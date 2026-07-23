@@ -1,3 +1,44 @@
+# Changed-File Report
+
+## Phase 1.5A — Local Integration Verification (changed/added)
+
+**Added**
+- `.nvmrc`, `.node-version` — Node 24 LTS pin
+- `packages/database/prisma/migrations/20260723233020_init/` — committed initial migration
+- `packages/shared/src/storage.ts` — upload MIME allow-lists, size limits, key namespaces
+- `apps/api/src/redis/{redis.service,redis.module}.ts` — Redis client (readiness)
+- `apps/api/src/health/{health.controller,health.module}.ts` — liveness + readiness probes
+- `apps/api/src/dev/{dev.controller,dev.module}.ts` — dev-only email/token retrieval (non-prod)
+- `apps/api/src/notifications/dev-mailbox.service.ts` — dev email capture
+- `apps/api/test/{helpers,integration.global,integration.setup}.ts` — integration harness (fails loudly w/o `TEST_DATABASE_URL`)
+- `apps/api/test/{auth,workflows,seed}.integration.spec.ts` — 36 integration tests
+- `apps/api/vitest.integration.config.ts` — SWC transform for Nest DI
+- `scripts/dev-infra/{start-infra,stop-infra}.ps1`, `scripts/dev-infra/README.md` — Docker-less infra
+- `PHASE-1.5A-VERIFICATION.md` — this phase's report
+
+**Modified**
+- `package.json` — `engines` (Node 22/24 LTS, pnpm 9)
+- `.env.example` — `TEST_DATABASE_URL`, Redis note, seed password docs
+- `apps/api/package.json` — `dotenv`, `@types/supertest`, `unplugin-swc`, `@swc/core`, `test:integration`
+- `apps/api/src/main.ts` — load root `.env`; **removed dead class-validator `ValidationPipe`** (crash fix)
+- `apps/api/src/app.module.ts` — register Redis/Health/Dev modules
+- `apps/api/src/config/env.ts` — `REDIS_URL`
+- `apps/api/src/storage/storage.service.ts` — `ensureBucket`, `headObject`, namespace guard
+- `apps/api/src/roles/{roles.service,roles.controller}.ts` — real doc metadata + validation
+- `apps/api/src/users/{users.service,users.controller}.ts` — avatar validation
+- `apps/api/src/notifications/{notifications.service,notifications.module}.ts` — dev mailbox
+- `packages/shared/src/index.ts` — export storage constants
+- `packages/validation/src/profile.ts` — `documentUploadRequestSchema` / `avatarUploadRequestSchema`
+- `packages/database/package.json` — `dotenv-cli`; scripts load root `.env`
+- `packages/database/prisma/schema.prisma` — ledger FK `onDelete: Restrict`
+- `packages/database/prisma/seed.ts` — env-driven demo password, production guard, unsafe-password warning
+- `README.md`, `SECURITY.md`, `REMAINING_WORK.md` — updated
+
+**Removed**
+- `apps/api/test/role-workflow.e2e-spec.ts`, `apps/api/vitest.e2e.config.ts` — replaced by the fail-loud integration suite
+
+---
+
 # Changed-File Report — Phase 1
 
 Brand-new repository: **all 167 files are additions.** Grouped by area below.
