@@ -1,0 +1,62 @@
+import { Controller, Get, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { Public } from '../common/decorators';
+import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
+import { StorageService } from '../storage/storage.service';
+
+/**
+ * Liveness and readiness probes. Readiness actually contacts PostgreSQL, Redis,
+ * and object storage — so the API never reports "ready" while silently degraded
+ * or falling back to mocks. Both endpoints are public (no auth).
+ */
+@Controller('health')
+export class HealthController {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+    private readonly storage: StorageService,
+  ) {}
+
+  /** Liveness — process is up. */
+  @Public()
+  @Get()
+  live() {
+    return { status: 'ok', uptime: process.uptime() };
+  }
+
+  /** Readiness — every backing dependency is reachable. 503 if any is down. */
+  @Public()
+  @Get('ready')
+  async ready(@Res({ passthrough: true }) res: Response) {
+    const [database, redis, storage] = await Promise.all([
+      this.checkDatabase(),
+      this.redis.ping(),
+      this.checkStorage(),
+    ]);
+    const ready = database && redis && storage;
+    if (!ready) res.status(503);
+    return {
+      status: ready ? 'ready' : 'degraded',
+      checks: { database, redis, storage },
+    };
+  }
+
+  private async checkDatabase(): Promise<boolean> {
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async checkStorage(): Promise<boolean> {
+    try {
+      await this.storage.ensureBucket();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}

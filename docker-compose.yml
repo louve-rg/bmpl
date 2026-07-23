@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bmpl-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bmpl
+      POSTGRES_PASSWORD: bmpl_dev_password
+      POSTGRES_DB: bmpl
+    ports:
+      - "5432:5432"
+    volumes:
+      - bmpl_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bmpl -d bmpl"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: bmpl-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - bmpl_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Local S3-compatible object storage for documents/images in development.
+  # Production uses Cloudflare R2 / Amazon S3 / Supabase Storage via the same S3 API.
+  minio:
+    image: minio/minio:latest
+    container_name: bmpl-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: bmpl
+      MINIO_ROOT_PASSWORD: bmpl_dev_password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - bmpl_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  bmpl_pg_data:
+  bmpl_redis_data:
+  bmpl_minio_data:

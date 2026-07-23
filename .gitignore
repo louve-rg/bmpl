@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Prisma generated client
+packages/database/generated/
+
+# Env & secrets — NEVER commit real secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Coverage / test output
+coverage/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Expo / React Native
+.expo/
+apps/mobile/.expo/
+*.jks
+*.p8
+*.p12
+*.mobileprovision
+
+# Misc
+tmp/

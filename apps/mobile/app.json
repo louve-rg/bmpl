@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Belize Marketplace",
+    "slug": "bmpl-mobile",
+    "scheme": "bmpl",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#1e40af"
+    },
+    "ios": { "supportsTablet": true, "bundleIdentifier": "bz.bzemarketplace.app" },
+    "android": {
+      "package": "bz.bzemarketplace.app",
+      "adaptiveIcon": { "backgroundColor": "#1e40af" }
+    },
+    "plugins": ["expo-router", "expo-secure-store"],
+    "extra": {
+      "apiUrl": "http://localhost:4000"
+    }
+  }
+}

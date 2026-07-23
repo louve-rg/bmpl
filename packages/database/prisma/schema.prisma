@@ -1,0 +1,476 @@
+// =============================================================================
+// BMPL — Belize Marketplace & Logistics — Prisma schema (Phase 1)
+//
+// Design principles:
+//  * ONE user account holds MANY roles. Each (user, role) pair is a UserRole
+//    row with its OWN independent status. There is NO single role column on User.
+//  * Admin capability lives on AdminPermissionGrant, a SEPARATE axis from
+//    customer-facing roles.
+//  * Every privileged action writes an AuditLog row.
+//  * Wallet uses a DOUBLE-ENTRY ledger. Balances are DERIVED from WalletLedgerEntry
+//    rows; there is no editable balance field as the source of truth.
+//  * Uploaded documents are stored as opaque storage KEYS only — never public URLs.
+// =============================================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---- Enums ------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum District {
+  BELIZE
+  CAYO
+  COROZAL
+  ORANGE_WALK
+  STANN_CREEK
+  TOLEDO
+}
+
+enum RoleCode {
+  CUSTOMER
+  VENDOR
+  DELIVERY_DRIVER
+  SHIPPING_PROVIDER
+  PASSENGER_DRIVER
+  PASSENGER_PROVIDER
+  JOB_SEEKER
+  EMPLOYER
+  REAL_ESTATE_AGENT
+  PROPERTY_OWNER
+  MARKETING_CLIENT
+  SUPPORT_AGENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+// Independent lifecycle status for a single UserRole.
+enum RoleStatus {
+  PENDING
+  MORE_INFO_REQUIRED
+  APPROVED
+  REJECTED
+  SUSPENDED
+  REVOKED
+}
+
+enum RoleApplicationStatus {
+  PENDING
+  MORE_INFO_REQUIRED
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+// A single administrative decision recorded against an application.
+enum ReviewAction {
+  SUBMITTED
+  MORE_INFO_REQUESTED
+  INFO_PROVIDED
+  APPROVED
+  REJECTED
+  SUSPENDED
+  RESTORED
+  REVOKED
+}
+
+enum NotificationType {
+  ACCOUNT
+  ROLE_APPLICATION
+  ROLE_STATUS
+  SECURITY
+  SYSTEM
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+}
+
+enum AuditAction {
+  USER_REGISTERED
+  USER_LOGGED_IN
+  USER_SUSPENDED
+  USER_RESTORED
+  EMAIL_VERIFIED
+  PASSWORD_RESET
+  ROLE_APPLICATION_SUBMITTED
+  ROLE_APPLICATION_MORE_INFO_REQUESTED
+  ROLE_APPLICATION_INFO_PROVIDED
+  ROLE_APPROVED
+  ROLE_REJECTED
+  ROLE_SUSPENDED
+  ROLE_RESTORED
+  ROLE_REVOKED
+  ROLE_SWITCHED
+  ADMIN_PERMISSION_GRANTED
+  ADMIN_PERMISSION_REVOKED
+  NOTIFICATION_BROADCAST
+}
+
+enum WalletAccountType {
+  USER
+  SYSTEM_ESCROW
+  SYSTEM_PLATFORM_FEES
+  SYSTEM_TOPUP_CLEARING
+  SYSTEM_PAYOUTS_CLEARING
+}
+
+enum WalletTransactionType {
+  TOPUP
+  PAYMENT
+  VENDOR_EARNING
+  DRIVER_EARNING
+  REFUND
+  ESCROW_HOLD
+  ESCROW_RELEASE
+  PLATFORM_FEE
+  TRANSFER
+  WITHDRAWAL
+  ADJUSTMENT
+}
+
+enum WalletTransactionStatus {
+  PENDING
+  POSTED
+  FAILED
+  REVERSED
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum Currency {
+  BZD
+  USD
+}
+
+// ---- Identity ---------------------------------------------------------------
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  phone         String?
+  district      District?
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  avatarKey     String? // private storage key; served via signed URL
+  status        UserStatus @default(ACTIVE)
+  emailVerifiedAt DateTime?
+  suspendedAt   DateTime?
+  suspendedReason String?
+  lastLoginAt   DateTime?
+  acceptedTermsAt DateTime?
+
+  // The user's currently active role in the switcher (must be an APPROVED UserRole).
+  activeRoleCode RoleCode? @default(CUSTOMER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  roles                UserRole[]
+  sessions             Session[]
+  emailTokens          EmailVerificationToken[]
+  passwordResetTokens  PasswordResetToken[]
+  roleApplications     RoleApplication[]
+  adminPermissions     AdminPermissionGrant[]      @relation("PermissionHolder")
+  grantedPermissions   AdminPermissionGrant[]      @relation("PermissionGrantedBy")
+  notifications        Notification[]
+  auditLogsAsActor     AuditLog[]                  @relation("AuditActor")
+  auditLogsAsTarget    AuditLog[]                  @relation("AuditTarget")
+  reviewsPerformed     RoleApplicationReview[]     @relation("ReviewReviewer")
+  walletAccounts       WalletAccount[]
+
+  @@index([status])
+  @@index([district])
+  @@map("users")
+}
+
+// Server-side, revocable session. Access token is a short-lived JWT; the refresh
+// token's HASH is stored here and rotated on use. Deleting the row revokes access.
+model Session {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String   @unique
+  userAgent        String?
+  ipAddress        String?
+  client           String   @default("web") // "web" | "admin" | "mobile"
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+  lastUsedAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// ---- Roles ------------------------------------------------------------------
+
+// Catalog of role definitions (seeded, one row per RoleCode).
+model Role {
+  code             RoleCode @id
+  label            String
+  description      String
+  isAdminRole      Boolean  @default(false)
+  requiresApproval Boolean  @default(true)
+  autoGranted      Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  userRoles UserRole[]
+
+  @@map("roles")
+}
+
+// One row per (user, role). Each has its OWN status. This is the multi-role core.
+model UserRole {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleCode  RoleCode
+  role      Role       @relation(fields: [roleCode], references: [code])
+  status    RoleStatus @default(PENDING)
+
+  approvedAt   DateTime?
+  suspendedAt  DateTime?
+  revokedAt    DateTime?
+  statusReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  applications RoleApplication[]
+
+  @@unique([userId, roleCode])
+  @@index([roleCode, status])
+  @@map("user_roles")
+}
+
+// A request for a role. Documents + a chronological review trail hang off it.
+model RoleApplication {
+  id         String                @id @default(cuid())
+  userId     String
+  user       User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleCode   RoleCode
+  userRoleId String?
+  userRole   UserRole?             @relation(fields: [userRoleId], references: [id], onDelete: SetNull)
+  status     RoleApplicationStatus @default(PENDING)
+  message    String? // applicant's note
+
+  submittedAt DateTime  @default(now())
+  decidedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documents RoleApplicationDocument[]
+  reviews   RoleApplicationReview[]
+
+  @@index([status])
+  @@index([roleCode, status])
+  @@index([userId])
+  @@map("role_applications")
+}
+
+// A private uploaded document. `storageKey` is an opaque object-store key; the
+// file is NEVER public and is served only through short-lived signed URLs.
+model RoleApplicationDocument {
+  id            String          @id @default(cuid())
+  applicationId String
+  application   RoleApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  label         String?
+  storageKey    String          @unique
+  contentType   String
+  sizeBytes     Int
+  uploadedAt    DateTime        @default(now())
+
+  @@index([applicationId])
+  @@map("role_application_documents")
+}
+
+// Immutable record of each decision/step taken on an application.
+model RoleApplicationReview {
+  id            String          @id @default(cuid())
+  applicationId String
+  application   RoleApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  action        ReviewAction
+  // Null when the actor is the applicant (SUBMITTED / INFO_PROVIDED).
+  reviewerId    String?
+  reviewer      User?           @relation("ReviewReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  note          String?
+  fromStatus    RoleApplicationStatus?
+  toStatus      RoleApplicationStatus?
+  createdAt     DateTime        @default(now())
+
+  @@index([applicationId])
+  @@map("role_application_reviews")
+}
+
+// ---- Admin permissions (separate from customer-facing roles) ----------------
+
+model AdminPermissionGrant {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation("PermissionHolder", fields: [userId], references: [id], onDelete: Cascade)
+  permission String // value from the shared PERMISSIONS catalog
+  grantedById String?
+  grantedBy  User?    @relation("PermissionGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, permission])
+  @@index([userId])
+  @@map("admin_permission_grants")
+}
+
+// ---- Notifications ----------------------------------------------------------
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  channel   NotificationChannel @default(IN_APP)
+  title     String
+  body      String
+  data      Json? // structured payload (e.g. { applicationId })
+  readAt    DateTime?
+  sentAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+// ---- Audit ------------------------------------------------------------------
+
+model AuditLog {
+  id           String      @id @default(cuid())
+  action       AuditAction
+  actorId      String?
+  actor        User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  targetUserId String?
+  targetUser   User?       @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  targetRole   RoleCode?
+  previousValue Json?
+  newValue     Json?
+  reason       String?
+  ipAddress    String?
+  sessionId    String?
+  createdAt    DateTime    @default(now())
+
+  @@index([actorId])
+  @@index([targetUserId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ---- Wallet (double-entry ledger foundation) --------------------------------
+
+model WalletAccount {
+  id       String            @id @default(cuid())
+  type     WalletAccountType
+  // Null for SYSTEM_* accounts; set for USER accounts.
+  userId   String?
+  user     User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currency Currency          @default(BZD)
+  // Cached, DERIVED balance in minor units (cents). NOT the source of truth —
+  // it is recomputed from ledger entries inside the same transaction that posts
+  // them. Reconciliation always trusts the sum of WalletLedgerEntry rows.
+  cachedBalanceMinor BigInt  @default(0)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  entries WalletLedgerEntry[]
+
+  // A user has at most one account per (type, currency); system accounts are unique per (type, currency).
+  @@unique([userId, type, currency])
+  @@index([type])
+  @@map("wallet_accounts")
+}
+
+// A logical money movement. Its entries MUST sum to zero (enforced in app code
+// and by the balanced-entries invariant in the wallet package).
+model WalletTransaction {
+  id          String                  @id @default(cuid())
+  type        WalletTransactionType
+  status      WalletTransactionStatus @default(PENDING)
+  currency    Currency                @default(BZD)
+  reference   String? // external/idempotency reference
+  description String?
+  metadata    Json?
+  postedAt    DateTime?
+  createdAt   DateTime                @default(now())
+
+  entries WalletLedgerEntry[]
+
+  @@unique([reference])
+  @@index([type, status])
+  @@map("wallet_transactions")
+}
+
+model WalletLedgerEntry {
+  id            String            @id @default(cuid())
+  transactionId String
+  // RESTRICT (not Cascade): a transaction with posted entries can never be
+  // deleted, so ledger history cannot be silently removed by deleting its
+  // parent transaction. Corrections are made by posting reversing entries.
+  transaction   WalletTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  accountId     String
+  account       WalletAccount     @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  direction     LedgerDirection
+  // Always positive; direction determines sign. Minor units (cents).
+  amountMinor   BigInt
+  createdAt     DateTime          @default(now())
+
+  @@index([accountId])
+  @@index([transactionId])
+  @@map("wallet_ledger_entries")
+}

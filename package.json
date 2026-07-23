@@ -1,0 +1,33 @@
+{
+  "name": "bmpl",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Belize Marketplace & Logistics — multi-role commerce & logistics platform (monorepo)",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22 <25",
+    "pnpm": ">=9 <10"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
+    "db:generate": "pnpm --filter @bmpl/database generate",
+    "db:migrate": "pnpm --filter @bmpl/database migrate",
+    "db:migrate:deploy": "pnpm --filter @bmpl/database migrate:deploy",
+    "db:seed": "pnpm --filter @bmpl/database seed",
+    "db:studio": "pnpm --filter @bmpl/database studio",
+    "db:reset": "pnpm --filter @bmpl/database reset",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "setup": "pnpm install && pnpm db:generate && pnpm infra:up && pnpm db:migrate && pnpm db:seed"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "turbo": "^2.1.3",
+    "typescript": "^5.5.4"
+  }
+}
