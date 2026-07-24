@@ -1,0 +1,27 @@
+# Gitleaks config for BMPL. Extends the default ruleset and allowlists the
+# repository's KNOWN development/example/CI placeholders (there are no real
+# secrets in the repo — real secrets live only in git-ignored .env or provider
+# secret managers). Keep this list tight so genuine leaks are still caught.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "BMPL dev/example/CI placeholders (not real secrets)"
+paths = [
+  '''\.env\.example''',
+  '''docker-compose\.yml''',
+  '''scripts/dev-infra/.*''',
+  '''apps/api/test/.*''',
+  '''apps/api/scripts/storage-smoke\.mjs''',
+  '''\.github/workflows/ci\.yml''',
+  '''packages/database/prisma/(seed|bootstrap)\.ts''',
+  '''.*\.md''',
+]
+regexes = [
+  '''bmpl_dev_password''',
+  '''ChangeMe!Admin123''',
+  '''DemoPass123''',
+  '''(ci|test)-(access|refresh|cookie)-secret[-a-z0-9]*''',
+  '''dev-only-change-me[-a-z]*''',
+]
