@@ -9,6 +9,7 @@ import {
 import type { RoleCode } from '@bmpl/shared';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser } from '../common/decorators';
+import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { RolesService } from './roles.service';
 
@@ -27,6 +28,7 @@ export class RolesController {
     return this.roles.myApplications(user.userId);
   }
 
+  @StrictThrottle()
   @Post('applications/:roleCode/documents/presign')
   presignDoc(
     @CurrentUser() user: AuthContext,

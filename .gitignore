@@ -34,13 +34,34 @@ coverage/
 .vscode/*
 !.vscode/extensions.json
 
-# Expo / React Native
+# Expo / React Native / EAS credentials
 .expo/
 apps/mobile/.expo/
 *.jks
+*.keystore
 *.p8
 *.p12
 *.mobileprovision
+credentials.json
+google-services.json
+GoogleService-Info.plist
 
-# Misc
+# Cloud provider local state
+.vercel/
+.railway/
+
+# Sentry
+.sentryclirc
+.env.sentry-build-plugin
+
+# Local databases / infra data (portable-binary dev infra lives OUTSIDE the repo)
+*.sqlite
+*.sqlite3
+pgdata/
+miniodata/
+redisdata/
+
+# Temporary upload / working files
 tmp/
+uploads/
+*.tmp

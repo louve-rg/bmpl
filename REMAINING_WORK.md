@@ -15,21 +15,34 @@ Phase 1 is the foundation. This is what remains, grouped by priority.
       without `TEST_DATABASE_URL`.
 - [x] **Node runtime standardized** on Node 24 LTS (`.nvmrc` / `.node-version`).
 
-## Immediate follow-ups to harden Phase 1
+## Done in Phase 1.5B (cloud deployment preparation)
 
-- [ ] **Rate limiting / brute-force protection** on auth routes
-      (`@nestjs/throttler` backed by Redis — the Redis client is already wired).
-- [ ] **Real email transport** (Resend/SES/SMTP) behind the existing
-      `@bmpl/notifications` provider interface; currently a console logger + dev outbox.
-- [ ] **Push notifications** via Expo push tokens (schema + dispatcher hook exist;
-      wire the provider + token registration).
-- [ ] **Antivirus / content scanning** of uploaded documents.
-- [ ] **CSRF double-submit token** on cookie-based mutations (SameSite=Strict + CORS
-      allow-list are in place; add the token for defense in depth).
-- [ ] **Refresh-token reuse *detection*** (reuse is already *rejected*; additionally
-      revoke the whole session family on a replayed rotated token).
-- [ ] **timestamptz** — timestamps are `timestamp(3)` normalized to UTC by Prisma
-      (consistent); consider `@db.Timestamptz` for explicit tz-awareness.
+- [x] **Rate limiting** — Redis-backed distributed throttling (`@nestjs/throttler`
+      + `@nest-lab/throttler-storage-redis`); strict per-IP limits on auth/upload/
+      signed-URL routes; tested (429 after limit).
+- [x] **CSRF** — Origin allow-list + double-submit token for browser cookie
+      mutations; mobile Bearer exempt; tested.
+- [x] **Email provider abstraction** — `EmailService` (console/dev + Resend);
+      dev outbox stays dev-only; failures logged and not falsely reported.
+- [x] **Structured JSON logging + request correlation IDs**, secret scrubbing.
+- [x] **Sentry** (API wired, no-op without DSN, PII scrubbed) + frontend shims.
+- [x] **Graceful shutdown**, PaaS `PORT` binding, health/readiness probes.
+- [x] **Cloudflare R2** support (provider selection + public/private buckets).
+- [x] **API Dockerfile**, Railway config, Vercel configs, Expo `eas.json`, CI.
+- [x] **Cloud admin bootstrap** (env-driven, idempotent, prod-guarded).
+- [x] **Refresh-cookie path bug** fixed (`/api/auth`, was `/auth`).
+
+## Immediate follow-ups (need provider credentials — Phase 1.5C)
+
+- [ ] Activate a real **email provider** (set `EMAIL_PROVIDER=resend` + `RESEND_API_KEY`).
+- [ ] Activate **Sentry** (set DSNs) for API/web/admin/mobile; upload source maps.
+- [ ] Enforce a **nonce-based CSP** on web/admin (currently baseline headers only).
+- [ ] **Push notifications** via Expo push tokens (schema + dispatcher hook exist).
+- [ ] **Antivirus / content scanning** + object **deletion/retention** lifecycle on R2.
+- [ ] **Refresh-token reuse *detection*** (reuse is already *rejected*; add session-family revocation).
+- [ ] **timestamptz** — timestamps are `timestamp(3)` (UTC, consistent); consider explicit tz.
+- [ ] Slim the API image via `turbo prune` + prod-only runtime (documented in DEPLOYMENT.md).
+- [ ] Configure **ESLint** so CI lint is enforcing (currently informational).
 - [ ] **Structured global exception filter** mapping domain errors → HTTP codes
       consistently; request-id logging.
 - [ ] **CI pipeline**: typecheck + lint + unit tests on every PR; e2e against an

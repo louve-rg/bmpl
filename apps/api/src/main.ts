@@ -11,7 +11,10 @@ import { Logger } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { loadEnv } from './config/env';
+import { loadEnv, listenPort, corsOrigins } from './config/env';
+import { StructuredLogger } from './observability/structured-logger';
+import { requestIdMiddleware } from './observability/request-id.middleware';
+import { initSentry } from './observability/sentry';
 
 // Ensure BigInt (wallet minor units) serializes cleanly to JSON as a string.
 (BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function () {
@@ -20,21 +23,37 @@ import { loadEnv } from './config/env';
 
 async function bootstrap() {
   const env = loadEnv();
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  const sentryEnabled = initSentry(env);
 
+  const logFormat = env.LOG_FORMAT ?? (env.NODE_ENV === 'production' ? 'json' : 'pretty');
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: false,
+    logger: new StructuredLogger({
+      format: logFormat,
+      env: env.NODE_ENV,
+      version: env.APP_VERSION,
+    }),
+  });
+
+  app.use(requestIdMiddleware);
   app.use(helmet());
   app.use(cookieParser(env.COOKIE_SECRET));
   app.setGlobalPrefix('api');
-  // Trust the reverse proxy so req.ip reflects the real client for audit logs.
+  // Trust the reverse proxy (Railway/Vercel) so req.ip and x-forwarded-* are honored.
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
-  // NOTE: request validation is done per-route with Zod (ZodValidationPipe);
-  // we deliberately do NOT use the class-validator ValidationPipe.
+  // Request validation is done per-route with Zod (ZodValidationPipe); we
+  // deliberately do NOT use the class-validator ValidationPipe.
 
-  const origins = env.CORS_ORIGINS.split(',').map((o) => o.trim());
-  app.enableCors({ origin: origins, credentials: true });
+  app.enableCors({ origin: corsOrigins(env), credentials: true });
 
-  await app.listen(env.API_PORT);
-  new Logger('Bootstrap').log(`BMPL API listening on ${env.API_URL} (prefix /api)`);
+  // Graceful shutdown: run Nest lifecycle hooks (Prisma/Redis disconnect) on SIGTERM/SIGINT.
+  app.enableShutdownHooks();
+
+  const port = listenPort(env);
+  await app.listen(port, '0.0.0.0');
+  const log = new Logger('Bootstrap');
+  log.log(`BMPL API listening on :${port} (prefix /api, env=${env.NODE_ENV})`);
+  log.log(`Sentry: ${sentryEnabled ? 'enabled' : 'disabled'} · logs: ${logFormat}`);
 }
 
 void bootstrap();

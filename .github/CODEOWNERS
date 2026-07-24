@@ -1,0 +1,10 @@
+# Code owners — placeholder. Replace @bmpl-owners with real GitHub handles/teams
+# once the remote repository and org are created.
+
+*                       @bmpl-owners
+
+# Security-sensitive areas — require an extra review.
+/apps/api/src/auth/      @bmpl-owners
+/apps/api/src/throttling/ @bmpl-owners
+/packages/database/prisma/ @bmpl-owners
+/.github/                @bmpl-owners

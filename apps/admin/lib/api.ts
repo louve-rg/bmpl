@@ -4,12 +4,37 @@ export interface ApiError {
   errors?: Array<{ path: string; message: string }>;
 }
 
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function readCookie(name: string): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]+)`));
+  return m?.[1] ? decodeURIComponent(m[1]) : undefined;
+}
+
+async function csrfToken(): Promise<string | undefined> {
+  let token = readCookie('csrf_token');
+  if (!token) {
+    await fetch('/api/auth/csrf', { credentials: 'include', cache: 'no-store' }).catch(() => {});
+    token = readCookie('csrf_token');
+  }
+  return token;
+}
+
 async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  const method = (init.method ?? 'GET').toUpperCase();
+  const csrfHeader: Record<string, string> = {};
+  if (MUTATING.has(method)) {
+    const token = await csrfToken();
+    if (token) csrfHeader['x-csrf-token'] = token;
+  }
+
   const res = await fetch(`/api${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       'x-bmpl-client': 'admin',
+      ...csrfHeader,
       ...(init.headers ?? {}),
     },
     credentials: 'include',

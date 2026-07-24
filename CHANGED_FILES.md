@@ -1,5 +1,42 @@
 # Changed-File Report
 
+## Phase 1.5B — Cloud Deployment Preparation (changed/added)
+
+**API — security & observability (added)**
+- `src/throttling/{throttling.module,throttler.guard,throttle.decorators}.ts` — Redis-backed rate limiting
+- `src/auth/csrf.guard.ts` — Origin + double-submit CSRF
+- `src/email/{email.service,email.module}.ts` — provider abstraction (console/Resend)
+- `src/observability/{structured-logger,request-id.middleware,logging.interceptor,observability.module,sentry}.ts`
+- `test/{ratelimit,csrf}.integration.spec.ts` — new security tests
+
+**API — modified**
+- `src/config/env.ts` — many new env vars + production secret guard + `listenPort`/`cookiesSecure`/`corsOrigins`
+- `src/main.ts` — Sentry init, structured logger, request-id, PORT/0.0.0.0 bind, `enableShutdownHooks`
+- `src/app.module.ts` — register Throttler/CSRF guards, Observability + Email modules
+- `src/auth/{cookies.ts,auth.controller.ts}` — **refresh cookie path fix**, CSRF cookie + `/auth/csrf`, strict throttle on auth routes
+- `src/auth/guards.ts` (unchanged), `src/roles/roles.controller.ts`, `src/admin/admin.controller.ts` — strict throttle on upload/signed-URL
+- `src/storage/storage.service.ts` — public/private buckets + MinIO/R2 provider
+- `src/redis/redis.service.ts` — TLS handling
+- `src/notifications/{notifications.service,notifications.module}.ts` — use EmailService
+
+**Deploy config (added)**
+- `apps/api/Dockerfile`, `.dockerignore`, `railway.json`
+- `apps/web/vercel.json`, `apps/admin/vercel.json`; `apps/web/next.config.mjs`, `apps/admin/next.config.mjs` (security headers)
+- `apps/mobile/eas.json`, `apps/mobile/app.config.ts`
+- `apps/web/{lib/monitoring.ts,app/global-error.tsx}`, `apps/admin/{lib/monitoring.ts,app/global-error.tsx}`
+- `.github/workflows/ci.yml`, `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/*`, `.github/CODEOWNERS`
+- `.nvmrc`/`.node-version` (unchanged), `.gitignore` (+expo/cloud/temp), `.prettierignore`
+
+**Database (modified/added)**
+- `packages/database/prisma/schema.prisma` — Debian Prisma engine target
+- `packages/database/prisma/bootstrap.ts` — cloud admin bootstrap; `package.json` scripts (`bootstrap`, cloud `migrate:deploy`)
+
+**Web/Admin clients** — `apps/web/lib/api.ts`, `apps/admin/lib/api.ts` — send CSRF header on mutations
+
+**Docs (added)** — `docs/DEPLOYMENT.md`, `docs/DEPLOYMENT-ARCHITECTURE.md`, `docs/ENVIRONMENT.md`, `docs/MONITORING.md`; updated `README.md`, `SECURITY.md`, `REMAINING_WORK.md`
+
+---
+
 ## Phase 1.5A — Local Integration Verification (changed/added)
 
 **Added**

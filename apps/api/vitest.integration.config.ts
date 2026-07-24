@@ -13,8 +13,10 @@ export default defineConfig({
     globalSetup: ['test/integration.global.ts'],
     testTimeout: 30_000,
     hookTimeout: 60_000,
+    // One shared database — files run serially. Isolate so per-file env overrides
+    // (e.g. the rate-limit spec's THROTTLE_* values) are picked up cleanly.
     fileParallelism: false,
+    isolate: true,
     pool: 'forks',
-    poolOptions: { forks: { singleFork: true } },
   },
 });

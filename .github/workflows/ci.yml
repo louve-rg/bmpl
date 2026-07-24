@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Deterministic, non-secret values used only for CI builds/tests.
+  NODE_ENV: test
+  CI: 'true'
+
+jobs:
+  build-and-test:
+    name: Build, typecheck & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4 # version comes from package.json "packageManager"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check (informational)
+        run: pnpm format:check
+        continue-on-error: true
+
+      - name: Lint (informational until ESLint is configured)
+        run: pnpm lint
+        continue-on-error: true
+
+      - name: Prisma validate
+        run: pnpm --filter @bmpl/database exec prisma validate
+
+      - name: Prisma generate
+        run: pnpm --filter @bmpl/database generate
+
+      - name: Build shared packages
+        run: pnpm -r --filter "./packages/*" build
+
+      - name: Typecheck (all)
+        run: pnpm turbo run typecheck
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      - name: Build API
+        run: pnpm --filter @bmpl/api build
+
+      - name: Build web
+        run: pnpm --filter @bmpl/web build
+
+      - name: Build admin
+        run: pnpm --filter @bmpl/admin build
+
+      - name: Typecheck mobile
+        run: pnpm --filter @bmpl/mobile exec tsc --noEmit
+
+  integration:
+    name: Integration tests (Postgres + Redis + MinIO)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bmpl
+          POSTGRES_PASSWORD: bmpl_ci_password
+          POSTGRES_DB: bmpl_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U bmpl -d bmpl_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Storage integration coverage is NOT omitted: MinIO cannot run as a GitHub
+      # `services:` entry (it needs a `server /data` command that services can't
+      # set), so it is started as a background container step below.
+      TEST_DATABASE_URL: postgresql://bmpl:bmpl_ci_password@localhost:5432/bmpl_test?schema=public
+      DATABASE_URL: postgresql://bmpl:bmpl_ci_password@localhost:5432/bmpl_test?schema=public
+      DIRECT_URL: postgresql://bmpl:bmpl_ci_password@localhost:5432/bmpl_test?schema=public
+      REDIS_URL: redis://localhost:6379
+      STORAGE_PROVIDER: minio
+      STORAGE_ENDPOINT: http://localhost:9000
+      STORAGE_ACCESS_KEY_ID: bmpl
+      STORAGE_SECRET_ACCESS_KEY: bmpl_ci_password
+      STORAGE_BUCKET: bmpl-documents
+      STORAGE_PUBLIC_BUCKET: bmpl-public
+      STORAGE_FORCE_PATH_STYLE: 'true'
+      JWT_ACCESS_SECRET: ci-access-secret-value-000000000000
+      JWT_REFRESH_SECRET: ci-refresh-secret-value-00000000000
+      COOKIE_SECRET: ci-cookie-secret-value-0000000000000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=bmpl -e MINIO_ROOT_PASSWORD=bmpl_ci_password \
+            minio/minio server /data
+          # Wait until MinIO answers (the API auto-creates its buckets on boot).
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/ready >/dev/null; then echo "minio ready"; break; fi
+            sleep 1
+          done
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages (needed by the API)
+        run: pnpm -r --filter "./packages/*" build
+
+      - name: Integration tests (fails loudly without TEST_DATABASE_URL)
+        # globalSetup runs `prisma migrate deploy` against TEST_DATABASE_URL.
+        run: pnpm --filter @bmpl/api test:integration
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

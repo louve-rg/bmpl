@@ -1,29 +1,23 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import {
-  ConsoleChannelProvider,
-  type ChannelProvider,
-  type NotificationMessage,
-} from '@bmpl/notifications';
+import { Injectable, Logger } from '@nestjs/common';
+import type { NotificationMessage } from '@bmpl/notifications';
 import type { NotificationType } from '@bmpl/shared';
 import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
-import { ENV } from '../config/config.module';
-import type { Env } from '../config/env';
+import { EmailService } from '../email/email.service';
 import { DevMailboxService } from './dev-mailbox.service';
 
 /**
- * Notification foundation. Persists an in-app Notification row and dispatches to
- * registered channel providers. Phase 1 uses a console email provider; real
- * email/push transports register here without touching callers.
+ * Notification foundation. Persists an in-app Notification row and dispatches
+ * emails through the environment-selected EmailService (console/dev vs a cloud
+ * provider). Push transports register here later without touching callers.
  */
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
-  private readonly emailProvider: ChannelProvider = new ConsoleChannelProvider('EMAIL');
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(ENV) private readonly env: Env,
+    private readonly email: EmailService,
     private readonly devMailbox: DevMailboxService,
   ) {}
 
@@ -52,21 +46,29 @@ export class NotificationsService {
     });
   }
 
-  /** Send an out-of-band email (dev: logged + captured). Never throws to the caller. */
-  async sendEmail(message: NotificationMessage, email: string | null): Promise<void> {
-    try {
-      await this.emailProvider.send(message, { userId: message.userId, email });
-      if (email) {
-        this.devMailbox.record({
-          to: email,
-          subject: message.title,
-          body: message.body,
-          createdAt: new Date().toISOString(),
-        });
-      }
-    } catch (err) {
-      this.logger.error(`Email dispatch failed: ${String(err)}`);
+  /**
+   * Send an out-of-band email. Returns whether delivery was accepted (never
+   * throws). The dev mailbox only records on success and only outside production,
+   * so a failed send is not falsely reported as delivered.
+   */
+  async sendEmail(message: NotificationMessage, email: string | null): Promise<boolean> {
+    if (!email) return false;
+    const delivered = await this.email.send({
+      to: email,
+      subject: message.title,
+      body: message.body,
+    });
+    if (delivered) {
+      this.devMailbox.record({
+        to: email,
+        subject: message.title,
+        body: message.body,
+        createdAt: new Date().toISOString(),
+      });
+    } else {
+      this.logger.error(`Email not delivered to ${email} (subject="${message.title}")`);
     }
+    return delivered;
   }
 
   async listForUser(userId: string, unreadOnly = false) {

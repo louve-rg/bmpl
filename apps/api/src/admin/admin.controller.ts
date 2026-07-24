@@ -14,6 +14,7 @@ import {
 import type { Permission, RoleCode } from '@bmpl/shared';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, RequirePermission } from '../common/decorators';
+import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { AdminService } from './admin.service';
 
@@ -60,6 +61,7 @@ export class AdminController {
     return this.admin.getApplication(id);
   }
 
+  @StrictThrottle()
   @Get('documents/:id/url')
   @RequirePermission('documents.read')
   documentUrl(@Param('id') id: string) {

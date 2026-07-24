@@ -21,10 +21,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   readonly client: Redis;
 
   constructor(@Inject(ENV) private readonly env: Env) {
+    // ioredis auto-enables TLS for rediss:// URLs (Railway/Upstash). REDIS_TLS
+    // forces TLS even for a redis:// URL when a provider requires it.
+    const forceTls = this.env.REDIS_TLS && !this.env.REDIS_URL.startsWith('rediss://');
     this.client = new Redis(this.env.REDIS_URL, {
       lazyConnect: true,
       maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
+      ...(forceTls ? { tls: {} } : {}),
     });
     this.client.on('error', (err) => this.logger.warn(`Redis error: ${err.message}`));
   }

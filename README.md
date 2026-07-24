@@ -177,8 +177,30 @@ Node 22 or 24 LTS), pnpm 9.
   movement is hard-disabled (`WALLET_MONEY_MOVEMENT_ENABLED = false`) until the
   payment/regulatory design lands.
 
+- **Rate limiting.** Redis-backed distributed throttling (works across API
+  instances); strict per-IP limits on auth, upload, and signed-URL routes.
+- **CSRF.** Cookie (browser) mutations require an allowed `Origin` **and** a
+  double-submit token; native mobile (Bearer) is exempt; non-browser callers rely
+  on SameSite + auth.
+- **Health/readiness.** `/api/health` (liveness) and `/api/health/ready` (probes
+  Postgres, Redis, storage) — the API never reports ready while degraded.
+
 See [`SECURITY.md`](./SECURITY.md) for how each stated security rule is enforced,
 and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the data model.
+
+## Cloud deployment (Phase 1.5B — preparation only, nothing deployed)
+
+Target: GitHub Actions CI → **Vercel** (web + admin) · **Railway** (API + Postgres
++ Redis) · **Cloudflare R2** (storage) · **Expo EAS** (mobile) · Resend/Postmark
+(email) · Sentry (errors). See:
+
+- [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — step-by-step runbook (GitHub,
+  Railway, R2, Vercel, DNS, migrations, bootstrap, verify, rollback, teardown)
+- [`docs/DEPLOYMENT-ARCHITECTURE.md`](./docs/DEPLOYMENT-ARCHITECTURE.md) — diagram + trust boundaries
+- [`docs/ENVIRONMENT.md`](./docs/ENVIRONMENT.md) — full environment-variable matrix
+- [`docs/MONITORING.md`](./docs/MONITORING.md) — logging + Sentry setup
+- API container: [`apps/api/Dockerfile`](./apps/api/Dockerfile) · [`railway.json`](./railway.json)
+- Cloud admin bootstrap (never the dev seed): `pnpm --filter @bmpl/database bootstrap`
 
 ## Landing page & brand
 

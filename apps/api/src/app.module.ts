@@ -3,7 +3,10 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { ThrottlingModule } from './throttling/throttling.module';
+import { ObservabilityModule } from './observability/observability.module';
 import { AuditModule } from './audit/audit.module';
+import { EmailModule } from './email/email.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { StorageModule } from './storage/storage.module';
 import { AuthModule } from './auth/auth.module';
@@ -13,6 +16,8 @@ import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
 import { DevModule } from './dev/dev.module';
 import { JwtAuthGuard, PermissionsGuard, RolesGuard } from './auth/guards';
+import { CsrfGuard } from './auth/csrf.guard';
+import { BmplThrottlerGuard } from './throttling/throttler.guard';
 
 // Dev/test-only modules are excluded entirely from production builds at runtime.
 const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
@@ -22,7 +27,10 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     ConfigModule,
     PrismaModule,
     RedisModule,
+    ThrottlingModule,
+    ObservabilityModule,
     AuditModule,
+    EmailModule,
     NotificationsModule,
     StorageModule,
     AuthModule,
@@ -33,7 +41,10 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     ...devModules,
   ],
   providers: [
-    // Global guard chain: authenticate (unless @Public), then role, then permission.
+    // Global guard chain, in order: rate limit → CSRF → authenticate (unless
+    // @Public) → role → permission.
+    { provide: APP_GUARD, useClass: BmplThrottlerGuard },
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },

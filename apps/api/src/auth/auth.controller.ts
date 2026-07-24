@@ -22,14 +22,15 @@ import {
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { Public } from '../common/decorators';
+import { StrictThrottle } from '../throttling/throttle.decorators';
 import { ENV } from '../config/config.module';
 import type { Env } from '../config/env';
 import { AuthService } from './auth.service';
 import { SessionService, type IssuedSession } from './session.service';
 import {
-  ACCESS_COOKIE,
   REFRESH_COOKIE,
   clearAuthCookies,
+  issueCsrfCookie,
   setAuthCookies,
 } from './cookies';
 
@@ -62,10 +63,20 @@ export class AuthController {
       };
     }
     setAuthCookies(res, this.env, issued);
-    return { ok: true };
+    // Issue a fresh double-submit CSRF token for the browser session.
+    const csrfToken = issueCsrfCookie(res, this.env);
+    return { ok: true, csrfToken };
+  }
+
+  /** Browser clients call this to (re)obtain a CSRF token cookie + value. */
+  @Public()
+  @Get('csrf')
+  csrf(@Res({ passthrough: true }) res: Response) {
+    return { csrfToken: issueCsrfCookie(res, this.env) };
   }
 
   @Public()
+  @StrictThrottle()
   @Post('register')
   async register(
     @Body(ZodBody(registerSchema)) body: RegisterInput,
@@ -77,6 +88,7 @@ export class AuthController {
   }
 
   @Public()
+  @StrictThrottle()
   @Post('login')
   async login(
     @Body(ZodBody(loginSchema)) body: LoginInput,
@@ -88,6 +100,7 @@ export class AuthController {
   }
 
   @Public()
+  @StrictThrottle()
   @Post('refresh')
   async refresh(
     @Req() req: Request,
@@ -114,6 +127,7 @@ export class AuthController {
   }
 
   @Public()
+  @StrictThrottle()
   @Post('verify-email')
   async verifyEmail(@Body(ZodBody(verifyEmailSchema)) body: { token: string }) {
     await this.auth.verifyEmail(body.token);
@@ -121,6 +135,7 @@ export class AuthController {
   }
 
   @Public()
+  @StrictThrottle()
   @Post('resend-verification')
   async resend(@Body(ZodBody(resendVerificationSchema)) body: { email: string }) {
     await this.auth.resendVerification(body.email);
@@ -128,6 +143,7 @@ export class AuthController {
   }
 
   @Public()
+  @StrictThrottle()
   @Post('forgot-password')
   async forgot(@Body(ZodBody(forgotPasswordSchema)) body: { email: string }) {
     await this.auth.forgotPassword(body.email);
@@ -135,6 +151,7 @@ export class AuthController {
   }
 
   @Public()
+  @StrictThrottle()
   @Post('reset-password')
   async reset(
     @Body(ZodBody(resetPasswordSchema)) body: ResetPasswordInput,

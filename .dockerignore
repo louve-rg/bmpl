@@ -1,0 +1,26 @@
+# Keep the Docker build context small and free of secrets/artifacts.
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+**/.expo
+**/*.tsbuildinfo
+
+# Secrets & local env — NEVER ship into an image
+.env
+.env.*
+!.env.example
+
+# Local infra data / scripts (portable-binary dev infra)
+scripts/dev-infra
+*.log
+
+# VCS / editor / CI
+.git
+.github
+.vscode
+.idea
+
+# Docs & tests are not needed in the runtime image
+**/*.md
