@@ -1,5 +1,26 @@
 # Phase 1.5C — Development Cloud Deployment: STATUS
 
+## Update (2026-07-24): GitHub verified · CI GREEN
+
+The repo was pushed to **github.com/louve-rg/bmpl** (private). Verified from this
+environment via the operator's cached git credential (never displayed):
+
+- **origin** = `https://github.com/louve-rg/bmpl.git`; remote `main` == local `main`.
+- **CI workflow "CI"** ran on push. First run (`e4ccd3f`) failed on two
+  infra-config issues (not app defects); both fixed in `7bbf7ee`:
+  1. *Build job* — `prisma validate`/`generate` need `env("DATABASE_URL")`/
+     `env("DIRECT_URL")`; the DB-less job now sets dummy non-connecting URLs.
+  2. *Secret scan* — replaced `gitleaks-action@v2` (failed with the git-log
+     `stderr is not empty` quirk despite **finding no leaks**) with a direct
+     gitleaks binary filesystem scan + `.gitleaks.toml` allowlist.
+- **Re-run on `7bbf7ee`: all 3 jobs SUCCESS** — Build/typecheck/unit,
+  Integration (Postgres+Redis+MinIO, 42 tests), Secret scan. ✅
+
+Railway / Vercel / Cloudflare deployment remains blocked: this environment has
+no CLIs or tokens for those providers (only the GitHub credential is present).
+
+---
+
 **Outcome: deployment BLOCKED on external credentials — nothing was deployed.**
 The automation environment has **no** GitHub remote, **no** provider CLIs
 (`gh`/`railway`/`vercel`/`wrangler`/`eas`/`docker` all absent), and **no**
