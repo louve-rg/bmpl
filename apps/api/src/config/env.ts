@@ -28,9 +28,10 @@ const envSchema = z.object({
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('30d'),
   COOKIE_SECRET: z.string().min(16),
-  // Empty string => host-only cookies (recommended behind a same-origin proxy).
-  // A leading-dot value (e.g. ".bzemarketplace.com") shares cookies across subdomains.
-  COOKIE_DOMAIN: z.string().default('localhost'),
+  // Empty string (default) => host-only cookies, correct for an API-only cloud
+  // deploy and the same-origin proxy. A leading-dot value (e.g.
+  // ".bzemarketplace.com") shares cookies across subdomains once web/admin exist.
+  COOKIE_DOMAIN: z.string().default(''),
   COOKIE_SAMESITE: z.enum(['strict', 'lax', 'none']).default('strict'),
   // Force Secure cookies regardless of NODE_ENV (needed behind TLS in cloud dev).
   COOKIE_SECURE: boolFromString(false),
@@ -49,7 +50,9 @@ const envSchema = z.object({
   ADMIN_SITE_URL: z.string().url().default('http://localhost:3001'),
 
   // ---- Object storage (S3-compatible: MinIO locally, Cloudflare R2 in cloud) ----
-  STORAGE_PROVIDER: z.enum(['minio', 'r2']).default('minio'),
+  // 'none' explicitly disables storage; file-upload endpoints then return a clear
+  // "storage not configured" error. See storageEnabled() below.
+  STORAGE_PROVIDER: z.enum(['none', 'minio', 'r2']).default('minio'),
   STORAGE_ENDPOINT: z.string().default('http://localhost:9000'),
   STORAGE_REGION: z.string().default('us-east-1'), // 'auto' for R2
   // Private bucket (verification documents, admin attachments). NEVER public.
@@ -117,3 +120,19 @@ export const corsOrigins = (env: Env): string[] =>
   env.CORS_ORIGINS.split(',')
     .map((o) => o.trim())
     .filter(Boolean);
+
+/**
+ * Whether object storage is configured/usable.
+ *  - 'none'  → disabled (explicit).
+ *  - 'minio' → local-dev backend only; in PRODUCTION it would be a localhost
+ *              placeholder, so it is treated as NOT configured (the API starts
+ *              without storage and upload endpoints return a clear error).
+ *  - 'r2'    → enabled (operator supplies real endpoint/credentials).
+ * This lets the initial Railway (API-only) deploy start with no storage vars,
+ * and never point at localhost/minio placeholders in production.
+ */
+export const storageEnabled = (env: Env): boolean => {
+  if (env.STORAGE_PROVIDER === 'none') return false;
+  if (env.STORAGE_PROVIDER === 'minio') return !isProd(env);
+  return true; // 'r2'
+};

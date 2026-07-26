@@ -25,16 +25,21 @@ export class HealthController {
     return { status: 'ok', uptime: process.uptime() };
   }
 
-  /** Readiness — every backing dependency is reachable. 503 if any is down. */
+  /**
+   * Readiness — required dependencies (database, Redis) must be reachable.
+   * Storage is OPTIONAL: an unconfigured storage backend reports 'not_configured'
+   * and does NOT fail readiness (the API runs fine without file uploads until
+   * Cloudflare R2 is configured). A configured-but-unreachable storage IS a failure.
+   */
   @Public()
   @Get('ready')
   async ready(@Res({ passthrough: true }) res: Response) {
     const [database, redis, storage] = await Promise.all([
       this.checkDatabase(),
       this.redis.ping(),
-      this.checkStorage(),
+      this.storage.healthStatus(),
     ]);
-    const ready = database && redis && storage;
+    const ready = database && redis && storage !== 'error';
     if (!ready) res.status(503);
     return {
       status: ready ? 'ready' : 'degraded',
@@ -45,15 +50,6 @@ export class HealthController {
   private async checkDatabase(): Promise<boolean> {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private async checkStorage(): Promise<boolean> {
-    try {
-      await this.storage.ensureBucket();
       return true;
     } catch {
       return false;

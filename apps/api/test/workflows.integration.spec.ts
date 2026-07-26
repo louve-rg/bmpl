@@ -66,7 +66,9 @@ describe('health & readiness', () => {
   it('readiness confirms database, redis, and storage are reachable', async () => {
     const res = await request(ctx.server).get('/api/health/ready');
     expect(res.status).toBe(200);
-    expect(res.body.checks).toEqual({ database: true, redis: true, storage: true });
+    // storage is a tri-state: 'ok' when configured+reachable (MinIO in tests),
+    // 'not_configured' when storage is intentionally disabled (optional).
+    expect(res.body.checks).toEqual({ database: true, redis: true, storage: 'ok' });
   });
 });
 

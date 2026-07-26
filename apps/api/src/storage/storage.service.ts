@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   type OnModuleInit,
 } from '@nestjs/common';
 import {
@@ -16,12 +17,14 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ENV } from '../config/config.module';
-import type { Env } from '../config/env';
+import { storageEnabled, type Env } from '../config/env';
 
 export interface ObjectMetadata {
   contentType: string;
   sizeBytes: number;
 }
+
+export type StorageHealth = 'ok' | 'not_configured' | 'error';
 
 type Visibility = 'private' | 'public';
 
@@ -41,18 +44,37 @@ type Visibility = 'private' | 'public';
 @Injectable()
 export class StorageService implements OnModuleInit {
   private readonly logger = new Logger(StorageService.name);
-  private readonly client: S3Client;
+  private readonly enabled: boolean;
+  private readonly client: S3Client | null;
 
   constructor(@Inject(ENV) private readonly env: Env) {
-    this.client = new S3Client({
-      region: env.STORAGE_REGION,
-      endpoint: env.STORAGE_ENDPOINT,
-      forcePathStyle: env.STORAGE_FORCE_PATH_STYLE,
-      credentials: {
-        accessKeyId: env.STORAGE_ACCESS_KEY_ID,
-        secretAccessKey: env.STORAGE_SECRET_ACCESS_KEY,
-      },
-    });
+    this.enabled = storageEnabled(env);
+    // Only construct an S3 client when storage is actually configured, so we
+    // never hold localhost/minio placeholder endpoints in production.
+    this.client = this.enabled
+      ? new S3Client({
+          region: env.STORAGE_REGION,
+          endpoint: env.STORAGE_ENDPOINT,
+          forcePathStyle: env.STORAGE_FORCE_PATH_STYLE,
+          credentials: {
+            accessKeyId: env.STORAGE_ACCESS_KEY_ID,
+            secretAccessKey: env.STORAGE_SECRET_ACCESS_KEY,
+          },
+        })
+      : null;
+  }
+
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  private requireClient(): S3Client {
+    if (!this.enabled || !this.client) {
+      throw new ServiceUnavailableException(
+        'Object storage is not configured. File uploads are unavailable until STORAGE_PROVIDER (e.g. r2) and its credentials are set.',
+      );
+    }
+    return this.client;
   }
 
   private bucketFor(v: Visibility): string {
@@ -60,16 +82,39 @@ export class StorageService implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
+    if (!this.enabled) {
+      this.logger.warn(
+        `Object storage is NOT configured (STORAGE_PROVIDER=${this.env.STORAGE_PROVIDER}, env=${this.env.NODE_ENV}). ` +
+          'The API will run normally; file-upload/signed-URL endpoints return 503 until Cloudflare R2 is configured.',
+      );
+      return;
+    }
     await this.ensureBucket('private');
     await this.ensureBucket('public');
+  }
+
+  /**
+   * Report storage health for the readiness probe. Returns 'not_configured'
+   * (a non-failing state) when storage is intentionally disabled.
+   */
+  async healthStatus(): Promise<StorageHealth> {
+    if (!this.enabled || !this.client) return 'not_configured';
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucketFor('private') }));
+      return 'ok';
+    } catch {
+      return 'error';
+    }
   }
 
   /**
    * Ensure a bucket exists. For local MinIO we create it if missing. For R2,
    * buckets are provisioned out-of-band (dashboard/API with elevated creds), so
    * we only verify reachability and warn — we never assume creation rights.
+   * No-op when storage is disabled.
    */
   async ensureBucket(v: Visibility = 'private'): Promise<void> {
+    if (!this.enabled || !this.client) return;
     const Bucket = this.bucketFor(v);
     try {
       await this.client.send(new HeadBucketCommand({ Bucket }));
@@ -113,12 +158,13 @@ export class StorageService implements OnModuleInit {
     contentType: string,
     visibility: Visibility = 'private',
   ): Promise<{ uploadUrl: string; key: string; expiresIn: number }> {
+    const client = this.requireClient();
     const command = new PutObjectCommand({
       Bucket: this.bucketFor(visibility),
       Key: key,
       ContentType: contentType,
     });
-    const uploadUrl = await getSignedUrl(this.client, command, {
+    const uploadUrl = await getSignedUrl(client, command, {
       expiresIn: this.env.STORAGE_SIGNED_URL_TTL,
     });
     return { uploadUrl, key, expiresIn: this.env.STORAGE_SIGNED_URL_TTL };
@@ -129,8 +175,9 @@ export class StorageService implements OnModuleInit {
     key: string,
     visibility: Visibility = 'private',
   ): Promise<{ url: string; expiresIn: number }> {
+    const client = this.requireClient();
     const command = new GetObjectCommand({ Bucket: this.bucketFor(visibility), Key: key });
-    const url = await getSignedUrl(this.client, command, {
+    const url = await getSignedUrl(client, command, {
       expiresIn: this.env.STORAGE_SIGNED_URL_TTL,
     });
     return { url, expiresIn: this.env.STORAGE_SIGNED_URL_TTL };
@@ -153,8 +200,9 @@ export class StorageService implements OnModuleInit {
    * metadata — not client-declared values.
    */
   async headObject(key: string, visibility: Visibility = 'private'): Promise<ObjectMetadata | null> {
+    const client = this.requireClient();
     try {
-      const res = await this.client.send(
+      const res = await client.send(
         new HeadObjectCommand({ Bucket: this.bucketFor(visibility), Key: key }),
       );
       return {
