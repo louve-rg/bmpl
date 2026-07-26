@@ -46,6 +46,19 @@ describe('loadEnv — required variables', () => {
     const env = loadEnv(base as NodeJS.ProcessEnv);
     expect(listenPort(env)).toBe(4000);
   });
+
+  it('does NOT crash on blank / bare-host / invalid URL vars (regression: Railway boot)', () => {
+    const env = loadEnv({
+      ...base,
+      NODE_ENV: 'production',
+      API_URL: '', // blank → falls back to default
+      NEXT_PUBLIC_SITE_URL: 'dev.bzemarketplace.com', // bare host → https:// prefixed
+      ADMIN_SITE_URL: 'not a url', // invalid → falls back to default
+    } as NodeJS.ProcessEnv);
+    expect(env.API_URL).toBe('http://localhost:4000');
+    expect(env.NEXT_PUBLIC_SITE_URL).toBe('https://dev.bzemarketplace.com');
+    expect(env.ADMIN_SITE_URL).toBe('http://localhost:3001');
+  });
 });
 
 describe('storageEnabled — storage is optional', () => {

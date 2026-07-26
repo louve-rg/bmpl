@@ -6,13 +6,30 @@ const boolFromString = (def: boolean) =>
     .optional()
     .transform((v) => (v === undefined ? def : v === 'true' || v === '1'));
 
+/**
+ * Tolerant URL field: accepts a full URL, prefixes https:// on a bare host, and
+ * falls back to `def` on empty/invalid input — it NEVER throws. A mistyped or
+ * blank URL variable (e.g. API_URL, site URLs) must not crash the API at boot;
+ * these values are non-critical for an API-only deployment.
+ */
+const urlWithDefault = (def: string) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => {
+      const s = (v ?? '').trim();
+      if (!s) return def;
+      return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+    })
+    .pipe(z.string().url().catch(def));
+
 /** Validated environment. The API refuses to boot with invalid/missing config. */
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   // Railway (and most PaaS) inject PORT; fall back to API_PORT for local dev.
   PORT: z.coerce.number().int().optional(),
   API_PORT: z.coerce.number().int().default(4000),
-  API_URL: z.string().url().default('http://localhost:4000'),
+  API_URL: urlWithDefault('http://localhost:4000'),
   APP_VERSION: z.string().default('0.1.0'),
   // Comma-separated allow-list of browser origins for CORS + CSRF origin checks.
   CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3001'),
@@ -46,8 +63,8 @@ const envSchema = z.object({
   // In test, throttling is skipped unless this is set (keeps the suite deterministic).
   THROTTLE_TEST_ENABLED: boolFromString(false),
 
-  NEXT_PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
-  ADMIN_SITE_URL: z.string().url().default('http://localhost:3001'),
+  NEXT_PUBLIC_SITE_URL: urlWithDefault('http://localhost:3000'),
+  ADMIN_SITE_URL: urlWithDefault('http://localhost:3001'),
 
   // ---- Object storage (S3-compatible: MinIO locally, Cloudflare R2 in cloud) ----
   // 'none' explicitly disables storage; file-upload endpoints then return a clear
