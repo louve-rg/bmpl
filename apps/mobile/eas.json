@@ -17,7 +17,7 @@
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api-dev.bzemarketplace.com"
+        "EXPO_PUBLIC_API_URL": "https://bmplapi-production.up.railway.app"
       }
     },
     "production": {
@@ -25,7 +25,7 @@
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.bzemarketplace.com"
+        "EXPO_PUBLIC_API_URL": "https://bmplapi-production.up.railway.app"
       }
     }
   },
