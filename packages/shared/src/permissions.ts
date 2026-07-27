@@ -18,13 +18,26 @@ export const PERMISSIONS = [
   'audit.read',
   'admin.manage', // manage other admins' permissions (SUPER_ADMIN)
   'notifications.broadcast',
+  // ---- Marketplace (Phase 2) ----
+  'vendors.read', // view vendor profiles in the admin moderation console
+  'vendors.moderate', // approve / reject / suspend / restore vendor storefronts
+  'products.read', // view products in the admin moderation console
+  'products.moderate', // approve / reject / suspend products
+  'categories.manage', // create / edit / delete marketplace categories
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Default permission bundles applied when seeding/assigning staff roles. */
 export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
-  SUPPORT_AGENT: ['users.read', 'role_applications.read', 'documents.read', 'audit.read'],
+  SUPPORT_AGENT: [
+    'users.read',
+    'role_applications.read',
+    'documents.read',
+    'audit.read',
+    'vendors.read',
+    'products.read',
+  ],
   ADMIN: [
     'users.read',
     'users.suspend',
@@ -37,6 +50,11 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'documents.read',
     'audit.read',
     'notifications.broadcast',
+    'vendors.read',
+    'vendors.moderate',
+    'products.read',
+    'products.moderate',
+    'categories.manage',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

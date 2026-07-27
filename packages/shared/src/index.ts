@@ -6,6 +6,8 @@ export * from './notifications';
 export * from './wallet';
 export * from './user';
 export * from './storage';
+export * from './marketplace';
+export * from './slug';
 
 /** Shared, framework-agnostic branding tokens (mirrored in the UI package). */
 export const BRAND = {

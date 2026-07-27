@@ -20,8 +20,16 @@ export type DocumentMime = (typeof DOCUMENT_MIME_ALLOWLIST)[number];
 export const AVATAR_MIME_ALLOWLIST = ['image/jpeg', 'image/png', 'image/webp'] as const;
 export type AvatarMime = (typeof AVATAR_MIME_ALLOWLIST)[number];
 
+/**
+ * Allowed MIME types for public marketplace images (product photos, vendor
+ * logo/banner, category icon/image). Stored in the PUBLIC bucket.
+ */
+export const PRODUCT_IMAGE_MIME_ALLOWLIST = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export type ProductImageMime = (typeof PRODUCT_IMAGE_MIME_ALLOWLIST)[number];
+
 export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10 MB
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5 MB
+export const MAX_PRODUCT_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
 
 export const isAllowedDocumentMime = (mime: string): mime is DocumentMime =>
   (DOCUMENT_MIME_ALLOWLIST as readonly string[]).includes(mime);
@@ -29,8 +37,22 @@ export const isAllowedDocumentMime = (mime: string): mime is DocumentMime =>
 export const isAllowedAvatarMime = (mime: string): mime is AvatarMime =>
   (AVATAR_MIME_ALLOWLIST as readonly string[]).includes(mime);
 
-/** Storage key prefixes (namespaces). Ownership is enforced against these. */
+export const isAllowedProductImageMime = (mime: string): mime is ProductImageMime =>
+  (PRODUCT_IMAGE_MIME_ALLOWLIST as readonly string[]).includes(mime);
+
+/**
+ * Storage key prefixes (namespaces). Ownership is enforced against these via
+ * StorageService.assertKeyInNamespace. Marketplace images live under the owning
+ * vendor's namespace so a single ownership check covers logo/banner/products.
+ */
 export const STORAGE_PREFIX = {
   applicationDocs: (userId: string, roleCode: string) => `applications/${userId}/${roleCode}`,
   avatar: (userId: string) => `avatars/${userId}`,
+  // ---- Marketplace (Phase 2), public bucket ----
+  vendorRoot: (vendorProfileId: string) => `vendors/${vendorProfileId}`,
+  vendorLogo: (vendorProfileId: string) => `vendors/${vendorProfileId}/logo`,
+  vendorBanner: (vendorProfileId: string) => `vendors/${vendorProfileId}/banner`,
+  productImage: (vendorProfileId: string, productId: string) =>
+    `vendors/${vendorProfileId}/products/${productId}`,
+  categoryImage: (categoryId: string) => `categories/${categoryId}`,
 } as const;
