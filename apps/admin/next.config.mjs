@@ -8,6 +8,21 @@ const securityHeaders = [
   { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
 ];
 
+/**
+ * Normalize the API base so the /api proxy destination is ALWAYS a valid
+ * absolute URL. Without a scheme, Next treats the rewrite destination as an
+ * internal same-host path and returns a 404 (the exact failure we hit). We:
+ *  - default to the production API when the env var is absent (so a missing
+ *    build-time value can't break the deployed proxy),
+ *  - prepend https:// when the value has no scheme,
+ *  - strip a trailing slash and an accidental trailing "/api" (avoids /api/api).
+ */
+function apiBase(raw) {
+  const v = (raw || 'https://bmplapi-production.up.railway.app').trim();
+  const withScheme = /^https?:\/\//i.test(v) ? v : `https://${v}`;
+  return withScheme.replace(/\/+$/, '').replace(/\/api$/i, '');
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -19,7 +34,7 @@ const nextConfig = {
   },
   async rewrites() {
     // Same-origin proxy to the API (keeps admin auth cookies first-party).
-    const api = process.env.ADMIN_PUBLIC_API_URL ?? 'http://localhost:4000';
+    const api = apiBase(process.env.ADMIN_PUBLIC_API_URL);
     return [{ source: '/api/:path*', destination: `${api}/api/:path*` }];
   },
 };

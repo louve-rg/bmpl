@@ -1,6 +1,13 @@
 import { cookies } from 'next/headers';
 
-const API_URL = process.env.ADMIN_PUBLIC_API_URL ?? 'http://localhost:4000';
+/** Normalize the API base to a valid absolute URL (see next.config.mjs apiBase). */
+function apiBase(raw?: string): string {
+  const v = (raw ?? 'https://bmplapi-production.up.railway.app').trim();
+  const withScheme = /^https?:\/\//i.test(v) ? v : `https://${v}`;
+  return withScheme.replace(/\/+$/, '').replace(/\/api$/i, '');
+}
+
+const API_URL = apiBase(process.env.ADMIN_PUBLIC_API_URL);
 
 /**
  * Server-side admin fetch. Returns { ok:false } on 401/403 so pages can bounce
