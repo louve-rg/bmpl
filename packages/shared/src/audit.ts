@@ -36,6 +36,8 @@ export const AUDIT_ACTIONS = [
   'PRODUCT_SUSPENDED',
   'PRODUCT_ARCHIVED',
   'PRODUCT_DELETED',
+  // ---- Marketplace: Inventory (Phase 2 · M6) ----
+  'INVENTORY_ADJUSTED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

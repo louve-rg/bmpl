@@ -239,6 +239,63 @@ export const imageReorderSchema = z.object({
 });
 export type ImageReorderInput = z.infer<typeof imageReorderSchema>;
 
+// ---- Variants & inventory (M6) ----------------------------------------------
+
+/** Create an option ("Color") with its initial values ("Red","Blue"). */
+export const createOptionSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  values: z.array(z.string().trim().min(1).max(60)).max(50).optional(),
+});
+export type CreateOptionInput = z.infer<typeof createOptionSchema>;
+
+export const addOptionValueSchema = z.object({
+  value: z.string().trim().min(1).max(60),
+});
+export type AddOptionValueInput = z.infer<typeof addOptionValueSchema>;
+
+/** A variant = one option-value per option, plus optional sku/price overrides. */
+export const createVariantSchema = z.object({
+  optionValueIds: z.array(cuidRef).min(1).max(10),
+  sku: z.string().trim().min(1).max(64).optional(),
+  barcode: z.string().trim().max(64).optional(),
+  priceMinor: optionalMoneyMinorSchema,
+  salePriceMinor: optionalMoneyMinorSchema,
+  // Opening inventory for this variant.
+  quantity: z.coerce.number().int().min(0).max(1_000_000).optional().default(0),
+});
+export type CreateVariantInput = z.infer<typeof createVariantSchema>;
+
+export const updateVariantSchema = z
+  .object({
+    sku: z.string().trim().min(1).max(64).nullable(),
+    barcode: z.string().trim().max(64).nullable(),
+    priceMinor: optionalMoneyMinorSchema,
+    salePriceMinor: optionalMoneyMinorSchema,
+    isActive: z.boolean(),
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+export type UpdateVariantInput = z.infer<typeof updateVariantSchema>;
+
+/** Inventory settings (thresholds/flags) — quantity changes go via /adjust. */
+export const inventorySettingsSchema = z
+  .object({
+    lowStockThreshold: z.coerce.number().int().min(0).max(1_000_000),
+    unlimited: z.boolean(),
+    allowBackorders: z.boolean(),
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+export type InventorySettingsInput = z.infer<typeof inventorySettingsSchema>;
+
+/** Adjust on-hand quantity by a signed delta with a reason (writes history). */
+export const inventoryAdjustSchema = z.object({
+  delta: z.coerce.number().int().refine((n) => n !== 0, 'Delta cannot be zero.'),
+  reason: z.enum(['MANUAL', 'RESTOCK', 'CORRECTION', 'BACKORDER']),
+  note: z.string().trim().max(500).optional(),
+});
+export type InventoryAdjustInput = z.infer<typeof inventoryAdjustSchema>;
+
 // ---- Products (M4) ----------------------------------------------------------
 
 const tagsSchema = z.array(z.string().trim().min(1).max(40)).max(20);

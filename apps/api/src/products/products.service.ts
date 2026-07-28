@@ -13,6 +13,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ProductImagesService } from './product-images.service';
+import { VariantsService } from './variants.service';
+import { InventoryService } from './inventory.service';
 
 export interface ActorContext {
   userId: string;
@@ -31,6 +33,8 @@ export class ProductsService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly images: ProductImagesService,
+    private readonly variants: VariantsService,
+    private readonly inventory: InventoryService,
   ) {}
 
   // ===========================================================================
@@ -371,6 +375,8 @@ export class ProductsService {
       metaDescription: p.metaDescription,
       tags: p.tags.map((t) => t.name),
       images: await this.images.list(p.id),
+      ...(await this.variants.publicView(p.id)), // { options, variants }
+      availability: await this.inventory.publicAvailability(p.id),
     };
   }
 

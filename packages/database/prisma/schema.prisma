@@ -141,6 +141,8 @@ enum AuditAction {
   PRODUCT_SUSPENDED
   PRODUCT_ARCHIVED
   PRODUCT_DELETED
+  // ---- Marketplace: Inventory (Phase 2 · M6) ----
+  INVENTORY_ADJUSTED
 }
 
 enum WalletAccountType {
@@ -224,6 +226,7 @@ model User {
   vendorProfile        VendorProfile?              @relation("UserVendorProfile")
   vendorReviewsMade    VendorModerationReview[]    @relation("VendorReviewer")
   productReviewsMade   ProductModerationReview[]   @relation("ProductReviewer")
+  inventoryChangesMade InventoryChange[]           @relation("InventoryActor")
 
   @@index([status])
   @@index([district])
@@ -703,9 +706,12 @@ model Product {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  tags    Tag[]                     @relation("ProductTags")
-  reviews ProductModerationReview[]
-  images  ProductImage[]
+  tags      Tag[]                     @relation("ProductTags")
+  reviews   ProductModerationReview[]
+  images    ProductImage[]
+  options   ProductOption[]
+  variants  ProductVariant[]
+  inventory Inventory[]
 
   @@unique([vendorProfileId, sku])
   @@index([status])
@@ -735,6 +741,119 @@ model ProductImage {
 
   @@index([productId, position])
   @@map("product_images")
+}
+
+// ---- Marketplace: Variants & Inventory (Phase 2 · M6) -----------------------
+// Fully NORMALIZED variants (no JSON): a product has Options (e.g. "Size"), each
+// with Values (e.g. "S","M"); a Variant is a concrete combination linked to one
+// Value per option via VariantOptionValue. Inventory attaches either to a Variant
+// or, when a product has no variants, to the Product itself (variantId = null).
+
+enum InventoryChangeReason {
+  INITIAL
+  MANUAL
+  RESTOCK
+  CORRECTION
+  RESERVE
+  RELEASE
+  BACKORDER
+}
+
+model ProductOption {
+  id        String               @id @default(cuid())
+  productId String
+  product   Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String
+  position  Int                  @default(0)
+  values    ProductOptionValue[]
+
+  @@unique([productId, name])
+  @@index([productId])
+  @@map("product_options")
+}
+
+model ProductOptionValue {
+  id              String               @id @default(cuid())
+  productOptionId String
+  option          ProductOption        @relation(fields: [productOptionId], references: [id], onDelete: Cascade)
+  value           String
+  position        Int                  @default(0)
+  variantLinks    VariantOptionValue[]
+
+  @@unique([productOptionId, value])
+  @@index([productOptionId])
+  @@map("product_option_values")
+}
+
+model ProductVariant {
+  id             String               @id @default(cuid())
+  productId      String
+  product        Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku            String?
+  barcode        String?
+  priceMinor     BigInt? // null = inherit the product price
+  salePriceMinor BigInt?
+  position       Int                  @default(0)
+  isActive       Boolean              @default(true)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  optionValues   VariantOptionValue[]
+  inventory      Inventory?
+
+  @@unique([productId, sku])
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model VariantOptionValue {
+  id                   String             @id @default(cuid())
+  variantId            String
+  variant              ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  productOptionValueId String
+  optionValue          ProductOptionValue @relation(fields: [productOptionValueId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, productOptionValueId])
+  @@index([productOptionValueId])
+  @@map("variant_option_values")
+}
+
+model Inventory {
+  id                String            @id @default(cuid())
+  productId         String
+  product           Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId         String?           @unique
+  variant           ProductVariant?   @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  quantity          Int               @default(0) // on-hand
+  reserved          Int               @default(0) // allocated (Phase 3 orders); available = quantity - reserved
+  lowStockThreshold Int               @default(0)
+  unlimited         Boolean           @default(false)
+  allowBackorders   Boolean           @default(false)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  changes           InventoryChange[]
+
+  // A product-level row has variantId = null; a partial unique index in the
+  // migration enforces at most ONE such row per product. Variant rows are unique
+  // via variantId @unique above.
+  @@index([productId])
+  @@map("inventory")
+}
+
+model InventoryChange {
+  id          String                @id @default(cuid())
+  inventoryId String
+  inventory   Inventory             @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  delta       Int // signed change to on-hand quantity
+  reason      InventoryChangeReason
+  previousQty Int
+  newQty      Int
+  actorId     String?
+  actor       User?                 @relation("InventoryActor", fields: [actorId], references: [id], onDelete: SetNull)
+  note        String?
+  createdAt   DateTime              @default(now())
+
+  @@index([inventoryId, createdAt])
+  @@map("inventory_changes")
 }
 
 model Tag {

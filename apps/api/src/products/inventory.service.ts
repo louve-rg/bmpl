@@ -1,0 +1,246 @@
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import type { InventoryAdjustInput, InventorySettingsInput } from '@bmpl/validation';
+import type { Inventory, Prisma } from '@bmpl/database';
+import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+
+export interface ActorContext {
+  userId: string;
+  ipAddress?: string | null;
+  sessionId?: string | null;
+}
+
+export interface Availability {
+  quantity: number;
+  reserved: number;
+  available: number | null; // null = unlimited
+  unlimited: boolean;
+  allowBackorders: boolean;
+  lowStockThreshold: number;
+  inStock: boolean;
+  lowStock: boolean;
+  outOfStock: boolean;
+}
+
+type Tx = Prisma.TransactionClient | PrismaService;
+
+@Injectable()
+export class InventoryService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
+
+  /** Pure derivation of stock state from an inventory row. */
+  availability(inv: Inventory): Availability {
+    const net = inv.quantity - inv.reserved;
+    const available = inv.unlimited ? null : net;
+    const inStock = inv.unlimited || net > 0 || inv.allowBackorders;
+    const outOfStock = !inv.unlimited && !inv.allowBackorders && net <= 0;
+    const lowStock = !inv.unlimited && net > 0 && net <= inv.lowStockThreshold;
+    return {
+      quantity: inv.quantity,
+      reserved: inv.reserved,
+      available,
+      unlimited: inv.unlimited,
+      allowBackorders: inv.allowBackorders,
+      lowStockThreshold: inv.lowStockThreshold,
+      inStock,
+      lowStock,
+      outOfStock,
+    };
+  }
+
+  /** Get-or-create the product-level inventory row (variantId = null). */
+  async ensureProductInventory(productId: string, tx: Tx = this.prisma): Promise<Inventory> {
+    const existing = await tx.inventory.findFirst({ where: { productId, variantId: null } });
+    if (existing) return existing;
+    const inv = await tx.inventory.create({ data: { productId, variantId: null, quantity: 0 } });
+    await tx.inventoryChange.create({
+      data: { inventoryId: inv.id, delta: 0, reason: 'INITIAL', previousQty: 0, newQty: 0 },
+    });
+    return inv;
+  }
+
+  /** Create inventory for a new variant with opening quantity. */
+  async ensureVariantInventory(
+    productId: string,
+    variantId: string,
+    quantity: number,
+    tx: Tx,
+  ): Promise<Inventory> {
+    const inv = await tx.inventory.create({ data: { productId, variantId, quantity } });
+    await tx.inventoryChange.create({
+      data: { inventoryId: inv.id, delta: quantity, reason: 'INITIAL', previousQty: 0, newQty: quantity },
+    });
+    return inv;
+  }
+
+  // ---- Vendor (owner) ----
+
+  async getForProduct(userId: string, productId: string) {
+    await this.ownedProductId(userId, productId);
+    const productInv = await this.ensureProductInventory(productId);
+    const variantRows = await this.prisma.inventory.findMany({
+      where: { productId, variantId: { not: null } },
+      include: { variant: { select: { id: true, sku: true } } },
+    });
+    return {
+      product: { inventoryId: productInv.id, ...this.availability(productInv) },
+      variants: variantRows.map((r) => ({
+        inventoryId: r.id,
+        variantId: r.variantId,
+        sku: r.variant?.sku ?? null,
+        ...this.availability(r),
+      })),
+    };
+  }
+
+  async updateSettings(
+    userId: string,
+    productId: string,
+    variantId: string | null,
+    dto: InventorySettingsInput,
+  ) {
+    await this.ownedProductId(userId, productId);
+    const inv = await this.resolveTarget(productId, variantId);
+    await this.prisma.inventory.update({
+      where: { id: inv.id },
+      data: {
+        lowStockThreshold: dto.lowStockThreshold ?? undefined,
+        unlimited: dto.unlimited ?? undefined,
+        allowBackorders: dto.allowBackorders ?? undefined,
+      },
+    });
+    return this.getForProduct(userId, productId);
+  }
+
+  /** Transactional on-hand adjustment with an append-only history entry + audit. */
+  async adjust(actor: ActorContext, productId: string, variantId: string | null, dto: InventoryAdjustInput) {
+    await this.ownedProductId(actor.userId, productId);
+    const inv = await this.resolveTarget(productId, variantId);
+
+    await this.prisma.$transaction(async (tx) => {
+      const current = await tx.inventory.findUniqueOrThrow({ where: { id: inv.id } });
+      const newQty = current.quantity + dto.delta;
+      if (newQty < 0) {
+        throw new BadRequestException('Adjustment would drive on-hand quantity below zero.');
+      }
+      await tx.inventory.update({ where: { id: inv.id }, data: { quantity: newQty } });
+      await tx.inventoryChange.create({
+        data: {
+          inventoryId: inv.id,
+          delta: dto.delta,
+          reason: dto.reason,
+          previousQty: current.quantity,
+          newQty,
+          actorId: actor.userId,
+          note: dto.note ?? null,
+        },
+      });
+      await this.audit.record(
+        {
+          action: 'INVENTORY_ADJUSTED',
+          actorId: actor.userId,
+          ipAddress: actor.ipAddress ?? null,
+          sessionId: actor.sessionId ?? null,
+          previousValue: { quantity: current.quantity },
+          newValue: { quantity: newQty, reason: dto.reason },
+        },
+        tx,
+      );
+    });
+    return this.getForProduct(actor.userId, productId);
+  }
+
+  async history(userId: string, productId: string, variantId: string | null) {
+    await this.ownedProductId(userId, productId);
+    const inv = await this.resolveTarget(productId, variantId);
+    const rows = await this.prisma.inventoryChange.findMany({
+      where: { inventoryId: inv.id },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: { actor: { select: { firstName: true, lastName: true } } },
+    });
+    return rows.map((r) => ({
+      delta: r.delta,
+      reason: r.reason,
+      previousQty: r.previousQty,
+      newQty: r.newQty,
+      note: r.note,
+      createdAt: r.createdAt,
+      actor: r.actor ? `${r.actor.firstName} ${r.actor.lastName}` : null,
+    }));
+  }
+
+  // ---- Reservations (Phase 3 hooks; transactional, not exposed via vendor API) ----
+
+  async reserve(inventoryId: string, qty: number, tx: Tx = this.prisma): Promise<void> {
+    const inv = await tx.inventory.findUniqueOrThrow({ where: { id: inventoryId } });
+    if (!inv.unlimited && !inv.allowBackorders && inv.quantity - inv.reserved < qty) {
+      throw new BadRequestException('Insufficient stock to reserve.');
+    }
+    await tx.inventory.update({ where: { id: inventoryId }, data: { reserved: inv.reserved + qty } });
+  }
+
+  async release(inventoryId: string, qty: number, tx: Tx = this.prisma): Promise<void> {
+    const inv = await tx.inventory.findUniqueOrThrow({ where: { id: inventoryId } });
+    await tx.inventory.update({
+      where: { id: inventoryId },
+      data: { reserved: Math.max(0, inv.reserved - qty) },
+    });
+  }
+
+  // ---- Public availability (used by ProductsService) ----
+
+  /** Aggregate availability for a product: product-level row, else any variant in stock. */
+  async publicAvailability(productId: string): Promise<{ inStock: boolean; lowStock: boolean }> {
+    const rows = await this.prisma.inventory.findMany({ where: { productId } });
+    if (rows.length === 0) return { inStock: true, lowStock: false }; // no inventory tracked yet
+    const avails = rows.map((r) => this.availability(r));
+    return {
+      inStock: avails.some((a) => a.inStock),
+      lowStock: avails.every((a) => a.lowStock || a.outOfStock) && avails.some((a) => a.lowStock),
+    };
+  }
+
+  /** Batched in-stock map for listings (avoids N+1). */
+  async inStockMap(productIds: string[]): Promise<Map<string, boolean>> {
+    const out = new Map<string, boolean>();
+    if (!productIds.length) return out;
+    const rows = await this.prisma.inventory.findMany({ where: { productId: { in: productIds } } });
+    const byProduct = new Map<string, Inventory[]>();
+    for (const r of rows) {
+      const list = byProduct.get(r.productId) ?? [];
+      list.push(r);
+      byProduct.set(r.productId, list);
+    }
+    for (const id of productIds) {
+      const list = byProduct.get(id);
+      out.set(id, !list || list.length === 0 ? true : list.some((r) => this.availability(r).inStock));
+    }
+    return out;
+  }
+
+  // ---- helpers ----
+
+  private async resolveTarget(productId: string, variantId: string | null): Promise<Inventory> {
+    if (variantId) {
+      const inv = await this.prisma.inventory.findFirst({ where: { productId, variantId } });
+      if (!inv) throw new NotFoundException('Variant inventory not found.');
+      return inv;
+    }
+    return this.ensureProductInventory(productId);
+  }
+
+  private async ownedProductId(userId: string, productId: string): Promise<string> {
+    const vp = await this.prisma.vendorProfile.findUnique({ where: { userId }, select: { id: true } });
+    if (!vp) throw new ForbiddenException('Create your vendor profile first.');
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true, vendorProfileId: true },
+    });
+    if (!product || product.vendorProfileId !== vp.id) throw new NotFoundException('Product not found.');
+    return product.id;
+  }
+}

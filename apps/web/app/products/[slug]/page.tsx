@@ -22,6 +22,9 @@ interface ProductDetail {
   dimensionsMm: { length: number | null; width: number | null; height: number | null };
   tags: string[];
   images: GalleryImage[];
+  availability: { inStock: boolean; lowStock: boolean };
+  options: Array<{ id: string; name: string; values: Array<{ id: string; value: string }> }>;
+  variants: Array<{ id: string; sku: string | null; priceMinor: number | null; salePriceMinor: number | null; optionValueIds: string[]; availability: { inStock: boolean; outOfStock: boolean } }>;
 }
 
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
@@ -64,7 +67,42 @@ export default async function ProductDetailPage({ params }: { params: { slug: st
               <span className="ml-2 text-sm text-slate-400">{p.currency}</span>
             </p>
 
-            <p className="mt-2 text-sm text-slate-500">
+            <p className="mt-2">
+              <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${p.availability.inStock ? (p.availability.lowStock ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700') : 'bg-red-100 text-red-700'}`}>
+                {p.availability.inStock ? (p.availability.lowStock ? 'Low stock' : 'In stock') : 'Out of stock'}
+              </span>
+            </p>
+
+            {p.variants.length > 0 && (
+              <div className="mt-4">
+                <p className="mb-1 text-xs font-semibold uppercase text-slate-500">Options</p>
+                <ul className="space-y-1 text-sm text-slate-600">
+                  {p.variants.map((v) => {
+                    const label = v.optionValueIds
+                      .map((id) => {
+                        for (const o of p.options) {
+                          const val = o.values.find((x) => x.id === id);
+                          if (val) return val.value;
+                        }
+                        return null;
+                      })
+                      .filter(Boolean)
+                      .join(' / ');
+                    return (
+                      <li key={v.id} className="flex items-center gap-2">
+                        <span>{label}</span>
+                        {v.priceMinor != null && <span className="text-xs text-slate-400">{money(v.priceMinor)}</span>}
+                        <span className={`text-xs ${v.availability.inStock ? 'text-emerald-600' : 'text-red-500'}`}>
+                          {v.availability.inStock ? '✓' : 'out'}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+
+            <p className="mt-3 text-sm text-slate-500">
               Sold by{' '}
               <Link href={`/store/${p.vendor.slug}`} className="text-belize-blue hover:underline">
                 {p.vendor.businessName}

@@ -3,8 +3,12 @@ import { ProductsController } from './products.controller';
 import { AdminProductsController } from './admin-products.controller';
 import { ProductsPublicController } from './products-public.controller';
 import { ProductImagesController } from './product-images.controller';
+import { ProductVariantsController } from './product-variants.controller';
+import { ProductInventoryController } from './product-inventory.controller';
 import { ProductsService } from './products.service';
 import { ProductImagesService } from './product-images.service';
+import { VariantsService } from './variants.service';
+import { InventoryService } from './inventory.service';
 
 // Prisma/Audit/Notifications/Storage come from @Global() modules.
 @Module({
@@ -13,8 +17,10 @@ import { ProductImagesService } from './product-images.service';
     AdminProductsController,
     ProductsPublicController,
     ProductImagesController,
+    ProductVariantsController,
+    ProductInventoryController,
   ],
-  providers: [ProductsService, ProductImagesService],
-  exports: [ProductsService, ProductImagesService],
+  providers: [ProductsService, ProductImagesService, VariantsService, InventoryService],
+  exports: [ProductsService, ProductImagesService, VariantsService, InventoryService],
 })
 export class ProductsModule {}

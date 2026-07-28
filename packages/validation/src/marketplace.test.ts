@@ -15,6 +15,9 @@ import {
   productQuerySchema,
   productImageConfirmSchema,
   imageReorderSchema,
+  createVariantSchema,
+  inventoryAdjustSchema,
+  inventorySettingsSchema,
 } from './marketplace';
 
 describe('slugSchema', () => {
@@ -141,5 +144,24 @@ describe('product image schemas (M5)', () => {
   it('imageReorderSchema requires a non-empty id list', () => {
     expect(imageReorderSchema.safeParse({ order: [] }).success).toBe(false);
     expect(imageReorderSchema.safeParse({ order: ['clabcabcabcabcabcabcabca'] }).success).toBe(true);
+  });
+});
+
+describe('variant + inventory schemas (M6)', () => {
+  it('createVariantSchema needs at least one option value + defaults quantity', () => {
+    expect(createVariantSchema.safeParse({ optionValueIds: [] }).success).toBe(false);
+    const v = createVariantSchema.parse({ optionValueIds: ['clabcabcabcabcabcabcabca'] });
+    expect(v.quantity).toBe(0);
+  });
+
+  it('inventoryAdjustSchema rejects zero delta + bad reason', () => {
+    expect(inventoryAdjustSchema.safeParse({ delta: 0, reason: 'RESTOCK' }).success).toBe(false);
+    expect(inventoryAdjustSchema.safeParse({ delta: 5, reason: 'NONSENSE' }).success).toBe(false);
+    expect(inventoryAdjustSchema.parse({ delta: -2, reason: 'CORRECTION' }).delta).toBe(-2);
+  });
+
+  it('inventorySettingsSchema requires at least one field', () => {
+    expect(inventorySettingsSchema.safeParse({}).success).toBe(false);
+    expect(inventorySettingsSchema.parse({ unlimited: true })).toEqual({ unlimited: true });
   });
 });
