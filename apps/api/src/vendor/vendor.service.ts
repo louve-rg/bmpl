@@ -293,10 +293,18 @@ export class VendorService {
   // Public storefront (M3)
   // ===========================================================================
 
-  /** Approved, non-vacation vendors for the public directory. */
-  async publicList() {
+  /** Approved, non-vacation vendors for the public directory (optional search/filter). */
+  async publicList(query?: { q?: string; district?: string }) {
+    const q = query?.q?.trim();
     const rows = await this.prisma.vendorProfile.findMany({
-      where: { approvalStatus: 'APPROVED', settings: { is: { vacationMode: false } } },
+      where: {
+        approvalStatus: 'APPROVED',
+        settings: { is: { vacationMode: false } },
+        ...(q ? { businessName: { contains: q, mode: 'insensitive' as const } } : {}),
+        ...(query?.district
+          ? { locations: { some: { district: query.district as never } } }
+          : {}),
+      },
       orderBy: { businessName: 'asc' },
       include: { settings: { select: { pickupEnabled: true, deliveryEnabled: true } } },
     });

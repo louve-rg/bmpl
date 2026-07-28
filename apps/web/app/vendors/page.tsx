@@ -22,8 +22,9 @@ export const metadata = {
   description: 'Browse approved vendors and storefronts across Belize.',
 };
 
-export default async function VendorsDirectoryPage() {
-  const res = await serverGetSafe<VendorCard[]>('/marketplace/vendors');
+export default async function VendorsDirectoryPage({ searchParams }: { searchParams: { q?: string } }) {
+  const qs = searchParams.q ? `?q=${encodeURIComponent(searchParams.q)}` : '';
+  const res = await serverGetSafe<VendorCard[]>(`/marketplace/vendors${qs}`);
   const vendors = res.ok ? res.data : [];
 
   return (
@@ -32,6 +33,11 @@ export default async function VendorsDirectoryPage() {
       <main className="container-bmpl py-10">
         <h1 className="text-3xl font-bold text-belize-navy">Vendors</h1>
         <p className="mt-1 text-slate-500">Discover approved storefronts across Belize.</p>
+
+        <form method="get" action="/vendors" className="mt-4 flex gap-2">
+          <input name="q" defaultValue={searchParams.q ?? ''} placeholder="Search vendors…" className="min-w-48 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <button className="rounded-lg bg-belize-blue px-5 text-sm font-semibold text-white hover:bg-belize-deep">Search</button>
+        </form>
 
         {!res.ok ? (
           <p className="mt-10 rounded-2xl border border-amber-200 bg-amber-50 p-10 text-center text-amber-700">

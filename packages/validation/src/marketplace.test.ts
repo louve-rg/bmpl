@@ -131,6 +131,12 @@ describe('product schemas (M4)', () => {
     expect(q).toMatchObject({ sort: 'newest', page: 1, pageSize: 24 });
     expect(productQuerySchema.parse({ page: '3', sort: 'price_asc' })).toMatchObject({ page: 3, sort: 'price_asc' });
   });
+
+  it('productQuerySchema coerces filters (price/inStock/featured)', () => {
+    const q = productQuerySchema.parse({ priceMin: '1000', priceMax: '5000', inStock: 'true', featured: 'true' });
+    expect(q).toMatchObject({ priceMin: 1000, priceMax: 5000, inStock: true, featured: true });
+    expect(productQuerySchema.safeParse({ pageSize: '999' }).success).toBe(false); // max 48
+  });
 });
 
 describe('product image schemas (M5)', () => {

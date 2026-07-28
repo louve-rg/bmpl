@@ -357,14 +357,24 @@ export const updateProductSchema = z
   .refine(saleNotAbovePrice, { message: 'Sale price cannot exceed the price.', path: ['salePriceMinor'] });
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
 
-/** Public product listing query. Full-text search arrives in M7. */
+/** Public product listing query (PostgreSQL full-text search + filters). */
 export const productQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
   categoryId: cuidRef.optional(),
   vendorSlug: slugSchema.optional(),
   featured: z.coerce.boolean().optional(),
+  inStock: z.coerce.boolean().optional(),
+  priceMin: moneyMinorSchema.optional(),
+  priceMax: moneyMinorSchema.optional(),
   sort: productSortSchema.optional().default('newest'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(48).default(24),
 });
 export type ProductQueryInput = z.infer<typeof productQuerySchema>;
+
+/** Public vendor directory query. */
+export const vendorQuerySchema = z.object({
+  q: z.string().trim().max(120).optional(),
+  district: districtSchema.optional(),
+});
+export type VendorQueryInput = z.infer<typeof vendorQuerySchema>;

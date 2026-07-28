@@ -323,35 +323,81 @@ export class ProductsService {
   // Public
   // ===========================================================================
 
+  /**
+   * Public catalog with PostgreSQL full-text search + filters + sort + pagination.
+   * Filtering/ranking/pagination run as one raw SQL query (uses the tsvector GIN
+   * index, a recursive category-subtree CTE, and an inventory EXISTS check); the
+   * resulting page of ids is then hydrated with Prisma for typed relations.
+   */
   async publicList(query: ProductQueryInput) {
-    const where: Prisma.ProductWhereInput = {
-      status: 'PUBLISHED',
-      vendorProfile: { approvalStatus: 'APPROVED' },
-      ...(query.categoryId ? { categoryId: query.categoryId } : {}),
-      ...(query.featured ? { featured: true } : {}),
-      ...(query.vendorSlug ? { vendorProfile: { approvalStatus: 'APPROVED', slug: query.vendorSlug } } : {}),
-      ...(query.q ? { title: { contains: query.q, mode: 'insensitive' } } : {}),
-    };
-    const orderBy = ORDER[query.sort] ?? ORDER.newest;
-    const [total, rows] = await this.prisma.$transaction([
-      this.prisma.product.count({ where }),
-      this.prisma.product.findMany({
-        where,
-        orderBy,
-        skip: (query.page - 1) * query.pageSize,
-        take: query.pageSize,
-        include: {
-          category: { select: { name: true, slug: true } },
-          vendorProfile: { select: { businessName: true, slug: true } },
-        },
-      }),
-    ]);
-    const primary = await this.images.primaryUrls(rows.map((r) => r.id));
+    const q = (query.q ?? '').trim();
+    const offset = (query.page - 1) * query.pageSize;
+
+    const catFilter = query.categoryId
+      ? Prisma.sql`AND p."categoryId" IN (
+          WITH RECURSIVE tree AS (
+            SELECT id FROM categories WHERE id = ${query.categoryId}
+            UNION ALL
+            SELECT c.id FROM categories c JOIN tree t ON c."parentId" = t.id
+          ) SELECT id FROM tree)`
+      : Prisma.empty;
+    const vendorFilter = query.vendorSlug ? Prisma.sql`AND vp.slug = ${query.vendorSlug}` : Prisma.empty;
+    const featuredFilter = query.featured ? Prisma.sql`AND p.featured = TRUE` : Prisma.empty;
+    const priceMinFilter = query.priceMin != null ? Prisma.sql`AND p."priceMinor" >= ${query.priceMin}` : Prisma.empty;
+    const priceMaxFilter = query.priceMax != null ? Prisma.sql`AND p."priceMinor" <= ${query.priceMax}` : Prisma.empty;
+    const inStockFilter = query.inStock
+      ? Prisma.sql`AND (
+          NOT EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id)
+          OR EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id
+            AND (i.unlimited OR i."allowBackorders" OR (i.quantity - i.reserved) > 0)))`
+      : Prisma.empty;
+    const searchFilter = q
+      ? Prisma.sql`AND (p."searchVector" @@ websearch_to_tsquery('english', ${q}) OR p.title ILIKE ${`%${q}%`})`
+      : Prisma.empty;
+    const rankExpr = q
+      ? Prisma.sql`ts_rank(p."searchVector", websearch_to_tsquery('english', ${q}))`
+      : Prisma.sql`0`;
+
+    let orderBy: Prisma.Sql;
+    switch (query.sort) {
+      case 'price_asc': orderBy = Prisma.sql`p."priceMinor" ASC`; break;
+      case 'price_desc': orderBy = Prisma.sql`p."priceMinor" DESC`; break;
+      case 'featured': orderBy = Prisma.sql`p.featured DESC, p."createdAt" DESC`; break;
+      case 'relevance': orderBy = q ? Prisma.sql`rank DESC, p."createdAt" DESC` : Prisma.sql`p."createdAt" DESC`; break;
+      default: orderBy = Prisma.sql`p."createdAt" DESC`;
+    }
+
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; total: bigint }>>`
+      SELECT p.id, ${rankExpr} AS rank, count(*) OVER() AS total
+      FROM products p
+      JOIN vendor_profiles vp ON vp.id = p."vendorProfileId"
+      WHERE p.status = 'PUBLISHED' AND vp."approvalStatus" = 'APPROVED'
+        ${catFilter} ${vendorFilter} ${featuredFilter} ${priceMinFilter} ${priceMaxFilter} ${inStockFilter} ${searchFilter}
+      ORDER BY ${orderBy}
+      LIMIT ${query.pageSize} OFFSET ${offset}`;
+
+    const total = rows.length ? Number(rows[0]!.total) : 0;
+    const ids = rows.map((r) => r.id);
+    const found = await this.prisma.product.findMany({
+      where: { id: { in: ids } },
+      include: {
+        category: { select: { name: true, slug: true } },
+        vendorProfile: { select: { businessName: true, slug: true } },
+      },
+    });
+    const byId = new Map(found.map((p) => [p.id, p]));
+    const ordered = ids.map((id) => byId.get(id)).filter((p): p is (typeof found)[number] => !!p);
+    const primary = await this.images.primaryUrls(ids);
+    const stock = await this.inventory.inStockMap(ids);
     return {
       total,
       page: query.page,
       pageSize: query.pageSize,
-      items: rows.map((p) => ({ ...this.cardShape(p), primaryImageUrl: primary.get(p.id) ?? null })),
+      items: ordered.map((p) => ({
+        ...this.cardShape(p),
+        primaryImageUrl: primary.get(p.id) ?? null,
+        inStock: stock.get(p.id) ?? true,
+      })),
     };
   }
 
@@ -530,14 +576,6 @@ export class ProductsService {
     };
   }
 }
-
-const ORDER: Record<string, Prisma.ProductOrderByWithRelationInput | Prisma.ProductOrderByWithRelationInput[]> = {
-  newest: { createdAt: 'desc' },
-  price_asc: { priceMinor: 'asc' },
-  price_desc: { priceMinor: 'desc' },
-  featured: [{ featured: 'desc' }, { createdAt: 'desc' }],
-  relevance: { createdAt: 'desc' },
-};
 
 const MOD: Record<
   ModerationKind,

@@ -1,4 +1,6 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
+import { vendorQuerySchema, type VendorQueryInput } from '@bmpl/validation';
+import { ZodBody } from '../common/zod-validation.pipe';
 import { Public } from '../common/decorators';
 import { VendorService } from './vendor.service';
 
@@ -9,8 +11,8 @@ export class VendorPublicController {
 
   @Public()
   @Get()
-  list() {
-    return this.vendor.publicList();
+  list(@Query(ZodBody(vendorQuerySchema)) query: VendorQueryInput) {
+    return this.vendor.publicList(query);
   }
 
   @Public()

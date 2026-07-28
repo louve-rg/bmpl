@@ -16,6 +16,7 @@ interface ProductCard {
   vendor: { businessName: string; slug: string };
   category: { name: string };
   primaryImageUrl: string | null;
+  inStock: boolean;
 }
 interface ProductList {
   total: number;
@@ -43,16 +44,20 @@ export const metadata = { title: 'Shop · Belize Marketplace & Logistics' };
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: { categoryId?: string; sort?: string; page?: string; q?: string };
+  searchParams: { categoryId?: string; sort?: string; page?: string; q?: string; priceMin?: string; priceMax?: string; inStock?: string };
 }) {
-  const params = new URLSearchParams();
-  if (searchParams.categoryId) params.set('categoryId', searchParams.categoryId);
-  if (searchParams.sort) params.set('sort', searchParams.sort);
-  if (searchParams.q) params.set('q', searchParams.q);
-  params.set('page', searchParams.page ?? '1');
+  // API params use cents for price; the URL keeps dollars (user-facing).
+  const apiParams = new URLSearchParams();
+  if (searchParams.categoryId) apiParams.set('categoryId', searchParams.categoryId);
+  if (searchParams.sort) apiParams.set('sort', searchParams.sort);
+  if (searchParams.q) apiParams.set('q', searchParams.q);
+  if (searchParams.priceMin) apiParams.set('priceMin', String(Math.round(Number(searchParams.priceMin) * 100)));
+  if (searchParams.priceMax) apiParams.set('priceMax', String(Math.round(Number(searchParams.priceMax) * 100)));
+  if (searchParams.inStock) apiParams.set('inStock', 'true');
+  apiParams.set('page', searchParams.page ?? '1');
 
   const [listRes, catsRes] = await Promise.all([
-    serverGetSafe<ProductList>(`/marketplace/products?${params.toString()}`),
+    serverGetSafe<ProductList>(`/marketplace/products?${apiParams.toString()}`),
     serverGetSafe<CatNode[]>('/marketplace/categories'),
   ]);
   const unavailable = !listRes.ok;
@@ -60,8 +65,10 @@ export default async function ProductsPage({
   const cats = catsRes.ok ? catsRes.data : [];
   const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
 
+  // Link builder preserves the raw (dollar) URL params.
   const qp = (overrides: Record<string, string | undefined>) => {
-    const p = new URLSearchParams(params.toString());
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(searchParams)) if (v) p.set(k, v);
     for (const [k, val] of Object.entries(overrides)) {
       if (val === undefined) p.delete(k);
       else p.set(k, val);
@@ -89,6 +96,18 @@ export default async function ProductsPage({
             ))}
           </div>
         </div>
+
+        <form method="get" action="/products" className="mt-4 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-3">
+          {searchParams.categoryId && <input type="hidden" name="categoryId" value={searchParams.categoryId} />}
+          {searchParams.sort && <input type="hidden" name="sort" value={searchParams.sort} />}
+          <input name="q" defaultValue={searchParams.q ?? ''} placeholder="Search products…" className="min-w-48 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <input name="priceMin" defaultValue={searchParams.priceMin ?? ''} inputMode="decimal" placeholder="Min $" className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <input name="priceMax" defaultValue={searchParams.priceMax ?? ''} inputMode="decimal" placeholder="Max $" className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+            <input type="checkbox" name="inStock" value="true" defaultChecked={!!searchParams.inStock} /> In stock
+          </label>
+          <button className="rounded-lg bg-belize-blue px-4 py-2 text-sm font-semibold text-white hover:bg-belize-deep">Apply</button>
+        </form>
 
         <div className="mt-6 grid gap-6 md:grid-cols-[200px_1fr]">
           <aside>
@@ -141,6 +160,7 @@ export default async function ProductsPage({
                         <span className="font-bold text-belize-navy">{money(p.priceMinor)}</span>
                       )}
                     </p>
+                    {!p.inStock && <p className="mt-1 text-xs font-semibold text-red-500">Out of stock</p>}
                   </Link>
                 ))}
               </div>

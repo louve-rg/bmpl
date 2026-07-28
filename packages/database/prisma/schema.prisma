@@ -699,6 +699,10 @@ model Product {
   metaTitle       String?
   metaDescription String?
   searchKeywords  String[] // used by the M7 Postgres search
+  // Generated tsvector (title/brand/description/keywords) for full-text search.
+  // Managed by raw SQL in the migration (GENERATED ALWAYS ... STORED) + GIN index;
+  // declared Unsupported so Prisma tracks the column without managing generation.
+  searchVector    Unsupported("tsvector")?
   ratingAverage   Float         @default(0) // placeholder
   ratingCount     Int           @default(0) // placeholder
   publishedAt     DateTime?
