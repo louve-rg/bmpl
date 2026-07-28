@@ -25,8 +25,11 @@ interface Storefront {
   bannerUrl: string | null;
   locations: Array<{ label: string; addressLine1: string; addressLine2: string | null; city: string; district: string; isPrimary: boolean }>;
   openingHours: Array<{ dayOfWeek: number; isClosed: boolean; openTime: string | null; closeTime: string | null }>;
-  featuredProducts: unknown[];
+  featuredProducts: Array<{ id: string; title: string; slug: string; priceMinor: number; salePriceMinor: number | null; category: { name: string } }>;
+  categories: Array<{ name: string; slug: string }>;
 }
+
+const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 
 async function fetchStore(slug: string): Promise<Storefront | null> {
   try {
@@ -81,10 +84,47 @@ export default async function StorefrontPage({ params }: { params: { slug: strin
 
           <div className="mt-8 grid gap-6 md:grid-cols-3">
             <section className="md:col-span-2">
-              <h2 className="mb-3 text-lg font-semibold text-belize-navy">Products</h2>
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-400">
-                This storefront hasn’t listed products yet.
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-belize-navy">Featured products</h2>
+                {store.featuredProducts.length > 0 && (
+                  <Link href={`/products?vendorSlug=${store.slug}`} className="text-sm text-belize-blue hover:underline">
+                    View all →
+                  </Link>
+                )}
               </div>
+              {store.categories.length > 0 && (
+                <div className="mb-4 flex flex-wrap gap-1.5">
+                  {store.categories.map((c) => (
+                    <span key={c.slug} className="rounded-full bg-belize-blue/10 px-2.5 py-0.5 text-xs font-medium text-belize-blue">
+                      {c.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {store.featuredProducts.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-400">
+                  This storefront hasn’t listed products yet.
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {store.featuredProducts.map((p) => (
+                    <Link key={p.id} href={`/products/${p.slug}`} className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-belize-accent hover:shadow-md">
+                      <div className="flex aspect-square items-center justify-center rounded-lg bg-slate-100 text-slate-300">No image</div>
+                      <p className="mt-2 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
+                      <p className="text-sm font-bold text-belize-navy">
+                        {p.salePriceMinor != null ? (
+                          <>
+                            <span className="text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
+                            <span className="text-xs font-normal text-slate-400 line-through">{money(p.priceMinor)}</span>
+                          </>
+                        ) : (
+                          money(p.priceMinor)
+                        )}
+                      </p>
+                    </Link>
+                  ))}
+                </div>
+              )}
             </section>
 
             <aside className="space-y-6">

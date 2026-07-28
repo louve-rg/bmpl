@@ -9,6 +9,7 @@ const NAV = [
   { label: 'Applications', href: '/dashboard/applications' },
   { label: 'Users', href: '/dashboard/users' },
   { label: 'Vendors', href: '/dashboard/vendors' },
+  { label: 'Products', href: '/dashboard/products' },
   { label: 'Categories', href: '/dashboard/categories' },
   { label: 'Audit Log', href: '/dashboard/audit' },
 ];

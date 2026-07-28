@@ -133,6 +133,14 @@ enum AuditAction {
   VENDOR_REJECTED
   VENDOR_SUSPENDED
   VENDOR_RESTORED
+  // ---- Marketplace: Products (Phase 2 · M4) ----
+  PRODUCT_CREATED
+  PRODUCT_SUBMITTED
+  PRODUCT_APPROVED
+  PRODUCT_REJECTED
+  PRODUCT_SUSPENDED
+  PRODUCT_ARCHIVED
+  PRODUCT_DELETED
 }
 
 enum WalletAccountType {
@@ -215,6 +223,7 @@ model User {
   walletAccounts       WalletAccount[]
   vendorProfile        VendorProfile?              @relation("UserVendorProfile")
   vendorReviewsMade    VendorModerationReview[]    @relation("VendorReviewer")
+  productReviewsMade   ProductModerationReview[]   @relation("ProductReviewer")
 
   @@index([status])
   @@index([district])
@@ -511,6 +520,7 @@ model Category {
   parentId    String?
   parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
   children    Category[] @relation("CategoryHierarchy")
+  products    Product[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
@@ -574,6 +584,7 @@ model VendorProfile {
   locations    VendorLocation[]
   openingHours VendorOpeningHours[]
   reviews      VendorModerationReview[]
+  products     Product[]
 
   @@index([approvalStatus])
   @@index([storeStatus])
@@ -644,4 +655,86 @@ model VendorModerationReview {
 
   @@index([vendorProfileId])
   @@map("vendor_moderation_reviews")
+}
+
+// ---- Marketplace: Products (Phase 2 · M4) -----------------------------------
+// Product CORE: identity, categorization (single most-specific categoryId; the
+// category parent-chain yields category/subcategory), pricing (minor units),
+// SEO, physical dimensions, and the moderation lifecycle. Images (M5) and
+// inventory + normalized variants (M6) attach to Product in later milestones.
+
+enum ProductStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  REJECTED
+  SUSPENDED
+  ARCHIVED
+}
+
+model Product {
+  id              String        @id @default(cuid())
+  vendorProfileId String
+  vendorProfile   VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  categoryId      String
+  category        Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  title           String
+  slug            String        @unique
+  description     String?
+  sku             String
+  barcode         String?
+  brand           String?
+  status          ProductStatus @default(DRAFT)
+  priceMinor      BigInt // minor units (cents), BZD
+  salePriceMinor  BigInt?
+  currency        Currency      @default(BZD)
+  weightGrams     Int?
+  lengthMm        Int?
+  widthMm         Int?
+  heightMm        Int?
+  featured        Boolean       @default(false)
+  metaTitle       String?
+  metaDescription String?
+  searchKeywords  String[] // used by the M7 Postgres search
+  ratingAverage   Float         @default(0) // placeholder
+  ratingCount     Int           @default(0) // placeholder
+  publishedAt     DateTime?
+  rejectionReason String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  tags    Tag[]                     @relation("ProductTags")
+  reviews ProductModerationReview[]
+
+  @@unique([vendorProfileId, sku])
+  @@index([status])
+  @@index([categoryId])
+  @@index([vendorProfileId, status])
+  @@index([featured])
+  @@map("products")
+}
+
+model Tag {
+  id       String    @id @default(cuid())
+  name     String
+  slug     String    @unique
+  products Product[] @relation("ProductTags")
+
+  @@map("tags")
+}
+
+model ProductModerationReview {
+  id         String         @id @default(cuid())
+  productId  String
+  product    Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  reviewerId String?
+  reviewer   User?          @relation("ProductReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  action     ModerationAction
+  note       String?
+  fromStatus ProductStatus?
+  toStatus   ProductStatus?
+  createdAt  DateTime       @default(now())
+
+  @@index([productId])
+  @@map("product_moderation_reviews")
 }

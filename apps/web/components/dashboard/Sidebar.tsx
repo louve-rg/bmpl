@@ -12,7 +12,9 @@ const NAV = [
 
 export function Sidebar({ me }: { me: MeView }) {
   const isVendor = me.roles.some((r) => r.roleCode === 'VENDOR' && r.status === 'APPROVED');
-  const nav = isVendor ? [...NAV, { label: 'My Store', href: '/dashboard/store' }] : NAV;
+  const nav = isVendor
+    ? [...NAV, { label: 'My Store', href: '/dashboard/store' }, { label: 'My Products', href: '/dashboard/products' }]
+    : NAV;
   return (
     <aside className="flex w-full flex-col gap-6 border-r border-slate-200 bg-white p-5 md:h-screen md:w-72 md:shrink-0">
       <Link href="/" className="rounded-lg bg-belize-navy p-3">

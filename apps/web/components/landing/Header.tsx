@@ -6,7 +6,8 @@ import { BrandLockup } from '../Logo';
 import { ButtonLink } from '../ui';
 
 const NAV = [
-  { label: 'Marketplace', href: '/vendors' },
+  { label: 'Shop', href: '/products' },
+  { label: 'Vendors', href: '/vendors' },
   { label: 'Services', href: '#services' },
   { label: 'For Providers', href: '#providers' },
   { label: 'Wallet', href: '#wallet' },

@@ -210,3 +210,76 @@ export const imageConfirmSchema = z.object({
   key: z.string().trim().min(1).max(512),
 });
 export type ImageConfirmInput = z.infer<typeof imageConfirmSchema>;
+
+// ---- Products (M4) ----------------------------------------------------------
+
+const tagsSchema = z.array(z.string().trim().min(1).max(40)).max(20);
+const dimensionSchema = z.coerce.number().int().min(0).max(10_000_000);
+
+const productCore = {
+  title: z.string().trim().min(2, 'Title is required.').max(200),
+  slug: slugSchema.optional(),
+  description: z.string().trim().max(8000).optional(),
+  sku: z.string().trim().min(1, 'SKU is required.').max(64),
+  barcode: z.string().trim().max(64).optional(),
+  categoryId: cuidRef,
+  brand: z.string().trim().max(120).optional(),
+  priceMinor: moneyMinorSchema,
+  salePriceMinor: optionalMoneyMinorSchema,
+  weightGrams: dimensionSchema.optional(),
+  lengthMm: dimensionSchema.optional(),
+  widthMm: dimensionSchema.optional(),
+  heightMm: dimensionSchema.optional(),
+  featured: z.boolean().optional().default(false),
+  tags: tagsSchema.optional(),
+  metaTitle: z.string().trim().max(200).optional(),
+  metaDescription: z.string().trim().max(500).optional(),
+  searchKeywords: z.array(z.string().trim().min(1).max(40)).max(30).optional(),
+};
+
+/** salePrice, when present, must not exceed price. */
+const saleNotAbovePrice = (v: { priceMinor?: number; salePriceMinor?: number | null }) =>
+  v.salePriceMinor == null || v.priceMinor == null || v.salePriceMinor <= v.priceMinor;
+
+export const createProductSchema = z
+  .object(productCore)
+  .refine(saleNotAbovePrice, { message: 'Sale price cannot exceed the price.', path: ['salePriceMinor'] });
+export type CreateProductInput = z.infer<typeof createProductSchema>;
+
+export const updateProductSchema = z
+  .object({
+    title: z.string().trim().min(2).max(200),
+    slug: slugSchema,
+    description: z.string().trim().max(8000).nullable(),
+    sku: z.string().trim().min(1).max(64),
+    barcode: z.string().trim().max(64).nullable(),
+    categoryId: cuidRef,
+    brand: z.string().trim().max(120).nullable(),
+    priceMinor: moneyMinorSchema,
+    salePriceMinor: optionalMoneyMinorSchema,
+    weightGrams: dimensionSchema.nullable(),
+    lengthMm: dimensionSchema.nullable(),
+    widthMm: dimensionSchema.nullable(),
+    heightMm: dimensionSchema.nullable(),
+    featured: z.boolean(),
+    tags: tagsSchema,
+    metaTitle: z.string().trim().max(200).nullable(),
+    metaDescription: z.string().trim().max(500).nullable(),
+    searchKeywords: z.array(z.string().trim().min(1).max(40)).max(30),
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' })
+  .refine(saleNotAbovePrice, { message: 'Sale price cannot exceed the price.', path: ['salePriceMinor'] });
+export type UpdateProductInput = z.infer<typeof updateProductSchema>;
+
+/** Public product listing query. Full-text search arrives in M7. */
+export const productQuerySchema = z.object({
+  q: z.string().trim().max(120).optional(),
+  categoryId: cuidRef.optional(),
+  vendorSlug: slugSchema.optional(),
+  featured: z.coerce.boolean().optional(),
+  sort: productSortSchema.optional().default('newest'),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(48).default(24),
+});
+export type ProductQueryInput = z.infer<typeof productQuerySchema>;

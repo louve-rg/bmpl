@@ -23,6 +23,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ProductsService } from '../products/products.service';
 
 export interface ActorContext {
   userId: string;
@@ -40,6 +41,7 @@ export class VendorService {
     private readonly storage: StorageService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly products: ProductsService,
   ) {}
 
   // ===========================================================================
@@ -325,6 +327,14 @@ export class VendorService {
     });
     if (!p) throw new NotFoundException('Storefront not found.');
 
+    const featuredProducts = await this.products.vendorFeatured(p.id);
+    const catRows = await this.prisma.product.findMany({
+      where: { vendorProfileId: p.id, status: 'PUBLISHED' },
+      select: { category: { select: { name: true, slug: true } } },
+      distinct: ['categoryId'],
+      orderBy: { categoryId: 'asc' },
+    });
+
     return {
       businessName: p.businessName,
       slug: p.slug,
@@ -355,9 +365,8 @@ export class VendorService {
         openTime: h.openTime,
         closeTime: h.closeTime,
       })),
-      // Populated in M4 once products exist.
-      featuredProducts: [] as unknown[],
-      categories: [] as unknown[],
+      featuredProducts,
+      categories: catRows.map((c) => c.category),
     };
   }
 

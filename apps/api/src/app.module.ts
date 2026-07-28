@@ -15,6 +15,7 @@ import { RolesModule } from './roles/roles.module';
 import { AdminModule } from './admin/admin.module';
 import { CategoriesModule } from './categories/categories.module';
 import { VendorModule } from './vendor/vendor.module';
+import { ProductsModule } from './products/products.module';
 import { HealthModule } from './health/health.module';
 import { DevModule } from './dev/dev.module';
 import { JwtAuthGuard, PermissionsGuard, RolesGuard } from './auth/guards';
@@ -41,6 +42,7 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     AdminModule,
     CategoriesModule,
     VendorModule,
+    ProductsModule,
     HealthModule,
     ...devModules,
   ],

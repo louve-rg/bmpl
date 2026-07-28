@@ -11,6 +11,8 @@ import {
   updateCategorySchema,
   vendorApprovalStatusSchema,
   vendorHoursSchema,
+  createProductSchema,
+  productQuerySchema,
 } from './marketplace';
 
 describe('slugSchema', () => {
@@ -101,5 +103,27 @@ describe('vendor schemas (M2)', () => {
     expect(
       vendorHoursSchema.safeParse({ hours: [{ dayOfWeek: 2, isClosed: true }] }).success,
     ).toBe(true);
+  });
+});
+
+describe('product schemas (M4)', () => {
+  const base = { title: 'Earbuds', sku: 'WE-1', categoryId: 'clabcabcabcabcabcabcabca', priceMinor: 1000 };
+
+  it('createProductSchema requires core fields and defaults featured=false', () => {
+    const ok = createProductSchema.parse(base);
+    expect(ok.featured).toBe(false);
+    expect(createProductSchema.safeParse({ ...base, title: 'x' }).success).toBe(false); // title min 2
+    expect(createProductSchema.safeParse({ title: 'X2', sku: 'S', priceMinor: 10 }).success).toBe(false); // missing category
+  });
+
+  it('rejects a sale price above the price', () => {
+    expect(createProductSchema.safeParse({ ...base, salePriceMinor: 2000 }).success).toBe(false);
+    expect(createProductSchema.safeParse({ ...base, salePriceMinor: 500 }).success).toBe(true);
+  });
+
+  it('productQuerySchema applies pagination + sort defaults', () => {
+    const q = productQuerySchema.parse({});
+    expect(q).toMatchObject({ sort: 'newest', page: 1, pageSize: 24 });
+    expect(productQuerySchema.parse({ page: '3', sort: 'price_asc' })).toMatchObject({ page: 3, sort: 'price_asc' });
   });
 });
