@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  DISTRICTS,
   INVENTORY_CHANGE_REASONS,
   MODERATION_ACTIONS,
   PRODUCT_SORTS,
@@ -95,3 +96,117 @@ export const updateCategorySchema = z
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
+
+// ---- Vendor business profile (M2) -------------------------------------------
+
+const districtSchema = z.enum(DISTRICTS);
+const optionalUrl = z
+  .string()
+  .trim()
+  .url('Enter a valid URL.')
+  .max(300)
+  .or(z.literal(''))
+  .optional();
+
+/** Optional, future-ready social links. Unknown keys are stripped. */
+export const socialLinksSchema = z
+  .object({
+    facebook: optionalUrl,
+    instagram: optionalUrl,
+    twitter: optionalUrl,
+    tiktok: optionalUrl,
+    whatsapp: z.string().trim().max(40).optional(),
+  })
+  .strip();
+
+export const createVendorProfileSchema = z.object({
+  businessName: z.string().trim().min(2, 'Business name is required.').max(120),
+  slug: slugSchema.optional(),
+  description: z.string().trim().max(4000).optional(),
+  contactEmail: z.string().trim().toLowerCase().email('Enter a valid email.').max(254),
+  contactPhone: z.string().trim().max(40).optional(),
+  website: optionalUrl,
+  socialLinks: socialLinksSchema.optional(),
+});
+export type CreateVendorProfileInput = z.infer<typeof createVendorProfileSchema>;
+
+export const updateVendorProfileSchema = z
+  .object({
+    businessName: z.string().trim().min(2).max(120),
+    slug: slugSchema,
+    description: z.string().trim().max(4000).nullable(),
+    contactEmail: z.string().trim().toLowerCase().email().max(254),
+    contactPhone: z.string().trim().max(40).nullable(),
+    website: optionalUrl,
+    socialLinks: socialLinksSchema.nullable(),
+    storeStatus: storeStatusSchema,
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+export type UpdateVendorProfileInput = z.infer<typeof updateVendorProfileSchema>;
+
+export const vendorSettingsSchema = z
+  .object({
+    pickupEnabled: z.boolean(),
+    deliveryEnabled: z.boolean(),
+    vacationMode: z.boolean(),
+    minimumOrderMinor: moneyMinorSchema.nullable(),
+    deliveryRadiusKm: z.coerce.number().int().min(0).max(1000).nullable(),
+    taxesEnabled: z.boolean(),
+    autoAcceptOrders: z.boolean(),
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+export type VendorSettingsInput = z.infer<typeof vendorSettingsSchema>;
+
+export const vendorLocationSchema = z.object({
+  label: z.string().trim().min(1).max(120),
+  addressLine1: z.string().trim().min(1).max(200),
+  addressLine2: z.string().trim().max(200).optional(),
+  city: z.string().trim().min(1).max(120),
+  district: districtSchema,
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
+  isPrimary: z.boolean().optional().default(false),
+});
+export type VendorLocationInput = z.infer<typeof vendorLocationSchema>;
+
+export const updateVendorLocationSchema = vendorLocationSchema
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+
+/** Replace-all opening hours: one entry per provided day (0–6). */
+export const vendorHoursSchema = z.object({
+  hours: z
+    .array(
+      z
+        .object({
+          dayOfWeek: z.coerce.number().int().min(0).max(6),
+          isClosed: z.boolean().default(false),
+          openTime: timeOfDaySchema.optional(),
+          closeTime: timeOfDaySchema.optional(),
+        })
+        .refine((h) => h.isClosed || (h.openTime && h.closeTime && h.openTime < h.closeTime), {
+          message: 'Open days need an open time earlier than the close time.',
+        }),
+    )
+    .max(7)
+    .refine((arr) => new Set(arr.map((h) => h.dayOfWeek)).size === arr.length, {
+      message: 'Each day may appear only once.',
+    }),
+});
+export type VendorHoursInput = z.infer<typeof vendorHoursSchema>;
+
+// ---- Marketplace image upload (public bucket): shared by M2 (logo/banner) and M5 --
+
+export const imagePresignSchema = z.object({
+  fileName: z.string().trim().min(1).max(200),
+  contentType: z.string().trim().min(1).max(120),
+  sizeBytes: z.coerce.number().int().positive(),
+});
+export type ImagePresignInput = z.infer<typeof imagePresignSchema>;
+
+export const imageConfirmSchema = z.object({
+  key: z.string().trim().min(1).max(512),
+});
+export type ImageConfirmInput = z.infer<typeof imageConfirmSchema>;

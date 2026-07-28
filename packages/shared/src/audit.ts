@@ -22,6 +22,12 @@ export const AUDIT_ACTIONS = [
   'CATEGORY_CREATED',
   'CATEGORY_UPDATED',
   'CATEGORY_DELETED',
+  // ---- Marketplace: Vendors (Phase 2 · M2) ----
+  'VENDOR_PROFILE_SUBMITTED',
+  'VENDOR_APPROVED',
+  'VENDOR_REJECTED',
+  'VENDOR_SUSPENDED',
+  'VENDOR_RESTORED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

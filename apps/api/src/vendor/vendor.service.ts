@@ -1,0 +1,575 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  isAllowedProductImageMime,
+  MAX_PRODUCT_IMAGE_BYTES,
+  slugify,
+  STORAGE_PREFIX,
+} from '@bmpl/shared';
+import type {
+  CreateVendorProfileInput,
+  UpdateVendorProfileInput,
+  VendorHoursInput,
+  VendorLocationInput,
+  VendorSettingsInput,
+} from '@bmpl/validation';
+import { Prisma } from '@bmpl/database';
+import type { VendorProfile } from '@bmpl/database';
+import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
+import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+export interface ActorContext {
+  userId: string;
+  ipAddress?: string | null;
+  sessionId?: string | null;
+}
+
+type ImageKind = 'logo' | 'banner';
+type ModerationKind = 'approve' | 'reject' | 'suspend' | 'restore';
+
+@Injectable()
+export class VendorService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+    private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
+  ) {}
+
+  // ===========================================================================
+  // Owner (the signed-in VENDOR)
+  // ===========================================================================
+
+  /** The caller's full storefront record, or `{ profile: null }` if not started. */
+  async getOwn(userId: string) {
+    const profile = await this.prisma.vendorProfile.findUnique({
+      where: { userId },
+      include: {
+        settings: true,
+        locations: { orderBy: { createdAt: 'asc' } },
+        openingHours: { orderBy: { dayOfWeek: 'asc' } },
+      },
+    });
+    if (!profile) return { profile: null };
+    return this.serializeOwn(profile);
+  }
+
+  async create(userId: string, dto: CreateVendorProfileInput) {
+    const existing = await this.prisma.vendorProfile.findUnique({ where: { userId } });
+    if (existing) throw new ConflictException('You already have a vendor profile.');
+
+    const slug = dto.slug
+      ? await this.assertSlugFree(dto.slug)
+      : await this.deriveUniqueSlug(dto.businessName);
+
+    const profile = await this.prisma.vendorProfile.create({
+      data: {
+        userId,
+        businessName: dto.businessName,
+        slug,
+        description: dto.description ?? null,
+        contactEmail: dto.contactEmail,
+        contactPhone: dto.contactPhone ?? null,
+        website: emptyToNull(dto.website),
+        socialLinks: (dto.socialLinks ?? undefined) as Prisma.InputJsonValue | undefined,
+        approvalStatus: 'DRAFT',
+        storeStatus: 'CLOSED',
+        settings: { create: {} }, // sensible defaults from the schema
+      },
+      include: { settings: true, locations: true, openingHours: true },
+    });
+    return this.serializeOwn(profile);
+  }
+
+  async update(userId: string, dto: UpdateVendorProfileInput) {
+    const profile = await this.ownProfileOrThrow(userId);
+
+    let slug = profile.slug;
+    if (dto.slug !== undefined && dto.slug !== profile.slug) {
+      slug = await this.assertSlugFree(dto.slug, profile.id);
+    }
+
+    await this.prisma.vendorProfile.update({
+      where: { id: profile.id },
+      data: {
+        businessName: dto.businessName ?? undefined,
+        slug,
+        description: dto.description === undefined ? undefined : dto.description,
+        contactEmail: dto.contactEmail ?? undefined,
+        contactPhone: dto.contactPhone === undefined ? undefined : dto.contactPhone,
+        website: dto.website === undefined ? undefined : emptyToNull(dto.website),
+        socialLinks:
+          dto.socialLinks === undefined
+            ? undefined
+            : ((dto.socialLinks ?? Prisma.JsonNull) as Prisma.InputJsonValue),
+        storeStatus: dto.storeStatus ?? undefined,
+      },
+    });
+    return this.getOwn(userId);
+  }
+
+  /** DRAFT/REJECTED -> PENDING. Requires the minimum publishable fields. */
+  async submit(actor: ActorContext) {
+    const profile = await this.ownProfileOrThrow(actor.userId);
+    if (profile.approvalStatus !== 'DRAFT' && profile.approvalStatus !== 'REJECTED') {
+      throw new ConflictException(`A ${profile.approvalStatus} profile cannot be submitted.`);
+    }
+    if (!profile.businessName?.trim() || !profile.contactEmail?.trim()) {
+      throw new BadRequestException('Add a business name and contact email before submitting.');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.vendorProfile.update({
+        where: { id: profile.id },
+        data: { approvalStatus: 'PENDING', submittedAt: new Date(), rejectionReason: null },
+      });
+      await tx.vendorModerationReview.create({
+        data: {
+          vendorProfileId: profile.id,
+          reviewerId: actor.userId,
+          action: 'SUBMITTED',
+          fromStatus: profile.approvalStatus,
+          toStatus: 'PENDING',
+        },
+      });
+      await this.audit.record(
+        {
+          action: 'VENDOR_PROFILE_SUBMITTED',
+          actorId: actor.userId,
+          ipAddress: actor.ipAddress ?? null,
+          sessionId: actor.sessionId ?? null,
+          newValue: { vendorProfileId: profile.id },
+        },
+        tx,
+      );
+    });
+    return this.getOwn(actor.userId);
+  }
+
+  async updateSettings(userId: string, dto: VendorSettingsInput) {
+    const profile = await this.ownProfileOrThrow(userId);
+    await this.prisma.vendorSettings.update({
+      where: { vendorProfileId: profile.id },
+      data: {
+        pickupEnabled: dto.pickupEnabled ?? undefined,
+        deliveryEnabled: dto.deliveryEnabled ?? undefined,
+        vacationMode: dto.vacationMode ?? undefined,
+        minimumOrderMinor:
+          dto.minimumOrderMinor === undefined
+            ? undefined
+            : dto.minimumOrderMinor === null
+              ? null
+              : BigInt(dto.minimumOrderMinor),
+        deliveryRadiusKm: dto.deliveryRadiusKm === undefined ? undefined : dto.deliveryRadiusKm,
+        taxesEnabled: dto.taxesEnabled ?? undefined,
+        autoAcceptOrders: dto.autoAcceptOrders ?? undefined,
+      },
+    });
+    return this.getOwn(userId);
+  }
+
+  // ---- Locations ----
+  async addLocation(userId: string, dto: VendorLocationInput) {
+    const profile = await this.ownProfileOrThrow(userId);
+    await this.prisma.$transaction(async (tx) => {
+      if (dto.isPrimary) {
+        await tx.vendorLocation.updateMany({
+          where: { vendorProfileId: profile.id },
+          data: { isPrimary: false },
+        });
+      }
+      await tx.vendorLocation.create({
+        data: {
+          vendorProfileId: profile.id,
+          label: dto.label,
+          addressLine1: dto.addressLine1,
+          addressLine2: dto.addressLine2 ?? null,
+          city: dto.city,
+          district: dto.district,
+          latitude: dto.latitude ?? null,
+          longitude: dto.longitude ?? null,
+          isPrimary: dto.isPrimary ?? false,
+        },
+      });
+    });
+    return this.getOwn(userId);
+  }
+
+  async updateLocation(userId: string, locationId: string, dto: Partial<VendorLocationInput>) {
+    const profile = await this.ownProfileOrThrow(userId);
+    await this.ownLocationOrThrow(profile.id, locationId);
+    await this.prisma.$transaction(async (tx) => {
+      if (dto.isPrimary) {
+        await tx.vendorLocation.updateMany({
+          where: { vendorProfileId: profile.id },
+          data: { isPrimary: false },
+        });
+      }
+      await tx.vendorLocation.update({
+        where: { id: locationId },
+        data: {
+          label: dto.label ?? undefined,
+          addressLine1: dto.addressLine1 ?? undefined,
+          addressLine2: dto.addressLine2 === undefined ? undefined : (dto.addressLine2 ?? null),
+          city: dto.city ?? undefined,
+          district: dto.district ?? undefined,
+          latitude: dto.latitude === undefined ? undefined : (dto.latitude ?? null),
+          longitude: dto.longitude === undefined ? undefined : (dto.longitude ?? null),
+          isPrimary: dto.isPrimary ?? undefined,
+        },
+      });
+    });
+    return this.getOwn(userId);
+  }
+
+  async deleteLocation(userId: string, locationId: string) {
+    const profile = await this.ownProfileOrThrow(userId);
+    await this.ownLocationOrThrow(profile.id, locationId);
+    await this.prisma.vendorLocation.delete({ where: { id: locationId } });
+    return this.getOwn(userId);
+  }
+
+  /** Replace-all opening hours. */
+  async setHours(userId: string, dto: VendorHoursInput) {
+    const profile = await this.ownProfileOrThrow(userId);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.vendorOpeningHours.deleteMany({ where: { vendorProfileId: profile.id } });
+      if (dto.hours.length) {
+        await tx.vendorOpeningHours.createMany({
+          data: dto.hours.map((h) => ({
+            vendorProfileId: profile.id,
+            dayOfWeek: h.dayOfWeek,
+            isClosed: h.isClosed,
+            openTime: h.isClosed ? null : (h.openTime ?? null),
+            closeTime: h.isClosed ? null : (h.closeTime ?? null),
+          })),
+        });
+      }
+    });
+    return this.getOwn(userId);
+  }
+
+  // ---- Images (public bucket) ----
+  async presignImage(userId: string, kind: ImageKind, fileName: string, contentType: string) {
+    if (!isAllowedProductImageMime(contentType)) {
+      throw new BadRequestException('Unsupported image type. Use JPEG, PNG, or WebP.');
+    }
+    const profile = await this.ownProfileOrThrow(userId);
+    const prefix =
+      kind === 'logo' ? STORAGE_PREFIX.vendorLogo(profile.id) : STORAGE_PREFIX.vendorBanner(profile.id);
+    const key = this.storage.buildKey(prefix, fileName);
+    return this.storage.presignUpload(key, contentType, 'public');
+  }
+
+  async confirmImage(userId: string, kind: ImageKind, key: string) {
+    const profile = await this.ownProfileOrThrow(userId);
+    const prefix =
+      kind === 'logo' ? STORAGE_PREFIX.vendorLogo(profile.id) : STORAGE_PREFIX.vendorBanner(profile.id);
+    this.storage.assertKeyInNamespace(key, prefix);
+    const meta = await this.storage.headObject(key, 'public');
+    if (!meta) throw new BadRequestException('Uploaded image could not be found in storage.');
+    if (!isAllowedProductImageMime(meta.contentType)) {
+      throw new BadRequestException('Unsupported image type.');
+    }
+    if (meta.sizeBytes <= 0 || meta.sizeBytes > MAX_PRODUCT_IMAGE_BYTES) {
+      throw new BadRequestException('Image exceeds the maximum allowed size.');
+    }
+    await this.prisma.vendorProfile.update({
+      where: { id: profile.id },
+      data: kind === 'logo' ? { logoKey: key } : { bannerKey: key },
+    });
+    return this.getOwn(userId);
+  }
+
+  // ===========================================================================
+  // Admin moderation
+  // ===========================================================================
+
+  async adminList(status?: string) {
+    const rows = await this.prisma.vendorProfile.findMany({
+      where: status ? { approvalStatus: status as VendorProfile['approvalStatus'] } : {},
+      orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+      include: {
+        user: { select: { id: true, email: true, firstName: true, lastName: true } },
+        _count: { select: { locations: true } },
+      },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      businessName: r.businessName,
+      slug: r.slug,
+      approvalStatus: r.approvalStatus,
+      storeStatus: r.storeStatus,
+      submittedAt: r.submittedAt,
+      owner: r.user,
+      locationCount: r._count.locations,
+    }));
+  }
+
+  async adminGet(id: string) {
+    const profile = await this.prisma.vendorProfile.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, email: true, firstName: true, lastName: true } },
+        settings: true,
+        locations: { orderBy: { createdAt: 'asc' } },
+        openingHours: { orderBy: { dayOfWeek: 'asc' } },
+        reviews: {
+          orderBy: { createdAt: 'desc' },
+          include: { reviewer: { select: { firstName: true, lastName: true } } },
+        },
+      },
+    });
+    if (!profile) throw new NotFoundException('Vendor profile not found.');
+    return {
+      ...this.publicShape(profile),
+      owner: profile.user,
+      settings: settingsShape(profile.settings),
+      locations: profile.locations,
+      openingHours: profile.openingHours,
+      rejectionReason: profile.rejectionReason,
+      reviews: profile.reviews.map((rev) => ({
+        action: rev.action,
+        note: rev.note,
+        fromStatus: rev.fromStatus,
+        toStatus: rev.toStatus,
+        createdAt: rev.createdAt,
+        reviewer: rev.reviewer ? `${rev.reviewer.firstName} ${rev.reviewer.lastName}` : null,
+      })),
+      logoUrl: await this.urlOrNull(profile.logoKey),
+      bannerUrl: await this.urlOrNull(profile.bannerKey),
+    };
+  }
+
+  async moderate(actor: ActorContext, id: string, kind: ModerationKind, note?: string) {
+    const profile = await this.prisma.vendorProfile.findUnique({ where: { id } });
+    if (!profile) throw new NotFoundException('Vendor profile not found.');
+
+    const plan = TRANSITIONS[kind];
+    if (!plan.from.includes(profile.approvalStatus)) {
+      throw new ConflictException(
+        `Cannot ${kind} a ${profile.approvalStatus} vendor profile.`,
+      );
+    }
+    if (kind === 'reject' && !note?.trim()) {
+      throw new BadRequestException('A reason is required to reject a vendor.');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.vendorProfile.update({
+        where: { id },
+        data: {
+          approvalStatus: plan.to,
+          approvedAt: plan.to === 'APPROVED' ? new Date() : undefined,
+          rejectionReason: kind === 'reject' ? (note ?? null) : null,
+        },
+      });
+      await tx.vendorModerationReview.create({
+        data: {
+          vendorProfileId: id,
+          reviewerId: actor.userId,
+          action: plan.action,
+          note: note ?? null,
+          fromStatus: profile.approvalStatus,
+          toStatus: plan.to,
+        },
+      });
+      await this.audit.record(
+        {
+          action: plan.audit,
+          actorId: actor.userId,
+          targetUserId: profile.userId,
+          ipAddress: actor.ipAddress ?? null,
+          sessionId: actor.sessionId ?? null,
+          previousValue: { approvalStatus: profile.approvalStatus },
+          newValue: { approvalStatus: plan.to },
+          reason: note ?? null,
+        },
+        tx,
+      );
+      await this.notifications.createInApp(
+        {
+          userId: profile.userId,
+          type: 'MARKETPLACE',
+          title: plan.notifyTitle,
+          body: plan.notifyBody(profile.businessName, note),
+          data: { vendorProfileId: id, approvalStatus: plan.to },
+        },
+        tx,
+      );
+    });
+    return this.adminGet(id);
+  }
+
+  // ===========================================================================
+  // Helpers
+  // ===========================================================================
+
+  private async ownProfileOrThrow(userId: string): Promise<VendorProfile> {
+    const profile = await this.prisma.vendorProfile.findUnique({ where: { userId } });
+    if (!profile) throw new NotFoundException('Create your vendor profile first.');
+    return profile;
+  }
+
+  private async ownLocationOrThrow(vendorProfileId: string, locationId: string) {
+    const loc = await this.prisma.vendorLocation.findUnique({ where: { id: locationId } });
+    if (!loc || loc.vendorProfileId !== vendorProfileId) {
+      throw new NotFoundException('Location not found.');
+    }
+    return loc;
+  }
+
+  private async assertSlugFree(slug: string, excludeId?: string): Promise<string> {
+    const existing = await this.prisma.vendorProfile.findUnique({ where: { slug } });
+    if (existing && existing.id !== excludeId) {
+      throw new ConflictException(`The store address "${slug}" is already taken.`);
+    }
+    return slug;
+  }
+
+  private async deriveUniqueSlug(name: string): Promise<string> {
+    const root = slugify(name) || 'store';
+    let candidate = root;
+    let n = 1;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const existing = await this.prisma.vendorProfile.findUnique({ where: { slug: candidate } });
+      if (!existing) return candidate;
+      n += 1;
+      candidate = `${root}-${n}`;
+    }
+  }
+
+  private async urlOrNull(key: string | null): Promise<string | null> {
+    if (!key) return null;
+    try {
+      return await this.storage.publicUrl(key);
+    } catch {
+      return null; // storage disabled in this environment
+    }
+  }
+
+  private publicShape(p: VendorProfile) {
+    return {
+      id: p.id,
+      businessName: p.businessName,
+      slug: p.slug,
+      description: p.description,
+      contactEmail: p.contactEmail,
+      contactPhone: p.contactPhone,
+      website: p.website,
+      socialLinks: p.socialLinks,
+      approvalStatus: p.approvalStatus,
+      storeStatus: p.storeStatus,
+      ratingAverage: p.ratingAverage,
+      ratingCount: p.ratingCount,
+      submittedAt: p.submittedAt,
+      approvedAt: p.approvedAt,
+    };
+  }
+
+  private async serializeOwn(
+    p: VendorProfile & {
+      settings: unknown;
+      locations: unknown;
+      openingHours: unknown;
+    },
+  ) {
+    return {
+      profile: {
+        ...this.publicShape(p),
+        rejectionReason: p.rejectionReason,
+        logoKey: p.logoKey,
+        bannerKey: p.bannerKey,
+        logoUrl: await this.urlOrNull(p.logoKey),
+        bannerUrl: await this.urlOrNull(p.bannerKey),
+      },
+      settings: settingsShape(p.settings as Parameters<typeof settingsShape>[0]),
+      locations: p.locations,
+      openingHours: p.openingHours,
+    };
+  }
+}
+
+function emptyToNull(v: string | null | undefined): string | null {
+  const s = (v ?? '').trim();
+  return s ? s : null;
+}
+
+/** BigInt-safe settings view (minimumOrderMinor -> number | null). */
+function settingsShape(
+  s:
+    | {
+        pickupEnabled: boolean;
+        deliveryEnabled: boolean;
+        vacationMode: boolean;
+        minimumOrderMinor: bigint | null;
+        deliveryRadiusKm: number | null;
+        taxesEnabled: boolean;
+        autoAcceptOrders: boolean;
+      }
+    | null
+    | undefined,
+) {
+  if (!s) return null;
+  return {
+    pickupEnabled: s.pickupEnabled,
+    deliveryEnabled: s.deliveryEnabled,
+    vacationMode: s.vacationMode,
+    minimumOrderMinor: s.minimumOrderMinor === null ? null : Number(s.minimumOrderMinor),
+    deliveryRadiusKm: s.deliveryRadiusKm,
+    taxesEnabled: s.taxesEnabled,
+    autoAcceptOrders: s.autoAcceptOrders,
+  };
+}
+
+const TRANSITIONS: Record<
+  ModerationKind,
+  {
+    from: VendorProfile['approvalStatus'][];
+    to: VendorProfile['approvalStatus'];
+    action: 'APPROVED' | 'REJECTED' | 'SUSPENDED' | 'RESTORED';
+    audit: 'VENDOR_APPROVED' | 'VENDOR_REJECTED' | 'VENDOR_SUSPENDED' | 'VENDOR_RESTORED';
+    notifyTitle: string;
+    notifyBody: (name: string, note?: string) => string;
+  }
+> = {
+  approve: {
+    from: ['PENDING'],
+    to: 'APPROVED',
+    action: 'APPROVED',
+    audit: 'VENDOR_APPROVED',
+    notifyTitle: 'Your storefront is approved',
+    notifyBody: (name) => `“${name}” has been approved and can now be published.`,
+  },
+  reject: {
+    from: ['PENDING'],
+    to: 'REJECTED',
+    action: 'REJECTED',
+    audit: 'VENDOR_REJECTED',
+    notifyTitle: 'Storefront needs changes',
+    notifyBody: (name, note) => `“${name}” was not approved. ${note ?? ''}`.trim(),
+  },
+  suspend: {
+    from: ['APPROVED'],
+    to: 'SUSPENDED',
+    action: 'SUSPENDED',
+    audit: 'VENDOR_SUSPENDED',
+    notifyTitle: 'Storefront suspended',
+    notifyBody: (name, note) => `“${name}” has been suspended. ${note ?? ''}`.trim(),
+  },
+  restore: {
+    from: ['SUSPENDED'],
+    to: 'APPROVED',
+    action: 'RESTORED',
+    audit: 'VENDOR_RESTORED',
+    notifyTitle: 'Storefront restored',
+    notifyBody: (name) => `“${name}” has been restored and is live again.`,
+  },
+};

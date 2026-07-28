@@ -11,6 +11,8 @@ const NAV = [
 ];
 
 export function Sidebar({ me }: { me: MeView }) {
+  const isVendor = me.roles.some((r) => r.roleCode === 'VENDOR' && r.status === 'APPROVED');
+  const nav = isVendor ? [...NAV, { label: 'My Store', href: '/dashboard/store' }] : NAV;
   return (
     <aside className="flex w-full flex-col gap-6 border-r border-slate-200 bg-white p-5 md:h-screen md:w-72 md:shrink-0">
       <Link href="/" className="rounded-lg bg-belize-navy p-3">
@@ -20,7 +22,7 @@ export function Sidebar({ me }: { me: MeView }) {
       <RoleSwitcher me={me} />
 
       <nav className="flex flex-col gap-1" aria-label="Dashboard">
-        {NAV.map((item) => (
+        {nav.map((item) => (
           <Link
             key={item.href}
             href={item.href}

@@ -5,6 +5,7 @@ export const NOTIFICATION_TYPES = [
   'ROLE_STATUS',
   'SECURITY',
   'SYSTEM',
+  'MARKETPLACE',
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];

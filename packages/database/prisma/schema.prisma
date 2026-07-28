@@ -95,6 +95,7 @@ enum NotificationType {
   ROLE_STATUS
   SECURITY
   SYSTEM
+  MARKETPLACE
 }
 
 enum NotificationChannel {
@@ -126,6 +127,12 @@ enum AuditAction {
   CATEGORY_CREATED
   CATEGORY_UPDATED
   CATEGORY_DELETED
+  // ---- Marketplace: Vendors (Phase 2 · M2) ----
+  VENDOR_PROFILE_SUBMITTED
+  VENDOR_APPROVED
+  VENDOR_REJECTED
+  VENDOR_SUSPENDED
+  VENDOR_RESTORED
 }
 
 enum WalletAccountType {
@@ -206,6 +213,8 @@ model User {
   auditLogsAsTarget    AuditLog[]                  @relation("AuditTarget")
   reviewsPerformed     RoleApplicationReview[]     @relation("ReviewReviewer")
   walletAccounts       WalletAccount[]
+  vendorProfile        VendorProfile?              @relation("UserVendorProfile")
+  vendorReviewsMade    VendorModerationReview[]    @relation("VendorReviewer")
 
   @@index([status])
   @@index([district])
@@ -508,4 +517,131 @@ model Category {
   @@index([parentId, sortOrder])
   @@index([isVisible])
   @@map("categories")
+}
+
+// ---- Marketplace: Vendors (Phase 2 · M2) ------------------------------------
+// A VENDOR-role user builds ONE business profile. Approval is a separate axis
+// from the VENDOR UserRole: the role grants the ability to build a storefront;
+// the profile's own approvalStatus gates whether that storefront is public.
+// Operational toggles live on VendorSettings so they can grow without touching
+// the profile's identity/branding fields.
+
+enum VendorApprovalStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum StoreStatus {
+  OPEN
+  CLOSED
+}
+
+enum ModerationAction {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  SUSPENDED
+  RESTORED
+}
+
+model VendorProfile {
+  id             String               @id @default(cuid())
+  userId         String               @unique
+  user           User                 @relation("UserVendorProfile", fields: [userId], references: [id], onDelete: Cascade)
+  businessName   String
+  slug           String               @unique
+  description    String?
+  logoKey        String? // public-bucket storage key
+  bannerKey      String? // public-bucket storage key
+  contactEmail   String
+  contactPhone   String?
+  website        String?
+  socialLinks    Json? // future-ready: { facebook?, instagram?, ... }
+  approvalStatus VendorApprovalStatus @default(DRAFT)
+  storeStatus    StoreStatus          @default(CLOSED)
+  rejectionReason String?
+  ratingAverage  Float                @default(0) // placeholder; populated in a later phase
+  ratingCount    Int                  @default(0) // placeholder
+  submittedAt    DateTime?
+  approvedAt     DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  settings     VendorSettings?
+  locations    VendorLocation[]
+  openingHours VendorOpeningHours[]
+  reviews      VendorModerationReview[]
+
+  @@index([approvalStatus])
+  @@index([storeStatus])
+  @@map("vendor_profiles")
+}
+
+model VendorSettings {
+  id               String        @id @default(cuid())
+  vendorProfileId  String        @unique
+  vendorProfile    VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  pickupEnabled    Boolean       @default(true)
+  deliveryEnabled  Boolean       @default(false)
+  vacationMode     Boolean       @default(false)
+  minimumOrderMinor BigInt?
+  deliveryRadiusKm Int?
+  taxesEnabled     Boolean       @default(false)
+  autoAcceptOrders Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@map("vendor_settings")
+}
+
+model VendorLocation {
+  id              String        @id @default(cuid())
+  vendorProfileId String
+  vendorProfile   VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  label           String
+  addressLine1    String
+  addressLine2    String?
+  city            String
+  district        District
+  country         String        @default("BZ")
+  latitude        Float?
+  longitude       Float?
+  isPrimary       Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([vendorProfileId])
+  @@map("vendor_locations")
+}
+
+model VendorOpeningHours {
+  id              String        @id @default(cuid())
+  vendorProfileId String
+  vendorProfile   VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  dayOfWeek       Int // 0=Sunday .. 6=Saturday
+  openTime        String? // "HH:MM"
+  closeTime       String? // "HH:MM"
+  isClosed        Boolean       @default(false)
+
+  @@unique([vendorProfileId, dayOfWeek])
+  @@map("vendor_opening_hours")
+}
+
+model VendorModerationReview {
+  id              String           @id @default(cuid())
+  vendorProfileId String
+  vendorProfile   VendorProfile    @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  reviewerId      String?
+  reviewer        User?            @relation("VendorReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  action          ModerationAction
+  note            String?
+  fromStatus      VendorApprovalStatus?
+  toStatus        VendorApprovalStatus?
+  createdAt       DateTime         @default(now())
+
+  @@index([vendorProfileId])
+  @@map("vendor_moderation_reviews")
 }

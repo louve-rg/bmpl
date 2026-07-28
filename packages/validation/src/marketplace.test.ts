@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createCategorySchema,
+  createVendorProfileSchema,
   moderationDecisionSchema,
   moneyMinorSchema,
   productSortSchema,
@@ -9,6 +10,7 @@ import {
   timeOfDaySchema,
   updateCategorySchema,
   vendorApprovalStatusSchema,
+  vendorHoursSchema,
 } from './marketplace';
 
 describe('slugSchema', () => {
@@ -73,5 +75,31 @@ describe('category schemas (M1)', () => {
     expect(updateCategorySchema.safeParse({}).success).toBe(false);
     expect(updateCategorySchema.parse({ featured: true })).toEqual({ featured: true });
     expect(updateCategorySchema.parse({ parentId: null })).toEqual({ parentId: null });
+  });
+});
+
+describe('vendor schemas (M2)', () => {
+  it('createVendorProfileSchema requires a name and valid email', () => {
+    expect(createVendorProfileSchema.safeParse({ businessName: 'X', contactEmail: 'a@b.co' }).success).toBe(false); // name too short
+    expect(createVendorProfileSchema.safeParse({ businessName: 'My Shop', contactEmail: 'nope' }).success).toBe(false);
+    const ok = createVendorProfileSchema.parse({ businessName: 'My Shop', contactEmail: 'A@B.CO' });
+    expect(ok.contactEmail).toBe('a@b.co');
+  });
+
+  it('vendorHoursSchema enforces open<close and unique days', () => {
+    expect(
+      vendorHoursSchema.safeParse({ hours: [{ dayOfWeek: 1, isClosed: false, openTime: '17:00', closeTime: '09:00' }] }).success,
+    ).toBe(false);
+    expect(
+      vendorHoursSchema.safeParse({
+        hours: [
+          { dayOfWeek: 1, isClosed: false, openTime: '09:00', closeTime: '17:00' },
+          { dayOfWeek: 1, isClosed: true },
+        ],
+      }).success,
+    ).toBe(false); // duplicate day
+    expect(
+      vendorHoursSchema.safeParse({ hours: [{ dayOfWeek: 2, isClosed: true }] }).success,
+    ).toBe(true);
   });
 });
