@@ -122,6 +122,10 @@ enum AuditAction {
   ADMIN_PERMISSION_GRANTED
   ADMIN_PERMISSION_REVOKED
   NOTIFICATION_BROADCAST
+  // ---- Marketplace: Categories (Phase 2 · M1) ----
+  CATEGORY_CREATED
+  CATEGORY_UPDATED
+  CATEGORY_DELETED
 }
 
 enum WalletAccountType {
@@ -475,4 +479,33 @@ model WalletLedgerEntry {
   @@index([accountId])
   @@index([transactionId])
   @@map("wallet_ledger_entries")
+}
+
+// ---- Marketplace: Categories (Phase 2 · M1) ---------------------------------
+// Hierarchical, admin-managed catalog taxonomy. A product references the single
+// most-specific Category (added in M4); the parent chain yields the full path.
+// Self-referential parent/children with onDelete: Restrict so a category that
+// still has children cannot be deleted out from under them.
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String
+  slug        String     @unique
+  description String?
+  // Icon is a short symbolic name (e.g. a lucide icon key) resolved by the UI.
+  iconName    String?
+  // Optional hero/thumbnail image stored as a PUBLIC-bucket storage key (never a URL).
+  imageKey    String?
+  featured    Boolean    @default(false)
+  isVisible   Boolean    @default(true)
+  sortOrder   Int        @default(0)
+  parentId    String?
+  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children    Category[] @relation("CategoryHierarchy")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([parentId, sortOrder])
+  @@index([isVisible])
+  @@map("categories")
 }

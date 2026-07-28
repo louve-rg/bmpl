@@ -53,3 +53,45 @@ export type ModerationDecision = z.infer<typeof moderationDecisionSchema>;
 export const timeOfDaySchema = z
   .string()
   .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use 24-hour HH:MM time.');
+
+// ---- Categories (M1) --------------------------------------------------------
+
+const categoryNameSchema = z.string().trim().min(1, 'Name is required.').max(80);
+const iconNameSchema = z.string().trim().max(64);
+const storageKeySchema = z.string().trim().max(512);
+const cuidRef = z.string().cuid2().or(z.string().cuid());
+
+/**
+ * Create a category. `slug` is optional — the service derives it from the name
+ * (with collision suffixing) when omitted. `parentId` null/undefined = a root
+ * category.
+ */
+export const createCategorySchema = z.object({
+  name: categoryNameSchema,
+  slug: slugSchema.optional(),
+  description: z.string().trim().max(2000).optional(),
+  iconName: iconNameSchema.optional(),
+  imageKey: storageKeySchema.optional(),
+  featured: z.boolean().optional().default(false),
+  isVisible: z.boolean().optional().default(true),
+  sortOrder: z.coerce.number().int().min(0).max(100000).optional().default(0),
+  parentId: cuidRef.nullish(),
+});
+export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
+
+/** Partial update. Every field optional; `parentId: null` promotes to a root. */
+export const updateCategorySchema = z
+  .object({
+    name: categoryNameSchema,
+    slug: slugSchema,
+    description: z.string().trim().max(2000).nullable(),
+    iconName: iconNameSchema.nullable(),
+    imageKey: storageKeySchema.nullable(),
+    featured: z.boolean(),
+    isVisible: z.boolean(),
+    sortOrder: z.coerce.number().int().min(0).max(100000),
+    parentId: cuidRef.nullable(),
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;

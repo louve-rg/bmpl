@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createCategorySchema,
   moderationDecisionSchema,
   moneyMinorSchema,
   productSortSchema,
   productStatusSchema,
   slugSchema,
   timeOfDaySchema,
+  updateCategorySchema,
   vendorApprovalStatusSchema,
 } from './marketplace';
 
@@ -52,5 +54,24 @@ describe('enum + helper schemas', () => {
   it('moderationDecisionSchema allows an optional note', () => {
     expect(moderationDecisionSchema.parse({})).toEqual({});
     expect(moderationDecisionSchema.parse({ note: 'looks good' })).toEqual({ note: 'looks good' });
+  });
+});
+
+describe('category schemas (M1)', () => {
+  it('createCategorySchema applies sensible defaults', () => {
+    const v = createCategorySchema.parse({ name: 'Electronics' });
+    expect(v).toMatchObject({ name: 'Electronics', featured: false, isVisible: true, sortOrder: 0 });
+  });
+
+  it('createCategorySchema requires a name and validates an explicit slug', () => {
+    expect(createCategorySchema.safeParse({ name: '' }).success).toBe(false);
+    expect(createCategorySchema.safeParse({ name: 'X', slug: 'Bad Slug' }).success).toBe(false);
+    expect(createCategorySchema.parse({ name: 'X', slug: 'good-slug' }).slug).toBe('good-slug');
+  });
+
+  it('updateCategorySchema rejects an empty patch but allows partial fields', () => {
+    expect(updateCategorySchema.safeParse({}).success).toBe(false);
+    expect(updateCategorySchema.parse({ featured: true })).toEqual({ featured: true });
+    expect(updateCategorySchema.parse({ parentId: null })).toEqual({ parentId: null });
   });
 });

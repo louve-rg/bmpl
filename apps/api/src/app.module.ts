@@ -13,6 +13,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { RolesModule } from './roles/roles.module';
 import { AdminModule } from './admin/admin.module';
+import { CategoriesModule } from './categories/categories.module';
 import { HealthModule } from './health/health.module';
 import { DevModule } from './dev/dev.module';
 import { JwtAuthGuard, PermissionsGuard, RolesGuard } from './auth/guards';
@@ -37,6 +38,7 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     UsersModule,
     RolesModule,
     AdminModule,
+    CategoriesModule,
     HealthModule,
     ...devModules,
   ],

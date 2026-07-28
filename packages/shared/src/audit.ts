@@ -18,6 +18,10 @@ export const AUDIT_ACTIONS = [
   'ADMIN_PERMISSION_GRANTED',
   'ADMIN_PERMISSION_REVOKED',
   'NOTIFICATION_BROADCAST',
+  // ---- Marketplace: Categories (Phase 2 · M1) ----
+  'CATEGORY_CREATED',
+  'CATEGORY_UPDATED',
+  'CATEGORY_DELETED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
