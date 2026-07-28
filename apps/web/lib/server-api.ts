@@ -5,7 +5,14 @@ import { cookies } from 'next/headers';
  * server-rendered dashboard pages can read the signed-in user. Returns null on
  * 401 so pages can redirect to /login.
  */
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+/** Normalize the API base to a valid absolute URL (see next.config.mjs apiBase). */
+function apiBase(raw?: string): string {
+  const v = (raw ?? 'https://bmplapi-production.up.railway.app').trim();
+  const withScheme = /^https?:\/\//i.test(v) ? v : `https://${v}`;
+  return withScheme.replace(/\/+$/, '').replace(/\/api$/i, '');
+}
+
+const API_URL = apiBase(process.env.NEXT_PUBLIC_API_URL);
 
 export async function serverGet<T>(path: string): Promise<T | null> {
   const cookieHeader = cookies().toString();

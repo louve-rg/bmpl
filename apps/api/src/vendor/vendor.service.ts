@@ -288,6 +288,80 @@ export class VendorService {
   }
 
   // ===========================================================================
+  // Public storefront (M3)
+  // ===========================================================================
+
+  /** Approved, non-vacation vendors for the public directory. */
+  async publicList() {
+    const rows = await this.prisma.vendorProfile.findMany({
+      where: { approvalStatus: 'APPROVED', settings: { is: { vacationMode: false } } },
+      orderBy: { businessName: 'asc' },
+      include: { settings: { select: { pickupEnabled: true, deliveryEnabled: true } } },
+    });
+    return Promise.all(
+      rows.map(async (r) => ({
+        businessName: r.businessName,
+        slug: r.slug,
+        description: r.description,
+        storeStatus: r.storeStatus,
+        ratingAverage: r.ratingAverage,
+        ratingCount: r.ratingCount,
+        pickupEnabled: r.settings?.pickupEnabled ?? true,
+        deliveryEnabled: r.settings?.deliveryEnabled ?? false,
+        logoUrl: await this.urlOrNull(r.logoKey),
+      })),
+    );
+  }
+
+  /** A single approved storefront by slug. 404 for unknown/unapproved vendors. */
+  async publicStorefront(slug: string) {
+    const p = await this.prisma.vendorProfile.findFirst({
+      where: { slug, approvalStatus: 'APPROVED' },
+      include: {
+        settings: true,
+        locations: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+        openingHours: { orderBy: { dayOfWeek: 'asc' } },
+      },
+    });
+    if (!p) throw new NotFoundException('Storefront not found.');
+
+    return {
+      businessName: p.businessName,
+      slug: p.slug,
+      description: p.description,
+      contactEmail: p.contactEmail,
+      contactPhone: p.contactPhone,
+      website: p.website,
+      socialLinks: p.socialLinks,
+      storeStatus: p.storeStatus,
+      ratingAverage: p.ratingAverage,
+      ratingCount: p.ratingCount,
+      vacationMode: p.settings?.vacationMode ?? false,
+      pickupEnabled: p.settings?.pickupEnabled ?? true,
+      deliveryEnabled: p.settings?.deliveryEnabled ?? false,
+      logoUrl: await this.urlOrNull(p.logoKey),
+      bannerUrl: await this.urlOrNull(p.bannerKey),
+      locations: p.locations.map((l) => ({
+        label: l.label,
+        addressLine1: l.addressLine1,
+        addressLine2: l.addressLine2,
+        city: l.city,
+        district: l.district,
+        isPrimary: l.isPrimary,
+      })),
+      openingHours: p.openingHours.map((h) => ({
+        dayOfWeek: h.dayOfWeek,
+        isClosed: h.isClosed,
+        openTime: h.openTime,
+        closeTime: h.closeTime,
+      })),
+      // Populated in M4 once products exist.
+      featuredProducts: [] as unknown[],
+      categories: [] as unknown[],
+    };
+  }
+
+  // ===========================================================================
   // Admin moderation
   // ===========================================================================
 

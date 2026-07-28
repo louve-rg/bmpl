@@ -14,6 +14,18 @@ const securityHeaders = [
   },
 ];
 
+/**
+ * Normalize the API base so the /api proxy destination is ALWAYS a valid
+ * absolute URL: default to the production API when unset, prepend https:// when
+ * there's no scheme (a schemeless value makes Next treat the rewrite as an
+ * internal path → 404), and strip a trailing slash / accidental "/api".
+ */
+function apiBase(raw) {
+  const v = (raw || 'https://bmplapi-production.up.railway.app').trim();
+  const withScheme = /^https?:\/\//i.test(v) ? v : `https://${v}`;
+  return withScheme.replace(/\/+$/, '').replace(/\/api$/i, '');
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -33,7 +45,7 @@ const nextConfig = {
   async rewrites() {
     // Same-origin proxy: the browser only talks to this origin; requests to
     // /api/* are proxied to the API so HTTP-only auth cookies stay first-party.
-    const api = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+    const api = apiBase(process.env.NEXT_PUBLIC_API_URL);
     return [{ source: '/api/:path*', destination: `${api}/api/:path*` }];
   },
 };
