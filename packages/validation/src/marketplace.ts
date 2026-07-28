@@ -211,6 +211,34 @@ export const imageConfirmSchema = z.object({
 });
 export type ImageConfirmInput = z.infer<typeof imageConfirmSchema>;
 
+/**
+ * Confirm a product-image upload. `width`/`height` are client-reported pixel
+ * dimensions (the server independently verifies MIME + size via headObject).
+ */
+export const productImageConfirmSchema = z.object({
+  key: z.string().trim().min(1).max(512),
+  width: z.coerce.number().int().positive().max(30000).optional(),
+  height: z.coerce.number().int().positive().max(30000).optional(),
+  altText: z.string().trim().max(300).optional(),
+  caption: z.string().trim().max(500).optional(),
+});
+export type ProductImageConfirmInput = z.infer<typeof productImageConfirmSchema>;
+
+export const productImageUpdateSchema = z
+  .object({
+    altText: z.string().trim().max(300).nullable(),
+    caption: z.string().trim().max(500).nullable(),
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+export type ProductImageUpdateInput = z.infer<typeof productImageUpdateSchema>;
+
+/** Reorder a product's images: full ordered list of image ids. */
+export const imageReorderSchema = z.object({
+  order: z.array(cuidRef).min(1).max(50),
+});
+export type ImageReorderInput = z.infer<typeof imageReorderSchema>;
+
 // ---- Products (M4) ----------------------------------------------------------
 
 const tagsSchema = z.array(z.string().trim().min(1).max(40)).max(20);

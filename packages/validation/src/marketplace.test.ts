@@ -13,6 +13,8 @@ import {
   vendorHoursSchema,
   createProductSchema,
   productQuerySchema,
+  productImageConfirmSchema,
+  imageReorderSchema,
 } from './marketplace';
 
 describe('slugSchema', () => {
@@ -125,5 +127,19 @@ describe('product schemas (M4)', () => {
     const q = productQuerySchema.parse({});
     expect(q).toMatchObject({ sort: 'newest', page: 1, pageSize: 24 });
     expect(productQuerySchema.parse({ page: '3', sort: 'price_asc' })).toMatchObject({ page: 3, sort: 'price_asc' });
+  });
+});
+
+describe('product image schemas (M5)', () => {
+  it('productImageConfirmSchema requires a key, allows optional dims/text', () => {
+    expect(productImageConfirmSchema.safeParse({}).success).toBe(false);
+    const ok = productImageConfirmSchema.parse({ key: 'vendors/v/products/p/x.png', width: 800, height: 600, altText: 'a' });
+    expect(ok.width).toBe(800);
+    expect(productImageConfirmSchema.safeParse({ key: 'k', width: -1 }).success).toBe(false);
+  });
+
+  it('imageReorderSchema requires a non-empty id list', () => {
+    expect(imageReorderSchema.safeParse({ order: [] }).success).toBe(false);
+    expect(imageReorderSchema.safeParse({ order: ['clabcabcabcabcabcabcabca'] }).success).toBe(true);
   });
 });

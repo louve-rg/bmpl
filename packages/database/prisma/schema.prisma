@@ -705,6 +705,7 @@ model Product {
 
   tags    Tag[]                     @relation("ProductTags")
   reviews ProductModerationReview[]
+  images  ProductImage[]
 
   @@unique([vendorProfileId, sku])
   @@index([status])
@@ -712,6 +713,28 @@ model Product {
   @@index([vendorProfileId, status])
   @@index([featured])
   @@map("products")
+}
+
+// Product image metadata. The binary lives in the PUBLIC object-storage bucket;
+// only the opaque storage key is persisted (never a URL). Exactly one image per
+// product is primary — enforced transactionally in the service layer.
+model ProductImage {
+  id            String   @id @default(cuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  storageKey    String   @unique
+  mimeType      String
+  fileSizeBytes Int
+  width         Int?
+  height        Int?
+  altText       String?
+  caption       String?
+  position      Int      @default(0)
+  isPrimary     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([productId, position])
+  @@map("product_images")
 }
 
 model Tag {

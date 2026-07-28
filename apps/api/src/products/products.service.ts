@@ -12,6 +12,7 @@ import type { Product, ProductStatus } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ProductImagesService } from './product-images.service';
 
 export interface ActorContext {
   userId: string;
@@ -29,6 +30,7 @@ export class ProductsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly images: ProductImagesService,
   ) {}
 
   // ===========================================================================
@@ -42,7 +44,8 @@ export class ProductsService {
       orderBy: { updatedAt: 'desc' },
       include: { category: { select: { name: true, slug: true } } },
     });
-    return rows.map((p) => this.ownShape(p, p.category));
+    const primary = await this.images.primaryUrls(rows.map((r) => r.id));
+    return rows.map((p) => ({ ...this.ownShape(p, p.category), primaryImageUrl: primary.get(p.id) ?? null }));
   }
 
   async getOwn(userId: string, id: string) {
@@ -52,7 +55,11 @@ export class ProductsService {
       include: { category: { select: { name: true, slug: true } }, tags: true },
     });
     if (!p || p.vendorProfileId !== vp) throw new NotFoundException('Product not found.');
-    return { ...this.ownShape(p, p.category), tags: p.tags.map((t) => t.name) };
+    return {
+      ...this.ownShape(p, p.category),
+      tags: p.tags.map((t) => t.name),
+      images: await this.images.list(id),
+    };
   }
 
   async create(actor: ActorContext, dto: CreateProductInput) {
@@ -234,6 +241,7 @@ export class ProductsService {
       ...this.ownShape(p, p.category),
       vendor: p.vendorProfile,
       tags: p.tags.map((t) => t.name),
+      images: await this.images.list(id),
       reviews: p.reviews.map((r) => ({
         action: r.action,
         note: r.note,
@@ -334,11 +342,12 @@ export class ProductsService {
         },
       }),
     ]);
+    const primary = await this.images.primaryUrls(rows.map((r) => r.id));
     return {
       total,
       page: query.page,
       pageSize: query.pageSize,
-      items: rows.map((p) => this.cardShape(p)),
+      items: rows.map((p) => ({ ...this.cardShape(p), primaryImageUrl: primary.get(p.id) ?? null })),
     };
   }
 
@@ -361,6 +370,7 @@ export class ProductsService {
       metaTitle: p.metaTitle,
       metaDescription: p.metaDescription,
       tags: p.tags.map((t) => t.name),
+      images: await this.images.list(p.id),
     };
   }
 
@@ -375,7 +385,8 @@ export class ProductsService {
         vendorProfile: { select: { businessName: true, slug: true } },
       },
     });
-    return rows.map((p) => this.cardShape(p));
+    const primary = await this.images.primaryUrls(rows.map((r) => r.id));
+    return rows.map((p) => ({ ...this.cardShape(p), primaryImageUrl: primary.get(p.id) ?? null }));
   }
 
   // ===========================================================================

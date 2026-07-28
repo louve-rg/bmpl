@@ -25,7 +25,7 @@ interface Storefront {
   bannerUrl: string | null;
   locations: Array<{ label: string; addressLine1: string; addressLine2: string | null; city: string; district: string; isPrimary: boolean }>;
   openingHours: Array<{ dayOfWeek: number; isClosed: boolean; openTime: string | null; closeTime: string | null }>;
-  featuredProducts: Array<{ id: string; title: string; slug: string; priceMinor: number; salePriceMinor: number | null; category: { name: string } }>;
+  featuredProducts: Array<{ id: string; title: string; slug: string; priceMinor: number; salePriceMinor: number | null; category: { name: string }; primaryImageUrl: string | null }>;
   categories: Array<{ name: string; slug: string }>;
 }
 
@@ -109,7 +109,14 @@ export default async function StorefrontPage({ params }: { params: { slug: strin
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {store.featuredProducts.map((p) => (
                     <Link key={p.id} href={`/products/${p.slug}`} className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-belize-accent hover:shadow-md">
-                      <div className="flex aspect-square items-center justify-center rounded-lg bg-slate-100 text-slate-300">No image</div>
+                      <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-slate-300">
+                        {p.primaryImageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
+                        ) : (
+                          'No image'
+                        )}
+                      </div>
                       <p className="mt-2 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
                       <p className="text-sm font-bold text-belize-navy">
                         {p.salePriceMinor != null ? (

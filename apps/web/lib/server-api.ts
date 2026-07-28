@@ -24,3 +24,24 @@ export async function serverGet<T>(path: string): Promise<T | null> {
   if (!res.ok) throw new Error(`API ${path} failed: ${res.status}`);
   return (await res.json()) as T;
 }
+
+/**
+ * Resilient GET for PUBLIC pages: never throws. Returns the parsed body on 2xx,
+ * or `null` on any error (API down, 5xx, network) so the page can render a
+ * proper empty/error state instead of a Next.js 500. Distinguish "not found"
+ * (404) from "unavailable" (everything else) via the `notFound` flag.
+ */
+export async function serverGetSafe<T>(
+  path: string,
+): Promise<{ ok: true; data: T } | { ok: false; notFound: boolean }> {
+  try {
+    const res = await fetch(`${API_URL}/api${path}`, {
+      headers: { cookie: cookies().toString() },
+      cache: 'no-store',
+    });
+    if (res.ok) return { ok: true, data: (await res.json()) as T };
+    return { ok: false, notFound: res.status === 404 };
+  } catch {
+    return { ok: false, notFound: false };
+  }
+}

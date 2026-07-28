@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
-import { serverGet } from '../../lib/server-api';
+import { serverGetSafe } from '../../lib/server-api';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +23,8 @@ export const metadata = {
 };
 
 export default async function VendorsDirectoryPage() {
-  const vendors = (await serverGet<VendorCard[]>('/marketplace/vendors')) ?? [];
+  const res = await serverGetSafe<VendorCard[]>('/marketplace/vendors');
+  const vendors = res.ok ? res.data : [];
 
   return (
     <>
@@ -32,7 +33,11 @@ export default async function VendorsDirectoryPage() {
         <h1 className="text-3xl font-bold text-belize-navy">Vendors</h1>
         <p className="mt-1 text-slate-500">Discover approved storefronts across Belize.</p>
 
-        {vendors.length === 0 ? (
+        {!res.ok ? (
+          <p className="mt-10 rounded-2xl border border-amber-200 bg-amber-50 p-10 text-center text-amber-700">
+            The marketplace is temporarily unavailable. Please try again in a moment.
+          </p>
+        ) : vendors.length === 0 ? (
           <p className="mt-10 rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-400">
             No storefronts are live yet. Check back soon.
           </p>

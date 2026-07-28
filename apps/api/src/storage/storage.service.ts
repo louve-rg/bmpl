@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import {
   CreateBucketCommand,
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
@@ -192,6 +193,18 @@ export class StorageService implements OnModuleInit {
       return `${this.env.STORAGE_PUBLIC_BASE_URL.replace(/\/$/, '')}/${key}`;
     }
     return (await this.presignDownload(key, 'public')).url;
+  }
+
+  /** Delete an object. Best-effort: never throws (callers delete DB rows regardless). */
+  async deleteObject(key: string, visibility: Visibility = 'private'): Promise<void> {
+    if (!this.enabled || !this.client) return;
+    try {
+      await this.client.send(
+        new DeleteObjectCommand({ Bucket: this.bucketFor(visibility), Key: key }),
+      );
+    } catch (err) {
+      this.logger.warn(`Failed to delete object "${key}": ${String(err)}`);
+    }
   }
 
   /**

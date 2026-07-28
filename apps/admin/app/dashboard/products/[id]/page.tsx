@@ -26,6 +26,7 @@ interface ProductDetail {
   vendor: { businessName: string; slug: string };
   tags: string[];
   rejectionReason: string | null;
+  images: Array<{ id: string; url: string | null; altText: string | null; isPrimary: boolean }>;
   reviews: Array<{ action: string; note: string | null; toStatus: string | null; createdAt: string; reviewer: string | null }>;
 }
 
@@ -83,6 +84,25 @@ export default async function AdminProductDetail({ params }: { params: { id: str
           </div>
         )}
       </section>
+
+      {p.images.length > 0 && (
+        <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
+          <h2 className="mb-2 text-xs font-semibold uppercase text-slate-500">Images ({p.images.length})</h2>
+          <div className="flex flex-wrap gap-3">
+            {p.images.map((img) => (
+              <div key={img.id} className="relative h-24 w-24 overflow-hidden rounded-lg bg-slate-100">
+                {img.url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={img.url} alt={img.altText ?? ''} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="flex h-full items-center justify-center text-[10px] text-slate-400">no preview</span>
+                )}
+                {img.isPrimary && <span className="absolute left-0 top-0 bg-belize-blue px-1 text-[10px] font-bold text-white">PRIMARY</span>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
         <h2 className="mb-2 text-xs font-semibold uppercase text-slate-500">Moderation history</h2>

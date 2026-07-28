@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { Header } from '../../../components/landing/Header';
 import { Footer } from '../../../components/landing/Footer';
 import { serverGet } from '../../../lib/server-api';
+import { Gallery, type GalleryImage } from './Gallery';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,7 @@ interface ProductDetail {
   weightGrams: number | null;
   dimensionsMm: { length: number | null; width: number | null; height: number | null };
   tags: string[];
+  images: GalleryImage[];
 }
 
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
@@ -43,9 +45,7 @@ export default async function ProductDetailPage({ params }: { params: { slug: st
       <main className="container-bmpl py-10">
         <Link href="/products" className="text-sm text-belize-blue hover:underline">← Shop</Link>
         <div className="mt-4 grid gap-8 md:grid-cols-2">
-          <div className="flex aspect-square items-center justify-center rounded-2xl bg-slate-100 text-slate-300">
-            No image yet
-          </div>
+          <Gallery images={p.images} />
 
           <div>
             <p className="text-xs uppercase tracking-wide text-slate-400">{p.category.name}</p>

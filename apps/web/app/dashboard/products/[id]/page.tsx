@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api, type ApiError } from '../../../../lib/api';
 import { ProductForm, type ProductValues } from '../ProductForm';
+import { ImageManager } from '../ImageManager';
 
 interface OwnProduct {
   id: string;
@@ -107,6 +108,10 @@ export default function EditProductPage() {
             Archive
           </button>
         )}
+      </div>
+
+      <div className="mb-6">
+        <ImageManager productId={id} />
       </div>
 
       <ProductForm initial={initial} />
