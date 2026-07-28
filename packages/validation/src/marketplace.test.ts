@@ -18,6 +18,7 @@ import {
   createVariantSchema,
   inventoryAdjustSchema,
   inventorySettingsSchema,
+  vendorQuerySchema,
 } from './marketplace';
 
 describe('slugSchema', () => {
@@ -169,5 +170,11 @@ describe('variant + inventory schemas (M6)', () => {
   it('inventorySettingsSchema requires at least one field', () => {
     expect(inventorySettingsSchema.safeParse({}).success).toBe(false);
     expect(inventorySettingsSchema.parse({ unlimited: true })).toEqual({ unlimited: true });
+  });
+
+  it('vendorQuerySchema accepts optional q + district', () => {
+    expect(vendorQuerySchema.parse({})).toEqual({});
+    expect(vendorQuerySchema.parse({ q: 'shop', district: 'CAYO' })).toMatchObject({ q: 'shop', district: 'CAYO' });
+    expect(vendorQuerySchema.safeParse({ district: 'ATLANTIS' }).success).toBe(false);
   });
 });

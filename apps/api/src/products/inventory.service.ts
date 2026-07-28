@@ -1,8 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { InventoryAdjustInput, InventorySettingsInput } from '@bmpl/validation';
 import type { Inventory, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { OwnershipService } from './ownership.service';
 
 export interface ActorContext {
   userId: string;
@@ -29,6 +30,7 @@ export class InventoryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly ownership: OwnershipService,
   ) {}
 
   /** Pure derivation of stock state from an inventory row. */
@@ -79,7 +81,7 @@ export class InventoryService {
   // ---- Vendor (owner) ----
 
   async getForProduct(userId: string, productId: string) {
-    await this.ownedProductId(userId, productId);
+    await this.ownership.ownedProduct(userId, productId);
     const productInv = await this.ensureProductInventory(productId);
     const variantRows = await this.prisma.inventory.findMany({
       where: { productId, variantId: { not: null } },
@@ -102,7 +104,7 @@ export class InventoryService {
     variantId: string | null,
     dto: InventorySettingsInput,
   ) {
-    await this.ownedProductId(userId, productId);
+    await this.ownership.ownedProduct(userId, productId);
     const inv = await this.resolveTarget(productId, variantId);
     await this.prisma.inventory.update({
       where: { id: inv.id },
@@ -117,7 +119,7 @@ export class InventoryService {
 
   /** Transactional on-hand adjustment with an append-only history entry + audit. */
   async adjust(actor: ActorContext, productId: string, variantId: string | null, dto: InventoryAdjustInput) {
-    await this.ownedProductId(actor.userId, productId);
+    await this.ownership.ownedProduct(actor.userId, productId);
     const inv = await this.resolveTarget(productId, variantId);
 
     await this.prisma.$transaction(async (tx) => {
@@ -154,7 +156,7 @@ export class InventoryService {
   }
 
   async history(userId: string, productId: string, variantId: string | null) {
-    await this.ownedProductId(userId, productId);
+    await this.ownership.ownedProduct(userId, productId);
     const inv = await this.resolveTarget(productId, variantId);
     const rows = await this.prisma.inventoryChange.findMany({
       where: { inventoryId: inv.id },
@@ -231,16 +233,5 @@ export class InventoryService {
       return inv;
     }
     return this.ensureProductInventory(productId);
-  }
-
-  private async ownedProductId(userId: string, productId: string): Promise<string> {
-    const vp = await this.prisma.vendorProfile.findUnique({ where: { userId }, select: { id: true } });
-    if (!vp) throw new ForbiddenException('Create your vendor profile first.');
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-      select: { id: true, vendorProfileId: true },
-    });
-    if (!product || product.vendorProfileId !== vp.id) throw new NotFoundException('Product not found.');
-    return product.id;
   }
 }

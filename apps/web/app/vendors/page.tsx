@@ -35,7 +35,7 @@ export default async function VendorsDirectoryPage({ searchParams }: { searchPar
         <p className="mt-1 text-slate-500">Discover approved storefronts across Belize.</p>
 
         <form method="get" action="/vendors" className="mt-4 flex gap-2">
-          <input name="q" defaultValue={searchParams.q ?? ''} placeholder="Search vendors…" className="min-w-48 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <input name="q" aria-label="Search vendors" defaultValue={searchParams.q ?? ''} placeholder="Search vendors…" className="min-w-48 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           <button className="rounded-lg bg-belize-blue px-5 text-sm font-semibold text-white hover:bg-belize-deep">Search</button>
         </form>
 

@@ -9,6 +9,7 @@ import { ProductsService } from './products.service';
 import { ProductImagesService } from './product-images.service';
 import { VariantsService } from './variants.service';
 import { InventoryService } from './inventory.service';
+import { OwnershipService } from './ownership.service';
 
 // Prisma/Audit/Notifications/Storage come from @Global() modules.
 @Module({
@@ -20,7 +21,7 @@ import { InventoryService } from './inventory.service';
     ProductVariantsController,
     ProductInventoryController,
   ],
-  providers: [ProductsService, ProductImagesService, VariantsService, InventoryService],
+  providers: [ProductsService, ProductImagesService, VariantsService, InventoryService, OwnershipService],
   exports: [ProductsService, ProductImagesService, VariantsService, InventoryService],
 })
 export class ProductsModule {}

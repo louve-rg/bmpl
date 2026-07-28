@@ -100,9 +100,9 @@ export default async function ProductsPage({
         <form method="get" action="/products" className="mt-4 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-3">
           {searchParams.categoryId && <input type="hidden" name="categoryId" value={searchParams.categoryId} />}
           {searchParams.sort && <input type="hidden" name="sort" value={searchParams.sort} />}
-          <input name="q" defaultValue={searchParams.q ?? ''} placeholder="Search products…" className="min-w-48 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <input name="priceMin" defaultValue={searchParams.priceMin ?? ''} inputMode="decimal" placeholder="Min $" className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <input name="priceMax" defaultValue={searchParams.priceMax ?? ''} inputMode="decimal" placeholder="Max $" className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <input name="q" aria-label="Search products" defaultValue={searchParams.q ?? ''} placeholder="Search products…" className="min-w-48 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <input name="priceMin" aria-label="Minimum price" defaultValue={searchParams.priceMin ?? ''} inputMode="decimal" placeholder="Min $" className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <input name="priceMax" aria-label="Maximum price" defaultValue={searchParams.priceMax ?? ''} inputMode="decimal" placeholder="Max $" className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           <label className="flex items-center gap-1.5 text-sm text-slate-600">
             <input type="checkbox" name="inStock" value="true" defaultChecked={!!searchParams.inStock} /> In stock
           </label>

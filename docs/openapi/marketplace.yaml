@@ -1,0 +1,305 @@
+openapi: 3.1.0
+info:
+  title: BMPL Marketplace API
+  version: "2.0.0"
+  description: >
+    Belize Marketplace & Logistics — Phase 2 marketplace endpoints (categories,
+    vendors, products, images, variants, inventory, public catalog/search).
+    All paths are under the `/api` prefix. Money is integer minor units (BZD cents).
+servers:
+  - url: https://bmplapi-production.up.railway.app/api
+    description: Production
+  - url: http://localhost:4000/api
+    description: Local
+tags:
+  - name: Public
+    description: Unauthenticated marketplace browse/search.
+  - name: Vendor
+    description: Owner-scoped storefront management (requires an APPROVED VENDOR role).
+  - name: Admin
+    description: Moderation (requires an admin permission).
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+    csrfToken:
+      type: apiKey
+      in: header
+      name: x-csrf-token
+  parameters:
+    productId: { name: productId, in: path, required: true, schema: { type: string } }
+    variantIdQuery: { name: variantId, in: query, required: false, schema: { type: string } }
+  responses:
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string, example: Validation failed }
+              errors:
+                type: array
+                items:
+                  type: object
+                  properties: { path: { type: string }, message: { type: string } }
+    Unauthorized: { description: Authentication required }
+    Forbidden: { description: Missing role/permission }
+    NotFound: { description: Not found or not owned }
+    Conflict: { description: State/uniqueness conflict }
+  schemas:
+    Category:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        description: { type: [string, "null"] }
+        iconName: { type: [string, "null"] }
+        imageKey: { type: [string, "null"] }
+        featured: { type: boolean }
+        isVisible: { type: boolean }
+        sortOrder: { type: integer }
+        parentId: { type: [string, "null"] }
+        children:
+          type: array
+          items: { $ref: "#/components/schemas/Category" }
+    Availability:
+      type: object
+      properties:
+        quantity: { type: integer }
+        reserved: { type: integer }
+        available: { type: [integer, "null"], description: null when unlimited }
+        unlimited: { type: boolean }
+        allowBackorders: { type: boolean }
+        lowStockThreshold: { type: integer }
+        inStock: { type: boolean }
+        lowStock: { type: boolean }
+        outOfStock: { type: boolean }
+    ProductCard:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        slug: { type: string }
+        brand: { type: [string, "null"] }
+        priceMinor: { type: integer }
+        salePriceMinor: { type: [integer, "null"] }
+        currency: { type: string, example: BZD }
+        featured: { type: boolean }
+        primaryImageUrl: { type: [string, "null"] }
+        inStock: { type: boolean }
+        vendor:
+          type: object
+          properties: { businessName: { type: string }, slug: { type: string } }
+        category:
+          type: object
+          properties: { name: { type: string }, slug: { type: string } }
+    ProductList:
+      type: object
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ProductCard" }
+    CreateProduct:
+      type: object
+      required: [title, sku, categoryId, priceMinor]
+      properties:
+        title: { type: string, minLength: 2, maxLength: 200 }
+        slug: { type: string }
+        description: { type: string }
+        sku: { type: string }
+        barcode: { type: string }
+        categoryId: { type: string }
+        brand: { type: string }
+        priceMinor: { type: integer, minimum: 0 }
+        salePriceMinor: { type: integer, minimum: 0, description: must be ≤ priceMinor }
+        weightGrams: { type: integer }
+        lengthMm: { type: integer }
+        widthMm: { type: integer }
+        heightMm: { type: integer }
+        featured: { type: boolean, default: false }
+        tags: { type: array, items: { type: string } }
+        metaTitle: { type: string }
+        metaDescription: { type: string }
+        searchKeywords: { type: array, items: { type: string } }
+    ImagePresign:
+      type: object
+      required: [fileName, contentType, sizeBytes]
+      properties:
+        fileName: { type: string }
+        contentType: { type: string, enum: [image/jpeg, image/png, image/webp] }
+        sizeBytes: { type: integer, minimum: 1 }
+    InventoryAdjust:
+      type: object
+      required: [delta, reason]
+      properties:
+        delta: { type: integer, description: non-zero signed change to on-hand }
+        reason: { type: string, enum: [MANUAL, RESTOCK, CORRECTION, BACKORDER] }
+        note: { type: string }
+    CreateVariant:
+      type: object
+      required: [optionValueIds]
+      properties:
+        optionValueIds: { type: array, items: { type: string }, minItems: 1 }
+        sku: { type: string }
+        barcode: { type: string }
+        priceMinor: { type: integer }
+        salePriceMinor: { type: integer }
+        quantity: { type: integer, default: 0 }
+    ModerationDecision:
+      type: object
+      properties: { note: { type: string, description: required for reject } }
+paths:
+  /marketplace/categories:
+    get:
+      tags: [Public]
+      summary: Visible category tree
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Category" } } } } } }
+  /marketplace/vendors:
+    get:
+      tags: [Public]
+      summary: Approved vendor directory
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: district, in: query, schema: { type: string, enum: [BELIZE, CAYO, COROZAL, ORANGE_WALK, STANN_CREEK, TOLEDO] } }
+      responses: { "200": { description: OK } }
+  /marketplace/vendors/{slug}:
+    get:
+      tags: [Public]
+      summary: Storefront by slug
+      parameters: [ { name: slug, in: path, required: true, schema: { type: string } } ]
+      responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }
+  /marketplace/products:
+    get:
+      tags: [Public]
+      summary: Catalog search (PostgreSQL full-text + filters)
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: categoryId, in: query, schema: { type: string }, description: includes the whole subtree }
+        - { name: vendorSlug, in: query, schema: { type: string } }
+        - { name: featured, in: query, schema: { type: boolean } }
+        - { name: inStock, in: query, schema: { type: boolean } }
+        - { name: priceMin, in: query, schema: { type: integer }, description: cents }
+        - { name: priceMax, in: query, schema: { type: integer }, description: cents }
+        - { name: sort, in: query, schema: { type: string, enum: [relevance, newest, price_asc, price_desc, featured] } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 48, default: 24 } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ProductList" } } } } }
+  /marketplace/products/{slug}:
+    get:
+      tags: [Public]
+      summary: Product detail (gallery, options, variants, availability)
+      parameters: [ { name: slug, in: path, required: true, schema: { type: string } } ]
+      responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }
+  /vendor/profile:
+    get: { tags: [Vendor], summary: Own storefront, security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "401": { $ref: "#/components/responses/Unauthorized" }, "403": { $ref: "#/components/responses/Forbidden" } } }
+    post: { tags: [Vendor], summary: Create profile, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Created }, "409": { $ref: "#/components/responses/Conflict" } } }
+    patch: { tags: [Vendor], summary: Update profile, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /vendor/profile/submit:
+    post: { tags: [Vendor], summary: Submit for review, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: PENDING }, "409": { $ref: "#/components/responses/Conflict" } } }
+  /vendor/settings:
+    patch: { tags: [Vendor], summary: Update operational settings, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /vendor/profile/locations:
+    post: { tags: [Vendor], summary: Add location, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Created } } }
+  /vendor/profile/locations/{id}:
+    patch: { tags: [Vendor], summary: Update location, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+    delete: { tags: [Vendor], summary: Delete location, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /vendor/profile/hours:
+    put: { tags: [Vendor], summary: Replace opening hours, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" } } }
+  /vendor/profile/logo/presign:
+    post: { tags: [Vendor], summary: Presign logo upload (rate-limited), security: [{ cookieAuth: [], csrfToken: [] }], requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ImagePresign" } } } }, responses: { "201": { description: presigned URL }, "503": { description: storage not configured } } }
+  /vendor/profile/logo/confirm:
+    post: { tags: [Vendor], summary: Confirm logo upload, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" } } }
+  /vendor/profile/banner/presign:
+    post: { tags: [Vendor], summary: Presign banner upload (rate-limited), security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: presigned URL }, "503": { description: storage not configured } } }
+  /vendor/profile/banner/confirm:
+    post: { tags: [Vendor], summary: Confirm banner upload, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } } }
+  /vendor/products:
+    get: { tags: [Vendor], summary: List own products, security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+    post: { tags: [Vendor], summary: Create product (DRAFT), security: [{ cookieAuth: [], csrfToken: [] }], requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/CreateProduct" } } } }, responses: { "201": { description: Created }, "400": { $ref: "#/components/responses/ValidationError" }, "409": { $ref: "#/components/responses/Conflict" } } }
+  /vendor/products/{id}:
+    get: { tags: [Vendor], summary: Own product detail, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+    patch: { tags: [Vendor], summary: Update product, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+    delete: { tags: [Vendor], summary: Delete a DRAFT product, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } } }
+  /vendor/products/{id}/submit:
+    post: { tags: [Vendor], summary: Submit product for review, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: PENDING_REVIEW } } }
+  /vendor/products/{id}/archive:
+    post: { tags: [Vendor], summary: Archive product, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: ARCHIVED } } }
+  /vendor/products/{id}/unarchive:
+    post: { tags: [Vendor], summary: Unarchive to DRAFT, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: DRAFT } } }
+  /vendor/products/{productId}/images:
+    get: { tags: [Vendor], summary: List images, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+  /vendor/products/{productId}/images/presign:
+    post: { tags: [Vendor], summary: Presign image upload (rate-limited), parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ImagePresign" } } } }, responses: { "201": { description: presigned URL }, "400": { $ref: "#/components/responses/ValidationError" }, "503": { description: storage not configured } } }
+  /vendor/products/{productId}/images/confirm:
+    post: { tags: [Vendor], summary: Confirm image (headObject verify), parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" } } }
+  /vendor/products/{productId}/images/reorder:
+    post: { tags: [Vendor], summary: Reorder images, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } } }
+  /vendor/products/{productId}/images/{imageId}/primary:
+    post: { tags: [Vendor], summary: Set primary image, parameters: [ { $ref: "#/components/parameters/productId" }, { name: imageId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } } }
+  /vendor/products/{productId}/images/{imageId}:
+    patch: { tags: [Vendor], summary: Update alt/caption, parameters: [ { $ref: "#/components/parameters/productId" }, { name: imageId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+    delete: { tags: [Vendor], summary: Delete image, parameters: [ { $ref: "#/components/parameters/productId" }, { name: imageId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /vendor/products/{productId}/variants:
+    get: { tags: [Vendor], summary: Options + variants, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+    post: { tags: [Vendor], summary: Create variant, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/CreateVariant" } } } }, responses: { "201": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" }, "409": { $ref: "#/components/responses/Conflict" } } }
+  /vendor/products/{productId}/options:
+    post: { tags: [Vendor], summary: Create option, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } } }
+  /vendor/products/{productId}/options/{optionId}/values:
+    post: { tags: [Vendor], summary: Add option value, parameters: [ { $ref: "#/components/parameters/productId" }, { name: optionId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } } }
+  /vendor/products/{productId}/options/{optionId}:
+    delete: { tags: [Vendor], summary: Delete option, parameters: [ { $ref: "#/components/parameters/productId" }, { name: optionId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } } }
+  /vendor/products/{productId}/option-values/{valueId}:
+    delete: { tags: [Vendor], summary: Delete option value, parameters: [ { $ref: "#/components/parameters/productId" }, { name: valueId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /vendor/products/{productId}/variants/{variantId}:
+    patch: { tags: [Vendor], summary: Update variant, parameters: [ { $ref: "#/components/parameters/productId" }, { name: variantId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+    delete: { tags: [Vendor], summary: Delete variant, parameters: [ { $ref: "#/components/parameters/productId" }, { name: variantId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /vendor/products/{productId}/inventory:
+    get: { tags: [Vendor], summary: Product + variant stock, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Availability" } } } } } }
+    patch: { tags: [Vendor], summary: Inventory settings, parameters: [ { $ref: "#/components/parameters/productId" }, { $ref: "#/components/parameters/variantIdQuery" } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /vendor/products/{productId}/inventory/adjust:
+    post: { tags: [Vendor], summary: Adjust stock (transactional + history), parameters: [ { $ref: "#/components/parameters/productId" }, { $ref: "#/components/parameters/variantIdQuery" } ], security: [{ cookieAuth: [], csrfToken: [] }], requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/InventoryAdjust" } } } }, responses: { "201": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" } } }
+  /vendor/products/{productId}/inventory/history:
+    get: { tags: [Vendor], summary: Inventory change history, parameters: [ { $ref: "#/components/parameters/productId" }, { $ref: "#/components/parameters/variantIdQuery" } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+  /admin/categories:
+    get: { tags: [Admin], summary: List categories, security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires categories.manage" }
+    post: { tags: [Admin], summary: Create category, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } }, description: "Requires categories.manage" }
+  /admin/categories/{id}:
+    patch: { tags: [Admin], summary: Update category, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" } }, description: "Requires categories.manage" }
+    delete: { tags: [Admin], summary: Delete category, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } }, description: "Requires categories.manage" }
+  /admin/vendors:
+    get: { tags: [Admin], summary: Vendor moderation queue, parameters: [ { name: status, in: query, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires vendors.read" }
+  /admin/vendors/{id}:
+    get: { tags: [Admin], summary: Vendor detail, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires vendors.read" }
+  /admin/vendors/{id}/{action}:
+    post:
+      tags: [Admin]
+      summary: Moderate vendor (approve|reject|suspend|restore)
+      description: "Requires vendors.moderate. reject requires a note."
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: action, in: path, required: true, schema: { type: string, enum: [approve, reject, suspend, restore] } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ModerationDecision" } } } }
+      responses: { "201": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" }, "409": { $ref: "#/components/responses/Conflict" } }
+  /admin/products:
+    get: { tags: [Admin], summary: Product moderation queue, parameters: [ { name: status, in: query, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires products.read" }
+  /admin/products/{id}:
+    get: { tags: [Admin], summary: Product detail, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires products.read" }
+  /admin/products/{id}/{action}:
+    post:
+      tags: [Admin]
+      summary: Moderate product (approve|reject|suspend|restore)
+      description: "Requires products.moderate. reject requires a note."
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: action, in: path, required: true, schema: { type: string, enum: [approve, reject, suspend, restore] } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ModerationDecision" } } } }
+      responses: { "201": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } }

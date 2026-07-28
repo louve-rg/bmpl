@@ -718,7 +718,9 @@ model Product {
   inventory Inventory[]
 
   @@unique([vendorProfileId, sku])
-  @@index([status])
+  // Composite serves both the status filter and the default "newest published"
+  // catalog sort (also covers status-only lookups via the leading column).
+  @@index([status, createdAt])
   @@index([categoryId])
   @@index([vendorProfileId, status])
   @@index([featured])
@@ -744,6 +746,8 @@ model ProductImage {
   createdAt     DateTime @default(now())
 
   @@index([productId, position])
+  // Serves the batched primary-image lookup on every catalog/listing page.
+  @@index([productId, isPrimary])
   @@map("product_images")
 }
 

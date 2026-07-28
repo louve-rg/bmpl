@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -15,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ProductImagesService } from './product-images.service';
 import { VariantsService } from './variants.service';
 import { InventoryService } from './inventory.service';
+import { OwnershipService } from './ownership.service';
 
 export interface ActorContext {
   userId: string;
@@ -35,6 +35,7 @@ export class ProductsService {
     private readonly images: ProductImagesService,
     private readonly variants: VariantsService,
     private readonly inventory: InventoryService,
+    private readonly ownership: OwnershipService,
   ) {}
 
   // ===========================================================================
@@ -42,7 +43,7 @@ export class ProductsService {
   // ===========================================================================
 
   async listOwn(userId: string) {
-    const vp = await this.ownProfileId(userId);
+    const vp = await this.ownership.vendorProfileId(userId);
     const rows = await this.prisma.product.findMany({
       where: { vendorProfileId: vp },
       orderBy: { updatedAt: 'desc' },
@@ -53,7 +54,7 @@ export class ProductsService {
   }
 
   async getOwn(userId: string, id: string) {
-    const vp = await this.ownProfileId(userId);
+    const vp = await this.ownership.vendorProfileId(userId);
     const p = await this.prisma.product.findUnique({
       where: { id },
       include: { category: { select: { name: true, slug: true } }, tags: true },
@@ -67,7 +68,7 @@ export class ProductsService {
   }
 
   async create(actor: ActorContext, dto: CreateProductInput) {
-    const vp = await this.ownProfileId(actor.userId);
+    const vp = await this.ownership.vendorProfileId(actor.userId);
     await this.categoryOrThrow(dto.categoryId);
     await this.assertSkuFree(vp, dto.sku);
     const slug = dto.slug ? await this.assertSlugFree(dto.slug) : await this.deriveUniqueSlug(dto.title);
@@ -109,7 +110,7 @@ export class ProductsService {
   }
 
   async update(actor: ActorContext, id: string, dto: UpdateProductInput) {
-    const vp = await this.ownProfileId(actor.userId);
+    const vp = await this.ownership.vendorProfileId(actor.userId);
     const existing = await this.prisma.product.findUnique({ where: { id } });
     if (!existing || existing.vendorProfileId !== vp) throw new NotFoundException('Product not found.');
     if (existing.status === 'ARCHIVED') {
@@ -185,7 +186,7 @@ export class ProductsService {
   }
 
   async remove(actor: ActorContext, id: string) {
-    const vp = await this.ownProfileId(actor.userId);
+    const vp = await this.ownership.vendorProfileId(actor.userId);
     const p = await this.prisma.product.findUnique({ where: { id } });
     if (!p || p.vendorProfileId !== vp) throw new NotFoundException('Product not found.');
     if (p.status !== 'DRAFT') throw new ConflictException('Only draft products can be deleted; archive instead.');
@@ -445,12 +446,6 @@ export class ProductsService {
   // Helpers
   // ===========================================================================
 
-  private async ownProfileId(userId: string): Promise<string> {
-    const vp = await this.prisma.vendorProfile.findUnique({ where: { userId }, select: { id: true } });
-    if (!vp) throw new ForbiddenException('Create your vendor profile first.');
-    return vp.id;
-  }
-
   private async ownTransition(
     actor: ActorContext,
     id: string,
@@ -462,7 +457,7 @@ export class ProductsService {
       clearRejection?: boolean;
     },
   ) {
-    const vp = await this.ownProfileId(actor.userId);
+    const vp = await this.ownership.vendorProfileId(actor.userId);
     const p = await this.prisma.product.findUnique({ where: { id } });
     if (!p || p.vendorProfileId !== vp) throw new NotFoundException('Product not found.');
     if (!plan.from.includes(p.status)) {

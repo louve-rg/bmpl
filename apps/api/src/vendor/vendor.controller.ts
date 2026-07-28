@@ -19,6 +19,7 @@ import {
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Roles } from '../common/decorators';
+import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { VendorService } from './vendor.service';
 
@@ -103,6 +104,7 @@ export class VendorController {
   }
 
   // ---- Logo / banner (public bucket) ----
+  @StrictThrottle()
   @Post('profile/logo/presign')
   presignLogo(
     @CurrentUser() user: AuthContext,
@@ -119,6 +121,7 @@ export class VendorController {
     return this.vendor.confirmImage(user.userId, 'logo', body.key);
   }
 
+  @StrictThrottle()
   @Post('profile/banner/presign')
   presignBanner(
     @CurrentUser() user: AuthContext,

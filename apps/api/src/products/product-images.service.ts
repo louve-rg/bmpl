@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   isAllowedProductImageMime,
   MAX_PRODUCT_IMAGE_BYTES,
@@ -8,17 +8,14 @@ import type { ProductImageConfirmInput, ProductImageUpdateInput } from '@bmpl/va
 import type { ProductImage } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
-
-interface OwnedProduct {
-  id: string;
-  vendorProfileId: string;
-}
+import { OwnershipService } from './ownership.service';
 
 @Injectable()
 export class ProductImagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ownership: OwnershipService,
   ) {}
 
   /** Presigned PUT to the PUBLIC bucket, namespaced under the owning vendor+product. */
@@ -26,7 +23,7 @@ export class ProductImagesService {
     if (!isAllowedProductImageMime(contentType)) {
       throw new BadRequestException('Unsupported image type. Use JPEG, PNG, or WebP.');
     }
-    const product = await this.ownedProduct(userId, productId);
+    const product = await this.ownership.ownedProduct(userId, productId);
     const key = this.storage.buildKey(
       STORAGE_PREFIX.productImage(product.vendorProfileId, product.id),
       fileName,
@@ -36,7 +33,7 @@ export class ProductImagesService {
 
   /** Confirm an uploaded image: verify namespace + real MIME/size, then persist. */
   async confirm(userId: string, productId: string, dto: ProductImageConfirmInput) {
-    const product = await this.ownedProduct(userId, productId);
+    const product = await this.ownership.ownedProduct(userId, productId);
     const prefix = STORAGE_PREFIX.productImage(product.vendorProfileId, product.id);
     this.storage.assertKeyInNamespace(dto.key, prefix);
 
@@ -70,12 +67,12 @@ export class ProductImagesService {
   }
 
   async listForOwner(userId: string, productId: string) {
-    await this.ownedProduct(userId, productId);
+    await this.ownership.ownedProduct(userId, productId);
     return this.list(productId);
   }
 
   async update(userId: string, productId: string, imageId: string, dto: ProductImageUpdateInput) {
-    await this.ownedProduct(userId, productId);
+    await this.ownership.ownedProduct(userId, productId);
     await this.ownedImage(productId, imageId);
     await this.prisma.productImage.update({
       where: { id: imageId },
@@ -89,7 +86,7 @@ export class ProductImagesService {
 
   /** Full reorder: `order` must contain exactly the product's image ids. */
   async reorder(userId: string, productId: string, order: string[]) {
-    await this.ownedProduct(userId, productId);
+    await this.ownership.ownedProduct(userId, productId);
     const images = await this.prisma.productImage.findMany({ where: { productId }, select: { id: true } });
     const ids = new Set(images.map((i) => i.id));
     if (order.length !== ids.size || !order.every((id) => ids.has(id))) {
@@ -105,7 +102,7 @@ export class ProductImagesService {
 
   /** Set the primary image transactionally (exactly one primary per product). */
   async setPrimary(userId: string, productId: string, imageId: string) {
-    await this.ownedProduct(userId, productId);
+    await this.ownership.ownedProduct(userId, productId);
     await this.ownedImage(productId, imageId);
     await this.prisma.$transaction([
       this.prisma.productImage.updateMany({
@@ -118,7 +115,7 @@ export class ProductImagesService {
   }
 
   async remove(userId: string, productId: string, imageId: string) {
-    await this.ownedProduct(userId, productId);
+    await this.ownership.ownedProduct(userId, productId);
     const image = await this.ownedImage(productId, imageId);
 
     await this.prisma.$transaction(async (tx) => {
@@ -180,17 +177,6 @@ export class ProductImagesService {
     } catch {
       return null; // storage disabled in this environment
     }
-  }
-
-  private async ownedProduct(userId: string, productId: string): Promise<OwnedProduct> {
-    const vp = await this.prisma.vendorProfile.findUnique({ where: { userId }, select: { id: true } });
-    if (!vp) throw new ForbiddenException('Create your vendor profile first.');
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-      select: { id: true, vendorProfileId: true },
-    });
-    if (!product || product.vendorProfileId !== vp.id) throw new NotFoundException('Product not found.');
-    return product;
   }
 
   private async ownedImage(productId: string, imageId: string): Promise<ProductImage> {

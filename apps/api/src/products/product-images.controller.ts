@@ -11,6 +11,7 @@ import {
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Roles } from '../common/decorators';
+import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { ProductImagesService } from './product-images.service';
 
@@ -25,6 +26,7 @@ export class ProductImagesController {
     return this.images.listForOwner(user.userId, productId);
   }
 
+  @StrictThrottle()
   @Post('presign')
   presign(
     @CurrentUser() user: AuthContext,
