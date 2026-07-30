@@ -22,6 +22,8 @@ tags:
     description: Authenticated customer's own shopping cart (self-scoped; no admin/vendor surface).
   - name: Orders
     description: Checkout + orders. Customer (self), Vendor (own vendor orders), Admin (read-only).
+  - name: Payments
+    description: Payment & wallet-hold foundation (M11) — read-only. NO money moves; no capture/settlement.
 components:
   securitySchemes:
     cookieAuth:
@@ -288,6 +290,45 @@ components:
         placedAt: { type: string, format: date-time }
         deliveryAddress: { type: [object, "null"] }
         vendorOrders: { type: array, items: { $ref: "#/components/schemas/VendorOrder" } }
+    WalletHold:
+      type: object
+      description: A SOFT hold — reservation of intent to pay. Never moves money in M11.
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [HELD, RELEASED] }
+        amountMinor: { type: integer }
+        currency: { type: string }
+        heldAt: { type: string, format: date-time }
+        releasedAt: { type: [string, "null"], format: date-time }
+        releaseReason: { type: [string, "null"] }
+    Payment:
+      type: object
+      description: >
+        A payment for an order (foundation). Created by checkout in CREATED→PENDING
+        with a WalletHold (HELD) and a PENDING LedgerReference. NO money moves.
+      properties:
+        id: { type: string }
+        paymentNumber: { type: string }
+        status: { type: string, enum: [CREATED, PENDING, AUTHORIZED, FAILED, EXPIRED, CANCELLED] }
+        methodType: { type: string, enum: [WALLET, CREDIT_CARD, BANK_TRANSFER] }
+        amountMinor: { type: integer }
+        currency: { type: string, example: BZD }
+        authorizedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        order:
+          type: object
+          properties:
+            id: { type: string }
+            orderNumber: { type: string }
+            totalMinor: { type: integer }
+            vendorOrders: { type: array, items: { type: object, properties: { id: { type: string }, orderNumber: { type: string }, businessName: { type: string }, subtotalMinor: { type: integer } } } }
+        holds: { type: array, items: { $ref: "#/components/schemas/WalletHold" } }
+        ledgerReferences:
+          type: array
+          items: { type: object, properties: { id: { type: string }, purpose: { type: string, enum: [CUSTOMER_PAYMENT] }, direction: { type: string, enum: [DEBIT, CREDIT] }, amountMinor: { type: integer }, status: { type: string, enum: [PENDING, POSTED, VOID] }, walletTransactionId: { type: [string, "null"] } } }
+        events:
+          type: array
+          items: { type: object, properties: { type: { type: string }, fromStatus: { type: [string, "null"] }, toStatus: { type: [string, "null"] }, createdAt: { type: string, format: date-time } } }
 paths:
   /marketplace/categories:
     get:
@@ -479,8 +520,12 @@ paths:
         Validates every product/variant/storefront + inventory one final time,
         atomically reserves inventory, creates the order graph, and clears the
         cart — all in one transaction. Any failure rolls everything back
-        (including reservations). No payment is taken.
+        (including reservations). Also creates the payment + wallet-hold foundation
+        (M11; no money moves). Supply an `Idempotency-Key` header so a duplicate
+        retry replays the same order/payment instead of creating a second one.
       security: [{ cookieAuth: [], csrfToken: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string }, description: "Dedupes checkout under distributed retries" }
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/Checkout" } } } }
       responses:
         "201": { description: Order created, content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } } }
@@ -525,3 +570,34 @@ paths:
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
       security: [{ cookieAuth: [], csrfToken: [] }]
       responses: { "201": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } }
+  /payments:
+    get:
+      tags: [Payments]
+      summary: The customer's own payment history (read-only)
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK }, "401": { $ref: "#/components/responses/Unauthorized" } }
+  /payments/for-order/{orderId}:
+    get:
+      tags: [Payments]
+      summary: The payment for one of the customer's orders
+      parameters: [ { name: orderId, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Payment" } } } }, "404": { $ref: "#/components/responses/NotFound" } }
+  /payments/{id}/status:
+    get:
+      tags: [Payments]
+      summary: Lightweight payment status
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }
+  /payments/{id}:
+    get:
+      tags: [Payments]
+      summary: Payment detail (own payments only)
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Payment" } } } }, "404": { $ref: "#/components/responses/NotFound" } }
+  /admin/payments:
+    get: { tags: [Payments], summary: All payments (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires payments.read" }
+  /admin/payments/{id}:
+    get: { tags: [Payments], summary: Payment detail (read-only, + holds/events/ledger refs), parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Requires payments.read" }

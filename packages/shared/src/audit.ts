@@ -41,6 +41,12 @@ export const AUDIT_ACTIONS = [
   // ---- Marketplace: Orders (Phase 3 · M10) ----
   'ORDER_CREATED',
   'ORDER_RESERVATION_RELEASED', // admin/maintenance release of an order's inventory reservations (M10.1)
+  // ---- Marketplace: Payments (Phase 3 · M11 — foundation, no money movement) ----
+  'PAYMENT_CREATED',
+  'PAYMENT_STATE_CHANGED',
+  'WALLET_HOLD_CREATED',
+  'WALLET_HOLD_RELEASED',
+  'IDEMPOTENCY_KEY_REPLAYED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

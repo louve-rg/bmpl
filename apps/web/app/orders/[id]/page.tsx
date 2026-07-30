@@ -7,6 +7,8 @@ import { Header } from '../../../components/landing/Header';
 import { Footer } from '../../../components/landing/Footer';
 import { ordersApi, money, type OrderView } from '../../../lib/orders';
 import { OrderStatusBadge, DeliveryBadge } from '../../../components/orders/OrderStatusBadge';
+import { paymentsApi, type PaymentDetail } from '../../../lib/payments';
+import { PaymentStatusBadge, HoldStatusBadge } from '../../../components/payments/PaymentStatusBadge';
 import type { ApiError } from '../../../lib/api';
 
 export default function OrderDetailPage() {
@@ -15,6 +17,7 @@ export default function OrderDetailPage() {
   const search = useSearchParams();
   const placed = search.get('placed') === '1';
   const [order, setOrder] = useState<OrderView | null>(null);
+  const [payment, setPayment] = useState<PaymentDetail | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading');
 
   useEffect(() => {
@@ -23,6 +26,8 @@ export default function OrderDetailPage() {
       .then((o) => {
         setOrder(o);
         setState('ready');
+        // Payment record is created with the order (M11 foundation) — best-effort.
+        paymentsApi.forOrder(params.id).then(setPayment).catch(() => setPayment(null));
       })
       .catch((e) => {
         const err = e as ApiError;
@@ -69,6 +74,22 @@ export default function OrderDetailPage() {
                 </p>
               </div>
             )}
+
+            {/* Payment status placeholder (M11 foundation — no payment button) */}
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase text-slate-500">Payment</p>
+                {payment ? <PaymentStatusBadge status={payment.status} /> : <span className="text-xs text-slate-400">—</span>}
+              </div>
+              {payment && (
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                  <Link href={`/payments/${payment.id}`} className="text-belize-blue hover:underline">{payment.paymentNumber}</Link>
+                  <span>{payment.methodType === 'WALLET' ? 'Platform wallet' : payment.methodType}</span>
+                  {payment.holds[0] && <HoldStatusBadge status={payment.holds[0].status} />}
+                </div>
+              )}
+              <p className="mt-2 text-xs text-blue-700">Payment processing coming next — no funds have moved.</p>
+            </div>
 
             <div className="mt-6 space-y-4">
               {order.vendorOrders.map((vo) => (

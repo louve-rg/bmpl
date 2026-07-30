@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { checkoutSchema, type CheckoutInput } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
@@ -17,8 +17,13 @@ export class OrdersController {
   }
 
   @Post('checkout')
-  checkout(@CurrentUser() user: AuthContext, @Req() req: Request, @Body(ZodBody(checkoutSchema)) body: CheckoutInput) {
-    return this.orders.checkout(this.actor(user, req), body);
+  checkout(
+    @CurrentUser() user: AuthContext,
+    @Req() req: Request,
+    @Body(ZodBody(checkoutSchema)) body: CheckoutInput,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.orders.checkout(this.actor(user, req), body, idempotencyKey?.trim() || undefined);
   }
 
   @Get('orders')

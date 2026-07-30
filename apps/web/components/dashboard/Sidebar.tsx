@@ -7,6 +7,7 @@ import type { MeView } from '../../lib/types';
 const NAV = [
   { label: 'Overview', href: '/dashboard' },
   { label: 'My Orders', href: '/orders' },
+  { label: 'Payments', href: '/payments' },
   { label: 'My Roles', href: '/dashboard/roles' },
   { label: 'Profile', href: '/dashboard/profile' },
 ];

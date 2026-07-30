@@ -18,6 +18,10 @@ User 1─1 Cart 1─* CartItem *─1 Product / *─1 ProductVariant (Phase 3 · 
 User 1─* Order 1─* VendorOrder 1─* OrderItem  (Phase 3 · M10)
               Order 1─* OrderAddress
               VendorOrder *─1 VendorProfile (Restrict)
+Order 1─1 Payment 1─* WalletHold *─1 WalletAccount   (Phase 3 · M11, foundation)
+             Payment 1─* LedgerReference *─1 WalletAccount (planned, unposted)
+             Payment 1─* PaymentEvent / PaymentAttempt
+             Payment *─1 PaymentMethod / IdempotencyKey
 Product 1─* ProductImage
         1─* ProductModerationReview
         *─* Tag
@@ -72,6 +76,11 @@ Product 1─* ProductImage
 - VendorOrder (Phase 3 · M10): unique `(orderNumber)`, `(orderId)`, `(vendorProfileId, createdAt)`, `(status)`
 - OrderItem (Phase 3 · M10): `(vendorOrderId)`, `(productId)`
 - OrderAddress (Phase 3 · M10): `(orderId)`
+- Payment (Phase 3 · M11): unique `(paymentNumber)`, `(orderId)`, `(idempotencyKeyId)`, `(userId, createdAt)`, `(status)`
+- PaymentMethod (Phase 3 · M11): unique `(userId, type)`, `(userId)`
+- WalletHold (Phase 3 · M11): `(paymentId)`, `(walletAccountId, status)`
+- LedgerReference / PaymentAttempt / PaymentEvent (Phase 3 · M11): `(paymentId)` (+ `(paymentId, createdAt)` for events)
+- IdempotencyKey (Phase 3 · M11): unique `(userId, scope, key)`, `(userId)`
 
 ## Cascade rules
 Vendor/product child rows `onDelete: Cascade`. Category parent + Product→Category

@@ -146,6 +146,12 @@ enum AuditAction {
   // ---- Marketplace: Orders (Phase 3 · M10) ----
   ORDER_CREATED
   ORDER_RESERVATION_RELEASED
+  // ---- Marketplace: Payments (Phase 3 · M11) ----
+  PAYMENT_CREATED
+  PAYMENT_STATE_CHANGED
+  WALLET_HOLD_CREATED
+  WALLET_HOLD_RELEASED
+  IDEMPOTENCY_KEY_REPLAYED
 }
 
 enum WalletAccountType {
@@ -228,6 +234,9 @@ model User {
   walletAccounts       WalletAccount[]
   cart                 Cart?
   orders               Order[]
+  payments             Payment[]
+  paymentMethods       PaymentMethod[]
+  idempotencyKeys      IdempotencyKey[]
   vendorProfile        VendorProfile?              @relation("UserVendorProfile")
   vendorReviewsMade    VendorModerationReview[]    @relation("VendorReviewer")
   productReviewsMade   ProductModerationReview[]   @relation("ProductReviewer")
@@ -460,7 +469,9 @@ model WalletAccount {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
-  entries WalletLedgerEntry[]
+  entries          WalletLedgerEntry[]
+  walletHolds      WalletHold[]
+  ledgerReferences LedgerReference[]
 
   // A user has at most one account per (type, currency); system accounts are unique per (type, currency).
   @@unique([userId, type, currency])
@@ -1012,6 +1023,7 @@ model Order {
 
   vendorOrders VendorOrder[]
   addresses    OrderAddress[]
+  payment      Payment?
 
   @@index([userId, createdAt])
   @@index([status])
@@ -1087,4 +1099,221 @@ model OrderAddress {
 
   @@index([orderId])
   @@map("order_addresses")
+}
+
+// ---- Marketplace: Payments & wallet holds (Phase 3 · M11) -------------------
+// FOUNDATION ONLY. This is the complete financial ARCHITECTURE, but no money
+// moves: no wallet ledger entries are written, no balances change, and no
+// capture/settlement occurs. A checkout creates a Payment (CREATED→PENDING), a
+// soft WalletHold (HELD — a reservation of intent, NOT an escrow ledger entry),
+// and a forward-looking LedgerReference (PENDING — the planned movement, unposted).
+// Idempotency on checkout prevents duplicate payments under distributed retries.
+// The design is gateway-agnostic (wallet / card / bank) without schema redesign.
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  AUTHORIZED
+  FAILED
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentMethodType {
+  WALLET
+  CREDIT_CARD
+  BANK_TRANSFER
+}
+
+enum PaymentAttemptStatus {
+  CREATED
+  PENDING
+  AUTHORIZED
+  FAILED
+}
+
+enum WalletHoldStatus {
+  HELD
+  RELEASED
+}
+
+enum PaymentEventType {
+  CREATED
+  STATE_CHANGED
+  HOLD_CREATED
+  HOLD_RELEASED
+  IDEMPOTENT_REPLAY
+}
+
+enum LedgerReferenceStatus {
+  PENDING
+  POSTED
+  VOID
+}
+
+enum LedgerReferencePurpose {
+  CUSTOMER_PAYMENT
+}
+
+enum IdempotencyKeyStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+// A customer's payment instrument. M11 provisions a WALLET method; card/bank
+// fields are present but null until a gateway is integrated (no schema redesign).
+model PaymentMethod {
+  id                 String            @id @default(cuid())
+  userId             String
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type               PaymentMethodType
+  label              String?
+  isDefault          Boolean           @default(false)
+  brand              String? // e.g. Visa (future)
+  last4              String? // future
+  gatewayCustomerRef String? // future third-party gateway id
+  gatewayMethodRef   String? // future
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  payments Payment[]
+
+  @@unique([userId, type])
+  @@index([userId])
+  @@map("payment_methods")
+}
+
+// One payment per Order (the customer pays for an order). Connected to the wallet
+// via WalletHold + LedgerReference; to vendor orders transitively via Order.
+model Payment {
+  id               String            @id @default(cuid())
+  paymentNumber    String            @unique
+  orderId          String            @unique
+  order            Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountMinor      BigInt // == order.totalMinor
+  currency         Currency          @default(BZD)
+  status           PaymentStatus     @default(CREATED)
+  methodType       PaymentMethodType @default(WALLET)
+  paymentMethodId  String?
+  paymentMethod    PaymentMethod?    @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  idempotencyKeyId String?           @unique
+  idempotencyKey   IdempotencyKey?   @relation(fields: [idempotencyKeyId], references: [id], onDelete: SetNull)
+  authorizedAt     DateTime?
+  expiresAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  attempts   PaymentAttempt[]
+  events     PaymentEvent[]
+  holds      WalletHold[]
+  ledgerRefs LedgerReference[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("payments")
+}
+
+// A gateway/processing attempt. Foundation table — no rows are created in M11
+// (attempts belong to authorization/capture, a later milestone).
+model PaymentAttempt {
+  id             String               @id @default(cuid())
+  paymentId      String
+  payment        Payment              @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  status         PaymentAttemptStatus @default(CREATED)
+  gateway        String?
+  gatewayRef     String?
+  failureCode    String?
+  failureMessage String?
+  createdAt      DateTime             @default(now())
+
+  @@index([paymentId])
+  @@map("payment_attempts")
+}
+
+// A SOFT hold reserving the customer's intent to pay from their wallet. It does
+// NOT create a ledger entry and does NOT change the wallet balance (no escrow in
+// M11). Release tracking via status + releasedAt.
+model WalletHold {
+  id              String           @id @default(cuid())
+  paymentId       String
+  payment         Payment          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  walletAccountId String
+  walletAccount   WalletAccount    @relation(fields: [walletAccountId], references: [id], onDelete: Restrict)
+  amountMinor     BigInt
+  currency        Currency         @default(BZD)
+  status          WalletHoldStatus @default(HELD)
+  heldAt          DateTime         @default(now())
+  releasedAt      DateTime?
+  releaseReason   String?
+  createdAt       DateTime         @default(now())
+
+  @@index([paymentId])
+  @@index([walletAccountId, status])
+  @@map("wallet_holds")
+}
+
+// A forward link from a payment to a PLANNED wallet ledger movement. In M11 the
+// movement is not posted (status PENDING; walletTransactionId/walletLedgerEntryId
+// null). Capture (later) fills these and flips status to POSTED — no schema change.
+model LedgerReference {
+  id                  String                 @id @default(cuid())
+  paymentId           String
+  payment             Payment                @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  walletAccountId     String
+  walletAccount       WalletAccount          @relation(fields: [walletAccountId], references: [id], onDelete: Restrict)
+  purpose             LedgerReferencePurpose
+  direction           LedgerDirection // intended DEBIT of the customer wallet
+  amountMinor         BigInt
+  currency            Currency               @default(BZD)
+  status              LedgerReferenceStatus  @default(PENDING)
+  // Filled when the movement is actually posted (future). Not FK-constrained so a
+  // reference can exist before any wallet transaction does.
+  walletTransactionId String?
+  walletLedgerEntryId String?
+  postedAt            DateTime?
+  createdAt           DateTime               @default(now())
+
+  @@index([paymentId])
+  @@index([walletAccountId])
+  @@map("ledger_references")
+}
+
+// Append-only event log for a payment (its own trail, in addition to AuditLog).
+model PaymentEvent {
+  id         String           @id @default(cuid())
+  paymentId  String
+  payment    Payment          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  type       PaymentEventType
+  fromStatus PaymentStatus?
+  toStatus   PaymentStatus?
+  data       Json?
+  createdAt  DateTime         @default(now())
+
+  @@index([paymentId, createdAt])
+  @@map("payment_events")
+}
+
+// Idempotency for checkout/payment initiation. A duplicate (user, scope, key)
+// returns the original result instead of creating a second order/payment —
+// safe under distributed retries.
+model IdempotencyKey {
+  id              String               @id @default(cuid())
+  userId          String
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scope           String // e.g. "checkout"
+  key             String
+  requestHash     String?
+  status          IdempotencyKeyStatus @default(IN_PROGRESS)
+  resultOrderId   String?
+  resultPaymentId String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  payment Payment?
+
+  @@unique([userId, scope, key])
+  @@index([userId])
+  @@map("idempotency_keys")
 }

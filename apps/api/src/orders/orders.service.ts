@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CheckoutInput } from '@bmpl/validation';
-import type { Prisma } from '@bmpl/database';
+import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -9,6 +9,7 @@ import { InventoryService } from '../products/inventory.service';
 import { ProductImagesService } from '../products/product-images.service';
 import { OwnershipService } from '../products/ownership.service';
 import { effectiveUnitPrice } from '../products/pricing.util';
+import { PaymentsService } from '../payments/payments.service';
 
 export interface ActorContext {
   userId: string;
@@ -17,6 +18,7 @@ export interface ActorContext {
 }
 
 const money = (v: bigint) => Number(v);
+const CHECKOUT_SCOPE = 'checkout';
 
 /** A validated, priced, reserved line grouped under its vendor during checkout. */
 interface CheckoutLine {
@@ -40,18 +42,56 @@ export class OrdersService {
     private readonly inventory: InventoryService,
     private readonly images: ProductImagesService,
     private readonly ownership: OwnershipService,
+    private readonly payments: PaymentsService,
   ) {}
 
   // ===========================================================================
   // Checkout — cart → order graph, atomically (one transaction)
   // ===========================================================================
 
-  async checkout(actor: ActorContext, dto: CheckoutInput) {
+  async checkout(actor: ActorContext, dto: CheckoutInput, idempotencyKey?: string) {
+    // Idempotency fast path: a completed key replays the original order/payment
+    // instead of creating duplicates (safe under distributed retries).
+    if (idempotencyKey) {
+      const existing = await this.prisma.idempotencyKey.findUnique({
+        where: { userId_scope_key: { userId: actor.userId, scope: CHECKOUT_SCOPE, key: idempotencyKey } },
+      });
+      if (existing?.resultOrderId) {
+        await this.audit.record({ action: 'IDEMPOTENCY_KEY_REPLAYED', actorId: actor.userId, newValue: { scope: CHECKOUT_SCOPE, orderId: existing.resultOrderId } });
+        return this.getOwn(actor.userId, existing.resultOrderId);
+      }
+      if (existing) throw new ConflictException('A checkout with this idempotency key is already in progress.');
+    }
+
+    let orderId: string;
+    try {
+      orderId = await this.runCheckout(actor, dto, idempotencyKey);
+    } catch (e) {
+      // Concurrent duplicate: the unique (user, scope, key) lost the race.
+      if (idempotencyKey && e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        const existing = await this.prisma.idempotencyKey.findUnique({
+          where: { userId_scope_key: { userId: actor.userId, scope: CHECKOUT_SCOPE, key: idempotencyKey } },
+        });
+        if (existing?.resultOrderId) return this.getOwn(actor.userId, existing.resultOrderId);
+        throw new ConflictException('A duplicate checkout is already in progress.');
+      }
+      throw e;
+    }
+    return this.getOwn(actor.userId, orderId);
+  }
+
+  private async runCheckout(actor: ActorContext, dto: CheckoutInput, idempotencyKey?: string): Promise<string> {
     const choiceByVendor = new Map(dto.vendors.map((v) => [v.vendorProfileId, v]));
 
-    const orderId = await this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       const cart = await tx.cart.findUnique({ where: { userId: actor.userId }, include: { items: { orderBy: { createdAt: 'asc' } } } });
       if (!cart || cart.items.length === 0) throw new BadRequestException('Your cart is empty.');
+
+      // Reserve the idempotency key up front — a concurrent duplicate hits the
+      // unique constraint here (→ P2002, handled by the caller).
+      const idemRow = idempotencyKey
+        ? await tx.idempotencyKey.create({ data: { userId: actor.userId, scope: CHECKOUT_SCOPE, key: idempotencyKey, status: 'IN_PROGRESS' } })
+        : null;
 
       // ---- Validate every line, recompute price, reserve inventory ----
       const linesByVendor = new Map<string, CheckoutLine[]>();
@@ -220,10 +260,19 @@ export class OrdersService {
         tx,
       );
 
+      // ---- Payment & wallet-hold foundation (M11) — NO money moves ----
+      const payment = await this.payments.createForOrder(
+        tx,
+        { id: order.id, userId: actor.userId, totalMinor: subtotalMinor, currency: 'BZD' },
+        actor,
+      );
+      if (idemRow) {
+        await tx.idempotencyKey.update({ where: { id: idemRow.id }, data: { status: 'COMPLETED', resultOrderId: order.id, resultPaymentId: payment.id } });
+        await tx.payment.update({ where: { id: payment.id }, data: { idempotencyKeyId: idemRow.id } });
+      }
+
       return order.id;
     });
-
-    return this.getOwn(actor.userId, orderId);
   }
 
   // ===========================================================================
@@ -257,15 +306,17 @@ export class OrdersService {
         }
       }
       await tx.order.update({ where: { id: orderId }, data: { reservationsReleasedAt: new Date() } });
+      // Also release the payment's wallet hold + cancel the payment (M11) — no money moves.
+      const payment = await this.payments.releaseForOrder(tx, orderId, actorId ?? null);
       await this.audit.record(
         {
           action: 'ORDER_RESERVATION_RELEASED',
           actorId: actorId ?? null,
-          newValue: { orderId, orderNumber: order.orderNumber, itemsReleased },
+          newValue: { orderId, orderNumber: order.orderNumber, itemsReleased, holdsReleased: payment.holdsReleased },
         },
         tx,
       );
-      return { orderId, orderNumber: order.orderNumber, released: true, alreadyReleased: false, itemsReleased };
+      return { orderId, orderNumber: order.orderNumber, released: true, alreadyReleased: false, itemsReleased, holdsReleased: payment.holdsReleased };
     });
   }
 

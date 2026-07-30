@@ -101,13 +101,25 @@ throws for a stale cart — each line carries `issues[]` / `purchasable` /
 | GET | `/api/vendor/orders` | the vendor's own vendor orders |
 | GET | `/api/vendor/orders/:id` | vendor order detail (+ customer name / delivery address) |
 
-Checkout rejects an empty cart (`400`), an unpublished product / inactive storefront / disabled variant (`409`), and insufficient stock (`409`) — any failure rolls the whole transaction back (no order, no reservation, cart intact). Prices are recomputed + **snapshotted**; the client sends no prices. No payment/tax/shipping/fees.
+Checkout rejects an empty cart (`400`), an unpublished product / inactive storefront / disabled variant (`409`), and insufficient stock (`409`) — any failure rolls the whole transaction back (no order, no reservation, cart intact). Prices are recomputed + **snapshotted**; the client sends no prices. No tax/shipping/fees. Checkout also creates the **payment + wallet-hold foundation** (M11, no money moves) and accepts an optional **`Idempotency-Key`** header (a duplicate retry replays the same order/payment).
+
+## Payments (Phase 3 · M11 — foundation, read-only)
+**Customer** — `@Roles('CUSTOMER')`, self-scoped:
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/payments` | own payment history |
+| GET | `/api/payments/for-order/:orderId` | the payment for one of the customer's orders |
+| GET | `/api/payments/:id` | payment detail (holds, ledger refs, events) |
+| GET | `/api/payments/:id/status` | lightweight status |
+
+No capture/debit/settlement endpoints. Payments are created by checkout (CREATED→PENDING) with a soft `WalletHold` (HELD) and a PENDING `LedgerReference`. **No money moves.**
 
 ## Admin — `@RequirePermission(...)`
 | Method | Path | Permission |
 |---|---|---|
 | GET | `/api/admin/orders` · `/:id` | `orders.read` (read-only; no editing) |
-| POST | `/api/admin/orders/:id/release-reservations` | `orders.manage` (M10.1; idempotent; releases an order's inventory reservations — not customer cancellation) |
+| POST | `/api/admin/orders/:id/release-reservations` | `orders.manage` (M10.1; idempotent; releases an order's inventory reservations + wallet hold, cancels the payment — no money moves) |
+| GET | `/api/admin/payments` · `/:id` | `payments.read` (M11; read-only; + holds/events/ledger refs) |
 | GET/POST | `/api/admin/categories` | `categories.manage` |
 | PATCH/DELETE | `/api/admin/categories/:id` | `categories.manage` |
 | GET | `/api/admin/vendors` `?status=` · `/:id` | `vendors.read` |

@@ -32,6 +32,7 @@ packages/
 | `products/` | product CRUD + lifecycle, images, options/variants, inventory, admin moderation, public catalog/search (M4–M7) |
 | `cart/` | authenticated customer shopping cart — self-scoped; server-authoritative pricing; vendor-grouped (Phase 3 · M9) |
 | `orders/` | checkout + orders — transactional cart→order conversion, inventory reservation, price snapshots; customer/vendor/admin reads (Phase 3 · M10) |
+| `payments/` | payment & wallet-hold FOUNDATION — payment state machine, soft wallet holds, ledger references, idempotency; read-only customer/admin (Phase 3 · M11; no money moves) |
 | `storage/` | S3-compatible object storage (MinIO/R2) — presign, headObject, publicUrl |
 | `auth/`, `common/`, `throttling/`, `audit/`, `notifications/` | reused Phase 1 cross-cutting infrastructure |
 
@@ -111,6 +112,20 @@ M10 creates orders in `PENDING` only — no payment/tax/shipping/fees/dispatch. 
 `VendorOrder` carries its `deliveryMethod` (PICKUP/DELIVERY), customer notes, and a
 reserved `shippingMetadata` placeholder, seeding future per-vendor fulfilment.
 See the [M10 doc](../phase-3/M10-checkout-orders.md).
+
+## Payments & wallet holds (Phase 3 · M11 — foundation)
+Checkout also lays the **financial foundation** in the same transaction: a
+`Payment` per order (state machine `CREATED→PENDING`; `AUTHORIZED/FAILED/EXPIRED/
+CANCELLED` defined, capture states deliberately absent), a soft `WalletHold`
+(`HELD` — a reservation of intent, **not** an escrow ledger entry), a PENDING
+`LedgerReference` (the planned movement, unposted), and `PaymentEvent`s. **No
+money moves**: no `WalletLedgerEntry` is written and no balance changes — the
+existing double-entry wallet package is reused, but its money-movement gate stays
+off. Checkout is **idempotent** via an `Idempotency-Key` header backed by a unique
+`IdempotencyKey(userId, scope, key)` — a duplicate retry replays the original
+order/payment. The design is gateway-agnostic (wallet / card / bank) without
+schema redesign. Releasing an order's reservations (M10.1) also releases the hold
+and cancels the payment. See the [M11 doc](../phase-3/M11-payments-wallet.md).
 
 ## Money & i18n
 Prices are `BigInt` **minor units** (cents), currency `BZD` (matches the wallet).
