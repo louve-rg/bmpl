@@ -126,6 +126,15 @@ Vercel (web/admin). Never place secrets in `NEXT_PUBLIC_`/`EXPO_PUBLIC_` vars.
 
 ## 11. Database migration  — MIGRATION STRATEGY
 
+> **REQUIRED PROCESS (all future DB migrations).** Every production schema change
+> ships as a committed Prisma migration and is applied **only** by the Railway
+> `deploy.preDeployCommand` hook below — never by a hand-run command against a
+> production `DATABASE_URL`. Author the migration locally, commit it, and push;
+> the hook applies it before the new code serves traffic. Do not add code that
+> depends on a schema change without the migration in the same (or an earlier)
+> deploy, and keep breaking changes expand→migrate→contract so the running code
+> tolerates both shapes during rollout.
+
 - **Command (always):** `prisma migrate deploy` (never `db push` in cloud).
 - **Wired as a Railway pre-deploy hook (as of M9):** `railway.json` →
   `deploy.preDeployCommand` runs

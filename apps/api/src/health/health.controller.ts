@@ -18,11 +18,13 @@ export class HealthController {
     private readonly storage: StorageService,
   ) {}
 
-  /** Liveness — process is up. */
+  /** Liveness — process is up. `commit` (Railway-injected git SHA) makes it
+   *  possible to confirm exactly which build is live during a deploy. */
   @Public()
   @Get()
   live() {
-    return { status: 'ok', uptime: process.uptime() };
+    const sha = process.env.RAILWAY_GIT_COMMIT_SHA ?? null;
+    return { status: 'ok', uptime: process.uptime(), commit: sha ? sha.slice(0, 7) : null };
   }
 
   /**
