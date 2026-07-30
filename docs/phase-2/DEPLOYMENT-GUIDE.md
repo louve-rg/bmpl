@@ -17,14 +17,30 @@ See also `docs/DEPLOYMENT.md` (Phase 1) and `ENVIRONMENT-REFERENCE.md`.
    `apps/admin`; `apps/*/vercel.json` runs the monorepo turbo build).
 
 ## Database migrations
-Migrations are **not** auto-run by the API container. Apply them explicitly against
-the Railway Postgres (public proxy URL) **before/with** the code that needs them:
+Migrations run **automatically on every Railway deploy**, via the
+`deploy.preDeployCommand` in `railway.json`:
+```jsonc
+"preDeployCommand": "sh -c 'DIRECT_URL=${DIRECT_URL:-$DATABASE_URL} pnpm --filter @bmpl/database exec prisma migrate deploy'"
+```
+Railway runs this **inside the freshly built image, in the project's environment
+(internal `DATABASE_URL` injected), after build and before the new deployment
+receives traffic** — so schema changes are always applied **before** the code that
+depends on them serves requests, and a failing migration **halts the deploy**
+(the old version keeps serving). `prisma migrate deploy` is idempotent (applies
+only pending migrations) and additive-only here. `DIRECT_URL` falls back to
+`DATABASE_URL` because the runtime service sets only `DATABASE_URL` (a direct,
+non-pooled Railway Postgres connection); the schema's `directUrl` needs a value at
+migrate time. No production credential is ever exposed outside Railway.
+
+**Manual fallback** (only if a migration must be applied out-of-band — e.g. a
+hotfix without a redeploy): run against the Railway Postgres **public proxy URL**
 ```bash
-DATABASE_URL="<railway public url>" DIRECT_URL="<same>" \
+DATABASE_URL="<railway public proxy url>" DIRECT_URL="<same>" \
   pnpm --filter @bmpl/database exec prisma migrate deploy
 ```
-Additive-only; safe to apply before the new code rolls. The `add_product_search`
-migration installs `pg_trgm` + the tsvector trigger + GIN indexes.
+The `add_product_search` migration installs `pg_trgm` + the tsvector trigger + GIN
+indexes. The Prisma client is generated at image build; migrations ship in the
+image (dev deps + `packages/database/prisma/migrations` are retained on purpose).
 
 ## Vercel project config (already set)
 Each project: framework **Next.js**, **Root Directory** = `apps/web` / `apps/admin`,

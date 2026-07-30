@@ -126,13 +126,19 @@ Vercel (web/admin). Never place secrets in `NEXT_PUBLIC_`/`EXPO_PUBLIC_` vars.
 
 ## 11. Database migration  — MIGRATION STRATEGY
 
-- **Command (always):** `prisma migrate deploy` (script:
-  `pnpm --filter @bmpl/database migrate:deploy`). Never `db push` in cloud.
-- **Initial deploy:** run migrate deploy once against the fresh Railway DB. On
-  Railway, use a **pre-deploy/release command** (same image) or a one-off:
-  `railway run pnpm --filter @bmpl/database migrate:deploy`.
+- **Command (always):** `prisma migrate deploy` (never `db push` in cloud).
+- **Wired as a Railway pre-deploy hook (as of M9):** `railway.json` →
+  `deploy.preDeployCommand` runs
+  `sh -c 'DIRECT_URL=${DIRECT_URL:-$DATABASE_URL} pnpm --filter @bmpl/database exec prisma migrate deploy'`
+  **inside the built image, before the new deployment serves traffic.** This
+  guarantees schema changes land **before** the code that depends on them, on
+  every deploy, with **no production credential leaving Railway** (the internal
+  `DATABASE_URL` is injected into the hook). A failed migration **halts the
+  deploy** — the previous version keeps serving.
 - **Future migrations:** author locally with `pnpm db:migrate` (dev), commit the
-  generated folder, and let the release command apply them with `migrate deploy`.
+  generated folder, push — the pre-deploy hook applies it automatically. No manual
+  step and no direct DB URL needed. (Out-of-band fallback: `migrate deploy` against
+  the Railway Postgres **public proxy URL**.)
 - **Migration failure:** `migrate deploy` is transactional per migration and
   stops on error, leaving prior migrations applied. Fix forward with a new
   migration; investigate `_prisma_migrations`. Do not hand-edit applied migrations.
