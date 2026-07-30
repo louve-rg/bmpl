@@ -13,11 +13,11 @@ import 'dotenv/config';
 import {
   ROLE_DEFINITIONS,
   ROLE_CODES,
-  PERMISSION_BUNDLES,
+  PERMISSIONS,
   WALLET_ACCOUNT_TYPES,
 } from '@bmpl/shared';
 import { hashPassword } from '@bmpl/authentication';
-import { prisma } from '../src/index';
+import { prisma, syncSuperAdminPermissions } from '../src/index';
 
 async function seedRoles() {
   for (const code of ROLE_CODES) {
@@ -107,14 +107,9 @@ async function seedSuperAdmin() {
     });
   }
 
-  // Grant all SUPER_ADMIN permissions (admin capability axis, separate from roles).
-  for (const permission of PERMISSION_BUNDLES.SUPER_ADMIN!) {
-    await prisma.adminPermissionGrant.upsert({
-      where: { userId_permission: { userId: admin.id, permission } },
-      update: {},
-      create: { userId: admin.id, permission },
-    });
-  }
+  // Grant the COMPLETE permission catalog to every super admin (idempotent;
+  // back-fills permissions added after an admin was first created).
+  await syncSuperAdminPermissions(prisma, PERMISSIONS);
 
   console.info(`✓ Seeded SUPER_ADMIN: ${email}`);
   return admin;

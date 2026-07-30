@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
 export * from '@prisma/client';
+export * from './sync-permissions';
 
 /**
  * Shared PrismaClient singleton. In dev, reuse across hot reloads to avoid

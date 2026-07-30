@@ -17,11 +17,11 @@
 import {
   ROLE_DEFINITIONS,
   ROLE_CODES,
-  PERMISSION_BUNDLES,
+  PERMISSIONS,
   WALLET_ACCOUNT_TYPES,
 } from '@bmpl/shared';
 import { hashPassword } from '@bmpl/authentication';
-import { prisma } from '../src/index';
+import { prisma, syncSuperAdminPermissions } from '../src/index';
 
 const KNOWN_DEV_PASSWORDS = new Set(['ChangeMe!Admin123', 'DemoPass123', 'password', 'admin']);
 
@@ -104,19 +104,17 @@ async function main() {
     },
   });
 
-  // Ensure SUPER_ADMIN role + permissions even if the user already existed.
+  // Ensure the SUPER_ADMIN role even if the user already existed.
   await prisma.userRole.upsert({
     where: { userId_roleCode: { userId: admin.id, roleCode: 'SUPER_ADMIN' } },
     update: { status: 'APPROVED', approvedAt: new Date() },
     create: { userId: admin.id, roleCode: 'SUPER_ADMIN', status: 'APPROVED', approvedAt: new Date() },
   });
-  for (const permission of PERMISSION_BUNDLES.SUPER_ADMIN!) {
-    await prisma.adminPermissionGrant.upsert({
-      where: { userId_permission: { userId: admin.id, permission } },
-      update: {},
-      create: { userId: admin.id, permission },
-    });
-  }
+
+  // Grant the COMPLETE permission catalog to EVERY super admin (idempotent).
+  // This also back-fills any admin bootstrapped before a permission was added.
+  const sync = await syncSuperAdminPermissions(prisma, PERMISSIONS);
+  console.info(`✓ Synced ${sync.permissions} permissions across ${sync.superAdmins} super admin(s).`);
 
   console.info(`✓ Bootstrap complete. Administrator: ${email}`);
   console.info('  Rotate this temporary password after first login.');
