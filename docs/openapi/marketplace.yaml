@@ -18,6 +18,8 @@ tags:
     description: Owner-scoped storefront management (requires an APPROVED VENDOR role).
   - name: Admin
     description: Moderation (requires an admin permission).
+  - name: Cart
+    description: Authenticated customer's own shopping cart (self-scoped; no admin/vendor surface).
 components:
   securitySchemes:
     cookieAuth:
@@ -155,6 +157,66 @@ components:
     ModerationDecision:
       type: object
       properties: { note: { type: string, description: required for reject } }
+    AddCartItem:
+      type: object
+      required: [productId]
+      properties:
+        productId: { type: string }
+        variantId: { type: [string, "null"], description: "null/omitted = product-level line" }
+        quantity: { type: integer, minimum: 1, maximum: 10000, default: 1 }
+    UpdateCartItem:
+      type: object
+      required: [quantity]
+      properties:
+        quantity: { type: integer, minimum: 1, maximum: 10000, description: "≥1; remove the line to reach zero" }
+    CartLine:
+      type: object
+      properties:
+        id: { type: string }
+        productId: { type: string }
+        variantId: { type: [string, "null"] }
+        title: { type: string }
+        slug: { type: string }
+        variantLabel: { type: [string, "null"] }
+        sku: { type: [string, "null"] }
+        imageUrl: { type: [string, "null"] }
+        currency: { type: string, example: BZD }
+        quantity: { type: integer }
+        unitPriceMinor: { type: integer, description: "current server-computed price (source of truth)" }
+        unitPriceMinorSnapshot: { type: integer, description: "price captured at last add/update" }
+        priceChanged: { type: boolean }
+        lineSubtotalMinor: { type: integer }
+        available: { type: [integer, "null"], description: "null = unlimited/untracked" }
+        inStock: { type: boolean }
+        issues:
+          type: array
+          items: { type: string, enum: [PRODUCT_UNAVAILABLE, VENDOR_INACTIVE, VARIANT_REQUIRED, VARIANT_UNAVAILABLE, OUT_OF_STOCK, INSUFFICIENT_STOCK] }
+        purchasable: { type: boolean }
+    CartVendorGroup:
+      type: object
+      properties:
+        vendorProfileId: { type: string }
+        slug: { type: string }
+        businessName: { type: string }
+        storeStatus: { type: string, enum: [OPEN, CLOSED] }
+        subtotalMinor: { type: integer }
+        itemCount: { type: integer }
+        items: { type: array, items: { $ref: "#/components/schemas/CartLine" } }
+    Cart:
+      type: object
+      description: >
+        The active cart, grouped by vendor. Each vendor group becomes a separate
+        vendor order at checkout (M10+). Prices are recomputed on every read.
+      properties:
+        id: { type: string }
+        currency: { type: string, example: BZD }
+        itemCount: { type: integer, description: "total quantity across all lines" }
+        distinctItemCount: { type: integer }
+        subtotalMinor: { type: integer, description: "sum of PURCHASABLE line subtotals only" }
+        hasPriceChanges: { type: boolean }
+        hasUnavailableItems: { type: boolean }
+        vendors: { type: array, items: { $ref: "#/components/schemas/CartVendorGroup" } }
+        updatedAt: { type: string, format: date-time }
 paths:
   /marketplace/categories:
     get:
@@ -303,3 +365,38 @@ paths:
       security: [{ cookieAuth: [], csrfToken: [] }]
       requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ModerationDecision" } } } }
       responses: { "201": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } }
+  /cart:
+    get:
+      tags: [Cart]
+      summary: Get the caller's active cart (prices + availability re-validated)
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Cart" } } } }, "401": { $ref: "#/components/responses/Unauthorized" } }
+    delete:
+      tags: [Cart]
+      summary: Clear the cart (removes all lines; keeps the cart)
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Cart" } } } }, "401": { $ref: "#/components/responses/Unauthorized" } }
+  /cart/items:
+    post:
+      tags: [Cart]
+      summary: Add an item (merges onto an identical existing line)
+      description: >
+        Rejects an unpublished product, an inactive storefront, a required/invalid
+        variant (400), and insufficient stock (409). No inventory is reserved.
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AddCartItem" } } } }
+      responses: { "201": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Cart" } } } }, "400": { $ref: "#/components/responses/ValidationError" }, "401": { $ref: "#/components/responses/Unauthorized" }, "404": { $ref: "#/components/responses/NotFound" }, "409": { $ref: "#/components/responses/Conflict" } }
+  /cart/items/{itemId}:
+    patch:
+      tags: [Cart]
+      summary: Set a line's quantity (≥1)
+      parameters: [ { name: itemId, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/UpdateCartItem" } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Cart" } } } }, "400": { $ref: "#/components/responses/ValidationError" }, "401": { $ref: "#/components/responses/Unauthorized" }, "404": { $ref: "#/components/responses/NotFound" }, "409": { $ref: "#/components/responses/Conflict" } }
+    delete:
+      tags: [Cart]
+      summary: Remove a single line
+      parameters: [ { name: itemId, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Cart" } } } }, "401": { $ref: "#/components/responses/Unauthorized" }, "404": { $ref: "#/components/responses/NotFound" } }

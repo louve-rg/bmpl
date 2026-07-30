@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { BrandLockup } from '../Logo';
 import { ButtonLink } from '../ui';
+import { CartButton } from '../cart/CartButton';
 
 const NAV = [
   { label: 'Shop', href: '/products' },
@@ -36,6 +37,7 @@ export function Header() {
         </div>
 
         <div className="hidden items-center gap-3 md:flex">
+          <CartButton />
           <ButtonLink href="/login" variant="ghostLight" size="sm">
             Sign in
           </ButtonLink>
@@ -44,16 +46,19 @@ export function Header() {
           </ButtonLink>
         </div>
 
-        <button
-          className="inline-flex items-center rounded-md p-2 text-white md:hidden"
-          aria-label="Toggle menu"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            {open ? <path d="M6 6l12 12M6 18L18 6" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
-          </svg>
-        </button>
+        <div className="flex items-center gap-1 md:hidden">
+          <CartButton />
+          <button
+            className="inline-flex items-center rounded-md p-2 text-white"
+            aria-label="Toggle menu"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              {open ? <path d="M6 6l12 12M6 18L18 6" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
+            </svg>
+          </button>
+        </div>
       </nav>
 
       {open && (

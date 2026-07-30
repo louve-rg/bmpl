@@ -378,3 +378,30 @@ export const vendorQuerySchema = z.object({
   district: districtSchema.optional(),
 });
 export type VendorQueryInput = z.infer<typeof vendorQuerySchema>;
+
+// ---- Shopping cart (Phase 3 · M9) -------------------------------------------
+
+/** Maximum units of a single line — a sanity bound, not an inventory limit. */
+const cartQtySchema = z.coerce
+  .number()
+  .int('Quantity must be a whole number.')
+  .min(1, 'Quantity must be at least 1.')
+  .max(10_000, 'Quantity is too large.');
+
+/**
+ * Add an item to the cart. `variantId` null/omitted selects the product-level
+ * purchasable; a value selects a specific variant. Repeated additions of the
+ * same line MERGE (quantities sum) in the service.
+ */
+export const addCartItemSchema = z.object({
+  productId: cuidRef,
+  variantId: cuidRef.nullish(),
+  quantity: cartQtySchema.default(1),
+});
+export type AddCartItemInput = z.infer<typeof addCartItemSchema>;
+
+/** Set a cart line's quantity. Zero/negative is rejected — remove the line instead. */
+export const updateCartItemSchema = z.object({
+  quantity: cartQtySchema,
+});
+export type UpdateCartItemInput = z.infer<typeof updateCartItemSchema>;

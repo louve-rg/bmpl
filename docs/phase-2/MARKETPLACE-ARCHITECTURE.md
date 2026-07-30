@@ -30,6 +30,7 @@ packages/
 | `categories/` | hierarchical categories: public tree + admin CRUD (M1) |
 | `vendor/` | vendor profile, settings, locations, hours, logo/banner, admin moderation, public storefront (M2/M3) |
 | `products/` | product CRUD + lifecycle, images, options/variants, inventory, admin moderation, public catalog/search (M4–M7) |
+| `cart/` | authenticated customer shopping cart — self-scoped; server-authoritative pricing; vendor-grouped (Phase 3 · M9) |
 | `storage/` | S3-compatible object storage (MinIO/R2) — presign, headObject, publicUrl |
 | `auth/`, `common/`, `throttling/`, `audit/`, `notifications/` | reused Phase 1 cross-cutting infrastructure |
 
@@ -79,6 +80,21 @@ persist opaque storage key. Keys are namespaced per owner and checked with
 - **Inventory:** per product (or per variant) with `quantity`/`reserved`/derived
   `available`, `unlimited`, `allowBackorders`, `lowStockThreshold`; append-only
   `InventoryChange` history; all mutations transactional (never below zero on-hand).
+
+## Shopping cart (Phase 3 · M9)
+One active server-side `Cart` per customer (`userId` unique); `CartItem` rows
+reference **either** a product (`variantId` null) or a specific variant — never
+both, enforced by a `(cartId, variantId)` unique plus a partial unique
+`(cartId, productId) WHERE variantId IS NULL` so duplicate additions **merge**.
+The cart is pure customer self-service: **no admin approval or moderation**, and
+no vendor/admin surface onto customer carts. The **server is the price authority**
+— each read recomputes the effective unit price (variant sale → variant price →
+product sale → product price) and flags a `priceChanged` vs the stored snapshot;
+frontend-sent prices are ignored. Availability is validated on every add/update/
+read (respecting `unlimited`/`allowBackorders`) but **inventory is never reserved**
+in the cart — reservation happens at checkout/order creation (M10+). Items are
+returned **grouped by vendor**; each group is the seed for one vendor order in the
+future checkout split. See the [M9 doc](../phase-3/M9-shopping-cart.md).
 
 ## Money & i18n
 Prices are `BigInt` **minor units** (cents), currency `BZD` (matches the wallet).

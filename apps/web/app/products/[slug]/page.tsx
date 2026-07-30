@@ -4,6 +4,7 @@ import { Header } from '../../../components/landing/Header';
 import { Footer } from '../../../components/landing/Footer';
 import { serverGet } from '../../../lib/server-api';
 import { Gallery, type GalleryImage } from './Gallery';
+import { AddToCart } from './AddToCart';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,34 +74,15 @@ export default async function ProductDetailPage({ params }: { params: { slug: st
               </span>
             </p>
 
-            {p.variants.length > 0 && (
-              <div className="mt-4">
-                <p className="mb-1 text-xs font-semibold uppercase text-slate-500">Options</p>
-                <ul className="space-y-1 text-sm text-slate-600">
-                  {p.variants.map((v) => {
-                    const label = v.optionValueIds
-                      .map((id) => {
-                        for (const o of p.options) {
-                          const val = o.values.find((x) => x.id === id);
-                          if (val) return val.value;
-                        }
-                        return null;
-                      })
-                      .filter(Boolean)
-                      .join(' / ');
-                    return (
-                      <li key={v.id} className="flex items-center gap-2">
-                        <span>{label}</span>
-                        {v.priceMinor != null && <span className="text-xs text-slate-400">{money(v.priceMinor)}</span>}
-                        <span className={`text-xs ${v.availability.inStock ? 'text-emerald-600' : 'text-red-500'}`}>
-                          {v.availability.inStock ? '✓' : 'out'}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
+            <AddToCart
+              productId={p.id}
+              slug={p.slug}
+              options={p.options}
+              variants={p.variants}
+              productInStock={p.availability.inStock}
+              basePriceMinor={p.priceMinor}
+              baseSalePriceMinor={p.salePriceMinor}
+            />
 
             <p className="mt-3 text-sm text-slate-500">
               Sold by{' '}

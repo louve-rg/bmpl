@@ -68,6 +68,25 @@ filters the whole subtree. Prices in the query are **cents**.
 
 ⛨ = stricter per-IP rate limit (`@StrictThrottle`).
 
+## Cart — `@Roles('CUSTOMER')` (self-scoped, Phase 3 · M9)
+Every authenticated customer has one active cart. All routes act on the caller's
+own cart only — there is **no admin or vendor surface** onto customer carts and
+**no approval/moderation** anywhere in the flow. Prices are recomputed server-side
+on every call; no inventory is reserved.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/cart` | active cart, grouped by vendor (prices + availability re-validated) |
+| POST | `/api/cart/items` | add `{ productId, variantId?, quantity }` (merges onto an identical line) |
+| PATCH | `/api/cart/items/:itemId` | set a line's quantity (≥1) |
+| DELETE | `/api/cart/items/:itemId` | remove a line |
+| DELETE | `/api/cart` | clear the cart |
+
+Add/update reject an unpublished product or inactive storefront (`409`), a
+required/invalid variant (`400`), and insufficient stock (`409`). `GET` never
+throws for a stale cart — each line carries `issues[]` / `purchasable` /
+`priceChanged` flags instead. Response is the full `Cart` (see OpenAPI `Cart`).
+
 ## Admin — `@RequirePermission(...)`
 | Method | Path | Permission |
 |---|---|---|
