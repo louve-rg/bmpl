@@ -4,6 +4,7 @@ import type { Inventory, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../products/inventory.service';
 import { ProductImagesService } from '../products/product-images.service';
+import { effectiveUnitPrice } from '../products/pricing.util';
 
 /** A blocking or informational condition on a cart line, surfaced to the UI. */
 export type CartIssue =
@@ -15,22 +16,6 @@ export type CartIssue =
   | 'INSUFFICIENT_STOCK'; // fewer units available than the requested quantity
 
 const money = (v: bigint) => Number(v);
-
-/**
- * Effective unit price (minor units) for a product / optional variant.
- * Precedence: variant sale → variant price → product sale → product price.
- * Variants with neither price nor sale inherit the product's pricing.
- */
-function effectiveUnitPrice(
-  product: { priceMinor: bigint; salePriceMinor: bigint | null },
-  variant?: { priceMinor: bigint | null; salePriceMinor: bigint | null } | null,
-): bigint {
-  if (variant) {
-    if (variant.salePriceMinor != null) return variant.salePriceMinor;
-    if (variant.priceMinor != null) return variant.priceMinor;
-  }
-  return product.salePriceMinor ?? product.priceMinor;
-}
 
 /** The product/variant a line points at, resolved and confirmed purchasable. */
 interface Purchasable {

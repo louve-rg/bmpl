@@ -15,6 +15,9 @@ User 1─1 VendorProfile 1─1 VendorSettings
 Category ─┐ (self parent/children, Restrict)
           └─* Product
 User 1─1 Cart 1─* CartItem *─1 Product / *─1 ProductVariant (Phase 3 · M9)
+User 1─* Order 1─* VendorOrder 1─* OrderItem  (Phase 3 · M10)
+              Order 1─* OrderAddress
+              VendorOrder *─1 VendorProfile (Restrict)
 Product 1─* ProductImage
         1─* ProductModerationReview
         *─* Tag
@@ -65,6 +68,10 @@ Product 1─* ProductImage
 - CartItem (Phase 3 · M9): `(cartId)`, `(productId)`, `(vendorProfileId)`,
   unique `(cartId, variantId)` + partial unique `(cartId, productId) WHERE variantId IS NULL`
   (variant lines unique per variant; product-level lines unique per product → duplicate adds merge)
+- Order (Phase 3 · M10): unique `(orderNumber)`, `(userId, createdAt)`, `(status)`
+- VendorOrder (Phase 3 · M10): unique `(orderNumber)`, `(orderId)`, `(vendorProfileId, createdAt)`, `(status)`
+- OrderItem (Phase 3 · M10): `(vendorOrderId)`, `(productId)`
+- OrderAddress (Phase 3 · M10): `(orderId)`
 
 ## Cascade rules
 Vendor/product child rows `onDelete: Cascade`. Category parent + Product→Category

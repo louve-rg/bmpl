@@ -143,6 +143,8 @@ enum AuditAction {
   PRODUCT_DELETED
   // ---- Marketplace: Inventory (Phase 2 · M6) ----
   INVENTORY_ADJUSTED
+  // ---- Marketplace: Orders (Phase 3 · M10) ----
+  ORDER_CREATED
 }
 
 enum WalletAccountType {
@@ -224,6 +226,7 @@ model User {
   reviewsPerformed     RoleApplicationReview[]     @relation("ReviewReviewer")
   walletAccounts       WalletAccount[]
   cart                 Cart?
+  orders               Order[]
   vendorProfile        VendorProfile?              @relation("UserVendorProfile")
   vendorReviewsMade    VendorModerationReview[]    @relation("VendorReviewer")
   productReviewsMade   ProductModerationReview[]   @relation("ProductReviewer")
@@ -590,6 +593,7 @@ model VendorProfile {
   reviews      VendorModerationReview[]
   products     Product[]
   cartItems    CartItem[]
+  vendorOrders VendorOrder[]
 
   @@index([approvalStatus])
   @@index([storeStatus])
@@ -715,10 +719,11 @@ model Product {
   tags      Tag[]                     @relation("ProductTags")
   reviews   ProductModerationReview[]
   images    ProductImage[]
-  options   ProductOption[]
-  variants  ProductVariant[]
-  inventory Inventory[]
-  cartItems CartItem[]
+  options    ProductOption[]
+  variants   ProductVariant[]
+  inventory  Inventory[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
 
   @@unique([vendorProfileId, sku])
   // Composite serves both the status filter and the default "newest published"
@@ -811,6 +816,7 @@ model ProductVariant {
   optionValues   VariantOptionValue[]
   inventory      Inventory?
   cartItems      CartItem[]
+  orderItems     OrderItem[]
 
   @@unique([productId, sku])
   @@index([productId])
@@ -951,4 +957,129 @@ model CartItem {
   @@index([productId])
   @@index([vendorProfileId])
   @@map("cart_items")
+}
+
+// ---- Marketplace: Orders & checkout (Phase 3 · M10) -------------------------
+// Checkout converts a validated cart into a normalized order graph inside ONE
+// transaction: a parent Order, one VendorOrder per storefront (the multi-vendor
+// split), immutable OrderItem snapshots, and a snapshotted OrderAddress. Prices
+// are recomputed server-side and SNAPSHOTTED (never trusted from the client).
+// Inventory is RESERVED here (InventoryService.reserve) for the first time, in
+// the same transaction, so a validation failure rolls back reservations too.
+//
+// M10 introduces only the INITIAL states (PENDING). Payment, fulfilment, refund,
+// return, shipment-tracking, and wallet-transaction records are LATER milestones;
+// the relational shape (parent → vendor orders → items) future-proofs them
+// without JSON blobs. `VendorOrder.shippingMetadata` is a reserved placeholder.
+
+enum OrderStatus {
+  PENDING
+}
+
+enum VendorOrderStatus {
+  PENDING
+}
+
+enum DeliveryMethod {
+  PICKUP
+  DELIVERY
+}
+
+enum OrderAddressType {
+  SHIPPING
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  orderNumber   String      @unique
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status        OrderStatus @default(PENDING)
+  currency      Currency    @default(BZD)
+  itemCount     Int // total quantity across all vendor orders
+  // Sum of vendor subtotals. NO tax / shipping / discounts / fees in M10;
+  // totalMinor == subtotalMinor until those are added in later milestones.
+  subtotalMinor BigInt
+  totalMinor    BigInt
+  placedAt      DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  vendorOrders VendorOrder[]
+  addresses    OrderAddress[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("orders")
+}
+
+model VendorOrder {
+  id              String            @id @default(cuid())
+  orderNumber     String            @unique // parent number + vendor suffix
+  orderId         String
+  order           Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  vendorProfileId String
+  // Restrict: a storefront with orders cannot be hard-deleted (protects history).
+  vendorProfile   VendorProfile     @relation(fields: [vendorProfileId], references: [id], onDelete: Restrict)
+  status          VendorOrderStatus @default(PENDING)
+  deliveryMethod  DeliveryMethod
+  customerNotes   String?
+  // Reserved for future shipment/tracking metadata — NOT used for order items.
+  shippingMetadata Json?
+  currency        Currency          @default(BZD)
+  itemCount       Int
+  subtotalMinor   BigInt
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  items OrderItem[]
+
+  @@index([orderId])
+  @@index([vendorProfileId, createdAt])
+  @@index([status])
+  @@map("vendor_orders")
+}
+
+model OrderItem {
+  id             String          @id @default(cuid())
+  vendorOrderId  String
+  vendorOrder    VendorOrder     @relation(fields: [vendorOrderId], references: [id], onDelete: Cascade)
+  // Live references kept for future linkage; the SNAPSHOT fields below are the
+  // source of truth so order history survives product/variant deletion.
+  productId      String?
+  product        Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  variantId      String?
+  variant        ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  productTitle   String
+  variantTitle   String?
+  sku            String?
+  unitPriceMinor BigInt
+  quantity       Int
+  subtotalMinor  BigInt
+  currency       Currency        @default(BZD)
+  createdAt      DateTime        @default(now())
+
+  @@index([vendorOrderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model OrderAddress {
+  id           String           @id @default(cuid())
+  orderId      String
+  order        Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type         OrderAddressType @default(SHIPPING)
+  fullName     String
+  phone        String?
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  district     District
+  country      String           @default("BZ")
+  latitude     Float?
+  longitude    Float?
+  createdAt    DateTime         @default(now())
+
+  @@index([orderId])
+  @@map("order_addresses")
 }

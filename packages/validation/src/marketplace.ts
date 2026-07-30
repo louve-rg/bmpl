@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  DELIVERY_METHODS,
   DISTRICTS,
   INVENTORY_CHANGE_REASONS,
   MODERATION_ACTIONS,
@@ -405,3 +406,40 @@ export const updateCartItemSchema = z.object({
   quantity: cartQtySchema,
 });
 export type UpdateCartItemInput = z.infer<typeof updateCartItemSchema>;
+
+// ---- Checkout & orders (Phase 3 · M10) --------------------------------------
+
+const deliveryMethodSchema = z.enum(DELIVERY_METHODS);
+
+/** A snapshotted delivery address (required when any vendor uses DELIVERY). */
+export const orderAddressSchema = z.object({
+  fullName: z.string().trim().min(1, 'Full name is required.').max(160),
+  phone: z.string().trim().max(40).optional(),
+  addressLine1: z.string().trim().min(1, 'Address is required.').max(200),
+  addressLine2: z.string().trim().max(200).optional(),
+  city: z.string().trim().min(1, 'City is required.').max(120),
+  district: z.enum(DISTRICTS),
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
+});
+export type OrderAddressInput = z.infer<typeof orderAddressSchema>;
+
+/** Per-vendor fulfilment choice at checkout. */
+export const checkoutVendorSchema = z.object({
+  vendorProfileId: cuidRef,
+  deliveryMethod: deliveryMethodSchema,
+  customerNotes: z.string().trim().max(1000).optional(),
+});
+
+/**
+ * Checkout the active cart. `vendors` sets per-storefront delivery method +
+ * notes (any storefront omitted defaults to PICKUP). `deliveryAddress` is
+ * required when at least one vendor uses DELIVERY (enforced in the service,
+ * which knows the cart's actual vendors). No prices are accepted — the server
+ * recalculates and snapshots everything.
+ */
+export const checkoutSchema = z.object({
+  vendors: z.array(checkoutVendorSchema).max(100).optional().default([]),
+  deliveryAddress: orderAddressSchema.optional(),
+});
+export type CheckoutInput = z.infer<typeof checkoutSchema>;

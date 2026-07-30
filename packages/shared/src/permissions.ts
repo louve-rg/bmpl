@@ -24,6 +24,8 @@ export const PERMISSIONS = [
   'products.read', // view products in the admin moderation console
   'products.moderate', // approve / reject / suspend products
   'categories.manage', // create / edit / delete marketplace categories
+  // ---- Marketplace (Phase 3 · M10) ----
+  'orders.read', // read-only order visibility in the admin console (no editing)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -37,6 +39,7 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'audit.read',
     'vendors.read',
     'products.read',
+    'orders.read',
   ],
   ADMIN: [
     'users.read',
@@ -55,6 +58,7 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'products.read',
     'products.moderate',
     'categories.manage',
+    'orders.read',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

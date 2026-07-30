@@ -38,6 +38,8 @@ export const AUDIT_ACTIONS = [
   'PRODUCT_DELETED',
   // ---- Marketplace: Inventory (Phase 2 · M6) ----
   'INVENTORY_ADJUSTED',
+  // ---- Marketplace: Orders (Phase 3 · M10) ----
+  'ORDER_CREATED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

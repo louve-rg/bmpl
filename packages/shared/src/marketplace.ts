@@ -80,3 +80,23 @@ export const DAYS_OF_WEEK = [
 /** Sort options accepted by the public product listing. */
 export const PRODUCT_SORTS = ['relevance', 'newest', 'price_asc', 'price_desc', 'featured'] as const;
 export type ProductSort = (typeof PRODUCT_SORTS)[number];
+
+// ---- Orders & checkout (Phase 3 · M10) --------------------------------------
+// Only the INITIAL lifecycle states are defined here. Payment/fulfilment/refund
+// states are deliberately NOT introduced yet (later milestones extend these).
+
+/** Parent order lifecycle. M10 creates orders in PENDING only. */
+export const ORDER_STATUSES = ['PENDING'] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+/** Per-vendor sub-order lifecycle. M10 creates vendor orders in PENDING only. */
+export const VENDOR_ORDER_STATUSES = ['PENDING'] as const;
+export type VendorOrderStatus = (typeof VENDOR_ORDER_STATUSES)[number];
+
+/** Fulfilment method chosen per vendor order at checkout. */
+export const DELIVERY_METHODS = ['PICKUP', 'DELIVERY'] as const;
+export type DeliveryMethod = (typeof DELIVERY_METHODS)[number];
+
+/** Snapshotted order address kinds. Only SHIPPING is captured in M10. */
+export const ORDER_ADDRESS_TYPES = ['SHIPPING'] as const;
+export type OrderAddressType = (typeof ORDER_ADDRESS_TYPES)[number];

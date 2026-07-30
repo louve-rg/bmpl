@@ -175,7 +175,12 @@ export class InventoryService {
     }));
   }
 
-  // ---- Reservations (Phase 3 hooks; transactional, not exposed via vendor API) ----
+  // ---- Reservations (Phase 3 · wired by checkout/M10; transactional) ----
+
+  /** The inventory row backing a purchasable (product-level or a variant); null if untracked. */
+  async rowFor(productId: string, variantId: string | null, tx: Tx = this.prisma): Promise<Inventory | null> {
+    return tx.inventory.findFirst({ where: { productId, variantId: variantId ?? null } });
+  }
 
   async reserve(inventoryId: string, qty: number, tx: Tx = this.prisma): Promise<void> {
     const inv = await tx.inventory.findUniqueOrThrow({ where: { id: inventoryId } });

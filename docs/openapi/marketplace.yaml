@@ -20,6 +20,8 @@ tags:
     description: Moderation (requires an admin permission).
   - name: Cart
     description: Authenticated customer's own shopping cart (self-scoped; no admin/vendor surface).
+  - name: Orders
+    description: Checkout + orders. Customer (self), Vendor (own vendor orders), Admin (read-only).
 components:
   securitySchemes:
     cookieAuth:
@@ -217,6 +219,75 @@ components:
         hasUnavailableItems: { type: boolean }
         vendors: { type: array, items: { $ref: "#/components/schemas/CartVendorGroup" } }
         updatedAt: { type: string, format: date-time }
+    OrderAddressInput:
+      type: object
+      required: [fullName, addressLine1, city, district]
+      properties:
+        fullName: { type: string }
+        phone: { type: string }
+        addressLine1: { type: string }
+        addressLine2: { type: string }
+        city: { type: string }
+        district: { type: string, enum: [BELIZE, CAYO, COROZAL, ORANGE_WALK, STANN_CREEK, TOLEDO] }
+        latitude: { type: number }
+        longitude: { type: number }
+    Checkout:
+      type: object
+      description: >
+        Checkout the active cart. `vendors` sets per-storefront delivery method +
+        notes (any storefront omitted defaults to PICKUP). `deliveryAddress` is
+        required when at least one vendor uses DELIVERY. NO prices are accepted —
+        the server recalculates and snapshots everything.
+      properties:
+        vendors:
+          type: array
+          items:
+            type: object
+            required: [vendorProfileId, deliveryMethod]
+            properties:
+              vendorProfileId: { type: string }
+              deliveryMethod: { type: string, enum: [PICKUP, DELIVERY] }
+              customerNotes: { type: string }
+        deliveryAddress: { $ref: "#/components/schemas/OrderAddressInput" }
+    OrderItem:
+      type: object
+      properties:
+        productTitle: { type: string }
+        variantTitle: { type: [string, "null"] }
+        sku: { type: [string, "null"] }
+        unitPriceMinor: { type: integer, description: "snapshot at checkout" }
+        quantity: { type: integer }
+        subtotalMinor: { type: integer }
+        currency: { type: string }
+        productId: { type: [string, "null"] }
+        imageUrl: { type: [string, "null"] }
+    VendorOrder:
+      type: object
+      properties:
+        id: { type: string }
+        orderNumber: { type: string }
+        status: { type: string, enum: [PENDING] }
+        deliveryMethod: { type: string, enum: [PICKUP, DELIVERY] }
+        customerNotes: { type: [string, "null"] }
+        currency: { type: string }
+        itemCount: { type: integer }
+        subtotalMinor: { type: integer }
+        vendor: { type: object, properties: { businessName: { type: string }, slug: { type: string } } }
+        items: { type: array, items: { $ref: "#/components/schemas/OrderItem" } }
+    Order:
+      type: object
+      description: A placed order — parent totals + one vendor order per storefront.
+      properties:
+        id: { type: string }
+        orderNumber: { type: string }
+        status: { type: string, enum: [PENDING] }
+        currency: { type: string, example: BZD }
+        itemCount: { type: integer }
+        subtotalMinor: { type: integer }
+        totalMinor: { type: integer, description: "== subtotalMinor in M10 (no tax/shipping/fees)" }
+        placedAt: { type: string, format: date-time }
+        deliveryAddress: { type: [object, "null"] }
+        vendorOrders: { type: array, items: { $ref: "#/components/schemas/VendorOrder" } }
 paths:
   /marketplace/categories:
     get:
@@ -400,3 +471,49 @@ paths:
       parameters: [ { name: itemId, in: path, required: true, schema: { type: string } } ]
       security: [{ cookieAuth: [], csrfToken: [] }]
       responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Cart" } } } }, "401": { $ref: "#/components/responses/Unauthorized" }, "404": { $ref: "#/components/responses/NotFound" } }
+  /checkout:
+    post:
+      tags: [Orders]
+      summary: Checkout the active cart into a PENDING order (transactional; reserves inventory)
+      description: >
+        Validates every product/variant/storefront + inventory one final time,
+        atomically reserves inventory, creates the order graph, and clears the
+        cart — all in one transaction. Any failure rolls everything back
+        (including reservations). No payment is taken.
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/Checkout" } } } }
+      responses:
+        "201": { description: Order created, content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /orders:
+    get:
+      tags: [Orders]
+      summary: The customer's own order history
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK }, "401": { $ref: "#/components/responses/Unauthorized" } }
+  /orders/{id}:
+    get:
+      tags: [Orders]
+      summary: Customer order detail (own orders only)
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } } }, "401": { $ref: "#/components/responses/Unauthorized" }, "404": { $ref: "#/components/responses/NotFound" } }
+  /vendor/orders:
+    get:
+      tags: [Orders]
+      summary: The vendor's own vendor orders (requires APPROVED VENDOR role)
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK }, "401": { $ref: "#/components/responses/Unauthorized" }, "403": { $ref: "#/components/responses/Forbidden" } }
+  /vendor/orders/{id}:
+    get:
+      tags: [Orders]
+      summary: Vendor order detail (own storefront only)
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/VendorOrder" } } } }, "404": { $ref: "#/components/responses/NotFound" } }
+  /admin/orders:
+    get: { tags: [Orders], summary: All orders (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires orders.read" }
+  /admin/orders/{id}:
+    get: { tags: [Orders], summary: Order detail (read-only), parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Requires orders.read" }

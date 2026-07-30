@@ -87,9 +87,26 @@ required/invalid variant (`400`), and insufficient stock (`409`). `GET` never
 throws for a stale cart — each line carries `issues[]` / `purchasable` /
 `priceChanged` flags instead. Response is the full `Cart` (see OpenAPI `Cart`).
 
+## Orders & checkout (Phase 3 · M10)
+**Customer** — `@Roles('CUSTOMER')`, self-scoped:
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/checkout` | cart → PENDING order (transactional; reserves inventory; clears cart). Body: `{ vendors:[{vendorProfileId, deliveryMethod, customerNotes?}], deliveryAddress? }` |
+| GET | `/api/orders` | own order history |
+| GET | `/api/orders/:id` | own order detail |
+
+**Vendor** — `@Roles('VENDOR')`, owner-scoped:
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/vendor/orders` | the vendor's own vendor orders |
+| GET | `/api/vendor/orders/:id` | vendor order detail (+ customer name / delivery address) |
+
+Checkout rejects an empty cart (`400`), an unpublished product / inactive storefront / disabled variant (`409`), and insufficient stock (`409`) — any failure rolls the whole transaction back (no order, no reservation, cart intact). Prices are recomputed + **snapshotted**; the client sends no prices. No payment/tax/shipping/fees.
+
 ## Admin — `@RequirePermission(...)`
 | Method | Path | Permission |
 |---|---|---|
+| GET | `/api/admin/orders` · `/:id` | `orders.read` (read-only; no editing) |
 | GET/POST | `/api/admin/categories` | `categories.manage` |
 | PATCH/DELETE | `/api/admin/categories/:id` | `categories.manage` |
 | GET | `/api/admin/vendors` `?status=` · `/:id` | `vendors.read` |

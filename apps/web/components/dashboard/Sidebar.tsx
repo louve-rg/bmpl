@@ -6,6 +6,7 @@ import type { MeView } from '../../lib/types';
 
 const NAV = [
   { label: 'Overview', href: '/dashboard' },
+  { label: 'My Orders', href: '/orders' },
   { label: 'My Roles', href: '/dashboard/roles' },
   { label: 'Profile', href: '/dashboard/profile' },
 ];
@@ -13,7 +14,12 @@ const NAV = [
 export function Sidebar({ me }: { me: MeView }) {
   const isVendor = me.roles.some((r) => r.roleCode === 'VENDOR' && r.status === 'APPROVED');
   const nav = isVendor
-    ? [...NAV, { label: 'My Store', href: '/dashboard/store' }, { label: 'My Products', href: '/dashboard/products' }]
+    ? [
+        ...NAV,
+        { label: 'My Store', href: '/dashboard/store' },
+        { label: 'My Products', href: '/dashboard/products' },
+        { label: 'Store Orders', href: '/dashboard/orders' },
+      ]
     : NAV;
   return (
     <aside className="flex w-full flex-col gap-6 border-r border-slate-200 bg-white p-5 md:h-screen md:w-72 md:shrink-0">

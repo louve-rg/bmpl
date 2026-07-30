@@ -141,14 +141,23 @@ export default function CartPage() {
                 </div>
               </dl>
               <p className="mt-3 text-xs text-slate-400">Taxes, delivery, and fees are calculated at checkout.</p>
-              <button
-                type="button"
-                disabled
-                title="Checkout is coming in the next milestone."
-                className="mt-4 w-full cursor-not-allowed rounded-lg bg-slate-300 px-5 py-3 text-sm font-semibold text-white"
-              >
-                Checkout coming next
-              </button>
+              {cart.hasUnavailableItems ? (
+                <button
+                  type="button"
+                  disabled
+                  title="Resolve the unavailable items before checking out."
+                  className="mt-4 w-full cursor-not-allowed rounded-lg bg-slate-300 px-5 py-3 text-sm font-semibold text-white"
+                >
+                  Resolve items to checkout
+                </button>
+              ) : (
+                <Link
+                  href="/checkout"
+                  className="mt-4 block w-full rounded-lg bg-belize-blue px-5 py-3 text-center text-sm font-semibold text-white hover:bg-belize-deep"
+                >
+                  Proceed to checkout
+                </Link>
+              )}
               <Link href="/products" className="mt-3 block text-center text-sm text-belize-blue hover:underline">
                 Continue shopping
               </Link>

@@ -31,6 +31,7 @@ packages/
 | `vendor/` | vendor profile, settings, locations, hours, logo/banner, admin moderation, public storefront (M2/M3) |
 | `products/` | product CRUD + lifecycle, images, options/variants, inventory, admin moderation, public catalog/search (M4–M7) |
 | `cart/` | authenticated customer shopping cart — self-scoped; server-authoritative pricing; vendor-grouped (Phase 3 · M9) |
+| `orders/` | checkout + orders — transactional cart→order conversion, inventory reservation, price snapshots; customer/vendor/admin reads (Phase 3 · M10) |
 | `storage/` | S3-compatible object storage (MinIO/R2) — presign, headObject, publicUrl |
 | `auth/`, `common/`, `throttling/`, `audit/`, `notifications/` | reused Phase 1 cross-cutting infrastructure |
 
@@ -95,6 +96,21 @@ read (respecting `unlimited`/`allowBackorders`) but **inventory is never reserve
 in the cart — reservation happens at checkout/order creation (M10+). Items are
 returned **grouped by vendor**; each group is the seed for one vendor order in the
 future checkout split. See the [M9 doc](../phase-3/M9-shopping-cart.md).
+
+## Checkout & orders (Phase 3 · M10)
+Checkout converts a validated cart into a normalized order graph in **one
+transaction**: a parent `Order`, one `VendorOrder` per storefront (the multi-vendor
+split), immutable `OrderItem` snapshots (title/variant/SKU/unit price), and a
+snapshotted `OrderAddress`. It re-validates every product/variant/storefront and
+inventory one final time, then **reserves inventory for the first time**
+(`InventoryService.reserve`, incrementing `Inventory.reserved`) — all inside the
+same transaction, so any failure rolls back the order **and** the reservations
+atomically; the cart is cleared only on success. The **server recomputes and
+snapshots all prices** (shared `effectiveUnitPrice`); the client sends no prices.
+M10 creates orders in `PENDING` only — no payment/tax/shipping/fees/dispatch. Each
+`VendorOrder` carries its `deliveryMethod` (PICKUP/DELIVERY), customer notes, and a
+reserved `shippingMetadata` placeholder, seeding future per-vendor fulfilment.
+See the [M10 doc](../phase-3/M10-checkout-orders.md).
 
 ## Money & i18n
 Prices are `BigInt` **minor units** (cents), currency `BZD` (matches the wallet).

@@ -22,6 +22,6 @@ import { OwnershipService } from './ownership.service';
     ProductInventoryController,
   ],
   providers: [ProductsService, ProductImagesService, VariantsService, InventoryService, OwnershipService],
-  exports: [ProductsService, ProductImagesService, VariantsService, InventoryService],
+  exports: [ProductsService, ProductImagesService, VariantsService, InventoryService, OwnershipService],
 })
 export class ProductsModule {}
