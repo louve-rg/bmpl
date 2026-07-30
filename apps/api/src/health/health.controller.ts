@@ -20,7 +20,8 @@ export class HealthController {
 
   /** Liveness — process is up. `commit` (Railway-injected git SHA) makes it
    *  possible to confirm exactly which build is live during a deploy (and that
-   *  the pre-deploy migration hook ran, since a failed hook halts promotion). */
+   *  the pre-deploy migration hook ran, since a failed hook halts promotion).
+   *  M10: checkout/orders live behind this build. */
   @Public()
   @Get()
   live() {
