@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let adminCookies: string[];
@@ -264,5 +264,52 @@ describe('authorization, ownership + isolation', () => {
     expect(aList.body.some((v: { id: string }) => v.id === vendorOrderId)).toBe(true);
     const bList = await request(ctx.server).get('/api/vendor/orders').set('Cookie', vendorB.cookies).expect(200);
     expect(bList.body.some((v: { id: string }) => v.id === vendorOrderId)).toBe(false);
+  });
+});
+
+describe('M10.1 — reservation release (admin operational)', () => {
+  let customer: string[];
+  let vendor: Awaited<ReturnType<typeof makeVendor>>;
+  let productId: string;
+  let orderId: string;
+
+  beforeAll(async () => {
+    customer = await registerCustomer('rel_c@example.bz');
+    vendor = await makeVendor('rel_v@example.bz', 'RelShop');
+    productId = await createProduct(vendor.cookies, { title: 'Releasable', sku: 'REL', priceMinor: 1000 });
+    await setStock(vendor.cookies, productId, 5);
+    await addToCart(customer, { productId, quantity: 2 }).expect(201);
+    orderId = (await checkout(customer).expect(201)).body.id;
+  });
+
+  const release = (cookie: string[]) =>
+    request(ctx.server).post(`/api/admin/orders/${orderId}/release-reservations`).set('Cookie', cookie);
+
+  it('reserves on checkout, then releases via the admin endpoint (restores stock)', async () => {
+    expect(await reservedFor(productId)).toBe(2);
+    const res = await release(adminCookies).expect(201);
+    expect(res.body).toMatchObject({ released: true, alreadyReleased: false, itemsReleased: 1 });
+    expect(await reservedFor(productId)).toBe(0); // reserved restored
+  });
+
+  it('is idempotent — a second release is a no-op and never over-releases', async () => {
+    const res = await release(adminCookies).expect(201);
+    expect(res.body).toMatchObject({ released: false, alreadyReleased: true, itemsReleased: 0 });
+    expect(await reservedFor(productId)).toBe(0);
+  });
+
+  it('leaves the historical order intact (no customer cancellation)', async () => {
+    const detail = await request(ctx.server).get(`/api/orders/${orderId}`).set('Cookie', customer).expect(200);
+    expect(detail.body.status).toBe('PENDING');
+    expect(detail.body.vendorOrders[0].items[0].quantity).toBe(2);
+  });
+
+  it('requires orders.manage (anon 401, customer 403, read-only admin 403)', async () => {
+    await request(ctx.server).post(`/api/admin/orders/${orderId}/release-reservations`).expect(401);
+    await release(customer).expect(403);
+    const ro = await seedLimitedAdmin(ctx.prisma, 'rel_ro@example.bz', ['orders.read']);
+    const roCookies = await login(ro.email, ro.password);
+    await request(ctx.server).get('/api/admin/orders').set('Cookie', roCookies).expect(200); // read allowed
+    await release(roCookies).expect(403); // manage denied
   });
 });

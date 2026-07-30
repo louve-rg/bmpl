@@ -517,3 +517,11 @@ paths:
     get: { tags: [Orders], summary: All orders (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires orders.read" }
   /admin/orders/{id}:
     get: { tags: [Orders], summary: Order detail (read-only), parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Requires orders.read" }
+  /admin/orders/{id}/release-reservations:
+    post:
+      tags: [Orders]
+      summary: Release an order's inventory reservations (M10.1, idempotent)
+      description: "Requires orders.manage. Operational utility (not customer cancellation) — releases reserved stock; the order row is left intact. A second call is a no-op."
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses: { "201": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" }, "404": { $ref: "#/components/responses/NotFound" } }

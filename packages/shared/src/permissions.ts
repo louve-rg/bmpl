@@ -26,6 +26,7 @@ export const PERMISSIONS = [
   'categories.manage', // create / edit / delete marketplace categories
   // ---- Marketplace (Phase 3 · M10) ----
   'orders.read', // read-only order visibility in the admin console (no editing)
+  'orders.manage', // operational order actions (e.g. release inventory reservations) — M10.1
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -59,6 +60,7 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'products.moderate',
     'categories.manage',
     'orders.read',
+    'orders.manage',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

@@ -107,6 +107,7 @@ Checkout rejects an empty cart (`400`), an unpublished product / inactive storef
 | Method | Path | Permission |
 |---|---|---|
 | GET | `/api/admin/orders` · `/:id` | `orders.read` (read-only; no editing) |
+| POST | `/api/admin/orders/:id/release-reservations` | `orders.manage` (M10.1; idempotent; releases an order's inventory reservations — not customer cancellation) |
 | GET/POST | `/api/admin/categories` | `categories.manage` |
 | PATCH/DELETE | `/api/admin/categories/:id` | `categories.manage` |
 | GET | `/api/admin/vendors` `?status=` · `/:id` | `vendors.read` |

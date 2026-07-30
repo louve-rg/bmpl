@@ -135,13 +135,22 @@ regressions.
 
 ## Known limitations / risks
 - **No payment** — orders are `PENDING`; no charge, wallet debit, or invoice.
-- **Reservations never released** in M10 — a cancel/refund/expiry path must call
-  `InventoryService.release()` in a later milestone, else reserved stock lingers.
 - **No fulfilment/dispatch/tracking/messaging/reviews** — deferred.
-- `orders.read` is a new admin permission: production super-admins need a
-  permission sync (existing `syncSuperAdminPermissions` via bootstrap) to see the
-  admin order views; this does not affect customer/vendor checkout.
 - Single currency (BZD); `totalMinor == subtotalMinor` until tax/shipping/fees.
+
+## M10.1 cleanup (follow-up)
+A small cleanup release added:
+- **Startup maintenance** (`MaintenanceService`, `OnApplicationBootstrap`, skipped
+  under `NODE_ENV=test`): runs inside Railway on every deploy — (1)
+  `syncSuperAdminPermissions` so new permissions (`orders.read`/`orders.manage`)
+  reach super-admins immediately, and (2) releases reservations for the production
+  verification account's orders (idempotent). No external DB credentials.
+- **`POST /api/admin/orders/:id/release-reservations`** (`orders.manage`) — an
+  idempotent operational utility to release an order's inventory reservations
+  (guarded by `Order.reservationsReleasedAt`; the order row stays intact). This is
+  **not** customer cancellation. Adds `OrderItem`-level reservation release via the
+  existing `InventoryService.release()`, partially completing the reservation
+  lifecycle (customer-facing cancel/refund remains a later milestone).
 
 ## Recommended M11 scope
 Payment authorization + wallet debit against a `PENDING` order (escrow hold via the

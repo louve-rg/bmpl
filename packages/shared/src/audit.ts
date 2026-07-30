@@ -40,6 +40,7 @@ export const AUDIT_ACTIONS = [
   'INVENTORY_ADJUSTED',
   // ---- Marketplace: Orders (Phase 3 · M10) ----
   'ORDER_CREATED',
+  'ORDER_RESERVATION_RELEASED', // admin/maintenance release of an order's inventory reservations (M10.1)
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

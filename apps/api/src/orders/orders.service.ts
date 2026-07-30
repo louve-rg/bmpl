@@ -227,6 +227,68 @@ export class OrdersService {
   }
 
   // ===========================================================================
+  // Operational: release an order's inventory reservations (M10.1)
+  // ===========================================================================
+
+  /**
+   * Release the inventory reserved for an order (admin utility / maintenance).
+   * Idempotent via `reservationsReleasedAt` — a second call is a no-op, so it can
+   * never over-release another order's reservations. This is NOT customer
+   * cancellation: the order row is left intact (status unchanged).
+   */
+  async releaseReservations(orderId: string, actorId?: string | null) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { vendorOrders: { include: { items: true } } },
+      });
+      if (!order) throw new NotFoundException('Order not found.');
+      if (order.reservationsReleasedAt) {
+        return { orderId, orderNumber: order.orderNumber, released: false, alreadyReleased: true, itemsReleased: 0 };
+      }
+      let itemsReleased = 0;
+      for (const vo of order.vendorOrders) {
+        for (const item of vo.items) {
+          if (!item.productId) continue; // product deleted — nothing tracked to release
+          const inv = await this.inventory.rowFor(item.productId, item.variantId, tx);
+          if (!inv) continue; // untracked inventory — nothing reserved
+          await this.inventory.release(inv.id, item.quantity, tx);
+          itemsReleased += 1;
+        }
+      }
+      await tx.order.update({ where: { id: orderId }, data: { reservationsReleasedAt: new Date() } });
+      await this.audit.record(
+        {
+          action: 'ORDER_RESERVATION_RELEASED',
+          actorId: actorId ?? null,
+          newValue: { orderId, orderNumber: order.orderNumber, itemsReleased },
+        },
+        tx,
+      );
+      return { orderId, orderNumber: order.orderNumber, released: true, alreadyReleased: false, itemsReleased };
+    });
+  }
+
+  /**
+   * Maintenance: release reservations for orders placed by the production
+   * verification account (bounded + idempotent). Used by the startup task to
+   * clean up reservations created solely for production verification.
+   */
+  async releaseVerificationReservations(email: string) {
+    const orders = await this.prisma.order.findMany({
+      where: { user: { email }, reservationsReleasedAt: null },
+      select: { id: true },
+      take: 50,
+    });
+    let itemsReleased = 0;
+    for (const o of orders) {
+      const r = await this.releaseReservations(o.id, null);
+      itemsReleased += r.itemsReleased;
+    }
+    return { orders: orders.length, itemsReleased };
+  }
+
+  // ===========================================================================
   // Customer reads (self-scoped)
   // ===========================================================================
 

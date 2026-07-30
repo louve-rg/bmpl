@@ -145,6 +145,7 @@ enum AuditAction {
   INVENTORY_ADJUSTED
   // ---- Marketplace: Orders (Phase 3 · M10) ----
   ORDER_CREATED
+  ORDER_RESERVATION_RELEASED
 }
 
 enum WalletAccountType {
@@ -1001,6 +1002,10 @@ model Order {
   // totalMinor == subtotalMinor until those are added in later milestones.
   subtotalMinor BigInt
   totalMinor    BigInt
+  // Operational (M10.1): set when this order's inventory reservations have been
+  // released (admin utility / maintenance). Guards against double-release. This
+  // is NOT customer cancellation and does not change the order's status.
+  reservationsReleasedAt DateTime?
   placedAt      DateTime    @default(now())
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
