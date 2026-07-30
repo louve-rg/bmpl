@@ -42,6 +42,12 @@ export class VendorController {
     return this.vendor.getOwn(user.userId);
   }
 
+  /** Owner preview of their own storefront (any approval status). */
+  @Get('profile/preview')
+  preview(@CurrentUser() user: AuthContext) {
+    return this.vendor.previewOwn(user.userId);
+  }
+
   @Post('profile')
   create(
     @CurrentUser() user: AuthContext,

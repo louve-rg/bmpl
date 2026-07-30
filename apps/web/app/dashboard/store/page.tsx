@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
 
 const DISTRICTS = ['BELIZE', 'CAYO', 'COROZAL', 'ORANGE_WALK', 'STANN_CREEK', 'TOLEDO'];
@@ -129,7 +130,13 @@ function StatusBar({ store, onDone, onError }: SectionProps) {
       {store.profile!.rejectionReason && status === 'REJECTED' && (
         <span className="text-sm text-red-600">Reason: {store.profile!.rejectionReason}</span>
       )}
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-3">
+        <Link
+          href="/dashboard/store/preview"
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          Preview storefront
+        </Link>
         {canSubmit && (
           <button
             className={btn}

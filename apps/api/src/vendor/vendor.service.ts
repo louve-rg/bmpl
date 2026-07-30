@@ -34,6 +34,13 @@ export interface ActorContext {
 type ImageKind = 'logo' | 'banner';
 type ModerationKind = 'approve' | 'reject' | 'suspend' | 'restore';
 
+/** Relations loaded to render a storefront (public view + owner preview). */
+const STOREFRONT_INCLUDE = {
+  settings: true,
+  locations: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+  openingHours: { orderBy: { dayOfWeek: 'asc' } },
+} satisfies Prisma.VendorProfileInclude;
+
 @Injectable()
 export class VendorService {
   constructor(
@@ -327,14 +334,30 @@ export class VendorService {
   async publicStorefront(slug: string) {
     const p = await this.prisma.vendorProfile.findFirst({
       where: { slug, approvalStatus: 'APPROVED' },
-      include: {
-        settings: true,
-        locations: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
-        openingHours: { orderBy: { dayOfWeek: 'asc' } },
-      },
+      include: STOREFRONT_INCLUDE,
     });
     if (!p) throw new NotFoundException('Storefront not found.');
+    return this.buildStorefront(p);
+  }
 
+  /**
+   * Owner-only PREVIEW of the caller's OWN storefront in ANY status (DRAFT,
+   * PENDING, …) — lets a vendor see exactly what customers will see before it is
+   * approved/public. Same shape as the public storefront plus a `preview` flag
+   * and the current `approvalStatus`.
+   */
+  async previewOwn(userId: string) {
+    const p = await this.prisma.vendorProfile.findUnique({
+      where: { userId },
+      include: STOREFRONT_INCLUDE,
+    });
+    if (!p) throw new NotFoundException('Create your storefront first.');
+    return { ...(await this.buildStorefront(p)), preview: true, approvalStatus: p.approvalStatus };
+  }
+
+  private async buildStorefront(
+    p: Prisma.VendorProfileGetPayload<{ include: typeof STOREFRONT_INCLUDE }>,
+  ) {
     const featuredProducts = await this.products.vendorFeatured(p.id);
     const catRows = await this.prisma.product.findMany({
       where: { vendorProfileId: p.id, status: 'PUBLISHED' },
