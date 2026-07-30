@@ -16,11 +16,11 @@ interface ProductRow {
   vendor: string;
 }
 
-const STATUSES = ['PENDING_REVIEW', 'PUBLISHED', 'REJECTED', 'SUSPENDED', 'DRAFT', 'ARCHIVED', ''];
+const STATUSES = ['PUBLISHED', 'SUSPENDED', 'ARCHIVED', ''];
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 
 export default function AdminProductsPage() {
-  const [status, setStatus] = useState('PENDING_REVIEW');
+  const [status, setStatus] = useState('PUBLISHED');
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(false);
 

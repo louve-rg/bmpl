@@ -72,7 +72,7 @@ export default function EditProductPage() {
     void load();
   }, [id]);
 
-  async function act(action: 'submit' | 'archive') {
+  async function act(action: 'archive' | 'unarchive') {
     try {
       await api.post(`/vendor/products/${id}/${action}`);
       await load();
@@ -92,21 +92,26 @@ export default function EditProductPage() {
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{status.replace('_', ' ')}</span>
       </div>
 
-      {rejection && status === 'REJECTED' && (
+      {status === 'PUBLISHED' && (
+        <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
+          This product is live on your storefront. Changes save instantly.
+        </p>
+      )}
+      {status === 'SUSPENDED' && (
         <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
-          Admin feedback: {rejection}
+          This product was suspended by an administrator.{rejection ? ` Reason: ${rejection}` : ''}
         </p>
       )}
 
       <div className="mb-5 flex gap-2">
-        {(status === 'DRAFT' || status === 'REJECTED') && (
-          <button onClick={() => act('submit')} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
-            Submit for review
+        {status !== 'ARCHIVED' && status !== 'SUSPENDED' && (
+          <button onClick={() => act('archive')} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+            Archive (hide from store)
           </button>
         )}
-        {status !== 'ARCHIVED' && (
-          <button onClick={() => act('archive')} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
-            Archive
+        {status === 'ARCHIVED' && (
+          <button onClick={() => act('unarchive')} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
+            Publish to store
           </button>
         )}
       </div>

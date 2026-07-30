@@ -28,8 +28,7 @@ async function publishProduct(fields: Record<string, unknown>, opts?: { stockZer
     // touch inventory so it is tracked at 0 (out of stock)
     await request(ctx.server).get(`/api/vendor/products/${id}/inventory`).set('Cookie', vendorCookies).expect(200);
   }
-  await request(ctx.server).post(`/api/vendor/products/${id}/submit`).set('Cookie', vendorCookies).expect(201);
-  await request(ctx.server).post(`/api/admin/products/${id}/approve`).set('Cookie', adminCookies).send({}).expect(201);
+  // products are PUBLISHED on create (auto-publish); vendor approved above.
   return id;
 }
 

@@ -56,8 +56,11 @@ Global guard chain (in order): **rate-limit → CSRF → JWT auth → roles → 
 ## Approval flows
 - **Vendor:** DRAFT → (submit) PENDING → admin APPROVE → APPROVED (public) / REJECT →
   REJECTED / SUSPEND ↔ RESTORE. A moderation-review trail + vendor notification per step.
-- **Product:** DRAFT → (submit) PENDING_REVIEW → admin APPROVE → PUBLISHED (public) /
-  REJECT / SUSPEND ↔ RESTORE / ARCHIVE. Only PUBLISHED products of APPROVED vendors are public.
+- **Product:** created **PUBLISHED** immediately — **no pre-review step**. The
+  `featured` flag surfaces it in featured placement; others appear in normal
+  rotation. The vendor can ARCHIVE ↔ re-publish; admins can SUSPEND ↔ RESTORE a
+  live product (reactive moderation). Only products of an **APPROVED vendor** are
+  public (the storefront still gates visibility).
 
 ## Storage strategy
 One S3-compatible abstraction (`StorageService`) serves **MinIO** locally and

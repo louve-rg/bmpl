@@ -42,7 +42,7 @@ export default function VendorProductsPage() {
     void load();
   }, []);
 
-  async function act(id: string, action: 'submit' | 'archive' | 'unarchive') {
+  async function act(id: string, action: 'archive' | 'unarchive') {
     try {
       await api.post(`/vendor/products/${id}/${action}`);
       await load();
@@ -51,7 +51,7 @@ export default function VendorProductsPage() {
     }
   }
   async function del(id: string) {
-    if (!window.confirm('Delete this draft product?')) return;
+    if (!window.confirm('Delete this product? This cannot be undone.')) return;
     try {
       await api.del(`/vendor/products/${id}`);
       await load();
@@ -100,16 +100,13 @@ export default function VendorProductsPage() {
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap justify-end gap-2 text-xs font-semibold">
                       <Link href={`/dashboard/products/${p.id}`} className="text-belize-blue hover:underline">Edit</Link>
-                      {(p.status === 'DRAFT' || p.status === 'REJECTED') && (
-                        <button onClick={() => act(p.id, 'submit')} className="text-emerald-600 hover:underline">Submit</button>
-                      )}
-                      {p.status !== 'ARCHIVED' && (
+                      {p.status !== 'ARCHIVED' && p.status !== 'SUSPENDED' && (
                         <button onClick={() => act(p.id, 'archive')} className="text-slate-500 hover:underline">Archive</button>
                       )}
                       {p.status === 'ARCHIVED' && (
                         <button onClick={() => act(p.id, 'unarchive')} className="text-slate-500 hover:underline">Unarchive</button>
                       )}
-                      {p.status === 'DRAFT' && (
+                      {p.status !== 'SUSPENDED' && (
                         <button onClick={() => del(p.id)} className="text-red-600 hover:underline">Delete</button>
                       )}
                     </div>

@@ -83,7 +83,11 @@ export class ProductsService {
         sku: dto.sku,
         barcode: dto.barcode ?? null,
         brand: dto.brand ?? null,
-        status: 'DRAFT',
+        // Products go live immediately on create (no admin pre-review). Public
+        // visibility still requires the vendor's storefront to be APPROVED, and
+        // admins can suspend a live product after the fact.
+        status: 'PUBLISHED',
+        publishedAt: new Date(),
         priceMinor: BigInt(dto.priceMinor),
         salePriceMinor: dto.salePriceMinor == null ? null : BigInt(dto.salePriceMinor),
         weightGrams: dto.weightGrams ?? null,
@@ -157,31 +161,23 @@ export class ProductsService {
     return { ...this.ownShape(product, product.category), tags: product.tags.map((t) => t.name) };
   }
 
-  async submit(actor: ActorContext, id: string) {
-    return this.ownTransition(actor, id, {
-      from: ['DRAFT', 'REJECTED'],
-      to: 'PENDING_REVIEW',
-      action: 'SUBMITTED',
-      audit: 'PRODUCT_SUBMITTED',
-      clearRejection: true,
-    });
-  }
-
+  /** Vendor hides a product from the store. */
   async archive(actor: ActorContext, id: string) {
     return this.ownTransition(actor, id, {
-      from: ['DRAFT', 'REJECTED', 'PUBLISHED', 'SUSPENDED', 'PENDING_REVIEW'],
+      from: ['DRAFT', 'REJECTED', 'PUBLISHED', 'PENDING_REVIEW'],
       to: 'ARCHIVED',
       action: 'SUSPENDED', // closest ModerationAction; audit distinguishes
       audit: 'PRODUCT_ARCHIVED',
     });
   }
 
+  /** Vendor re-lists an archived product — goes straight back live. */
   async unarchive(actor: ActorContext, id: string) {
     return this.ownTransition(actor, id, {
       from: ['ARCHIVED'],
-      to: 'DRAFT',
+      to: 'PUBLISHED',
       action: 'RESTORED',
-      audit: 'PRODUCT_CREATED',
+      audit: 'PRODUCT_APPROVED',
     });
   }
 
@@ -189,7 +185,9 @@ export class ProductsService {
     const vp = await this.ownership.vendorProfileId(actor.userId);
     const p = await this.prisma.product.findUnique({ where: { id } });
     if (!p || p.vendorProfileId !== vp) throw new NotFoundException('Product not found.');
-    if (p.status !== 'DRAFT') throw new ConflictException('Only draft products can be deleted; archive instead.');
+    if (p.status === 'SUSPENDED') {
+      throw new ConflictException('A suspended product cannot be deleted; contact support.');
+    }
     await this.prisma.product.delete({ where: { id } });
     await this.audit.record({
       action: 'PRODUCT_DELETED',
@@ -453,7 +451,7 @@ export class ProductsService {
       from: ProductStatus[];
       to: ProductStatus;
       action: 'SUBMITTED' | 'SUSPENDED' | 'RESTORED';
-      audit: 'PRODUCT_SUBMITTED' | 'PRODUCT_ARCHIVED' | 'PRODUCT_CREATED';
+      audit: 'PRODUCT_SUBMITTED' | 'PRODUCT_ARCHIVED' | 'PRODUCT_CREATED' | 'PRODUCT_APPROVED';
       clearRejection?: boolean;
     },
   ) {

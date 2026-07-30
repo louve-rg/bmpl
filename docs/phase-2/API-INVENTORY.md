@@ -40,9 +40,9 @@ filters the whole subtree. Prices in the query are **cents**.
 **Products**
 | Method | Path |
 |---|---|
-| GET/POST | `/api/vendor/products` |
+| GET/POST | `/api/vendor/products` (POST creates a **PUBLISHED** product — no review step) |
 | GET/PATCH/DELETE | `/api/vendor/products/:id` |
-| POST | `/api/vendor/products/:id/submit` · `/archive` · `/unarchive` |
+| POST | `/api/vendor/products/:id/archive` · `/unarchive` |
 
 **Images** (`/api/vendor/products/:productId/images`)
 | Method | Path |

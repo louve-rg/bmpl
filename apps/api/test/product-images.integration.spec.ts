@@ -154,10 +154,7 @@ describe('product image manager', () => {
   });
 
   it('exposes the gallery on the public product detail', async () => {
-    // vendor already approved by the helper; publish the product
-    await request(ctx.server).post(`/api/vendor/products/${vendor.productId}/submit`).set('Cookie', vendor.cookies).expect(201);
-    await request(ctx.server).post(`/api/admin/products/${vendor.productId}/approve`).set('Cookie', adminCookies).send({}).expect(201);
-
+    // vendor already approved by the helper; products are published on create.
     const prod = await ctx.prisma.product.findUniqueOrThrow({ where: { id: vendor.productId } });
     const detail = await request(ctx.server).get(`/api/marketplace/products/${prod.slug}`);
     expect(detail.status).toBe(200);

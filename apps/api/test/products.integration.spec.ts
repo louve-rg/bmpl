@@ -62,26 +62,35 @@ afterAll(async () => {
   await ctx.app.close();
 });
 
-describe('product lifecycle + public visibility', () => {
+describe('product auto-publish + public visibility', () => {
   let vendor: Awaited<ReturnType<typeof makeApprovedVendor>>;
   let productId: string;
   let productSlug: string;
 
-  it('creates a DRAFT product with derived slug', async () => {
+  it('creates a product that is PUBLISHED immediately (no review step)', async () => {
     vendor = await makeApprovedVendor('p_vendor@example.bz', 'Gadget Hub');
     const res = await request(ctx.server)
       .post('/api/vendor/products')
       .set('Cookie', vendor.cookies)
-      .send({ title: 'Wireless Earbuds', sku: 'WE-001', categoryId, priceMinor: 5999, salePriceMinor: 4999, tags: ['audio', 'wireless'] });
+      .send({ title: 'Wireless Earbuds', sku: 'WE-001', categoryId, priceMinor: 5999, salePriceMinor: 4999, featured: true, tags: ['audio', 'wireless'] });
     expect(res.status).toBe(201);
     expect(res.body.slug).toBe('wireless-earbuds');
-    expect(res.body.status).toBe('DRAFT');
+    expect(res.body.status).toBe('PUBLISHED');
     expect(res.body.priceMinor).toBe(5999);
     productId = res.body.id;
     productSlug = res.body.slug;
 
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'PRODUCT_CREATED' } });
     expect(audit).toBeTruthy();
+  });
+
+  it('is immediately public — appears in the catalog + detail (no approval needed)', async () => {
+    const list = await request(ctx.server).get('/api/marketplace/products');
+    expect(list.body.items.some((p: { slug: string }) => p.slug === productSlug)).toBe(true);
+    const detail = await request(ctx.server).get(`/api/marketplace/products/${productSlug}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.title).toBe('Wireless Earbuds');
+    expect(detail.body.tags).toEqual(expect.arrayContaining(['audio', 'wireless']));
   });
 
   it('rejects a duplicate SKU and a sale price above price', async () => {
@@ -97,45 +106,7 @@ describe('product lifecycle + public visibility', () => {
       .expect(400);
   });
 
-  it('is NOT public while in DRAFT', async () => {
-    const list = await request(ctx.server).get('/api/marketplace/products');
-    expect(list.body.items.every((p: { slug: string }) => p.slug !== productSlug)).toBe(true);
-    await request(ctx.server).get(`/api/marketplace/products/${productSlug}`).expect(404);
-  });
-
-  it('submits → PENDING_REVIEW (still not public)', async () => {
-    const res = await request(ctx.server).post(`/api/vendor/products/${productId}/submit`).set('Cookie', vendor.cookies);
-    expect(res.status).toBe(201);
-    expect(res.body.status).toBe('PENDING_REVIEW');
-    await request(ctx.server).get(`/api/marketplace/products/${productSlug}`).expect(404);
-  });
-
-  it('admin approves → PUBLISHED, public, audit + vendor notification', async () => {
-    const queue = await request(ctx.server).get('/api/admin/products?status=PENDING_REVIEW').set('Cookie', adminCookies);
-    expect(queue.body.some((p: { id: string }) => p.id === productId)).toBe(true);
-
-    const approve = await request(ctx.server)
-      .post(`/api/admin/products/${productId}/approve`)
-      .set('Cookie', adminCookies)
-      .send({});
-    expect(approve.status).toBe(201);
-    expect(approve.body.status).toBe('PUBLISHED');
-
-    const detail = await request(ctx.server).get(`/api/marketplace/products/${productSlug}`);
-    expect(detail.status).toBe(200);
-    expect(detail.body.title).toBe('Wireless Earbuds');
-    expect(detail.body.tags).toEqual(expect.arrayContaining(['audio', 'wireless']));
-
-    const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'PRODUCT_APPROVED' } });
-    expect(audit).toBeTruthy();
-    const note = await request(ctx.server).get('/api/notifications').set('Cookie', vendor.cookies);
-    expect(note.body.some((n: { type: string }) => n.type === 'MARKETPLACE')).toBe(true);
-  });
-
-  it('appears in the public list and on the vendor storefront (featured)', async () => {
-    const list = await request(ctx.server).get('/api/marketplace/products');
-    expect(list.body.items.some((p: { slug: string }) => p.slug === productSlug)).toBe(true);
-
+  it('shows on the vendor storefront (featured) with its category', async () => {
     const store = await request(ctx.server).get(`/api/marketplace/vendors/${vendor.slug}`);
     expect(store.body.featuredProducts.some((p: { slug: string }) => p.slug === productSlug)).toBe(true);
     expect(store.body.categories.map((c: { name: string }) => c.name)).toContain('Electronics');
@@ -148,7 +119,16 @@ describe('product lifecycle + public visibility', () => {
     expect(byVendor.body.items.every((p: { vendor: { slug: string } }) => p.vendor.slug === vendor.slug)).toBe(true);
   });
 
-  it('suspends then restores a published product', async () => {
+  it('archiving hides it; re-publishing brings it back', async () => {
+    await request(ctx.server).post(`/api/vendor/products/${productId}/archive`).set('Cookie', vendor.cookies).expect(201);
+    await request(ctx.server).get(`/api/marketplace/products/${productSlug}`).expect(404);
+    const back = await request(ctx.server).post(`/api/vendor/products/${productId}/unarchive`).set('Cookie', vendor.cookies);
+    expect(back.status).toBe(201);
+    expect(back.body.status).toBe('PUBLISHED');
+    await request(ctx.server).get(`/api/marketplace/products/${productSlug}`).expect(200);
+  });
+
+  it('admin can suspend then restore a live product', async () => {
     await request(ctx.server).post(`/api/admin/products/${productId}/suspend`).set('Cookie', adminCookies).send({ note: 'Policy check' }).expect(201);
     await request(ctx.server).get(`/api/marketplace/products/${productSlug}`).expect(404);
     await request(ctx.server).post(`/api/admin/products/${productId}/restore`).set('Cookie', adminCookies).send({}).expect(201);
@@ -164,7 +144,7 @@ describe('product lifecycle + public visibility', () => {
   });
 });
 
-describe('rejection, ownership, deletion, authorization', () => {
+describe('ownership, deletion, authorization', () => {
   let a: Awaited<ReturnType<typeof makeApprovedVendor>>;
   let b: Awaited<ReturnType<typeof makeApprovedVendor>>;
   let aProductId: string;
@@ -179,30 +159,27 @@ describe('rejection, ownership, deletion, authorization', () => {
     aProductId = p.body.id;
   });
 
-  it('rejects a submitted product with a required reason', async () => {
-    await request(ctx.server).post(`/api/vendor/products/${aProductId}/submit`).set('Cookie', a.cookies).expect(201);
-    await request(ctx.server).post(`/api/admin/products/${aProductId}/reject`).set('Cookie', adminCookies).send({}).expect(400);
-    const rej = await request(ctx.server)
-      .post(`/api/admin/products/${aProductId}/reject`)
-      .set('Cookie', adminCookies)
-      .send({ note: 'Photos are too blurry.' });
-    expect(rej.status).toBe(201);
-    expect(rej.body.status).toBe('REJECTED');
-  });
-
   it("forbids vendor B from reading or editing vendor A's product", async () => {
     await request(ctx.server).get(`/api/vendor/products/${aProductId}`).set('Cookie', b.cookies).expect(404);
     await request(ctx.server).patch(`/api/vendor/products/${aProductId}`).set('Cookie', b.cookies).send({ title: 'Hijack' }).expect(404);
   });
 
-  it('only allows deleting DRAFT products', async () => {
-    // aProduct is REJECTED now → cannot delete
-    await request(ctx.server).delete(`/api/vendor/products/${aProductId}`).set('Cookie', a.cookies).expect(409);
-    const draft = await request(ctx.server)
+  it('lets the owner delete a live product', async () => {
+    const p = await request(ctx.server)
       .post('/api/vendor/products')
       .set('Cookie', a.cookies)
       .send({ title: 'Scratch', sku: 'SC-1', categoryId, priceMinor: 50 });
-    await request(ctx.server).delete(`/api/vendor/products/${draft.body.id}`).set('Cookie', a.cookies).expect(200);
+    expect(p.body.status).toBe('PUBLISHED');
+    await request(ctx.server).delete(`/api/vendor/products/${p.body.id}`).set('Cookie', a.cookies).expect(200);
+  });
+
+  it('refuses to delete an admin-suspended product', async () => {
+    const p = await request(ctx.server)
+      .post('/api/vendor/products')
+      .set('Cookie', a.cookies)
+      .send({ title: 'Suspendable', sku: 'SU-1', categoryId, priceMinor: 200 });
+    await request(ctx.server).post(`/api/admin/products/${p.body.id}/suspend`).set('Cookie', adminCookies).send({ note: 'hold' }).expect(201);
+    await request(ctx.server).delete(`/api/vendor/products/${p.body.id}`).set('Cookie', a.cookies).expect(409);
   });
 
   it('enforces the authorization matrix', async () => {

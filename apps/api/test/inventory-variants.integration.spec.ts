@@ -136,8 +136,7 @@ describe('normalized variants + variant inventory', () => {
   });
 
   it('exposes options + variants + availability on the public product', async () => {
-    await request(ctx.server).post(`/api/vendor/products/${v.productId}/submit`).set('Cookie', v.cookies).expect(201);
-    await request(ctx.server).post(`/api/admin/products/${v.productId}/approve`).set('Cookie', adminCookies).send({}).expect(201);
+    // products publish on create; vendor approved by the helper → already public
     const prod = await ctx.prisma.product.findUniqueOrThrow({ where: { id: v.productId } });
     const detail = await request(ctx.server).get(`/api/marketplace/products/${prod.slug}`);
     expect(detail.status).toBe(200);

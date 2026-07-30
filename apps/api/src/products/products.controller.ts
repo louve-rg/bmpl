@@ -50,11 +50,6 @@ export class ProductsController {
     return this.products.update(this.actor(user, req), id, body);
   }
 
-  @Post(':id/submit')
-  submit(@CurrentUser() user: AuthContext, @Req() req: Request, @Param('id') id: string) {
-    return this.products.submit(this.actor(user, req), id);
-  }
-
   @Post(':id/archive')
   archive(@CurrentUser() user: AuthContext, @Req() req: Request, @Param('id') id: string) {
     return this.products.archive(this.actor(user, req), id);
