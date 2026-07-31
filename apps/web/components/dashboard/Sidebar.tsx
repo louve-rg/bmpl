@@ -21,6 +21,7 @@ const VENDOR_NAV: NavItem[] = [
   { label: 'My Store', href: '/dashboard/store', icon: 'M4 8h16l-1 3H5L4 8Zm1 3v9h14v-9M9 20v-5h6v5' },
   { label: 'My Products', href: '/dashboard/products', icon: 'M4 7l8-4 8 4-8 4-8-4Zm0 0v10l8 4 8-4V7' },
   { label: 'Store Orders', href: '/dashboard/orders', icon: 'M6 3h12l1 4H5l1-4Zm-1 4v13h14V7' },
+  { label: 'Delivery', href: '/dashboard/delivery', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
 ];
 
 export function Sidebar({ me }: { me: MeView }) {

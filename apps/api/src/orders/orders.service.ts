@@ -10,6 +10,7 @@ import { ProductImagesService } from '../products/product-images.service';
 import { OwnershipService } from '../products/ownership.service';
 import { effectiveUnitPrice } from '../products/pricing.util';
 import { PaymentsService } from '../payments/payments.service';
+import { DeliveryPricingService } from '../delivery/delivery.pricing';
 
 export interface ActorContext {
   userId: string;
@@ -43,6 +44,7 @@ export class OrdersService {
     private readonly images: ProductImagesService,
     private readonly ownership: OwnershipService,
     private readonly payments: PaymentsService,
+    private readonly deliveryPricing: DeliveryPricingService,
   ) {}
 
   // ===========================================================================
@@ -160,12 +162,51 @@ export class OrdersService {
         linesByVendor.set(product.vendorProfileId, list);
       }
 
-      // ---- Delivery / address rules ----
+      // ---- Delivery (M13): validate method offered + price per vendor ----
+      const address = dto.deliveryAddress;
       const anyDelivery = [...linesByVendor.keys()].some(
         (vpId) => (choiceByVendor.get(vpId)?.deliveryMethod ?? 'PICKUP') === 'DELIVERY',
       );
-      if (anyDelivery && !dto.deliveryAddress) {
+      if (anyDelivery && !address) {
         throw new BadRequestException('A delivery address is required for delivery orders.');
+      }
+
+      interface VendorDelivery {
+        feeMinor: bigint;
+        freeApplied: boolean;
+        estimate: { minHours: number; maxHours: number; label: string | null } | null;
+        appliedZoneId: string | null;
+        instructions: string | null;
+      }
+      const deliveryByVendor = new Map<string, VendorDelivery>();
+      let deliveryFeeMinor = 0n;
+      for (const [vpId, lines] of linesByVendor) {
+        const choice = choiceByVendor.get(vpId);
+        const method = choice?.deliveryMethod ?? 'PICKUP';
+        const settings = await tx.vendorSettings.findUnique({ where: { vendorProfileId: vpId } });
+        if (method === 'PICKUP') {
+          if (settings && !settings.pickupEnabled) throw new BadRequestException('This store does not offer pickup.');
+          continue;
+        }
+        const vSubtotal = lines.reduce((s, l) => s + l.subtotalMinor, 0n);
+        const q = await this.deliveryPricing.quote(vpId, address!.district, vSubtotal);
+        if (!q.deliverable) {
+          const msg =
+            q.reason === 'PICKUP_ONLY'
+              ? 'This store does not offer delivery.'
+              : q.reason === 'BELOW_MINIMUM'
+                ? `Order is below this store's minimum for delivery ($${(Number(q.minimumOrderMinor ?? 0n) / 100).toFixed(2)}).`
+                : `This store does not deliver to ${address!.district.replace('_', ' ')}.`;
+          throw new BadRequestException(msg);
+        }
+        deliveryByVendor.set(vpId, {
+          feeMinor: q.feeMinor,
+          freeApplied: q.freeApplied,
+          estimate: q.estimate,
+          appliedZoneId: q.appliedZoneId,
+          instructions: choice?.deliveryInstructions?.trim() || null,
+        });
+        deliveryFeeMinor += q.feeMinor;
       }
 
       // ---- Create the order graph ----
@@ -174,6 +215,7 @@ export class OrdersService {
       const subtotalMinor = allLines.reduce((s, l) => s + l.subtotalMinor, 0n);
       const itemCount = allLines.reduce((s, l) => s + l.quantity, 0);
 
+      const totalMinor = subtotalMinor + deliveryFeeMinor;
       const order = await tx.order.create({
         data: {
           orderNumber,
@@ -182,7 +224,8 @@ export class OrdersService {
           currency: 'BZD',
           itemCount,
           subtotalMinor,
-          totalMinor: subtotalMinor, // no tax/shipping/fees in M10
+          deliveryFeeMinor,
+          totalMinor, // subtotal + delivery (no tax/discounts yet)
         },
       });
 
@@ -207,6 +250,7 @@ export class OrdersService {
       for (const [vpId, lines] of linesByVendor) {
         idx += 1;
         const choice = choiceByVendor.get(vpId);
+        const dv = deliveryByVendor.get(vpId);
         await tx.vendorOrder.create({
           data: {
             orderNumber: `${orderNumber}-${idx}`,
@@ -231,6 +275,23 @@ export class OrdersService {
                 currency: 'BZD',
               })),
             },
+            // Delivery snapshot (M13) — only for DELIVERY vendor-orders.
+            ...(dv
+              ? {
+                  delivery: {
+                    create: {
+                      status: 'PENDING_ASSIGNMENT',
+                      feeMinor: dv.feeMinor,
+                      freeApplied: dv.freeApplied,
+                      estimateMinHours: dv.estimate?.minHours ?? null,
+                      estimateMaxHours: dv.estimate?.maxHours ?? null,
+                      estimateLabel: dv.estimate?.label ?? null,
+                      instructions: dv.instructions,
+                      appliedZoneId: dv.appliedZoneId,
+                    },
+                  },
+                }
+              : {}),
           },
         });
       }
@@ -263,7 +324,7 @@ export class OrdersService {
       // ---- Payment & wallet-hold foundation (M11) — NO money moves ----
       const payment = await this.payments.createForOrder(
         tx,
-        { id: order.id, userId: actor.userId, totalMinor: subtotalMinor, currency: 'BZD' },
+        { id: order.id, userId: actor.userId, totalMinor, currency: 'BZD' },
         actor,
       );
       if (idemRow) {
@@ -407,13 +468,18 @@ export class OrdersService {
     const rows = await this.prisma.vendorOrder.findMany({
       where: { vendorProfileId: vp },
       orderBy: { createdAt: 'desc' },
-      include: { order: { select: { user: { select: { firstName: true, lastName: true } } } } },
+      include: {
+        order: { select: { user: { select: { firstName: true, lastName: true } } } },
+        delivery: { select: { feeMinor: true, status: true } },
+      },
     });
     return rows.map((vo) => ({
       id: vo.id,
       orderNumber: vo.orderNumber,
       status: vo.status,
       deliveryMethod: vo.deliveryMethod,
+      deliveryFeeMinor: vo.delivery ? money(vo.delivery.feeMinor) : null,
+      deliveryStatus: vo.delivery?.status ?? null,
       itemCount: vo.itemCount,
       subtotalMinor: money(vo.subtotalMinor),
       currency: vo.currency,
@@ -486,6 +552,7 @@ export class OrdersService {
       currency: order.currency,
       itemCount: order.itemCount,
       subtotalMinor: money(order.subtotalMinor),
+      deliveryFeeMinor: money(order.deliveryFeeMinor),
       totalMinor: money(order.totalMinor),
       placedAt: order.placedAt,
       deliveryAddress: address
@@ -538,15 +605,29 @@ export class OrdersService {
   }
 
   private shapeVendorOrder(
-    vo: { id: string; orderNumber: string; status: string; deliveryMethod: string; customerNotes: string | null; currency: string; itemCount: number; subtotalMinor: bigint; vendorProfile: { businessName: string; slug: string }; items: OrderItemRow[] },
+    vo: { id: string; orderNumber: string; status: string; deliveryMethod: string; customerNotes: string | null; currency: string; itemCount: number; subtotalMinor: bigint; vendorProfile: { businessName: string; slug: string }; items: OrderItemRow[]; delivery?: DeliveryRow | null },
     primary: Map<string, string | null>,
   ) {
+    const d = vo.delivery ?? null;
     return {
       id: vo.id,
       orderNumber: vo.orderNumber,
       status: vo.status,
       deliveryMethod: vo.deliveryMethod,
       customerNotes: vo.customerNotes,
+      // Delivery snapshot (M13): present only for DELIVERY vendor-orders.
+      delivery: d
+        ? {
+            status: d.status,
+            feeMinor: money(d.feeMinor),
+            freeApplied: d.freeApplied,
+            estimate:
+              d.estimateMinHours != null || d.estimateMaxHours != null || d.estimateLabel
+                ? { minHours: d.estimateMinHours, maxHours: d.estimateMaxHours, label: d.estimateLabel }
+                : null,
+            instructions: d.instructions,
+          }
+        : null,
       currency: vo.currency,
       itemCount: vo.itemCount,
       subtotalMinor: money(vo.subtotalMinor),
@@ -577,12 +658,22 @@ interface OrderItemRow {
   productId: string | null;
 }
 
+interface DeliveryRow {
+  status: string;
+  feeMinor: bigint;
+  freeApplied: boolean;
+  estimateMinHours: number | null;
+  estimateMaxHours: number | null;
+  estimateLabel: string | null;
+  instructions: string | null;
+}
+
 const ORDER_DETAIL_INCLUDE = {
   include: {
     addresses: true,
     vendorOrders: {
       orderBy: { createdAt: 'asc' as const },
-      include: { vendorProfile: { select: { businessName: true, slug: true } }, items: { orderBy: { createdAt: 'asc' as const } } },
+      include: { vendorProfile: { select: { businessName: true, slug: true } }, items: { orderBy: { createdAt: 'asc' as const } }, delivery: true },
     },
   },
 } satisfies { include: Prisma.OrderInclude };
@@ -591,6 +682,7 @@ const VENDOR_ORDER_DETAIL_INCLUDE = {
   include: {
     vendorProfile: { select: { businessName: true, slug: true } },
     items: { orderBy: { createdAt: 'asc' as const } },
+    delivery: true,
     order: { select: { orderNumber: true, placedAt: true, addresses: true, user: { select: { firstName: true, lastName: true } } } },
   },
 } satisfies { include: Prisma.VendorOrderInclude };

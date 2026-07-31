@@ -18,6 +18,7 @@ import { VendorModule } from './vendor/vendor.module';
 import { ProductsModule } from './products/products.module';
 import { CartModule } from './cart/cart.module';
 import { OrdersModule } from './orders/orders.module';
+import { DeliveryModule } from './delivery/delivery.module';
 import { PaymentsModule } from './payments/payments.module';
 import { WalletModule } from './wallet/wallet.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
@@ -50,6 +51,7 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     ProductsModule,
     CartModule,
     OrdersModule,
+    DeliveryModule,
     WalletModule,
     PaymentsModule,
     MaintenanceModule,

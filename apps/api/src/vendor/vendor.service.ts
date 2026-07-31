@@ -176,6 +176,10 @@ export class VendorService {
               ? null
               : BigInt(dto.minimumOrderMinor),
         deliveryRadiusKm: dto.deliveryRadiusKm === undefined ? undefined : dto.deliveryRadiusKm,
+        baseDeliveryFeeMinor:
+          dto.baseDeliveryFeeMinor === undefined ? undefined : dto.baseDeliveryFeeMinor === null ? null : BigInt(dto.baseDeliveryFeeMinor),
+        freeDeliveryThresholdMinor:
+          dto.freeDeliveryThresholdMinor === undefined ? undefined : dto.freeDeliveryThresholdMinor === null ? null : BigInt(dto.freeDeliveryThresholdMinor),
         taxesEnabled: dto.taxesEnabled ?? undefined,
         autoAcceptOrders: dto.autoAcceptOrders ?? undefined,
       },

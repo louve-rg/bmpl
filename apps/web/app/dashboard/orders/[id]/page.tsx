@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { ordersApi, money, type VendorOrderView } from '../../../../lib/orders';
 import { OrderStatusBadge, DeliveryBadge } from '../../../../components/orders/OrderStatusBadge';
 import type { ApiError } from '../../../../lib/api';
-import { Card, Alert, EmptyState, Spinner } from '../../../../components/ui';
+import { Card, Alert, EmptyState, Spinner, StatusBadge } from '../../../../components/ui';
 
 export default function VendorOrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -72,6 +72,21 @@ export default function VendorOrderDetailPage() {
                   {vo.deliveryAddress.addressLine1}{vo.deliveryAddress.addressLine2 ? `, ${vo.deliveryAddress.addressLine2}` : ''}<br />
                   {vo.deliveryAddress.city}, {vo.deliveryAddress.district.replace('_', ' ')}
                 </p>
+              </Card>
+            )}
+            {vo.deliveryMethod === 'DELIVERY' && vo.delivery && (
+              <Card className="p-4 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="bmpl-label">Delivery</p>
+                  <StatusBadge status={vo.delivery.status} />
+                </div>
+                <p className="mt-1 text-slate-700">
+                  {vo.delivery.freeApplied ? 'Free delivery' : money(vo.delivery.feeMinor)}
+                  {vo.delivery.estimate && (
+                    <> · Est. {vo.delivery.estimate.label ?? `${vo.delivery.estimate.minHours}–${vo.delivery.estimate.maxHours} h`}</>
+                  )}
+                </p>
+                {vo.delivery.instructions && <p className="mt-2 text-slate-500">Instructions: {vo.delivery.instructions}</p>}
               </Card>
             )}
           </div>

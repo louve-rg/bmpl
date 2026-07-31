@@ -153,6 +153,9 @@ export const vendorSettingsSchema = z
     vacationMode: z.boolean(),
     minimumOrderMinor: moneyMinorSchema.nullable(),
     deliveryRadiusKm: z.coerce.number().int().min(0).max(1000).nullable(),
+    // Delivery pricing (M13): base flat fee + free-delivery threshold (minor units).
+    baseDeliveryFeeMinor: moneyMinorSchema.nullable(),
+    freeDeliveryThresholdMinor: moneyMinorSchema.nullable(),
     taxesEnabled: z.boolean(),
     autoAcceptOrders: z.boolean(),
   })
@@ -433,6 +436,8 @@ export const checkoutVendorSchema = z.object({
   vendorProfileId: cuidRef,
   deliveryMethod: deliveryMethodSchema,
   customerNotes: z.string().trim().max(1000).optional(),
+  // Delivery-only instructions (M13), snapshotted onto the order delivery.
+  deliveryInstructions: z.string().trim().max(1000).optional(),
 });
 
 /**
@@ -447,3 +452,40 @@ export const checkoutSchema = z.object({
   deliveryAddress: orderAddressSchema.optional(),
 });
 export type CheckoutInput = z.infer<typeof checkoutSchema>;
+
+// ---- Delivery & Shipping Foundation (Phase 4 · M13) -------------------------
+
+/** Vendor delivery zone: a named set of districts with a flat delivery fee. */
+export const deliveryZoneSchema = z.object({
+  name: z.string().trim().min(1, 'Zone name is required.').max(120),
+  districts: z.array(districtSchema).min(1, 'Select at least one district.').max(6),
+  feeMinor: moneyMinorSchema, // >= 0
+  isActive: z.boolean().optional().default(true),
+});
+export type DeliveryZoneInput = z.infer<typeof deliveryZoneSchema>;
+
+export const deliveryZoneUpdateSchema = deliveryZoneSchema
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+export type DeliveryZoneUpdateInput = z.infer<typeof deliveryZoneUpdateSchema>;
+
+/** Vendor estimated delivery time window (hours). */
+export const deliveryEstimateSchema = z
+  .object({
+    minHours: z.coerce.number().int().min(0).max(2160),
+    maxHours: z.coerce.number().int().min(0).max(2160),
+    label: z.string().trim().max(120).optional(),
+  })
+  .refine((v) => v.maxHours >= v.minHours, { message: 'Max hours must be ≥ min hours.', path: ['maxHours'] });
+export type DeliveryEstimateInput = z.infer<typeof deliveryEstimateSchema>;
+
+/** Quote the current cart's delivery fees/estimates against a destination district. */
+export const deliveryQuoteSchema = z.object({
+  district: districtSchema,
+  vendors: z
+    .array(z.object({ vendorProfileId: cuidRef, deliveryMethod: deliveryMethodSchema }))
+    .max(100)
+    .optional()
+    .default([]),
+});
+export type DeliveryQuoteInput = z.infer<typeof deliveryQuoteSchema>;

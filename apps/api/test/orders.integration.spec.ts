@@ -109,6 +109,8 @@ describe('multi-vendor split + delivery', () => {
     const customer = await registerCustomer('ord_c2@example.bz');
     const a = await makeVendor('ord_v2a@example.bz', 'Alpha');
     const b = await makeVendor('ord_v2b@example.bz', 'Beta');
+    // Beta offers delivery (M13: a DELIVERY choice requires the store to offer it).
+    await request(ctx.server).patch('/api/vendor/settings').set('Cookie', b.cookies).send({ deliveryEnabled: true, baseDeliveryFeeMinor: 500 });
     const pa = await createProduct(a.cookies, { title: 'Prod A', sku: 'A1', priceMinor: 1000 });
     const pb = await createProduct(b.cookies, { title: 'Prod B', sku: 'B1', priceMinor: 2000 });
     await setStock(b.cookies, pb, 10);

@@ -12,6 +12,7 @@
 | `/dashboard` | authed | overview + role switcher |
 | `/dashboard/roles` | authed | request provider roles: upload required documents, view application status + reviewer notes, respond to MORE_INFO_REQUIRED and resubmit |
 | `/dashboard/store` | VENDOR | "My Store": profile, settings, locations, hours, logo/banner, submit |
+| `/dashboard/delivery` | VENDOR | delivery settings (M13): pickup/delivery, base fee, free threshold, zones + fees, estimate |
 | `/dashboard/products` | VENDOR | product list (submit/archive/delete) |
 | `/dashboard/products/new` | VENDOR | create product |
 | `/dashboard/products/[id]` | VENDOR | edit product + image manager + variants/inventory manager |

@@ -10,7 +10,7 @@ import { OrderStatusBadge, DeliveryBadge } from '../../../components/orders/Orde
 import { paymentsApi, type PaymentDetail } from '../../../lib/payments';
 import { PaymentStatusBadge, HoldStatusBadge } from '../../../components/payments/PaymentStatusBadge';
 import type { ApiError } from '../../../lib/api';
-import { Alert, Card, PageHeader, Spinner } from '../../../components/ui';
+import { Alert, Card, PageHeader, Spinner, StatusBadge } from '../../../components/ui';
 
 export default function OrderDetailPage() {
   const router = useRouter();
@@ -126,6 +126,20 @@ export default function OrderDetailPage() {
                       </li>
                     ))}
                   </ul>
+                  {vo.deliveryMethod === 'DELIVERY' && vo.delivery && (
+                    <div className="space-y-1 border-t border-slate-100 px-4 py-2 text-xs text-slate-600">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge status={vo.delivery.status} />
+                        <span>{vo.delivery.freeApplied ? 'Free delivery' : money(vo.delivery.feeMinor)}</span>
+                        {vo.delivery.estimate && (
+                          <span>
+                            · Est. {vo.delivery.estimate.label ?? `${vo.delivery.estimate.minHours}–${vo.delivery.estimate.maxHours} h`}
+                          </span>
+                        )}
+                      </div>
+                      {vo.delivery.instructions && <p className="text-slate-500">Instructions: {vo.delivery.instructions}</p>}
+                    </div>
+                  )}
                   {vo.customerNotes && <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Notes: {vo.customerNotes}</p>}
                   <div className="flex justify-between border-t border-slate-100 px-4 py-2 text-sm">
                     <span className="text-slate-500">Store subtotal</span>
@@ -138,8 +152,17 @@ export default function OrderDetailPage() {
             <div className="mt-6 flex justify-end">
               <Card className="w-full max-w-xs p-4 text-sm">
                 <div className="flex justify-between"><span className="text-slate-500">Subtotal</span><span className="font-medium">{money(order.subtotalMinor)}</span></div>
+                <div className="mt-1 flex justify-between">
+                  <span className="text-slate-500">Delivery</span>
+                  <span className="font-medium">
+                    {order.vendorOrders.some((vo) => vo.deliveryMethod === 'DELIVERY')
+                      ? order.deliveryFeeMinor === 0
+                        ? 'Free'
+                        : money(order.deliveryFeeMinor)
+                      : '—'}
+                  </span>
+                </div>
                 <div className="mt-1 flex justify-between border-t border-slate-100 pt-2 text-base"><span className="font-semibold text-belize-navy">Total</span><span className="font-bold text-belize-navy">{money(order.totalMinor)} {order.currency}</span></div>
-                <p className="mt-2 text-xs text-slate-400">Taxes, delivery, and fees not yet applied.</p>
               </Card>
             </div>
           </>

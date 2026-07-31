@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { ordersApi, money, type VendorOrderListItem } from '../../../lib/orders';
 import { OrderStatusBadge, DeliveryBadge } from '../../../components/orders/OrderStatusBadge';
 import type { ApiError } from '../../../lib/api';
-import { PageHeader, Alert, EmptyState, Spinner } from '../../../components/ui';
+import { PageHeader, Alert, EmptyState, Spinner, StatusBadge } from '../../../components/ui';
 
 export default function VendorOrdersPage() {
   const [rows, setRows] = useState<VendorOrderListItem[]>([]);
@@ -48,6 +48,8 @@ export default function VendorOrdersPage() {
                 <th className="px-4 py-3">Order</th>
                 <th className="px-4 py-3">Customer</th>
                 <th className="px-4 py-3">Fulfilment</th>
+                <th className="px-4 py-3">Delivery fee</th>
+                <th className="px-4 py-3">Delivery status</th>
                 <th className="px-4 py-3">Items</th>
                 <th className="px-4 py-3">Subtotal</th>
                 <th className="px-4 py-3">Status</th>
@@ -62,6 +64,8 @@ export default function VendorOrdersPage() {
                   </td>
                   <td className="px-4 py-3 text-slate-600">{o.customerName}</td>
                   <td className="px-4 py-3"><DeliveryBadge method={o.deliveryMethod} /></td>
+                  <td className="px-4 py-3 text-slate-600">{o.deliveryFeeMinor != null ? money(o.deliveryFeeMinor) : '—'}</td>
+                  <td className="px-4 py-3">{o.deliveryStatus ? <StatusBadge status={o.deliveryStatus} /> : <span className="text-slate-400">—</span>}</td>
                   <td className="px-4 py-3 text-slate-600">{o.itemCount}</td>
                   <td className="px-4 py-3 font-semibold text-belize-navy">{money(o.subtotalMinor)}</td>
                   <td className="px-4 py-3"><OrderStatusBadge status={o.status} /></td>

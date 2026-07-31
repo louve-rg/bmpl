@@ -25,6 +25,20 @@ export interface Address {
   country: string;
 }
 
+export interface DeliveryEstimate {
+  minHours: number;
+  maxHours: number;
+  label: string | null;
+}
+
+export interface DeliveryInfo {
+  status: string;
+  feeMinor: number;
+  freeApplied: boolean;
+  estimate: DeliveryEstimate | null;
+  instructions: string | null;
+}
+
 export interface VendorOrderView {
   id: string;
   orderNumber: string;
@@ -36,6 +50,7 @@ export interface VendorOrderView {
   subtotalMinor: number;
   vendor: { businessName: string; slug: string };
   items: OrderItemView[];
+  delivery?: DeliveryInfo | null;
   // vendor-detail extras
   parentOrderNumber?: string;
   placedAt?: string;
@@ -50,6 +65,7 @@ export interface OrderView {
   currency: string;
   itemCount: number;
   subtotalMinor: number;
+  deliveryFeeMinor: number;
   totalMinor: number;
   placedAt: string;
   deliveryAddress: Address | null;
@@ -72,6 +88,8 @@ export interface VendorOrderListItem {
   orderNumber: string;
   status: string;
   deliveryMethod: 'PICKUP' | 'DELIVERY';
+  deliveryFeeMinor: number | null;
+  deliveryStatus: string | null;
   itemCount: number;
   subtotalMinor: number;
   currency: string;
