@@ -21,3 +21,19 @@ Notes:
   runtime; the source should stay high-enough resolution for large desktops.
 - Until this file is present the hero falls back to a solid navy background, so
   the build and layout stay intact.
+
+## `logo.png` — brand logo badge (REQUIRED)
+
+`components/Logo.tsx` renders the brand badge from `/images/logo.png`, clipped to
+a circle (the square corners of the source canvas are masked off). Place the
+official circular "Belize Marketplace and Logistics 50" logo at:
+
+```
+apps/web/public/images/logo.png
+```
+
+Notes:
+- A square PNG works fine — it is clipped to a circle at render time, so the
+  square/white corners never show. A transparent-background square is ideal.
+- Used in the header, footer, auth screens, and dashboard sidebar (all on dark
+  backgrounds). Until present, a navy circle placeholder shows.
