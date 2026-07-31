@@ -185,10 +185,15 @@ export class VariantsService {
         salePriceMinor: v.salePriceMinor == null ? null : Number(v.salePriceMinor),
         optionValueIds: v.optionValues.map((ov) => ov.productOptionValueId),
         availability: v.inventory
-          ? (({ inStock, lowStock, outOfStock }) => ({ inStock, lowStock, outOfStock }))(
-              this.inventory.availability(v.inventory),
-            )
-          : { inStock: true, lowStock: false, outOfStock: false },
+          ? (({ inStock, lowStock, outOfStock, available, unlimited, allowBackorders }) => ({
+              inStock,
+              lowStock,
+              outOfStock,
+              available,
+              unlimited,
+              allowBackorders,
+            }))(this.inventory.availability(v.inventory))
+          : { inStock: true, lowStock: false, outOfStock: false, available: null, unlimited: false, allowBackorders: false },
       })),
     };
   }

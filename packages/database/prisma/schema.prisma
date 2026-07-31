@@ -769,6 +769,11 @@ model ProductImage {
   id            String   @id @default(cuid())
   productId     String
   product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Optional association to a specific variant. null = general product image
+  // (default gallery). SetNull on variant delete keeps the image as a general
+  // product image (no data loss).
+  variantId     String?
+  variant       ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
   storageKey    String   @unique
   mimeType      String
   fileSizeBytes Int
@@ -783,6 +788,7 @@ model ProductImage {
   @@index([productId, position])
   // Serves the batched primary-image lookup on every catalog/listing page.
   @@index([productId, isPrimary])
+  @@index([variantId])
   @@map("product_images")
 }
 
@@ -842,6 +848,7 @@ model ProductVariant {
   updatedAt      DateTime             @updatedAt
   optionValues   VariantOptionValue[]
   inventory      Inventory?
+  images         ProductImage[]
   cartItems      CartItem[]
   orderItems     OrderItem[]
 

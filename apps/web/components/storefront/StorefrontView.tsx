@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Badge as UiBadge, EmptyState } from '../ui';
+import { EnlargeableImage } from './EnlargeableImage';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
@@ -35,16 +36,26 @@ export function StorefrontView({ store }: { store: Storefront }) {
     <>
       <div className="h-40 w-full bg-gradient-to-r from-belize-navy to-belize-blue sm:h-56">
         {store.bannerUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={store.bannerUrl} alt="" className="h-full w-full object-cover" />
+          <EnlargeableImage
+            src={store.bannerUrl}
+            alt={`${store.businessName} banner`}
+            label="Store banner"
+            triggerClassName="block h-full w-full"
+            imgClassName="h-full w-full object-cover"
+          />
         )}
       </div>
 
       <div className="container-bmpl -mt-12 pb-12">
         <div className="flex items-end gap-4">
           {store.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={store.logoUrl} alt="" className="h-24 w-24 rounded-bmpl-lg border-4 border-white object-cover shadow-bmpl-md" />
+            <EnlargeableImage
+              src={store.logoUrl}
+              alt={`${store.businessName} logo`}
+              label="Store logo"
+              triggerClassName="block h-24 w-24 shrink-0 overflow-hidden rounded-bmpl-lg border-4 border-white shadow-bmpl-md"
+              imgClassName="h-full w-full object-cover"
+            />
           ) : (
             <span className="flex h-24 w-24 items-center justify-center rounded-bmpl-lg border-4 border-white bg-belize-blue text-2xl font-bold text-white shadow-bmpl-md">
               {store.businessName.slice(0, 2).toUpperCase()}

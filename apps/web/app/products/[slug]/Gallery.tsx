@@ -6,6 +6,7 @@ export interface GalleryImage {
   id: string;
   url: string | null;
   altText: string | null;
+  variantId?: string | null;
 }
 
 export function Gallery({ images }: { images: GalleryImage[] }) {

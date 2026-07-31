@@ -45,12 +45,14 @@ export class ProductImagesService {
     if (meta.sizeBytes <= 0 || meta.sizeBytes > MAX_PRODUCT_IMAGE_BYTES) {
       throw new BadRequestException('Image exceeds the maximum allowed size.');
     }
+    if (dto.variantId) await this.assertVariantInProduct(productId, dto.variantId);
 
     await this.prisma.$transaction(async (tx) => {
       const count = await tx.productImage.count({ where: { productId } });
       await tx.productImage.create({
         data: {
           productId,
+          variantId: dto.variantId ?? null,
           storageKey: dto.key,
           mimeType: meta.contentType,
           fileSizeBytes: meta.sizeBytes,
@@ -66,6 +68,17 @@ export class ProductImagesService {
     return this.list(productId);
   }
 
+  /** A variant referenced by an image must belong to the same product. */
+  private async assertVariantInProduct(productId: string, variantId: string): Promise<void> {
+    const variant = await this.prisma.productVariant.findUnique({
+      where: { id: variantId },
+      select: { productId: true },
+    });
+    if (!variant || variant.productId !== productId) {
+      throw new BadRequestException('That variant does not belong to this product.');
+    }
+  }
+
   async listForOwner(userId: string, productId: string) {
     await this.ownership.ownedProduct(userId, productId);
     return this.list(productId);
@@ -74,11 +87,13 @@ export class ProductImagesService {
   async update(userId: string, productId: string, imageId: string, dto: ProductImageUpdateInput) {
     await this.ownership.ownedProduct(userId, productId);
     await this.ownedImage(productId, imageId);
+    if (dto.variantId) await this.assertVariantInProduct(productId, dto.variantId);
     await this.prisma.productImage.update({
       where: { id: imageId },
       data: {
         altText: dto.altText === undefined ? undefined : dto.altText,
         caption: dto.caption === undefined ? undefined : dto.caption,
+        variantId: dto.variantId === undefined ? undefined : dto.variantId,
       },
     });
     return this.list(productId);
@@ -148,6 +163,7 @@ export class ProductImagesService {
   private async serialize(img: ProductImage) {
     return {
       id: img.id,
+      variantId: img.variantId,
       url: await this.urlOrNull(img.storageKey),
       mimeType: img.mimeType,
       fileSizeBytes: img.fileSizeBytes,

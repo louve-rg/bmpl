@@ -185,3 +185,62 @@ describe('image ownership', () => {
     await request(ctx.server).get(`/api/vendor/products/${a.productId}/images`).expect(401);
   });
 });
+
+describe('variant-specific images', () => {
+  let vendor: Awaited<ReturnType<typeof makeVendorWithProduct>>;
+  let variantId: string;
+  let otherVariantId: string;
+
+  it('sets up a product with two variants', async () => {
+    vendor = await makeVendorWithProduct('vimg_v@example.bz', 'VImg');
+    await request(ctx.server)
+      .post(`/api/vendor/products/${vendor.productId}/options`)
+      .set('Cookie', vendor.cookies)
+      .send({ name: 'Scent', values: ['Vanilla', 'Coconut'] })
+      .expect(201);
+    const view = await request(ctx.server).get(`/api/vendor/products/${vendor.productId}/variants`).set('Cookie', vendor.cookies);
+    const scent = view.body.options.find((o: { name: string }) => o.name === 'Scent');
+    const vanilla = scent.values.find((x: { value: string }) => x.value === 'Vanilla').id;
+    const coconut = scent.values.find((x: { value: string }) => x.value === 'Coconut').id;
+    const v1 = await request(ctx.server).post(`/api/vendor/products/${vendor.productId}/variants`).set('Cookie', vendor.cookies).send({ optionValueIds: [vanilla], sku: 'VAN', quantity: 3 });
+    expect(v1.status).toBe(201);
+    variantId = v1.body.variants.find((x: { sku: string }) => x.sku === 'VAN').id;
+    const v2 = await request(ctx.server).post(`/api/vendor/products/${vendor.productId}/variants`).set('Cookie', vendor.cookies).send({ optionValueIds: [coconut], sku: 'COCO', quantity: 0 });
+    otherVariantId = v2.body.variants.find((x: { sku: string }) => x.sku === 'COCO').id;
+    expect(variantId).toBeTruthy();
+  });
+
+  it('confirms an image tagged to a specific variant', async () => {
+    const key = await uploadImage(vendor.cookies, vendor.productId);
+    const res = await request(ctx.server).post(`/api/vendor/products/${vendor.productId}/images/confirm`).set('Cookie', vendor.cookies).send({ key, variantId });
+    expect(res.status).toBe(201);
+    expect(res.body.some((i: { variantId: string | null }) => i.variantId === variantId)).toBe(true);
+  });
+
+  it('confirms a general image (variantId null)', async () => {
+    const key = await uploadImage(vendor.cookies, vendor.productId);
+    const res = await request(ctx.server).post(`/api/vendor/products/${vendor.productId}/images/confirm`).set('Cookie', vendor.cookies).send({ key });
+    expect(res.status).toBe(201);
+    expect(res.body.some((i: { variantId: string | null }) => i.variantId === null)).toBe(true);
+  });
+
+  it('reassigns then clears an image variant via PATCH', async () => {
+    const list = await request(ctx.server).get(`/api/vendor/products/${vendor.productId}/images`).set('Cookie', vendor.cookies);
+    const general = list.body.find((i: { variantId: string | null }) => i.variantId === null);
+    const assigned = await request(ctx.server).patch(`/api/vendor/products/${vendor.productId}/images/${general.id}`).set('Cookie', vendor.cookies).send({ variantId: otherVariantId });
+    expect(assigned.status).toBe(200);
+    expect(assigned.body.find((i: { id: string }) => i.id === general.id).variantId).toBe(otherVariantId);
+    const cleared = await request(ctx.server).patch(`/api/vendor/products/${vendor.productId}/images/${general.id}`).set('Cookie', vendor.cookies).send({ variantId: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.find((i: { id: string }) => i.id === general.id).variantId).toBeNull();
+  });
+
+  it('rejects a variantId that does not belong to the product', async () => {
+    const key = await uploadImage(vendor.cookies, vendor.productId);
+    await request(ctx.server)
+      .post(`/api/vendor/products/${vendor.productId}/images/confirm`)
+      .set('Cookie', vendor.cookies)
+      .send({ key, variantId: 'clabcabcabcabcabcabcabca' })
+      .expect(400);
+  });
+});

@@ -201,14 +201,66 @@ export class InventoryService {
   // ---- Public availability (used by ProductsService) ----
 
   /** Aggregate availability for a product: product-level row, else any variant in stock. */
-  async publicAvailability(productId: string): Promise<{ inStock: boolean; lowStock: boolean }> {
+  async publicAvailability(productId: string): Promise<{
+    inStock: boolean;
+    lowStock: boolean;
+    outOfStock: boolean;
+    available: number | null;
+    unlimited: boolean;
+    allowBackorders: boolean;
+  }> {
     const rows = await this.prisma.inventory.findMany({ where: { productId } });
-    if (rows.length === 0) return { inStock: true, lowStock: false }; // no inventory tracked yet
+    // No inventory tracked yet → purchasable, no cap.
+    if (rows.length === 0) {
+      return { inStock: true, lowStock: false, outOfStock: false, available: null, unlimited: false, allowBackorders: false };
+    }
     const avails = rows.map((r) => this.availability(r));
+    const unlimited = avails.some((a) => a.unlimited);
     return {
       inStock: avails.some((a) => a.inStock),
       lowStock: avails.every((a) => a.lowStock || a.outOfStock) && avails.some((a) => a.lowStock),
+      outOfStock: avails.every((a) => a.outOfStock),
+      unlimited,
+      allowBackorders: avails.some((a) => a.allowBackorders),
+      // Aggregate purchasable units across the product's inventory rows (null = unlimited).
+      available: unlimited ? null : avails.reduce((sum, a) => sum + Math.max(0, a.available ?? 0), 0),
     };
+  }
+
+  /**
+   * Batch stock summary per product id for owner listings (F3): total available
+   * units and a coarse status. Single query; safe on the empty set.
+   */
+  async summaryFor(
+    productIds: string[],
+  ): Promise<Map<string, { available: number | null; unlimited: boolean; status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'UNTRACKED' }>> {
+    const out = new Map<string, { available: number | null; unlimited: boolean; status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'UNTRACKED' }>();
+    if (!productIds.length) return out;
+    const rows = await this.prisma.inventory.findMany({ where: { productId: { in: productIds } } });
+    const byProduct = new Map<string, ReturnType<InventoryService['availability']>[]>();
+    for (const r of rows) {
+      const list = byProduct.get(r.productId) ?? [];
+      list.push(this.availability(r));
+      byProduct.set(r.productId, list);
+    }
+    for (const id of productIds) {
+      const avails = byProduct.get(id);
+      if (!avails || avails.length === 0) {
+        out.set(id, { available: null, unlimited: false, status: 'UNTRACKED' });
+        continue;
+      }
+      const unlimited = avails.some((a) => a.unlimited);
+      const available = unlimited ? null : avails.reduce((s, a) => s + Math.max(0, a.available ?? 0), 0);
+      const status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'UNTRACKED' = unlimited
+        ? 'IN_STOCK'
+        : avails.every((a) => a.outOfStock)
+          ? 'OUT_OF_STOCK'
+          : avails.some((a) => a.lowStock) && avails.every((a) => a.lowStock || a.outOfStock)
+            ? 'LOW_STOCK'
+            : 'IN_STOCK';
+      out.set(id, { available, unlimited, status });
+    }
+    return out;
   }
 
   /** Batched in-stock map for listings (avoids N+1). */

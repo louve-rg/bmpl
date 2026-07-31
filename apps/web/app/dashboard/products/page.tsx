@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
 import { PageHeader, ButtonLink, Alert, Badge, EmptyState, Spinner, type Tone } from '../../../components/ui';
 
+type StockStatus = 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'UNTRACKED';
 interface ProductRow {
   id: string;
   title: string;
@@ -12,6 +13,7 @@ interface ProductRow {
   status: string;
   priceMinor: number;
   category: { name: string };
+  stock: { available: number | null; unlimited: boolean; status: StockStatus };
 }
 
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
@@ -23,6 +25,14 @@ const STATUS_TONE: Record<string, Tone> = {
   SUSPENDED: 'error',
   ARCHIVED: 'neutral',
 };
+const STOCK_META: Record<StockStatus, { tone: Tone; label: string }> = {
+  IN_STOCK: { tone: 'success', label: 'In stock' },
+  LOW_STOCK: { tone: 'warning', label: 'Low stock' },
+  OUT_OF_STOCK: { tone: 'error', label: 'Out of stock' },
+  UNTRACKED: { tone: 'neutral', label: 'Not tracked' },
+};
+const stockQtyLabel = (s: ProductRow['stock']) =>
+  s.unlimited ? 'Unlimited' : s.status === 'UNTRACKED' ? '—' : `${s.available ?? 0} left`;
 
 export default function VendorProductsPage() {
   const [rows, setRows] = useState<ProductRow[]>([]);
@@ -95,6 +105,7 @@ export default function VendorProductsPage() {
               <tr>
                 <th className="px-4 py-3">Product</th>
                 <th className="px-4 py-3">Price</th>
+                <th className="px-4 py-3">Inventory</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3"></th>
               </tr>
@@ -107,6 +118,12 @@ export default function VendorProductsPage() {
                     <p className="text-xs text-slate-500">{p.sku} · {p.category.name}</p>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{money(p.priceMinor)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Badge tone={STOCK_META[p.stock.status].tone}>{STOCK_META[p.stock.status].label}</Badge>
+                      <span className="text-xs text-slate-500">{stockQtyLabel(p.stock)}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-3">
                     <Badge tone={STATUS_TONE[p.status] ?? 'neutral'}>{p.status.replace('_', ' ')}</Badge>
                   </td>

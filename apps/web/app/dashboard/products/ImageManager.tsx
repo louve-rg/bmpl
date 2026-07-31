@@ -11,6 +11,12 @@ interface ProductImage {
   caption: string | null;
   position: number;
   isPrimary: boolean;
+  variantId: string | null;
+}
+
+interface VariantsView {
+  options: Array<{ id: string; name: string; values: Array<{ id: string; value: string }> }>;
+  variants: Array<{ id: string; sku: string | null; optionValueIds: string[] }>;
 }
 
 function readDims(file: File): Promise<{ width?: number; height?: number }> {
@@ -24,6 +30,7 @@ function readDims(file: File): Promise<{ width?: number; height?: number }> {
 
 export function ImageManager({ productId }: { productId: string }) {
   const [images, setImages] = useState<ProductImage[]>([]);
+  const [variants, setVariants] = useState<Array<{ id: string; label: string }>>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -35,8 +42,24 @@ export function ImageManager({ productId }: { productId: string }) {
       setErr((e as ApiError).message ?? 'Failed to load images.');
     }
   }
+  async function loadVariants() {
+    try {
+      const v = await api.get<VariantsView>(`/vendor/products/${productId}/variants`);
+      const valueMap = new Map<string, string>();
+      v.options.forEach((o) => o.values.forEach((val) => valueMap.set(val.id, val.value)));
+      setVariants(
+        v.variants.map((vr) => ({
+          id: vr.id,
+          label: vr.optionValueIds.map((id) => valueMap.get(id)).filter(Boolean).join(' / ') || vr.sku || 'Variant',
+        })),
+      );
+    } catch {
+      setVariants([]);
+    }
+  }
   useEffect(() => {
     void load();
+    void loadVariants();
   }, [productId]);
 
   async function upload(file: File) {
@@ -144,6 +167,22 @@ export function ImageManager({ productId }: { productId: string }) {
                   onBlur={(e) => e.target.value !== (img.caption ?? '') && call(() => api.patch(`/vendor/products/${productId}/images/${img.id}`, { caption: e.target.value }))}
                   className="w-full rounded-bmpl-sm border border-slate-200 px-2 py-1 text-xs outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
                 />
+                {variants.length > 0 && (
+                  <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                    <span className="shrink-0">Applies to</span>
+                    <select
+                      value={img.variantId ?? ''}
+                      onChange={(e) => call(() => api.patch(`/vendor/products/${productId}/images/${img.id}`, { variantId: e.target.value || null }))}
+                      aria-label="Applies to variant"
+                      className="w-full rounded-bmpl-sm border border-slate-200 px-2 py-1 text-xs text-belize-navy outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
+                    >
+                      <option value="">All variants (general)</option>
+                      {variants.map((v) => (
+                        <option key={v.id} value={v.id}>{v.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div className="flex flex-wrap gap-3 text-xs font-semibold">
                   {!img.isPrimary && (
                     <button onClick={() => call(() => api.post(`/vendor/products/${productId}/images/${img.id}/primary`))} className="text-belize-blue hover:underline">

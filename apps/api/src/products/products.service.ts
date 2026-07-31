@@ -49,8 +49,16 @@ export class ProductsService {
       orderBy: { updatedAt: 'desc' },
       include: { category: { select: { name: true, slug: true } } },
     });
-    const primary = await this.images.primaryUrls(rows.map((r) => r.id));
-    return rows.map((p) => ({ ...this.ownShape(p, p.category), primaryImageUrl: primary.get(p.id) ?? null }));
+    const ids = rows.map((r) => r.id);
+    const [primary, stock] = await Promise.all([
+      this.images.primaryUrls(ids),
+      this.inventory.summaryFor(ids),
+    ]);
+    return rows.map((p) => ({
+      ...this.ownShape(p, p.category),
+      primaryImageUrl: primary.get(p.id) ?? null,
+      stock: stock.get(p.id) ?? { available: null, unlimited: false, status: 'UNTRACKED' as const },
+    }));
   }
 
   async getOwn(userId: string, id: string) {

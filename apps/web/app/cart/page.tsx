@@ -240,9 +240,10 @@ function CartRow({
             <button
               type="button"
               aria-label="Increase quantity"
-              disabled={busy}
+              disabled={busy || (item.available != null && item.quantity >= item.available)}
               onClick={() => onUpdate(item.quantity + 1)}
               className="px-2.5 py-1 text-slate-600 disabled:opacity-40"
+              title={item.available != null && item.quantity >= item.available ? `Only ${item.available} in stock` : undefined}
             >
               +
             </button>

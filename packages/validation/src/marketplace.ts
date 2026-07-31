@@ -222,6 +222,8 @@ export const productImageConfirmSchema = z.object({
   height: z.coerce.number().int().positive().max(30000).optional(),
   altText: z.string().trim().max(300).optional(),
   caption: z.string().trim().max(500).optional(),
+  // Optional: tag this image to a specific variant (must belong to the product).
+  variantId: cuidRef.optional(),
 });
 export type ProductImageConfirmInput = z.infer<typeof productImageConfirmSchema>;
 
@@ -229,6 +231,8 @@ export const productImageUpdateSchema = z
   .object({
     altText: z.string().trim().max(300).nullable(),
     caption: z.string().trim().max(500).nullable(),
+    // Reassign the image to a variant, or clear it (null = general product image).
+    variantId: cuidRef.nullable(),
   })
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
