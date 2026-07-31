@@ -2,6 +2,14 @@
 
 Onboarding a new developer to the BMPL marketplace. Windows/macOS/Linux.
 
+> **Frontend styling:** use the BMPL design system — shared primitives in
+> `apps/web/components/ui.tsx` / `apps/admin/components/ui.tsx` (`Card`,
+> `PageHeader`, `Button`, `Badge`, `StatusBadge`, `Alert`, `EmptyState`,
+> `Field`/`Input`/`Select`/`Textarea`, …), the `bmpl-*` utility classes, and the
+> `rounded-bmpl-*` / `shadow-bmpl-*` / `belize-*` Tailwind tokens. Do not
+> hardcode ad-hoc colors/shadows. Full reference:
+> [docs/design/BMPL-DESIGN-SYSTEM.md](./../design/BMPL-DESIGN-SYSTEM.md).
+
 ## Prerequisites
 - **Node 24** (`.nvmrc` / `.node-version` = 24.12.0) and **pnpm 9**
   (`corepack enable`).

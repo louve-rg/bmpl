@@ -1,5 +1,11 @@
 # Architecture & Data Model (Phase 1)
 
+> **Design system:** the platform's shared visual language (tokens, components,
+> shells, patterns) is documented in
+> [docs/design/BMPL-DESIGN-SYSTEM.md](design/BMPL-DESIGN-SYSTEM.md); the
+> consolidation audit is in
+> [docs/design/BMPL-THEME-AUDIT.md](design/BMPL-THEME-AUDIT.md).
+
 ## Data model
 
 ```
