@@ -62,6 +62,25 @@ the same DB transaction, and notifies the applicant.
 - Amounts are `BigInt` **minor units** (cents). Real-money movement is gated off
   by `assertMoneyMovementEnabled(false)`.
 
+### Dispatch & delivery execution (M15)
+
+- The delivery lifecycle is a **strict state machine** whose single source of truth
+  is `@bmpl/shared` `DELIVERY_ACTIONS` (legal `from→to` edges + the allowed actor).
+  `PENDING_ASSIGNMENT → ASSIGNED → DRIVER_ACCEPTED → PICKUP_CONFIRMED → IN_TRANSIT →
+  ARRIVING → DELIVERED`, plus `DRIVER_DECLINED` and pre-pickup `CANCELLED`.
+- `OrderDelivery` denormalizes the **current** assignment; `DeliveryAssignment` and
+  `DeliveryTimelineEvent` are **append-only** history. Every transition writes a
+  timeline event + audit row + notification.
+- Driver **assignment eligibility** reuses `DriverService` (M14 vehicle/licence checks
+  + availability + service-district) and is re-checked at assignment time.
+- Inventory is **finalized exactly once** at `PICKUP_CONFIRMED`
+  (`InventoryService.finalizeReservation`, guarded by `inventoryFinalizedAt`).
+- Pickup/delivery **PINs** are held by the vendor/customer and submitted by the
+  driver; attempt-capped, throttled, revealed only via role-checked endpoints, never
+  in general payloads or logs. Proof-of-delivery lives in the **private** bucket.
+- **No money moves** in dispatch — see the wallet section; settlement/payouts/refunds
+  are deferred.
+
 ## Request authorization pipeline (API)
 
 ```

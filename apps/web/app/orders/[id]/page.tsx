@@ -11,6 +11,7 @@ import { paymentsApi, type PaymentDetail } from '../../../lib/payments';
 import { PaymentStatusBadge, HoldStatusBadge } from '../../../components/payments/PaymentStatusBadge';
 import type { ApiError } from '../../../lib/api';
 import { Alert, Card, PageHeader, Spinner, StatusBadge } from '../../../components/ui';
+import { DeliveryTracker } from '../../../components/DeliveryTracker';
 
 export default function OrderDetailPage() {
   const router = useRouter();
@@ -139,6 +140,9 @@ export default function OrderDetailPage() {
                       </div>
                       {vo.delivery.instructions && <p className="text-slate-500">Instructions: {vo.delivery.instructions}</p>}
                     </div>
+                  )}
+                  {vo.deliveryMethod === 'DELIVERY' && vo.delivery?.id && (
+                    <DeliveryTracker deliveryId={vo.delivery.id} />
                   )}
                   {vo.customerNotes && <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Notes: {vo.customerNotes}</p>}
                   <div className="flex justify-between border-t border-slate-100 px-4 py-2 text-sm">

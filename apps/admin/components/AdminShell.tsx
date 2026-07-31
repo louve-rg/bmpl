@@ -11,6 +11,7 @@ const NAV: Array<{ label: string; href: string; icon: string }> = [
   { label: 'Users', href: '/dashboard/users', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 8a6 6 0 0 1 12 0M17 11a3 3 0 0 0 0-6M22 19a6 6 0 0 0-4-5.7' },
   { label: 'Vendors', href: '/dashboard/vendors', icon: 'M4 8h16l-1 3H5L4 8Zm1 3v9h14v-9M9 20v-5h6v5' },
   { label: 'Drivers', href: '/dashboard/drivers', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
+  { label: 'Dispatch', href: '/dashboard/dispatch', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
   { label: 'Products', href: '/dashboard/products', icon: 'M4 7l8-4 8 4-8 4-8-4Zm0 0v10l8 4 8-4V7' },
   { label: 'Orders', href: '/dashboard/orders', icon: 'M6 3h12l1 4H5l1-4Zm-1 4v13h14V7M9 11h6' },
   { label: 'Payments', href: '/dashboard/payments', icon: 'M3 6h18v12H3zM3 10h18' },

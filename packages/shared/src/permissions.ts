@@ -34,6 +34,12 @@ export const PERMISSIONS = [
   // ---- Logistics: Driver Management (Phase 4 · M14) ----
   'drivers.read', // view driver profiles / vehicles / service areas / availability (read-only)
   'drivers.moderate', // approve/reject driver vehicles (driver role approval reuses role_applications.review)
+  // ---- Logistics: Dispatch & Delivery Execution (Phase 4 · M15) ----
+  'deliveries.read', // view deliveries, timelines, assignment history in the dispatch console (read-only)
+  'deliveries.assign', // assign / reassign a driver to a delivery
+  'deliveries.manage', // cancel an assignment; other operational dispatch actions
+  'deliveries.verify', // reveal pickup/delivery PINs; admin override of verification
+  'proof_of_delivery.read', // view private proof-of-delivery files via signed URLs
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -51,6 +57,8 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'payments.read',
     'wallet.read',
     'drivers.read',
+    'deliveries.read',
+    'proof_of_delivery.read',
   ],
   ADMIN: [
     'users.read',
@@ -75,6 +83,11 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'wallet.read',
     'drivers.read',
     'drivers.moderate',
+    'deliveries.read',
+    'deliveries.assign',
+    'deliveries.manage',
+    'deliveries.verify',
+    'proof_of_delivery.read',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

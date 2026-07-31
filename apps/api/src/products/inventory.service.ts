@@ -198,6 +198,35 @@ export class InventoryService {
     });
   }
 
+  /**
+   * Finalize a reservation into a real stock deduction (M15, at pickup confirmation):
+   * decrement BOTH on-hand `quantity` and `reserved` by `qty` and write an
+   * append-only FULFILLED history row. Unlimited rows are untracked (no-op). The
+   * caller guards exactly-once via `OrderDelivery.inventoryFinalizedAt`, so this is
+   * never double-applied. `reserved` is clamped at 0; `quantity` may go negative
+   * only under prior backorder oversell (an accepted "owed stock" state).
+   */
+  async finalizeReservation(inventoryId: string, qty: number, actorId: string | null, tx: Tx = this.prisma): Promise<void> {
+    const inv = await tx.inventory.findUniqueOrThrow({ where: { id: inventoryId } });
+    if (inv.unlimited) return; // nothing was reserved for an unlimited row
+    const newQty = inv.quantity - qty;
+    await tx.inventory.update({
+      where: { id: inventoryId },
+      data: { quantity: newQty, reserved: Math.max(0, inv.reserved - qty) },
+    });
+    await tx.inventoryChange.create({
+      data: {
+        inventoryId,
+        delta: -qty,
+        reason: 'FULFILLED',
+        previousQty: inv.quantity,
+        newQty,
+        actorId: actorId ?? undefined,
+        note: 'Delivery pickup confirmed',
+      },
+    });
+  }
+
   // ---- Public availability (used by ProductsService) ----
 
   /** Aggregate availability for a product: product-level row, else any variant in stock. */

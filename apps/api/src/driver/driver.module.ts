@@ -14,5 +14,8 @@ import { AdminDriverController } from './admin-driver.controller';
   imports: [PrismaModule],
   controllers: [DriverController, AdminDriverController],
   providers: [DriverService, AdminDriverService],
+  // DriverService is exported so the DispatchModule (M15) reuses driver
+  // assignment-eligibility instead of re-implementing driver rules.
+  exports: [DriverService],
 })
 export class DriverModule {}

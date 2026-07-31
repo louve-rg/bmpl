@@ -6,6 +6,7 @@
 | `/` | public | landing (nav: Shop → `/products`, Vendors → `/vendors`) |
 | `/products` | public | catalog: search, category sidebar, price/in-stock filters, sort, pagination, `vendorSlug` (single-store view) |
 | `/products/[slug]` | public | product detail: gallery, variant list, availability |
+| `/orders/[id]` | authed | customer order detail + delivery tracking (M15): timeline, driver, delivery-PIN reveal, proof of delivery |
 | `/vendors` | public | vendor directory + name search |
 | `/store/[slug]` | public | storefront: banner/logo, info, hours, locations, featured products |
 | `/login` | public | sign in; honors same-origin `?next=` to return after an add-to-cart/checkout bounce |
@@ -14,6 +15,8 @@
 | `/dashboard/store` | VENDOR | "My Store": profile, settings, locations, hours, logo/banner, submit |
 | `/dashboard/delivery` | VENDOR | delivery settings (M13): pickup/delivery, base fee, free threshold, zones + fees, estimate |
 | `/dashboard/driver` | authed | driver (M14): profile, vehicles, service areas, availability, application/approval status |
+| `/dashboard/driver/jobs` | DELIVERY_DRIVER | driver job feed (M15): assigned/active + completed jobs |
+| `/dashboard/driver/jobs/[id]` | DELIVERY_DRIVER | job detail (M15): accept/decline, pickup PIN, in-transit/arriving, delivery PIN + POD upload |
 | `/dashboard/products` | VENDOR | product list (submit/archive/delete) |
 | `/dashboard/products/new` | VENDOR | create product |
 | `/dashboard/products/[id]` | VENDOR | edit product + image manager + variants/inventory manager |
@@ -27,6 +30,7 @@ pages `notFound()` on missing/unapproved.
 |---|---|---|
 | `/dashboard/vendors` | `vendors.read` | vendor queue (status filter) |
 | `/dashboard/drivers` | `drivers.read` | driver list/detail (M14): profiles, vehicles + approve/reject, expiry, availability |
+| `/dashboard/dispatch` | `deliveries.read` | dispatch console (M15): deliveries list/detail, assign/reassign/cancel, eligible drivers, timeline, assignment history, POD, PIN reveal |
 | `/dashboard/vendors/[id]` | `vendors.read`/`.moderate` | detail + approve/reject/suspend/restore |
 | `/dashboard/products` | `products.read` | product queue (status filter) |
 | `/dashboard/products/[id]` | `products.read`/`.moderate` | detail + images + moderation |

@@ -32,6 +32,7 @@ export interface DeliveryEstimate {
 }
 
 export interface DeliveryInfo {
+  id?: string;
   status: string;
   feeMinor: number;
   freeApplied: boolean;

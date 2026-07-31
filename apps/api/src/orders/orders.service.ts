@@ -618,6 +618,7 @@ export class OrdersService {
       // Delivery snapshot (M13): present only for DELIVERY vendor-orders.
       delivery: d
         ? {
+            id: d.id,
             status: d.status,
             feeMinor: money(d.feeMinor),
             freeApplied: d.freeApplied,
@@ -659,6 +660,7 @@ interface OrderItemRow {
 }
 
 interface DeliveryRow {
+  id: string;
   status: string;
   feeMinor: bigint;
   freeApplied: boolean;

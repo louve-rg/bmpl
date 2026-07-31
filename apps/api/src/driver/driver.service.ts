@@ -271,6 +271,79 @@ export class DriverService {
   }
 
   // ===========================================================================
+  // Assignment eligibility (M15 dispatch) — reuses the vehicle/licence checks and
+  // ADDS availability (ONLINE) + service-district coverage. Centralized here so
+  // dispatch never re-implements driver rules.
+  // ===========================================================================
+
+  /** Full eligibility for assigning `driverProfileId` to a delivery in `district`
+   *  (optionally with a specific `vehicleId`). Never throws for ineligibility —
+   *  returns reasons so the admin sees exactly why. */
+  async assignmentEligibility(driverProfileId: string, district: string, vehicleId?: string) {
+    const p = await this.prisma.driverProfile.findUnique({
+      where: { id: driverProfileId },
+      include: { vehicles: true, serviceAreas: true },
+    });
+    if (!p) throw new NotFoundException('Driver not found.');
+    const status = await this.roleStatus(p.userId);
+    const reasons: string[] = [];
+    if (status !== 'APPROVED') reasons.push(status === 'SUSPENDED' ? 'driver role suspended' : status === 'REVOKED' ? 'driver role revoked' : 'driver role not approved');
+    if (!p.isActive) reasons.push('driver account inactive');
+    if (p.availability !== 'ONLINE') reasons.push('driver is not online');
+    if (isExpiredOrMissing(p.licenceExpiry)) reasons.push("driver's licence expired");
+    const servesDistrict = p.serviceAreas.some((s) => s.isActive && s.district === district);
+    if (!servesDistrict) reasons.push(`driver does not serve ${String(district).replace('_', ' ')}`);
+    const usableVehicles = p.vehicles.filter(
+      (v) => v.approvalStatus === 'APPROVED' && v.isActive && !isExpiredOrMissing(v.registrationExpiry) && !isExpiredOrMissing(v.insuranceExpiry),
+    );
+    if (usableVehicles.length === 0) reasons.push('no approved active vehicle with valid registration + insurance');
+    let vehicle: DriverVehicle | null = null;
+    if (vehicleId) {
+      vehicle = usableVehicles.find((v) => v.id === vehicleId) ?? null;
+      if (!vehicle) reasons.push('selected vehicle is not an approved, valid, active vehicle for this driver');
+    }
+    return { eligible: reasons.length === 0, reasons, usableVehicles, vehicle, profile: p, roleStatus: status };
+  }
+
+  /** Approved, online, valid drivers who serve `district` — the admin dispatch pool. */
+  async eligibleDriversForDistrict(district: string) {
+    const candidates = await this.prisma.driverProfile.findMany({
+      where: { availability: 'ONLINE', isActive: true, serviceAreas: { some: { district: district as never, isActive: true } } },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        vehicles: true,
+        serviceAreas: { select: { district: true, isActive: true } },
+      },
+      take: 200,
+    });
+    const roles = await this.prisma.userRole.findMany({
+      where: { userId: { in: candidates.map((c) => c.userId) }, roleCode: 'DELIVERY_DRIVER' },
+      select: { userId: true, status: true },
+    });
+    const roleBy = new Map(roles.map((r) => [r.userId, r.status]));
+    return candidates
+      .map((p) => {
+        const usable = p.vehicles.filter(
+          (v) => v.approvalStatus === 'APPROVED' && v.isActive && !isExpiredOrMissing(v.registrationExpiry) && !isExpiredOrMissing(v.insuranceExpiry),
+        );
+        return {
+          driverProfileId: p.id,
+          displayName: p.displayName,
+          name: `${p.user.firstName} ${p.user.lastName}`,
+          homeDistrict: p.homeDistrict,
+          availability: p.availability,
+          roleStatus: roleBy.get(p.userId) ?? null,
+          licenceExpired: isExpiredOrMissing(p.licenceExpiry),
+          completedDeliveries: p.completedDeliveries,
+          ratingAverage: p.ratingAverage,
+          vehicles: usable.map((v) => ({ id: v.id, type: v.type, make: v.make, model: v.model, licencePlate: v.licencePlate, isPrimary: v.isPrimary })),
+        };
+      })
+      // Only fully eligible drivers appear in the assignable pool.
+      .filter((d) => d.roleStatus === 'APPROVED' && !d.licenceExpired && d.vehicles.length > 0);
+  }
+
+  // ===========================================================================
   // Dashboard (aggregate; safe for a pending applicant to view)
   // ===========================================================================
   async dashboard(userId: string) {

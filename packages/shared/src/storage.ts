@@ -60,4 +60,8 @@ export const STORAGE_PREFIX = {
   // viewed only via short-lived signed URLs after ownership/permission checks.
   driverPhoto: (userId: string) => `drivers/${userId}/profile`,
   driverVehiclePhoto: (userId: string) => `drivers/${userId}/vehicles`,
+  // ---- Logistics: Dispatch proof-of-delivery (Phase 4 · M15), PRIVATE bucket ----
+  // POD photos/signature capture the recipient/premises → private, viewed only via
+  // short-lived signed URLs by the authorized customer/vendor/driver/admin.
+  deliveryProof: (userId: string) => `deliveries/proof/${userId}`,
 } as const;

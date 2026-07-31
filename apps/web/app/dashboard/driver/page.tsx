@@ -183,7 +183,10 @@ export default function DriverPage() {
 
           <UiCard className="p-5 sm:p-6">
             <h2 className="bmpl-eyebrow mb-2">Delivery jobs</h2>
-            <p className="text-sm text-slate-400">Delivery jobs will appear here in a future update.</p>
+            <p className="mb-4 text-sm text-slate-500">View and manage your assigned deliveries — accept jobs, confirm pickups, and complete drop-offs.</p>
+            <ButtonLink href="/dashboard/driver/jobs" size="sm">
+              Go to my deliveries
+            </ButtonLink>
           </UiCard>
         </>
       )}

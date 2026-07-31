@@ -13,7 +13,7 @@
 // =============================================================================
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   // "native" for the local host; the Debian target is for the Railway Docker
   // runtime (node:24-bookworm-slim => debian-openssl-3.0.x).
   binaryTargets = ["native", "debian-openssl-3.0.x"]
@@ -164,6 +164,20 @@ enum AuditAction {
   DRIVER_AVAILABILITY_CHANGED
   DRIVER_VEHICLE_APPROVED
   DRIVER_VEHICLE_REJECTED
+  // ---- Dispatch & Delivery Execution (Phase 4 · M15) ----
+  DELIVERY_ASSIGNED
+  DELIVERY_REASSIGNED
+  DELIVERY_ASSIGNMENT_CANCELLED
+  DELIVERY_ACCEPTED
+  DELIVERY_DECLINED
+  DELIVERY_PICKUP_CONFIRMED
+  DELIVERY_IN_TRANSIT
+  DELIVERY_ARRIVING
+  DELIVERY_COMPLETED
+  DELIVERY_POD_UPLOADED
+  DELIVERY_PICKUP_PIN_FAILED
+  DELIVERY_DELIVERY_PIN_FAILED
+  INVENTORY_FULFILLED
 }
 
 enum WalletAccountType {
@@ -214,22 +228,22 @@ enum Currency {
 // ---- Identity ---------------------------------------------------------------
 
 model User {
-  id            String     @id @default(cuid())
-  email         String     @unique
-  passwordHash  String
-  firstName     String
-  lastName      String
-  phone         String?
-  district      District?
-  addressLine1  String?
-  addressLine2  String?
-  city          String?
-  avatarKey     String? // private storage key; served via signed URL
-  status        UserStatus @default(ACTIVE)
+  id              String     @id @default(cuid())
+  email           String     @unique
+  passwordHash    String
+  firstName       String
+  lastName        String
+  phone           String?
+  district        District?
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  avatarKey       String? // private storage key; served via signed URL
+  status          UserStatus @default(ACTIVE)
   emailVerifiedAt DateTime?
-  suspendedAt   DateTime?
+  suspendedAt     DateTime?
   suspendedReason String?
-  lastLoginAt   DateTime?
+  lastLoginAt     DateTime?
   acceptedTermsAt DateTime?
 
   // The user's currently active role in the switcher (must be an APPROVED UserRole).
@@ -238,28 +252,30 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  roles                UserRole[]
-  sessions             Session[]
-  emailTokens          EmailVerificationToken[]
-  passwordResetTokens  PasswordResetToken[]
-  roleApplications     RoleApplication[]
-  adminPermissions     AdminPermissionGrant[]      @relation("PermissionHolder")
-  grantedPermissions   AdminPermissionGrant[]      @relation("PermissionGrantedBy")
-  notifications        Notification[]
-  auditLogsAsActor     AuditLog[]                  @relation("AuditActor")
-  auditLogsAsTarget    AuditLog[]                  @relation("AuditTarget")
-  reviewsPerformed     RoleApplicationReview[]     @relation("ReviewReviewer")
-  walletAccounts       WalletAccount[]
-  cart                 Cart?
-  orders               Order[]
-  payments             Payment[]
-  paymentMethods       PaymentMethod[]
-  idempotencyKeys      IdempotencyKey[]
-  vendorProfile        VendorProfile?              @relation("UserVendorProfile")
-  driverProfile        DriverProfile?              @relation("UserDriverProfile")
-  vendorReviewsMade    VendorModerationReview[]    @relation("VendorReviewer")
-  productReviewsMade   ProductModerationReview[]   @relation("ProductReviewer")
-  inventoryChangesMade InventoryChange[]           @relation("InventoryActor")
+  roles                   UserRole[]
+  sessions                Session[]
+  emailTokens             EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
+  roleApplications        RoleApplication[]
+  adminPermissions        AdminPermissionGrant[]    @relation("PermissionHolder")
+  grantedPermissions      AdminPermissionGrant[]    @relation("PermissionGrantedBy")
+  notifications           Notification[]
+  auditLogsAsActor        AuditLog[]                @relation("AuditActor")
+  auditLogsAsTarget       AuditLog[]                @relation("AuditTarget")
+  reviewsPerformed        RoleApplicationReview[]   @relation("ReviewReviewer")
+  walletAccounts          WalletAccount[]
+  cart                    Cart?
+  orders                  Order[]
+  payments                Payment[]
+  paymentMethods          PaymentMethod[]
+  idempotencyKeys         IdempotencyKey[]
+  vendorProfile           VendorProfile?            @relation("UserVendorProfile")
+  driverProfile           DriverProfile?            @relation("UserDriverProfile")
+  deliveriesAssigned      OrderDelivery[]           @relation("DeliveryAssignedBy")
+  deliveryAssignmentsMade DeliveryAssignment[]      @relation("AssignmentAssignedBy")
+  vendorReviewsMade       VendorModerationReview[]  @relation("VendorReviewer")
+  productReviewsMade      ProductModerationReview[] @relation("ProductReviewer")
+  inventoryChangesMade    InventoryChange[]         @relation("InventoryActor")
 
   @@index([status])
   @@index([district])
@@ -269,17 +285,17 @@ model User {
 // Server-side, revocable session. Access token is a short-lived JWT; the refresh
 // token's HASH is stored here and rotated on use. Deleting the row revokes access.
 model Session {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   userId           String
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refreshTokenHash String   @unique
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
   userAgent        String?
   ipAddress        String?
-  client           String   @default("web") // "web" | "admin" | "mobile"
+  client           String    @default("web") // "web" | "admin" | "mobile"
   expiresAt        DateTime
   revokedAt        DateTime?
-  createdAt        DateTime @default(now())
-  lastUsedAt       DateTime @default(now())
+  createdAt        DateTime  @default(now())
+  lastUsedAt       DateTime  @default(now())
 
   @@index([userId])
   @@index([expiresAt])
@@ -287,26 +303,26 @@ model Session {
 }
 
 model EmailVerificationToken {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String   @unique
-  expiresAt DateTime
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
   consumedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   @@index([userId])
   @@map("email_verification_tokens")
 }
 
 model PasswordResetToken {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String   @unique
-  expiresAt DateTime
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
   consumedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   @@index([userId])
   @@map("password_reset_tokens")
@@ -331,12 +347,12 @@ model Role {
 
 // One row per (user, role). Each has its OWN status. This is the multi-role core.
 model UserRole {
-  id        String     @id @default(cuid())
-  userId    String
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  roleCode  RoleCode
-  role      Role       @relation(fields: [roleCode], references: [code])
-  status    RoleStatus @default(PENDING)
+  id       String     @id @default(cuid())
+  userId   String
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleCode RoleCode
+  role     Role       @relation(fields: [roleCode], references: [code])
+  status   RoleStatus @default(PENDING)
 
   approvedAt   DateTime?
   suspendedAt  DateTime?
@@ -397,17 +413,17 @@ model RoleApplicationDocument {
 
 // Immutable record of each decision/step taken on an application.
 model RoleApplicationReview {
-  id            String          @id @default(cuid())
+  id            String                 @id @default(cuid())
   applicationId String
-  application   RoleApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application   RoleApplication        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   action        ReviewAction
   // Null when the actor is the applicant (SUBMITTED / INFO_PROVIDED).
   reviewerId    String?
-  reviewer      User?           @relation("ReviewReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewer      User?                  @relation("ReviewReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
   note          String?
   fromStatus    RoleApplicationStatus?
   toStatus      RoleApplicationStatus?
-  createdAt     DateTime        @default(now())
+  createdAt     DateTime               @default(now())
 
   @@index([applicationId])
   @@map("role_application_reviews")
@@ -416,13 +432,13 @@ model RoleApplicationReview {
 // ---- Admin permissions (separate from customer-facing roles) ----------------
 
 model AdminPermissionGrant {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation("PermissionHolder", fields: [userId], references: [id], onDelete: Cascade)
-  permission String // value from the shared PERMISSIONS catalog
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation("PermissionHolder", fields: [userId], references: [id], onDelete: Cascade)
+  permission  String // value from the shared PERMISSIONS catalog
   grantedById String?
-  grantedBy  User?    @relation("PermissionGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
-  createdAt  DateTime @default(now())
+  grantedBy   User?    @relation("PermissionGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
 
   @@unique([userId, permission])
   @@index([userId])
@@ -451,19 +467,19 @@ model Notification {
 // ---- Audit ------------------------------------------------------------------
 
 model AuditLog {
-  id           String      @id @default(cuid())
-  action       AuditAction
-  actorId      String?
-  actor        User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
-  targetUserId String?
-  targetUser   User?       @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
-  targetRole   RoleCode?
+  id            String      @id @default(cuid())
+  action        AuditAction
+  actorId       String?
+  actor         User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  targetUserId  String?
+  targetUser    User?       @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  targetRole    RoleCode?
   previousValue Json?
-  newValue     Json?
-  reason       String?
-  ipAddress    String?
-  sessionId    String?
-  createdAt    DateTime    @default(now())
+  newValue      Json?
+  reason        String?
+  ipAddress     String?
+  sessionId     String?
+  createdAt     DateTime    @default(now())
 
   @@index([actorId])
   @@index([targetUserId])
@@ -475,20 +491,20 @@ model AuditLog {
 // ---- Wallet (double-entry ledger foundation) --------------------------------
 
 model WalletAccount {
-  id       String            @id @default(cuid())
-  type     WalletAccountType
+  id                 String              @id @default(cuid())
+  type               WalletAccountType
   // Null for SYSTEM_* accounts; set for USER accounts.
-  userId   String?
-  user     User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  currency Currency          @default(BZD)
+  userId             String?
+  user               User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currency           Currency            @default(BZD)
   // Operational state (M12) — authorization is rejected unless ACTIVE.
-  status   WalletAccountStatus @default(ACTIVE)
+  status             WalletAccountStatus @default(ACTIVE)
   // Cached, DERIVED balance in minor units (cents). NOT the source of truth —
   // it is recomputed from ledger entries inside the same transaction that posts
   // them. Reconciliation always trusts the sum of WalletLedgerEntry rows.
-  cachedBalanceMinor BigInt  @default(0)
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  cachedBalanceMinor BigInt              @default(0)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   entries          WalletLedgerEntry[]
   walletHolds      WalletHold[]
@@ -598,27 +614,27 @@ enum ModerationAction {
 }
 
 model VendorProfile {
-  id             String               @id @default(cuid())
-  userId         String               @unique
-  user           User                 @relation("UserVendorProfile", fields: [userId], references: [id], onDelete: Cascade)
-  businessName   String
-  slug           String               @unique
-  description    String?
-  logoKey        String? // public-bucket storage key
-  bannerKey      String? // public-bucket storage key
-  contactEmail   String
-  contactPhone   String?
-  website        String?
-  socialLinks    Json? // future-ready: { facebook?, instagram?, ... }
-  approvalStatus VendorApprovalStatus @default(DRAFT)
-  storeStatus    StoreStatus          @default(CLOSED)
+  id              String               @id @default(cuid())
+  userId          String               @unique
+  user            User                 @relation("UserVendorProfile", fields: [userId], references: [id], onDelete: Cascade)
+  businessName    String
+  slug            String               @unique
+  description     String?
+  logoKey         String? // public-bucket storage key
+  bannerKey       String? // public-bucket storage key
+  contactEmail    String
+  contactPhone    String?
+  website         String?
+  socialLinks     Json? // future-ready: { facebook?, instagram?, ... }
+  approvalStatus  VendorApprovalStatus @default(DRAFT)
+  storeStatus     StoreStatus          @default(CLOSED)
   rejectionReason String?
-  ratingAverage  Float                @default(0) // placeholder; populated in a later phase
-  ratingCount    Int                  @default(0) // placeholder
-  submittedAt    DateTime?
-  approvedAt     DateTime?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  ratingAverage   Float                @default(0) // placeholder; populated in a later phase
+  ratingCount     Int                  @default(0) // placeholder
+  submittedAt     DateTime?
+  approvedAt      DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   settings         VendorSettings?
   locations        VendorLocation[]
@@ -636,22 +652,22 @@ model VendorProfile {
 }
 
 model VendorSettings {
-  id               String        @id @default(cuid())
-  vendorProfileId  String        @unique
-  vendorProfile    VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
-  pickupEnabled    Boolean       @default(true)
-  deliveryEnabled  Boolean       @default(false)
-  vacationMode     Boolean       @default(false)
-  minimumOrderMinor BigInt? // Minimum delivery order (subtotal) to qualify for delivery
-  deliveryRadiusKm Int? // Maximum delivery radius (optional; informational in M13)
+  id                         String        @id @default(cuid())
+  vendorProfileId            String        @unique
+  vendorProfile              VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  pickupEnabled              Boolean       @default(true)
+  deliveryEnabled            Boolean       @default(false)
+  vacationMode               Boolean       @default(false)
+  minimumOrderMinor          BigInt? // Minimum delivery order (subtotal) to qualify for delivery
+  deliveryRadiusKm           Int? // Maximum delivery radius (optional; informational in M13)
   // Delivery pricing (M13 foundation). Base flat fee applies when no zone matches
   // the destination district; a null base means "no flat rate" (a zone must match).
-  baseDeliveryFeeMinor        BigInt?
-  freeDeliveryThresholdMinor  BigInt? // subtotal at/above which delivery is free
-  taxesEnabled     Boolean       @default(false)
-  autoAcceptOrders Boolean       @default(false)
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  baseDeliveryFeeMinor       BigInt?
+  freeDeliveryThresholdMinor BigInt? // subtotal at/above which delivery is free
+  taxesEnabled               Boolean       @default(false)
+  autoAcceptOrders           Boolean       @default(false)
+  createdAt                  DateTime      @default(now())
+  updatedAt                  DateTime      @updatedAt
 
   @@map("vendor_settings")
 }
@@ -664,8 +680,37 @@ model VendorSettings {
 // the result onto the order (OrderDelivery). NO delivery execution / dispatch /
 // tracking / driver assignment — foundation data only.
 
+// M13 introduced PENDING_ASSIGNMENT only. M15 (Dispatch & Delivery Execution)
+// adds the full operational lifecycle. Transitions are enforced by the shared
+// state machine (@bmpl/shared `DELIVERY_ACTIONS`).
 enum DeliveryStatus {
   PENDING_ASSIGNMENT
+  ASSIGNED
+  DRIVER_ACCEPTED
+  DRIVER_DECLINED
+  PICKUP_CONFIRMED
+  IN_TRANSIT
+  ARRIVING
+  DELIVERED
+  CANCELLED
+}
+
+// Lifecycle of a single DeliveryAssignment attempt (history is append-only).
+enum DeliveryAssignmentStatus {
+  ACTIVE
+  ACCEPTED
+  DECLINED
+  REASSIGNED
+  CANCELLED
+  COMPLETED
+}
+
+// Pickup / delivery PIN verification outcome.
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  OVERRIDDEN
+  FAILED
 }
 
 model DeliveryZone {
@@ -689,12 +734,12 @@ model DeliveryZone {
 }
 
 model DeliveryRate {
-  id         String       @id @default(cuid())
-  zoneId     String       @unique
-  zone       DeliveryZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
-  feeMinor   BigInt // delivery fee (minor units) for this zone
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
+  id        String       @id @default(cuid())
+  zoneId    String       @unique
+  zone      DeliveryZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  feeMinor  BigInt // delivery fee (minor units) for this zone
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
   @@map("delivery_rates")
 }
@@ -746,16 +791,16 @@ model VendorOpeningHours {
 }
 
 model VendorModerationReview {
-  id              String           @id @default(cuid())
+  id              String                @id @default(cuid())
   vendorProfileId String
-  vendorProfile   VendorProfile    @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  vendorProfile   VendorProfile         @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
   reviewerId      String?
-  reviewer        User?            @relation("VendorReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewer        User?                 @relation("VendorReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
   action          ModerationAction
   note            String?
   fromStatus      VendorApprovalStatus?
   toStatus        VendorApprovalStatus?
-  createdAt       DateTime         @default(now())
+  createdAt       DateTime              @default(now())
 
   @@index([vendorProfileId])
   @@map("vendor_moderation_reviews")
@@ -777,26 +822,26 @@ enum ProductStatus {
 }
 
 model Product {
-  id              String        @id @default(cuid())
+  id              String                   @id @default(cuid())
   vendorProfileId String
-  vendorProfile   VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  vendorProfile   VendorProfile            @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
   categoryId      String
-  category        Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  category        Category                 @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   title           String
-  slug            String        @unique
+  slug            String                   @unique
   description     String?
   sku             String
   barcode         String?
   brand           String?
-  status          ProductStatus @default(DRAFT)
+  status          ProductStatus            @default(DRAFT)
   priceMinor      BigInt // minor units (cents), BZD
   salePriceMinor  BigInt?
-  currency        Currency      @default(BZD)
+  currency        Currency                 @default(BZD)
   weightGrams     Int?
   lengthMm        Int?
   widthMm         Int?
   heightMm        Int?
-  featured        Boolean       @default(false)
+  featured        Boolean                  @default(false)
   metaTitle       String?
   metaDescription String?
   searchKeywords  String[] // used by the M7 Postgres search
@@ -804,16 +849,16 @@ model Product {
   // Managed by raw SQL in the migration (GENERATED ALWAYS ... STORED) + GIN index;
   // declared Unsupported so Prisma tracks the column without managing generation.
   searchVector    Unsupported("tsvector")?
-  ratingAverage   Float         @default(0) // placeholder
-  ratingCount     Int           @default(0) // placeholder
+  ratingAverage   Float                    @default(0) // placeholder
+  ratingCount     Int                      @default(0) // placeholder
   publishedAt     DateTime?
   rejectionReason String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
 
-  tags      Tag[]                     @relation("ProductTags")
-  reviews   ProductModerationReview[]
-  images    ProductImage[]
+  tags       Tag[]                     @relation("ProductTags")
+  reviews    ProductModerationReview[]
+  images     ProductImage[]
   options    ProductOption[]
   variants   ProductVariant[]
   inventory  Inventory[]
@@ -834,24 +879,24 @@ model Product {
 // only the opaque storage key is persisted (never a URL). Exactly one image per
 // product is primary — enforced transactionally in the service layer.
 model ProductImage {
-  id            String   @id @default(cuid())
+  id            String          @id @default(cuid())
   productId     String
-  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product       Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   // Optional association to a specific variant. null = general product image
   // (default gallery). SetNull on variant delete keeps the image as a general
   // product image (no data loss).
   variantId     String?
   variant       ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
-  storageKey    String   @unique
+  storageKey    String          @unique
   mimeType      String
   fileSizeBytes Int
   width         Int?
   height        Int?
   altText       String?
   caption       String?
-  position      Int      @default(0)
-  isPrimary     Boolean  @default(false)
-  createdAt     DateTime @default(now())
+  position      Int             @default(0)
+  isPrimary     Boolean         @default(false)
+  createdAt     DateTime        @default(now())
 
   @@index([productId, position])
   // Serves the batched primary-image lookup on every catalog/listing page.
@@ -874,6 +919,8 @@ enum InventoryChangeReason {
   RESERVE
   RELEASE
   BACKORDER
+  // Reservation finalized into a real stock deduction at pickup confirmation (M15).
+  FULFILLED
 }
 
 model ProductOption {
@@ -986,16 +1033,16 @@ model Tag {
 }
 
 model ProductModerationReview {
-  id         String         @id @default(cuid())
+  id         String           @id @default(cuid())
   productId  String
-  product    Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product    Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
   reviewerId String?
-  reviewer   User?          @relation("ProductReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewer   User?            @relation("ProductReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
   action     ModerationAction
   note       String?
   fromStatus ProductStatus?
   toStatus   ProductStatus?
-  createdAt  DateTime       @default(now())
+  createdAt  DateTime         @default(now())
 
   @@index([productId])
   @@map("product_moderation_reviews")
@@ -1018,12 +1065,12 @@ model ProductModerationReview {
 // be returned grouped by vendor and later split into one order per vendor.
 
 model Cart {
-  id        String     @id @default(cuid())
-  userId    String     @unique
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  currency  Currency   @default(BZD)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currency  Currency @default(BZD)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   items CartItem[]
 
@@ -1031,24 +1078,24 @@ model Cart {
 }
 
 model CartItem {
-  id              String          @id @default(cuid())
-  cartId          String
-  cart            Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  productId       String
-  product         Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id                     String          @id @default(cuid())
+  cartId                 String
+  cart                   Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId              String
+  product                Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   // Null for a product-level purchasable; set for a specific variant.
-  variantId       String?
-  variant         ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  variantId              String?
+  variant                ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
   // Denormalized owner: enables vendor-grouped retrieval and the future per-vendor
   // order split without re-joining through product on every read.
-  vendorProfileId String
-  vendorProfile   VendorProfile   @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
-  quantity        Int
+  vendorProfileId        String
+  vendorProfile          VendorProfile   @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  quantity               Int
   // Effective unit price (minor units) at the time the line was last written.
   // Display/price-change detection only — never trusted as the charge price.
   unitPriceMinorSnapshot BigInt
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
 
   // Variant lines are unique per (cart, variant). Product-level lines (variantId
   // NULL) are made unique per (cart, product) by a PARTIAL unique index added in
@@ -1094,25 +1141,25 @@ enum OrderAddressType {
 }
 
 model Order {
-  id            String      @id @default(cuid())
-  orderNumber   String      @unique
-  userId        String
-  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  status        OrderStatus @default(PENDING)
-  currency      Currency    @default(BZD)
-  itemCount     Int // total quantity across all vendor orders
-  subtotalMinor BigInt
+  id                     String      @id @default(cuid())
+  orderNumber            String      @unique
+  userId                 String
+  user                   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status                 OrderStatus @default(PENDING)
+  currency               Currency    @default(BZD)
+  itemCount              Int // total quantity across all vendor orders
+  subtotalMinor          BigInt
   // Aggregate delivery fee across delivery vendor-orders (M13). 0 for all-pickup
   // orders. totalMinor == subtotalMinor + deliveryFeeMinor (no tax/discounts yet).
-  deliveryFeeMinor BigInt @default(0)
-  totalMinor    BigInt
+  deliveryFeeMinor       BigInt      @default(0)
+  totalMinor             BigInt
   // Operational (M10.1): set when this order's inventory reservations have been
   // released (admin utility / maintenance). Guards against double-release. This
   // is NOT customer cancellation and does not change the order's status.
   reservationsReleasedAt DateTime?
-  placedAt      DateTime    @default(now())
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  placedAt               DateTime    @default(now())
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
 
   vendorOrders VendorOrder[]
   addresses    OrderAddress[]
@@ -1124,23 +1171,23 @@ model Order {
 }
 
 model VendorOrder {
-  id              String            @id @default(cuid())
-  orderNumber     String            @unique // parent number + vendor suffix
-  orderId         String
-  order           Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  vendorProfileId String
+  id               String            @id @default(cuid())
+  orderNumber      String            @unique // parent number + vendor suffix
+  orderId          String
+  order            Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  vendorProfileId  String
   // Restrict: a storefront with orders cannot be hard-deleted (protects history).
-  vendorProfile   VendorProfile     @relation(fields: [vendorProfileId], references: [id], onDelete: Restrict)
-  status          VendorOrderStatus @default(PENDING)
-  deliveryMethod  DeliveryMethod
-  customerNotes   String?
+  vendorProfile    VendorProfile     @relation(fields: [vendorProfileId], references: [id], onDelete: Restrict)
+  status           VendorOrderStatus @default(PENDING)
+  deliveryMethod   DeliveryMethod
+  customerNotes    String?
   // Reserved for future shipment/tracking metadata — NOT used for order items.
   shippingMetadata Json?
-  currency        Currency          @default(BZD)
-  itemCount       Int
-  subtotalMinor   BigInt
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  currency         Currency          @default(BZD)
+  itemCount        Int
+  subtotalMinor    BigInt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   items    OrderItem[]
   delivery OrderDelivery?
@@ -1155,6 +1202,11 @@ model VendorOrder {
 // deliveryMethod is DELIVERY. The delivery address snapshot is the order-level
 // OrderAddress (type SHIPPING) — not duplicated here. Status is PENDING_ASSIGNMENT
 // only; later statuses/assignment/dispatch are out of scope for M13.
+// The delivery record for a DELIVERY vendor-order. M13 created it (pricing snapshot,
+// PENDING_ASSIGNMENT). M15 adds the operational lifecycle: the CURRENT assignment is
+// denormalized here for fast reads (full history lives in DeliveryAssignment), plus
+// per-transition timestamps, pickup/delivery PIN verification, proof-of-delivery, and
+// an exactly-once inventory-finalization guard.
 model OrderDelivery {
   id               String         @id @default(cuid())
   vendorOrderId    String         @unique
@@ -1167,11 +1219,102 @@ model OrderDelivery {
   estimateLabel    String?
   instructions     String?
   appliedZoneId    String? // which DeliveryZone priced this (null = base flat fee)
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+
+  // ---- Current assignment (denormalized; DeliveryAssignment holds full history) ----
+  assignedDriverProfileId String?
+  assignedDriver          DriverProfile? @relation("DriverActiveDeliveries", fields: [assignedDriverProfileId], references: [id], onDelete: SetNull)
+  assignedVehicleId       String?
+  assignedVehicle         DriverVehicle? @relation("VehicleActiveDeliveries", fields: [assignedVehicleId], references: [id], onDelete: SetNull)
+  assignedByUserId        String?
+  assignedBy              User?          @relation("DeliveryAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+
+  // ---- Lifecycle timestamps (append-only in spirit; set once per transition) ----
+  assignedAt        DateTime?
+  acceptedAt        DateTime?
+  declinedAt        DateTime?
+  pickupConfirmedAt DateTime?
+  inTransitAt       DateTime?
+  arrivingAt        DateTime?
+  deliveredAt       DateTime?
+  reassignedAt      DateTime?
+  cancelledAt       DateTime?
+
+  declineReason      String?
+  reassignmentReason String?
+  cancellationReason String?
+  deliveryNotes      String?
+
+  // ---- Pickup verification (driver submits a PIN the vendor holds) ----
+  pickupPin                String? // access-controlled; never returned to driver/public/logs
+  pickupPinAttempts        Int                @default(0)
+  pickupVerifiedAt         DateTime?
+  pickupVerificationStatus VerificationStatus @default(PENDING)
+
+  // ---- Delivery verification (driver submits a PIN the recipient holds) ----
+  deliveryPin                String? // access-controlled; never returned to driver/public/logs
+  deliveryPinAttempts        Int                @default(0)
+  deliveryVerifiedAt         DateTime?
+  deliveryVerificationStatus VerificationStatus @default(PENDING)
+  recipientName              String?
+  podPhotoKeys               String[] // private-bucket proof-of-delivery photo keys
+  signatureKey               String? // reserved placeholder (private); no capture UI in M15
+
+  // Exactly-once guard: reservation → stock deduction happens at PICKUP_CONFIRMED.
+  inventoryFinalizedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments DeliveryAssignment[]
+  timeline    DeliveryTimelineEvent[]
 
   @@index([status])
+  @@index([assignedDriverProfileId, status])
   @@map("order_deliveries")
+}
+
+// Append-only assignment history. One row per assignment attempt; the current row
+// is denormalized onto OrderDelivery. Reassignment ends the ACTIVE row (REASSIGNED)
+// and creates a new ACTIVE row — historical rows are never overwritten or deleted.
+model DeliveryAssignment {
+  id               String                   @id @default(cuid())
+  orderDeliveryId  String
+  orderDelivery    OrderDelivery            @relation(fields: [orderDeliveryId], references: [id], onDelete: Cascade)
+  driverProfileId  String
+  driverProfile    DriverProfile            @relation(fields: [driverProfileId], references: [id], onDelete: Restrict)
+  vehicleId        String?
+  vehicle          DriverVehicle?           @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  assignedByUserId String?
+  assignedBy       User?                    @relation("AssignmentAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+  status           DeliveryAssignmentStatus @default(ACTIVE)
+  assignedAt       DateTime                 @default(now())
+  respondedAt      DateTime? // accept/decline time
+  endedAt          DateTime? // reassigned/cancelled/completed time
+  declineReason    String?
+  endReason        String? // reassignment / cancellation reason that ended this row
+  createdAt        DateTime                 @default(now())
+
+  @@index([orderDeliveryId, assignedAt])
+  @@index([driverProfileId, status])
+  @@map("delivery_assignments")
+}
+
+// Append-only delivery timeline. One row per state transition (and PIN/POD events),
+// used to render the customer/admin timeline. Never mutated.
+model DeliveryTimelineEvent {
+  id              String          @id @default(cuid())
+  orderDeliveryId String
+  orderDelivery   OrderDelivery   @relation(fields: [orderDeliveryId], references: [id], onDelete: Cascade)
+  fromStatus      DeliveryStatus?
+  toStatus        DeliveryStatus?
+  event           String // action key (e.g. ASSIGN, ACCEPT, CONFIRM_PICKUP, POD_UPLOADED)
+  actorRole       String // ADMIN | DRIVER | CUSTOMER | VENDOR | SYSTEM
+  actorUserId     String?
+  note            String?
+  createdAt       DateTime        @default(now())
+
+  @@index([orderDeliveryId, createdAt])
+  @@map("delivery_timeline_events")
 }
 
 // ---- Logistics: Driver Management Foundation (Phase 4 · M14) ----------------
@@ -1212,9 +1355,9 @@ enum VehicleApprovalStatus {
 }
 
 model DriverProfile {
-  id       String @id @default(cuid())
-  userId   String @unique
-  user     User   @relation("UserDriverProfile", fields: [userId], references: [id], onDelete: Cascade)
+  id                    String             @id @default(cuid())
+  userId                String             @unique
+  user                  User               @relation("UserDriverProfile", fields: [userId], references: [id], onDelete: Cascade)
   // Application / identity data (captured with the driver-role application).
   legalName             String
   displayName           String
@@ -1227,7 +1370,7 @@ model DriverProfile {
   emergencyContactPhone String?
   licenceNumber         String
   licenceExpiry         DateTime
-  vehicleOwnership      VehicleOwnership @default(OWNED)
+  vehicleOwnership      VehicleOwnership   @default(OWNED)
   termsAcceptedAt       DateTime?
   applicantNotes        String?
   profilePhotoKey       String? // private-bucket storage key
@@ -1235,23 +1378,26 @@ model DriverProfile {
   availability          DriverAvailability @default(OFFLINE)
   isActive              Boolean            @default(true)
   // Placeholders — populated in a later phase; NO money movement in M14.
-  ratingAverage         Float @default(0)
-  ratingCount           Int   @default(0)
-  completedDeliveries   Int   @default(0)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  ratingAverage         Float              @default(0)
+  ratingCount           Int                @default(0)
+  completedDeliveries   Int                @default(0)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
-  vehicles     DriverVehicle[]
-  serviceAreas DriverServiceArea[]
+  vehicles            DriverVehicle[]
+  serviceAreas        DriverServiceArea[]
+  // Dispatch (M15): the current deliveries assigned to this driver + full history.
+  activeDeliveries    OrderDelivery[]      @relation("DriverActiveDeliveries")
+  deliveryAssignments DeliveryAssignment[]
 
   @@index([availability])
   @@map("driver_profiles")
 }
 
 model DriverVehicle {
-  id                    String        @id @default(cuid())
+  id                    String                @id @default(cuid())
   driverProfileId       String
-  driverProfile         DriverProfile @relation(fields: [driverProfileId], references: [id], onDelete: Cascade)
+  driverProfile         DriverProfile         @relation(fields: [driverProfileId], references: [id], onDelete: Cascade)
   type                  VehicleType
   make                  String
   model                 String
@@ -1270,6 +1416,10 @@ model DriverVehicle {
   rejectionReason       String?
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
+
+  // Dispatch (M15): deliveries currently using this vehicle + assignment history.
+  activeDeliveries    OrderDelivery[]      @relation("VehicleActiveDeliveries")
+  deliveryAssignments DeliveryAssignment[]
 
   @@index([driverProfileId])
   @@index([approvalStatus])
@@ -1470,22 +1620,22 @@ model PaymentAttempt {
 // NOT create a ledger entry and does NOT change the wallet balance (no escrow in
 // M11). Release tracking via status + releasedAt.
 model WalletHold {
-  id              String           @id @default(cuid())
-  paymentId       String
-  payment         Payment          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  walletAccountId String
-  walletAccount   WalletAccount    @relation(fields: [walletAccountId], references: [id], onDelete: Restrict)
-  amountMinor     BigInt
-  currency        Currency         @default(BZD)
-  status          WalletHoldStatus @default(HELD)
+  id                  String           @id @default(cuid())
+  paymentId           String
+  payment             Payment          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  walletAccountId     String
+  walletAccount       WalletAccount    @relation(fields: [walletAccountId], references: [id], onDelete: Restrict)
+  amountMinor         BigInt
+  currency            Currency         @default(BZD)
+  status              WalletHoldStatus @default(HELD)
   // Set when the hold is AUTHORIZED — the customer→escrow WalletTransaction that
   // backs it (M12). Null while the hold is a soft (HELD) reservation.
   walletTransactionId String?
-  heldAt          DateTime         @default(now())
-  authorizedAt    DateTime?
-  releasedAt      DateTime?
-  releaseReason   String?
-  createdAt       DateTime         @default(now())
+  heldAt              DateTime         @default(now())
+  authorizedAt        DateTime?
+  releasedAt          DateTime?
+  releaseReason       String?
+  createdAt           DateTime         @default(now())
 
   @@index([paymentId])
   @@index([walletAccountId, status])

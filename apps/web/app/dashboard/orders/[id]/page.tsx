@@ -7,6 +7,7 @@ import { ordersApi, money, type VendorOrderView } from '../../../../lib/orders';
 import { OrderStatusBadge, DeliveryBadge } from '../../../../components/orders/OrderStatusBadge';
 import type { ApiError } from '../../../../lib/api';
 import { Card, Alert, EmptyState, Spinner, StatusBadge } from '../../../../components/ui';
+import { VendorDeliveryPanel } from '../../../../components/VendorDeliveryPanel';
 
 export default function VendorOrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -90,6 +91,12 @@ export default function VendorOrderDetailPage() {
               </Card>
             )}
           </div>
+
+          {vo.deliveryMethod === 'DELIVERY' && vo.delivery?.id && (
+            <div className="mt-4">
+              <VendorDeliveryPanel deliveryId={vo.delivery.id} />
+            </div>
+          )}
 
           <div className="mt-4 overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
             <table className="w-full min-w-[36rem] text-sm">

@@ -633,3 +633,58 @@ paths:
     get: { tags: [Wallet], summary: All wallet transactions (read-only, each balances to net 0), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read" }
   /admin/wallet/accounts:
     get: { tags: [Wallet], summary: System / escrow account balances (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read" }
+  # ---- Dispatch & Delivery Execution (Phase 4 · M15) ----
+  /admin/deliveries:
+    get: { tags: [Dispatch], summary: "List/filter deliveries (status, district, vendorProfileId, unassigned)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.read" }
+  /admin/deliveries/{id}:
+    get: { tags: [Dispatch], summary: "Delivery detail (timeline, assignment history, POD, current-driver eligibility, read-only payment)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.read" }
+  /admin/deliveries/{id}/eligible-drivers:
+    get: { tags: [Dispatch], summary: "Eligible drivers for the delivery district", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires deliveries.assign" }
+  /admin/deliveries/{id}/assign:
+    post: { tags: [Dispatch], summary: "Assign an eligible driver + vehicle (eligibility re-checked)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Assigned }, "400": { description: "Ineligible driver / illegal transition" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.assign; body { driverProfileId, vehicleId }" }
+  /admin/deliveries/{id}/reassign:
+    post: { tags: [Dispatch], summary: "Reassign to a new driver (reason required); preserves history", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Reassigned }, "400": { description: "Ineligible / illegal transition / missing reason" } }, description: "Requires deliveries.assign; body { driverProfileId, vehicleId, reason }" }
+  /admin/deliveries/{id}/cancel:
+    post: { tags: [Dispatch], summary: "Cancel a pre-pickup assignment (reason required)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Cancelled }, "400": { description: "Illegal transition (after pickup)" } }, description: "Requires deliveries.manage; body { reason }" }
+  /admin/deliveries/{id}/timeline:
+    get: { tags: [Dispatch], summary: "Append-only delivery timeline", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires deliveries.read" }
+  /admin/deliveries/{id}/history:
+    get: { tags: [Dispatch], summary: "Append-only assignment history", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires deliveries.read" }
+  /admin/deliveries/{id}/proof:
+    get: { tags: [Dispatch], summary: "Proof of delivery (signed URLs)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires proof_of_delivery.read" }
+  /admin/deliveries/{id}/pins:
+    get: { tags: [Dispatch], summary: "Reveal pickup + delivery PINs (admin override)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires deliveries.verify; PINs never appear in general payloads" }
+  /driver/jobs:
+    get: { tags: [Dispatch], summary: "The driver's own assigned jobs (scope=active|completed|all)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires APPROVED DELIVERY_DRIVER role" }
+  /driver/jobs/{id}:
+    get: { tags: [Dispatch], summary: "Own job detail (404 for another driver's job)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /driver/jobs/{id}/accept:
+    post: { tags: [Dispatch], summary: "Accept the assignment", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Accepted }, "400": { description: "Illegal transition" } } }
+  /driver/jobs/{id}/decline:
+    post: { tags: [Dispatch], summary: "Decline (reason required); returns the job to the pool", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Declined }, "400": { description: "Missing reason / illegal transition" } } }
+  /driver/jobs/{id}/confirm-pickup:
+    post: { tags: [Dispatch], summary: "Confirm pickup with the vendor-held PIN (rate-limited; finalizes inventory once)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "Picked up" }, "400": { description: "Wrong/locked PIN or illegal transition" } }, description: "body { pin }" }
+  /driver/jobs/{id}/in-transit:
+    post: { tags: [Dispatch], summary: "Mark on the way", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "In transit" }, "400": { description: "Illegal transition" } } }
+  /driver/jobs/{id}/arriving:
+    post: { tags: [Dispatch], summary: "Mark arriving", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Arriving }, "400": { description: "Illegal transition" } } }
+  /driver/jobs/{id}/confirm-delivery:
+    post: { tags: [Dispatch], summary: "Complete delivery with the recipient PIN + recipient name (rate-limited)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Delivered }, "400": { description: "Wrong/locked PIN or illegal transition" } }, description: "body { pin, recipientName, notes?, podPhotoKeys? }" }
+  /driver/jobs/{id}/pod/presign:
+    post: { tags: [Dispatch], summary: "Presigned private PUT for a proof-of-delivery photo (rate-limited)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "body { fileName, contentType, sizeBytes }" }
+  /driver/jobs/{id}/pod/confirm:
+    post: { tags: [Dispatch], summary: "Attach uploaded POD photo keys before completion", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "body { photoKeys }" }
+  /deliveries/{id}:
+    get: { tags: [Dispatch], summary: "Customer delivery tracking for their own order", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /deliveries/{id}/pin:
+    get: { tags: [Dispatch], summary: "Reveal the recipient delivery PIN (own order)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /deliveries/{id}/proof:
+    get: { tags: [Dispatch], summary: "Proof of delivery for own order (signed URLs)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+  /vendor/deliveries:
+    get: { tags: [Dispatch], summary: "Deliveries for the vendor's own vendor-orders", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } } }
+  /vendor/deliveries/{id}:
+    get: { tags: [Dispatch], summary: "Own vendor-order delivery detail", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /vendor/deliveries/{id}/pickup-pin:
+    get: { tags: [Dispatch], summary: "Reveal the pickup PIN to hand the driver (own vendor-order)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+  /vendor/deliveries/{id}/proof:
+    get: { tags: [Dispatch], summary: "Proof of delivery for own vendor-order", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }

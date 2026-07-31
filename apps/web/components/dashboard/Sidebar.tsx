@@ -16,6 +16,7 @@ const BASE_NAV: NavItem[] = [
   { label: 'My Roles', href: '/dashboard/roles', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 8a6 6 0 0 1 12 0' },
   { label: 'Profile', href: '/dashboard/profile', icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0' },
   { label: 'Driver', href: '/dashboard/driver', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
+  { label: 'Deliveries', href: '/dashboard/driver/jobs', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
 ];
 
 const VENDOR_NAV: NavItem[] = [
