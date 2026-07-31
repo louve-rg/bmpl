@@ -14,13 +14,16 @@ export function Logo({ size = 44 }: { size?: number; withGlow?: boolean }) {
       style={{ width: size, height: size }}
       aria-hidden
     >
+      {/* The badge fills ~90% of its square canvas (10% white margin). Zoom
+          ~1.12x inside the circular mask so the white ring is clipped away and
+          only the round badge shows — the ring text (~80-85%) stays intact. */}
       <Image
         src="/images/logo.png"
         alt=""
         width={size}
         height={size}
         priority
-        className="h-full w-full rounded-full object-cover"
+        className="h-full w-full scale-[1.12] rounded-full object-cover"
       />
     </span>
   );
