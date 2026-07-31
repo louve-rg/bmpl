@@ -211,7 +211,11 @@ export class DriverService {
     const p = await this.ownProfileOrThrow(userId);
     const districts = [...new Set(dto.districts)];
     await this.prisma.$transaction([
-      this.prisma.driverServiceArea.deleteMany({ where: { driverProfileId: p.id, district: { notIn: districts.length ? districts : ['BELIZE'] } } }),
+      // Empty list clears all areas; a non-empty list removes anything not in it.
+      // (Avoid `notIn: []`, which Prisma treats as "exclude nothing" — it would delete every row here anyway, but be explicit.)
+      this.prisma.driverServiceArea.deleteMany({
+        where: { driverProfileId: p.id, ...(districts.length ? { district: { notIn: districts } } : {}) },
+      }),
       ...districts.map((d) =>
         this.prisma.driverServiceArea.upsert({
           where: { driverProfileId_district: { driverProfileId: p.id, district: d } },

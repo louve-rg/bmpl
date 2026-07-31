@@ -128,6 +128,14 @@ describe('service areas', () => {
     const set2 = await put(cookies, 'driver/service-areas', { districts: ['TOLEDO'] });
     expect(set2.body.map((a: { district: string }) => a.district)).toEqual(['TOLEDO']);
   });
+
+  it('clears all service districts when given an empty list (including a BELIZE row)', async () => {
+    const { cookies } = await registerCustomer('drv_area_clear@example.bz');
+    await put(cookies, 'driver/profile', profilePayload());
+    await put(cookies, 'driver/service-areas', { districts: ['BELIZE', 'CAYO'] });
+    const cleared = await put(cookies, 'driver/service-areas', { districts: [] });
+    expect(cleared.body).toEqual([]);
+  });
 });
 
 describe('availability + ONLINE eligibility', () => {
