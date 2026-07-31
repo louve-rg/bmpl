@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { api } from '../lib/api';
 import { BrandLockup } from './Logo';
+import { NotificationBell } from './notifications/NotificationBell';
 
 const NAV: Array<{ label: string; href: string; icon: string }> = [
   { label: 'Overview', href: '/dashboard', icon: 'M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6V11h-6v9Zm0-16v5h6V4h-6Z' },
+  { label: 'Notifications', href: '/dashboard/notifications', icon: 'M12 3a6 6 0 0 0-6 6v3l-2 3h16l-2-3V9a6 6 0 0 0-6-6ZM9 19a3 3 0 0 0 6 0' },
   { label: 'Applications', href: '/dashboard/applications', icon: 'M6 3h9l4 4v14H6V3Zm9 0v4h4M9 12h6M9 16h6' },
   { label: 'Users', href: '/dashboard/users', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 8a6 6 0 0 1 12 0M17 11a3 3 0 0 0 0-6M22 19a6 6 0 0 0-4-5.7' },
   { label: 'Vendors', href: '/dashboard/vendors', icon: 'M4 8h16l-1 3H5L4 8Zm1 3v9h14v-9M9 20v-5h6v5' },
@@ -71,7 +73,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           Sign out
         </button>
       </aside>
-      <main className="flex-1 bg-slate-100 p-5 md:p-8">{children}</main>
+      <main className="flex flex-1 flex-col bg-slate-100">
+        <header className="flex items-center justify-end border-b border-slate-200 bg-white px-4 py-2.5 md:px-8">
+          <NotificationBell />
+        </header>
+        <div className="flex-1 p-5 md:p-8">{children}</div>
+      </main>
     </div>
   );
 }

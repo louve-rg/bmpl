@@ -5,6 +5,7 @@ import { Prisma } from '@bmpl/database';
 import type { Currency } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { InventoryService } from '../products/inventory.service';
 import { WalletService } from '../wallet/wallet.service';
 
@@ -30,6 +31,7 @@ export class PaymentsService {
     private readonly audit: AuditService,
     private readonly inventory: InventoryService,
     private readonly wallet: WalletService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // ===========================================================================
@@ -212,6 +214,19 @@ export class PaymentsService {
         await this.audit.record({ action: 'ESCROW_FUNDS_HELD', actorId: actor.userId, newValue: { paymentId: payment.id, amountMinor: money(payment.amountMinor), walletTransactionId: txn.id, from: 'customer', to: 'escrow' } }, tx);
         await this.audit.record({ action: 'WALLET_TRANSACTION_POSTED', actorId: actor.userId, newValue: { walletTransactionId: txn.id, type: 'ESCROW_HOLD' } }, tx);
         await this.audit.record({ action: 'PAYMENT_AUTHORIZED', actorId: actor.userId, newValue: { paymentId: payment.id, paymentNumber: payment.paymentNumber, amountMinor: money(payment.amountMinor) } }, tx);
+        // Customer payment-authorized notification (M16).
+        await this.notifications.createInApp(
+          {
+            userId: payment.userId,
+            type: 'MARKETPLACE',
+            category: 'PAYMENT',
+            event: 'PAYMENT_AUTHORIZED',
+            title: 'Payment authorized',
+            body: `Your payment ${payment.paymentNumber} was authorized.`,
+            data: { paymentId: payment.id, orderId: payment.orderId },
+          },
+          tx,
+        );
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {

@@ -200,7 +200,7 @@ describe('vendor profile lifecycle', () => {
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'VENDOR_APPROVED' } });
     expect(audit).toBeTruthy();
     const note = await request(ctx.server).get('/api/notifications').set('Cookie', vendorCookies);
-    expect(note.body.some((n: { type: string }) => n.type === 'MARKETPLACE')).toBe(true);
+    expect(note.body.items.some((n: { type: string }) => n.type === 'MARKETPLACE')).toBe(true);
   });
 
   it('cannot approve a non-PENDING profile', async () => {

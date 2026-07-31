@@ -157,6 +157,19 @@ export class VendorService {
         },
         tx,
       );
+      // Alert vendor reviewers of the new application (M16).
+      await this.notifications.notifyAdmins(
+        'vendors.read',
+        {
+          type: 'ACCOUNT',
+          category: 'ADMIN_ALERT',
+          event: 'ADMIN_VENDOR_APPLICATION',
+          title: 'New vendor application',
+          body: `"${profile.businessName}" submitted their storefront for review.`,
+          data: { vendorProfileId: profile.id },
+        },
+        tx,
+      );
     });
     return this.getOwn(actor.userId);
   }

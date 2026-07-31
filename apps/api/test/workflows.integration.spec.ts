@@ -189,7 +189,7 @@ describe('administrator approval workflow', () => {
     expect(app.status).toBe('MORE_INFO_REQUIRED');
 
     const notes = await request(ctx.server).get('/api/notifications').set('Cookie', vendorCookies);
-    expect(notes.body.some((n: { type: string }) => n.type === 'ROLE_APPLICATION')).toBe(true);
+    expect(notes.body.items.some((n: { type: string }) => n.type === 'ROLE_APPLICATION')).toBe(true);
   });
 
   it('lets the customer provide more info, then admin approves', async () => {

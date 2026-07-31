@@ -120,16 +120,23 @@ export class DeliveryCoreService {
     });
   }
 
-  /** In-app notification to each distinct user (best-effort; within a tx if given). */
+  /** One DELIVERY-category notification event fanned out to each distinct user
+   *  (best-effort; within a tx if given). */
   async notify(
     userIds: Array<string | null | undefined>,
-    msg: { title: string; body: string; data?: Record<string, unknown> },
+    msg: { title: string; body: string; data?: Record<string, unknown>; event?: string },
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    const unique = [...new Set(userIds.filter((u): u is string => !!u))];
-    for (const userId of unique) {
-      await this.notifications.createInApp({ userId, type: 'MARKETPLACE', title: msg.title, body: msg.body, data: msg.data }, tx);
-    }
+    await this.notifications.notifyUsers(
+      userIds,
+      { type: 'MARKETPLACE', category: 'DELIVERY', event: msg.event, title: msg.title, body: msg.body, data: msg.data },
+      tx,
+    );
+  }
+
+  /** Fan out an admin alert (e.g. a failed-delivery/verification lock). */
+  async notifyAdmins(permission: string, msg: { title: string; body: string; data?: Record<string, unknown>; event?: string; category?: 'ADMIN_ALERT' | 'SECURITY' }, tx?: Prisma.TransactionClient): Promise<void> {
+    await this.notifications.notifyAdmins(permission, { type: 'SECURITY', category: msg.category ?? 'ADMIN_ALERT', event: msg.event, title: msg.title, body: msg.body, data: msg.data }, tx);
   }
 
   async loadOrThrow(deliveryId: string): Promise<DeliveryWithGraph> {

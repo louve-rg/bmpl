@@ -309,17 +309,38 @@ export class OrdersService {
         },
         tx,
       );
-      // Order-creation notification (the permitted boundary for M10).
+      // Customer order-placed notification.
       await this.notifications.createInApp(
         {
           userId: actor.userId,
           type: 'MARKETPLACE',
+          category: 'ORDER',
+          event: 'ORDER_PLACED',
           title: 'Order placed',
           body: `Your order ${orderNumber} has been placed and is pending.`,
           data: { orderId: order.id, orderNumber },
         },
         tx,
       );
+      // Vendor new-order notification, one per storefront in the order (M16).
+      const vendorProfiles = await tx.vendorProfile.findMany({
+        where: { id: { in: [...linesByVendor.keys()] } },
+        select: { id: true, userId: true, businessName: true },
+      });
+      for (const vp of vendorProfiles) {
+        await this.notifications.createInApp(
+          {
+            userId: vp.userId,
+            type: 'MARKETPLACE',
+            category: 'VENDOR',
+            event: 'VENDOR_NEW_ORDER',
+            title: 'New order',
+            body: `You have a new order (${orderNumber}) to fulfil.`,
+            data: { orderId: order.id, orderNumber, vendorProfileId: vp.id },
+          },
+          tx,
+        );
+      }
 
       // ---- Payment & wallet-hold foundation (M11) — NO money moves ----
       const payment = await this.payments.createForOrder(

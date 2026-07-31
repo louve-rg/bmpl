@@ -165,6 +165,20 @@ export class RolesService {
         tx,
       );
 
+      // Alert reviewers of the new application (M16).
+      await this.notifications.notifyAdmins(
+        'role_applications.read',
+        {
+          type: 'ROLE_APPLICATION',
+          category: 'ADMIN_ALERT',
+          event: 'ADMIN_ROLE_APPLICATION',
+          title: 'New role application',
+          body: `A ${roleCode.replace('_', ' ').toLowerCase()} application was submitted and needs review.`,
+          data: { applicationId: application.id, roleCode },
+        },
+        tx,
+      );
+
       return { autoApproved: false, applicationId: application.id, roleCode };
     });
   }

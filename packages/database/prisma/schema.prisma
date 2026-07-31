@@ -104,6 +104,21 @@ enum NotificationChannel {
   PUSH
 }
 
+// Module-aligned notification taxonomy (M16). Every notification event carries
+// exactly one category; the notification center + preferences filter by it.
+enum NotificationCategory {
+  ORDER
+  PAYMENT
+  DELIVERY
+  DRIVER
+  VENDOR
+  ACCOUNT
+  ROLE_APPLICATION
+  ADMIN_ALERT
+  SECURITY
+  SYSTEM
+}
+
 enum AuditAction {
   USER_REGISTERED
   USER_LOGGED_IN
@@ -259,7 +274,8 @@ model User {
   roleApplications        RoleApplication[]
   adminPermissions        AdminPermissionGrant[]    @relation("PermissionHolder")
   grantedPermissions      AdminPermissionGrant[]    @relation("PermissionGrantedBy")
-  notifications           Notification[]
+  notifications           NotificationRecipient[]
+  notificationPreferences NotificationPreference[]
   auditLogsAsActor        AuditLog[]                @relation("AuditActor")
   auditLogsAsTarget       AuditLog[]                @relation("AuditTarget")
   reviewsPerformed        RoleApplicationReview[]   @relation("ReviewReviewer")
@@ -447,21 +463,62 @@ model AdminPermissionGrant {
 
 // ---- Notifications ----------------------------------------------------------
 
+// A notification EVENT (M16). One event can fan out to many recipients (e.g. an
+// admin alert to every admin holding a permission); per-user read/dismiss state
+// lives on NotificationRecipient. `type` is the legacy top-level enum (back-compat);
+// `category` is the module-aligned taxonomy; `event` is a stable machine key.
 model Notification {
-  id        String              @id @default(cuid())
-  userId    String
-  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String               @id @default(cuid())
   type      NotificationType
-  channel   NotificationChannel @default(IN_APP)
+  category  NotificationCategory @default(SYSTEM)
+  event     String? // stable machine key from @bmpl/shared NOTIFICATION_EVENTS
   title     String
   body      String
-  data      Json? // structured payload (e.g. { applicationId })
-  readAt    DateTime?
-  sentAt    DateTime?
-  createdAt DateTime            @default(now())
+  data      Json? // structured payload (e.g. { orderId, deliveryId })
+  createdAt DateTime             @default(now())
 
-  @@index([userId, readAt])
+  recipients NotificationRecipient[]
+
+  @@index([category, createdAt])
   @@map("notifications")
+}
+
+// Per-recipient delivery + read/dismiss state for a Notification event. Unique per
+// (notification, user). Read = readAt set; dismissed = deletedAt set (soft delete).
+model NotificationRecipient {
+  id             String              @id @default(cuid())
+  notificationId String
+  notification   Notification        @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel        NotificationChannel @default(IN_APP)
+  readAt         DateTime?
+  deletedAt      DateTime?
+  createdAt      DateTime            @default(now())
+
+  @@unique([notificationId, userId])
+  @@index([userId, readAt])
+  @@index([userId, deletedAt])
+  @@index([notificationId])
+  @@map("notification_recipients")
+}
+
+// Per-user, per-category delivery-channel preferences (M16). In-app is always
+// stored; email/push are gated by these flags when those channels are wired.
+model NotificationPreference {
+  id        String               @id @default(cuid())
+  userId    String
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  NotificationCategory
+  inApp     Boolean              @default(true)
+  email     Boolean              @default(false)
+  push      Boolean              @default(false)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@unique([userId, category])
+  @@index([userId])
+  @@map("notification_preferences")
 }
 
 // ---- Audit ------------------------------------------------------------------

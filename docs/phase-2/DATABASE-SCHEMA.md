@@ -28,6 +28,13 @@ Product 1─* ProductImage
         1─* ProductOption 1─* ProductOptionValue
         1─* ProductVariant *─* ProductOptionValue (via VariantOptionValue)
         1─* Inventory 1─* InventoryChange
+VendorOrder 1─1 OrderDelivery (M13)                            (Phase 4)
+OrderDelivery 1─* DeliveryAssignment (append-only history)     (M15)
+              1─* DeliveryTimelineEvent (append-only)          (M15)
+              *─1 DriverProfile (assignedDriver) / DriverVehicle (assignedVehicle)
+User 1─1 DriverProfile 1─* DriverVehicle / DriverServiceArea   (M14)
+Notification (event) 1─* NotificationRecipient *─1 User        (M16)
+User 1─* NotificationPreference (per category)                 (M16)
 ```
 
 ## Models
@@ -49,8 +56,16 @@ Product 1─* ProductImage
 | `VariantOptionValue` (variant_option_values) | variantId, productOptionValueId | the variant↔value combination |
 | `Inventory` (inventory) | productId, variantId?, quantity, reserved, lowStockThreshold, unlimited, allowBackorders | one product-level row (variantId NULL) via partial unique index; per-variant via `variantId` unique |
 | `InventoryChange` (inventory_changes) | inventoryId, delta, reason, previous/newQty, actorId, note | append-only history |
+| `Notification` (notifications) | type, category, event, title, body, data(Json) | **M16** the notification EVENT (fan-out capable); no per-user state |
+| `NotificationRecipient` (notification_recipients) | notificationId, userId, channel, readAt, deletedAt | **M16** per-user read/dismiss state; unique (notification, user) |
+| `NotificationPreference` (notification_preferences) | userId, category*, inApp, email, push | **M16** per-user per-category channel prefs; unique (user, category) |
 
 \* = unique.
+
+**M16 note:** the single per-user `notifications` table was normalized into a
+`Notification` **event** + `NotificationRecipient` (per-user read/dismiss) so one
+event can fan out to many recipients (e.g. an admin alert to every admin holding a
+permission). Existing rows were migrated to one recipient each (no data loss).
 
 ## Enums (mirrored in `@bmpl/shared`)
 `VendorApprovalStatus` (DRAFT/PENDING/APPROVED/REJECTED/SUSPENDED) · `StoreStatus`

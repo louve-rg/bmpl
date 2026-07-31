@@ -688,3 +688,17 @@ paths:
     get: { tags: [Dispatch], summary: "Reveal the pickup PIN to hand the driver (own vendor-order)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
   /vendor/deliveries/{id}/proof:
     get: { tags: [Dispatch], summary: "Proof of delivery for own vendor-order", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+  # ---- Notifications & Event System (Phase 4 · M16) ----
+  /notifications:
+    get: { tags: [Notifications], summary: "The caller's notifications (filter category/unread; cursor+limit)", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ items, nextCursor, unreadCount }" }, "401": { $ref: "#/components/responses/Unauthorized" } }, description: "Scoped to the caller. Query: category, unread=true, cursor, limit(<=50)." }
+  /notifications/unread-count:
+    get: { tags: [Notifications], summary: "Unread notification count for the badge", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ count }" } } }
+  /notifications/preferences:
+    get: { tags: [Notifications], summary: "Per-category channel preferences (one row per category)", security: [{ cookieAuth: [] }], responses: { "200": { description: "[{ category, inApp, email, push }]" } } }
+    put: { tags: [Notifications], summary: "Update a category's channel preferences", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "Updated full preference array" }, "400": { description: "Validation error" } }, description: "body { category, inApp?, email?, push? }" }
+  /notifications/read-all:
+    patch: { tags: [Notifications], summary: "Mark all the caller's notifications read", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "{ ok: true }" } } }
+  /notifications/{id}/read:
+    patch: { tags: [Notifications], summary: "Mark one notification read (recipient id; own only)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "{ ok: true }" } } }
+  /notifications/{id}:
+    delete: { tags: [Notifications], summary: "Dismiss (soft-delete) one notification (own only)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "{ ok: true }" } } }

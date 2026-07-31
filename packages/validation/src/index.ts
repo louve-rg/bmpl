@@ -6,3 +6,4 @@ export * from './admin';
 export * from './marketplace';
 export * from './driver';
 export * from './dispatch';
+export * from './notifications';

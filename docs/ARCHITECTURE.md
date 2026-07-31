@@ -81,6 +81,19 @@ the same DB transaction, and notifies the applicant.
 - **No money moves** in dispatch — see the wallet section; settlement/payouts/refunds
   are deferred.
 
+### Notifications & event system (M16)
+
+- One engine, one funnel: `NotificationsService` (`createInApp` for a single user,
+  `notifyUsers` for fan-out, `notifyAdmins(permission, …)` for admin alerts). Every
+  module routes events through it — no duplicated notification logic.
+- **Normalized event → recipient:** a `Notification` is the event; a
+  `NotificationRecipient` holds per-user read/dismiss state (so one event fans out to
+  many recipients with independent read state). Per-category `NotificationPreference`
+  gates future email/push; in-app is always stored.
+- Taxonomy: legacy `NotificationType` (back-compat) + module-aligned
+  `NotificationCategory` + a stable `event` key (`@bmpl/shared`). The notification
+  center reads are strictly caller-scoped.
+
 ## Request authorization pipeline (API)
 
 ```

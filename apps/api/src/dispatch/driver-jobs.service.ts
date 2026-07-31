@@ -226,7 +226,7 @@ export class DriverJobService {
       await this.core.appendTimeline(tx, deliveryId, { fromStatus: 'ARRIVING', toStatus: 'DELIVERED', event: 'DELIVER', actorRole: 'DRIVER', actorUserId: actor.userId, note: `Received by ${dto.recipientName}` });
       await this.core.auditTransition('DELIVER', actor.userId, deliveryId, { recipientName: dto.recipientName }, tx);
       if (podKeys?.length) await this.core.auditTransition('POD', actor.userId, deliveryId, { count: podKeys.length }, tx);
-      await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId], { title: 'Delivered', body: `Order ${d.vendorOrder.order.orderNumber} was delivered${dto.recipientName ? ` to ${dto.recipientName}` : ''}.`, data: { deliveryId } }, tx);
+      await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId, actor.userId], { event: 'DELIVERY_DELIVERED', title: 'Delivered', body: `Order ${d.vendorOrder.order.orderNumber} was delivered${dto.recipientName ? ` to ${dto.recipientName}` : ''}.`, data: { deliveryId } }, tx);
     });
     return this.getJob(actor.userId, deliveryId);
   }
@@ -289,6 +289,16 @@ export class DriverJobService {
           : { deliveryPinAttempts: nextAttempts, ...(locked ? { deliveryVerificationStatus: 'FAILED' } : {}) },
       });
       await this.audit.record({ action: kind === 'pickup' ? 'DELIVERY_PICKUP_PIN_FAILED' : 'DELIVERY_DELIVERY_PIN_FAILED', actorId: actor.userId, newValue: { deliveryId: d.id, attempts: nextAttempts } });
+      // A verification lock is an operational exception → alert dispatch admins (M16).
+      if (locked) {
+        await this.core.notifyAdmins('deliveries.read', {
+          category: 'SECURITY',
+          event: 'ADMIN_FAILED_DELIVERY',
+          title: 'Delivery verification locked',
+          body: `A ${kind} code for a delivery locked after ${nextAttempts} failed attempts and needs admin verification.`,
+          data: { deliveryId: d.id, kind },
+        });
+      }
       throw new BadRequestException(locked ? 'Incorrect code. This delivery is now locked; ask an admin to verify.' : 'Incorrect code. Please try again.');
     }
   }

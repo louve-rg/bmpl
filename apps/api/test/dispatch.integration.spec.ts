@@ -450,7 +450,7 @@ describe('audit, notifications, and the no-money invariant', () => {
       expect(actions.some((x) => x.action === a)).toBe(true);
     }
     // customer got at least one delivery notification
-    expect(await ctx.prisma.notification.count({ where: { userId: order.customerId, type: 'MARKETPLACE' } })).toBeGreaterThan(0);
+    expect(await ctx.prisma.notificationRecipient.count({ where: { userId: order.customerId, notification: { category: 'DELIVERY' } } })).toBeGreaterThan(0);
     // NO wallet movement occurred during the entire dispatch lifecycle
     expect(await ctx.prisma.walletLedgerEntry.count()).toBe(ledgerBefore);
     expect(await ctx.prisma.walletTransaction.count()).toBe(txBefore);
