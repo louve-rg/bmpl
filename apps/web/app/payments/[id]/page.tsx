@@ -8,6 +8,7 @@ import { Footer } from '../../../components/landing/Footer';
 import { paymentsApi, money, type PaymentDetail } from '../../../lib/payments';
 import { PaymentStatusBadge, HoldStatusBadge } from '../../../components/payments/PaymentStatusBadge';
 import type { ApiError } from '../../../lib/api';
+import { Alert, Button, Card, PageHeader, Spinner } from '../../../components/ui';
 
 export default function PaymentDetailPage() {
   const router = useRouter();
@@ -55,63 +56,71 @@ export default function PaymentDetailPage() {
       <main className="container-bmpl py-10">
         <Link href="/payments" className="text-sm text-belize-blue hover:underline">← Payments</Link>
 
-        {state === 'loading' && <p className="mt-8 text-center text-slate-400">Loading…</p>}
-        {state === 'notfound' && <p className="mt-8 rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-400">Payment not found.</p>}
-        {state === 'error' && <p className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center text-amber-700">We couldn’t load this payment.</p>}
+        {state === 'loading' && (
+          <div className="mt-8 flex flex-col items-center gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-14 text-center">
+            <Spinner />
+            <p className="text-sm text-slate-400">Loading…</p>
+          </div>
+        )}
+        {state === 'notfound' && (
+          <div className="mt-8 rounded-bmpl-xl border border-slate-200 bg-white p-10 text-center text-slate-400">Payment not found.</div>
+        )}
+        {state === 'error' && <Alert tone="error" title="We couldn’t load this payment." className="mt-8" />}
 
         {state === 'ready' && p && (
           <>
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h1 className="text-3xl font-bold text-belize-navy">{p.paymentNumber}</h1>
-                <p className="text-sm text-slate-500">
-                  Order <Link href={`/orders/${p.order.id}`} className="text-belize-blue hover:underline">{p.order.orderNumber}</Link> · {new Date(p.createdAt).toLocaleString()}
-                </p>
-              </div>
-              <PaymentStatusBadge status={p.status} />
+            <div className="mt-4">
+              <PageHeader
+                title={p.paymentNumber}
+                description={new Date(p.createdAt).toLocaleString()}
+                actions={
+                  <div className="flex items-center gap-3">
+                    <Link href={`/orders/${p.order.id}`} className="text-sm text-belize-blue hover:underline">
+                      Order {p.order.orderNumber}
+                    </Link>
+                    <PaymentStatusBadge status={p.status} />
+                  </div>
+                }
+              />
             </div>
 
             {/* Authorization panel — status-aware (M12) */}
             {p.status === 'AUTHORIZED' ? (
-              <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-                <p className="font-semibold">✓ Payment authorized</p>
-                <p>Your funds ({money(p.amountMinor)}) are held in <strong>escrow</strong> under BMPL until fulfilment. No vendor has been paid.</p>
-              </div>
+              <Alert tone="success" title="✓ Payment authorized">
+                Your funds ({money(p.amountMinor)}) are held in <strong>escrow</strong> under BMPL until fulfilment. No vendor has been paid.
+              </Alert>
             ) : p.status === 'FAILED' ? (
-              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                <p className="font-semibold">Authorization failed</p>
-                <p>This payment could not be authorized and the order was cancelled. No funds moved.</p>
-              </div>
+              <Alert tone="error" title="Authorization failed">
+                This payment could not be authorized and the order was cancelled. No funds moved.
+              </Alert>
             ) : p.status === 'CANCELLED' ? (
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">This payment was cancelled. No funds moved.</div>
+              <Alert tone="neutral">This payment was cancelled. No funds moved.</Alert>
             ) : (
-              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                <p className="text-sm font-semibold text-amber-800">Pending authorization</p>
-                <p className="mt-1 text-sm text-amber-700">Authorize {money(p.amountMinor)} from your wallet — the funds move into escrow (held by BMPL, not paid to the vendor).</p>
-                <button
-                  type="button"
-                  onClick={authorize}
-                  disabled={busy}
-                  className="mt-3 rounded-lg bg-belize-blue px-5 py-2.5 text-sm font-semibold text-white hover:bg-belize-deep disabled:cursor-not-allowed disabled:opacity-60"
-                >
+              <Alert tone="warning" title="Pending authorization">
+                <p>Authorize {money(p.amountMinor)} from your wallet — the funds move into escrow (held by BMPL, not paid to the vendor).</p>
+                <Button type="button" onClick={authorize} disabled={busy} className="mt-3">
                   {busy ? 'Authorizing…' : 'Authorize with wallet'}
-                </button>
-                {msg && <p role="status" className={`mt-2 text-sm ${msg.kind === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>{msg.text}</p>}
-              </div>
+                </Button>
+                {msg && (
+                  <p role="status" className={`mt-2 text-sm font-medium ${msg.kind === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {msg.text}
+                  </p>
+                )}
+              </Alert>
             )}
 
             <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <h2 className="text-xs font-semibold uppercase text-slate-500">Payment</h2>
+              <Card className="p-4">
+                <h2 className="bmpl-label">Payment</h2>
                 <dl className="mt-2 space-y-1.5 text-sm">
                   <div className="flex justify-between"><dt className="text-slate-500">Method</dt><dd className="font-medium">{p.methodType === 'WALLET' ? 'Platform wallet' : p.methodType}</dd></div>
                   <div className="flex justify-between"><dt className="text-slate-500">Amount</dt><dd className="font-semibold text-belize-navy">{money(p.amountMinor)} {p.currency}</dd></div>
                   <div className="flex justify-between"><dt className="text-slate-500">Status</dt><dd><PaymentStatusBadge status={p.status} /></dd></div>
                 </dl>
-              </div>
+              </Card>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <h2 className="text-xs font-semibold uppercase text-slate-500">Wallet hold</h2>
+              <Card className="p-4">
+                <h2 className="bmpl-label">Wallet hold</h2>
                 {p.holds.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-400">No hold.</p>
                 ) : (
@@ -123,10 +132,10 @@ export default function PaymentDetailPage() {
                   ))
                 )}
                 <p className="mt-2 text-xs text-slate-400">A hold reserves your intent to pay. It does not move money.</p>
-              </div>
+              </Card>
             </div>
 
-            <section className="mt-6 rounded-2xl border border-slate-200 bg-white">
+            <Card className="mt-6 overflow-hidden">
               <header className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-belize-navy">Activity</header>
               <ul className="divide-y divide-slate-100 text-sm">
                 {p.events.map((e, i) => (
@@ -138,7 +147,7 @@ export default function PaymentDetailPage() {
                   </li>
                 ))}
               </ul>
-            </section>
+            </Card>
           </>
         )}
       </main>

@@ -22,10 +22,10 @@ export default async function StorefrontPage({ params }: { params: { slug: strin
   return (
     <>
       <Header />
-      <main>
+      <main className="bg-slate-50">
         <StorefrontView store={store} />
         <div className="container-bmpl pb-12">
-          <Link href="/vendors" className="text-sm text-belize-blue hover:underline">
+          <Link href="/vendors" className="text-sm font-medium text-belize-blue hover:underline">
             ← All vendors
           </Link>
         </div>

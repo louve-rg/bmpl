@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api } from '../../../../lib/api';
 import { StatusBadge } from '../../../../components/StatusBadge';
+import { Card, Spinner } from '../../../../components/ui';
 
 interface Item {
   productTitle: string;
@@ -56,58 +57,65 @@ export default function AdminOrderDetailPage() {
       .catch(() => setState('error'));
   }, [params.id]);
 
-  if (state === 'loading') return <p className="text-sm text-slate-500">Loading…</p>;
+  if (state === 'loading')
+    return (
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <Spinner className="h-4 w-4" /> Loading…
+      </div>
+    );
   if (state === 'error' || !order) return <p className="text-sm text-slate-500">Order not found.</p>;
 
   return (
     <div>
-      <Link href="/dashboard/orders" className="text-sm text-belize-blue hover:underline">← Orders</Link>
+      <Link href="/dashboard/orders" className="text-sm font-medium text-belize-blue hover:underline">← Orders</Link>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-belize-navy">{order.orderNumber}</h1>
-          <p className="text-sm text-slate-500">{order.customer.name} · {order.customer.email} · {new Date(order.placedAt).toLocaleString()}</p>
+          <h1 className="bmpl-page-title">{order.orderNumber}</h1>
+          <p className="mt-1 text-sm text-slate-500">{order.customer.name} · {order.customer.email} · {new Date(order.placedAt).toLocaleString()}</p>
         </div>
         <StatusBadge status={order.status} />
       </div>
 
       {order.deliveryAddress && (
-        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm">
-          <p className="text-xs font-semibold uppercase text-slate-500">Delivery address</p>
+        <Card className="mt-4 p-4 text-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Delivery address</p>
           <p className="mt-1 text-slate-700">
             {order.deliveryAddress.fullName} — {order.deliveryAddress.addressLine1}
             {order.deliveryAddress.addressLine2 ? `, ${order.deliveryAddress.addressLine2}` : ''}, {order.deliveryAddress.city}, {order.deliveryAddress.district.replace('_', ' ')}
           </p>
-        </div>
+        </Card>
       )}
 
       <div className="mt-5 space-y-4">
         {order.vendorOrders.map((vo) => (
-          <section key={vo.id} className="rounded-2xl border border-slate-200 bg-white">
-            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+          <Card key={vo.id} className="overflow-hidden p-0">
+            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
               <span className="font-semibold text-belize-navy">{vo.vendor.businessName}</span>
-              <span className="text-xs text-slate-500">{vo.orderNumber} · {vo.deliveryMethod === 'DELIVERY' ? 'Delivery' : 'Pickup'} · <StatusBadge status={vo.status} /></span>
+              <span className="flex items-center gap-1.5 text-xs text-slate-500">{vo.orderNumber} · {vo.deliveryMethod === 'DELIVERY' ? 'Delivery' : 'Pickup'} · <StatusBadge status={vo.status} /></span>
             </header>
-            <table className="w-full text-left text-sm">
-              <tbody className="divide-y divide-slate-100">
-                {vo.items.map((it, i) => (
-                  <tr key={i}>
-                    <td className="px-4 py-2">{it.productTitle}{it.variantTitle ? ` · ${it.variantTitle}` : ''}</td>
-                    <td className="px-4 py-2 text-slate-500">{it.sku ?? '—'}</td>
-                    <td className="px-4 py-2 text-slate-600">{money(it.unitPriceMinor)} × {it.quantity}</td>
-                    <td className="px-4 py-2 text-right font-semibold text-belize-navy">{money(it.subtotalMinor)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <tbody>
+                  {vo.items.map((it, i) => (
+                    <tr key={i} className="border-t border-slate-100 first:border-t-0">
+                      <td className="px-4 py-2">{it.productTitle}{it.variantTitle ? ` · ${it.variantTitle}` : ''}</td>
+                      <td className="px-4 py-2 text-slate-500">{it.sku ?? '—'}</td>
+                      <td className="px-4 py-2 text-slate-600">{money(it.unitPriceMinor)} × {it.quantity}</td>
+                      <td className="px-4 py-2 text-right font-semibold text-belize-navy">{money(it.subtotalMinor)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {vo.customerNotes && <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Notes: {vo.customerNotes}</p>}
-          </section>
+          </Card>
         ))}
       </div>
 
       <div className="mt-4 flex justify-end">
-        <div className="w-full max-w-xs rounded-2xl border border-slate-200 bg-white p-4 text-sm">
-          <div className="flex justify-between border-t border-slate-100 pt-1 text-base"><span className="font-semibold text-belize-navy">Total</span><span className="font-bold text-belize-navy">{money(order.totalMinor)} {order.currency}</span></div>
-        </div>
+        <Card className="w-full max-w-xs p-4 text-sm">
+          <div className="flex justify-between pt-1 text-base"><span className="font-semibold text-belize-navy">Total</span><span className="font-bold text-belize-navy">{money(order.totalMinor)} {order.currency}</span></div>
+        </Card>
       </div>
     </div>
   );

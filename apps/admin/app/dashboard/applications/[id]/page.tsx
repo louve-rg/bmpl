@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { ROLE_DEFINITIONS, type RoleCode } from '@bmpl/shared';
 import { serverGet } from '../../../../lib/server-api';
 import { StatusBadge } from '../../../../components/StatusBadge';
+import { Card } from '../../../../components/ui';
 import { ReviewActions } from './ReviewActions';
 import { DocumentLink } from './DocumentLink';
 
@@ -36,32 +37,32 @@ export default async function ApplicationDetailPage({ params }: { params: { id: 
 
   return (
     <div className="mx-auto max-w-3xl">
-      <Link href="/dashboard/applications" className="text-sm text-belize-blue hover:underline">
+      <Link href="/dashboard/applications" className="text-sm font-medium text-belize-blue hover:underline">
         ← Back to queue
       </Link>
 
       <header className="mt-3 mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-belize-navy">
+          <h1 className="bmpl-page-title">
             {ROLE_DEFINITIONS[app.roleCode].label} application
           </h1>
-          <p className="text-sm text-slate-500">
+          <p className="mt-1 text-sm text-slate-500">
             {app.user.firstName} {app.user.lastName} · {app.user.email}
           </p>
         </div>
         <StatusBadge status={app.status} />
       </header>
 
-      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-2 text-sm font-semibold uppercase text-slate-500">Applicant message</h2>
+      <Card className="mb-5 p-5">
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Applicant message</h2>
         <p className="text-sm text-slate-700">{app.message || <em className="text-slate-400">No message provided.</em>}</p>
         <p className="mt-3 text-xs text-slate-500">
           District: {app.user.district ?? '—'} · Submitted {new Date(app.submittedAt).toLocaleString()}
         </p>
-      </section>
+      </Card>
 
-      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-3 text-sm font-semibold uppercase text-slate-500">Documents</h2>
+      <Card className="mb-5 p-5">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Documents</h2>
         {app.documents.length === 0 ? (
           <p className="text-sm text-slate-400">No documents uploaded.</p>
         ) : (
@@ -75,14 +76,14 @@ export default async function ApplicationDetailPage({ params }: { params: { id: 
             ))}
           </div>
         )}
-      </section>
+      </Card>
 
       <section className="mb-5">
         <ReviewActions applicationId={app.id} decided={decided} />
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-3 text-sm font-semibold uppercase text-slate-500">Review history</h2>
+      <Card className="p-5">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Review history</h2>
         <ol className="space-y-3">
           {app.reviews.map((r) => (
             <li key={r.id} className="border-l-2 border-belize-light pl-3">
@@ -100,7 +101,7 @@ export default async function ApplicationDetailPage({ params }: { params: { id: 
             </li>
           ))}
         </ol>
-      </section>
+      </Card>
     </div>
   );
 }

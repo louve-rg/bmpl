@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ordersApi, money, type VendorOrderListItem } from '../../../lib/orders';
 import { OrderStatusBadge, DeliveryBadge } from '../../../components/orders/OrderStatusBadge';
 import type { ApiError } from '../../../lib/api';
+import { PageHeader, Alert, EmptyState, Spinner } from '../../../components/ui';
 
 export default function VendorOrdersPage() {
   const [rows, setRows] = useState<VendorOrderListItem[]>([]);
@@ -21,19 +22,28 @@ export default function VendorOrdersPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-belize-navy">Store orders</h1>
-      <p className="mt-1 text-sm text-slate-500">Orders placed with your storefront. Fulfilment controls arrive in a later update.</p>
+      <PageHeader title="Store orders" description="Orders placed with your storefront. Fulfilment controls arrive in a later update." />
 
-      {loading && <p className="mt-6 text-slate-400">Loading…</p>}
-      {err && <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-700">{err}</p>}
+      {loading && (
+        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading…
+        </div>
+      )}
+      {err && (
+        <Alert tone="warning" className="mt-6">
+          {err}
+        </Alert>
+      )}
       {!loading && !err && rows.length === 0 && (
-        <p className="mt-6 rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-400">No orders yet.</p>
+        <div className="mt-6">
+          <EmptyState title="No orders yet" description="Orders from your storefront will show up here." />
+        </div>
       )}
 
       {rows.length > 0 && (
-        <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="border-b border-slate-100 text-left text-xs uppercase text-slate-500">
+        <div className="mt-6 overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
+          <table className="w-full min-w-[40rem] text-sm">
+            <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">Order</th>
                 <th className="px-4 py-3">Customer</th>
@@ -43,9 +53,9 @@ export default function VendorOrdersPage() {
                 <th className="px-4 py-3">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {rows.map((o) => (
-                <tr key={o.id} className="hover:bg-slate-50">
+                <tr key={o.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-3">
                     <Link href={`/dashboard/orders/${o.id}`} className="font-medium text-belize-blue hover:underline">{o.orderNumber}</Link>
                     <div className="text-xs text-slate-400">{new Date(o.createdAt).toLocaleDateString()}</div>

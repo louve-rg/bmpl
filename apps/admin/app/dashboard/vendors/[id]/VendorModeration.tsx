@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../lib/api';
+import { Button } from '../../../../components/ui';
 
 /** Approve / reject / suspend / restore a vendor, guarded server-side by vendors.moderate. */
 export function VendorModeration({ id, status }: { id: string; status: string }) {
@@ -30,39 +31,27 @@ export function VendorModeration({ id, status }: { id: string; status: string })
     <div className="mt-4 flex flex-wrap gap-2">
       {status === 'PENDING' && (
         <>
-          <Btn label="Approve" onClick={() => run('approve')} disabled={busy} kind="primary" />
-          <Btn label="Reject" onClick={() => run('reject')} disabled={busy} kind="danger" />
+          <Button onClick={() => run('approve')} disabled={busy} variant="primary">
+            Approve
+          </Button>
+          <Button onClick={() => run('reject')} disabled={busy} variant="destructive">
+            Reject
+          </Button>
         </>
       )}
-      {status === 'APPROVED' && <Btn label="Suspend" onClick={() => run('suspend')} disabled={busy} kind="danger" />}
-      {status === 'SUSPENDED' && <Btn label="Restore" onClick={() => run('restore')} disabled={busy} kind="primary" />}
+      {status === 'APPROVED' && (
+        <Button onClick={() => run('suspend')} disabled={busy} variant="destructive">
+          Suspend
+        </Button>
+      )}
+      {status === 'SUSPENDED' && (
+        <Button onClick={() => run('restore')} disabled={busy} variant="primary">
+          Restore
+        </Button>
+      )}
       {status === 'REJECTED' && (
         <p className="text-sm text-slate-500">Awaiting the vendor to revise and resubmit.</p>
       )}
     </div>
-  );
-}
-
-function Btn({
-  label,
-  onClick,
-  disabled,
-  kind,
-}: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  kind: 'primary' | 'danger';
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-50 ${
-        kind === 'primary' ? 'bg-belize-blue hover:bg-belize-deep' : 'bg-red-600 hover:bg-red-700'
-      }`}
-    >
-      {label}
-    </button>
   );
 }

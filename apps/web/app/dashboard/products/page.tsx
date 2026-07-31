@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
+import { PageHeader, ButtonLink, Alert, Badge, EmptyState, Spinner, type Tone } from '../../../components/ui';
 
 interface ProductRow {
   id: string;
@@ -14,13 +15,13 @@ interface ProductRow {
 }
 
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
-const STATUS_TONE: Record<string, string> = {
-  DRAFT: 'bg-slate-100 text-slate-600',
-  PENDING_REVIEW: 'bg-amber-100 text-amber-700',
-  PUBLISHED: 'bg-emerald-100 text-emerald-700',
-  REJECTED: 'bg-red-100 text-red-700',
-  SUSPENDED: 'bg-red-100 text-red-700',
-  ARCHIVED: 'bg-slate-100 text-slate-400',
+const STATUS_TONE: Record<string, Tone> = {
+  DRAFT: 'neutral',
+  PENDING_REVIEW: 'warning',
+  PUBLISHED: 'success',
+  REJECTED: 'error',
+  SUSPENDED: 'error',
+  ARCHIVED: 'neutral',
 };
 
 export default function VendorProductsPage() {
@@ -62,21 +63,35 @@ export default function VendorProductsPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-belize-navy">My Products</h1>
-        <Link href="/dashboard/products/new" className="rounded-lg bg-belize-blue px-4 py-2 text-sm font-semibold text-white hover:bg-belize-deep">
-          + New product
-        </Link>
-      </div>
+      <PageHeader
+        title="My Products"
+        actions={
+          <ButtonLink href="/dashboard/products/new" size="sm">
+            + New product
+          </ButtonLink>
+        }
+      />
 
-      {err && <p className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">{err}</p>}
+      {err && (
+        <Alert tone="warning" className="mb-4">
+          {err}
+        </Alert>
+      )}
 
       {loading ? (
-        <p className="text-sm text-slate-500">Loading…</p>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading…
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title="No products yet"
+          description="Create your first product to start selling on your storefront."
+          action={<ButtonLink href="/dashboard/products/new">+ New product</ButtonLink>}
+        />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
           <table className="w-full min-w-[32rem] text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">Product</th>
                 <th className="px-4 py-3">Price</th>
@@ -84,18 +99,16 @@ export default function VendorProductsPage() {
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {rows.map((p) => (
-                <tr key={p.id} className="hover:bg-slate-50">
+                <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-3">
                     <Link href={`/dashboard/products/${p.id}`} className="font-medium text-belize-navy hover:text-belize-blue">{p.title}</Link>
                     <p className="text-xs text-slate-500">{p.sku} · {p.category.name}</p>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{money(p.priceMinor)}</td>
                   <td className="px-4 py-3">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_TONE[p.status] ?? 'bg-slate-100'}`}>
-                      {p.status.replace('_', ' ')}
-                    </span>
+                    <Badge tone={STATUS_TONE[p.status] ?? 'neutral'}>{p.status.replace('_', ' ')}</Badge>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap justify-end gap-2 text-xs font-semibold">
@@ -113,9 +126,6 @@ export default function VendorProductsPage() {
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-400">No products yet. Create your first one.</td></tr>
-              )}
             </tbody>
           </table>
         </div>

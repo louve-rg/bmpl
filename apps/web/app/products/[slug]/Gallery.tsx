@@ -14,7 +14,7 @@ export function Gallery({ images }: { images: GalleryImage[] }) {
 
   if (usable.length === 0) {
     return (
-      <div className="flex aspect-square items-center justify-center rounded-2xl bg-slate-100 text-slate-300">
+      <div className="flex aspect-square items-center justify-center rounded-bmpl-lg border border-slate-200 bg-slate-100 text-sm text-slate-400">
         No image yet
       </div>
     );
@@ -23,7 +23,7 @@ export function Gallery({ images }: { images: GalleryImage[] }) {
   const current = usable[Math.min(active, usable.length - 1)]!;
   return (
     <div>
-      <div className="aspect-square overflow-hidden rounded-2xl bg-slate-100">
+      <div className="aspect-square overflow-hidden rounded-bmpl-lg border border-slate-200 bg-slate-100 shadow-bmpl-sm">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={current.url!} alt={current.altText ?? ''} className="h-full w-full object-cover" />
       </div>
@@ -33,7 +33,9 @@ export function Gallery({ images }: { images: GalleryImage[] }) {
             <button
               key={img.id}
               onClick={() => setActive(i)}
-              className={`h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 ${i === active ? 'border-belize-blue' : 'border-transparent'}`}
+              aria-label={`Show image ${i + 1}`}
+              aria-current={i === active}
+              className={`h-16 w-16 shrink-0 overflow-hidden rounded-bmpl-sm border-2 transition ${i === active ? 'border-belize-blue' : 'border-transparent hover:border-slate-300'}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={img.url!} alt={img.altText ?? ''} className="h-full w-full object-cover" />

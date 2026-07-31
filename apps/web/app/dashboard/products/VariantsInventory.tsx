@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
+import { Card, Alert, Badge, Spinner, type Tone } from '../../../components/ui';
 
 interface OptionValue { id: string; value: string }
 interface Option { id: string; name: string; values: OptionValue[] }
@@ -56,7 +57,13 @@ export function VariantsInventory({ productId }: { productId: string }) {
     try { await p; await load(); } catch (e) { window.alert((e as ApiError).message ?? 'Action failed.'); }
   }
 
-  if (!view || !inv) return <section className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">Loading variants…</section>;
+  if (!view || !inv) {
+    return (
+      <Card className="flex items-center gap-2 p-5 text-sm text-slate-500 sm:p-6">
+        <Spinner className="h-4 w-4" /> Loading variants…
+      </Card>
+    );
+  }
 
   const valueLabel = (id: string) => {
     for (const o of view.options) { const val = o.values.find((v) => v.id === id); if (val) return `${o.name}: ${val.value}`; }
@@ -64,19 +71,19 @@ export function VariantsInventory({ productId }: { productId: string }) {
   };
 
   return (
-    <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5">
-      <h2 className="text-sm font-semibold uppercase text-slate-500">Variants &amp; Inventory</h2>
-      {err && <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">{err}</p>}
+    <Card className="space-y-6 p-5 sm:p-6">
+      <h2 className="bmpl-eyebrow">Variants &amp; Inventory</h2>
+      {err && <Alert tone="warning">{err}</Alert>}
 
       <Options view={view} onRun={run} productId={productId} />
       <Variants view={view} onRun={run} productId={productId} valueLabel={valueLabel} />
       <InventoryPanel inv={inv} hasVariants={view.variants.length > 0} onRun={run} productId={productId} valueLabel={valueLabel} view={view} />
-    </section>
+    </Card>
   );
 }
 
-const input = 'rounded-lg border border-slate-300 px-2 py-1 text-sm';
-const btn = 'rounded-lg bg-belize-blue px-3 py-1 text-xs font-semibold text-white hover:bg-belize-deep disabled:opacity-50';
+const input = 'rounded-bmpl-md border border-slate-300 px-2.5 py-1.5 text-sm outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30';
+const btn = 'rounded-bmpl-md bg-belize-blue px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-belize-deep disabled:opacity-50';
 
 function Options({ view, onRun, productId }: { view: ManageView; onRun: (p: Promise<unknown>) => void; productId: string }) {
   const [name, setName] = useState('');
@@ -84,11 +91,11 @@ function Options({ view, onRun, productId }: { view: ManageView; onRun: (p: Prom
   const locked = view.variants.length > 0;
   return (
     <div>
-      <h3 className="mb-2 text-xs font-semibold text-slate-600">Options</h3>
+      <h3 className="bmpl-label mb-2">Options</h3>
       {view.options.map((o) => (
-        <div key={o.id} className="mb-1 flex flex-wrap items-center gap-2 text-sm">
+        <div key={o.id} className="mb-1.5 flex flex-wrap items-center gap-2 text-sm">
           <span className="font-medium text-belize-navy">{o.name}:</span>
-          {o.values.map((v) => <span key={v.id} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{v.value}</span>)}
+          {o.values.map((v) => <Badge key={v.id}>{v.value}</Badge>)}
           <AddValue optionId={o.id} productId={productId} onRun={onRun} disabled={locked} />
           {!locked && <button onClick={() => onRun(api.del(`/vendor/products/${productId}/options/${o.id}`))} className="text-xs text-red-600 hover:underline">remove</button>}
         </div>
@@ -113,7 +120,7 @@ function AddValue({ optionId, productId, onRun, disabled }: { optionId: string; 
   if (disabled) return null;
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!v.trim()) return; onRun(api.post(`/vendor/products/${productId}/options/${optionId}/values`, { value: v })); setV(''); }}>
-      <input className="w-24 rounded border border-slate-200 px-1 text-xs" placeholder="+ value" value={v} onChange={(e) => setV(e.target.value)} />
+      <input className="w-24 rounded-bmpl-sm border border-slate-200 px-1.5 py-0.5 text-xs outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30" placeholder="+ value" value={v} onChange={(e) => setV(e.target.value)} />
     </form>
   );
 }
@@ -126,9 +133,9 @@ function Variants({ view, onRun, productId, valueLabel }: { view: ManageView; on
 
   return (
     <div>
-      <h3 className="mb-2 text-xs font-semibold text-slate-600">Variants</h3>
+      <h3 className="bmpl-label mb-2">Variants</h3>
       {view.variants.map((v) => (
-        <div key={v.id} className="mb-1 flex flex-wrap items-center gap-2 text-sm">
+        <div key={v.id} className="mb-1.5 flex flex-wrap items-center gap-2 rounded-bmpl-md border border-slate-100 px-2.5 py-1.5 text-sm">
           <span>{v.optionValueIds.map(valueLabel).join(' / ')}</span>
           <span className="text-xs text-slate-400">{v.sku ?? 'no sku'} · {money(v.priceMinor)} · qty {v.quantity}</span>
           <button onClick={() => onRun(api.patch(`/vendor/products/${productId}/variants/${v.id}`, { isActive: !v.isActive }))} className={`text-xs ${v.isActive ? 'text-emerald-600' : 'text-slate-400'} hover:underline`}>{v.isActive ? 'active' : 'inactive'}</button>
@@ -162,7 +169,7 @@ function Variants({ view, onRun, productId, valueLabel }: { view: ManageView; on
 function InventoryPanel({ inv, hasVariants, onRun, productId, valueLabel, view }: { inv: Inventory; hasVariants: boolean; onRun: (p: Promise<unknown>) => void; productId: string; valueLabel: (id: string) => string; view: ManageView }) {
   return (
     <div>
-      <h3 className="mb-2 text-xs font-semibold text-slate-600">Inventory</h3>
+      <h3 className="bmpl-label mb-2">Inventory</h3>
       {!hasVariants ? (
         <StockRow label="Product stock" row={inv.product} productId={productId} onRun={onRun} />
       ) : (
@@ -176,19 +183,21 @@ function InventoryPanel({ inv, hasVariants, onRun, productId, valueLabel, view }
   );
 }
 
+const STOCK_TONE = (row: InvRow): Tone => (row.outOfStock ? 'error' : row.lowStock ? 'warning' : 'success');
+
 function StockRow({ label, row, productId, variantId, onRun }: { label: string; row: InvRow; productId: string; variantId?: string; onRun: (p: Promise<unknown>) => void }) {
   const [delta, setDelta] = useState('');
   const q = variantId ? `?variantId=${variantId}` : '';
   return (
-    <div className="mb-2 rounded-lg border border-slate-200 p-2 text-sm">
+    <div className="mb-2 rounded-bmpl-md border border-slate-200 p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{label}</span>
-        <span className={`rounded-full px-2 py-0.5 text-xs ${row.outOfStock ? 'bg-red-100 text-red-700' : row.lowStock ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+        <span className="font-medium text-belize-navy">{label}</span>
+        <Badge tone={row.unlimited ? 'brand' : STOCK_TONE(row)}>
           {row.unlimited ? 'Unlimited' : row.outOfStock ? 'Out of stock' : row.lowStock ? `Low (${row.available})` : `In stock (${row.available})`}
-        </span>
+        </Badge>
         <span className="text-xs text-slate-400">on-hand {row.quantity} · reserved {row.reserved}</span>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-3">
         <input className={`${input} w-20`} placeholder="+/- qty" value={delta} onChange={(e) => setDelta(e.target.value)} />
         <button
           className={btn}
@@ -196,9 +205,9 @@ function StockRow({ label, row, productId, variantId, onRun }: { label: string; 
         >
           Adjust
         </button>
-        <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={row.unlimited} onChange={(e) => onRun(api.patch(`/vendor/products/${productId}/inventory${q}`, { unlimited: e.target.checked }))} /> Unlimited</label>
-        <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={row.allowBackorders} onChange={(e) => onRun(api.patch(`/vendor/products/${productId}/inventory${q}`, { allowBackorders: e.target.checked }))} /> Backorders</label>
-        <label className="flex items-center gap-1 text-xs">Low&nbsp;≤ <input className="w-14 rounded border border-slate-200 px-1" defaultValue={row.lowStockThreshold} onBlur={(e) => Number(e.target.value) !== row.lowStockThreshold && onRun(api.patch(`/vendor/products/${productId}/inventory${q}`, { lowStockThreshold: Number(e.target.value) }))} /></label>
+        <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" className="h-3.5 w-3.5 rounded border-slate-300 text-belize-blue focus:ring-2 focus:ring-belize-accent/30" checked={row.unlimited} onChange={(e) => onRun(api.patch(`/vendor/products/${productId}/inventory${q}`, { unlimited: e.target.checked }))} /> Unlimited</label>
+        <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" className="h-3.5 w-3.5 rounded border-slate-300 text-belize-blue focus:ring-2 focus:ring-belize-accent/30" checked={row.allowBackorders} onChange={(e) => onRun(api.patch(`/vendor/products/${productId}/inventory${q}`, { allowBackorders: e.target.checked }))} /> Backorders</label>
+        <label className="flex items-center gap-1.5 text-xs text-slate-600">Low&nbsp;≤ <input className="w-14 rounded-bmpl-sm border border-slate-200 px-1.5 py-0.5 outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30" defaultValue={row.lowStockThreshold} onBlur={(e) => Number(e.target.value) !== row.lowStockThreshold && onRun(api.patch(`/vendor/products/${productId}/inventory${q}`, { lowStockThreshold: Number(e.target.value) }))} /></label>
       </div>
     </div>
   );

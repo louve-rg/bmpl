@@ -2,10 +2,48 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Mirrors apps/web BMPL tokens so the admin portal is the same brand. */
+  --bmpl-primary: #1e40af;
+  --bmpl-primary-hover: #1e3a8a;
+  --bmpl-secondary: #0f172a;
+  --bmpl-accent: #0ea5e9;
+  --bmpl-bg: #f1f5f9;
+  --bmpl-surface: #ffffff;
+  --bmpl-text: #0f172a;
+  --bmpl-text-muted: #64748b;
+  --bmpl-border: #e2e8f0;
+  --bmpl-success: #059669;
+  --bmpl-warning: #d97706;
+  --bmpl-error: #dc2626;
+  --bmpl-info: #0284c7;
+}
+
 body {
   @apply bg-slate-100 text-slate-800 antialiased;
 }
 
 .container-admin {
   @apply mx-auto w-full max-w-6xl px-4 sm:px-6;
+}
+
+@layer components {
+  .bmpl-card {
+    @apply rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm;
+  }
+  .bmpl-panel {
+    @apply rounded-bmpl-lg border border-slate-200 bg-white;
+  }
+  .bmpl-input {
+    @apply w-full rounded-bmpl-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-belize-navy outline-none transition placeholder:text-slate-400 focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70;
+  }
+  .bmpl-label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .bmpl-eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.22em] text-belize-accent;
+  }
+  .bmpl-page-title {
+    @apply text-2xl font-bold tracking-tight text-belize-navy sm:text-3xl;
+  }
 }

@@ -1,4 +1,5 @@
 import { serverGet } from '../../../lib/server-api';
+import { EmptyState, PageHeader } from '../../../components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,50 +29,47 @@ export default async function AuditPage({
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-belize-navy">Audit Log</h1>
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">When</th>
-              <th className="px-4 py-3">Action</th>
-              <th className="px-4 py-3">Actor</th>
-              <th className="px-4 py-3">Target</th>
-              <th className="px-4 py-3">Detail</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {items.map((row) => (
-              <tr key={row.id} className="align-top">
-                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">
-                  {new Date(row.createdAt).toLocaleString()}
-                </td>
-                <td className="px-4 py-3 font-medium text-belize-navy">
-                  {row.action.replace(/_/g, ' ')}
-                  {row.targetRole && <span className="ml-1 text-xs text-slate-500">({row.targetRole})</span>}
-                </td>
-                <td className="px-4 py-3 text-xs text-slate-600">
-                  {row.actor ? `${row.actor.firstName} ${row.actor.lastName}` : 'System'}
-                </td>
-                <td className="px-4 py-3 text-xs text-slate-600">
-                  {row.targetUser ? row.targetUser.email : '—'}
-                </td>
-                <td className="px-4 py-3 text-xs text-slate-500">
-                  {row.reason ?? ''}
-                  {row.ipAddress && <span className="ml-1 text-slate-400">· {row.ipAddress}</span>}
-                </td>
-              </tr>
-            ))}
-            {items.length === 0 && (
+      <PageHeader eyebrow="Governance" title="Audit Log" />
+      {items.length === 0 ? (
+        <EmptyState title="No audit entries yet" description="Administrative actions across the platform will be recorded here." />
+      ) : (
+        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">
-                  No audit entries yet.
-                </td>
+                <th className="px-4 py-3">When</th>
+                <th className="px-4 py-3">Action</th>
+                <th className="px-4 py-3">Actor</th>
+                <th className="px-4 py-3">Target</th>
+                <th className="px-4 py-3">Detail</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {items.map((row) => (
+                <tr key={row.id} className="border-t border-slate-100 align-top">
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">
+                    {new Date(row.createdAt).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 font-medium text-belize-navy">
+                    {row.action.replace(/_/g, ' ')}
+                    {row.targetRole && <span className="ml-1 text-xs text-slate-500">({row.targetRole})</span>}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-600">
+                    {row.actor ? `${row.actor.firstName} ${row.actor.lastName}` : 'System'}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-600">
+                    {row.targetUser ? row.targetUser.email : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-500">
+                    {row.reason ?? ''}
+                    {row.ipAddress && <span className="ml-1 text-slate-400">· {row.ipAddress}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

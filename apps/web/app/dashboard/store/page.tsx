@@ -1,8 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
+import {
+  Card as UiCard,
+  PageHeader,
+  Field,
+  Input,
+  Textarea,
+  Select,
+  Button,
+  ButtonLink,
+  Badge,
+  StatusBadge,
+  Alert,
+  Spinner,
+} from '../../../components/ui';
 
 const DISTRICTS = ['BELIZE', 'CAYO', 'COROZAL', 'ORANGE_WALK', 'STANN_CREEK', 'TOLEDO'];
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -48,14 +61,18 @@ export default function StorePage() {
     setMsg((e as ApiError).message ?? 'Something went wrong.');
   }
 
-  if (loading) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <Spinner className="h-4 w-4" /> Loading…
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <h1 className="text-2xl font-bold text-belize-navy">My Store</h1>
-      {msg && (
-        <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">{msg}</p>
-      )}
+      <PageHeader title="My Store" />
+      {msg && <Alert tone="warning">{msg}</Alert>}
 
       {!store?.profile ? (
         <CreateForm onDone={reload} onError={fail} />
@@ -75,15 +92,12 @@ export default function StorePage() {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5">
-      <h2 className="mb-3 text-sm font-semibold uppercase text-slate-500">{title}</h2>
+    <UiCard className="p-5 sm:p-6">
+      <h2 className="bmpl-eyebrow mb-4">{title}</h2>
       {children}
-    </section>
+    </UiCard>
   );
 }
-const input =
-  'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30';
-const btn = 'rounded-lg bg-belize-blue px-4 py-2 text-sm font-semibold text-white hover:bg-belize-deep disabled:opacity-50';
 
 type SectionProps = { store: Store; onDone: () => Promise<void>; onError: (e: unknown) => void };
 
@@ -94,7 +108,7 @@ function CreateForm({ onDone, onError }: { onDone: () => Promise<void>; onError:
   return (
     <Card title="Create your storefront">
       <form
-        className="space-y-3"
+        className="space-y-4"
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
@@ -108,11 +122,13 @@ function CreateForm({ onDone, onError }: { onDone: () => Promise<void>; onError:
           }
         }}
       >
-        <input className={input} placeholder="Business name" value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
-        <input className={input} placeholder="Contact email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
-        <button className={btn} disabled={busy || !businessName || !contactEmail}>
-          Create storefront
-        </button>
+        <Field label="Business name">
+          <Input placeholder="Business name" value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
+        </Field>
+        <Field label="Contact email">
+          <Input placeholder="Contact email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
+        </Field>
+        <Button disabled={busy || !businessName || !contactEmail}>Create storefront</Button>
       </form>
     </Card>
   );
@@ -123,23 +139,25 @@ function StatusBar({ store, onDone, onError }: SectionProps) {
   const status = store.profile!.approvalStatus;
   const canSubmit = status === 'DRAFT' || status === 'REJECTED';
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4">
-      <span className="text-sm text-slate-600">
-        Approval: <b className="text-belize-navy">{status}</b> · Store: {store.profile!.storeStatus}
-      </span>
-      {store.profile!.rejectionReason && status === 'REJECTED' && (
-        <span className="text-sm text-red-600">Reason: {store.profile!.rejectionReason}</span>
-      )}
+    <UiCard className="flex flex-wrap items-center gap-3 p-4">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+        <span>Approval:</span>
+        <StatusBadge status={status} />
+        <span className="text-slate-300">·</span>
+        <span>
+          Store: <b className="text-belize-navy">{store.profile!.storeStatus}</b>
+        </span>
+        {store.profile!.rejectionReason && status === 'REJECTED' && (
+          <span className="text-red-600">Reason: {store.profile!.rejectionReason}</span>
+        )}
+      </div>
       <div className="ml-auto flex items-center gap-3">
-        <Link
-          href="/dashboard/store/preview"
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-        >
+        <ButtonLink href="/dashboard/store/preview" variant="outline" size="sm">
           Preview storefront
-        </Link>
+        </ButtonLink>
         {canSubmit && (
-          <button
-            className={btn}
+          <Button
+            size="sm"
             disabled={busy}
             onClick={async () => {
               setBusy(true);
@@ -154,12 +172,12 @@ function StatusBar({ store, onDone, onError }: SectionProps) {
             }}
           >
             Submit for review
-          </button>
+          </Button>
         )}
         {status === 'PENDING' && <span className="text-sm text-slate-500">Awaiting admin review…</span>}
-        {status === 'APPROVED' && <span className="text-sm text-emerald-600">Live ✓</span>}
+        {status === 'APPROVED' && <Badge tone="success">Live ✓</Badge>}
       </div>
-    </div>
+    </UiCard>
   );
 }
 
@@ -177,7 +195,7 @@ function ProfileForm({ store, onDone, onError }: SectionProps) {
   return (
     <Card title="Business details">
       <form
-        className="space-y-3"
+        className="space-y-4"
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
@@ -198,21 +216,30 @@ function ProfileForm({ store, onDone, onError }: SectionProps) {
           }
         }}
       >
-        <input className={input} value={f.businessName} onChange={(e) => setF({ ...f, businessName: e.target.value })} placeholder="Business name" />
-        <textarea className={input} rows={3} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Description" />
-        <div className="grid gap-3 md:grid-cols-2">
-          <input className={input} value={f.contactEmail} onChange={(e) => setF({ ...f, contactEmail: e.target.value })} placeholder="Contact email" />
-          <input className={input} value={f.contactPhone} onChange={(e) => setF({ ...f, contactPhone: e.target.value })} placeholder="Contact phone" />
+        <Field label="Business name">
+          <Input value={f.businessName} onChange={(e) => setF({ ...f, businessName: e.target.value })} placeholder="Business name" />
+        </Field>
+        <Field label="Description">
+          <Textarea rows={3} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Description" />
+        </Field>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Contact email">
+            <Input value={f.contactEmail} onChange={(e) => setF({ ...f, contactEmail: e.target.value })} placeholder="Contact email" />
+          </Field>
+          <Field label="Contact phone">
+            <Input value={f.contactPhone} onChange={(e) => setF({ ...f, contactPhone: e.target.value })} placeholder="Contact phone" />
+          </Field>
         </div>
-        <input className={input} value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} placeholder="https://…" />
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          Store status:
-          <select className="rounded-lg border border-slate-300 px-3 py-2 text-sm" value={f.storeStatus} onChange={(e) => setF({ ...f, storeStatus: e.target.value })}>
+        <Field label="Website">
+          <Input value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} placeholder="https://…" />
+        </Field>
+        <Field label="Store status">
+          <Select value={f.storeStatus} onChange={(e) => setF({ ...f, storeStatus: e.target.value })}>
             <option value="OPEN">Open</option>
             <option value="CLOSED">Closed</option>
-          </select>
-        </label>
-        <button className={btn} disabled={busy}>Save details</button>
+          </Select>
+        </Field>
+        <Button disabled={busy}>Save details</Button>
       </form>
     </Card>
   );
@@ -241,19 +268,21 @@ function ImagesSection({ store, onDone, onError }: SectionProps) {
         <ImagePicker label="Logo" url={p.logoUrl} onPick={(file) => upload('logo', file)} />
         <ImagePicker label="Banner" url={p.bannerUrl} onPick={(file) => upload('banner', file)} wide />
       </div>
-      <p className="mt-2 text-xs text-slate-400">JPEG, PNG, or WebP up to 8&nbsp;MB.</p>
+      <p className="mt-3 text-xs text-slate-400">JPEG, PNG, or WebP up to 8&nbsp;MB.</p>
     </Card>
   );
 }
 function ImagePicker({ label, url, onPick, wide }: { label: string; url: string | null; onPick: (f: File) => void; wide?: boolean }) {
   return (
-    <label className="cursor-pointer">
-      <span className="mb-1 block text-xs font-semibold uppercase text-slate-500">{label}</span>
+    <label className="group cursor-pointer">
+      <span className="bmpl-label">{label}</span>
       {url ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={url} alt="" className={`rounded-lg object-cover ${wide ? 'h-20 w-56' : 'h-20 w-20'}`} />
+        <img src={url} alt="" className={`rounded-bmpl-md border border-slate-200 object-cover ${wide ? 'h-20 w-56' : 'h-20 w-20'}`} />
       ) : (
-        <span className={`flex items-center justify-center rounded-lg border border-dashed border-slate-300 text-xs text-slate-400 ${wide ? 'h-20 w-56' : 'h-20 w-20'}`}>
+        <span
+          className={`flex items-center justify-center rounded-bmpl-lg border-2 border-dashed border-slate-300 text-xs text-slate-400 transition group-hover:border-belize-accent group-hover:text-belize-blue ${wide ? 'h-20 w-56' : 'h-20 w-20'}`}
+        >
           Upload
         </span>
       )}
@@ -296,11 +325,15 @@ function SettingsForm({ store, onDone, onError }: SectionProps) {
         <Check label="Pickup available" checked={f.pickupEnabled} onChange={(v) => setF({ ...f, pickupEnabled: v })} />
         <Check label="Delivery available" checked={f.deliveryEnabled} onChange={(v) => setF({ ...f, deliveryEnabled: v })} />
         <Check label="Vacation mode (temporarily hide)" checked={f.vacationMode} onChange={(v) => setF({ ...f, vacationMode: v })} />
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          Minimum order (cents):
-          <input className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm" value={f.minimumOrderMinor} onChange={(e) => setF({ ...f, minimumOrderMinor: e.target.value })} placeholder="none" />
-        </label>
-        <button className={btn} disabled={busy}>Save operations</button>
+        <Field label="Minimum order (cents)">
+          <Input
+            className="w-32"
+            value={f.minimumOrderMinor}
+            onChange={(e) => setF({ ...f, minimumOrderMinor: e.target.value })}
+            placeholder="none"
+          />
+        </Field>
+        <Button disabled={busy}>Save operations</Button>
       </form>
     </Card>
   );
@@ -308,7 +341,12 @@ function SettingsForm({ store, onDone, onError }: SectionProps) {
 function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="flex items-center gap-2 text-sm text-slate-700">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <input
+        type="checkbox"
+        className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-2 focus:ring-belize-accent/30"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
       {label}
     </label>
   );
@@ -320,12 +358,20 @@ function LocationsSection({ store, onDone, onError }: SectionProps) {
   const [busy, setBusy] = useState(false);
   return (
     <Card title="Locations">
-      <ul className="mb-3 space-y-1">
+      <ul className="mb-4 space-y-2">
         {locations.map((l) => (
-          <li key={l.id} className="flex items-center justify-between text-sm text-slate-600">
+          <li
+            key={l.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-bmpl-md border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-600"
+          >
             <span>
-              <b>{l.label}</b>
-              {l.isPrimary && <span className="ml-1 text-xs text-emerald-600">(primary)</span>} — {l.addressLine1}, {l.city}, {l.district}
+              <b className="text-belize-navy">{l.label}</b>
+              {l.isPrimary && (
+                <Badge tone="success" className="ml-2">
+                  Primary
+                </Badge>
+              )}{' '}
+              — {l.addressLine1}, {l.city}, {l.district}
             </span>
             <button
               className="text-xs font-semibold text-red-600 hover:underline"
@@ -345,7 +391,7 @@ function LocationsSection({ store, onDone, onError }: SectionProps) {
         {locations.length === 0 && <li className="text-sm text-slate-400">No locations yet.</li>}
       </ul>
       <form
-        className="grid gap-2 md:grid-cols-2"
+        className="grid gap-3 md:grid-cols-2"
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
@@ -360,18 +406,26 @@ function LocationsSection({ store, onDone, onError }: SectionProps) {
           }
         }}
       >
-        <input className={input} placeholder="Label (e.g. Main)" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
-        <input className={input} placeholder="Address" value={f.addressLine1} onChange={(e) => setF({ ...f, addressLine1: e.target.value })} />
-        <input className={input} placeholder="City" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} />
-        <select className={input} value={f.district} onChange={(e) => setF({ ...f, district: e.target.value })}>
+        <Input placeholder="Label (e.g. Main)" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
+        <Input placeholder="Address" value={f.addressLine1} onChange={(e) => setF({ ...f, addressLine1: e.target.value })} />
+        <Input placeholder="City" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} />
+        <Select value={f.district} onChange={(e) => setF({ ...f, district: e.target.value })}>
           {DISTRICTS.map((d) => (
-            <option key={d} value={d}>{d.replace('_', ' ')}</option>
+            <option key={d} value={d}>
+              {d.replace('_', ' ')}
+            </option>
           ))}
-        </select>
+        </Select>
         <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" checked={f.isPrimary} onChange={(e) => setF({ ...f, isPrimary: e.target.checked })} /> Primary
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-2 focus:ring-belize-accent/30"
+            checked={f.isPrimary}
+            onChange={(e) => setF({ ...f, isPrimary: e.target.checked })}
+          />{' '}
+          Primary
         </label>
-        <button className={btn} disabled={busy || !f.label || !f.addressLine1 || !f.city}>Add location</button>
+        <Button disabled={busy || !f.label || !f.addressLine1 || !f.city}>Add location</Button>
       </form>
     </Card>
   );
@@ -395,11 +449,12 @@ function HoursSection({ store, onDone, onError }: SectionProps) {
     <Card title="Opening hours">
       <div className="space-y-2">
         {rows.map((r, i) => (
-          <div key={r.dayOfWeek} className="flex items-center gap-3 text-sm">
-            <span className="w-24 text-slate-600">{DAYS[r.dayOfWeek]}</span>
-            <label className="flex items-center gap-1 text-slate-500">
+          <div key={r.dayOfWeek} className="flex flex-wrap items-center gap-3 rounded-bmpl-md border border-slate-100 px-3 py-2 text-sm">
+            <span className="w-24 font-medium text-slate-600">{DAYS[r.dayOfWeek]}</span>
+            <label className="flex items-center gap-1.5 text-slate-500">
               <input
                 type="checkbox"
+                className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-2 focus:ring-belize-accent/30"
                 checked={!r.isClosed}
                 onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, isClosed: !e.target.checked } : x)))}
               />
@@ -407,16 +462,26 @@ function HoursSection({ store, onDone, onError }: SectionProps) {
             </label>
             {!r.isClosed && (
               <>
-                <input type="time" value={r.openTime} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, openTime: e.target.value } : x)))} className="rounded border border-slate-300 px-2 py-1" />
-                <span>–</span>
-                <input type="time" value={r.closeTime} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, closeTime: e.target.value } : x)))} className="rounded border border-slate-300 px-2 py-1" />
+                <input
+                  type="time"
+                  value={r.openTime}
+                  onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, openTime: e.target.value } : x)))}
+                  className="bmpl-input w-auto px-2 py-1"
+                />
+                <span className="text-slate-400">–</span>
+                <input
+                  type="time"
+                  value={r.closeTime}
+                  onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, closeTime: e.target.value } : x)))}
+                  className="bmpl-input w-auto px-2 py-1"
+                />
               </>
             )}
           </div>
         ))}
       </div>
-      <button
-        className={`${btn} mt-3`}
+      <Button
+        className="mt-4"
         disabled={busy}
         onClick={async () => {
           setBusy(true);
@@ -438,7 +503,7 @@ function HoursSection({ store, onDone, onError }: SectionProps) {
         }}
       >
         Save hours
-      </button>
+      </Button>
     </Card>
   );
 }

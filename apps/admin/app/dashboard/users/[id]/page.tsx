@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { ROLE_DEFINITIONS, type RoleCode } from '@bmpl/shared';
 import { serverGet } from '../../../../lib/server-api';
 import { StatusBadge } from '../../../../components/StatusBadge';
+import { Badge, Card } from '../../../../components/ui';
 import { AccountActions, RoleActions } from './RoleActions';
 
 export const dynamic = 'force-dynamic';
@@ -28,16 +29,16 @@ export default async function UserDetailPage({ params }: { params: { id: string 
 
   return (
     <div className="mx-auto max-w-3xl">
-      <Link href="/dashboard/users" className="text-sm text-belize-blue hover:underline">
+      <Link href="/dashboard/users" className="text-sm font-medium text-belize-blue hover:underline">
         ← Back to users
       </Link>
 
       <header className="mt-3 mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-belize-navy">
+          <h1 className="bmpl-page-title">
             {u.firstName} {u.lastName}
           </h1>
-          <p className="text-sm text-slate-500">
+          <p className="mt-1 text-sm text-slate-500">
             {u.email} {u.emailVerifiedAt ? '· ✓ verified' : '· unverified'}
           </p>
           <p className="text-xs text-slate-500">
@@ -50,8 +51,8 @@ export default async function UserDetailPage({ params }: { params: { id: string 
         </div>
       </header>
 
-      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 className="mb-3 text-sm font-semibold uppercase text-slate-500">Roles</h2>
+      <Card className="mb-5 p-5">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Roles</h2>
         <ul className="divide-y divide-slate-100">
           {u.roles.map((r) => (
             <li key={r.roleCode} className="flex items-center justify-between gap-3 py-3">
@@ -66,11 +67,11 @@ export default async function UserDetailPage({ params }: { params: { id: string 
             </li>
           ))}
         </ul>
-      </section>
+      </Card>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5">
+      <Card className="p-5">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase text-slate-500">Admin permissions</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Admin permissions</h2>
           <Link
             href={`/dashboard/audit?targetUserId=${u.id}`}
             className="text-sm font-semibold text-belize-blue hover:underline"
@@ -83,16 +84,13 @@ export default async function UserDetailPage({ params }: { params: { id: string 
         ) : (
           <div className="flex flex-wrap gap-2">
             {u.adminPermissions.map((p) => (
-              <span
-                key={p.permission}
-                className="rounded-full bg-belize-blue/10 px-2.5 py-0.5 text-xs font-medium text-belize-blue"
-              >
+              <Badge key={p.permission} tone="brand">
                 {p.permission}
-              </span>
+              </Badge>
             ))}
           </div>
         )}
-      </section>
+      </Card>
     </div>
   );
 }

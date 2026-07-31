@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { StorefrontView, type Storefront } from '../../../../components/storefront/StorefrontView';
 import { serverGet } from '../../../../lib/server-api';
+import { Alert, StatusBadge } from '../../../../components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,18 +20,18 @@ export default async function StorePreviewPage() {
   const live = data.approvalStatus === 'APPROVED';
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
-        <p className="text-sm text-amber-800">
-          <b>Preview</b> — this is how customers will see your storefront. Status:{' '}
-          <b>{data.approvalStatus}</b>
-          {live ? ' (live)' : ' (not public yet)'}.
-        </p>
+      <Alert tone="warning" className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <span className="flex flex-wrap items-center gap-2">
+          <b>Preview</b> — this is how customers will see your storefront.
+          <StatusBadge status={data.approvalStatus} />
+          <span>{live ? '(live)' : '(not public yet)'}</span>
+        </span>
         <Link href="/dashboard/store" className="text-sm font-semibold text-belize-blue hover:underline">
           ← Back to My Store
         </Link>
-      </div>
+      </Alert>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="overflow-hidden rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
         <StorefrontView store={data} />
       </div>
 

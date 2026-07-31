@@ -4,6 +4,36 @@
 
 :root {
   --font-sans: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+
+  /* ---- BMPL design tokens (source of truth: production landing page) ---- */
+  --bmpl-primary: #1e40af; /* belize-blue */
+  --bmpl-primary-hover: #1e3a8a; /* belize-deep */
+  --bmpl-secondary: #0f172a; /* belize-navy */
+  --bmpl-accent: #0ea5e9; /* belize-accent */
+  --bmpl-accent-soft: #60a5fa; /* belize-light */
+
+  --bmpl-bg: #f8fafc; /* slate-50 page background */
+  --bmpl-surface: #ffffff; /* elevated cards */
+  --bmpl-surface-muted: #f1f5f9; /* slate-100 muted panels */
+
+  --bmpl-text: #0f172a; /* slate-900/navy */
+  --bmpl-text-muted: #64748b; /* slate-500 */
+  --bmpl-border: #e2e8f0; /* slate-200 hairline */
+
+  --bmpl-success: #059669; /* emerald-600 */
+  --bmpl-warning: #d97706; /* amber-600 */
+  --bmpl-error: #dc2626; /* red-600 */
+  --bmpl-info: #0284c7; /* sky-600 */
+  --bmpl-focus: #0ea5e9; /* focus ring */
+
+  --bmpl-radius-sm: 8px;
+  --bmpl-radius-md: 12px;
+  --bmpl-radius-lg: 16px;
+  --bmpl-radius-xl: 24px;
+
+  --bmpl-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --bmpl-shadow-md: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px -18px rgba(15, 23, 42, 0.18);
+  --bmpl-shadow-lg: 0 1px 2px rgba(15, 23, 42, 0.06), 0 28px 50px -24px rgba(30, 64, 175, 0.28);
 }
 
 html {
@@ -12,6 +42,28 @@ html {
 
 body {
   @apply bg-white text-slate-800 antialiased;
+}
+
+@layer components {
+  /* Reusable surface + control classes so screens share one visual language. */
+  .bmpl-card {
+    @apply rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm;
+  }
+  .bmpl-panel {
+    @apply rounded-bmpl-lg border border-slate-200 bg-white;
+  }
+  .bmpl-input {
+    @apply w-full rounded-bmpl-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-belize-navy shadow-bmpl-sm outline-none transition placeholder:text-slate-400 focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70;
+  }
+  .bmpl-label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .bmpl-eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.22em] text-belize-accent;
+  }
+  .bmpl-page-title {
+    @apply text-2xl font-bold tracking-tight text-belize-navy sm:text-3xl;
+  }
 }
 
 /* Respect users who prefer reduced motion. */

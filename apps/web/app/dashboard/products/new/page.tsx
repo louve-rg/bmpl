@@ -2,12 +2,17 @@
 
 import Link from 'next/link';
 import { ProductForm } from '../ProductForm';
+import { PageHeader } from '../../../../components/ui';
 
 export default function NewProductPage() {
   return (
     <div className="mx-auto max-w-2xl">
-      <Link href="/dashboard/products" className="text-sm text-belize-blue hover:underline">← My Products</Link>
-      <h1 className="mb-6 mt-2 text-2xl font-bold text-belize-navy">New product</h1>
+      <Link href="/dashboard/products" className="text-sm font-medium text-belize-blue hover:underline">
+        ← My Products
+      </Link>
+      <div className="mt-2">
+        <PageHeader title="New product" />
+      </div>
       <ProductForm />
     </div>
   );

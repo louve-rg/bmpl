@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../lib/api';
+import { Alert, Button, Field, Input } from '../../components/ui';
+import { Logo } from '../../components/Logo';
 
 export default function AdminLogin() {
   const router = useRouter();
@@ -37,47 +39,23 @@ export default function AdminLogin() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-belize-hero p-6">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-xl">
-        <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-belize-hero font-bold text-white">
-            BM
-          </div>
-          <h1 className="text-lg font-bold text-belize-navy">Admin Console</h1>
+      <div className="w-full max-w-sm rounded-bmpl-xl bg-white p-8 shadow-bmpl-lg">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <Logo size={48} />
+          <h1 className="mt-3 text-lg font-bold text-belize-navy">Admin Console</h1>
           <p className="text-sm text-slate-500">Belize Marketplace &amp; Logistics</p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4">
-          {error && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-              {error}
-            </p>
-          )}
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-slate-700">Email</span>
-            <input
-              name="email"
-              type="email"
-              required
-              autoComplete="email"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-slate-700">Password</span>
-            <input
-              name="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-belize-blue px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-belize-deep disabled:opacity-60"
-          >
+          {error && <Alert tone="error">{error}</Alert>}
+          <Field label="Email" htmlFor="login-email">
+            <Input id="login-email" name="email" type="email" required autoComplete="email" />
+          </Field>
+          <Field label="Password" htmlFor="login-password">
+            <Input id="login-password" name="password" type="password" required autoComplete="current-password" />
+          </Field>
+          <Button type="submit" disabled={loading} className="w-full">
             {loading ? 'Signing in…' : 'Sign in'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

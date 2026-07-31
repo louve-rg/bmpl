@@ -14,6 +14,7 @@ import {
   type CartView,
 } from '../../lib/cart';
 import type { ApiError } from '../../lib/api';
+import { Alert, Button, ButtonLink, Card, EmptyState, PageHeader, Spinner } from '../../components/ui';
 
 export default function CartPage() {
   const router = useRouter();
@@ -58,29 +59,39 @@ export default function CartPage() {
     <>
       <Header />
       <main className="container-bmpl py-10">
-        <h1 className="text-3xl font-bold text-belize-navy">Your cart</h1>
+        <PageHeader title="Your cart" />
 
         {state === 'loading' && (
-          <p className="mt-8 rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-400">
-            Loading your cart…
-          </p>
-        )}
-
-        {state === 'error' && (
-          <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-10 text-center text-amber-700">
-            <p>We couldn’t load your cart. Please try again in a moment.</p>
-            <button onClick={() => { setState('loading'); void load(); }} className="mt-4 rounded-lg bg-belize-blue px-4 py-2 text-sm font-semibold text-white">
-              Retry
-            </button>
+          <div className="mt-8 flex flex-col items-center gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-14 text-center">
+            <Spinner />
+            <p className="text-sm text-slate-400">Loading your cart…</p>
           </div>
         )}
 
+        {state === 'error' && (
+          <Alert tone="error" title="We couldn’t load your cart." className="mt-8">
+            <p>Please try again in a moment.</p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-3"
+              onClick={() => {
+                setState('loading');
+                void load();
+              }}
+            >
+              Retry
+            </Button>
+          </Alert>
+        )}
+
         {state === 'ready' && cart && cart.vendors.length === 0 && (
-          <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-12 text-center">
-            <p className="text-slate-500">Your cart is empty.</p>
-            <Link href="/products" className="mt-4 inline-block rounded-lg bg-belize-blue px-5 py-2.5 text-sm font-semibold text-white hover:bg-belize-deep">
-              Start shopping
-            </Link>
+          <div className="mt-8">
+            <EmptyState
+              title="Your cart is empty"
+              description="Browse the marketplace and add something you like."
+              action={<ButtonLink href="/products">Start shopping</ButtonLink>}
+            />
           </div>
         )}
 
@@ -88,18 +99,16 @@ export default function CartPage() {
           <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
             <div className="space-y-6">
               {cart.hasUnavailableItems && (
-                <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+                <Alert tone="warning">
                   Some items are unavailable and won’t be included in your subtotal. Remove or update them to continue.
-                </p>
+                </Alert>
               )}
               {cart.hasPriceChanges && (
-                <p className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-800">
-                  Some prices changed since you added them. The current price is shown.
-                </p>
+                <Alert tone="info">Some prices changed since you added them. The current price is shown.</Alert>
               )}
 
               {cart.vendors.map((v) => (
-                <section key={v.vendorProfileId} className="rounded-2xl border border-slate-200 bg-white">
+                <Card key={v.vendorProfileId} className="overflow-hidden">
                   <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                     <Link href={`/store/${v.slug}`} className="font-semibold text-belize-navy hover:text-belize-blue">
                       {v.businessName}
@@ -117,7 +126,7 @@ export default function CartPage() {
                       />
                     ))}
                   </ul>
-                </section>
+                </Card>
               ))}
 
               <button
@@ -128,39 +137,35 @@ export default function CartPage() {
               </button>
             </div>
 
-            <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-5 lg:sticky lg:top-24">
-              <h2 className="text-lg font-semibold text-belize-navy">Summary</h2>
-              <dl className="mt-4 space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">Items</dt>
-                  <dd className="font-medium text-slate-700">{cart.itemCount}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">Subtotal</dt>
-                  <dd className="font-semibold text-belize-navy">{money(cart.subtotalMinor)} {cart.currency}</dd>
-                </div>
-              </dl>
-              <p className="mt-3 text-xs text-slate-400">Taxes, delivery, and fees are calculated at checkout.</p>
-              {cart.hasUnavailableItems ? (
-                <button
-                  type="button"
-                  disabled
-                  title="Resolve the unavailable items before checking out."
-                  className="mt-4 w-full cursor-not-allowed rounded-lg bg-slate-300 px-5 py-3 text-sm font-semibold text-white"
-                >
-                  Resolve items to checkout
-                </button>
-              ) : (
-                <Link
-                  href="/checkout"
-                  className="mt-4 block w-full rounded-lg bg-belize-blue px-5 py-3 text-center text-sm font-semibold text-white hover:bg-belize-deep"
-                >
-                  Proceed to checkout
+            <aside className="h-fit lg:sticky lg:top-24">
+              <Card className="p-5">
+                <h2 className="text-lg font-semibold text-belize-navy">Summary</h2>
+                <dl className="mt-4 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <dt className="text-slate-500">Items</dt>
+                    <dd className="font-medium text-slate-700">{cart.itemCount}</dd>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-100 pt-2">
+                    <dt className="text-slate-500">Subtotal</dt>
+                    <dd className="text-base font-bold text-belize-navy">
+                      {money(cart.subtotalMinor)} {cart.currency}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="mt-3 text-xs text-slate-400">Taxes, delivery, and fees are calculated at checkout.</p>
+                {cart.hasUnavailableItems ? (
+                  <Button disabled title="Resolve the unavailable items before checking out." className="mt-4 w-full">
+                    Resolve items to checkout
+                  </Button>
+                ) : (
+                  <ButtonLink href="/checkout" className="mt-4 w-full">
+                    Proceed to checkout
+                  </ButtonLink>
+                )}
+                <Link href="/products" className="mt-3 block text-center text-sm text-belize-blue hover:underline">
+                  Continue shopping
                 </Link>
-              )}
-              <Link href="/products" className="mt-3 block text-center text-sm text-belize-blue hover:underline">
-                Continue shopping
-              </Link>
+              </Card>
             </aside>
           </div>
         )}
@@ -184,7 +189,7 @@ function CartRow({
   const blocking = item.issues.filter((i) => i !== 'INSUFFICIENT_STOCK');
   return (
     <li className={`flex gap-4 p-4 ${item.purchasable ? '' : 'opacity-70'}`}>
-      <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-xs text-slate-300">
+      <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center overflow-hidden rounded-bmpl-md bg-slate-100 text-xs text-slate-300">
         {item.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" />
@@ -203,7 +208,7 @@ function CartRow({
           {item.priceChanged && (
             <span className="ml-2 text-xs text-slate-400 line-through">{money(item.unitPriceMinorSnapshot)}</span>
           )}
-          {item.priceChanged && <span className="ml-1 text-xs font-medium text-blue-600">price updated</span>}
+          {item.priceChanged && <span className="ml-1 text-xs font-medium text-belize-blue">price updated</span>}
         </p>
 
         {/* Availability warnings */}
@@ -219,7 +224,7 @@ function CartRow({
         )}
 
         <div className="mt-2 flex items-center gap-3">
-          <div className="inline-flex items-center rounded-lg border border-slate-300">
+          <div className="inline-flex items-center rounded-bmpl-sm border border-slate-300">
             <button
               type="button"
               aria-label="Decrease quantity"

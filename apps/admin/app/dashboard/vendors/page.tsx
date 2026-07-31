@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
+import { PageHeader, Spinner } from '../../../components/ui';
 
 interface VendorRow {
   id: string;
@@ -37,14 +38,16 @@ export default function VendorsPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-belize-navy">Vendors</h1>
-      <div className="mb-5 flex gap-2">
+      <PageHeader eyebrow="Marketplace" title="Vendors" />
+      <div className="mb-5 flex flex-wrap gap-2">
         {STATUSES.map((s) => (
           <button
             key={s || 'ALL'}
             onClick={() => setStatus(s)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-              status === s ? 'bg-belize-blue text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+            className={`rounded-bmpl-md px-3 py-1.5 text-xs font-semibold transition ${
+              status === s
+                ? 'bg-belize-blue text-white'
+                : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
             }`}
           >
             {s || 'All'}
@@ -53,11 +56,13 @@ export default function VendorsPage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-slate-500">Loading…</p>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading…
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
           <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">Business</th>
                 <th className="px-4 py-3">Owner</th>
@@ -66,9 +71,9 @@ export default function VendorsPage() {
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {rows.map((v) => (
-                <tr key={v.id} className="hover:bg-slate-50">
+                <tr key={v.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-3">
                     <p className="font-medium text-belize-navy">{v.businessName}</p>
                     <p className="text-xs text-slate-500">

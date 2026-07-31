@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { serverGet } from '../../lib/server-api';
+import { Card, PageHeader } from '../../components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,16 +26,14 @@ export default async function AdminDashboard() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-belize-navy">Overview</h1>
+      <PageHeader eyebrow="Admin" title="Overview" description="A quick snapshot of platform activity that needs attention." />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (
-          <Link
-            key={c.label}
-            href={c.href}
-            className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-belize-light hover:shadow"
-          >
-            <p className="text-sm text-slate-500">{c.label}</p>
-            <p className="mt-1 text-3xl font-bold text-belize-navy">{c.value}</p>
+          <Link key={c.label} href={c.href} className="block">
+            <Card className="p-5 transition hover:border-belize-light hover:shadow-bmpl-md">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{c.label}</p>
+              <p className="mt-1.5 text-3xl font-bold text-belize-navy">{c.value}</p>
+            </Card>
           </Link>
         ))}
       </div>

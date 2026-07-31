@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
+import { EmptyState, PageHeader, Spinner } from '../../../components/ui';
 
 interface PaymentRow {
   id: string;
@@ -32,15 +33,18 @@ export default function AdminPaymentsPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-bold text-belize-navy">Payments</h1>
-      <p className="mb-6 text-sm text-slate-500">Read-only. Foundation only — no funds move yet (wallet holds are reservations).</p>
+      <PageHeader eyebrow="Finance" title="Payments" description="Read-only. Foundation only — no funds move yet (wallet holds are reservations)." />
 
       {loading ? (
-        <p className="text-sm text-slate-500">Loading…</p>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading…
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyState title="No payments yet" description="Payments captured against orders will appear here." />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
           <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">Payment</th>
                 <th className="px-4 py-3">Customer</th>
@@ -51,9 +55,9 @@ export default function AdminPaymentsPage() {
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {rows.map((p) => (
-                <tr key={p.id} className="hover:bg-slate-50">
+                <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-3">
                     <p className="font-medium text-belize-navy">{p.paymentNumber}</p>
                     <p className="text-xs text-slate-500">Order {p.orderNumber}</p>
@@ -66,7 +70,6 @@ export default function AdminPaymentsPage() {
                   <td className="px-4 py-3 text-right"><Link href={`/dashboard/payments/${p.id}`} className="font-semibold text-belize-blue hover:underline">View →</Link></td>
                 </tr>
               ))}
-              {rows.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-400">No payments yet.</td></tr>}
             </tbody>
           </table>
         </div>

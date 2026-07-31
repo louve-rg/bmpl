@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '../../../../lib/api';
+import { Alert, Button, Card, Textarea } from '../../../../components/ui';
 
 type Action = 'approve' | 'reject' | 'more-info';
 
@@ -15,9 +16,9 @@ export function ReviewActions({ applicationId, decided }: { applicationId: strin
 
   if (decided) {
     return (
-      <p className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+      <div className="rounded-bmpl-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
         This application has already been decided. See the review history above.
-      </p>
+      </div>
     );
   }
 
@@ -47,9 +48,9 @@ export function ReviewActions({ applicationId, decided }: { applicationId: strin
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5">
+    <Card className="p-5">
       <h2 className="mb-3 font-bold text-belize-navy">Decision</h2>
-      {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <Alert tone="error" className="mb-3">{error}</Alert>}
       <div className="mb-3 flex flex-wrap gap-2">
         <ActionTab label="Approve" active={action === 'approve'} onClick={() => setAction('approve')} />
         <ActionTab label="Request more info" active={action === 'more-info'} onClick={() => setAction('more-info')} />
@@ -58,7 +59,7 @@ export function ReviewActions({ applicationId, decided }: { applicationId: strin
 
       {action && (
         <>
-          <textarea
+          <Textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={3}
@@ -69,18 +70,13 @@ export function ReviewActions({ applicationId, decided }: { applicationId: strin
                   ? 'Describe what the applicant must provide…'
                   : 'Reason for rejection (shown to the applicant)…'
             }
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
           />
-          <button
-            onClick={submit}
-            disabled={busy}
-            className="mt-3 rounded-lg bg-belize-blue px-5 py-2.5 text-sm font-semibold text-white hover:bg-belize-deep disabled:opacity-60"
-          >
+          <Button onClick={submit} disabled={busy} variant={action === 'reject' ? 'destructive' : 'primary'} className="mt-3">
             {busy ? 'Submitting…' : 'Confirm decision'}
-          </button>
+          </Button>
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -98,7 +94,7 @@ function ActionTab({
   return (
     <button
       onClick={onClick}
-      className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+      className={`rounded-bmpl-md border px-3 py-1.5 text-sm font-medium transition ${
         active
           ? danger
             ? 'border-red-500 bg-red-50 text-red-700'

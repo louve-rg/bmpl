@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
 import type { ApplicableRole } from '../../../lib/types';
-import { Button } from '../../../components/ui';
+import { Alert, Button, Card, Label, PageHeader, Spinner, StatusBadge, Textarea } from '../../../components/ui';
 
 interface AppReview {
   action: string;
@@ -21,16 +21,6 @@ interface RoleApplication {
   documents: Array<{ id: string; label: string | null; uploadedAt: string }>;
   reviews: AppReview[];
 }
-
-const STATUS_STYLES: Record<string, string> = {
-  APPROVED: 'bg-green-100 text-green-700',
-  PENDING: 'bg-amber-100 text-amber-700',
-  MORE_INFO_REQUIRED: 'bg-blue-100 text-blue-700',
-  REJECTED: 'bg-red-100 text-red-700',
-  SUSPENDED: 'bg-orange-100 text-orange-700',
-  REVOKED: 'bg-slate-200 text-slate-700',
-  WITHDRAWN: 'bg-slate-200 text-slate-700',
-};
 
 /** Upload one file to the role-application private bucket; returns the storage key. */
 async function uploadDoc(roleCode: string, file: File): Promise<string> {
@@ -68,21 +58,21 @@ export default function RolesPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold text-belize-navy">My Roles</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Request the provider roles you need. Each is reviewed independently — you keep your Customer account.
-        </p>
-      </header>
+      <PageHeader
+        title="My Roles"
+        description="Request the provider roles you need. Each is reviewed independently — you keep your Customer account."
+      />
 
       {message && (
-        <div role="status" className={`mb-5 rounded-xl border px-4 py-3 text-sm ${message.kind === 'ok' ? 'border-belize-light bg-belize-blue/5 text-belize-navy' : 'border-red-200 bg-red-50 text-red-700'}`}>
+        <Alert tone={message.kind === 'ok' ? 'brand' : 'error'} className="mb-5">
           {message.text}
-        </div>
+        </Alert>
       )}
 
       {loading ? (
-        <p className="text-sm text-slate-500">Loading roles…</p>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading roles…
+        </div>
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -150,14 +140,10 @@ function RoleCard({ role, onDone }: { role: ApplicableRole; onDone: (m: { kind: 
   }
 
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-5">
+    <Card className="p-5">
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-bold text-belize-navy">{role.label}</h3>
-        {role.status && (
-          <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_STYLES[role.status] ?? 'bg-slate-100 text-slate-600'}`}>
-            {role.status.replace(/_/g, ' ')}
-          </span>
-        )}
+        {role.status && <StatusBadge status={role.status} className="shrink-0" />}
       </div>
       <p className="mt-2 text-sm text-slate-600">{role.description}</p>
       {needsDocs && <p className="mt-3 text-xs text-slate-500">Documents required: {role.requiredDocuments.join(', ')}</p>}
@@ -173,7 +159,7 @@ function RoleCard({ role, onDone }: { role: ApplicableRole; onDone: (m: { kind: 
           <div className="space-y-3">
             {role.requiredDocuments.map((d) => (
               <div key={d}>
-                <label className="mb-1 block text-xs font-medium text-slate-600">{d}</label>
+                <Label className="mb-1 normal-case tracking-normal">{d}</Label>
                 <input
                   type="file"
                   accept="application/pdf,image/jpeg,image/png,image/webp"
@@ -182,16 +168,16 @@ function RoleCard({ role, onDone }: { role: ApplicableRole; onDone: (m: { kind: 
                 />
               </div>
             ))}
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to add for the reviewer? (optional)" rows={2} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-            {err && <p className="text-xs text-red-600">{err}</p>}
+            <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to add for the reviewer? (optional)" rows={2} />
+            {err && <p className="text-xs font-medium text-red-600" role="alert">{err}</p>}
             <div className="flex gap-2">
               <Button size="sm" disabled={busy} onClick={submit}>{busy ? 'Submitting…' : 'Submit application'}</Button>
-              <button type="button" onClick={() => setOpen(false)} className="text-sm text-slate-500 hover:text-slate-700">Cancel</button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
             </div>
           </div>
         )}
       </div>
-    </article>
+    </Card>
   );
 }
 
@@ -218,29 +204,29 @@ function ApplicationCard({ app, onDone }: { app: RoleApplication; onDone: (m: { 
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+    <Card className="p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-semibold text-belize-navy">{app.roleCode.replace(/_/g, ' ')} application</span>
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_STYLES[app.status] ?? 'bg-slate-100 text-slate-600'}`}>{app.status.replace(/_/g, ' ')}</span>
+        <StatusBadge status={app.status} />
       </div>
       <p className="mt-1 text-xs text-slate-400">
         Submitted {new Date(app.createdAt).toLocaleDateString()} · {app.documents.length} document{app.documents.length === 1 ? '' : 's'}
       </p>
       {latestReview?.note && (
-        <p className={`mt-2 rounded-lg px-3 py-2 text-sm ${app.status === 'REJECTED' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
+        <Alert tone={app.status === 'REJECTED' ? 'error' : 'info'} className="mt-2">
           <span className="font-medium">Reviewer:</span> {latestReview.note}
-        </p>
+        </Alert>
       )}
 
       {app.status === 'MORE_INFO_REQUIRED' && (
         <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
           <p className="text-xs font-medium text-slate-600">Respond with the requested information:</p>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Your response to the reviewer" rows={2} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Your response to the reviewer" rows={2} />
           <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue" />
-          {err && <p className="text-xs text-red-600">{err}</p>}
+          {err && <p className="text-xs font-medium text-red-600" role="alert">{err}</p>}
           <Button size="sm" disabled={busy || !note.trim()} onClick={resubmit}>{busy ? 'Submitting…' : 'Submit response'}</Button>
         </div>
       )}
-    </div>
+    </Card>
   );
 }

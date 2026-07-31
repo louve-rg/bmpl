@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { BrandLockup } from '../Logo';
+import { BrandLockup, Logo } from '../Logo';
 
 export function AuthShell({
   title,
@@ -15,28 +15,49 @@ export function AuthShell({
 }) {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
-      <div className="relative hidden flex-col justify-between bg-belize-hero p-12 lg:flex">
-        <Link href="/">
+      {/* Brand panel */}
+      <div className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-belize-navy via-[#0d2657] to-belize-blue p-12 lg:flex">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.35]"
+          style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.10) 1px, transparent 1px)', backgroundSize: '22px 22px' }}
+          aria-hidden
+        />
+        <span className="pointer-events-none absolute -right-16 -top-20 h-72 w-72 rounded-full bg-belize-accent/25 blur-3xl" aria-hidden />
+
+        <Link href="/" className="relative">
           <BrandLockup />
         </Link>
-        <div>
-          <h2 className="text-3xl font-bold text-white">Your Complete Commerce Solution</h2>
-          <p className="mt-3 max-w-md text-blue-100">
-            One account for marketplace, shipping, passenger service, employment, real estate,
-            marketing, and your platform wallet.
+        <div className="relative">
+          <h2 className="text-3xl font-bold leading-tight text-white">Your Complete Commerce Solution</h2>
+          <p className="mt-3 max-w-md text-blue-100/80">
+            One account for the marketplace, shipping, payments, and every service across all six
+            districts of Belize.
           </p>
+          <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-blue-100/70">
+            <span className="inline-flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-belize-accent" /> Secure &amp; reliable
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-belize-accent" /> Nationwide coverage
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-belize-accent" /> Local support
+            </span>
+          </div>
         </div>
-        <p className="text-sm text-blue-200">Made in Belize 🇧🇿</p>
+        <p className="relative text-xs text-blue-200/60">© 2026 Belize Marketplace &amp; Logistics</p>
       </div>
 
-      <div className="flex items-center justify-center p-6 sm:p-12">
+      {/* Form panel */}
+      <div className="flex items-center justify-center bg-slate-50 p-6 sm:p-12">
         <div className="w-full max-w-md">
           <div className="mb-8 lg:hidden">
-            <Link href="/">
-              <span className="text-lg font-bold text-belize-blue">Belize Marketplace</span>
+            <Link href="/" className="inline-flex items-center gap-2.5">
+              <Logo size={36} />
+              <span className="text-base font-bold uppercase tracking-wide text-belize-navy">Belize Marketplace</span>
             </Link>
           </div>
-          <h1 className="text-2xl font-bold text-belize-navy">{title}</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-belize-navy">{title}</h1>
           {subtitle && <p className="mt-2 text-sm text-slate-600">{subtitle}</p>}
           <div className="mt-6">{children}</div>
           {footer && <div className="mt-6 text-sm text-slate-600">{footer}</div>}
@@ -63,14 +84,14 @@ export function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-sm font-medium text-slate-700">{label}</span>
+      <span className="bmpl-label">{label}</span>
       <input
         name={name}
         type={type}
         autoComplete={autoComplete}
         required={required}
         placeholder={placeholder}
-        className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
+        className="bmpl-input"
       />
     </label>
   );
@@ -79,7 +100,7 @@ export function Field({
 export function FormError({ message }: { message?: string | null }) {
   if (!message) return null;
   return (
-    <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+    <p className="rounded-bmpl-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
       {message}
     </p>
   );
@@ -88,7 +109,7 @@ export function FormError({ message }: { message?: string | null }) {
 export function FormSuccess({ message }: { message?: string | null }) {
   if (!message) return null;
   return (
-    <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700" role="status">
+    <p className="rounded-bmpl-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
       {message}
     </p>
   );

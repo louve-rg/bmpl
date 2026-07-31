@@ -1,6 +1,14 @@
 import Link from 'next/link';
 import type { ComponentProps, ReactNode } from 'react';
 
+/**
+ * BMPL shared UI primitives (admin). Kept token-identical to
+ * apps/web/components/ui.tsx so both surfaces render one brand. Consolidating
+ * these into a single @bmpl/ui React package is the recommended follow-up (see
+ * docs/design/BMPL-THEME-AUDIT.md — deferred to avoid changing the live build
+ * pipeline mid-milestone).
+ */
+
 const base =
   'inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent disabled:opacity-60 disabled:pointer-events-none';
 
@@ -22,19 +30,7 @@ const sizes = {
 type Variant = keyof typeof variants;
 type Size = keyof typeof sizes;
 
-export function ButtonLink({
-  href,
-  variant = 'primary',
-  size = 'md',
-  className = '',
-  children,
-}: {
-  href: string;
-  variant?: Variant;
-  size?: Size;
-  className?: string;
-  children: ReactNode;
-}) {
+export function ButtonLink({ href, variant = 'primary', size = 'md', className = '', children }: { href: string; variant?: Variant; size?: Size; className?: string; children: ReactNode }) {
   return (
     <Link href={href} className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}>
       {children}
@@ -42,13 +38,7 @@ export function ButtonLink({
   );
 }
 
-export function Button({
-  variant = 'primary',
-  size = 'md',
-  className = '',
-  children,
-  ...props
-}: ComponentProps<'button'> & { variant?: Variant; size?: Size }) {
+export function Button({ variant = 'primary', size = 'md', className = '', children, ...props }: ComponentProps<'button'> & { variant?: Variant; size?: Size }) {
   return (
     <button className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...props}>
       {children}
@@ -56,48 +46,6 @@ export function Button({
   );
 }
 
-export function SectionHeading({
-  eyebrow,
-  title,
-  subtitle,
-  dark = false,
-}: {
-  eyebrow?: string;
-  title: string;
-  subtitle?: string;
-  dark?: boolean;
-}) {
-  return (
-    <div className="mx-auto max-w-2xl text-center">
-      {eyebrow && (
-        <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-belize-accent">
-          {eyebrow}
-        </p>
-      )}
-      <h2
-        className={`text-3xl font-bold sm:text-4xl ${dark ? 'text-white' : 'text-belize-navy'}`}
-      >
-        {title}
-      </h2>
-      {subtitle && (
-        <p className={`mt-3 text-lg ${dark ? 'text-blue-100' : 'text-slate-600'}`}>{subtitle}</p>
-      )}
-    </div>
-  );
-}
-
-/** Small pill used to clearly mark not-yet-supplied content. */
-export function PlaceholderBadge({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-dashed border-slate-300 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-500">
-      {children}
-    </span>
-  );
-}
-
-/* ------------------------------------------------------------------ surfaces */
-
-/** Elevated content surface (24px radius, hairline border, soft shadow). */
 export function Card({ className = '', children, ...props }: ComponentProps<'div'>) {
   return (
     <div className={`bmpl-card ${className}`} {...props}>
@@ -106,18 +54,7 @@ export function Card({ className = '', children, ...props }: ComponentProps<'div
   );
 }
 
-/** Consistent page title block for authenticated screens. */
-export function PageHeader({
-  title,
-  description,
-  eyebrow,
-  actions,
-}: {
-  title: string;
-  description?: string;
-  eyebrow?: string;
-  actions?: ReactNode;
-}) {
+export function PageHeader({ title, description, eyebrow, actions }: { title: string; description?: string; eyebrow?: string; actions?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
@@ -129,8 +66,6 @@ export function PageHeader({
     </div>
   );
 }
-
-/* ------------------------------------------------------------------- badges */
 
 const TONES = {
   neutral: 'bg-slate-100 text-slate-600',
@@ -151,30 +86,6 @@ export function Badge({ tone = 'neutral', className = '', children }: { tone?: T
   );
 }
 
-/** Maps a domain status string to a branded, dot-prefixed badge. Status is never
- *  communicated by colour alone — the label text is always shown. */
-const STATUS_TONE: Record<string, Tone> = {
-  APPROVED: 'success', ACTIVE: 'success', PAID: 'success', AUTHORIZED: 'success', POSTED: 'success', RELEASED: 'success', DELIVERED: 'success', COMPLETED: 'success', PUBLISHED: 'success', BALANCED: 'success',
-  PENDING: 'warning', PENDING_REVIEW: 'warning', MORE_INFO_REQUIRED: 'info', PROCESSING: 'info', HELD: 'info', RESERVED: 'info',
-  REJECTED: 'error', FAILED: 'error', CANCELLED: 'error', SUSPENDED: 'warning', UNBALANCED: 'error',
-  DRAFT: 'neutral', REVOKED: 'neutral', WITHDRAWN: 'neutral', VOID: 'neutral', DEACTIVATED: 'neutral', ARCHIVED: 'neutral',
-};
-const DOT: Record<Tone, string> = {
-  neutral: 'bg-slate-400', brand: 'bg-belize-blue', success: 'bg-emerald-500', warning: 'bg-amber-500', error: 'bg-red-500', info: 'bg-sky-500',
-};
-
-export function StatusBadge({ status, className = '' }: { status: string; className?: string }) {
-  const tone = STATUS_TONE[status] ?? 'neutral';
-  return (
-    <Badge tone={tone} className={className}>
-      <span className={`h-1.5 w-1.5 rounded-full ${DOT[tone]}`} aria-hidden />
-      {status.replace(/_/g, ' ')}
-    </Badge>
-  );
-}
-
-/* -------------------------------------------------------------------- alerts */
-
 const ALERT_STYLES: Record<Tone, string> = {
   neutral: 'border-slate-200 bg-slate-50 text-slate-700',
   brand: 'border-belize-light/50 bg-belize-blue/5 text-belize-navy',
@@ -192,8 +103,6 @@ export function Alert({ tone = 'info', title, children, className = '' }: { tone
     </div>
   );
 }
-
-/* -------------------------------------------------------------- empty + load */
 
 export function EmptyState({ icon, title, description, action }: { icon?: ReactNode; title: string; description?: string; action?: ReactNode }) {
   return (
@@ -219,8 +128,6 @@ export function Spinner({ className = 'h-5 w-5' }: { className?: string }) {
   );
 }
 
-/* --------------------------------------------------------------------- forms */
-
 export function Label({ className = '', children, ...props }: ComponentProps<'label'>) {
   return (
     <label className={`bmpl-label ${className}`} {...props}>
@@ -245,7 +152,6 @@ export function Select({ className = '', children, ...props }: ComponentProps<'s
   );
 }
 
-/** Label + control + optional error, with the error wired to the field via id. */
 export function Field({ label, htmlFor, error, hint, children }: { label: string; htmlFor?: string; error?: string | null; hint?: string; children: ReactNode }) {
   return (
     <div>

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { serverGet } from '../../../../lib/server-api';
 import { StatusBadge } from '../../../../components/StatusBadge';
+import { Alert } from '../../../../components/ui';
 import { VendorModeration } from './VendorModeration';
 
 export const dynamic = 'force-dynamic';
@@ -35,13 +36,13 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
 
   return (
     <div className="mx-auto max-w-4xl">
-      <Link href="/dashboard/vendors" className="text-sm text-belize-blue hover:underline">
+      <Link href="/dashboard/vendors" className="text-sm font-medium text-belize-blue hover:underline">
         ← Vendors
       </Link>
 
       {v.bannerUrl && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={v.bannerUrl} alt="" className="mt-4 h-40 w-full rounded-2xl object-cover" />
+        <img src={v.bannerUrl} alt="" className="mt-4 h-40 w-full rounded-bmpl-xl object-cover" />
       )}
 
       <div className="mt-4 flex items-center gap-4">
@@ -50,30 +51,30 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
           <img src={v.logoUrl} alt="" className="h-16 w-16 rounded-full object-cover" />
         )}
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-belize-navy">{v.businessName}</h1>
+          <h1 className="bmpl-page-title">{v.businessName}</h1>
           <p className="text-sm text-slate-500">/{v.slug}</p>
         </div>
         <StatusBadge status={v.approvalStatus} />
       </div>
 
       {v.rejectionReason && (
-        <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+        <Alert tone="error" className="mt-3">
           Rejection reason: {v.rejectionReason}
-        </p>
+        </Alert>
       )}
 
       <VendorModeration id={v.id} status={v.approvalStatus} />
 
       <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <Card title="Business">
+        <InfoCard title="Business">
           <Row label="Owner">{v.owner.firstName} {v.owner.lastName} ({v.owner.email})</Row>
           <Row label="Contact">{v.contactEmail}{v.contactPhone ? ` · ${v.contactPhone}` : ''}</Row>
           {v.website && <Row label="Website">{v.website}</Row>}
           <Row label="Store status">{v.storeStatus}</Row>
           {v.description && <p className="mt-2 text-sm text-slate-600">{v.description}</p>}
-        </Card>
+        </InfoCard>
 
-        <Card title="Locations">
+        <InfoCard title="Locations">
           {v.locations.length === 0 && <p className="text-sm text-slate-400">None</p>}
           {v.locations.map((l) => (
             <p key={l.id} className="text-sm text-slate-600">
@@ -81,18 +82,18 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
               {l.isPrimary && <span className="ml-1 text-xs text-emerald-600">(primary)</span>} — {l.addressLine1}, {l.city}, {l.district}
             </p>
           ))}
-        </Card>
+        </InfoCard>
 
-        <Card title="Opening hours">
+        <InfoCard title="Opening hours">
           {v.openingHours.length === 0 && <p className="text-sm text-slate-400">Not set</p>}
           {v.openingHours.map((h) => (
             <p key={h.dayOfWeek} className="text-sm text-slate-600">
               {DAYS[h.dayOfWeek]}: {h.isClosed ? 'Closed' : `${h.openTime}–${h.closeTime}`}
             </p>
           ))}
-        </Card>
+        </InfoCard>
 
-        <Card title="Settings">
+        <InfoCard title="Settings">
           {v.settings ? (
             <ul className="text-sm text-slate-600">
               <li>Pickup: {String((v.settings as Record<string, unknown>).pickupEnabled)}</li>
@@ -102,10 +103,10 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
           ) : (
             <p className="text-sm text-slate-400">Defaults</p>
           )}
-        </Card>
+        </InfoCard>
       </div>
 
-      <Card title="Moderation history">
+      <InfoCard title="Moderation history">
         <ol className="space-y-2">
           {v.reviews.map((r, i) => (
             <li key={i} className="text-sm text-slate-600">
@@ -115,15 +116,15 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
             </li>
           ))}
         </ol>
-      </Card>
+      </InfoCard>
     </div>
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function InfoCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-      <h2 className="mb-2 text-xs font-semibold uppercase text-slate-500">{title}</h2>
+    <section className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm">
+      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
       {children}
     </section>
   );

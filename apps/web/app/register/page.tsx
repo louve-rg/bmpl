@@ -66,11 +66,8 @@ export default function RegisterPage() {
           placeholder="At least 10 characters"
         />
         <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">District (optional)</span>
-          <select
-            name="district"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
-          >
+          <span className="bmpl-label">District (optional)</span>
+          <select name="district" className="bmpl-input">
             <option value="">Select a district</option>
             {DISTRICTS.map((d) => (
               <option key={d} value={d}>
@@ -80,7 +77,7 @@ export default function RegisterPage() {
           </select>
         </label>
         <label className="flex items-start gap-2 text-sm text-slate-600">
-          <input type="checkbox" name="acceptedTerms" required className="mt-1" />
+          <input type="checkbox" name="acceptedTerms" required className="mt-1 accent-belize-blue" />
           <span>
             I agree to the{' '}
             <Link href="#" className="text-belize-blue hover:underline">

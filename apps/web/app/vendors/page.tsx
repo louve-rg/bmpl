@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
 import { serverGetSafe } from '../../lib/server-api';
+import { Alert, Badge as UiBadge, Button, EmptyState, Input } from '../../components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,69 +31,61 @@ export default async function VendorsDirectoryPage({ searchParams }: { searchPar
   return (
     <>
       <Header />
-      <main className="container-bmpl py-10">
-        <h1 className="text-3xl font-bold text-belize-navy">Vendors</h1>
-        <p className="mt-1 text-slate-500">Discover approved storefronts across Belize.</p>
+      <main className="bg-slate-50 py-10">
+        <div className="container-bmpl">
+          <p className="bmpl-eyebrow">Marketplace</p>
+          <h1 className="bmpl-page-title mt-1">Vendors</h1>
+          <p className="mt-1.5 text-slate-500">Discover approved storefronts across Belize.</p>
 
-        <form method="get" action="/vendors" className="mt-4 flex gap-2">
-          <input name="q" aria-label="Search vendors" defaultValue={searchParams.q ?? ''} placeholder="Search vendors…" className="min-w-48 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <button className="rounded-lg bg-belize-blue px-5 text-sm font-semibold text-white hover:bg-belize-deep">Search</button>
-        </form>
+          <form method="get" action="/vendors" className="mt-5 flex gap-2">
+            <Input name="q" aria-label="Search vendors" defaultValue={searchParams.q ?? ''} placeholder="Search vendors…" className="min-w-48 flex-1" />
+            <Button type="submit">Search</Button>
+          </form>
 
-        {!res.ok ? (
-          <p className="mt-10 rounded-2xl border border-amber-200 bg-amber-50 p-10 text-center text-amber-700">
-            The marketplace is temporarily unavailable. Please try again in a moment.
-          </p>
-        ) : vendors.length === 0 ? (
-          <p className="mt-10 rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-400">
-            No storefronts are live yet. Check back soon.
-          </p>
-        ) : (
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {vendors.map((v) => (
-              <Link
-                key={v.slug}
-                href={`/store/${v.slug}`}
-                className="group rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-belize-accent hover:shadow-md"
-              >
-                <div className="flex items-center gap-3">
-                  {v.logoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={v.logoUrl} alt="" className="h-12 w-12 rounded-full object-cover" />
-                  ) : (
-                    <span className="flex h-12 w-12 items-center justify-center rounded-full bg-belize-blue/10 text-sm font-bold text-belize-blue">
-                      {v.businessName.slice(0, 2).toUpperCase()}
-                    </span>
-                  )}
-                  <div>
-                    <p className="font-semibold text-belize-navy group-hover:text-belize-blue">{v.businessName}</p>
-                    <p className="text-xs text-slate-400">
-                      {'★'.repeat(Math.round(v.ratingAverage))}
-                      {v.ratingCount > 0 ? ` (${v.ratingCount})` : ' New'}
-                    </p>
+          {!res.ok ? (
+            <Alert tone="warning" className="mt-10">The marketplace is temporarily unavailable. Please try again in a moment.</Alert>
+          ) : vendors.length === 0 ? (
+            <div className="mt-10">
+              <EmptyState title="No storefronts are live yet." description="Check back soon." />
+            </div>
+          ) : (
+            <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {vendors.map((v) => (
+                <Link
+                  key={v.slug}
+                  href={`/store/${v.slug}`}
+                  className="group rounded-bmpl-lg border border-slate-200 bg-white p-5 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md"
+                >
+                  <div className="flex items-center gap-3">
+                    {v.logoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={v.logoUrl} alt="" className="h-12 w-12 rounded-full object-cover" />
+                    ) : (
+                      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-belize-blue/10 text-sm font-bold text-belize-blue">
+                        {v.businessName.slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                    <div>
+                      <p className="font-semibold text-belize-navy group-hover:text-belize-blue">{v.businessName}</p>
+                      <p className="text-xs text-slate-400">
+                        {'★'.repeat(Math.round(v.ratingAverage))}
+                        {v.ratingCount > 0 ? ` (${v.ratingCount})` : ' New'}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                {v.description && <p className="mt-3 line-clamp-2 text-sm text-slate-600">{v.description}</p>}
-                <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
-                  {v.pickupEnabled && <Badge>Pickup</Badge>}
-                  {v.deliveryEnabled && <Badge>Delivery</Badge>}
-                  <Badge tone={v.storeStatus === 'OPEN' ? 'green' : 'slate'}>{v.storeStatus}</Badge>
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
+                  {v.description && <p className="mt-3 line-clamp-2 text-sm text-slate-600">{v.description}</p>}
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {v.pickupEnabled && <UiBadge tone="brand">Pickup</UiBadge>}
+                    {v.deliveryEnabled && <UiBadge tone="brand">Delivery</UiBadge>}
+                    <UiBadge tone={v.storeStatus === 'OPEN' ? 'success' : 'neutral'}>{v.storeStatus}</UiBadge>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
       </main>
       <Footer />
     </>
   );
-}
-
-function Badge({ children, tone = 'blue' }: { children: React.ReactNode; tone?: 'blue' | 'green' | 'slate' }) {
-  const tones = {
-    blue: 'bg-belize-blue/10 text-belize-blue',
-    green: 'bg-emerald-100 text-emerald-700',
-    slate: 'bg-slate-100 text-slate-500',
-  };
-  return <span className={`rounded-full px-2 py-0.5 font-medium ${tones[tone]}`}>{children}</span>;
 }

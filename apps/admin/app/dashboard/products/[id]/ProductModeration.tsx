@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../lib/api';
+import { Button } from '../../../../components/ui';
 
 /** Approve / reject / suspend / restore a product (server-guarded by products.moderate). */
 export function ProductModeration({ id, status }: { id: string; status: string }) {
@@ -30,29 +31,19 @@ export function ProductModeration({ id, status }: { id: string; status: string }
     <div className="mt-4 flex flex-wrap gap-2">
       {status === 'PENDING_REVIEW' && (
         <>
-          <Btn label="Approve" kind="primary" onClick={() => run('approve')} disabled={busy} />
-          <Btn label="Reject" kind="danger" onClick={() => run('reject')} disabled={busy} />
+          <Button variant="primary" onClick={() => run('approve')} disabled={busy}>Approve</Button>
+          <Button variant="destructive" onClick={() => run('reject')} disabled={busy}>Reject</Button>
         </>
       )}
-      {status === 'PUBLISHED' && <Btn label="Suspend" kind="danger" onClick={() => run('suspend')} disabled={busy} />}
-      {status === 'SUSPENDED' && <Btn label="Restore" kind="primary" onClick={() => run('restore')} disabled={busy} />}
+      {status === 'PUBLISHED' && (
+        <Button variant="destructive" onClick={() => run('suspend')} disabled={busy}>Suspend</Button>
+      )}
+      {status === 'SUSPENDED' && (
+        <Button variant="primary" onClick={() => run('restore')} disabled={busy}>Restore</Button>
+      )}
       {(status === 'DRAFT' || status === 'REJECTED' || status === 'ARCHIVED') && (
         <p className="text-sm text-slate-500">No action available in “{status}”. Waiting on the vendor.</p>
       )}
     </div>
-  );
-}
-
-function Btn({ label, onClick, disabled, kind }: { label: string; onClick: () => void; disabled?: boolean; kind: 'primary' | 'danger' }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-50 ${
-        kind === 'primary' ? 'bg-belize-blue hover:bg-belize-deep' : 'bg-red-600 hover:bg-red-700'
-      }`}
-    >
-      {label}
-    </button>
   );
 }

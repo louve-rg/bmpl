@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
+import { Card, Alert, Badge } from '../../../components/ui';
 
 interface ProductImage {
   id: string;
@@ -79,10 +80,10 @@ export function ImageManager({ productId }: { productId: string }) {
   };
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase text-slate-500">Images</h2>
-        <label className="cursor-pointer rounded-lg bg-belize-blue px-3 py-1.5 text-sm font-semibold text-white hover:bg-belize-deep">
+    <Card className="p-5 sm:p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="bmpl-eyebrow">Images</h2>
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-bmpl-md bg-belize-blue px-3 py-1.5 text-sm font-semibold text-white shadow-bmpl-sm transition hover:bg-belize-deep">
           {busy ? 'Uploading…' : '+ Add image'}
           <input
             ref={fileRef}
@@ -95,15 +96,29 @@ export function ImageManager({ productId }: { productId: string }) {
         </label>
       </div>
 
-      {err && <p className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">{err}</p>}
+      {err && (
+        <Alert tone="warning" className="mb-3">
+          {err}
+        </Alert>
+      )}
 
       {images.length === 0 ? (
-        <p className="text-sm text-slate-400">No images yet. JPEG, PNG, or WebP up to 8&nbsp;MB.</p>
+        <label className="flex cursor-pointer flex-col items-center justify-center rounded-bmpl-lg border-2 border-dashed border-slate-300 px-6 py-8 text-center transition hover:border-belize-accent">
+          <span className="text-sm font-medium text-slate-500">No images yet</span>
+          <span className="mt-1 text-xs text-slate-400">JPEG, PNG, or WebP up to 8&nbsp;MB.</span>
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
+          />
+        </label>
       ) : (
         <ul className="space-y-3">
           {images.map((img, idx) => (
-            <li key={img.id} className="flex gap-3 rounded-lg border border-slate-200 p-2">
-              <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded bg-slate-100">
+            <li key={img.id} className="flex gap-3 rounded-bmpl-md border border-slate-200 p-3">
+              <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-bmpl-md bg-slate-100">
                 {img.url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={img.url} alt={img.altText ?? ''} className="h-full w-full object-cover" />
@@ -111,30 +126,32 @@ export function ImageManager({ productId }: { productId: string }) {
                   <span className="flex h-full items-center justify-center text-[10px] text-slate-400">no preview</span>
                 )}
                 {img.isPrimary && (
-                  <span className="absolute left-0 top-0 bg-belize-blue px-1 text-[10px] font-bold text-white">PRIMARY</span>
+                  <Badge tone="brand" className="absolute left-1 top-1 px-1.5 py-0 text-[10px]">
+                    Primary
+                  </Badge>
                 )}
               </div>
-              <div className="flex-1 space-y-1">
+              <div className="flex-1 space-y-1.5">
                 <input
                   defaultValue={img.altText ?? ''}
                   placeholder="Alt text"
                   onBlur={(e) => e.target.value !== (img.altText ?? '') && call(() => api.patch(`/vendor/products/${productId}/images/${img.id}`, { altText: e.target.value }))}
-                  className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                  className="w-full rounded-bmpl-sm border border-slate-200 px-2 py-1 text-xs outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
                 />
                 <input
                   defaultValue={img.caption ?? ''}
                   placeholder="Caption"
                   onBlur={(e) => e.target.value !== (img.caption ?? '') && call(() => api.patch(`/vendor/products/${productId}/images/${img.id}`, { caption: e.target.value }))}
-                  className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                  className="w-full rounded-bmpl-sm border border-slate-200 px-2 py-1 text-xs outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
                 />
-                <div className="flex gap-2 text-xs font-semibold">
+                <div className="flex flex-wrap gap-3 text-xs font-semibold">
                   {!img.isPrimary && (
                     <button onClick={() => call(() => api.post(`/vendor/products/${productId}/images/${img.id}/primary`))} className="text-belize-blue hover:underline">
                       Make primary
                     </button>
                   )}
-                  <button onClick={() => move(idx, -1)} disabled={idx === 0} className="text-slate-500 hover:underline disabled:opacity-30">↑</button>
-                  <button onClick={() => move(idx, 1)} disabled={idx === images.length - 1} className="text-slate-500 hover:underline disabled:opacity-30">↓</button>
+                  <button onClick={() => move(idx, -1)} disabled={idx === 0} aria-label="Move image earlier" className="text-slate-500 hover:underline disabled:opacity-30">↑</button>
+                  <button onClick={() => move(idx, 1)} disabled={idx === images.length - 1} aria-label="Move image later" className="text-slate-500 hover:underline disabled:opacity-30">↓</button>
                   <button onClick={() => call(() => api.del(`/vendor/products/${productId}/images/${img.id}`))} className="text-red-600 hover:underline">Delete</button>
                 </div>
               </div>
@@ -142,6 +159,6 @@ export function ImageManager({ productId }: { productId: string }) {
           ))}
         </ul>
       )}
-    </section>
+    </Card>
   );
 }

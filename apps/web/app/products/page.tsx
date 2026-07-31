@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
 import { serverGetSafe } from '../../lib/server-api';
+import { Alert, Badge, Button, EmptyState, Input } from '../../components/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,112 +81,119 @@ export default async function ProductsPage({
   return (
     <>
       <Header />
-      <main className="container-bmpl py-10">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-bold text-belize-navy">Shop</h1>
-            {searchParams.vendorSlug && (
-              <p className="mt-1 text-sm text-slate-500">
-                {data.items[0]?.vendor.businessName
-                  ? `Browsing ${data.items[0].vendor.businessName}`
-                  : 'Browsing one store'}{' '}
-                · <Link href={qp({ vendorSlug: undefined, page: '1' })} className="text-belize-blue hover:underline">Show all stores</Link>
-              </p>
-            )}
-          </div>
-          <div className="flex gap-1.5 text-xs">
-            {SORTS.map((s) => (
-              <Link
-                key={s.v}
-                href={qp({ sort: s.v, page: '1' })}
-                className={`rounded-full px-3 py-1.5 font-medium ${
-                  (searchParams.sort ?? 'newest') === s.v ? 'bg-belize-blue text-white' : 'bg-white text-slate-600'
-                }`}
-              >
-                {s.label}
-              </Link>
-            ))}
-          </div>
-        </div>
-
-        <form method="get" action="/products" className="mt-4 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-3">
-          {searchParams.vendorSlug && <input type="hidden" name="vendorSlug" value={searchParams.vendorSlug} />}
-          {searchParams.categoryId && <input type="hidden" name="categoryId" value={searchParams.categoryId} />}
-          {searchParams.sort && <input type="hidden" name="sort" value={searchParams.sort} />}
-          <input name="q" aria-label="Search products" defaultValue={searchParams.q ?? ''} placeholder="Search products…" className="min-w-48 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <input name="priceMin" aria-label="Minimum price" defaultValue={searchParams.priceMin ?? ''} inputMode="decimal" placeholder="Min $" className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <input name="priceMax" aria-label="Maximum price" defaultValue={searchParams.priceMax ?? ''} inputMode="decimal" placeholder="Max $" className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <label className="flex items-center gap-1.5 text-sm text-slate-600">
-            <input type="checkbox" name="inStock" value="true" defaultChecked={!!searchParams.inStock} /> In stock
-          </label>
-          <button className="rounded-lg bg-belize-blue px-4 py-2 text-sm font-semibold text-white hover:bg-belize-deep">Apply</button>
-        </form>
-
-        <div className="mt-6 grid gap-6 md:grid-cols-[200px_1fr]">
-          <aside>
-            <h2 className="mb-2 text-xs font-semibold uppercase text-slate-500">Categories</h2>
-            <Link href={qp({ categoryId: undefined, page: '1' })} className={`block rounded px-2 py-1 text-sm ${!searchParams.categoryId ? 'font-semibold text-belize-blue' : 'text-slate-600'}`}>
-              All
-            </Link>
-            {cats.map((c) => (
-              <div key={c.id}>
-                <Link href={qp({ categoryId: c.id, page: '1' })} className={`block rounded px-2 py-1 text-sm ${searchParams.categoryId === c.id ? 'font-semibold text-belize-blue' : 'text-slate-600'}`}>
-                  {c.name}
+      <main className="bg-slate-50 py-10">
+        <div className="container-bmpl">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="bmpl-eyebrow">Marketplace</p>
+              <h1 className="bmpl-page-title mt-1">Shop</h1>
+              {searchParams.vendorSlug && (
+                <p className="mt-1.5 text-sm text-slate-500">
+                  {data.items[0]?.vendor.businessName
+                    ? `Browsing ${data.items[0].vendor.businessName}`
+                    : 'Browsing one store'}{' '}
+                  · <Link href={qp({ vendorSlug: undefined, page: '1' })} className="font-medium text-belize-blue hover:underline">Show all stores</Link>
+                </p>
+              )}
+            </div>
+            <div className="flex gap-1 rounded-full bg-slate-100 p-1 text-xs">
+              {SORTS.map((s) => (
+                <Link
+                  key={s.v}
+                  href={qp({ sort: s.v, page: '1' })}
+                  className={`rounded-full px-3 py-1.5 font-medium transition ${
+                    (searchParams.sort ?? 'newest') === s.v
+                      ? 'bg-belize-blue text-white shadow-bmpl-sm'
+                      : 'text-slate-600 hover:text-belize-navy'
+                  }`}
+                >
+                  {s.label}
                 </Link>
-                {(c.children ?? []).map((ch) => (
-                  <Link key={ch.id} href={qp({ categoryId: ch.id, page: '1' })} className={`block rounded px-2 py-1 pl-5 text-sm ${searchParams.categoryId === ch.id ? 'font-semibold text-belize-blue' : 'text-slate-500'}`}>
-                    {ch.name}
-                  </Link>
-                ))}
-              </div>
-            ))}
-          </aside>
+              ))}
+            </div>
+          </div>
 
-          <section>
-            {unavailable ? (
-              <p className="rounded-2xl border border-amber-200 bg-amber-50 p-10 text-center text-amber-700">
-                The shop is temporarily unavailable. Please try again in a moment.
-              </p>
-            ) : data.items.length === 0 ? (
-              <p className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-400">No products found.</p>
-            ) : (
-              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                {data.items.map((p) => (
-                  <Link key={p.id} href={`/products/${p.slug}`} className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-belize-accent hover:shadow-md">
-                    <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-slate-300">
-                      {p.primaryImageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
-                      ) : (
-                        'No image'
-                      )}
-                    </div>
-                    <p className="mt-3 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
-                    <p className="text-xs text-slate-400">{p.vendor.businessName} · {p.category.name}</p>
-                    <p className="mt-1 text-sm">
-                      {p.salePriceMinor != null ? (
-                        <>
-                          <span className="font-bold text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
-                          <span className="text-slate-400 line-through">{money(p.priceMinor)}</span>
-                        </>
-                      ) : (
-                        <span className="font-bold text-belize-navy">{money(p.priceMinor)}</span>
-                      )}
-                    </p>
-                    {!p.inStock && <p className="mt-1 text-xs font-semibold text-red-500">Out of stock</p>}
-                  </Link>
-                ))}
-              </div>
-            )}
+          <form method="get" action="/products" className="bmpl-card mt-5 flex flex-wrap items-end gap-3 p-4">
+            {searchParams.vendorSlug && <input type="hidden" name="vendorSlug" value={searchParams.vendorSlug} />}
+            {searchParams.categoryId && <input type="hidden" name="categoryId" value={searchParams.categoryId} />}
+            {searchParams.sort && <input type="hidden" name="sort" value={searchParams.sort} />}
+            <Input name="q" aria-label="Search products" defaultValue={searchParams.q ?? ''} placeholder="Search products…" className="min-w-48 flex-1" />
+            <Input name="priceMin" aria-label="Minimum price" defaultValue={searchParams.priceMin ?? ''} inputMode="decimal" placeholder="Min $" className="w-24" />
+            <Input name="priceMax" aria-label="Maximum price" defaultValue={searchParams.priceMax ?? ''} inputMode="decimal" placeholder="Max $" className="w-24" />
+            <label className="flex items-center gap-1.5 pb-2.5 text-sm text-slate-600">
+              <input type="checkbox" name="inStock" value="true" defaultChecked={!!searchParams.inStock} className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-belize-accent" /> In stock
+            </label>
+            <Button type="submit">Apply</Button>
+          </form>
 
-            {totalPages > 1 && (
-              <div className="mt-8 flex justify-center gap-2 text-sm">
-                {data.page > 1 && <Link href={qp({ page: String(data.page - 1) })} className="rounded-lg border border-slate-300 px-3 py-1.5">← Prev</Link>}
-                <span className="px-3 py-1.5 text-slate-500">Page {data.page} of {totalPages}</span>
-                {data.page < totalPages && <Link href={qp({ page: String(data.page + 1) })} className="rounded-lg border border-slate-300 px-3 py-1.5">Next →</Link>}
-              </div>
-            )}
-          </section>
+          <div className="mt-6 grid gap-6 md:grid-cols-[200px_1fr]">
+            <aside className="md:sticky md:top-24 md:self-start">
+              <h2 className="bmpl-eyebrow mb-3">Categories</h2>
+              <nav className="flex flex-col gap-0.5">
+                <Link href={qp({ categoryId: undefined, page: '1' })} className={`rounded-bmpl-sm px-3 py-1.5 text-sm transition ${!searchParams.categoryId ? 'bg-belize-blue/10 font-semibold text-belize-blue' : 'text-slate-600 hover:bg-slate-100'}`}>
+                  All
+                </Link>
+                {cats.map((c) => (
+                  <div key={c.id}>
+                    <Link href={qp({ categoryId: c.id, page: '1' })} className={`block rounded-bmpl-sm px-3 py-1.5 text-sm transition ${searchParams.categoryId === c.id ? 'bg-belize-blue/10 font-semibold text-belize-blue' : 'text-slate-600 hover:bg-slate-100'}`}>
+                      {c.name}
+                    </Link>
+                    {(c.children ?? []).map((ch) => (
+                      <Link key={ch.id} href={qp({ categoryId: ch.id, page: '1' })} className={`block rounded-bmpl-sm px-3 py-1.5 pl-6 text-sm transition ${searchParams.categoryId === ch.id ? 'bg-belize-blue/10 font-semibold text-belize-blue' : 'text-slate-500 hover:bg-slate-100'}`}>
+                        {ch.name}
+                      </Link>
+                    ))}
+                  </div>
+                ))}
+              </nav>
+            </aside>
+
+            <section>
+              {unavailable ? (
+                <Alert tone="warning">The shop is temporarily unavailable. Please try again in a moment.</Alert>
+              ) : data.items.length === 0 ? (
+                <EmptyState title="No products found." description="Try adjusting your search or filters." />
+              ) : (
+                <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {data.items.map((p) => (
+                    <Link key={p.id} href={`/products/${p.slug}`} className="group rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md">
+                      <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
+                        {p.primaryImageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
+                        ) : (
+                          'No image'
+                        )}
+                      </div>
+                      <p className="mt-3 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
+                      <p className="text-xs text-slate-400">{p.vendor.businessName} · {p.category.name}</p>
+                      <p className="mt-1.5 text-sm">
+                        {p.salePriceMinor != null ? (
+                          <>
+                            <span className="font-bold text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
+                            <span className="text-slate-400 line-through">{money(p.priceMinor)}</span>
+                          </>
+                        ) : (
+                          <span className="font-bold text-belize-navy">{money(p.priceMinor)}</span>
+                        )}
+                      </p>
+                      {!p.inStock && (
+                        <Badge tone="error" className="mt-1.5">Out of stock</Badge>
+                      )}
+                    </Link>
+                  ))}
+                </div>
+              )}
+
+              {totalPages > 1 && (
+                <div className="mt-8 flex items-center justify-center gap-2 text-sm">
+                  {data.page > 1 && <Link href={qp({ page: String(data.page - 1) })} className="rounded-bmpl-md border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-belize-light/60 hover:text-belize-navy">← Prev</Link>}
+                  <span className="px-3 py-1.5 text-slate-500">Page {data.page} of {totalPages}</span>
+                  {data.page < totalPages && <Link href={qp({ page: String(data.page + 1) })} className="rounded-bmpl-md border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-600 transition hover:border-belize-light/60 hover:text-belize-navy">Next →</Link>}
+                </div>
+              )}
+            </section>
+          </div>
         </div>
       </main>
       <Footer />

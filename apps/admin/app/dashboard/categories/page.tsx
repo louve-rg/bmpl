@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
+import { Alert, Button, EmptyState, Input, Label, PageHeader, Select, Spinner } from '../../../components/ui';
 
 interface AdminCategory {
   id: string;
@@ -149,31 +150,33 @@ export default function CategoriesPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-belize-navy">Categories</h1>
+      <PageHeader eyebrow="Marketplace" title="Categories" />
 
       {error && (
-        <p className="mb-5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <Alert tone="warning" className="mb-5">
           {error}
-        </p>
+        </Alert>
       )}
 
       {/* Create */}
-      <form onSubmit={create} className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-4">
-        <label className="flex flex-col gap-1 text-xs font-semibold uppercase text-slate-500">
-          Name
-          <input
+      <form onSubmit={create} className="mb-6 flex flex-wrap items-end gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="cat-name">Name</Label>
+          <Input
+            id="cat-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Electronics"
-            className="w-56 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
+            className="w-56"
           />
-        </label>
-        <label className="flex flex-col gap-1 text-xs font-semibold uppercase text-slate-500">
-          Parent
-          <select
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="cat-parent">Parent</Label>
+          <Select
+            id="cat-parent"
             value={parentId}
             onChange={(e) => setParentId(e.target.value)}
-            className="w-56 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-belize-accent"
+            className="w-56"
           >
             <option value="">— none (root) —</option>
             {rows.map(({ cat, depth }) => (
@@ -182,35 +185,37 @@ export default function CategoriesPage() {
                 {cat.name}
               </option>
             ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs font-semibold uppercase text-slate-500">
-          Sort
-          <input
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="cat-sort">Sort</Label>
+          <Input
+            id="cat-sort"
             type="number"
             value={sortOrder}
             onChange={(e) => setSortOrder(e.target.value)}
-            className="w-20 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-belize-accent"
+            className="w-20"
           />
-        </label>
-        <label className="flex items-center gap-2 pb-2 text-sm text-slate-700">
+        </div>
+        <label className="flex items-center gap-2 pb-2.5 text-sm text-slate-700">
           <input type="checkbox" checked={featured} onChange={(e) => setFeatured(e.target.checked)} />
           Featured
         </label>
-        <button
-          disabled={busy || !name.trim()}
-          className="rounded-lg bg-belize-blue px-5 py-2 text-sm font-semibold text-white hover:bg-belize-deep disabled:opacity-50"
-        >
+        <Button type="submit" disabled={busy || !name.trim()}>
           Add category
-        </button>
+        </Button>
       </form>
 
       {loading ? (
-        <p className="text-sm text-slate-500">Loading…</p>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading…
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyState title="No categories yet" description="Add your first category using the form above." />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
           <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Slug</th>
@@ -220,28 +225,28 @@ export default function CategoriesPage() {
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {rows.map(({ cat, depth }) =>
                 editId === cat.id ? (
-                  <tr key={cat.id} className="bg-slate-50">
+                  <tr key={cat.id} className="border-t border-slate-100 bg-slate-50">
                     <td className="px-4 py-3" colSpan={6}>
                       <div className="flex flex-wrap items-end gap-3">
-                        <input
+                        <Input
                           value={edit.name}
                           onChange={(e) => setEdit({ ...edit, name: e.target.value })}
                           placeholder="Name"
-                          className="w-48 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          className="w-48"
                         />
-                        <input
+                        <Input
                           value={edit.slug}
                           onChange={(e) => setEdit({ ...edit, slug: e.target.value })}
                           placeholder="slug"
-                          className="w-48 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          className="w-48"
                         />
-                        <select
+                        <Select
                           value={edit.parentId}
                           onChange={(e) => setEdit({ ...edit, parentId: e.target.value })}
-                          className="w-48 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          className="w-48"
                         >
                           <option value="">— none (root) —</option>
                           {rows
@@ -255,30 +260,24 @@ export default function CategoriesPage() {
                                 {c.name}
                               </option>
                             ))}
-                        </select>
-                        <input
+                        </Select>
+                        <Input
                           type="number"
                           value={edit.sortOrder}
                           onChange={(e) => setEdit({ ...edit, sortOrder: e.target.value })}
-                          className="w-20 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                          className="w-20"
                         />
-                        <button
-                          onClick={() => void saveEdit(cat.id)}
-                          className="rounded-lg bg-belize-blue px-4 py-2 text-xs font-semibold text-white hover:bg-belize-deep"
-                        >
+                        <Button size="sm" onClick={() => void saveEdit(cat.id)}>
                           Save
-                        </button>
-                        <button
-                          onClick={() => setEditId(null)}
-                          className="rounded-lg border border-slate-300 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                        >
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setEditId(null)}>
                           Cancel
-                        </button>
+                        </Button>
                       </div>
                     </td>
                   </tr>
                 ) : (
-                  <tr key={cat.id} className="hover:bg-slate-50">
+                  <tr key={cat.id} className="border-t border-slate-100 hover:bg-slate-50">
                     <td className="px-4 py-3">
                       <span style={{ paddingLeft: `${depth * 18}px` }} className="font-medium text-belize-navy">
                         {depth > 0 && <span className="text-slate-300">└ </span>}
@@ -298,7 +297,9 @@ export default function CategoriesPage() {
                     <td className="px-4 py-3 text-slate-600">{cat.sortOrder}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <button
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={() => {
                             setEditId(cat.id);
                             setEdit({
@@ -308,27 +309,16 @@ export default function CategoriesPage() {
                               sortOrder: String(cat.sortOrder),
                             });
                           }}
-                          className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                         >
                           Edit
-                        </button>
-                        <button
-                          onClick={() => void remove(cat)}
-                          className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
-                        >
+                        </Button>
+                        <Button size="sm" variant="destructive" onClick={() => void remove(cat)}>
                           Delete
-                        </button>
+                        </Button>
                       </div>
                     </td>
                   </tr>
                 ),
-              )}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-400">
-                    No categories yet. Add your first one above.
-                  </td>
-                </tr>
               )}
             </tbody>
           </table>

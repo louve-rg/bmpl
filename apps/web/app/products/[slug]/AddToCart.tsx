@@ -86,19 +86,19 @@ export function AddToCart({
   }
 
   return (
-    <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
+    <div className="bmpl-card mt-6 p-5">
       {hasVariants && (
         <div className="space-y-3">
           {options.map((opt) => (
             <div key={opt.id}>
-              <label htmlFor={`opt-${opt.id}`} className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+              <label htmlFor={`opt-${opt.id}`} className="bmpl-label">
                 {opt.name}
               </label>
               <select
                 id={`opt-${opt.id}`}
                 value={selection[opt.id] ?? ''}
                 onChange={(e) => setSelection((s) => ({ ...s, [opt.id]: e.target.value }))}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="bmpl-input"
               >
                 <option value="">Select {opt.name.toLowerCase()}…</option>
                 {opt.values.map((v) => (
@@ -114,7 +114,7 @@ export function AddToCart({
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <div>
-          <label htmlFor="qty" className="mb-1 block text-xs font-semibold uppercase text-slate-500">
+          <label htmlFor="qty" className="bmpl-label">
             Quantity
           </label>
           <input
@@ -124,14 +124,14 @@ export function AddToCart({
             max={10000}
             value={qty}
             onChange={(e) => setQty(Math.max(1, Math.min(10000, Math.floor(Number(e.target.value) || 1))))}
-            className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="bmpl-input w-24"
           />
         </div>
         <button
           type="button"
           onClick={add}
           disabled={disabled}
-          className="flex-1 rounded-lg bg-belize-blue px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-belize-deep disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-belize-blue px-5 py-2.5 text-sm font-semibold text-white shadow-bmpl-sm transition hover:bg-belize-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy
             ? 'Adding…'
@@ -146,7 +146,7 @@ export function AddToCart({
       {message && (
         <p
           role="status"
-          className={`mt-3 text-sm ${message.kind === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}
+          className={`mt-3 text-sm font-medium ${message.kind === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}
         >
           {message.text}
           {message.kind === 'ok' && (

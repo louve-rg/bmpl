@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { RoleCode } from '@bmpl/shared';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
+import { Badge, Button, Input, PageHeader, Spinner } from '../../../components/ui';
 
 interface UserRow {
   id: string;
@@ -48,24 +49,27 @@ export default function UsersPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-belize-navy">Users</h1>
-      {status && (
-        <div className="mb-4 flex items-center gap-2 text-sm">
-          <span className="rounded-full bg-belize-blue/10 px-3 py-1 font-medium text-belize-blue">
-            Filtered: {status}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setStatus(null);
-              void search(query, null);
-            }}
-            className="text-slate-500 hover:text-slate-700"
-          >
-            Clear filter
-          </button>
-        </div>
-      )}
+      <PageHeader
+        eyebrow="Accounts"
+        title="Users"
+        actions={
+          status && (
+            <div className="flex items-center gap-2 text-sm">
+              <Badge tone="brand">Filtered: {status}</Badge>
+              <button
+                type="button"
+                onClick={() => {
+                  setStatus(null);
+                  void search(query, null);
+                }}
+                className="font-medium text-slate-500 hover:text-slate-700"
+              >
+                Clear filter
+              </button>
+            </div>
+          )
+        }
+      />
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -73,23 +77,23 @@ export default function UsersPage() {
         }}
         className="mb-5 flex gap-2"
       >
-        <input
+        <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search by name or email…"
-          className="flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30"
+          className="flex-1"
         />
-        <button className="rounded-lg bg-belize-blue px-5 text-sm font-semibold text-white hover:bg-belize-deep">
-          Search
-        </button>
+        <Button type="submit">Search</Button>
       </form>
 
       {loading ? (
-        <p className="text-sm text-slate-500">Searching…</p>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Searching…
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
           <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Account</th>
@@ -97,9 +101,9 @@ export default function UsersPage() {
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {result?.items.map((u) => (
-                <tr key={u.id} className="hover:bg-slate-50">
+                <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-3">
                     <p className="font-medium text-belize-navy">
                       {u.firstName} {u.lastName}

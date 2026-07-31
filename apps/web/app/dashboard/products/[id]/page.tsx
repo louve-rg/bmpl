@@ -7,6 +7,16 @@ import { api, type ApiError } from '../../../../lib/api';
 import { ProductForm, type ProductValues } from '../ProductForm';
 import { ImageManager } from '../ImageManager';
 import { VariantsInventory } from '../VariantsInventory';
+import { Badge, Alert, Button, Spinner, type Tone } from '../../../../components/ui';
+
+const STATUS_TONE: Record<string, Tone> = {
+  DRAFT: 'neutral',
+  PENDING_REVIEW: 'warning',
+  PUBLISHED: 'success',
+  REJECTED: 'error',
+  SUSPENDED: 'error',
+  ARCHIVED: 'neutral',
+};
 
 interface OwnProduct {
   id: string;
@@ -81,38 +91,44 @@ export default function EditProductPage() {
     }
   }
 
-  if (err) return <p className="text-sm text-red-600">{err}</p>;
-  if (!initial) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (err) return <Alert tone="error">{err}</Alert>;
+  if (!initial) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <Spinner className="h-4 w-4" /> Loading…
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl">
-      <Link href="/dashboard/products" className="text-sm text-belize-blue hover:underline">← My Products</Link>
-      <div className="mb-6 mt-2 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-belize-navy">Edit product</h1>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{status.replace('_', ' ')}</span>
+      <Link href="/dashboard/products" className="text-sm font-medium text-belize-blue hover:underline">← My Products</Link>
+      <div className="mb-6 mt-2 flex items-center justify-between gap-3">
+        <h1 className="bmpl-page-title">Edit product</h1>
+        <Badge tone={STATUS_TONE[status] ?? 'neutral'}>{status.replace('_', ' ')}</Badge>
       </div>
 
       {status === 'PUBLISHED' && (
-        <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
+        <Alert tone="success" className="mb-4">
           This product is live on your storefront. Changes save instantly.
-        </p>
+        </Alert>
       )}
       {status === 'SUSPENDED' && (
-        <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+        <Alert tone="error" className="mb-4">
           This product was suspended by an administrator.{rejection ? ` Reason: ${rejection}` : ''}
-        </p>
+        </Alert>
       )}
 
       <div className="mb-5 flex gap-2">
         {status !== 'ARCHIVED' && status !== 'SUSPENDED' && (
-          <button onClick={() => act('archive')} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+          <Button variant="outline" size="sm" onClick={() => act('archive')}>
             Archive (hide from store)
-          </button>
+          </Button>
         )}
         {status === 'ARCHIVED' && (
-          <button onClick={() => act('unarchive')} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
+          <Button size="sm" onClick={() => act('unarchive')}>
             Publish to store
-          </button>
+          </Button>
         )}
       </div>
 

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Badge as UiBadge, EmptyState } from '../ui';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
@@ -43,14 +44,14 @@ export function StorefrontView({ store }: { store: Storefront }) {
         <div className="flex items-end gap-4">
           {store.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={store.logoUrl} alt="" className="h-24 w-24 rounded-2xl border-4 border-white object-cover shadow" />
+            <img src={store.logoUrl} alt="" className="h-24 w-24 rounded-bmpl-lg border-4 border-white object-cover shadow-bmpl-md" />
           ) : (
-            <span className="flex h-24 w-24 items-center justify-center rounded-2xl border-4 border-white bg-belize-blue text-2xl font-bold text-white shadow">
+            <span className="flex h-24 w-24 items-center justify-center rounded-bmpl-lg border-4 border-white bg-belize-blue text-2xl font-bold text-white shadow-bmpl-md">
               {store.businessName.slice(0, 2).toUpperCase()}
             </span>
           )}
           <div className="pb-1">
-            <h1 className="text-2xl font-bold text-belize-navy">{store.businessName}</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-belize-navy">{store.businessName}</h1>
             <p className="text-sm text-slate-500">
               {'★'.repeat(Math.round(store.ratingAverage))}
               {store.ratingCount > 0 ? ` (${store.ratingCount} reviews)` : ' · No reviews yet'}
@@ -58,11 +59,11 @@ export function StorefrontView({ store }: { store: Storefront }) {
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <Badge tone={store.storeStatus === 'OPEN' ? 'green' : 'slate'}>{store.storeStatus}</Badge>
-          {store.vacationMode && <Badge tone="amber">On vacation</Badge>}
-          {store.pickupEnabled && <Badge>Pickup</Badge>}
-          {store.deliveryEnabled && <Badge>Delivery</Badge>}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <UiBadge tone={store.storeStatus === 'OPEN' ? 'success' : 'neutral'}>{store.storeStatus}</UiBadge>
+          {store.vacationMode && <UiBadge tone="warning">On vacation</UiBadge>}
+          {store.pickupEnabled && <UiBadge tone="brand">Pickup</UiBadge>}
+          {store.deliveryEnabled && <UiBadge tone="brand">Delivery</UiBadge>}
         </div>
 
         {store.description && <p className="mt-5 max-w-2xl text-slate-600">{store.description}</p>}
@@ -70,9 +71,9 @@ export function StorefrontView({ store }: { store: Storefront }) {
         <div className="mt-8 grid gap-6 md:grid-cols-3">
           <section className="md:col-span-2">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-belize-navy">Featured products</h2>
+              <h2 className="text-lg font-bold text-belize-navy">Featured products</h2>
               {store.featuredProducts.length > 0 && (
-                <Link href={`/products?vendorSlug=${store.slug}`} className="text-sm text-belize-blue hover:underline">
+                <Link href={`/products?vendorSlug=${store.slug}`} className="text-sm font-medium text-belize-blue hover:underline">
                   View all →
                 </Link>
               )}
@@ -80,21 +81,17 @@ export function StorefrontView({ store }: { store: Storefront }) {
             {store.categories.length > 0 && (
               <div className="mb-4 flex flex-wrap gap-1.5">
                 {store.categories.map((c) => (
-                  <span key={c.slug} className="rounded-full bg-belize-blue/10 px-2.5 py-0.5 text-xs font-medium text-belize-blue">
-                    {c.name}
-                  </span>
+                  <UiBadge key={c.slug} tone="brand">{c.name}</UiBadge>
                 ))}
               </div>
             )}
             {store.featuredProducts.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-400">
-                This storefront hasn’t listed products yet.
-              </div>
+              <EmptyState title="This storefront hasn’t listed products yet." />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {store.featuredProducts.map((p) => (
-                  <Link key={p.id} href={`/products/${p.slug}`} className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-belize-accent hover:shadow-md">
-                    <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-slate-300">
+                  <Link key={p.id} href={`/products/${p.slug}`} className="group rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md">
+                    <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
                       {p.primaryImageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
@@ -160,18 +157,9 @@ export function StorefrontView({ store }: { store: Storefront }) {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4">
-      <h3 className="mb-2 text-xs font-semibold uppercase text-slate-500">{title}</h3>
+    <section className="bmpl-card space-y-1.5 p-4">
+      <h3 className="bmpl-eyebrow mb-1">{title}</h3>
       {children}
     </section>
   );
-}
-function Badge({ children, tone = 'blue' }: { children: React.ReactNode; tone?: 'blue' | 'green' | 'slate' | 'amber' }) {
-  const tones = {
-    blue: 'bg-belize-blue/10 text-belize-blue',
-    green: 'bg-emerald-100 text-emerald-700',
-    slate: 'bg-slate-100 text-slate-500',
-    amber: 'bg-amber-100 text-amber-700',
-  };
-  return <span className={`rounded-full px-2.5 py-0.5 font-medium ${tones[tone]}`}>{children}</span>;
 }

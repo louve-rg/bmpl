@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
+import { EmptyState, PageHeader, Spinner } from '../../../components/ui';
 
 interface OrderRow {
   id: string;
@@ -34,15 +35,18 @@ export default function AdminOrdersPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-bold text-belize-navy">Orders</h1>
-      <p className="mb-6 text-sm text-slate-500">Read-only view. Fulfilment and payment controls are later milestones.</p>
+      <PageHeader eyebrow="Fulfilment" title="Orders" description="Read-only view. Fulfilment and payment controls are later milestones." />
 
       {loading ? (
-        <p className="text-sm text-slate-500">Loading…</p>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading…
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyState title="No orders yet" description="Orders placed across the marketplace will appear here." />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
           <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">Order</th>
                 <th className="px-4 py-3">Customer</th>
@@ -53,9 +57,9 @@ export default function AdminOrdersPage() {
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {rows.map((o) => (
-                <tr key={o.id} className="hover:bg-slate-50">
+                <tr key={o.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-3">
                     <p className="font-medium text-belize-navy">{o.orderNumber}</p>
                     <p className="text-xs text-slate-500">{new Date(o.placedAt).toLocaleDateString()}</p>
@@ -73,9 +77,6 @@ export default function AdminOrdersPage() {
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-400">No orders yet.</td></tr>
-              )}
             </tbody>
           </table>
         </div>
