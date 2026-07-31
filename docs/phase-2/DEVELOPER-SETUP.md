@@ -60,10 +60,14 @@ matrix. Reset Redis between rapid reruns if the rate-limit spec flakes
 - Money = integer minor units. New audit codes go in the emitting milestone (Prisma
   enum + `@bmpl/shared` `AUDIT_ACTIONS` mirror together).
 - Uploads reuse `StorageService` (presign → PUT → `headObject` verify → persist key).
-- **Payments/wallet (M11) move NO money.** Real transfers require the wallet package's
-  `assertMoneyMovementEnabled(true)` gate — off in all foundation phases. `WalletHold`/
-  `LedgerReference` are metadata; never write a `WalletLedgerEntry` in a foundation
-  milestone. Payment state changes go through `canTransitionPayment` (`@bmpl/shared`).
+- **Money movement is gated.** The global `WALLET_MONEY_MOVEMENT_ENABLED` stays off;
+  the wallet package's `assertMoneyMovementEnabled(true)` is passed **only** by
+  `WalletService.postTransaction` for the sanctioned **customer↔escrow** operations
+  (M12). Every posted transaction MUST be balanced (`assertBalanced` — debits ==
+  credits, net 0) and carry a **unique `reference`** (ledger-level idempotency).
+  Balances are DERIVED from ledger entries; `cachedBalanceMinor` is a maintained
+  cache. M11 holds/ledger-refs are metadata (no `WalletLedgerEntry`). Payment state
+  changes go through `canTransitionPayment` (`@bmpl/shared`).
 - **Idempotent initiation:** `POST /api/checkout` honors an `Idempotency-Key` header
   (unique `IdempotencyKey(userId, scope, key)`); a duplicate replays the original
   order/payment. Add new idempotent initiations under a distinct `scope`.

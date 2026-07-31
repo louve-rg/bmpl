@@ -15,6 +15,10 @@ export const WALLET_ACCOUNT_TYPES = [
 ] as const;
 export type WalletAccountType = (typeof WALLET_ACCOUNT_TYPES)[number];
 
+/** Operational state of a wallet account (M12). Mirrors Prisma `WalletAccountStatus`. */
+export const WALLET_ACCOUNT_STATUSES = ['ACTIVE', 'LOCKED', 'SUSPENDED'] as const;
+export type WalletAccountStatus = (typeof WALLET_ACCOUNT_STATUSES)[number];
+
 /** Each ledger entry is a DEBIT or CREDIT. Entries of a transaction sum to zero. */
 export const LEDGER_DIRECTIONS = ['DEBIT', 'CREDIT'] as const;
 export type LedgerDirection = (typeof LEDGER_DIRECTIONS)[number];

@@ -41,8 +41,12 @@ export type PaymentMethodType = (typeof PAYMENT_METHOD_TYPES)[number];
 export const PAYMENT_ATTEMPT_STATUSES = ['CREATED', 'PENDING', 'AUTHORIZED', 'FAILED'] as const;
 export type PaymentAttemptStatus = (typeof PAYMENT_ATTEMPT_STATUSES)[number];
 
-/** A soft wallet hold — a RESERVATION of intent to pay. NEVER moves money in M11. */
-export const WALLET_HOLD_STATUSES = ['HELD', 'RELEASED'] as const;
+/**
+ * Wallet hold lifecycle. `HELD` = soft reservation (M11, no money). `AUTHORIZED`
+ * = backed by a real customer→escrow ledger movement (M12). `RELEASED` = released
+ * (a soft hold releases with no money; an authorized hold reverses escrow→customer).
+ */
+export const WALLET_HOLD_STATUSES = ['HELD', 'AUTHORIZED', 'RELEASED'] as const;
 export type WalletHoldStatus = (typeof WALLET_HOLD_STATUSES)[number];
 
 /** Append-only payment event-log entry types. */

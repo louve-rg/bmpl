@@ -47,6 +47,13 @@ export const AUDIT_ACTIONS = [
   'WALLET_HOLD_CREATED',
   'WALLET_HOLD_RELEASED',
   'IDEMPOTENCY_KEY_REPLAYED',
+  // ---- Wallet authorization & escrow (Phase 3 · M12 — first real money movement) ----
+  'PAYMENT_AUTHORIZED',
+  'PAYMENT_AUTHORIZATION_FAILED',
+  'WALLET_VALIDATION_FAILED',
+  'ESCROW_FUNDS_HELD', // customer wallet → escrow (authorization)
+  'ESCROW_FUNDS_RELEASED', // escrow → customer wallet (release/rollback)
+  'WALLET_TRANSACTION_POSTED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

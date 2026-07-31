@@ -29,6 +29,8 @@ export const PERMISSIONS = [
   'orders.manage', // operational order actions (e.g. release inventory reservations) — M10.1
   // ---- Marketplace (Phase 3 · M11) ----
   'payments.read', // read-only payment / wallet-hold / payment-event visibility (no actions)
+  // ---- Wallet (Phase 3 · M12) ----
+  'wallet.read', // read-only wallet transactions / escrow balances / ledger visibility (no adjustments)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -44,6 +46,7 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'products.read',
     'orders.read',
     'payments.read',
+    'wallet.read',
   ],
   ADMIN: [
     'users.read',
@@ -65,6 +68,7 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'orders.read',
     'orders.manage',
     'payments.read',
+    'wallet.read',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

@@ -33,6 +33,7 @@ packages/
 | `cart/` | authenticated customer shopping cart — self-scoped; server-authoritative pricing; vendor-grouped (Phase 3 · M9) |
 | `orders/` | checkout + orders — transactional cart→order conversion, inventory reservation, price snapshots; customer/vendor/admin reads (Phase 3 · M10) |
 | `payments/` | payment & wallet-hold FOUNDATION — payment state machine, soft wallet holds, ledger references, idempotency; read-only customer/admin (Phase 3 · M11; no money moves) |
+| `wallet/` | double-entry ledger persistence + escrow — posts balanced customer↔escrow transactions, derives balances, read-only wallet/escrow views (Phase 3 · M12; first real money movement) |
 | `storage/` | S3-compatible object storage (MinIO/R2) — presign, headObject, publicUrl |
 | `auth/`, `common/`, `throttling/`, `audit/`, `notifications/` | reused Phase 1 cross-cutting infrastructure |
 
@@ -126,6 +127,24 @@ off. Checkout is **idempotent** via an `Idempotency-Key` header backed by a uniq
 order/payment. The design is gateway-agnostic (wallet / card / bank) without
 schema redesign. Releasing an order's reservations (M10.1) also releases the hold
 and cancels the payment. See the [M11 doc](../phase-3/M11-payments-wallet.md).
+
+## Wallet authorization & escrow (Phase 3 · M12 — first real money movement)
+`POST /api/payments/:id/authorize` performs the platform's **first real money
+movement**: after validating the customer's wallet (exists / active / correct
+currency / sufficient balance / not locked / not suspended), it moves funds
+**customer wallet → escrow** as a **balanced double-entry** `WalletTransaction`
+(DEBIT customer, CREDIT `SYSTEM_ESCROW`, net 0 — enforced by the `@bmpl/wallet`
+`assertBalanced`), posts the `LedgerReference`, marks the `WalletHold` `AUTHORIZED`,
+and transitions the payment `PENDING→AUTHORIZED` — all in one transaction. Money
+moves **only** customer↔escrow; **vendor balances are never touched** and escrow
+holds the funds until a future settlement milestone. Real movement is gated by the
+wallet package's `assertMoneyMovementEnabled`, passed `true` **only** for these
+escrow operations (the global `WALLET_MONEY_MOVEMENT_ENABLED` stays off). The
+`WalletTransaction.reference` (`payment:<id>:auth`) is unique → ledger-level
+idempotency (re-authorizing replays, never double-debits). On any validation
+failure the order is rolled back atomically (hold + reservation released, order
+`CANCELLED`, payment `FAILED`, no money moved). Releasing an authorized order
+reverses the escrow (escrow→customer). See the [M12 doc](../phase-3/M12-wallet-authorization-escrow.md).
 
 ## Money & i18n
 Prices are `BigInt` **minor units** (cents), currency `BZD` (matches the wallet).

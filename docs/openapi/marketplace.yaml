@@ -24,6 +24,8 @@ tags:
     description: Checkout + orders. Customer (self), Vendor (own vendor orders), Admin (read-only).
   - name: Payments
     description: Payment & wallet-hold foundation (M11) — read-only. NO money moves; no capture/settlement.
+  - name: Wallet
+    description: Wallet authorization & escrow (M12). Money moves ONLY customer↔escrow via balanced double-entry.
 components:
   securitySchemes:
     cookieAuth:
@@ -601,3 +603,33 @@ paths:
     get: { tags: [Payments], summary: All payments (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires payments.read" }
   /admin/payments/{id}:
     get: { tags: [Payments], summary: Payment detail (read-only, + holds/events/ledger refs), parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Requires payments.read" }
+  /payments/{id}/authorize:
+    post:
+      tags: [Wallet]
+      summary: Authorize a PENDING payment from the wallet (customer → escrow, M12)
+      description: >
+        The first real money movement. Validates the wallet (exists/active/currency/
+        balance/not-locked/not-suspended), moves funds customer→escrow via a balanced
+        double-entry transaction, posts the LedgerReference, and transitions the
+        payment PENDING→AUTHORIZED — all in one transaction. Idempotent (re-authorizing
+        replays). On validation failure the order is rolled back atomically (hold
+        released, reservation released, order cancelled, payment FAILED) and no money
+        moves. Vendor balances are never touched.
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201": { description: Authorized (or replayed), content: { application/json: { schema: { $ref: "#/components/schemas/Payment" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Rejected (insufficient balance / currency mismatch / wallet locked or suspended) — order rolled back" }
+  /wallet/transactions/{id}:
+    get:
+      tags: [Wallet]
+      summary: A wallet transaction the caller is party to
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }
+  /admin/wallet/transactions:
+    get: { tags: [Wallet], summary: All wallet transactions (read-only, each balances to net 0), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read" }
+  /admin/wallet/accounts:
+    get: { tags: [Wallet], summary: System / escrow account balances (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read" }

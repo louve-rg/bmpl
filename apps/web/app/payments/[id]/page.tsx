@@ -14,6 +14,8 @@ export default function PaymentDetailPage() {
   const params = useParams<{ id: string }>();
   const [p, setP] = useState<PaymentDetail | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
     paymentsApi
@@ -28,6 +30,24 @@ export default function PaymentDetailPage() {
         else setState(err.status === 404 ? 'notfound' : 'error');
       });
   }, [params.id, router]);
+
+  async function authorize() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const updated = await paymentsApi.authorize(params.id);
+      setP(updated);
+      setMsg({ kind: 'ok', text: 'Payment authorized — funds are held in escrow.' });
+    } catch (e) {
+      const err = e as ApiError;
+      if (err.status === 401) return router.push(`/login?next=${encodeURIComponent(`/payments/${params.id}`)}`);
+      // Refresh so the UI reflects any rollback (payment FAILED, order cancelled).
+      paymentsApi.getOwn(params.id).then(setP).catch(() => {});
+      setMsg({ kind: 'err', text: /insufficient/i.test(err.message) ? 'Insufficient funds in your wallet.' : err.message || 'Authorization failed.' });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <>
@@ -51,9 +71,34 @@ export default function PaymentDetailPage() {
               <PaymentStatusBadge status={p.status} />
             </div>
 
-            <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
-              Payment processing is coming next. This record and the wallet hold below were created with your order — no funds have moved.
-            </div>
+            {/* Authorization panel — status-aware (M12) */}
+            {p.status === 'AUTHORIZED' ? (
+              <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                <p className="font-semibold">✓ Payment authorized</p>
+                <p>Your funds ({money(p.amountMinor)}) are held in <strong>escrow</strong> under BMPL until fulfilment. No vendor has been paid.</p>
+              </div>
+            ) : p.status === 'FAILED' ? (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                <p className="font-semibold">Authorization failed</p>
+                <p>This payment could not be authorized and the order was cancelled. No funds moved.</p>
+              </div>
+            ) : p.status === 'CANCELLED' ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">This payment was cancelled. No funds moved.</div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-800">Pending authorization</p>
+                <p className="mt-1 text-sm text-amber-700">Authorize {money(p.amountMinor)} from your wallet — the funds move into escrow (held by BMPL, not paid to the vendor).</p>
+                <button
+                  type="button"
+                  onClick={authorize}
+                  disabled={busy}
+                  className="mt-3 rounded-lg bg-belize-blue px-5 py-2.5 text-sm font-semibold text-white hover:bg-belize-deep disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {busy ? 'Authorizing…' : 'Authorize with wallet'}
+                </button>
+                {msg && <p role="status" className={`mt-2 text-sm ${msg.kind === 'ok' ? 'text-emerald-600' : 'text-red-600'}`}>{msg.text}</p>}
+              </div>
+            )}
 
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 bg-white p-4">

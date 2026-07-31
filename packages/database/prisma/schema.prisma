@@ -152,6 +152,13 @@ enum AuditAction {
   WALLET_HOLD_CREATED
   WALLET_HOLD_RELEASED
   IDEMPOTENCY_KEY_REPLAYED
+  // ---- Wallet authorization & escrow (Phase 3 · M12) ----
+  PAYMENT_AUTHORIZED
+  PAYMENT_AUTHORIZATION_FAILED
+  WALLET_VALIDATION_FAILED
+  ESCROW_FUNDS_HELD
+  ESCROW_FUNDS_RELEASED
+  WALLET_TRANSACTION_POSTED
 }
 
 enum WalletAccountType {
@@ -160,6 +167,12 @@ enum WalletAccountType {
   SYSTEM_PLATFORM_FEES
   SYSTEM_TOPUP_CLEARING
   SYSTEM_PAYOUTS_CLEARING
+}
+
+enum WalletAccountStatus {
+  ACTIVE
+  LOCKED
+  SUSPENDED
 }
 
 enum WalletTransactionType {
@@ -462,6 +475,8 @@ model WalletAccount {
   userId   String?
   user     User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
   currency Currency          @default(BZD)
+  // Operational state (M12) — authorization is rejected unless ACTIVE.
+  status   WalletAccountStatus @default(ACTIVE)
   // Cached, DERIVED balance in minor units (cents). NOT the source of truth —
   // it is recomputed from ledger entries inside the same transaction that posts
   // them. Reconciliation always trusts the sum of WalletLedgerEntry rows.
@@ -986,10 +1001,12 @@ model CartItem {
 
 enum OrderStatus {
   PENDING
+  CANCELLED
 }
 
 enum VendorOrderStatus {
   PENDING
+  CANCELLED
 }
 
 enum DeliveryMethod {
@@ -1134,6 +1151,7 @@ enum PaymentAttemptStatus {
 
 enum WalletHoldStatus {
   HELD
+  AUTHORIZED
   RELEASED
 }
 
@@ -1244,7 +1262,11 @@ model WalletHold {
   amountMinor     BigInt
   currency        Currency         @default(BZD)
   status          WalletHoldStatus @default(HELD)
+  // Set when the hold is AUTHORIZED — the customer→escrow WalletTransaction that
+  // backs it (M12). Null while the hold is a soft (HELD) reservation.
+  walletTransactionId String?
   heldAt          DateTime         @default(now())
+  authorizedAt    DateTime?
   releasedAt      DateTime?
   releaseReason   String?
   createdAt       DateTime         @default(now())

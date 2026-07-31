@@ -81,6 +81,10 @@ Product 1─* ProductImage
 - WalletHold (Phase 3 · M11): `(paymentId)`, `(walletAccountId, status)`
 - LedgerReference / PaymentAttempt / PaymentEvent (Phase 3 · M11): `(paymentId)` (+ `(paymentId, createdAt)` for events)
 - IdempotencyKey (Phase 3 · M11): unique `(userId, scope, key)`, `(userId)`
+- WalletAccount (M12): + `status` (ACTIVE/LOCKED/SUSPENDED); unique `(userId, type, currency)`
+- WalletHold (M12): + `AUTHORIZED` status + `walletTransactionId` (escrow tx backing an authorized hold)
+- Order/VendorOrder (M12): + `CANCELLED` status (authorization-failure rollback)
+- WalletTransaction (now used, M12): unique `(reference)` → ledger-level idempotency; entries sum to zero
 
 ## Cascade rules
 Vendor/product child rows `onDelete: Cascade`. Category parent + Product→Category

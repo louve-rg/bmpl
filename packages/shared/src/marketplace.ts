@@ -85,12 +85,12 @@ export type ProductSort = (typeof PRODUCT_SORTS)[number];
 // Only the INITIAL lifecycle states are defined here. Payment/fulfilment/refund
 // states are deliberately NOT introduced yet (later milestones extend these).
 
-/** Parent order lifecycle. M10 creates orders in PENDING only. */
-export const ORDER_STATUSES = ['PENDING'] as const;
+/** Parent order lifecycle. PENDING at checkout; CANCELLED on authorization failure (M12). */
+export const ORDER_STATUSES = ['PENDING', 'CANCELLED'] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
-/** Per-vendor sub-order lifecycle. M10 creates vendor orders in PENDING only. */
-export const VENDOR_ORDER_STATUSES = ['PENDING'] as const;
+/** Per-vendor sub-order lifecycle. PENDING at checkout; CANCELLED on authorization failure (M12). */
+export const VENDOR_ORDER_STATUSES = ['PENDING', 'CANCELLED'] as const;
 export type VendorOrderStatus = (typeof VENDOR_ORDER_STATUSES)[number];
 
 /** Fulfilment method chosen per vendor order at checkout. */

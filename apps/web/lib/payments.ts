@@ -22,8 +22,10 @@ export interface WalletHoldView {
   amountMinor: number;
   currency: string;
   heldAt: string;
+  authorizedAt: string | null;
   releasedAt: string | null;
   releaseReason: string | null;
+  walletTransactionId: string | null;
 }
 
 export interface PaymentDetail {
@@ -45,6 +47,7 @@ export const paymentsApi = {
   listOwn: () => api.get<PaymentCard[]>('/payments'),
   getOwn: (id: string) => api.get<PaymentDetail>(`/payments/${id}`),
   forOrder: (orderId: string) => api.get<PaymentDetail>(`/payments/for-order/${orderId}`),
+  authorize: (id: string) => api.post<PaymentDetail>(`/payments/${id}/authorize`),
 };
 
 export const PAYMENT_STATUS_LABEL: Record<string, string> = {

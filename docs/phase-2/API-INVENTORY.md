@@ -112,7 +112,16 @@ Checkout rejects an empty cart (`400`), an unpublished product / inactive storef
 | GET | `/api/payments/:id` | payment detail (holds, ledger refs, events) |
 | GET | `/api/payments/:id/status` | lightweight status |
 
-No capture/debit/settlement endpoints. Payments are created by checkout (CREATED→PENDING) with a soft `WalletHold` (HELD) and a PENDING `LedgerReference`. **No money moves.**
+No capture/debit/settlement endpoints. Payments are created by checkout (CREATED→PENDING) with a soft `WalletHold` (HELD) and a PENDING `LedgerReference`.
+
+## Wallet authorization & escrow (Phase 3 · M12 — first real money movement)
+Money moves **only** customer↔escrow, via balanced double-entry.
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/payments/:id/authorize` | authorize a PENDING payment from the wallet (customer→escrow); PENDING→AUTHORIZED. Idempotent. On validation failure the order rolls back atomically (payment FAILED, order CANCELLED, hold + reservation released), no money moved |
+| GET | `/api/wallet/transactions/:id` | a wallet transaction the caller is party to |
+
+Validation: wallet exists / active / correct currency / sufficient balance / not locked / not suspended. Vendor balances are never touched.
 
 ## Admin — `@RequirePermission(...)`
 | Method | Path | Permission |
@@ -120,6 +129,7 @@ No capture/debit/settlement endpoints. Payments are created by checkout (CREATED
 | GET | `/api/admin/orders` · `/:id` | `orders.read` (read-only; no editing) |
 | POST | `/api/admin/orders/:id/release-reservations` | `orders.manage` (M10.1; idempotent; releases an order's inventory reservations + wallet hold, cancels the payment — no money moves) |
 | GET | `/api/admin/payments` · `/:id` | `payments.read` (M11; read-only; + holds/events/ledger refs) |
+| GET | `/api/admin/wallet/transactions` · `/accounts` | `wallet.read` (M12; read-only ledger + escrow/system balances) |
 | GET/POST | `/api/admin/categories` | `categories.manage` |
 | PATCH/DELETE | `/api/admin/categories/:id` | `categories.manage` |
 | GET | `/api/admin/vendors` `?status=` · `/:id` | `vendors.read` |

@@ -1,11 +1,13 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Post, Req } from '@nestjs/common';
+import type { Request } from 'express';
 import { CurrentUser, Roles } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
 import { PaymentsService } from './payments.service';
 
 /**
- * Customer payment reads (self-scoped). FOUNDATION ONLY — no capture, debit, or
- * settlement endpoints. Payments are created by checkout (see OrdersController).
+ * Customer payments (self-scoped). Reads are foundation-only; the single
+ * money-moving action is wallet authorization (customer → escrow, M12). No
+ * capture, settlement, refund, or payout endpoints.
  */
 @Roles('CUSTOMER')
 @Controller('payments')
@@ -15,6 +17,12 @@ export class PaymentsController {
   @Get()
   list(@CurrentUser() user: AuthContext) {
     return this.payments.listOwn(user.userId);
+  }
+
+  /** Authorize a PENDING payment from the customer's wallet (customer → escrow). */
+  @Post(':id/authorize')
+  authorize(@CurrentUser() user: AuthContext, @Req() req: Request, @Param('id') id: string) {
+    return this.payments.authorize({ userId: user.userId, ipAddress: req.ip, sessionId: user.sessionId }, id);
   }
 
   @Get('for-order/:orderId')

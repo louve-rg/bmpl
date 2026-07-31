@@ -17,10 +17,13 @@ export function PaymentStatusBadge({ status }: { status: string }) {
   );
 }
 
+const HOLD_LABEL: Record<string, string> = { HELD: 'Hold placed', AUTHORIZED: 'Escrow hold', RELEASED: 'Hold released' };
+const HOLD_TONE: Record<string, string> = { HELD: 'bg-amber-50 text-amber-700', AUTHORIZED: 'bg-emerald-50 text-emerald-700', RELEASED: 'bg-slate-100 text-slate-500' };
+
 export function HoldStatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${status === 'HELD' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
-      {status === 'HELD' ? 'Hold placed' : 'Hold released'}
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${HOLD_TONE[status] ?? 'bg-slate-100 text-slate-500'}`}>
+      {HOLD_LABEL[status] ?? status}
     </span>
   );
 }
