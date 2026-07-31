@@ -339,6 +339,36 @@ export class OrdersService {
     return { orders: orders.length, itemsReleased };
   }
 
+  /**
+   * Maintenance reconciliation: correct any STUCK `reserved` count for a (test)
+   * account's already-terminal orders (reservationsReleasedAt set OR CANCELLED).
+   * Clamped by `InventoryService.release` (never below 0) and skips rows already
+   * at 0 — so it is safe and self-neutralizing (a no-op once counts are correct),
+   * and it never touches an active PENDING reservation. Scoped to the given
+   * account only.
+   */
+  async reconcileTerminalReservations(email: string) {
+    const orders = await this.prisma.order.findMany({
+      where: { user: { email }, OR: [{ reservationsReleasedAt: { not: null } }, { status: 'CANCELLED' }] },
+      include: { vendorOrders: { include: { items: true } } },
+      take: 100,
+    });
+    let corrected = 0;
+    for (const o of orders) {
+      for (const vo of o.vendorOrders) {
+        for (const item of vo.items) {
+          if (!item.productId) continue;
+          const inv = await this.inventory.rowFor(item.productId, item.variantId);
+          if (inv && inv.reserved > 0) {
+            await this.inventory.release(inv.id, item.quantity);
+            corrected += 1;
+          }
+        }
+      }
+    }
+    return { corrected };
+  }
+
   // ===========================================================================
   // Customer reads (self-scoped)
   // ===========================================================================

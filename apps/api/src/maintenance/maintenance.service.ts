@@ -40,8 +40,11 @@ export class MaintenanceService implements OnApplicationBootstrap {
       if (r.orders > 0) {
         this.logger.log(`released reservations for ${r.orders} verification order(s) (${r.itemsReleased} item(s))`);
       }
+      // Correct any stuck reserved count from earlier verification runs (safe/clamped).
+      const rec = await this.orders.reconcileTerminalReservations(email);
+      if (rec.corrected > 0) this.logger.log(`reconciled ${rec.corrected} stuck reservation(s) for the verification account`);
     } catch (err) {
-      this.logger.error(`verification reservation release failed: ${(err as Error).message}`);
+      this.logger.error(`verification reservation cleanup failed: ${(err as Error).message}`);
     }
   }
 }
