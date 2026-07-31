@@ -55,4 +55,9 @@ export const STORAGE_PREFIX = {
   productImage: (vendorProfileId: string, productId: string) =>
     `vendors/${vendorProfileId}/products/${productId}`,
   categoryImage: (categoryId: string) => `categories/${categoryId}`,
+  // ---- Logistics: Driver Management (Phase 4 · M14), PRIVATE bucket ----
+  // Driver profile photo + vehicle photos hold personal/registration data → private,
+  // viewed only via short-lived signed URLs after ownership/permission checks.
+  driverPhoto: (userId: string) => `drivers/${userId}/profile`,
+  driverVehiclePhoto: (userId: string) => `drivers/${userId}/vehicles`,
 } as const;

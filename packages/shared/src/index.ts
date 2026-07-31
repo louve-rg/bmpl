@@ -8,6 +8,7 @@ export * from './user';
 export * from './storage';
 export * from './marketplace';
 export * from './payments';
+export * from './driver';
 export * from './slug';
 
 /** Shared, framework-agnostic branding tokens (mirrored in the UI package). */

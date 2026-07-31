@@ -54,6 +54,11 @@ export const AUDIT_ACTIONS = [
   'ESCROW_FUNDS_HELD', // customer wallet → escrow (authorization)
   'ESCROW_FUNDS_RELEASED', // escrow → customer wallet (release/rollback)
   'WALLET_TRANSACTION_POSTED',
+  // ---- Logistics: Driver Management (Phase 4 · M14) ----
+  'DRIVER_PROFILE_UPSERTED',
+  'DRIVER_AVAILABILITY_CHANGED',
+  'DRIVER_VEHICLE_APPROVED',
+  'DRIVER_VEHICLE_REJECTED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -31,6 +31,9 @@ export const PERMISSIONS = [
   'payments.read', // read-only payment / wallet-hold / payment-event visibility (no actions)
   // ---- Wallet (Phase 3 · M12) ----
   'wallet.read', // read-only wallet transactions / escrow balances / ledger visibility (no adjustments)
+  // ---- Logistics: Driver Management (Phase 4 · M14) ----
+  'drivers.read', // view driver profiles / vehicles / service areas / availability (read-only)
+  'drivers.moderate', // approve/reject driver vehicles (driver role approval reuses role_applications.review)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -47,6 +50,7 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'orders.read',
     'payments.read',
     'wallet.read',
+    'drivers.read',
   ],
   ADMIN: [
     'users.read',
@@ -69,6 +73,8 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'orders.manage',
     'payments.read',
     'wallet.read',
+    'drivers.read',
+    'drivers.moderate',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

@@ -13,6 +13,7 @@
 | `/dashboard/roles` | authed | request provider roles: upload required documents, view application status + reviewer notes, respond to MORE_INFO_REQUIRED and resubmit |
 | `/dashboard/store` | VENDOR | "My Store": profile, settings, locations, hours, logo/banner, submit |
 | `/dashboard/delivery` | VENDOR | delivery settings (M13): pickup/delivery, base fee, free threshold, zones + fees, estimate |
+| `/dashboard/driver` | authed | driver (M14): profile, vehicles, service areas, availability, application/approval status |
 | `/dashboard/products` | VENDOR | product list (submit/archive/delete) |
 | `/dashboard/products/new` | VENDOR | create product |
 | `/dashboard/products/[id]` | VENDOR | edit product + image manager + variants/inventory manager |
@@ -25,6 +26,7 @@ pages `notFound()` on missing/unapproved.
 | Route | Permission | Purpose |
 |---|---|---|
 | `/dashboard/vendors` | `vendors.read` | vendor queue (status filter) |
+| `/dashboard/drivers` | `drivers.read` | driver list/detail (M14): profiles, vehicles + approve/reject, expiry, availability |
 | `/dashboard/vendors/[id]` | `vendors.read`/`.moderate` | detail + approve/reject/suspend/restore |
 | `/dashboard/products` | `products.read` | product queue (status filter) |
 | `/dashboard/products/[id]` | `products.read`/`.moderate` | detail + images + moderation |

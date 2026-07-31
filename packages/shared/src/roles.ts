@@ -92,7 +92,7 @@ export const ROLE_DEFINITIONS: Record<RoleCode, RoleDefinition> = {
     isAdminRole: false,
     requiresApproval: true,
     autoGranted: false,
-    requiredDocuments: ["Driver's licence", 'Vehicle registration', 'Proof of insurance'],
+    requiredDocuments: ['Government-issued ID', "Driver's licence", 'Vehicle registration', 'Proof of insurance', 'Vehicle photo', 'Profile photo'],
     service: 'shipping',
   },
   SHIPPING_PROVIDER: {

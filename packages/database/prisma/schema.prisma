@@ -159,6 +159,11 @@ enum AuditAction {
   ESCROW_FUNDS_HELD
   ESCROW_FUNDS_RELEASED
   WALLET_TRANSACTION_POSTED
+  // ---- Driver Management (Phase 4 · M14) ----
+  DRIVER_PROFILE_UPSERTED
+  DRIVER_AVAILABILITY_CHANGED
+  DRIVER_VEHICLE_APPROVED
+  DRIVER_VEHICLE_REJECTED
 }
 
 enum WalletAccountType {
@@ -251,6 +256,7 @@ model User {
   paymentMethods       PaymentMethod[]
   idempotencyKeys      IdempotencyKey[]
   vendorProfile        VendorProfile?              @relation("UserVendorProfile")
+  driverProfile        DriverProfile?              @relation("UserDriverProfile")
   vendorReviewsMade    VendorModerationReview[]    @relation("VendorReviewer")
   productReviewsMade   ProductModerationReview[]   @relation("ProductReviewer")
   inventoryChangesMade InventoryChange[]           @relation("InventoryActor")
@@ -1166,6 +1172,122 @@ model OrderDelivery {
 
   @@index([status])
   @@map("order_deliveries")
+}
+
+// ---- Logistics: Driver Management Foundation (Phase 4 · M14) ----------------
+// Approved delivery-driver accounts. The driver ROLE (DELIVERY_DRIVER) + its
+// documents + approval workflow reuse the existing role-application system; the
+// role's UserRole status is the source of truth for approval/suspend/revoke.
+// These models hold the driver's operational profile, vehicles, and service
+// areas. NO assignment/dispatch/tracking/earnings/wallets in M14.
+
+enum DriverAvailability {
+  OFFLINE
+  ONLINE
+  UNAVAILABLE
+  SUSPENDED
+}
+
+enum VehicleType {
+  CAR
+  MOTORCYCLE
+  SCOOTER
+  BICYCLE
+  VAN
+  TRUCK
+  OTHER
+}
+
+enum VehicleOwnership {
+  OWNED
+  LEASED
+  BORROWED
+  NONE
+}
+
+enum VehicleApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model DriverProfile {
+  id       String @id @default(cuid())
+  userId   String @unique
+  user     User   @relation("UserDriverProfile", fields: [userId], references: [id], onDelete: Cascade)
+  // Application / identity data (captured with the driver-role application).
+  legalName             String
+  displayName           String
+  phone                 String
+  homeDistrict          District
+  homeAddress           String?
+  latitude              Float?
+  longitude             Float?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  licenceNumber         String
+  licenceExpiry         DateTime
+  vehicleOwnership      VehicleOwnership @default(OWNED)
+  termsAcceptedAt       DateTime?
+  applicantNotes        String?
+  profilePhotoKey       String? // private-bucket storage key
+  // Operational.
+  availability          DriverAvailability @default(OFFLINE)
+  isActive              Boolean            @default(true)
+  // Placeholders — populated in a later phase; NO money movement in M14.
+  ratingAverage         Float @default(0)
+  ratingCount           Int   @default(0)
+  completedDeliveries   Int   @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  vehicles     DriverVehicle[]
+  serviceAreas DriverServiceArea[]
+
+  @@index([availability])
+  @@map("driver_profiles")
+}
+
+model DriverVehicle {
+  id                    String        @id @default(cuid())
+  driverProfileId       String
+  driverProfile         DriverProfile @relation(fields: [driverProfileId], references: [id], onDelete: Cascade)
+  type                  VehicleType
+  make                  String
+  model                 String
+  year                  Int?
+  color                 String?
+  licencePlate          String
+  registrationNumber    String?
+  registrationExpiry    DateTime?
+  insuranceProvider     String?
+  insurancePolicyNumber String?
+  insuranceExpiry       DateTime?
+  photoKeys             String[] // private-bucket storage keys (photos, not core data)
+  isActive              Boolean               @default(true)
+  isPrimary             Boolean               @default(false)
+  approvalStatus        VehicleApprovalStatus @default(PENDING)
+  rejectionReason       String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@index([driverProfileId])
+  @@index([approvalStatus])
+  @@map("driver_vehicles")
+}
+
+model DriverServiceArea {
+  id              String        @id @default(cuid())
+  driverProfileId String
+  driverProfile   DriverProfile @relation(fields: [driverProfileId], references: [id], onDelete: Cascade)
+  district        District
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([driverProfileId, district])
+  @@index([driverProfileId])
+  @@map("driver_service_areas")
 }
 
 model OrderItem {

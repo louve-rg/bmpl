@@ -13,6 +13,8 @@ enforced server-side by the global guard chain, regardless of what any UI shows.
 | `products.read` | view products in the admin console |
 | `products.moderate` | approve / reject / suspend / restore products |
 | `categories.manage` | create / edit / delete categories |
+| `drivers.read` | view driver profiles / vehicles / service areas / availability (M14) |
+| `drivers.moderate` | approve / reject driver vehicles (M14; driver-role approval reuses `role_applications.review`) |
 
 ### Default bundles (`PERMISSION_BUNDLES`)
 | Staff role | Marketplace permissions |
