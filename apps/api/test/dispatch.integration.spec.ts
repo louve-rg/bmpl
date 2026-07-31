@@ -280,6 +280,12 @@ describe('admin assignment + eligibility', () => {
     expect((await post(adminCookies, `admin/deliveries/${flow.order.deliveryId}/cancel`, { reason: 'too late' })).status).toBe(400);
   });
 
+  it('a missing delivery returns 404 (admin + customer)', async () => {
+    expect((await get(adminCookies, 'admin/deliveries/nonexistentid')).status).toBe(404);
+    const cust = await registerCustomer(`nf_${uniq()}@example.bz`);
+    expect((await get(cust.cookies, 'deliveries/nonexistentid')).status).toBe(404);
+  });
+
   it('auto-assign preview never assigns', async () => {
     const { order } = await assignedDelivery();
     const res = await get(adminCookies, `admin/deliveries/${order.deliveryId}/auto-assign-preview`);

@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   DELIVERY_ACTIONS,
   DELIVERY_PIN_LENGTH,
@@ -134,7 +134,7 @@ export class DeliveryCoreService {
 
   async loadOrThrow(deliveryId: string): Promise<DeliveryWithGraph> {
     const d = await this.prisma.orderDelivery.findUnique({ where: { id: deliveryId }, include: DELIVERY_INCLUDE });
-    if (!d) throw new BadRequestException('Delivery not found.');
+    if (!d) throw new NotFoundException('Delivery not found.');
     return d;
   }
 
