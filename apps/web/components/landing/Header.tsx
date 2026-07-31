@@ -6,13 +6,15 @@ import { BrandLockup } from '../Logo';
 import { ButtonLink } from '../ui';
 import { CartButton } from '../cart/CartButton';
 
+// Anchor links point at the landing page ("/#…") so they work from any route,
+// not just when the visitor is already on "/".
 const NAV = [
   { label: 'Shop', href: '/products' },
   { label: 'Vendors', href: '/vendors' },
-  { label: 'Services', href: '#services' },
-  { label: 'For Providers', href: '#providers' },
-  { label: 'Wallet', href: '#wallet' },
-  { label: 'Mobile App', href: '#mobile' },
+  { label: 'Services', href: '/#services' },
+  { label: 'For Providers', href: '/#providers' },
+  { label: 'Wallet', href: '/#wallet' },
+  { label: 'Mobile App', href: '/#mobile' },
 ];
 
 export function Header() {

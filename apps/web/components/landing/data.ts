@@ -18,8 +18,8 @@ export const SERVICES: ServiceCard[] = [
     description:
       'Shop from Belizean vendors across every district. Discover products and support local businesses.',
     icon: '🛍️',
-    href: '/services/marketplace',
-    status: 'coming-soon',
+    href: '/products',
+    status: 'live',
   },
   {
     id: 'shipping',

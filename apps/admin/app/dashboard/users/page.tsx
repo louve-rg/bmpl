@@ -22,29 +22,54 @@ interface SearchResult {
 
 export default function UsersPage() {
   const [query, setQuery] = useState('');
+  const [status, setStatus] = useState<string | null>(null);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function search(q: string) {
+  async function search(q: string, statusFilter?: string | null) {
     setLoading(true);
     try {
-      setResult(await api.get<SearchResult>(`/admin/users?query=${encodeURIComponent(q)}`));
+      const params = new URLSearchParams();
+      if (q) params.set('query', q);
+      if (statusFilter) params.set('status', statusFilter);
+      setResult(await api.get<SearchResult>(`/admin/users?${params.toString()}`));
     } finally {
       setLoading(false);
     }
   }
 
+  // Honor ?status=SUSPENDED (e.g. the dashboard "suspended accounts" card links here).
   useEffect(() => {
-    void search('');
+    const raw = new URLSearchParams(window.location.search).get('status');
+    const initial = raw && ['ACTIVE', 'SUSPENDED', 'DEACTIVATED'].includes(raw) ? raw : null;
+    setStatus(initial);
+    void search('', initial);
   }, []);
 
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold text-belize-navy">Users</h1>
+      {status && (
+        <div className="mb-4 flex items-center gap-2 text-sm">
+          <span className="rounded-full bg-belize-blue/10 px-3 py-1 font-medium text-belize-blue">
+            Filtered: {status}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setStatus(null);
+              void search(query, null);
+            }}
+            className="text-slate-500 hover:text-slate-700"
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void search(query);
+          void search(query, status);
         }}
         className="mb-5 flex gap-2"
       >

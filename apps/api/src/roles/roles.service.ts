@@ -106,6 +106,14 @@ export class RolesService {
 
     const needsApproval = roleRequiresApproval(roleCode);
 
+    // Enforce document requirements — a role that lists required documents cannot
+    // be submitted with none (prevents bypassing the requirement).
+    if (ROLE_DEFINITIONS[roleCode].requiredDocuments.length > 0 && input.documentKeys.length === 0) {
+      throw new BadRequestException(
+        `The ${ROLE_DEFINITIONS[roleCode].label} role requires supporting documents.`,
+      );
+    }
+
     // Validate documents + capture their real metadata BEFORE opening the tx.
     const documents = await this.resolveDocuments(userId, roleCode, input.documentKeys);
 

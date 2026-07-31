@@ -22,7 +22,12 @@ export default function LoginPage() {
         email: form.get('email'),
         password: form.get('password'),
       });
-      router.push('/dashboard');
+      // Honor ?next= so guests bounced to login (add-to-cart, checkout) return to
+      // where they were headed. Only same-origin relative paths ("/…", not "//…")
+      // are allowed — this blocks open-redirect to an external host.
+      const raw = new URLSearchParams(window.location.search).get('next');
+      const dest = raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/dashboard';
+      router.push(dest);
       router.refresh();
     } catch (err) {
       setError((err as ApiError).message ?? 'Unable to sign in.');

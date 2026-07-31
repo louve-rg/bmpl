@@ -42,7 +42,10 @@ const envSchema = z.object({
 
   JWT_ACCESS_SECRET: z.string().min(16),
   JWT_REFRESH_SECRET: z.string().min(16),
-  JWT_ACCESS_TTL: z.string().default('15m'),
+  // 2h keeps a demo/browsing session alive across page reloads. This is safe:
+  // every request re-checks that the DB session still exists (JwtAuthGuard), so a
+  // revoked/logged-out session is rejected immediately regardless of token TTL.
+  JWT_ACCESS_TTL: z.string().default('2h'),
   JWT_REFRESH_TTL: z.string().default('30d'),
   COOKIE_SECRET: z.string().min(16),
   // Empty string (default) => host-only cookies, correct for an API-only cloud

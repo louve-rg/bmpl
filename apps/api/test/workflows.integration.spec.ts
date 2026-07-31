@@ -365,10 +365,17 @@ describe('authorization & abuse', () => {
 
   it('prevents an admin from approving their OWN application (no self-approval)', async () => {
     const admin = await ctx.prisma.user.findFirstOrThrow({ where: { email: 'it-admin@example.bz' } });
+    // MARKETING_CLIENT requires a document, so upload one first (M12.1 enforcement).
+    const presign = await request(ctx.server)
+      .post('/api/roles/applications/MARKETING_CLIENT/documents/presign')
+      .set('Cookie', adminCookies)
+      .send({ fileName: 'biz-reg.pdf', contentType: 'application/pdf', sizeBytes: DOC_BYTES.length });
+    expect(presign.status).toBe(201);
+    expect(await putToPresigned(presign.body.uploadUrl, DOC_BYTES, 'application/pdf')).toBe(200);
     const submit = await request(ctx.server)
       .post('/api/roles/applications')
       .set('Cookie', adminCookies)
-      .send({ roleCode: 'MARKETING_CLIENT', documentKeys: [] });
+      .send({ roleCode: 'MARKETING_CLIENT', documentKeys: [presign.body.key] });
     expect(submit.status).toBe(201);
     const ownAppId = submit.body.applicationId;
 

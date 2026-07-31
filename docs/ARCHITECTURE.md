@@ -72,8 +72,8 @@ Request
 
 | Client | Access token | Refresh token | Storage |
 |--------|--------------|---------------|---------|
-| Web / Admin | JWT (15m) | opaque, rotating | HTTP-only Secure SameSite=Strict cookies |
-| Mobile | JWT (15m) | opaque, rotating | `expo-secure-store` (Keychain/Keystore), sent as Bearer |
+| Web / Admin | JWT (2h) | opaque, rotating | HTTP-only Secure SameSite=Strict cookies |
+| Mobile | JWT (2h) | opaque, rotating | `expo-secure-store` (Keychain/Keystore), sent as Bearer |
 
 Both call the same `/api/auth/refresh`, which validates the hashed refresh token,
 rotates it, and issues a new pair.

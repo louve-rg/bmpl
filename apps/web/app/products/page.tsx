@@ -44,10 +44,11 @@ export const metadata = { title: 'Shop · Belize Marketplace & Logistics' };
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: { categoryId?: string; sort?: string; page?: string; q?: string; priceMin?: string; priceMax?: string; inStock?: string };
+  searchParams: { categoryId?: string; sort?: string; page?: string; q?: string; priceMin?: string; priceMax?: string; inStock?: string; vendorSlug?: string };
 }) {
   // API params use cents for price; the URL keeps dollars (user-facing).
   const apiParams = new URLSearchParams();
+  if (searchParams.vendorSlug) apiParams.set('vendorSlug', searchParams.vendorSlug);
   if (searchParams.categoryId) apiParams.set('categoryId', searchParams.categoryId);
   if (searchParams.sort) apiParams.set('sort', searchParams.sort);
   if (searchParams.q) apiParams.set('q', searchParams.q);
@@ -81,7 +82,17 @@ export default async function ProductsPage({
       <Header />
       <main className="container-bmpl py-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-3xl font-bold text-belize-navy">Shop</h1>
+          <div>
+            <h1 className="text-3xl font-bold text-belize-navy">Shop</h1>
+            {searchParams.vendorSlug && (
+              <p className="mt-1 text-sm text-slate-500">
+                {data.items[0]?.vendor.businessName
+                  ? `Browsing ${data.items[0].vendor.businessName}`
+                  : 'Browsing one store'}{' '}
+                · <Link href={qp({ vendorSlug: undefined, page: '1' })} className="text-belize-blue hover:underline">Show all stores</Link>
+              </p>
+            )}
+          </div>
           <div className="flex gap-1.5 text-xs">
             {SORTS.map((s) => (
               <Link
@@ -98,6 +109,7 @@ export default async function ProductsPage({
         </div>
 
         <form method="get" action="/products" className="mt-4 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-200 bg-white p-3">
+          {searchParams.vendorSlug && <input type="hidden" name="vendorSlug" value={searchParams.vendorSlug} />}
           {searchParams.categoryId && <input type="hidden" name="categoryId" value={searchParams.categoryId} />}
           {searchParams.sort && <input type="hidden" name="sort" value={searchParams.sort} />}
           <input name="q" aria-label="Search products" defaultValue={searchParams.q ?? ''} placeholder="Search products…" className="min-w-48 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
