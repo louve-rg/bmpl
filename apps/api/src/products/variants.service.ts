@@ -1,9 +1,13 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { CreateOptionInput, CreateVariantInput, UpdateVariantInput } from '@bmpl/validation';
-import { slugify } from '@bmpl/shared';
+import type { CreateOptionInput, CreateVariantInput, GenerateVariantsInput, UpdateVariantInput } from '@bmpl/validation';
+import { resolveVariantTitle, slugify } from '@bmpl/shared';
+import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from './inventory.service';
 import { OwnershipService } from './ownership.service';
+
+/** An option-value row joined enough to build a variant's label. */
+type OptionWithValues = Prisma.ProductOptionGetPayload<{ include: { values: true } }>;
 
 @Injectable()
 export class VariantsService {
@@ -58,15 +62,30 @@ export class VariantsService {
     return this.buildManageView(productId);
   }
 
-  async deleteValue(userId: string, productId: string, valueId: string) {
+  /**
+   * Remove an option value. Variants using it are removed too (their order-item
+   * references are preserved via SetNull). When those variants still carry
+   * inventory or order history, `force` is required (the UI confirms first).
+   */
+  async deleteValue(userId: string, productId: string, valueId: string, force = false) {
     await this.ownership.ownedProduct(userId, productId);
-    await this.assertNoVariants(productId, 'options');
-    const value = await this.prisma.productOptionValue.findUnique({
-      where: { id: valueId },
-      include: { option: true },
-    });
+    const value = await this.prisma.productOptionValue.findUnique({ where: { id: valueId }, include: { option: true } });
     if (!value || value.option.productId !== productId) throw new NotFoundException('Value not found.');
-    await this.prisma.productOptionValue.delete({ where: { id: valueId } });
+
+    const affected = await this.prisma.productVariant.findMany({
+      where: { productId, optionValues: { some: { productOptionValueId: valueId } } },
+      include: { inventory: true, _count: { select: { orderItems: true } } },
+    });
+    if (affected.length > 0 && !force) {
+      const withData = affected.filter((v) => (v.inventory?.quantity ?? 0) > 0 || v._count.orderItems > 0);
+      if (withData.length > 0) {
+        throw new ConflictException(`${affected.length} variant(s) use this value${withData.length ? ' and some have inventory or orders' : ''}. Confirm to remove them.`);
+      }
+    }
+    await this.prisma.$transaction([
+      this.prisma.productVariant.deleteMany({ where: { productId, optionValues: { some: { productOptionValueId: valueId } } } }),
+      this.prisma.productOptionValue.delete({ where: { id: valueId } }),
+    ]);
     return this.buildManageView(productId);
   }
 
@@ -95,7 +114,7 @@ export class VariantsService {
       throw new BadRequestException('A variant must choose one value for every option.');
     }
 
-    // Reject a duplicate combination.
+    // Reject a duplicate combination — name the clashing combination for clarity.
     const existing = await this.prisma.productVariant.findMany({
       where: { productId },
       include: { optionValues: true },
@@ -104,7 +123,7 @@ export class VariantsService {
     for (const v of existing) {
       const set = new Set(v.optionValues.map((ov) => ov.productOptionValueId));
       if (set.size === target.size && [...target].every((id) => set.has(id))) {
-        throw new ConflictException('A variant with this combination already exists.');
+        throw new ConflictException(`A variant for "${this.labelFor(dto.optionValueIds, options)}" already exists. Add a new option value first to create a different variant.`);
       }
     }
     if (dto.sku) {
@@ -117,6 +136,7 @@ export class VariantsService {
       const variant = await tx.productVariant.create({
         data: {
           productId,
+          displayName: dto.displayName?.trim() || null,
           sku: dto.sku ?? null,
           barcode: dto.barcode ?? null,
           priceMinor: dto.priceMinor == null ? null : BigInt(dto.priceMinor),
@@ -127,6 +147,51 @@ export class VariantsService {
       });
       await this.inventory.ensureVariantInventory(productId, variant.id, dto.quantity, tx);
     });
+    return this.buildManageView(productId);
+  }
+
+  /**
+   * Generate every MISSING option-value combination as a variant, in one
+   * transaction. Existing variants (and their ids, images, prices, SKUs, inventory,
+   * display names, order references) are never touched — only absent combinations
+   * are created. Idempotent: a second call with no new values is a no-op.
+   */
+  async generateVariants(userId: string, productId: string, dto: GenerateVariantsInput) {
+    await this.ownership.ownedProduct(userId, productId);
+    const options = await this.prisma.productOption.findMany({ where: { productId }, orderBy: { position: 'asc' }, include: { values: { orderBy: { position: 'asc' } } } });
+    if (options.length === 0 || options.some((o) => o.values.length === 0)) {
+      throw new BadRequestException('Add at least one value to every option before generating variants.');
+    }
+    // Cartesian product of value ids, one per option.
+    let combos: string[][] = [[]];
+    for (const o of options) combos = combos.flatMap((c) => o.values.map((v) => [...c, v.id]));
+
+    const existing = await this.prisma.productVariant.findMany({ where: { productId }, include: { optionValues: true } });
+    const existingKeys = new Set(existing.map((v) => keyOf(v.optionValues.map((ov) => ov.productOptionValueId))));
+    const missing = combos.filter((c) => !existingKeys.has(keyOf(c)));
+
+    if (missing.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        let position = await tx.productVariant.count({ where: { productId } });
+        for (const combo of missing) {
+          const variant = await tx.productVariant.create({
+            data: { productId, position: position++, optionValues: { create: combo.map((id) => ({ productOptionValueId: id })) } },
+          });
+          await this.inventory.ensureVariantInventory(productId, variant.id, dto.quantity, tx);
+        }
+      });
+    }
+    return { ...(await this.buildManageView(productId)), created: missing.length };
+  }
+
+  /** Rename an option value's label (does NOT recreate or corrupt variants). */
+  async renameValue(userId: string, productId: string, valueId: string, value: string) {
+    await this.ownership.ownedProduct(userId, productId);
+    const row = await this.prisma.productOptionValue.findUnique({ where: { id: valueId }, include: { option: true } });
+    if (!row || row.option.productId !== productId) throw new NotFoundException('Value not found.');
+    const dup = await this.prisma.productOptionValue.findFirst({ where: { productOptionId: row.productOptionId, value, id: { not: valueId } } });
+    if (dup) throw new ConflictException(`Value "${value}" already exists.`);
+    await this.prisma.productOptionValue.update({ where: { id: valueId }, data: { value } });
     return this.buildManageView(productId);
   }
 
@@ -141,6 +206,8 @@ export class VariantsService {
     await this.prisma.productVariant.update({
       where: { id: variantId },
       data: {
+        // Display name is variant-owned marketplace data; '' clears back to the label.
+        displayName: dto.displayName === undefined ? undefined : dto.displayName?.trim() || null,
         sku: dto.sku === undefined ? undefined : dto.sku,
         barcode: dto.barcode === undefined ? undefined : dto.barcode,
         priceMinor: dto.priceMinor === undefined ? undefined : dto.priceMinor === null ? null : BigInt(dto.priceMinor),
@@ -162,6 +229,7 @@ export class VariantsService {
   // ---- Public view (used by ProductsService.publicDetail) ----
 
   async publicView(productId: string) {
+    const product = await this.prisma.product.findUniqueOrThrow({ where: { id: productId }, select: { title: true } });
     const options = await this.prisma.productOption.findMany({
       where: { productId },
       orderBy: { position: 'asc' },
@@ -180,6 +248,11 @@ export class VariantsService {
       })),
       variants: variants.map((v) => ({
         id: v.id,
+        // Resolved marketplace title (displayName → option label → product title)
+        // + the raw parts, so any client can apply the precedence itself.
+        title: resolveVariantTitle(v.displayName, this.labelForVariant(v.optionValues.map((ov) => ov.productOptionValueId), options), product.title),
+        displayName: v.displayName,
+        optionLabel: this.labelForVariant(v.optionValues.map((ov) => ov.productOptionValueId), options) || null,
         sku: v.sku,
         priceMinor: v.priceMinor == null ? null : Number(v.priceMinor),
         salePriceMinor: v.salePriceMinor == null ? null : Number(v.salePriceMinor),
@@ -201,6 +274,7 @@ export class VariantsService {
   // ---- shared ----
 
   private async buildManageView(productId: string) {
+    const product = await this.prisma.product.findUniqueOrThrow({ where: { id: productId }, select: { title: true } });
     const options = await this.prisma.productOption.findMany({
       where: { productId },
       orderBy: { position: 'asc' },
@@ -212,28 +286,55 @@ export class VariantsService {
       include: { optionValues: true, inventory: true },
     });
     return {
+      productTitle: product.title,
       options: options.map((o) => ({
         id: o.id,
         name: o.name,
         values: o.values.map((v) => ({ id: v.id, value: v.value })),
       })),
-      variants: variants.map((v) => ({
-        id: v.id,
-        sku: v.sku,
-        barcode: v.barcode,
-        priceMinor: v.priceMinor == null ? null : Number(v.priceMinor),
-        salePriceMinor: v.salePriceMinor == null ? null : Number(v.salePriceMinor),
-        isActive: v.isActive,
-        optionValueIds: v.optionValues.map((ov) => ov.productOptionValueId),
-        quantity: v.inventory?.quantity ?? 0,
-      })),
+      variants: variants.map((v) => {
+        const optionLabel = this.labelForVariant(v.optionValues.map((ov) => ov.productOptionValueId), options) || null;
+        return {
+          id: v.id,
+          title: resolveVariantTitle(v.displayName, optionLabel, product.title),
+          displayName: v.displayName,
+          optionLabel,
+          sku: v.sku,
+          barcode: v.barcode,
+          priceMinor: v.priceMinor == null ? null : Number(v.priceMinor),
+          salePriceMinor: v.salePriceMinor == null ? null : Number(v.salePriceMinor),
+          isActive: v.isActive,
+          optionValueIds: v.optionValues.map((ov) => ov.productOptionValueId),
+          quantity: v.inventory?.quantity ?? 0,
+        };
+      }),
     };
+  }
+
+  /** Option-value label join for a set of value ids, ordered by option position. */
+  private labelForVariant(valueIds: string[], options: OptionWithValues[]): string {
+    const parts: Array<{ position: number; value: string }> = [];
+    for (const o of options) {
+      for (const v of o.values) {
+        if (valueIds.includes(v.id)) parts.push({ position: o.position, value: v.value });
+      }
+    }
+    return parts.sort((a, b) => a.position - b.position).map((p) => p.value).join(' / ');
+  }
+
+  private labelFor(valueIds: string[], options: OptionWithValues[]): string {
+    return this.labelForVariant(valueIds, options) || 'this combination';
   }
 
   private async assertNoVariants(productId: string, what: string) {
     const count = await this.prisma.productVariant.count({ where: { productId } });
     if (count > 0) throw new ConflictException(`Delete the variants before changing ${what}.`);
   }
+}
+
+/** Stable key for a variant's set of option-value ids (order-independent). */
+function keyOf(valueIds: string[]): string {
+  return [...valueIds].sort().join('|');
 }
 
 function dedupe(values: string[]): string[] {

@@ -200,9 +200,12 @@ function CartRow({
 
       <div className="min-w-0 flex-1">
         <Link href={`/products/${item.slug}`} className="font-medium text-belize-navy hover:text-belize-blue">
-          {item.title}
+          {item.variantTitle ?? item.title}
         </Link>
-        {item.variantLabel && <p className="text-xs text-slate-500">{item.variantLabel}</p>}
+        {item.variantTitle && item.variantTitle !== item.title && (
+          <p className="text-xs text-slate-500">{item.title}</p>
+        )}
+        {item.variantLabel && <p className="text-xs text-slate-400">{item.variantLabel}</p>}
         <p className="mt-1 text-sm">
           <span className="font-semibold text-belize-navy">{money(item.unitPriceMinor)}</span>
           {item.priceChanged && (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Gallery, type GalleryImage } from './Gallery';
@@ -18,6 +18,10 @@ interface Availability {
 }
 interface Variant {
   id: string;
+  /** Resolved variant title: displayName → option-label → product title. */
+  title: string;
+  displayName: string | null;
+  optionLabel: string | null;
   sku: string | null;
   priceMinor: number | null;
   salePriceMinor: number | null;
@@ -76,6 +80,35 @@ export function ProductView({ product }: { product: ProductDetail }) {
     );
   }, [hasVariants, selection, product.options.length, product.variants]);
 
+  // Preselect from the URL (?variant=<id>) once on mount so a refresh/share
+  // restores the chosen variant without a full navigation or refetch.
+  useEffect(() => {
+    if (!hasVariants) return;
+    const vId = new URLSearchParams(window.location.search).get('variant');
+    if (!vId) return;
+    const v = product.variants.find((x) => x.id === vId);
+    if (!v) return;
+    const optionOf = new Map<string, string>();
+    for (const opt of product.options) for (const val of opt.values) optionOf.set(val.id, opt.id);
+    const next: Record<string, string> = {};
+    for (const valId of v.optionValueIds) {
+      const optId = optionOf.get(valId);
+      if (optId) next[optId] = valId;
+    }
+    if (Object.keys(next).length) setSelection(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reflect the fully-selected variant in the URL (shallow, client-side only).
+  useEffect(() => {
+    if (!hasVariants || typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (selectedVariant) url.searchParams.set('variant', selectedVariant.id);
+    else url.searchParams.delete('variant');
+    window.history.replaceState(window.history.state, '', url.toString());
+  }, [hasVariants, selectedVariant]);
+
+  const displayTitle = selectedVariant ? selectedVariant.title : product.title;
   const needsVariant = hasVariants && !selectedVariant;
   const avail: Availability = selectedVariant ? selectedVariant.availability : product.availability;
   const outOfStock = selectedVariant ? selectedVariant.availability.outOfStock : !product.availability.inStock;
@@ -141,8 +174,13 @@ export function ProductView({ product }: { product: ProductDetail }) {
 
       <div>
         <p className="bmpl-eyebrow">{product.category.name}</p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight text-belize-navy">{product.title}</h1>
+        {/* Single source of truth for the shown title: the selected variant, else the product. */}
+        <h1 className="mt-1 text-3xl font-bold tracking-tight text-belize-navy">{displayTitle}</h1>
         {product.brand && <p className="text-sm text-slate-500">by {product.brand}</p>}
+        {/* Base product family kept visible as a secondary line when a variant title is shown. */}
+        {selectedVariant && displayTitle !== product.title && (
+          <p className="text-sm text-slate-500">{product.title}</p>
+        )}
 
         <p className="mt-4 text-2xl">
           {compareAt != null ? (
@@ -155,6 +193,10 @@ export function ProductView({ product }: { product: ProductDetail }) {
           )}
           <span className="ml-2 text-sm text-slate-400">{product.currency}</span>
         </p>
+
+        {selectedVariant?.sku && (
+          <p className="mt-1 text-xs text-slate-400">SKU: {selectedVariant.sku}</p>
+        )}
 
         <p className="mt-2">
           <StockBadge outOfStock={outOfStock} avail={avail} needsVariant={needsVariant} />

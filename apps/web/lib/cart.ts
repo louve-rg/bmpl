@@ -7,6 +7,8 @@ export interface CartLine {
   variantId: string | null;
   title: string;
   slug: string;
+  /** Variant-specific display name (e.g. "Perfect in Pink"); null for non-variant lines. */
+  variantTitle?: string | null;
   variantLabel: string | null;
   sku: string | null;
   imageUrl: string | null;

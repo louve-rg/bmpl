@@ -180,7 +180,7 @@ export default function CheckoutPage() {
                       {v.items.map((it) => (
                         <li key={it.id} className="flex justify-between py-2">
                           <span className="text-slate-600">
-                            {it.title}
+                            {it.variantTitle ?? it.title}
                             {it.variantLabel ? ` · ${it.variantLabel}` : ''} × {it.quantity}
                           </span>
                           <span className="text-slate-700">{money(it.lineSubtotalMinor)}</span>

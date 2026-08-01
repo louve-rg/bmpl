@@ -122,12 +122,15 @@ export class OrdersService {
             throw new ConflictException(`A selected option for "${product.title}" is unavailable.`);
           }
           variant = v;
-          variantTitle =
+          const optionLabel =
             v.optionValues
               .map((ov) => ov.optionValue)
               .sort((a, b) => a.option.position - b.option.position)
               .map((ov) => ov.value)
               .join(' / ') || null;
+          // Snapshot the variant's marketplace title (displayName → option label),
+          // so the order permanently shows the variant the customer purchased.
+          variantTitle = v.displayName?.trim() || optionLabel;
         } else if (product.variants.length > 0) {
           throw new ConflictException(`"${product.title}" requires an option to be selected.`);
         }

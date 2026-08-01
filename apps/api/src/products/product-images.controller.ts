@@ -3,10 +3,12 @@ import {
   imagePresignSchema,
   imageReorderSchema,
   productImageConfirmSchema,
+  productImageReplaceSchema,
   productImageUpdateSchema,
   type ImagePresignInput,
   type ImageReorderInput,
   type ProductImageConfirmInput,
+  type ProductImageReplaceInput,
   type ProductImageUpdateInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
@@ -52,6 +54,16 @@ export class ProductImagesController {
     @Body(ZodBody(imageReorderSchema)) body: ImageReorderInput,
   ) {
     return this.images.reorder(user.userId, productId, body.order);
+  }
+
+  @Post(':imageId/replace')
+  replace(
+    @CurrentUser() user: AuthContext,
+    @Param('productId') productId: string,
+    @Param('imageId') imageId: string,
+    @Body(ZodBody(productImageReplaceSchema)) body: ProductImageReplaceInput,
+  ) {
+    return this.images.replace(user.userId, productId, imageId, body);
   }
 
   @Post(':imageId/primary')

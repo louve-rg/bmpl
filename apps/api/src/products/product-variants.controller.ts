@@ -1,12 +1,16 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import {
   addOptionValueSchema,
   createOptionSchema,
   createVariantSchema,
+  generateVariantsSchema,
+  renameOptionValueSchema,
   updateVariantSchema,
   type AddOptionValueInput,
   type CreateOptionInput,
   type CreateVariantInput,
+  type GenerateVariantsInput,
+  type RenameOptionValueInput,
   type UpdateVariantInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
@@ -49,9 +53,24 @@ export class ProductVariantsController {
     return this.variants.deleteOption(user.userId, productId, optionId);
   }
 
+  @Patch('option-values/:valueId')
+  renameValue(
+    @CurrentUser() user: AuthContext,
+    @Param('productId') productId: string,
+    @Param('valueId') valueId: string,
+    @Body(ZodBody(renameOptionValueSchema)) body: RenameOptionValueInput,
+  ) {
+    return this.variants.renameValue(user.userId, productId, valueId, body.value);
+  }
+
   @Delete('option-values/:valueId')
-  deleteValue(@CurrentUser() user: AuthContext, @Param('productId') productId: string, @Param('valueId') valueId: string) {
-    return this.variants.deleteValue(user.userId, productId, valueId);
+  deleteValue(
+    @CurrentUser() user: AuthContext,
+    @Param('productId') productId: string,
+    @Param('valueId') valueId: string,
+    @Query('force') force?: string,
+  ) {
+    return this.variants.deleteValue(user.userId, productId, valueId, force === 'true');
   }
 
   @Post('variants')
@@ -61,6 +80,15 @@ export class ProductVariantsController {
     @Body(ZodBody(createVariantSchema)) body: CreateVariantInput,
   ) {
     return this.variants.createVariant(user.userId, productId, body);
+  }
+
+  @Post('variants/generate')
+  generateVariants(
+    @CurrentUser() user: AuthContext,
+    @Param('productId') productId: string,
+    @Body(ZodBody(generateVariantsSchema)) body: GenerateVariantsInput,
+  ) {
+    return this.variants.generateVariants(user.userId, productId, body);
   }
 
   @Patch('variants/:variantId')

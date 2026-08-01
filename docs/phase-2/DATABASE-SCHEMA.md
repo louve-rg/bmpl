@@ -56,7 +56,7 @@ Conversation 1─* ConversationParticipant *─1 User             (M17)
 | `ProductModerationReview` (product_moderation_reviews) | productId, reviewerId, action, from/toStatus | immutable trail |
 | `ProductOption` (product_options) | productId, name, position | unique (product, name) |
 | `ProductOptionValue` (product_option_values) | productOptionId, value, position | unique (option, value) |
-| `ProductVariant` (product_variants) | productId, sku, price overrides, isActive | unique (product, sku) |
+| `ProductVariant` (product_variants) | productId, **displayName** (M6.1), sku, price overrides, isActive | unique (product, sku); displayName = variant-specific marketplace title (precedence displayName → option label → product title) |
 | `VariantOptionValue` (variant_option_values) | variantId, productOptionValueId | the variant↔value combination |
 | `Inventory` (inventory) | productId, variantId?, quantity, reserved, lowStockThreshold, unlimited, allowBackorders | one product-level row (variantId NULL) via partial unique index; per-variant via `variantId` unique |
 | `InventoryChange` (inventory_changes) | inventoryId, delta, reason, previous/newQty, actorId, note | append-only history |

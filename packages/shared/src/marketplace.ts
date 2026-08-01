@@ -100,3 +100,22 @@ export type DeliveryMethod = (typeof DELIVERY_METHODS)[number];
 /** Snapshotted order address kinds. Only SHIPPING is captured in M10. */
 export const ORDER_ADDRESS_TYPES = ['SHIPPING'] as const;
 export type OrderAddressType = (typeof ORDER_ADDRESS_TYPES)[number];
+
+/**
+ * Variant title precedence (M6.1). A variant's customer-facing marketplace title is
+ * its own display name; else the option-value label join (e.g. "Red / Large");
+ * else the base product title. Never falls through to the product title when the
+ * variant has a name of its own — the single rule used everywhere a variant appears
+ * (detail page, cards, cart, checkout, orders, search, API payloads).
+ */
+export function resolveVariantTitle(
+  displayName: string | null | undefined,
+  optionLabel: string | null | undefined,
+  productTitle: string,
+): string {
+  const dn = displayName?.trim();
+  if (dn) return dn;
+  const ol = optionLabel?.trim();
+  if (ol) return ol;
+  return productTitle;
+}

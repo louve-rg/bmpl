@@ -4,7 +4,7 @@ import {
   MAX_PRODUCT_IMAGE_BYTES,
   STORAGE_PREFIX,
 } from '@bmpl/shared';
-import type { ProductImageConfirmInput, ProductImageUpdateInput } from '@bmpl/validation';
+import type { ProductImageConfirmInput, ProductImageReplaceInput, ProductImageUpdateInput } from '@bmpl/validation';
 import type { ProductImage } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
@@ -49,6 +49,9 @@ export class ProductImagesService {
 
     await this.prisma.$transaction(async (tx) => {
       const count = await tx.productImage.count({ where: { productId } });
+      // The first image within a variant GROUP (or the general group) becomes that
+      // group's primary — so every variant gallery has a primary of its own.
+      const groupCount = await tx.productImage.count({ where: { productId, variantId: dto.variantId ?? null } });
       await tx.productImage.create({
         data: {
           productId,
@@ -61,7 +64,7 @@ export class ProductImagesService {
           altText: dto.altText ?? null,
           caption: dto.caption ?? null,
           position: count,
-          isPrimary: count === 0, // first image is primary
+          isPrimary: groupCount === 0,
         },
       });
     });
@@ -86,15 +89,32 @@ export class ProductImagesService {
 
   async update(userId: string, productId: string, imageId: string, dto: ProductImageUpdateInput) {
     await this.ownership.ownedProduct(userId, productId);
-    await this.ownedImage(productId, imageId);
+    const image = await this.ownedImage(productId, imageId);
     if (dto.variantId) await this.assertVariantInProduct(productId, dto.variantId);
-    await this.prisma.productImage.update({
-      where: { id: imageId },
-      data: {
-        altText: dto.altText === undefined ? undefined : dto.altText,
-        caption: dto.caption === undefined ? undefined : dto.caption,
-        variantId: dto.variantId === undefined ? undefined : dto.variantId,
-      },
+    const movingGroup = dto.variantId !== undefined && dto.variantId !== image.variantId;
+
+    await this.prisma.$transaction(async (tx) => {
+      // When moving an image between variant groups, keep exactly one primary per
+      // group: become primary only if the target group has none; and if this image
+      // was its old group's primary, promote the next image there.
+      let isPrimary: boolean | undefined;
+      if (movingGroup) {
+        const targetHasPrimary = (await tx.productImage.count({ where: { productId, variantId: dto.variantId ?? null, isPrimary: true } })) > 0;
+        isPrimary = !targetHasPrimary;
+      }
+      await tx.productImage.update({
+        where: { id: imageId },
+        data: {
+          altText: dto.altText === undefined ? undefined : dto.altText,
+          caption: dto.caption === undefined ? undefined : dto.caption,
+          variantId: dto.variantId === undefined ? undefined : dto.variantId,
+          ...(isPrimary === undefined ? {} : { isPrimary }),
+        },
+      });
+      if (movingGroup && image.isPrimary) {
+        const next = await tx.productImage.findFirst({ where: { productId, variantId: image.variantId, id: { not: imageId } }, orderBy: { position: 'asc' } });
+        if (next) await tx.productImage.update({ where: { id: next.id }, data: { isPrimary: true } });
+      }
     });
     return this.list(productId);
   }
@@ -115,17 +135,50 @@ export class ProductImagesService {
     return this.list(productId);
   }
 
-  /** Set the primary image transactionally (exactly one primary per product). */
+  /**
+   * Set the primary image for its variant GROUP — exactly one primary per
+   * (product, variant) group, so each variant gallery has its own primary and the
+   * general (variantId = null) gallery has its own. Amazon-style: a variant's
+   * gallery resets to this image.
+   */
   async setPrimary(userId: string, productId: string, imageId: string) {
     await this.ownership.ownedProduct(userId, productId);
-    await this.ownedImage(productId, imageId);
+    const image = await this.ownedImage(productId, imageId);
     await this.prisma.$transaction([
+      // Clear the current primary only WITHIN the same variant group.
       this.prisma.productImage.updateMany({
-        where: { productId, isPrimary: true },
+        where: { productId, variantId: image.variantId, isPrimary: true },
         data: { isPrimary: false },
       }),
       this.prisma.productImage.update({ where: { id: imageId }, data: { isPrimary: true } }),
     ]);
+    return this.list(productId);
+  }
+
+  /**
+   * Replace the FILE of an existing image in place (M6.1). Preserves the image's
+   * variant, gallery position, primary status, alt text, and caption — vendors no
+   * longer delete-and-reupload just to swap a photo. The new object is verified
+   * (namespace + real MIME/size); the old object is best-effort deleted.
+   */
+  async replace(userId: string, productId: string, imageId: string, dto: ProductImageReplaceInput) {
+    const product = await this.ownership.ownedProduct(userId, productId);
+    const image = await this.ownedImage(productId, imageId);
+    const prefix = STORAGE_PREFIX.productImage(product.vendorProfileId, product.id);
+    this.storage.assertKeyInNamespace(dto.key, prefix);
+    if (dto.key === image.storageKey) throw new BadRequestException('The replacement image is the same file.');
+    const meta = await this.storage.headObject(dto.key, 'public');
+    if (!meta) throw new BadRequestException('Uploaded image could not be found in storage.');
+    if (!isAllowedProductImageMime(meta.contentType)) throw new BadRequestException('Unsupported image type.');
+    if (meta.sizeBytes <= 0 || meta.sizeBytes > MAX_PRODUCT_IMAGE_BYTES) throw new BadRequestException('Image exceeds the maximum allowed size.');
+
+    const oldKey = image.storageKey;
+    await this.prisma.productImage.update({
+      where: { id: imageId },
+      // variantId / position / isPrimary / altText / caption are intentionally preserved.
+      data: { storageKey: dto.key, mimeType: meta.contentType, fileSizeBytes: meta.sizeBytes, width: dto.width ?? null, height: dto.height ?? null },
+    });
+    await this.storage.deleteObject(oldKey, 'public');
     return this.list(productId);
   }
 
@@ -176,14 +229,47 @@ export class ProductImagesService {
     };
   }
 
-  /** Batch: primary-image URL per product id (single query; avoids N+1 on lists). */
+  /**
+   * Batch: the card/thumbnail primary-image URL per product id. With per-variant
+   * primaries there can be several primary rows per product, so we prefer the
+   * general (variantId = null) primary, then any primary, then the first image —
+   * a deterministic product-level thumbnail for catalog/storefront cards.
+   */
   async primaryUrls(productIds: string[]): Promise<Map<string, string | null>> {
     const out = new Map<string, string | null>();
     if (!productIds.length) return out;
     const rows = await this.prisma.productImage.findMany({
-      where: { productId: { in: productIds }, isPrimary: true },
+      where: { productId: { in: productIds } },
+      orderBy: [{ isPrimary: 'desc' }, { position: 'asc' }],
     });
-    for (const r of rows) out.set(r.productId, await this.urlOrNull(r.storageKey));
+    const chosen = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) {
+      const cur = chosen.get(r.productId);
+      if (!cur) { chosen.set(r.productId, r); continue; }
+      // Prefer a general-group primary over a variant-group primary.
+      if (r.isPrimary && r.variantId === null && !(cur.isPrimary && cur.variantId === null)) chosen.set(r.productId, r);
+    }
+    for (const [productId, r] of chosen) out.set(productId, await this.urlOrNull(r.storageKey));
+    return out;
+  }
+
+  /**
+   * Batch: the variant-specific primary image URL per variant id (M6.1) — used so
+   * cart/order lines show the image of the exact variant purchased. Falls back to
+   * the variant's first image; callers fall back to the product primary when a
+   * variant has no images.
+   */
+  async variantPrimaryUrls(variantIds: string[]): Promise<Map<string, string | null>> {
+    const out = new Map<string, string | null>();
+    if (!variantIds.length) return out;
+    const rows = await this.prisma.productImage.findMany({
+      where: { variantId: { in: variantIds } },
+      orderBy: [{ isPrimary: 'desc' }, { position: 'asc' }],
+    });
+    for (const r of rows) {
+      if (!r.variantId || out.has(r.variantId)) continue;
+      out.set(r.variantId, await this.urlOrNull(r.storageKey));
+    }
     return out;
   }
 

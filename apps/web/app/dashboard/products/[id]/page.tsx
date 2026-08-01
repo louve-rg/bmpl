@@ -5,8 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api, type ApiError } from '../../../../lib/api';
 import { ProductForm, type ProductValues } from '../ProductForm';
-import { ImageManager } from '../ImageManager';
-import { VariantsInventory } from '../VariantsInventory';
+import { ProductEditorManager } from '../../../../components/products/ProductEditorManager';
 import { Badge, Alert, Button, Spinner, type Tone } from '../../../../components/ui';
 
 const STATUS_TONE: Record<string, Tone> = {
@@ -49,6 +48,7 @@ export default function EditProductPage() {
   const [status, setStatus] = useState('');
   const [rejection, setRejection] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [actionErr, setActionErr] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -83,11 +83,12 @@ export default function EditProductPage() {
   }, [id]);
 
   async function act(action: 'archive' | 'unarchive') {
+    setActionErr(null);
     try {
       await api.post(`/vendor/products/${id}/${action}`);
       await load();
     } catch (e) {
-      window.alert((e as ApiError).message ?? 'Action failed.');
+      setActionErr((e as ApiError).message ?? 'Action failed.');
     }
   }
 
@@ -119,6 +120,8 @@ export default function EditProductPage() {
         </Alert>
       )}
 
+      {actionErr && <Alert tone="error" className="mb-4">{actionErr}</Alert>}
+
       <div className="mb-5 flex gap-2">
         {status !== 'ARCHIVED' && status !== 'SUSPENDED' && (
           <Button variant="outline" size="sm" onClick={() => act('archive')}>
@@ -133,11 +136,7 @@ export default function EditProductPage() {
       </div>
 
       <div className="mb-6">
-        <ImageManager productId={id} />
-      </div>
-
-      <div className="mb-6">
-        <VariantsInventory productId={id} />
+        <ProductEditorManager productId={id} />
       </div>
 
       <ProductForm initial={initial} />

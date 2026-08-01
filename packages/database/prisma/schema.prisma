@@ -1159,6 +1159,11 @@ model ProductVariant {
   product        Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
   sku            String?
   barcode        String?
+  // First-class, variant-specific marketplace display name (M6.1). Independent of
+  // the base product title and the option-value labels. Title precedence is
+  // displayName → option-value label join → base product title (never overwritten
+  // by publication, image edits, price/inventory changes, or re-serialization).
+  displayName    String?
   priceMinor     BigInt? // null = inherit the product price
   salePriceMinor BigInt?
   position       Int                  @default(0)

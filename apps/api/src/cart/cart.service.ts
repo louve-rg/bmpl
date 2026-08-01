@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { resolveVariantTitle } from '@bmpl/shared';
 import type { AddCartItemInput, UpdateCartItemInput } from '@bmpl/validation';
 import type { Inventory, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
@@ -201,6 +202,7 @@ export class CartService {
             sku: true,
             isActive: true,
             productId: true,
+            displayName: true,
             priceMinor: true,
             salePriceMinor: true,
             inventory: true,
@@ -215,8 +217,10 @@ export class CartService {
     });
 
     const productIds = [...new Set(items.map((i) => i.productId))];
-    const [primary, productInvMap, variantProducts] = await Promise.all([
+    const variantIds = [...new Set(items.map((i) => i.variantId).filter((v): v is string => !!v))];
+    const [primary, variantPrimary, productInvMap, variantProducts] = await Promise.all([
       this.images.primaryUrls(productIds),
+      this.images.variantPrimaryUrls(variantIds),
       this.productLevelInventory(productIds),
       this.activeVariantProductIds(productIds),
     ]);
@@ -252,6 +256,10 @@ export class CartService {
             .map((ov) => ov.value)
             .join(' / ') || null
         : null;
+      // Variant-specific marketplace title (displayName → option label → product title).
+      const variantTitle = v ? resolveVariantTitle(v.displayName, variantLabel, p.title) : null;
+      // Prefer the purchased variant's own image; fall back to the product primary.
+      const imageUrl = (item.variantId ? variantPrimary.get(item.variantId) : null) ?? primary.get(item.productId) ?? null;
 
       return {
         id: item.id,
@@ -260,8 +268,9 @@ export class CartService {
         title: p.title,
         slug: p.slug,
         variantLabel,
+        variantTitle,
         sku: v?.sku ?? null,
-        imageUrl: primary.get(item.productId) ?? null,
+        imageUrl,
         currency: p.currency,
         quantity: item.quantity,
         unitPriceMinor: money(unitPriceMinor),

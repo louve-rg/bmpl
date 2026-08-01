@@ -247,6 +247,18 @@ export const imageReorderSchema = z.object({
 });
 export type ImageReorderInput = z.infer<typeof imageReorderSchema>;
 
+/**
+ * Replace the FILE of an existing image (M6.1) — swaps the stored object in place
+ * while preserving the image's variant, gallery position, primary status, alt text,
+ * and caption. `key` is the freshly uploaded object (via the normal presign flow).
+ */
+export const productImageReplaceSchema = z.object({
+  key: z.string().trim().min(1).max(512),
+  width: z.coerce.number().int().positive().max(30000).optional(),
+  height: z.coerce.number().int().positive().max(30000).optional(),
+});
+export type ProductImageReplaceInput = z.infer<typeof productImageReplaceSchema>;
+
 // ---- Variants & inventory (M6) ----------------------------------------------
 
 /** Create an option ("Color") with its initial values ("Red","Blue"). */
@@ -261,9 +273,17 @@ export const addOptionValueSchema = z.object({
 });
 export type AddOptionValueInput = z.infer<typeof addOptionValueSchema>;
 
-/** A variant = one option-value per option, plus optional sku/price overrides. */
+/** Rename an existing option value (label only — does not touch variants). */
+export const renameOptionValueSchema = z.object({
+  value: z.string().trim().min(1).max(60),
+});
+export type RenameOptionValueInput = z.infer<typeof renameOptionValueSchema>;
+
+/** A variant = one option-value per option, plus optional display name / sku / price. */
 export const createVariantSchema = z.object({
   optionValueIds: z.array(cuidRef).min(1).max(10),
+  // Variant-specific marketplace display name (independent of the option labels).
+  displayName: z.string().trim().min(1).max(160).optional(),
   sku: z.string().trim().min(1).max(64).optional(),
   barcode: z.string().trim().max(64).optional(),
   priceMinor: optionalMoneyMinorSchema,
@@ -275,6 +295,7 @@ export type CreateVariantInput = z.infer<typeof createVariantSchema>;
 
 export const updateVariantSchema = z
   .object({
+    displayName: z.string().trim().max(160).nullable(),
     sku: z.string().trim().min(1).max(64).nullable(),
     barcode: z.string().trim().max(64).nullable(),
     priceMinor: optionalMoneyMinorSchema,
@@ -284,6 +305,13 @@ export const updateVariantSchema = z
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
 export type UpdateVariantInput = z.infer<typeof updateVariantSchema>;
+
+/** Bulk-generate all missing option-value combinations as variants (idempotent —
+ *  only creates combinations that don't already exist; never touches existing ones). */
+export const generateVariantsSchema = z
+  .object({ quantity: z.coerce.number().int().min(0).max(1_000_000).optional().default(0) })
+  .default({ quantity: 0 });
+export type GenerateVariantsInput = z.infer<typeof generateVariantsSchema>;
 
 /** Inventory settings (thresholds/flags) — quantity changes go via /adjust. */
 export const inventorySettingsSchema = z
