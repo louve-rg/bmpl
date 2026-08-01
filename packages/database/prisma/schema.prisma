@@ -1112,11 +1112,18 @@ model ProductImage {
   caption       String?
   position      Int             @default(0)
   isPrimary     Boolean         @default(false)
+  // Explicit BRAND-IMAGE role (M6.2). At most one per product. Used for marketplace
+  // listing cards / search / category / storefront grid — NEVER shown in the product
+  // detail gallery or a variant thumbnail row, and never variant-scoped. Kept as a
+  // distinct field (not inferred from isPrimary) so listing vs gallery vs variant
+  // roles are unambiguous.
+  isBrandImage  Boolean         @default(false)
   createdAt     DateTime        @default(now())
 
   @@index([productId, position])
   // Serves the batched primary-image lookup on every catalog/listing page.
   @@index([productId, isPrimary])
+  @@index([productId, isBrandImage])
   @@index([variantId])
   @@map("product_images")
 }

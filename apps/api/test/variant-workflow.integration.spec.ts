@@ -60,7 +60,7 @@ async function uploadImageToVariant(v: Vendor, variantId: string | null) {
   expect(await putToPresigned(presign.body.uploadUrl, JPEG, 'image/jpeg')).toBe(200);
   const confirm = await post(v.cookies, `vendor/products/${v.productId}/images/confirm`, { key: presign.body.key, ...(variantId ? { variantId } : {}) });
   expect(confirm.status).toBe(201);
-  return confirm.body as Array<{ id: string; variantId: string | null; isPrimary: boolean; position: number; url: string }>;
+  return confirm.body as Array<{ id: string; variantId: string | null; isPrimary: boolean; position: number; url: string; isBrandImage?: boolean; role?: string }>;
 }
 
 beforeAll(async () => {
@@ -222,6 +222,48 @@ describe('per-variant image galleries', () => {
     // public detail exposes per-image variantId so the storefront can switch galleries
     const detail = await get([], `marketplace/products/${v.slug}`);
     expect(detail.body.images.some((i: { variantId: string | null }) => i.variantId === redV)).toBe(true);
+  });
+});
+
+describe('brand image role (M6.2)', () => {
+  it('brand image is a distinct listing role: excluded from the detail gallery, used for the card, one-per-product', async () => {
+    const v = await makeVendorWithProduct('Bath & Body');
+    // two general gallery images + one brand image
+    await uploadImageToVariant(v, null);
+    let imgs = await uploadImageToVariant(v, null);
+    const brandCandidate = imgs[0]!;
+    // set the first as the brand image
+    const afterBrand = (await post(v.cookies, `vendor/products/${v.productId}/images/${brandCandidate.id}/brand`)).body as typeof imgs;
+    const brand = afterBrand.find((i) => i.id === brandCandidate.id)!;
+    expect(brand.isBrandImage).toBe(true);
+    expect(brand.role).toBe('BRAND');
+    expect(brand.variantId).toBeNull(); // brand image is never variant-scoped
+    expect(afterBrand.filter((i) => i.isBrandImage)).toHaveLength(1); // exactly one
+
+    // public detail gallery EXCLUDES the brand image; brandImageUrl is exposed
+    const prod = await ctx.prisma.product.findUniqueOrThrow({ where: { id: v.productId } });
+    const detail = await get([], `marketplace/products/${prod.slug}`);
+    expect(detail.body.brandImageUrl).toBeTruthy();
+    expect(detail.body.images.some((i: { id: string }) => i.id === brandCandidate.id)).toBe(false);
+    // the marketplace card uses the brand image (precedence #1)
+    const list = await get([], `marketplace/products?pageSize=48`);
+    const card = list.body.items.find((p: { id: string }) => p.id === v.productId);
+    expect(card).toBeTruthy();
+    expect(card.primaryImageUrl).toBe(brand.url);
+
+    // setting another image as brand replaces the designation (no delete)
+    const other = imgs[1]!;
+    const replaced = (await post(v.cookies, `vendor/products/${v.productId}/images/${other.id}/brand`)).body as typeof imgs;
+    expect(replaced.find((i) => i.id === other.id)!.isBrandImage).toBe(true);
+    expect(replaced.find((i) => i.id === brandCandidate.id)!.isBrandImage).toBe(false);
+    expect(replaced).toHaveLength(2); // both files still exist
+
+    // clearing the designation returns it to the gallery
+    const cleared = (await request(ctx.server).delete(`/api/vendor/products/${v.productId}/images/${other.id}/brand`).set('Cookie', v.cookies)).body as typeof imgs;
+    expect(cleared.find((i) => i.id === other.id)!.isBrandImage).toBe(false);
+    const detail2 = await get([], `marketplace/products/${prod.slug}`);
+    expect(detail2.body.brandImageUrl).toBeNull();
+    expect(detail2.body.images.length).toBe(2); // both back in the gallery
   });
 });
 

@@ -202,15 +202,54 @@ export class ProductImagesService {
     return this.list(productId);
   }
 
+  /**
+   * Set an image as the product's BRAND image (M6.2) — the marketplace listing/card
+   * image. At most one per product. A brand image is not variant-scoped and is
+   * excluded from the detail gallery, so we also detach it from any variant and
+   * clear its gallery-primary flag. Replacing the designation never deletes files.
+   */
+  async setBrandImage(userId: string, productId: string, imageId: string) {
+    await this.ownership.ownedProduct(userId, productId);
+    await this.ownedImage(productId, imageId);
+    await this.prisma.$transaction([
+      this.prisma.productImage.updateMany({ where: { productId, isBrandImage: true }, data: { isBrandImage: false } }),
+      this.prisma.productImage.update({ where: { id: imageId }, data: { isBrandImage: true, variantId: null, isPrimary: false } }),
+    ]);
+    return this.list(productId);
+  }
+
+  /** Remove the brand-image designation (the file becomes a general gallery image). */
+  async clearBrandImage(userId: string, productId: string, imageId: string) {
+    await this.ownership.ownedProduct(userId, productId);
+    await this.ownedImage(productId, imageId);
+    await this.prisma.productImage.update({ where: { id: imageId }, data: { isBrandImage: false } });
+    return this.list(productId);
+  }
+
   // ---- shared serialization (also used by public/admin product views) ----
 
-  /** Ordered images with resolved public URLs (primary first, then by position). */
+  /** ALL images (incl. the brand image, flagged) — for the vendor/admin editor. */
   async list(productId: string) {
     const rows = await this.prisma.productImage.findMany({
       where: { productId },
+      orderBy: [{ isBrandImage: 'desc' }, { isPrimary: 'desc' }, { position: 'asc' }],
+    });
+    return Promise.all(rows.map((r) => this.serialize(r)));
+  }
+
+  /** Customer-facing detail GALLERY — excludes the brand image (listing-only role). */
+  async listGallery(productId: string) {
+    const rows = await this.prisma.productImage.findMany({
+      where: { productId, isBrandImage: false },
       orderBy: [{ isPrimary: 'desc' }, { position: 'asc' }],
     });
     return Promise.all(rows.map((r) => this.serialize(r)));
+  }
+
+  /** The product's brand-image URL, or null when none is assigned. */
+  async brandImageUrl(productId: string): Promise<string | null> {
+    const img = await this.prisma.productImage.findFirst({ where: { productId, isBrandImage: true } });
+    return img ? this.urlOrNull(img.storageKey) : null;
   }
 
   private async serialize(img: ProductImage) {
@@ -226,28 +265,31 @@ export class ProductImagesService {
       caption: img.caption,
       position: img.position,
       isPrimary: img.isPrimary,
+      isBrandImage: img.isBrandImage,
+      // Explicit, unambiguous role for the editor + clients.
+      role: img.isBrandImage ? ('BRAND' as const) : img.variantId ? ('VARIANT' as const) : ('GENERAL' as const),
     };
   }
 
   /**
-   * Batch: the card/thumbnail primary-image URL per product id. With per-variant
-   * primaries there can be several primary rows per product, so we prefer the
-   * general (variantId = null) primary, then any primary, then the first image —
-   * a deterministic product-level thumbnail for catalog/storefront cards.
+   * Batch: the marketplace listing/card image URL per product id (M6.2 precedence):
+   * 1) the Brand Image, 2) the general (variantId = null) primary, 3) any primary,
+   * 4) the first image. Deterministic product-level thumbnail for catalog / search /
+   * category / storefront cards.
    */
   async primaryUrls(productIds: string[]): Promise<Map<string, string | null>> {
     const out = new Map<string, string | null>();
     if (!productIds.length) return out;
     const rows = await this.prisma.productImage.findMany({
       where: { productId: { in: productIds } },
-      orderBy: [{ isPrimary: 'desc' }, { position: 'asc' }],
+      orderBy: [{ isBrandImage: 'desc' }, { isPrimary: 'desc' }, { position: 'asc' }],
     });
+    const rank = (r: { isBrandImage: boolean; isPrimary: boolean; variantId: string | null }): number =>
+      r.isBrandImage ? 3 : r.isPrimary && r.variantId === null ? 2 : r.isPrimary ? 1 : 0;
     const chosen = new Map<string, (typeof rows)[number]>();
     for (const r of rows) {
       const cur = chosen.get(r.productId);
-      if (!cur) { chosen.set(r.productId, r); continue; }
-      // Prefer a general-group primary over a variant-group primary.
-      if (r.isPrimary && r.variantId === null && !(cur.isPrimary && cur.variantId === null)) chosen.set(r.productId, r);
+      if (!cur || rank(r) > rank(cur)) chosen.set(r.productId, r);
     }
     for (const [productId, r] of chosen) out.set(productId, await this.urlOrNull(r.storageKey));
     return out;

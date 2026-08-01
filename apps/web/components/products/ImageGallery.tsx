@@ -14,6 +14,25 @@ export interface VariantChoice {
   label: string;
 }
 
+/** Resolve an image's role, preferring the API `role` field and falling back to its data. */
+function imageRole(img: ProductImage): 'BRAND' | 'GENERAL' | 'VARIANT' {
+  if (img.role) return img.role;
+  if (img.isBrandImage) return 'BRAND';
+  return img.variantId ? 'VARIANT' : 'GENERAL';
+}
+
+function RoleChip({ img, variantChoices }: { img: ProductImage; variantChoices: VariantChoice[] }) {
+  const role = imageRole(img);
+  if (role === 'BRAND') {
+    return <Badge tone="brand" className="px-1.5 py-0 text-[10px]">Brand</Badge>;
+  }
+  if (role === 'VARIANT') {
+    const name = variantChoices.find((v) => v.id === img.variantId)?.label ?? 'unassigned';
+    return <Badge tone="info" className="px-1.5 py-0 text-[10px]">Variant: {name}</Badge>;
+  }
+  return <Badge tone="neutral" className="px-1.5 py-0 text-[10px]">General</Badge>;
+}
+
 interface Props {
   productId: string;
   variantId: string | null;
@@ -185,6 +204,9 @@ function ImageCard({
       </div>
 
       <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <RoleChip img={img} variantChoices={variantChoices} />
+        </div>
         <input
           defaultValue={img.altText ?? ''}
           placeholder="Alt text (for accessibility & SEO)"
@@ -208,6 +230,9 @@ function ImageCard({
           </select>
         )}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold">
+          <button type="button" onClick={() => void act(() => api.post(`/vendor/products/${productId}/images/${img.id}/brand`))} className="text-belize-accent hover:underline">
+            Set as Brand Image
+          </button>
           {!img.isPrimary && (
             <button type="button" onClick={() => void act(() => api.post(`/vendor/products/${productId}/images/${img.id}/primary`))} className="text-belize-blue hover:underline">
               Make primary

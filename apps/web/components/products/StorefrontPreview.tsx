@@ -1,43 +1,186 @@
 'use client';
 
-import { useState } from 'react';
-import type { ProductImage } from './types';
+import { useMemo, useState } from 'react';
+import { Badge } from '../ui';
+import { Gallery, type GalleryImage } from '../../app/products/[slug]/Gallery';
+import { VariantLineup, VariantSelector, type LineupImage } from './VariantChooser';
+import { money } from '../../lib/cart';
+import type { InvRow, Inventory, ManageView, ProductImage } from './types';
+import {
+  pruneSelection,
+  purchaseState,
+  resolveSelectedVariant,
+  selectionForVariant,
+  type ProductLike,
+  type PurchaseStateKind,
+  type Selection,
+  type VariantAvailabilityInfo,
+  type VariantLike,
+} from '../../lib/variant-availability';
 
-/** A light approximation of how the storefront gallery will render the images. */
-export function StorefrontPreview({ productTitle, images }: { productTitle: string; images: ProductImage[] }) {
-  const ordered = [...images].sort((a, b) => a.position - b.position);
-  const withUrl = ordered.filter((i) => i.url);
-  const [active, setActive] = useState(0);
+/** Derive the marketplace availability signal from editor inventory + quantity.
+ *  A variant with 0 on-hand (and no unlimited/backorders) is out of stock. */
+function toAvailability(row: InvRow | undefined, quantity: number): VariantAvailabilityInfo {
+  const unlimited = row?.unlimited ?? false;
+  const allowBackorders = row?.allowBackorders ?? false;
+  const available = unlimited ? null : row?.available ?? quantity;
+  const inStock = unlimited || allowBackorders || (available ?? 0) > 0;
+  return {
+    inStock,
+    outOfStock: !inStock,
+    available,
+    unlimited,
+    allowBackorders,
+    lowStock: row?.lowStock,
+  };
+}
 
-  if (withUrl.length === 0) {
+/**
+ * Read-only storefront preview. Renders the SAME variant lineup + combination-
+ * aware dropdowns as the live marketplace product page, via the shared
+ * lib/variant-availability + VariantChooser code — no add-to-cart.
+ */
+export function StorefrontPreview({
+  view,
+  inventory,
+  images,
+}: {
+  view: ManageView;
+  inventory: Inventory;
+  images: ProductImage[];
+}) {
+  const invByVariant = useMemo(
+    () => new Map(inventory.variants.map((r) => [r.variantId ?? '', r])),
+    [inventory.variants],
+  );
+
+  // Only active variants reach the storefront (mirrors the marketplace API).
+  const variants: VariantLike[] = useMemo(
+    () =>
+      view.variants
+        .filter((v) => v.isActive)
+        .map((v) => ({
+          id: v.id,
+          title: v.title,
+          priceMinor: v.priceMinor,
+          salePriceMinor: v.salePriceMinor,
+          optionValueIds: v.optionValueIds,
+          availability: toAvailability(invByVariant.get(v.id), v.quantity),
+        })),
+    [view.variants, invByVariant],
+  );
+
+  const hasVariants = variants.length > 0;
+  const fallbackPriceMinor =
+    variants.find((v) => v.priceMinor != null)?.priceMinor ??
+    variants[0]?.priceMinor ??
+    0;
+  const product: ProductLike = {
+    priceMinor: fallbackPriceMinor,
+    salePriceMinor: null,
+    availability: toAvailability(inventory.product, inventory.product.quantity),
+  };
+
+  const [selection, setSelection] = useState<Selection>({});
+
+  const selectedVariant = useMemo(
+    () => (hasVariants ? resolveSelectedVariant(variants, selection) : null),
+    [hasVariants, variants, selection],
+  );
+  const ps = useMemo(() => purchaseState(product, variants, selection), [product, variants, selection]);
+  const state: PurchaseStateKind = ps.state;
+
+  const galleryImages: GalleryImage[] = useMemo(() => {
+    const mapped: GalleryImage[] = images
+      .filter((i) => i.url)
+      .map((i) => ({
+        id: i.id,
+        url: i.url,
+        altText: i.altText,
+        variantId: i.variantId,
+        position: i.position,
+        isPrimary: i.isPrimary,
+      }));
+    const general = mapped.filter((i) => i.variantId == null);
+    const base = general.length ? general : mapped;
+    if (!selectedVariant) return base;
+    const forVariant = mapped.filter((i) => i.variantId === selectedVariant.id);
+    return forVariant.length ? forVariant : base;
+  }, [images, selectedVariant]);
+
+  const lineupImages: LineupImage[] = useMemo(
+    () =>
+      images.map((i) => ({
+        variantId: i.variantId ?? null,
+        url: i.url,
+        altText: i.altText,
+        isPrimary: i.isPrimary,
+        position: i.position,
+      })),
+    [images],
+  );
+
+  function changeOption(optionId: string, valueId: string) {
+    setSelection((s) => pruneSelection(variants, view.options, { ...s, [optionId]: valueId }));
+  }
+
+  if (images.filter((i) => i.url).length === 0 && !hasVariants) {
     return <p className="text-sm text-slate-400">Add images to preview the storefront gallery.</p>;
   }
-  const hero = withUrl[Math.min(active, withUrl.length - 1)]!;
+
+  const displayTitle = selectedVariant ? selectedVariant.title : view.productTitle;
+  const effectivePrice = selectedVariant
+    ? selectedVariant.salePriceMinor ?? selectedVariant.priceMinor ?? fallbackPriceMinor
+    : fallbackPriceMinor;
 
   return (
-    <div>
-      <div className="aspect-square w-full max-w-xs overflow-hidden rounded-bmpl-lg bg-slate-100">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={hero.url ?? ''} alt={hero.altText ?? productTitle} className="h-full w-full object-cover" />
+    <div className="max-w-md">
+      {/* key resets the active thumbnail when the shown image set changes */}
+      <Gallery key={selectedVariant?.id ?? 'base'} images={galleryImages} />
+
+      {hasVariants && (
+        <VariantLineup
+          variants={variants}
+          images={lineupImages}
+          selectedId={selectedVariant?.id ?? null}
+          fallbackPriceMinor={fallbackPriceMinor}
+          onSelect={(v) => setSelection(selectionForVariant(view.options, v))}
+        />
+      )}
+
+      <div className="mt-4">
+        <p className="text-lg font-bold text-belize-navy">{displayTitle}</p>
+        {selectedVariant && displayTitle !== view.productTitle && (
+          <p className="text-sm text-slate-500">{view.productTitle}</p>
+        )}
+        <p className="mt-1 text-xl font-bold text-belize-navy">{money(effectivePrice)}</p>
+        <p className="mt-2">
+          <PreviewBadge state={state} />
+        </p>
       </div>
-      {withUrl.length > 1 && (
-        <div className="mt-2 flex max-w-xs gap-2 overflow-x-auto pb-1">
-          {withUrl.map((img, i) => (
-            <button
-              key={img.id}
-              type="button"
-              onClick={() => setActive(i)}
-              className={`h-12 w-12 shrink-0 overflow-hidden rounded-bmpl-md border-2 ${i === Math.min(active, withUrl.length - 1) ? 'border-belize-accent' : 'border-transparent'}`}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={img.url ?? ''} alt={img.altText ?? ''} className="h-full w-full object-cover" />
-            </button>
-          ))}
+
+      {hasVariants && (
+        <div className="mt-4 space-y-3">
+          <VariantSelector
+            options={view.options}
+            variants={variants}
+            selection={selection}
+            onChange={changeOption}
+            idPrefix="preview-opt"
+          />
         </div>
       )}
-      <p className="mt-2 text-xs text-slate-400">
-        {withUrl.length} image{withUrl.length === 1 ? '' : 's'} · buyers see the primary image first within each selection.
+
+      <p className="mt-3 text-xs text-slate-400">
+        Preview only — this mirrors what buyers see. Out-of-stock variants are hidden.
       </p>
     </div>
   );
+}
+
+function PreviewBadge({ state }: { state: PurchaseStateKind }) {
+  if (state === 'SELECT') return <Badge tone="neutral">Select options</Badge>;
+  if (state === 'UNAVAILABLE') return <Badge tone="error">Unavailable</Badge>;
+  if (state === 'OUT_OF_STOCK') return <Badge tone="error">Out of stock</Badge>;
+  return <Badge tone="success">In stock</Badge>;
 }

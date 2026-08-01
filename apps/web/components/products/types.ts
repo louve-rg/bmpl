@@ -41,6 +41,8 @@ export interface ProductImage {
   isPrimary: boolean;
   width: number | null;
   height: number | null;
+  isBrandImage?: boolean;
+  role?: 'BRAND' | 'GENERAL' | 'VARIANT';
 }
 
 export interface InvRow {

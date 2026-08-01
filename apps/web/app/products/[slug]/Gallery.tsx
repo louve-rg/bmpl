@@ -7,6 +7,10 @@ export interface GalleryImage {
   url: string | null;
   altText: string | null;
   variantId?: string | null;
+  position?: number;
+  isPrimary?: boolean;
+  isBrandImage?: boolean;
+  role?: 'BRAND' | 'GENERAL' | 'VARIANT';
 }
 
 export function Gallery({ images }: { images: GalleryImage[] }) {

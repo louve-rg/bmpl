@@ -52,7 +52,7 @@ Conversation 1─* ConversationParticipant *─1 User             (M17)
 | `VendorModerationReview` (vendor_moderation_reviews) | vendorProfileId, reviewerId, action, from/toStatus | immutable trail |
 | `Product` (products) | vendorProfileId, categoryId, slug*, sku, price/salePriceMinor, status, featured, dims, SEO, searchKeywords[], searchVector(tsvector) | `@@unique(vendorProfileId, sku)` |
 | `Tag` (tags) | slug*, name | implicit m2m with Product |
-| `ProductImage` (product_images) | productId, storageKey*, mimeType, fileSizeBytes, width/height, altText, caption, position, isPrimary | one primary/product (transactional) |
+| `ProductImage` (product_images, +**isBrandImage** M6.2: brand/listing role, ≤1 per product, excluded from detail gallery) | productId, storageKey*, mimeType, fileSizeBytes, width/height, altText, caption, position, isPrimary | one primary/product (transactional) |
 | `ProductModerationReview` (product_moderation_reviews) | productId, reviewerId, action, from/toStatus | immutable trail |
 | `ProductOption` (product_options) | productId, name, position | unique (product, name) |
 | `ProductOptionValue` (product_option_values) | productOptionId, value, position | unique (option, value) |

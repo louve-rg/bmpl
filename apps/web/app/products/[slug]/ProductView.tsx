@@ -5,34 +5,28 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Gallery, type GalleryImage } from './Gallery';
 import { Badge } from '../../../components/ui';
+import { VariantLineup, VariantSelector, type LineupImage } from '../../../components/products/VariantChooser';
 import { cartApi, money, notifyCartChanged } from '../../../lib/cart';
 import type { ApiError } from '../../../lib/api';
+import {
+  pruneSelection,
+  purchaseState,
+  resolveSelectedVariant,
+  selectionForVariant,
+  type OptionLike,
+  type PurchaseStateKind,
+  type Selection,
+  type VariantAvailabilityInfo,
+  type VariantLike,
+} from '../../../lib/variant-availability';
 
-interface Availability {
-  inStock: boolean;
-  lowStock?: boolean;
-  outOfStock: boolean;
-  available: number | null;
-  unlimited: boolean;
-  allowBackorders: boolean;
-}
-interface Variant {
-  id: string;
-  /** Resolved variant title: displayName → option-label → product title. */
-  title: string;
+interface Availability extends VariantAvailabilityInfo {}
+interface Variant extends VariantLike {
   displayName: string | null;
   optionLabel: string | null;
   sku: string | null;
-  priceMinor: number | null;
-  salePriceMinor: number | null;
-  optionValueIds: string[];
-  availability: Availability;
 }
-interface Option {
-  id: string;
-  name: string;
-  values: Array<{ id: string; value: string }>;
-}
+interface Option extends OptionLike {}
 
 export interface ProductDetail {
   id: string;
@@ -61,24 +55,46 @@ function stockCap(a: Availability): number | null {
   return a.available == null ? null : Math.max(0, a.available);
 }
 
+/** Map the detail images into the shared lineup shape. */
+function toLineupImages(images: GalleryImage[]): LineupImage[] {
+  return images.map((i) => ({
+    variantId: i.variantId ?? null,
+    url: i.url,
+    altText: i.altText,
+    isPrimary: i.isPrimary ?? false,
+    position: i.position ?? 0,
+  }));
+}
+
 export function ProductView({ product }: { product: ProductDetail }) {
   const router = useRouter();
   const hasVariants = product.variants.length > 0;
-  const [selection, setSelection] = useState<Record<string, string>>({});
+  const [selection, setSelection] = useState<Selection>({});
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
-  const selectedVariant = useMemo(() => {
-    if (!hasVariants) return null;
-    if (Object.keys(selection).length !== product.options.length) return null;
-    const chosen = new Set(Object.values(selection));
-    return (
-      product.variants.find(
-        (v) => v.optionValueIds.length === chosen.size && v.optionValueIds.every((id) => chosen.has(id)),
-      ) ?? null
-    );
-  }, [hasVariants, selection, product.options.length, product.variants]);
+  const selectedVariant = useMemo(
+    () => (hasVariants ? (resolveSelectedVariant(product.variants, selection) as Variant | null) : null),
+    [hasVariants, product.variants, selection],
+  );
+
+  const ps = useMemo(
+    () => purchaseState(product, product.variants, selection),
+    [product, selection],
+  );
+
+  // Selecting from the lineup: adopt that variant's full option selection.
+  function selectVariant(v: VariantLike) {
+    setSelection(selectionForVariant(product.options, v));
+    setQty(1);
+  }
+
+  // A dropdown change, pruned so the remaining selection stays reachable.
+  function changeOption(optionId: string, valueId: string) {
+    setSelection((s) => pruneSelection(product.variants, product.options, { ...s, [optionId]: valueId }));
+    setQty(1);
+  }
 
   // Preselect from the URL (?variant=<id>) once on mount so a refresh/share
   // restores the chosen variant without a full navigation or refetch.
@@ -88,13 +104,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
     if (!vId) return;
     const v = product.variants.find((x) => x.id === vId);
     if (!v) return;
-    const optionOf = new Map<string, string>();
-    for (const opt of product.options) for (const val of opt.values) optionOf.set(val.id, opt.id);
-    const next: Record<string, string> = {};
-    for (const valId of v.optionValueIds) {
-      const optId = optionOf.get(valId);
-      if (optId) next[optId] = valId;
-    }
+    const next = selectionForVariant(product.options, v);
     if (Object.keys(next).length) setSelection(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -109,11 +119,10 @@ export function ProductView({ product }: { product: ProductDetail }) {
   }, [hasVariants, selectedVariant]);
 
   const displayTitle = selectedVariant ? selectedVariant.title : product.title;
-  const needsVariant = hasVariants && !selectedVariant;
   const avail: Availability = selectedVariant ? selectedVariant.availability : product.availability;
-  const outOfStock = selectedVariant ? selectedVariant.availability.outOfStock : !product.availability.inStock;
-  const cap = needsVariant ? null : stockCap(avail);
-  const maxQty = cap == null ? null : cap;
+  const state: PurchaseStateKind = ps.state;
+  const cap = selectedVariant ? stockCap(avail) : hasVariants ? null : stockCap(avail);
+  const maxQty = cap;
 
   // Keep the chosen quantity within the current cap (e.g. after switching variant).
   const effectiveQty = maxQty == null ? qty : Math.min(qty, Math.max(1, maxQty));
@@ -139,6 +148,8 @@ export function ProductView({ product }: { product: ProductDetail }) {
     return forVariant.length ? forVariant : base;
   }, [product.images, selectedVariant]);
 
+  const lineupImages = useMemo(() => toLineupImages(product.images), [product.images]);
+
   function clampQty(n: number) {
     const lo = 1;
     const hi = maxQty == null ? 100000 : Math.max(1, maxQty);
@@ -149,7 +160,11 @@ export function ProductView({ product }: { product: ProductDetail }) {
     setBusy(true);
     setMessage(null);
     try {
-      const cart = await cartApi.add({ productId: product.id, variantId: selectedVariant?.id ?? null, quantity: effectiveQty });
+      const cart = await cartApi.add({
+        productId: product.id,
+        variantId: selectedVariant?.id ?? null,
+        quantity: effectiveQty,
+      });
       notifyCartChanged(cart.itemCount);
       setMessage({ kind: 'ok', text: 'Added to your cart.' });
     } catch (e) {
@@ -164,13 +179,35 @@ export function ProductView({ product }: { product: ProductDetail }) {
     }
   }
 
-  const canAdd = !busy && !needsVariant && !outOfStock && (maxQty == null || maxQty >= 1);
+  const canAdd = state === 'ADD' && !busy && (maxQty == null || maxQty >= 1);
+  const controlsDisabled = state !== 'ADD';
   const dims = product.dimensionsMm;
+
+  const buttonLabel = busy
+    ? 'Adding…'
+    : state === 'UNAVAILABLE'
+      ? 'Unavailable'
+      : state === 'OUT_OF_STOCK'
+        ? 'Out of stock'
+        : state === 'SELECT'
+          ? 'Select options'
+          : `Add to cart · ${money(effectivePrice)}`;
 
   return (
     <div className="mt-4 grid gap-8 md:grid-cols-2">
-      {/* key resets the active thumbnail when the shown image set changes */}
-      <Gallery key={selectedVariant?.id ?? 'base'} images={galleryImages} />
+      <div>
+        {/* key resets the active thumbnail when the shown image set changes */}
+        <Gallery key={selectedVariant?.id ?? 'base'} images={galleryImages} />
+        {hasVariants && (
+          <VariantLineup
+            variants={product.variants}
+            images={lineupImages}
+            selectedId={selectedVariant?.id ?? null}
+            fallbackPriceMinor={product.salePriceMinor ?? product.priceMinor}
+            onSelect={selectVariant}
+          />
+        )}
+      </div>
 
       <div>
         <p className="bmpl-eyebrow">{product.category.name}</p>
@@ -194,35 +231,21 @@ export function ProductView({ product }: { product: ProductDetail }) {
           <span className="ml-2 text-sm text-slate-400">{product.currency}</span>
         </p>
 
-        {selectedVariant?.sku && (
-          <p className="mt-1 text-xs text-slate-400">SKU: {selectedVariant.sku}</p>
-        )}
+        {selectedVariant?.sku && <p className="mt-1 text-xs text-slate-400">SKU: {selectedVariant.sku}</p>}
 
         <p className="mt-2">
-          <StockBadge outOfStock={outOfStock} avail={avail} needsVariant={needsVariant} />
+          <StockBadge state={state} avail={avail} />
         </p>
 
         {/* ---- buy panel ---- */}
         <div className="mt-6 rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm">
           {hasVariants && (
-            <div className="space-y-3">
-              {product.options.map((opt) => (
-                <div key={opt.id}>
-                  <label htmlFor={`opt-${opt.id}`} className="bmpl-label">{opt.name}</label>
-                  <select
-                    id={`opt-${opt.id}`}
-                    value={selection[opt.id] ?? ''}
-                    onChange={(e) => { setSelection((s) => ({ ...s, [opt.id]: e.target.value })); setQty(1); }}
-                    className="bmpl-input"
-                  >
-                    <option value="">Select {opt.name.toLowerCase()}…</option>
-                    {opt.values.map((val) => (
-                      <option key={val.id} value={val.id}>{val.value}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
+            <VariantSelector
+              options={product.options}
+              variants={product.variants}
+              selection={selection}
+              onChange={changeOption}
+            />
           )}
 
           <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -232,27 +255,31 @@ export function ProductView({ product }: { product: ProductDetail }) {
                 <button
                   type="button"
                   aria-label="Decrease quantity"
-                  disabled={outOfStock || needsVariant || effectiveQty <= 1}
+                  disabled={controlsDisabled || effectiveQty <= 1}
                   onClick={() => clampQty(effectiveQty - 1)}
                   className="px-3 text-lg text-slate-500 transition hover:bg-slate-50 disabled:opacity-30"
-                >−</button>
+                >
+                  −
+                </button>
                 <input
                   aria-label="Quantity"
                   type="number"
                   min={1}
                   max={maxQty ?? undefined}
                   value={effectiveQty}
-                  disabled={outOfStock || needsVariant}
+                  disabled={controlsDisabled}
                   onChange={(e) => clampQty(Number(e.target.value))}
                   className="w-14 border-x border-slate-300 text-center text-sm outline-none focus:ring-2 focus:ring-belize-accent/30 disabled:bg-slate-50"
                 />
                 <button
                   type="button"
                   aria-label="Increase quantity"
-                  disabled={outOfStock || needsVariant || (maxQty != null && effectiveQty >= maxQty)}
+                  disabled={controlsDisabled || (maxQty != null && effectiveQty >= maxQty)}
                   onClick={() => clampQty(effectiveQty + 1)}
                   className="px-3 text-lg text-slate-500 transition hover:bg-slate-50 disabled:opacity-30"
-                >+</button>
+                >
+                  +
+                </button>
               </div>
             </div>
 
@@ -262,17 +289,11 @@ export function ProductView({ product }: { product: ProductDetail }) {
               disabled={!canAdd}
               className="flex-1 rounded-bmpl-md bg-belize-blue px-5 py-2.5 text-sm font-semibold text-white shadow-bmpl-sm transition hover:bg-belize-deep disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy
-                ? 'Adding…'
-                : outOfStock
-                  ? 'Out of stock'
-                  : needsVariant
-                    ? 'Select options'
-                    : `Add to cart · ${money(effectivePrice)}`}
+              {buttonLabel}
             </button>
           </div>
 
-          {!needsVariant && !outOfStock && maxQty != null && maxQty <= 10 && (
+          {state === 'ADD' && maxQty != null && maxQty <= 10 && (
             <p className="mt-2 text-xs font-medium text-amber-600">
               Only {maxQty} left in stock — the quantity is capped at what's available.
             </p>
@@ -284,7 +305,9 @@ export function ProductView({ product }: { product: ProductDetail }) {
               {message.kind === 'ok' && (
                 <>
                   {' '}
-                  <a href="/cart" className="font-semibold text-belize-blue hover:underline">View cart →</a>
+                  <a href="/cart" className="font-semibold text-belize-blue hover:underline">
+                    View cart →
+                  </a>
                 </>
               )}
             </p>
@@ -302,9 +325,19 @@ export function ProductView({ product }: { product: ProductDetail }) {
 
         {(product.weightGrams || dims.length || dims.width || dims.height) && (
           <dl className="mt-6 grid grid-cols-2 gap-2 text-sm text-slate-600">
-            {product.weightGrams && <div><dt className="text-slate-400">Weight</dt><dd>{product.weightGrams} g</dd></div>}
+            {product.weightGrams && (
+              <div>
+                <dt className="text-slate-400">Weight</dt>
+                <dd>{product.weightGrams} g</dd>
+              </div>
+            )}
             {(dims.length || dims.width || dims.height) && (
-              <div><dt className="text-slate-400">Dimensions</dt><dd>{dims.length ?? '—'}×{dims.width ?? '—'}×{dims.height ?? '—'} mm</dd></div>
+              <div>
+                <dt className="text-slate-400">Dimensions</dt>
+                <dd>
+                  {dims.length ?? '—'}×{dims.width ?? '—'}×{dims.height ?? '—'} mm
+                </dd>
+              </div>
             )}
           </dl>
         )}
@@ -312,7 +345,9 @@ export function ProductView({ product }: { product: ProductDetail }) {
         {product.tags.length > 0 && (
           <div className="mt-5 flex flex-wrap gap-1.5">
             {product.tags.map((t) => (
-              <Badge key={t} tone="neutral">{t}</Badge>
+              <Badge key={t} tone="neutral">
+                {t}
+              </Badge>
             ))}
           </div>
         )}
@@ -321,9 +356,10 @@ export function ProductView({ product }: { product: ProductDetail }) {
   );
 }
 
-function StockBadge({ outOfStock, avail, needsVariant }: { outOfStock: boolean; avail: Availability; needsVariant: boolean }) {
-  if (needsVariant) return <Badge tone="neutral">Select options</Badge>;
-  if (outOfStock) return <Badge tone="error">Out of stock</Badge>;
+function StockBadge({ state, avail }: { state: PurchaseStateKind; avail: Availability }) {
+  if (state === 'SELECT') return <Badge tone="neutral">Select options</Badge>;
+  if (state === 'UNAVAILABLE') return <Badge tone="error">Unavailable</Badge>;
+  if (state === 'OUT_OF_STOCK') return <Badge tone="error">Out of stock</Badge>;
   const low = avail.lowStock || (avail.available != null && !avail.unlimited && avail.available <= 5);
   return <Badge tone={low ? 'warning' : 'success'}>{low ? 'Low stock' : 'In stock'}</Badge>;
 }

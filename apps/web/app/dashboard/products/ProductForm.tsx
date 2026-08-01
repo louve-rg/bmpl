@@ -163,9 +163,14 @@ export function ProductForm({ initial }: { initial?: ProductValues }) {
         </label>
       </Card>
 
-      <Button disabled={busy} size="lg">
-        {isEdit ? 'Save changes' : 'Create product'}
-      </Button>
+      <div className="space-y-1.5">
+        <Button disabled={busy} size="lg">
+          {isEdit ? 'Save changes' : 'Next'}
+        </Button>
+        {!isEdit && (
+          <p className="text-xs text-slate-400">You'll add options, variants, images, and inventory next.</p>
+        )}
+      </div>
     </form>
   );
 }

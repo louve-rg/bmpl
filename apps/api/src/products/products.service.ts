@@ -427,7 +427,9 @@ export class ProductsService {
       metaTitle: p.metaTitle,
       metaDescription: p.metaDescription,
       tags: p.tags.map((t) => t.name),
-      images: await this.images.list(p.id),
+      // Detail gallery EXCLUDES the brand image (listing-only role, M6.2).
+      images: await this.images.listGallery(p.id),
+      brandImageUrl: await this.images.brandImageUrl(p.id),
       ...(await this.variants.publicView(p.id)), // { options, variants }
       availability: await this.inventory.publicAvailability(p.id),
     };

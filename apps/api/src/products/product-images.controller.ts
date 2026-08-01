@@ -66,6 +66,24 @@ export class ProductImagesController {
     return this.images.replace(user.userId, productId, imageId, body);
   }
 
+  @Post(':imageId/brand')
+  setBrandImage(
+    @CurrentUser() user: AuthContext,
+    @Param('productId') productId: string,
+    @Param('imageId') imageId: string,
+  ) {
+    return this.images.setBrandImage(user.userId, productId, imageId);
+  }
+
+  @Delete(':imageId/brand')
+  clearBrandImage(
+    @CurrentUser() user: AuthContext,
+    @Param('productId') productId: string,
+    @Param('imageId') imageId: string,
+  ) {
+    return this.images.clearBrandImage(user.userId, productId, imageId);
+  }
+
   @Post(':imageId/primary')
   setPrimary(
     @CurrentUser() user: AuthContext,

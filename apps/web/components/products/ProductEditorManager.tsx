@@ -9,6 +9,7 @@ import { OptionsManager } from './OptionsManager';
 import { VariantBuilder } from './VariantBuilder';
 import { VariantCard } from './VariantCard';
 import { ImageGallery, type VariantChoice } from './ImageGallery';
+import { BrandImageSlot } from './BrandImageSlot';
 import { StorefrontPreview } from './StorefrontPreview';
 
 /**
@@ -67,7 +68,7 @@ export function ProductEditorManager({ productId }: { productId: string }) {
       const full = [...images].sort((a, b) => a.position - b.position);
       const target = full.find((x) => x.id === imageId);
       if (!target) return;
-      const group = full.filter((x) => x.variantId === target.variantId);
+      const group = full.filter((x) => x.variantId === target.variantId && !x.isBrandImage);
       const gi = group.findIndex((x) => x.id === imageId);
       const neighbour = group[gi + dir];
       if (!neighbour) return;
@@ -101,7 +102,12 @@ export function ProductEditorManager({ productId }: { productId: string }) {
   }
 
   const variantChoices: VariantChoice[] = view.variants.map((v) => ({ id: v.id, label: v.title }));
-  const generalImages = images.filter((i) => i.variantId === null).sort((a, b) => a.position - b.position);
+  const brandImage = images.find((i) => i.isBrandImage || i.role === 'BRAND') ?? null;
+  // The brand image lives only in the brand slot — keep it out of the general gallery
+  // (it has a null variantId so it would otherwise appear here and be duplicated).
+  const generalImages = images
+    .filter((i) => i.variantId === null && !i.isBrandImage && i.role !== 'BRAND')
+    .sort((a, b) => a.position - b.position);
   const invByVariant = new Map(inv.variants.map((r) => [r.variantId ?? '', r]));
 
   return (
@@ -160,6 +166,17 @@ export function ProductEditorManager({ productId }: { productId: string }) {
         )}
       </Card>
 
+      {/* Brand image — product-level marketplace listing image (at most one) */}
+      <Card className="space-y-4 p-5 sm:p-6">
+        <div>
+          <h2 className="bmpl-eyebrow">Brand image</h2>
+          <p className="mt-1 text-xs text-slate-400">
+            Shown on marketplace listing cards. Not shown in the product detail gallery. Use “Set as Brand Image” on any image below to choose one.
+          </p>
+        </div>
+        <BrandImageSlot productId={productId} image={brandImage} onMutate={reloadImages} onError={setActionErr} />
+      </Card>
+
       {/* General / all-variants gallery */}
       <Card className="space-y-4 p-5 sm:p-6">
         <div>
@@ -182,7 +199,7 @@ export function ProductEditorManager({ productId }: { productId: string }) {
       {/* Storefront preview */}
       <Card className="space-y-3 p-5 sm:p-6">
         <h2 className="bmpl-eyebrow">Storefront preview</h2>
-        <StorefrontPreview productTitle={view.productTitle} images={images} />
+        <StorefrontPreview view={view} inventory={inv} images={images} />
       </Card>
     </div>
   );
