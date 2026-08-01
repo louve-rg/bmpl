@@ -13,6 +13,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../products/inventory.service';
+import { MessagingService } from '../messaging/messaging.service';
 import { DeliveryCoreService } from './delivery-core.service';
 
 interface Actor {
@@ -35,6 +36,7 @@ export class DriverJobService {
     private readonly audit: AuditService,
     private readonly inventory: InventoryService,
     private readonly core: DeliveryCoreService,
+    private readonly messaging: MessagingService,
   ) {}
 
   private async myProfileId(userId: string): Promise<string> {
@@ -165,6 +167,7 @@ export class DriverJobService {
       if (!fresh.inventoryFinalizedAt) await this.audit.record({ action: 'INVENTORY_FULFILLED', actorId: actor.userId, newValue: { deliveryId } }, tx);
       await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId], { title: 'Order picked up', body: `Your order ${d.vendorOrder.order.orderNumber} was picked up and is on its way soon.`, data: { deliveryId } }, tx);
     });
+    await this.messaging.onDeliveryEvent(deliveryId, 'Order picked up.');
     return this.getJob(actor.userId, deliveryId);
   }
 
@@ -228,6 +231,7 @@ export class DriverJobService {
       if (podKeys?.length) await this.core.auditTransition('POD', actor.userId, deliveryId, { count: podKeys.length }, tx);
       await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId, actor.userId], { event: 'DELIVERY_DELIVERED', title: 'Delivered', body: `Order ${d.vendorOrder.order.orderNumber} was delivered${dto.recipientName ? ` to ${dto.recipientName}` : ''}.`, data: { deliveryId } }, tx);
     });
+    await this.messaging.onDeliveryEvent(deliveryId, 'Order delivered.');
     return this.getJob(actor.userId, deliveryId);
   }
 

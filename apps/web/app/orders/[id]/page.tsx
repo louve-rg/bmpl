@@ -12,6 +12,7 @@ import { PaymentStatusBadge, HoldStatusBadge } from '../../../components/payment
 import type { ApiError } from '../../../lib/api';
 import { Alert, Card, PageHeader, Spinner, StatusBadge } from '../../../components/ui';
 import { DeliveryTracker } from '../../../components/DeliveryTracker';
+import { MessageButton } from '../../../components/messaging/MessageButton';
 
 export default function OrderDetailPage() {
   const router = useRouter();
@@ -145,9 +146,12 @@ export default function OrderDetailPage() {
                     <DeliveryTracker deliveryId={vo.delivery.id} />
                   )}
                   {vo.customerNotes && <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Notes: {vo.customerNotes}</p>}
-                  <div className="flex justify-between border-t border-slate-100 px-4 py-2 text-sm">
-                    <span className="text-slate-500">Store subtotal</span>
-                    <span className="font-semibold text-belize-navy">{money(vo.subtotalMinor)}</span>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-2">
+                    <MessageButton kind="vendor-order" id={vo.id} />
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-slate-500">Store subtotal</span>
+                      <span className="font-semibold text-belize-navy">{money(vo.subtotalMinor)}</span>
+                    </div>
                   </div>
                 </Card>
               ))}

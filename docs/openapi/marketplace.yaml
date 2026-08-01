@@ -702,3 +702,36 @@ paths:
     patch: { tags: [Notifications], summary: "Mark one notification read (recipient id; own only)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "{ ok: true }" } } }
   /notifications/{id}:
     delete: { tags: [Notifications], summary: "Dismiss (soft-delete) one notification (own only)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "{ ok: true }" } } }
+  # ---- Messaging & Order Communication (Phase 4 · M17) ----
+  /conversations:
+    get: { tags: [Messaging], summary: "The caller's conversations (context-scoped) with unread counts", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "401": { $ref: "#/components/responses/Unauthorized" } } }
+  /conversations/unread-count:
+    get: { tags: [Messaging], summary: "Total unread message count", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ count }" } } }
+  /conversations/attachments/presign:
+    post: { tags: [Messaging], summary: "Presigned private PUT for a message attachment (rate-limited)", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "400": { description: "Disallowed type" } }, description: "images + PDF only, no executables; body { fileName, contentType, sizeBytes }" }
+  /conversations/vendor-order/{id}:
+    post: { tags: [Messaging], summary: "Open the customer↔vendor conversation for a vendor-order", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Conversation }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /conversations/delivery/{id}:
+    post: { tags: [Messaging], summary: "Open a delivery conversation (customer↔driver or vendor↔driver via ?with=)", parameters: [ { name: id, in: path, required: true, schema: { type: string } }, { name: with, in: query, required: false, schema: { type: string, enum: [customer, vendor] } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Conversation }, "400": { description: "No driver assigned yet" }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /conversations/support:
+    post: { tags: [Messaging], summary: "Open a support case", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Conversation } }, description: "body { subject, message, relatedType?, relatedId? }" }
+  /conversations/{id}:
+    get: { tags: [Messaging], summary: "Conversation detail + messages (404 for non-participants)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /conversations/{id}/messages:
+    post: { tags: [Messaging], summary: "Send a message (+ optional attachment keys); rate-limited", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Sent }, "400": { description: "Bad attachment" }, "403": { description: "Closed / not allowed / reassigned / suspended" } }, description: "body { body, attachmentKeys? }" }
+  /conversations/{id}/read:
+    post: { tags: [Messaging], summary: "Mark the conversation read", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ ok: true }" } } }
+  /conversations/{id}/close:
+    post: { tags: [Messaging], summary: "Close a conversation (creator or support)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Closed }, "403": { $ref: "#/components/responses/Forbidden" } } }
+  /conversations/{id}/reopen:
+    post: { tags: [Messaging], summary: "Reopen a conversation (creator or support)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Reopened } } }
+  /admin/support:
+    get: { tags: [Messaging], summary: "List support conversations (filter status)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires support.read" }
+  /admin/support/{id}:
+    get: { tags: [Messaging], summary: "Support conversation detail (includes internal notes)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires support.read" }
+  /admin/support/{id}/join:
+    post: { tags: [Messaging], summary: "Join a support thread", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Joined } }, description: "Requires support.respond" }
+  /admin/support/{id}/messages:
+    post: { tags: [Messaging], summary: "Reply to the requester", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Sent } }, description: "Requires support.respond" }
+  /admin/support/{id}/notes:
+    post: { tags: [Messaging], summary: "Add an INTERNAL note (never shown to the requester)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Added } }, description: "Requires support.respond" }

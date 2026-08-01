@@ -40,6 +40,9 @@ export const PERMISSIONS = [
   'deliveries.manage', // cancel an assignment; other operational dispatch actions
   'deliveries.verify', // reveal pickup/delivery PINs; admin override of verification
   'proof_of_delivery.read', // view private proof-of-delivery files via signed URLs
+  // ---- Messaging & Order Communication (Phase 4 · M17) ----
+  'support.read', // list / view support conversations (and any conversation for moderation)
+  'support.respond', // join + reply to support threads, add internal notes, close/reopen
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -59,6 +62,8 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'drivers.read',
     'deliveries.read',
     'proof_of_delivery.read',
+    'support.read',
+    'support.respond',
   ],
   ADMIN: [
     'users.read',
@@ -88,6 +93,8 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'deliveries.manage',
     'deliveries.verify',
     'proof_of_delivery.read',
+    'support.read',
+    'support.respond',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

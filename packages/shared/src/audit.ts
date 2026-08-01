@@ -73,6 +73,15 @@ export const AUDIT_ACTIONS = [
   'DELIVERY_PICKUP_PIN_FAILED',
   'DELIVERY_DELIVERY_PIN_FAILED',
   'INVENTORY_FULFILLED',
+  // ---- Messaging & Order Communication (Phase 4 · M17) ----
+  'CONVERSATION_CREATED',
+  'CONVERSATION_CLOSED',
+  'CONVERSATION_REOPENED',
+  'MESSAGE_SENT',
+  'MESSAGE_DELETED',
+  'MESSAGE_ATTACHMENT_ADDED',
+  'SUPPORT_JOINED',
+  'INTERNAL_NOTE_ADDED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

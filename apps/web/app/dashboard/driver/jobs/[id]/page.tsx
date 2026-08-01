@@ -18,8 +18,12 @@ import {
   Alert,
   Spinner,
 } from '../../../../../components/ui';
+import { MessageButton } from '../../../../../components/messaging/MessageButton';
 
 /* --------------------------------------------------------------- helpers */
+
+/** Job is "active" — between acceptance and completion — so customer messaging makes sense. */
+const ACTIVE_JOB_STATUSES = new Set(['DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING']);
 
 function errMessage(e: unknown): string {
   return (e as ApiError)?.message ?? 'Something went wrong.';
@@ -168,7 +172,14 @@ export default function DriverJobDetailPage() {
       <PageHeader
         title={`Order #${job.orderNumber}`}
         description={job.vendor?.businessName}
-        actions={<StatusBadge status={job.status} />}
+        actions={
+          <>
+            {ACTIVE_JOB_STATUSES.has(job.status) && (
+              <MessageButton kind="delivery" id={job.id} with="customer" />
+            )}
+            <StatusBadge status={job.status} />
+          </>
+        }
       />
 
       {error && <Alert tone="error">{error}</Alert>}

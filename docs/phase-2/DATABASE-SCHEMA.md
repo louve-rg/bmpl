@@ -35,6 +35,10 @@ OrderDelivery 1─* DeliveryAssignment (append-only history)     (M15)
 User 1─1 DriverProfile 1─* DriverVehicle / DriverServiceArea   (M14)
 Notification (event) 1─* NotificationRecipient *─1 User        (M16)
 User 1─* NotificationPreference (per category)                 (M16)
+Conversation 1─* ConversationParticipant *─1 User             (M17)
+             1─* Message 1─* MessageAttachment                (M17)
+                         1─* MessageReadReceipt *─1 User       (M17)
+  context = (contextType ∈ {ORDER,VENDOR_ORDER,DELIVERY,SUPPORT_CASE}, contextId, pairing)
 ```
 
 ## Models
@@ -59,6 +63,11 @@ User 1─* NotificationPreference (per category)                 (M16)
 | `Notification` (notifications) | type, category, event, title, body, data(Json) | **M16** the notification EVENT (fan-out capable); no per-user state |
 | `NotificationRecipient` (notification_recipients) | notificationId, userId, channel, readAt, deletedAt | **M16** per-user read/dismiss state; unique (notification, user) |
 | `NotificationPreference` (notification_preferences) | userId, category*, inApp, email, push | **M16** per-user per-category channel prefs; unique (user, category) |
+| `Conversation` (conversations) | contextType, contextId, pairing, subject, status, createdById, closedAt | **M17** context-scoped; unique (contextType, contextId, pairing) — no arbitrary chat |
+| `ConversationParticipant` (conversation_participants) | conversationId, userId, role, canSend, lastReadAt, leftAt | **M17** per-user membership + read state; unique (conversation, user) |
+| `Message` (messages) | conversationId, senderId?, type (USER/SYSTEM/INTERNAL_NOTE), body, editedAt, deletedAt | **M17** plain text; soft-delete only; immutable SYSTEM/INTERNAL_NOTE |
+| `MessageAttachment` (message_attachments) | messageId, storageKey*, mimeType, fileSizeBytes, scanStatus | **M17** private R2; images+PDF; scan placeholder |
+| `MessageReadReceipt` (message_read_receipts) | messageId, userId, readAt | **M17** read receipt; unique (message, user) |
 
 \* = unique.
 

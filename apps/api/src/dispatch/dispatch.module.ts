@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ProductsModule } from '../products/products.module';
 import { DriverModule } from '../driver/driver.module';
+import { MessagingModule } from '../messaging/messaging.module';
 import { DeliveryCoreService } from './delivery-core.service';
 import { DispatchService } from './dispatch.service';
 import { DriverJobService } from './driver-jobs.service';
@@ -20,7 +21,7 @@ import { CustomerDeliveryController, VendorDeliveryStatusController } from './de
  * NO GPS/tracking/routing/ETA/earnings/wallets/payouts/settlement.
  */
 @Module({
-  imports: [PrismaModule, ProductsModule, DriverModule],
+  imports: [PrismaModule, ProductsModule, DriverModule, MessagingModule],
   controllers: [AdminDispatchController, DriverJobsController, CustomerDeliveryController, VendorDeliveryStatusController],
   providers: [DeliveryCoreService, DispatchService, DriverJobService, DeliveryAccessService],
 })

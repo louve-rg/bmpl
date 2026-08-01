@@ -28,6 +28,7 @@ export const NOTIFICATION_CATEGORIES = [
   'ROLE_APPLICATION',
   'ADMIN_ALERT',
   'SECURITY',
+  'MESSAGE',
   'SYSTEM',
 ] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
@@ -43,6 +44,7 @@ export const NOTIFICATION_CATEGORY_LABELS: Record<NotificationCategory, string> 
   ROLE_APPLICATION: 'Applications',
   ADMIN_ALERT: 'Admin alerts',
   SECURITY: 'Security',
+  MESSAGE: 'Messages',
   SYSTEM: 'System',
 };
 
@@ -96,5 +98,10 @@ export const NOTIFICATION_EVENTS = [
   'ADMIN_ORDER_EXCEPTION',
   'ADMIN_FAILED_DELIVERY',
   'ADMIN_SECURITY_ALERT',
+  // messaging (M17)
+  'MESSAGE_RECEIVED',
+  'MESSAGE_ATTACHMENT',
+  'SUPPORT_RESPONSE',
+  'CONVERSATION_CLOSED',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];

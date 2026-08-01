@@ -7,6 +7,7 @@ import { Badge, type Tone } from '../ui';
  */
 const CATEGORY_TONE: Record<NotificationCategory, Tone> = {
   ORDER: 'info',
+  MESSAGE: 'brand',
   PAYMENT: 'success',
   DELIVERY: 'brand',
   DRIVER: 'brand',

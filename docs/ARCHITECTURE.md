@@ -94,6 +94,22 @@ the same DB transaction, and notifies the applicant.
   `NotificationCategory` + a stable `event` key (`@bmpl/shared`). The notification
   center reads are strictly caller-scoped.
 
+### Messaging & order communication (M17)
+
+- **No arbitrary chat.** A `Conversation` is uniquely keyed by
+  `(contextType, contextId, pairing)` — always bound to a vendor-order, delivery, or
+  support case. Access is authorized against the caller's *live* relationship AND the
+  conversation's pairing (a customer related to a delivery still can't read the
+  vendor↔driver pickup thread); non-participants get `404`.
+- **Dynamic driver send.** A DELIVERY driver may send only if they are the delivery's
+  *current* `assignedDriverProfileId` — a reassigned driver keeps read/history but loses
+  send automatically, with no dispatch coupling required for correctness.
+- Fully **normalized** rows (`Message`, `ConversationParticipant`, `MessageAttachment`,
+  `MessageReadReceipt`) — no JSON histories. SYSTEM messages mark events without
+  duplicating business-state transitions; INTERNAL_NOTE messages are support-only and
+  filtered from every non-support view. Attachments are private R2 (signed-URL view).
+  New-message events use the **M16** notification engine (`MESSAGE` category).
+
 ## Request authorization pipeline (API)
 
 ```

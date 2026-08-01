@@ -116,6 +116,7 @@ enum NotificationCategory {
   ROLE_APPLICATION
   ADMIN_ALERT
   SECURITY
+  MESSAGE
   SYSTEM
 }
 
@@ -193,6 +194,15 @@ enum AuditAction {
   DELIVERY_PICKUP_PIN_FAILED
   DELIVERY_DELIVERY_PIN_FAILED
   INVENTORY_FULFILLED
+  // ---- Messaging & Order Communication (Phase 4 · M17) ----
+  CONVERSATION_CREATED
+  CONVERSATION_CLOSED
+  CONVERSATION_REOPENED
+  MESSAGE_SENT
+  MESSAGE_DELETED
+  MESSAGE_ATTACHMENT_ADDED
+  SUPPORT_JOINED
+  INTERNAL_NOTE_ADDED
 }
 
 enum WalletAccountType {
@@ -267,31 +277,35 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  roles                   UserRole[]
-  sessions                Session[]
-  emailTokens             EmailVerificationToken[]
-  passwordResetTokens     PasswordResetToken[]
-  roleApplications        RoleApplication[]
-  adminPermissions        AdminPermissionGrant[]    @relation("PermissionHolder")
-  grantedPermissions      AdminPermissionGrant[]    @relation("PermissionGrantedBy")
-  notifications           NotificationRecipient[]
-  notificationPreferences NotificationPreference[]
-  auditLogsAsActor        AuditLog[]                @relation("AuditActor")
-  auditLogsAsTarget       AuditLog[]                @relation("AuditTarget")
-  reviewsPerformed        RoleApplicationReview[]   @relation("ReviewReviewer")
-  walletAccounts          WalletAccount[]
-  cart                    Cart?
-  orders                  Order[]
-  payments                Payment[]
-  paymentMethods          PaymentMethod[]
-  idempotencyKeys         IdempotencyKey[]
-  vendorProfile           VendorProfile?            @relation("UserVendorProfile")
-  driverProfile           DriverProfile?            @relation("UserDriverProfile")
-  deliveriesAssigned      OrderDelivery[]           @relation("DeliveryAssignedBy")
-  deliveryAssignmentsMade DeliveryAssignment[]      @relation("AssignmentAssignedBy")
-  vendorReviewsMade       VendorModerationReview[]  @relation("VendorReviewer")
-  productReviewsMade      ProductModerationReview[] @relation("ProductReviewer")
-  inventoryChangesMade    InventoryChange[]         @relation("InventoryActor")
+  roles                      UserRole[]
+  sessions                   Session[]
+  emailTokens                EmailVerificationToken[]
+  passwordResetTokens        PasswordResetToken[]
+  roleApplications           RoleApplication[]
+  adminPermissions           AdminPermissionGrant[]    @relation("PermissionHolder")
+  grantedPermissions         AdminPermissionGrant[]    @relation("PermissionGrantedBy")
+  notifications              NotificationRecipient[]
+  notificationPreferences    NotificationPreference[]
+  conversationsCreated       Conversation[]            @relation("ConversationCreatedBy")
+  conversationParticipations ConversationParticipant[]
+  messagesSent               Message[]                 @relation("MessageSender")
+  messageReadReceipts        MessageReadReceipt[]
+  auditLogsAsActor           AuditLog[]                @relation("AuditActor")
+  auditLogsAsTarget          AuditLog[]                @relation("AuditTarget")
+  reviewsPerformed           RoleApplicationReview[]   @relation("ReviewReviewer")
+  walletAccounts             WalletAccount[]
+  cart                       Cart?
+  orders                     Order[]
+  payments                   Payment[]
+  paymentMethods             PaymentMethod[]
+  idempotencyKeys            IdempotencyKey[]
+  vendorProfile              VendorProfile?            @relation("UserVendorProfile")
+  driverProfile              DriverProfile?            @relation("UserDriverProfile")
+  deliveriesAssigned         OrderDelivery[]           @relation("DeliveryAssignedBy")
+  deliveryAssignmentsMade    DeliveryAssignment[]      @relation("AssignmentAssignedBy")
+  vendorReviewsMade          VendorModerationReview[]  @relation("VendorReviewer")
+  productReviewsMade         ProductModerationReview[] @relation("ProductReviewer")
+  inventoryChangesMade       InventoryChange[]         @relation("InventoryActor")
 
   @@index([status])
   @@index([district])
@@ -519,6 +533,139 @@ model NotificationPreference {
   @@unique([userId, category])
   @@index([userId])
   @@map("notification_preferences")
+}
+
+// ---- Messaging & Order Communication (Phase 4 · M17) ------------------------
+// Scoped, context-bound conversations — NO arbitrary user-to-user chat. Every
+// conversation is tied to a business context (a vendor-order, a delivery, or a
+// support case). The (contextType, contextId, pairing) triple is unique so the
+// same context + participant grouping is never duplicated. Driver SEND access is
+// authorized dynamically against the delivery's CURRENT assigned driver, so a
+// reassigned driver keeps read/history but loses send access automatically.
+
+enum ConversationContext {
+  ORDER
+  VENDOR_ORDER
+  DELIVERY
+  SUPPORT_CASE
+}
+
+enum ConversationStatus {
+  OPEN
+  CLOSED
+}
+
+enum ConversationParticipantRole {
+  CUSTOMER
+  VENDOR
+  DRIVER
+  SUPPORT
+}
+
+enum MessageType {
+  USER
+  SYSTEM
+  INTERNAL_NOTE // support/admin-only; never shown to end users
+}
+
+enum AttachmentScanStatus {
+  PENDING
+  CLEAN
+  FLAGGED
+}
+
+model Conversation {
+  id            String              @id @default(cuid())
+  contextType   ConversationContext
+  // Business id (vendorOrderId / deliveryId / generated support-case id). Used with
+  // pairing to dedupe. Nullable only defensively; always set in practice.
+  contextId     String
+  // Canonical participant grouping (e.g. CUSTOMER_VENDOR, CUSTOMER_DRIVER,
+  // VENDOR_DRIVER, USER_SUPPORT) — see @bmpl/shared CONVERSATION_PAIRINGS.
+  pairing       String
+  subject       String?
+  status        ConversationStatus  @default(OPEN)
+  createdById   String?
+  createdBy     User?               @relation("ConversationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  closedById    String?
+  closedAt      DateTime?
+  lastMessageAt DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@unique([contextType, contextId, pairing])
+  @@index([contextType, contextId])
+  @@index([status, lastMessageAt])
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String                      @id @default(cuid())
+  conversationId String
+  conversation   Conversation                @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           ConversationParticipantRole
+  // Send access; DELIVERY driver access is ALSO checked dynamically at send time.
+  canSend        Boolean                     @default(true)
+  lastReadAt     DateTime?
+  joinedAt       DateTime                    @default(now())
+  leftAt         DateTime?
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  // Null for SYSTEM messages.
+  senderId       String?
+  sender         User?        @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+  type           MessageType  @default(USER)
+  body           String
+  editedAt       DateTime?
+  deletedAt      DateTime? // soft delete; financial/support/safety messages are never hard-deleted
+  createdAt      DateTime     @default(now())
+
+  attachments  MessageAttachment[]
+  readReceipts MessageReadReceipt[]
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model MessageAttachment {
+  id            String               @id @default(cuid())
+  messageId     String
+  message       Message              @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  storageKey    String               @unique // private-bucket key
+  mimeType      String
+  fileSizeBytes Int
+  fileName      String?
+  scanStatus    AttachmentScanStatus @default(PENDING) // malware-scan placeholder
+  createdAt     DateTime             @default(now())
+
+  @@index([messageId])
+  @@map("message_attachments")
+}
+
+model MessageReadReceipt {
+  id        String   @id @default(cuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt    DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@index([userId])
+  @@map("message_read_receipts")
 }
 
 // ---- Audit ------------------------------------------------------------------

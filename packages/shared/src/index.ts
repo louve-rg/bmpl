@@ -10,6 +10,7 @@ export * from './marketplace';
 export * from './payments';
 export * from './driver';
 export * from './dispatch';
+export * from './messaging';
 export * from './slug';
 
 /** Shared, framework-agnostic branding tokens (mirrored in the UI package). */

@@ -64,4 +64,8 @@ export const STORAGE_PREFIX = {
   // POD photos/signature capture the recipient/premises → private, viewed only via
   // short-lived signed URLs by the authorized customer/vendor/driver/admin.
   deliveryProof: (userId: string) => `deliveries/proof/${userId}`,
+  // ---- Messaging attachments (Phase 4 · M17), PRIVATE bucket ----
+  // Message attachments (issue/damage photos, supporting docs) → private, viewed
+  // only via short-lived signed URLs by conversation participants (+ authorized support).
+  messageAttachment: (userId: string) => `messages/${userId}`,
 } as const;

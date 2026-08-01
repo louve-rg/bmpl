@@ -4,6 +4,7 @@ import type { AssignDeliveryInput, CancelDeliveryInput, ReassignDeliveryInput } 
 import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { DriverService } from '../driver/driver.service';
+import { MessagingService } from '../messaging/messaging.service';
 import { DeliveryCoreService } from './delivery-core.service';
 
 interface Actor {
@@ -26,6 +27,7 @@ export class DispatchService {
     private readonly prisma: PrismaService,
     private readonly drivers: DriverService,
     private readonly core: DeliveryCoreService,
+    private readonly messaging: MessagingService,
   ) {}
 
   // ---- reads -------------------------------------------------------------
@@ -180,6 +182,8 @@ export class DispatchService {
         tx,
       );
     });
+    // Best-effort: system message + driver-participant swap in any DELIVERY thread.
+    await this.messaging.onDeliveryEvent(deliveryId, action === 'REASSIGN' ? 'Delivery reassigned to a new driver.' : 'A driver was assigned.', e.profile.userId);
     return this.get(deliveryId);
   }
 
@@ -204,6 +208,7 @@ export class DispatchService {
         tx,
       );
     });
+    await this.messaging.onDeliveryEvent(deliveryId, 'This delivery was cancelled.', null);
     return this.get(deliveryId);
   }
 

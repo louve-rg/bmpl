@@ -17,6 +17,8 @@
 | `/dashboard/driver` | authed | driver (M14): profile, vehicles, service areas, availability, application/approval status |
 | `/dashboard/driver/jobs` | DELIVERY_DRIVER | driver job feed (M15): assigned/active + completed jobs |
 | `/dashboard/driver/jobs/[id]` | DELIVERY_DRIVER | job detail (M15): accept/decline, pickup PIN, in-transit/arriving, delivery PIN + POD upload |
+| `/dashboard/notifications` | authed | notification center (M16): filter, mark read/dismiss, preferences |
+| `/dashboard/messages` | authed | messaging center (M17): order/delivery/support conversations, composer, attachments |
 | `/dashboard/products` | VENDOR | product list (submit/archive/delete) |
 | `/dashboard/products/new` | VENDOR | create product |
 | `/dashboard/products/[id]` | VENDOR | edit product + image manager + variants/inventory manager |
@@ -31,6 +33,8 @@ pages `notFound()` on missing/unapproved.
 | `/dashboard/vendors` | `vendors.read` | vendor queue (status filter) |
 | `/dashboard/drivers` | `drivers.read` | driver list/detail (M14): profiles, vehicles + approve/reject, expiry, availability |
 | `/dashboard/dispatch` | `deliveries.read` | dispatch console (M15): deliveries list/detail, assign/reassign/cancel, eligible drivers, timeline, assignment history, POD, PIN reveal |
+| `/dashboard/notifications` | authed staff | admin notification center (M16): admin-alert/security feed + preferences |
+| `/dashboard/support` | `support.read` | support console (M17): support conversations, join/reply, internal notes, close/reopen |
 | `/dashboard/vendors/[id]` | `vendors.read`/`.moderate` | detail + approve/reject/suspend/restore |
 | `/dashboard/products` | `products.read` | product queue (status filter) |
 | `/dashboard/products/[id]` | `products.read`/`.moderate` | detail + images + moderation |

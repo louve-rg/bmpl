@@ -20,6 +20,8 @@ enforced server-side by the global guard chain, regardless of what any UI shows.
 | `deliveries.manage` | cancel an assignment; operational dispatch actions (M15) |
 | `deliveries.verify` | reveal pickup/delivery PINs; admin override of verification (M15) |
 | `proof_of_delivery.read` | view private proof-of-delivery files via signed URLs (M15) |
+| `support.read` | list / view support conversations (and any conversation for moderation) (M17) |
+| `support.respond` | join + reply to support threads, add internal notes, close/reopen (M17) |
 
 ### Default bundles (`PERMISSION_BUNDLES`)
 | Staff role | Marketplace permissions |
