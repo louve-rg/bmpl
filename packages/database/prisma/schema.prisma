@@ -218,6 +218,59 @@ enum AuditAction {
   VENDOR_ORDER_READY_FOR_PICKUP
   VENDOR_ORDER_PICKED_UP
   VENDOR_ORDER_PICKUP_PIN_FAILED
+  // ---- Reviews & Ratings (Phase 4 · M19) ----
+  REVIEW_CREATED
+  REVIEW_EDITED
+  REVIEW_MODERATED
+  REVIEW_RESPONSE_ADDED
+  REVIEW_RESPONSE_EDITED
+  REVIEW_REPORTED
+  REVIEW_REPORT_RESOLVED
+}
+
+// ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
+// Verified reviews tied to a COMPLETED transaction. subjectId is a plain indexed
+// id (product / vendor-profile / driver-profile) — aggregates recompute by
+// (subjectType, subjectId, status). The verified context (order item / vendor-order /
+// delivery) makes each review non-duplicable per reviewer.
+
+enum ReviewSubjectType {
+  PRODUCT
+  VENDOR
+  DRIVER
+}
+
+// The order artifact that proves eligibility for a review.
+enum ReviewContextType {
+  ORDER_ITEM // product review
+  VENDOR_ORDER // vendor review
+  ORDER_DELIVERY // driver / delivery review
+}
+
+enum ReviewStatus {
+  PUBLISHED
+  HIDDEN // hidden by moderation (kept, not deleted)
+  REJECTED // prohibited content (kept for audit)
+}
+
+enum ReviewReportReason {
+  SPAM
+  HARASSMENT
+  IRRELEVANT
+  PROHIBITED
+  PRIVACY
+  FRAUDULENT
+}
+
+enum ReviewReportStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+enum ReviewMediaStatus {
+  APPROVED
+  REJECTED
 }
 
 enum WalletAccountType {
@@ -1727,6 +1780,103 @@ model DriverEarning {
 
   @@index([driverProfileId, status])
   @@map("driver_earnings")
+}
+
+// A verified customer review of a product / vendor / driver, tied to a completed
+// transaction. User ids are plain (no FK) — users are never hard-deleted.
+model Review {
+  id               String            @id @default(cuid())
+  reviewerId       String
+  subjectType      ReviewSubjectType
+  subjectId        String // productId / vendorProfileId / driverProfileId
+  contextType      ReviewContextType
+  contextId        String // orderItemId / vendorOrderId / orderDeliveryId (proves eligibility)
+  rating           Int // 1..5
+  title            String?
+  body             String
+  status           ReviewStatus      @default(PUBLISHED)
+  verifiedPurchase Boolean           @default(true)
+  helpfulCount     Int               @default(0) // cache; recomputable from votes
+  // Product-review variant snapshot (so a "Perfect in Pink" review never mislabels).
+  productId        String?
+  variantId        String?
+  variantName      String?
+  sku              String?
+  optionsSnapshot  Json?
+  // Moderation.
+  moderatedById    String?
+  moderationReason String?
+  moderatedAt      DateTime?
+  editedAt         DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  media    ReviewMedia[]
+  response ReviewResponse?
+  reports  ReviewReport[]
+  votes    ReviewHelpfulVote[]
+
+  // One active review per reviewer per verified context (dup prevention).
+  @@unique([reviewerId, subjectType, contextId])
+  @@index([subjectType, subjectId, status])
+  @@index([reviewerId])
+  @@index([status])
+  @@map("reviews")
+}
+
+model ReviewMedia {
+  id            String            @id @default(cuid())
+  reviewId      String
+  review        Review            @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  storageKey    String            @unique // private bucket
+  mimeType      String
+  fileSizeBytes Int
+  status        ReviewMediaStatus @default(APPROVED)
+  createdAt     DateTime          @default(now())
+
+  @@index([reviewId])
+  @@map("review_media")
+}
+
+model ReviewResponse {
+  id          String    @id @default(cuid())
+  reviewId    String    @unique
+  review      Review    @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  responderId String // vendor user id
+  body        String
+  editedAt    DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@map("review_responses")
+}
+
+model ReviewReport {
+  id             String             @id @default(cuid())
+  reviewId       String
+  review         Review             @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  reporterId     String
+  reason         ReviewReportReason
+  note           String?
+  status         ReviewReportStatus @default(OPEN)
+  resolvedById   String?
+  resolutionNote String?
+  resolvedAt     DateTime?
+  createdAt      DateTime           @default(now())
+
+  @@unique([reviewId, reporterId]) // one report per user per review
+  @@index([status])
+  @@map("review_reports")
+}
+
+model ReviewHelpfulVote {
+  id        String   @id @default(cuid())
+  reviewId  String
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@unique([reviewId, userId])
+  @@map("review_helpful_votes")
 }
 
 model DriverVehicle {

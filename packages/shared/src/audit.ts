@@ -97,6 +97,14 @@ export const AUDIT_ACTIONS = [
   'VENDOR_ORDER_READY_FOR_PICKUP',
   'VENDOR_ORDER_PICKED_UP',
   'VENDOR_ORDER_PICKUP_PIN_FAILED',
+  // ---- Reviews & Ratings (Phase 4 · M19) ----
+  'REVIEW_CREATED',
+  'REVIEW_EDITED',
+  'REVIEW_MODERATED',
+  'REVIEW_RESPONSE_ADDED',
+  'REVIEW_RESPONSE_EDITED',
+  'REVIEW_REPORTED',
+  'REVIEW_REPORT_RESOLVED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -5,10 +5,10 @@
 |---|---|---|
 | `/` | public | landing (nav: Shop → `/products`, Vendors → `/vendors`) |
 | `/products` | public | catalog: search, category sidebar, price/in-stock filters, sort, pagination, `vendorSlug` (single-store view) |
-| `/products/[slug]` | public | product detail: gallery, variant list, availability |
+| `/products/[slug]` | public | product detail: gallery, variant list, availability, ratings & reviews (M19) |
 | `/orders/[id]` | authed | customer order detail + delivery tracking (M15): timeline, driver, delivery-PIN reveal, proof of delivery |
 | `/vendors` | public | vendor directory + name search |
-| `/store/[slug]` | public | storefront: banner/logo, info, hours, locations, featured products |
+| `/store/[slug]` | public | storefront: banner/logo, info, hours, locations, featured products, store rating + customer reviews (M19) |
 | `/login` | public | sign in; honors same-origin `?next=` to return after an add-to-cart/checkout bounce |
 | `/dashboard` | authed | overview + role switcher |
 | `/dashboard/roles` | authed | request provider roles: upload required documents, view application status + reviewer notes, respond to MORE_INFO_REQUIRED and resubmit |

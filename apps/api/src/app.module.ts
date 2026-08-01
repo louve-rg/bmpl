@@ -23,6 +23,7 @@ import { DriverModule } from './driver/driver.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { SettlementModule } from './settlement/settlement.module';
+import { ReviewsModule } from './reviews/reviews.module';
 import { PaymentsModule } from './payments/payments.module';
 import { WalletModule } from './wallet/wallet.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
@@ -60,6 +61,7 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     DispatchModule,
     MessagingModule,
     SettlementModule,
+    ReviewsModule,
     WalletModule,
     PaymentsModule,
     MaintenanceModule,

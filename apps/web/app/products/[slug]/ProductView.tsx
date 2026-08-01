@@ -5,6 +5,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Gallery, type GalleryImage } from './Gallery';
 import { Badge } from '../../../components/ui';
+import { ProductReviews } from '../../../components/reviews/ProductReviews';
+import { StarRating } from '../../../components/reviews/StarRating';
+import type { RatingAggregate } from '../../../lib/reviews';
 import { VariantLineup, VariantSelector, type LineupImage } from '../../../components/products/VariantChooser';
 import { cartApi, money, notifyCartChanged } from '../../../lib/cart';
 import type { ApiError } from '../../../lib/api';
@@ -73,6 +76,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [reviewAggregate, setReviewAggregate] = useState<RatingAggregate | null>(null);
 
   const selectedVariant = useMemo(
     () => (hasVariants ? (resolveSelectedVariant(product.variants, selection) as Variant | null) : null),
@@ -194,6 +198,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
           : `Add to cart · ${money(effectivePrice)}`;
 
   return (
+    <>
     <div className="mt-4 grid gap-8 md:grid-cols-2">
       <div>
         {/* key resets the active thumbnail when the shown image set changes */}
@@ -214,6 +219,11 @@ export function ProductView({ product }: { product: ProductDetail }) {
         {/* Single source of truth for the shown title: the selected variant, else the product. */}
         <h1 className="mt-1 text-3xl font-bold tracking-tight text-belize-navy">{displayTitle}</h1>
         {product.brand && <p className="text-sm text-slate-500">by {product.brand}</p>}
+        {reviewAggregate && reviewAggregate.count > 0 && (
+          <a href="#reviews" className="mt-1.5 inline-flex items-center gap-1.5 hover:underline">
+            <StarRating value={reviewAggregate.average} size="sm" showValue count={reviewAggregate.count} />
+          </a>
+        )}
         {/* Base product family kept visible as a secondary line when a variant title is shown. */}
         {selectedVariant && displayTitle !== product.title && (
           <p className="text-sm text-slate-500">{product.title}</p>
@@ -353,6 +363,14 @@ export function ProductView({ product }: { product: ProductDetail }) {
         )}
       </div>
     </div>
+
+    <section id="reviews" className="mt-12 scroll-mt-24">
+      <h2 className="text-xl font-bold tracking-tight text-belize-navy">Ratings &amp; reviews</h2>
+      <div className="mt-4">
+        <ProductReviews productId={product.id} onAggregate={setReviewAggregate} />
+      </div>
+    </section>
+    </>
   );
 }
 

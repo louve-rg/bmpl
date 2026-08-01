@@ -9,3 +9,4 @@ export * from './dispatch';
 export * from './notifications';
 export * from './messaging';
 export * from './settlement';
+export * from './reviews';

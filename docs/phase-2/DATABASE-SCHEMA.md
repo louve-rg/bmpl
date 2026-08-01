@@ -39,6 +39,10 @@ Conversation 1─* ConversationParticipant *─1 User             (M17)
              1─* Message 1─* MessageAttachment                (M17)
                          1─* MessageReadReceipt *─1 User       (M17)
   context = (contextType ∈ {ORDER,VENDOR_ORDER,DELIVERY,SUPPORT_CASE}, contextId, pairing)
+User 1─* Review (verified) 1─* ReviewMedia                     (M19)
+                          1─1 ReviewResponse                   (M19)
+                          1─* ReviewReport / ReviewHelpfulVote (M19)
+  subject = (subjectType ∈ {PRODUCT,VENDOR,DRIVER}, subjectId)  context = fulfilled OrderItem/VendorOrder/OrderDelivery
 ```
 
 ## Models
@@ -68,6 +72,11 @@ Conversation 1─* ConversationParticipant *─1 User             (M17)
 | `Message` (messages) | conversationId, senderId?, type (USER/SYSTEM/INTERNAL_NOTE), body, editedAt, deletedAt | **M17** plain text; soft-delete only; immutable SYSTEM/INTERNAL_NOTE |
 | `MessageAttachment` (message_attachments) | messageId, storageKey*, mimeType, fileSizeBytes, scanStatus | **M17** private R2; images+PDF; scan placeholder |
 | `MessageReadReceipt` (message_read_receipts) | messageId, userId, readAt | **M17** read receipt; unique (message, user) |
+| `Review` (reviews) | reviewerId, subjectType, subjectId, contextType, contextId, rating, title?, body, status, verifiedPurchase, helpfulCount, productId?/variantId?/variantName?/sku?/optionsSnapshot?, moderatedById?/moderationReason?/moderatedAt?, editedAt? | **M19** verified review; unique (reviewerId, subjectType, contextId); subjectId is a plain indexed string (no polymorphic FK) |
+| `ReviewMedia` (review_media) | reviewId, storageKey*, mimeType, fileSizeBytes, status (APPROVED/REJECTED) | **M19** ≤5 photos per review; private R2 under `reviews/<userId>` |
+| `ReviewResponse` (review_responses) | reviewId*, responderId, body, editedAt? | **M19** one seller response per review (editable) |
+| `ReviewReport` (review_reports) | reviewId, reporterId, reason, note?, status (OPEN/ACTIONED/DISMISSED), resolvedById?/resolutionNote?/resolvedAt? | **M19** abuse report; unique (review, reporter) |
+| `ReviewHelpfulVote` (review_helpful_votes) | reviewId, userId | **M19** one helpful vote per user; unique (review, user) |
 
 \* = unique.
 
@@ -83,6 +92,12 @@ permission). Existing rows were migrated to one recipient each (no data loss).
 `InventoryChangeReason` (INITIAL/MANUAL/RESTOCK/CORRECTION/RESERVE/RELEASE/BACKORDER).
 `AuditAction` gained `CATEGORY_*`, `VENDOR_*`, `PRODUCT_*`, `INVENTORY_ADJUSTED`;
 `NotificationType` gained `MARKETPLACE`.
+**M19** added `ReviewSubjectType` (PRODUCT/VENDOR/DRIVER) · `ReviewContextType`
+(ORDER_ITEM/VENDOR_ORDER/ORDER_DELIVERY) · `ReviewStatus` (PUBLISHED/HIDDEN/REJECTED) ·
+`ReviewReportReason` (SPAM/HARASSMENT/IRRELEVANT/PROHIBITED/PRIVACY/FRAUDULENT) ·
+`ReviewReportStatus` (OPEN/ACTIONED/DISMISSED) · `ReviewMediaStatus` (APPROVED/REJECTED);
+`AuditAction` gained seven `REVIEW_*` actions. Cached aggregates reuse the existing
+`ratingAverage`/`ratingCount` on `Product`, `VendorProfile`, and `DriverProfile`.
 
 ## Indexes (beyond primary/unique keys)
 - Category: `(parentId, sortOrder)`, `(isVisible)`
@@ -109,6 +124,11 @@ permission). Existing rows were migrated to one recipient each (no data loss).
 - WalletHold (M12): + `AUTHORIZED` status + `walletTransactionId` (escrow tx backing an authorized hold)
 - Order/VendorOrder (M12): + `CANCELLED` status (authorization-failure rollback)
 - WalletTransaction (now used, M12): unique `(reference)` → ledger-level idempotency; entries sum to zero
+- Review (Phase 4 · M19): unique `(reviewerId, subjectType, contextId)`; `(subjectType, subjectId, status)`, `(reviewerId)`, `(status)`
+- ReviewMedia (M19): unique `(storageKey)`; `(reviewId)`
+- ReviewResponse (M19): unique `(reviewId)`
+- ReviewReport (M19): unique `(reviewId, reporterId)`; `(status)`
+- ReviewHelpfulVote (M19): unique `(reviewId, userId)`
 
 ## Cascade rules
 Vendor/product child rows `onDelete: Cascade`. Category parent + Product→Category

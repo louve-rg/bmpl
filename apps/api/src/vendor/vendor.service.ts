@@ -384,6 +384,8 @@ export class VendorService {
     });
 
     return {
+      // Public review subject id — reviews are read publicly by (subjectType, subjectId).
+      vendorProfileId: p.id,
       businessName: p.businessName,
       slug: p.slug,
       description: p.description,

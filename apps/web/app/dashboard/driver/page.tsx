@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, type ApiError } from '../../../lib/api';
+import { StarRating } from '../../../components/reviews/StarRating';
 import {
   Card as UiCard,
   PageHeader,
@@ -177,6 +178,8 @@ export default function DriverPage() {
 
           {data.profile && <AvailabilityControl profile={data.profile} eligibility={data.eligibility} onDone={reload} />}
 
+          {data.profile && <RatingSummary profile={data.profile} />}
+
           <ProfileEditor profile={data.profile} onDone={reload} />
           <VehicleManager vehicles={data.vehicles} onDone={reload} />
           <ServiceAreasSection serviceAreas={data.serviceAreas} onDone={reload} />
@@ -208,6 +211,29 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
       <h2 className="bmpl-eyebrow mb-4">{title}</h2>
       {children}
     </UiCard>
+  );
+}
+
+/* -------------------------------------------------------- rating summary */
+
+function RatingSummary({ profile }: { profile: DriverProfile }) {
+  const average = profile.ratingAverage ?? 0;
+  const completed = profile.completedDeliveries ?? 0;
+  return (
+    <Card title="Your rating">
+      <div className="flex flex-wrap items-center gap-6">
+        <div className="flex flex-col">
+          <span className="text-3xl font-bold text-belize-navy">{average > 0 ? average.toFixed(1) : '—'}</span>
+          <StarRating value={average} size="md" className="mt-1" />
+        </div>
+        <div className="text-sm text-slate-500">
+          <p>
+            <span className="font-semibold text-belize-navy">{completed}</span> completed deliver{completed === 1 ? 'y' : 'ies'}
+          </p>
+          {average === 0 && <p className="mt-0.5 text-xs">No ratings yet — complete deliveries to start building your rating.</p>}
+        </div>
+      </div>
+    </Card>
   );
 }
 

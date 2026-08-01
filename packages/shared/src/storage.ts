@@ -68,4 +68,8 @@ export const STORAGE_PREFIX = {
   // Message attachments (issue/damage photos, supporting docs) → private, viewed
   // only via short-lived signed URLs by conversation participants (+ authorized support).
   messageAttachment: (userId: string) => `messages/${userId}`,
+  // ---- Review media (Phase 4 · M19), PRIVATE bucket ----
+  // Review photos uploaded privately + shown via short-lived signed URLs once
+  // published (reactive moderation can reject them).
+  reviewMedia: (userId: string) => `reviews/${userId}`,
 } as const;

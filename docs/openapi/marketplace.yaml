@@ -26,6 +26,8 @@ tags:
     description: Payment & wallet-hold foundation (M11) — read-only. NO money moves; no capture/settlement.
   - name: Wallet
     description: Wallet authorization & escrow (M12). Money moves ONLY customer↔escrow via balanced double-entry.
+  - name: Reviews
+    description: Verified reviews & ratings (M19) tied to completed transactions. Public reads; customer writes; vendor responses; admin moderation.
 components:
   securitySchemes:
     cookieAuth:
@@ -776,3 +778,30 @@ paths:
     get: { tags: [Orders], summary: "Customer: reveal own pickup PIN (only while READY_FOR_PICKUP)", parameters: [ { name: vendorOrderId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "{ status, pickupPin, pickedUpAt }" }, "404": { $ref: "#/components/responses/NotFound" } } }
   /admin/orders/vendor-orders/{vendorOrderId}/confirm-pickup:
     post: { tags: [Orders], summary: "Admin override: confirm pickup collection (reason required, no PIN)", parameters: [ { name: vendorOrderId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "PICKED_UP" }, "400": { description: "Missing reason / bad state" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires orders.manage; body { reason }" }
+  # ---- Reviews & Ratings (Phase 4 · M19) ----
+  /marketplace/reviews/{subjectType}/{subjectId}:
+    get: { tags: [Reviews], summary: "Public reviews + aggregate for a product/vendor/driver", parameters: [ { name: subjectType, in: path, required: true, schema: { type: string, enum: [PRODUCT, VENDOR, DRIVER] } }, { name: subjectId, in: path, required: true, schema: { type: string } }, { name: sort, in: query, required: false, schema: { type: string, enum: [helpful, rating_desc, rating_asc] } }, { name: rating, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 5 } }, { name: page, in: query, required: false, schema: { type: integer, minimum: 1 } } ], responses: { "200": { description: "{ aggregate { average, count, distribution }, total, page, pageSize, reviews[] }" } }, description: "PUBLISHED reviews only; pageSize 10; PRODUCT subjectId=productId, VENDOR=vendorProfileId, DRIVER=driverProfileId" }
+  /reviews/eligible:
+    get: { tags: [Reviews], summary: "Fulfilled contexts the customer can still review", security: [{ cookieAuth: [] }], responses: { "200": { description: "[{ subjectType, contextId, label, orderNumber }]" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires CUSTOMER role; delivery after DELIVERED, pickup after PICKED_UP" }
+  /reviews/mine:
+    get: { tags: [Reviews], summary: "The caller's own reviews (any status)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires CUSTOMER role" }
+  /reviews/media/presign:
+    post: { tags: [Reviews], summary: "Presigned private PUT for a review photo (rate-limited)", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "400": { description: "Disallowed type" } }, description: "JPEG/PNG/WebP; ≤5 per review; body { fileName, contentType }" }
+  /reviews:
+    post: { tags: [Reviews], summary: "Create a verified review (rate-limited)", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Review }, "400": { description: "Duplicate / invalid rating" }, "403": { description: "Order not completed / suspended" }, "404": { description: "Context not the caller's" } }, description: "body { subjectType, contextId, rating 1-5, title?, body, mediaKeys? }" }
+  /reviews/{id}:
+    patch: { tags: [Reviews], summary: "Edit own review (rating edit recomputes aggregate)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: Review }, "403": { description: "REJECTED review" }, "404": { $ref: "#/components/responses/NotFound" } }, description: "body { rating?, title?, body? }" }
+  /reviews/{id}/report:
+    post: { tags: [Reviews], summary: "Report a review (idempotent per reporter)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ ok: true }" }, "404": { $ref: "#/components/responses/NotFound" } }, description: "body { reason (SPAM|HARASSMENT|IRRELEVANT|PROHIBITED|PRIVACY|FRAUDULENT), note? }" }
+  /reviews/{id}/helpful:
+    post: { tags: [Reviews], summary: "Toggle a helpful vote (one per user)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ helpful: boolean }" } } }
+  /vendor/reviews/{id}/response:
+    post: { tags: [Reviews], summary: "Vendor: add/edit a response to a review of an own product/store", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Review }, "403": { description: "Not the caller's subject" }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Requires VENDOR role; body { body }" }
+  /admin/reviews:
+    get: { tags: [Reviews], summary: "Moderation list (filters: status, subjectType, reported)", security: [{ cookieAuth: [] }], responses: { "200": { description: "Review[] + reportCount + moderationReason" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires reviews.read" }
+  /admin/reviews/reports:
+    get: { tags: [Reviews], summary: "Report queue (defaults to OPEN)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires reviews.read; query status" }
+  /admin/reviews/{id}/moderate:
+    post: { tags: [Reviews], summary: "Hide / unhide / reject a review (recomputes aggregate)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Review }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires reviews.moderate; body { action (HIDE|UNHIDE|REJECT), reason? }" }
+  /admin/reviews/reports/{id}/resolve:
+    post: { tags: [Reviews], summary: "Resolve a report (ACTIONED | DISMISSED)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ ok: true }" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires reviews.moderate; body { status, note? }" }

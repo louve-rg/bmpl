@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { Badge as UiBadge, EmptyState } from '../ui';
 import { EnlargeableImage } from './EnlargeableImage';
+import { StarRating } from '../reviews/StarRating';
+import { ReviewList } from '../reviews/ReviewList';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
@@ -8,6 +10,7 @@ const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 export interface Storefront {
   businessName: string;
   slug: string;
+  vendorProfileId: string;
   description: string | null;
   contactEmail: string;
   contactPhone: string | null;
@@ -63,10 +66,9 @@ export function StorefrontView({ store }: { store: Storefront }) {
           )}
           <div className="pb-1">
             <h1 className="text-2xl font-bold tracking-tight text-belize-navy">{store.businessName}</h1>
-            <p className="text-sm text-slate-500">
-              {'★'.repeat(Math.round(store.ratingAverage))}
-              {store.ratingCount > 0 ? ` (${store.ratingCount} reviews)` : ' · No reviews yet'}
-            </p>
+            <div className="mt-0.5">
+              <StarRating value={store.ratingAverage} size="sm" showValue count={store.ratingCount} />
+            </div>
           </div>
         </div>
 
@@ -161,6 +163,11 @@ export function StorefrontView({ store }: { store: Storefront }) {
             )}
           </aside>
         </div>
+
+        <section className="mt-10">
+          <h2 className="mb-4 text-lg font-bold text-belize-navy">Customer reviews</h2>
+          <ReviewList subjectType="VENDOR" subjectId={store.vendorProfileId} />
+        </section>
       </div>
     </>
   );
