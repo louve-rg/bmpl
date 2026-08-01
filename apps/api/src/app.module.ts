@@ -27,6 +27,7 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { EngagementModule } from './engagement/engagement.module';
 import { DiscoveryModule } from './discovery/discovery.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { OpsModule } from './ops/ops.module';
 import { PaymentsModule } from './payments/payments.module';
 import { WalletModule } from './wallet/wallet.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
@@ -68,6 +69,7 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     EngagementModule,
     DiscoveryModule,
     AnalyticsModule,
+    OpsModule,
     WalletModule,
     PaymentsModule,
     MaintenanceModule,

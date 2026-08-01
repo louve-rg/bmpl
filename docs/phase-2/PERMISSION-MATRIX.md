@@ -27,12 +27,14 @@ enforced server-side by the global guard chain, regardless of what any UI shows.
 | `reviews.read` | list/view reviews + report queue in the admin console (M19) |
 | `reviews.moderate` | hide/unhide/reject reviews; resolve reports (M19) |
 | `analytics.read` | view platform analytics dashboards + export reports (M22, read-only; ADMIN/SUPER_ADMIN only — excludes SUPPORT_AGENT) |
+| `ops.read` | view the operations console (cross-domain action queues + audit export) (M23) |
+| `ops.manage` | manage the platform announcement / maintenance banner (M23; display-only) |
 
 ### Default bundles (`PERMISSION_BUNDLES`)
 | Staff role | Marketplace permissions |
 |---|---|
 | `SUPPORT_AGENT` | read-only bundle incl. `vendors.read`, `products.read`, `drivers.read`, `deliveries.read`, `proof_of_delivery.read`, `reviews.read` |
-| `ADMIN` | all marketplace + logistics permissions incl. all `deliveries.*` + `proof_of_delivery.read` + `reviews.read`/`reviews.moderate` + `analytics.read` |
+| `ADMIN` | all marketplace + logistics permissions incl. all `deliveries.*` + `proof_of_delivery.read` + `reviews.read`/`reviews.moderate` + `analytics.read` + `ops.read`/`ops.manage` |
 | `SUPER_ADMIN` | all (inherits every permission) |
 
 ## Capability matrix
@@ -54,6 +56,8 @@ enforced server-side by the global guard chain, regardless of what any UI shows.
 | Save products (wishlist) · recently-viewed (own, private) | — | ✅ | — | — | — |
 | View own-store analytics + export (M22) | — | — | ✅ | — | — |
 | View platform analytics + reports (M22, `analytics.read`) | — | — | — | — | ✅ |
+| Operations console + audit export (M23, `ops.read`) | — | — | — | — | ✅ |
+| Manage announcement/maintenance banner (M23, `ops.manage`) | — | — | — | — | ✅ |
 
 ## Ownership rule
 Every vendor endpoint resolves ownership through `OwnershipService`

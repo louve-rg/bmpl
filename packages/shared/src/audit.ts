@@ -105,6 +105,8 @@ export const AUDIT_ACTIONS = [
   'REVIEW_RESPONSE_EDITED',
   'REVIEW_REPORTED',
   'REVIEW_REPORT_RESOLVED',
+  // ---- Platform Operations (Phase 4 · M23) ----
+  'PLATFORM_SETTING_UPDATED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

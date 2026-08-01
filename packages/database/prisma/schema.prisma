@@ -226,6 +226,8 @@ enum AuditAction {
   REVIEW_RESPONSE_EDITED
   REVIEW_REPORTED
   REVIEW_REPORT_RESOLVED
+  // ---- Platform Operations (Phase 4 · M23) ----
+  PLATFORM_SETTING_UPDATED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -1723,6 +1725,29 @@ model PlatformFeeConfig {
 
   @@index([isActive])
   @@map("platform_fee_configs")
+}
+
+// Platform operations announcement / maintenance banner (Phase 4 · M23). A single
+// admin-managed row surfaced to the public banner. DISPLAY-ONLY — maintenanceMode is
+// an informational notice, NOT an API gate (it never blocks requests).
+enum AnnouncementLevel {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model PlatformSetting {
+  id                  String            @id @default(cuid())
+  announcementActive  Boolean           @default(false)
+  announcementLevel   AnnouncementLevel @default(INFO)
+  announcementMessage String?
+  maintenanceMode     Boolean           @default(false) // display-only notice; not an API gate
+  maintenanceMessage  String?
+  updatedById         String?
+  updatedAt           DateTime          @updatedAt
+  createdAt           DateTime          @default(now())
+
+  @@map("platform_settings")
 }
 
 model VendorSettlement {

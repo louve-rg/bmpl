@@ -34,6 +34,8 @@ tags:
     description: Discovery, cross-sell, personalized recommendations & search typeahead (M21). Deterministic, non-AI; read-only over catalog + ratings + own saved/viewed signals.
   - name: Analytics
     description: Analytics & reporting (M22). Read-only aggregation over orders/payments/settlements. Admin (analytics.read) is platform-wide; vendor is own-store only.
+  - name: Operations
+    description: Platform operations (M23). Ops console action queues (ops.read), announcement/maintenance banner (ops.manage; public read; display-only), audit CSV export (audit.read).
 components:
   securitySchemes:
     cookieAuth:
@@ -854,3 +856,13 @@ paths:
     get: { tags: [Analytics], summary: "Vendor's own best sellers", parameters: [ { name: limit, in: query, required: false, schema: { type: integer } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "[{ productId, title, unitsSold, revenueMinor }]" } } }
   /vendor/analytics/reports/orders.csv:
     get: { tags: [Analytics], summary: "Vendor's own orders CSV export", security: [{ cookieAuth: [] }], responses: { "200": { description: "text/csv attachment" } } }
+  # ---- Platform Operations (Phase 4 · M23) ----
+  /admin/ops/overview:
+    get: { tags: [Operations], summary: "Aggregated cross-domain action queues", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ queues: {...}, totalActionable, settings }" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires ops.read; counts pending vendor/product/driver/role work, open review reports/support, failed settlements, deliveries awaiting assignment, pickups awaiting collection, suspended users/roles" }
+  /admin/ops/settings:
+    get: { tags: [Operations], summary: "Read the platform announcement/maintenance settings", security: [{ cookieAuth: [] }], responses: { "200": { description: PlatformSetting } }, description: "Requires ops.read" }
+    patch: { tags: [Operations], summary: "Update the announcement/maintenance banner", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: PlatformSetting }, "400": { description: "Validation error" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires ops.manage; body { announcementActive?, announcementLevel? (INFO|WARNING|CRITICAL), announcementMessage?, maintenanceMode?, maintenanceMessage? }; audited PLATFORM_SETTING_UPDATED; display-only (never gates the API)" }
+  /admin/ops/audit.csv:
+    get: { tags: [Operations], summary: "Audit-log CSV export", parameters: [ { name: action, in: query, required: false, schema: { type: string } }, { name: actorId, in: query, required: false, schema: { type: string } }, { name: from, in: query, required: false, schema: { type: string, format: date-time } }, { name: to, in: query, required: false, schema: { type: string, format: date-time } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "text/csv attachment" } }, description: "Requires audit.read; RFC-4180 quoted" }
+  /marketplace/announcement:
+    get: { tags: [Operations], summary: "Public announcement/maintenance banner (active notices only)", responses: { "200": { description: "{ announcement: { level, message } | null, maintenance: { message } | null }" } }, description: "Public; display-only" }

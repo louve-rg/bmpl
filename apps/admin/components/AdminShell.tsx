@@ -5,9 +5,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import { api } from '../lib/api';
 import { BrandLockup } from './Logo';
 import { NotificationBell } from './notifications/NotificationBell';
+import { AnnouncementBanner } from './AnnouncementBanner';
 
 const NAV: Array<{ label: string; href: string; icon: string }> = [
   { label: 'Overview', href: '/dashboard', icon: 'M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6V11h-6v9Zm0-16v5h6V4h-6Z' },
+  { label: 'Operations', href: '/dashboard/ops', icon: 'M10.3 3.2 9.9 5a7 7 0 0 0-1.7 1l-1.8-.6-1.7 3 1.4 1.2a7 7 0 0 0 0 2l-1.4 1.2 1.7 3 1.8-.6a7 7 0 0 0 1.7 1l.4 1.8h3.4l.4-1.8a7 7 0 0 0 1.7-1l1.8.6 1.7-3-1.4-1.2a7 7 0 0 0 0-2l1.4-1.2-1.7-3-1.8.6a7 7 0 0 0-1.7-1l-.4-1.8h-3.4ZM12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z' },
   { label: 'Notifications', href: '/dashboard/notifications', icon: 'M12 3a6 6 0 0 0-6 6v3l-2 3h16l-2-3V9a6 6 0 0 0-6-6ZM9 19a3 3 0 0 0 6 0' },
   { label: 'Support', href: '/dashboard/support', icon: 'M4 5h16v10H7l-3 3V5Z' },
   { label: 'Reviews', href: '/dashboard/reviews', icon: 'M12 3l2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.2l5.9-.9L12 3Z' },
@@ -78,6 +80,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         </button>
       </aside>
       <main className="flex flex-1 flex-col bg-slate-100">
+        <AnnouncementBanner />
         <header className="flex items-center justify-end border-b border-slate-200 bg-white px-4 py-2.5 md:px-8">
           <NotificationBell />
         </header>

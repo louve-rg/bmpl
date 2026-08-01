@@ -42,6 +42,7 @@ pages `notFound()` on missing/unapproved.
 | `/dashboard/support` | `support.read` | support console (M17): support conversations, join/reply, internal notes, close/reopen |
 | `/dashboard/settlements` | `settlements.read` | settlements & escrow (M18): reconciliation, internal balances, settlements, exceptions/retry, fee config |
 | `/dashboard/analytics` | `analytics.read` | platform analytics (M22): KPIs, sales chart, top products/vendors, orders CSV export |
+| `/dashboard/ops` | `ops.read` | operations console (M23): cross-domain action queues, announcement/maintenance editor (`ops.manage`), audit CSV export (`audit.read`) |
 | `/dashboard/vendors/[id]` | `vendors.read`/`.moderate` | detail + approve/reject/suspend/restore |
 | `/dashboard/products` | `products.read` | product queue (status filter) |
 | `/dashboard/products/[id]` | `products.read`/`.moderate` | detail + images + moderation |

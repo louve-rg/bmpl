@@ -7,6 +7,7 @@ import { BrandLockup } from '../Logo';
 import { ButtonLink } from '../ui';
 import { CartButton } from '../cart/CartButton';
 import { SavedNavButton } from '../saved/SavedNavButton';
+import { AnnouncementBanner } from '../AnnouncementBanner';
 import { api } from '../../lib/api';
 import type { MeView } from '../../lib/types';
 
@@ -53,7 +54,9 @@ export function Header() {
   const initials = me ? `${me.firstName?.[0] ?? ''}${me.lastName?.[0] ?? ''}`.toUpperCase() || 'U' : '';
 
   return (
-    <header className="sticky top-0 z-50 bg-belize-navy/95 backdrop-blur supports-[backdrop-filter]:bg-belize-navy/80">
+    <>
+      <AnnouncementBanner />
+      <header className="sticky top-0 z-50 bg-belize-navy/95 backdrop-blur supports-[backdrop-filter]:bg-belize-navy/80">
       <nav className="container-bmpl flex h-16 items-center justify-between" aria-label="Primary">
         <Link href="/" aria-label="Belize Marketplace & Logistics home">
           <BrandLockup />
@@ -154,6 +157,7 @@ export function Header() {
           </div>
         </div>
       )}
-    </header>
+      </header>
+    </>
   );
 }

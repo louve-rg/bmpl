@@ -81,6 +81,7 @@ User 1─* RecentlyViewedProduct *─1 Product                   (M20)  private,
 | `ReviewHelpfulVote` (review_helpful_votes) | reviewId, userId | **M19** one helpful vote per user; unique (review, user) |
 | `SavedProduct` (saved_products) | userId, productId, createdAt | **M20** wishlist entry; unique (user, product); cascade from user+product; no money/inventory |
 | `RecentlyViewedProduct` (recently_viewed_products) | userId, productId, viewedAt | **M20** private view history; unique (user, product); upserted on view; capped to newest 50 |
+| `PlatformSetting` (platform_settings) | announcementActive, announcementLevel, announcementMessage, maintenanceMode, maintenanceMessage, updatedById | **M23** singleton ops banner (created lazily); maintenanceMode is display-only, never an API gate |
 
 \* = unique.
 
@@ -102,6 +103,9 @@ permission). Existing rows were migrated to one recipient each (no data loss).
 `ReviewReportStatus` (OPEN/ACTIONED/DISMISSED) · `ReviewMediaStatus` (APPROVED/REJECTED);
 `AuditAction` gained seven `REVIEW_*` actions. Cached aggregates reuse the existing
 `ratingAverage`/`ratingCount` on `Product`, `VendorProfile`, and `DriverProfile`.
+**M22** added the `analytics.read` permission only (no schema change — read-only BI).
+**M23** added `AnnouncementLevel` (INFO/WARNING/CRITICAL) + the `PlatformSetting`
+singleton + `AuditAction.PLATFORM_SETTING_UPDATED` + `ops.read`/`ops.manage` permissions.
 
 ## Indexes (beyond primary/unique keys)
 - Category: `(parentId, sortOrder)`, `(isVisible)`
