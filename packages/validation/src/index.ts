@@ -8,3 +8,4 @@ export * from './driver';
 export * from './dispatch';
 export * from './notifications';
 export * from './messaging';
+export * from './settlement';

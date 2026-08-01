@@ -29,6 +29,12 @@ export class WalletService {
     return existing ?? tx.walletAccount.create({ data: { type, currency } });
   }
 
+  /** Get-or-create a user's USER wallet account for a currency (settlement payee). */
+  async ensureUserAccount(userId: string, currency: Currency, tx: Tx): Promise<WalletAccount> {
+    const existing = await tx.walletAccount.findFirst({ where: { userId, type: 'USER', currency } });
+    return existing ?? tx.walletAccount.create({ data: { userId, type: 'USER', currency } });
+  }
+
   /**
    * Persist a BALANCED transaction + its ledger entries and update cached
    * balances. `reference` is unique → duplicate posts collide (P2002), giving

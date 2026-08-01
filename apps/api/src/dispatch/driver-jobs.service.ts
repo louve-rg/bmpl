@@ -14,6 +14,7 @@ import { StorageService } from '../storage/storage.service';
 import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../products/inventory.service';
 import { MessagingService } from '../messaging/messaging.service';
+import { SettlementService } from '../settlement/settlement.service';
 import { DeliveryCoreService } from './delivery-core.service';
 
 interface Actor {
@@ -37,6 +38,7 @@ export class DriverJobService {
     private readonly inventory: InventoryService,
     private readonly core: DeliveryCoreService,
     private readonly messaging: MessagingService,
+    private readonly settlement: SettlementService,
   ) {}
 
   private async myProfileId(userId: string): Promise<string> {
@@ -232,6 +234,10 @@ export class DriverJobService {
       await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId, actor.userId], { event: 'DELIVERY_DELIVERED', title: 'Delivered', body: `Order ${d.vendorOrder.order.orderNumber} was delivered${dto.recipientName ? ` to ${dto.recipientName}` : ''}.`, data: { deliveryId } }, tx);
     });
     await this.messaging.onDeliveryEvent(deliveryId, 'Order delivered.');
+    // Delivery completion triggers internal settlement (M18) — its own atomic,
+    // idempotent transaction. Never blocks/reverts the delivery; a failure records
+    // a settlement exception + alerts admins and preserves escrow.
+    await this.settlement.settleVendorOrder(d.vendorOrder.id, actor.userId);
     return this.getJob(actor.userId, deliveryId);
   }
 

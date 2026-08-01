@@ -188,6 +188,14 @@ export default function DriverPage() {
               Go to my deliveries
             </ButtonLink>
           </UiCard>
+
+          <UiCard className="p-5 sm:p-6">
+            <h2 className="bmpl-eyebrow mb-2">Earnings</h2>
+            <p className="mb-4 text-sm text-slate-500">Track your delivery earnings and see a transparent breakdown of how each one was calculated.</p>
+            <ButtonLink href="/dashboard/driver/earnings" size="sm">
+              View my earnings
+            </ButtonLink>
+          </UiCard>
         </>
       )}
     </div>

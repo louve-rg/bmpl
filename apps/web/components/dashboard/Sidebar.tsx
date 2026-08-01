@@ -21,6 +21,7 @@ const BASE_NAV: NavItem[] = [
   { label: 'Profile', href: '/dashboard/profile', icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0' },
   { label: 'Driver', href: '/dashboard/driver', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
   { label: 'Deliveries', href: '/dashboard/driver/jobs', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
+  { label: 'Earnings', href: '/dashboard/driver/earnings', icon: 'M12 3v18 M6 8h9a3 3 0 0 1 0 6H8' },
 ];
 
 const VENDOR_NAV: NavItem[] = [
@@ -28,6 +29,7 @@ const VENDOR_NAV: NavItem[] = [
   { label: 'My Products', href: '/dashboard/products', icon: 'M4 7l8-4 8 4-8 4-8-4Zm0 0v10l8 4 8-4V7' },
   { label: 'Store Orders', href: '/dashboard/orders', icon: 'M6 3h12l1 4H5l1-4Zm-1 4v13h14V7' },
   { label: 'Delivery', href: '/dashboard/delivery', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
+  { label: 'Settlements', href: '/dashboard/settlements', icon: 'M3 6h18v12H3z M3 10h18' },
 ];
 
 const MESSAGES_POLL_MS = 60_000;

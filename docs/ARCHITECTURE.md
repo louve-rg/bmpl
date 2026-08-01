@@ -59,8 +59,23 @@ the same DB transaction, and notifies the applicant.
 - Balances are **derived** by summing entries. `WalletAccount.cachedBalanceMinor`
   is only a cache, recomputed transactionally; reconciliation always trusts the
   ledger.
-- Amounts are `BigInt` **minor units** (cents). Real-money movement is gated off
-  by `assertMoneyMovementEnabled(false)`.
+- Amounts are `BigInt` **minor units** (cents). Real-money movement is gated per-call
+  by `assertMoneyMovementEnabled(enabled)` — passed `true` only for the sanctioned
+  customer↔escrow (M12) and settlement (M18) operations.
+
+### Settlement & earnings (M18)
+
+- After a vendor-order's delivery is `DELIVERED`, `SettlementService.settleVendorOrder`
+  distributes its escrow slice INTERNALLY in one balanced `ESCROW_RELEASE` transaction
+  (via the sole `WalletService.postTransaction` path): DEBIT escrow, CREDIT vendor USER
+  wallet (net) + driver USER wallet (earning) + `SYSTEM_PLATFORM_FEES` (platform
+  revenue). **No external payout/withdrawal/refund.**
+- The split is the pure `@bmpl/shared` `computeSettlement` (vendorNet + driver +
+  platform ≡ gross, exact). Idempotent via the unique `settlement:<vo>:v1` ledger
+  reference + unique `VendorSettlement`. A failure rolls back with no partial entries,
+  records a FAILED exception, and alerts admins. Fee rates live in one server-side
+  `PlatformFeeConfig`; each settlement snapshots the config so history is immutable.
+  Reconciliation surfaces the global ledger net (must be zero).
 
 ### Dispatch & delivery execution (M15)
 

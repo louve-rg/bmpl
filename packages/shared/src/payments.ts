@@ -13,17 +13,22 @@ export const PAYMENT_STATUSES = [
   'CREATED', // record created, nothing attempted
   'PENDING', // awaiting processing (M12 gateway/wallet capture)
   'AUTHORIZED', // funds authorized/held by a method (no capture) — reserved for M12
+  'SETTLING', // M18: some (not all) vendor-orders internally settled from escrow
+  'SETTLED', // M18: every vendor-order settled; escrow fully distributed internally
   'FAILED', // authorization failed
   'EXPIRED', // authorization window lapsed
   'CANCELLED', // cancelled before capture (e.g. order/reservation released)
 ] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
-/** Allowed payment state transitions. Capture/settlement is deliberately absent. */
+/** Allowed payment state transitions. Settlement (M18) distributes escrow internally
+ *  — NO external capture/payout/refund. AUTHORIZED → SETTLING → SETTLED. */
 export const PAYMENT_TRANSITIONS: Record<PaymentStatus, readonly PaymentStatus[]> = {
   CREATED: ['PENDING', 'CANCELLED', 'FAILED', 'EXPIRED'],
   PENDING: ['AUTHORIZED', 'FAILED', 'EXPIRED', 'CANCELLED'],
-  AUTHORIZED: ['CANCELLED', 'EXPIRED'], // capture (→PAID) is a later milestone
+  AUTHORIZED: ['CANCELLED', 'EXPIRED', 'SETTLING', 'SETTLED'],
+  SETTLING: ['SETTLED'],
+  SETTLED: [],
   FAILED: [],
   EXPIRED: [],
   CANCELLED: [],

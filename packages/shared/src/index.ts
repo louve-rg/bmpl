@@ -8,6 +8,7 @@ export * from './user';
 export * from './storage';
 export * from './marketplace';
 export * from './payments';
+export * from './settlement';
 export * from './driver';
 export * from './dispatch';
 export * from './messaging';

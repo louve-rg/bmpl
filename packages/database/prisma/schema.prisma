@@ -203,6 +203,17 @@ enum AuditAction {
   MESSAGE_ATTACHMENT_ADDED
   SUPPORT_JOINED
   INTERNAL_NOTE_ADDED
+  // ---- Settlement & Earnings (Phase 3 · M18) ----
+  SETTLEMENT_CALCULATED
+  SETTLEMENT_POSTED
+  SETTLEMENT_FAILED
+  ESCROW_RELEASED_SETTLEMENT
+  DRIVER_EARNING_POSTED
+  VENDOR_SETTLEMENT_POSTED
+  PLATFORM_FEE_POSTED
+  PAYMENT_SETTLING
+  PAYMENT_SETTLED
+  PLATFORM_FEE_CONFIG_UPDATED
 }
 
 enum WalletAccountType {
@@ -849,6 +860,7 @@ model VendorProfile {
   vendorOrders     VendorOrder[]
   deliveryZones    DeliveryZone[]
   deliveryEstimate DeliveryEstimate?
+  settlements      VendorSettlement[]
 
   @@index([approvalStatus])
   @@index([storeStatus])
@@ -1398,8 +1410,9 @@ model VendorOrder {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
-  items    OrderItem[]
-  delivery OrderDelivery?
+  items      OrderItem[]
+  delivery   OrderDelivery?
+  settlement VendorSettlement?
 
   @@index([orderId])
   @@index([vendorProfileId, createdAt])
@@ -1474,8 +1487,9 @@ model OrderDelivery {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  assignments DeliveryAssignment[]
-  timeline    DeliveryTimelineEvent[]
+  assignments   DeliveryAssignment[]
+  timeline      DeliveryTimelineEvent[]
+  driverEarning DriverEarning?
 
   @@index([status])
   @@index([assignedDriverProfileId, status])
@@ -1598,9 +1612,98 @@ model DriverProfile {
   // Dispatch (M15): the current deliveries assigned to this driver + full history.
   activeDeliveries    OrderDelivery[]      @relation("DriverActiveDeliveries")
   deliveryAssignments DeliveryAssignment[]
+  driverEarnings      DriverEarning[]
 
   @@index([availability])
   @@map("driver_profiles")
+}
+
+// ---- Settlement & Earnings (Phase 3 · M18) ----------------------------------
+// After a VendorOrder's fulfilment completes, escrow is distributed INTERNALLY:
+// vendor net → vendor USER wallet, driver earning → driver USER wallet, platform
+// fees → SYSTEM_PLATFORM_FEES. No external withdrawal/bank payout. Every posting
+// is a single balanced WalletTransaction via the ONE approved WalletService path;
+// records carry an immutable calculation snapshot and never change when the fee
+// configuration later changes.
+
+// Single active configuration row = the server-side source of truth for fees.
+model PlatformFeeConfig {
+  id                   String              @id @default(cuid())
+  isActive             Boolean             @default(true)
+  currency             Currency            @default(BZD)
+  // Marketplace commission as basis points of the merchandise subtotal (1000 = 10%).
+  commissionBps        Int                 @default(1000)
+  driverEarningMethod  DriverEarningMethod @default(PERCENT_DELIVERY_FEE)
+  // FLAT / HYBRID: fixed minor units the driver earns per completed delivery.
+  driverFlatMinor      BigInt              @default(0)
+  // PERCENT / HYBRID: driver's share of the delivery fee, basis points (8000 = 80%).
+  driverDeliveryFeeBps Int                 @default(8000)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@index([isActive])
+  @@map("platform_fee_configs")
+}
+
+model VendorSettlement {
+  id                       String           @id @default(cuid())
+  vendorProfileId          String
+  vendorProfile            VendorProfile    @relation(fields: [vendorProfileId], references: [id], onDelete: Restrict)
+  vendorOrderId            String           @unique
+  vendorOrder              VendorOrder      @relation(fields: [vendorOrderId], references: [id], onDelete: Restrict)
+  paymentId                String
+  payment                  Payment          @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  currency                 Currency         @default(BZD)
+  // Calculation components (minor units) — gross = merchandise + delivery fee.
+  merchandiseSubtotalMinor BigInt
+  deliveryFeeMinor         BigInt
+  commissionMinor          BigInt
+  driverAllocationMinor    BigInt
+  platformFeeMinor         BigInt // platform's share of the delivery fee (+ future fees)
+  grossMinor               BigInt
+  netMinor                 BigInt // vendor net = merchandise − commission
+  status                   SettlementStatus @default(PENDING)
+  failureReason            String?
+  // Immutable snapshot of the config + inputs used (never recomputed).
+  snapshot                 Json
+  walletTransactionId      String?
+  calculatedAt             DateTime         @default(now())
+  postedAt                 DateTime?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  driverEarnings DriverEarning[]
+
+  @@index([vendorProfileId, status])
+  @@index([paymentId])
+  @@index([status])
+  @@map("vendor_settlements")
+}
+
+model DriverEarning {
+  id                  String              @id @default(cuid())
+  driverProfileId     String
+  driverProfile       DriverProfile       @relation(fields: [driverProfileId], references: [id], onDelete: Restrict)
+  orderDeliveryId     String              @unique
+  orderDelivery       OrderDelivery       @relation(fields: [orderDeliveryId], references: [id], onDelete: Restrict)
+  vendorOrderId       String
+  settlementId        String?
+  settlement          VendorSettlement?   @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+  currency            Currency            @default(BZD)
+  method              DriverEarningMethod
+  grossMinor          BigInt
+  // Future-ready (tips/bonuses/penalties) — always 0 in M18.
+  adjustmentsMinor    BigInt              @default(0)
+  netMinor            BigInt
+  status              SettlementStatus    @default(PENDING)
+  snapshot            Json
+  walletTransactionId String?
+  calculatedAt        DateTime            @default(now())
+  postedAt            DateTime?
+  createdAt           DateTime            @default(now())
+
+  @@index([driverProfileId, status])
+  @@map("driver_earnings")
 }
 
 model DriverVehicle {
@@ -1706,9 +1809,29 @@ enum PaymentStatus {
   CREATED
   PENDING
   AUTHORIZED
+  // Internal financial completion (M18). SETTLING = at least one vendor-order of a
+  // multi-vendor order has been settled; SETTLED = every vendor-order settled.
+  SETTLING
+  SETTLED
   FAILED
   EXPIRED
   CANCELLED
+}
+
+// ---- Settlement (Phase 3 · M18 — internal escrow distribution, no payouts) ----
+// Driver earning calculation basis (configurable via PlatformFeeConfig).
+enum DriverEarningMethod {
+  FLAT
+  PERCENT_DELIVERY_FEE
+  HYBRID
+}
+
+// Lifecycle of a VendorSettlement / DriverEarning. Posting is atomic with the
+// balanced escrow-release ledger transaction.
+enum SettlementStatus {
+  PENDING
+  POSTED
+  FAILED
 }
 
 enum PaymentMethodType {
@@ -1798,10 +1921,11 @@ model Payment {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
-  attempts   PaymentAttempt[]
-  events     PaymentEvent[]
-  holds      WalletHold[]
-  ledgerRefs LedgerReference[]
+  attempts    PaymentAttempt[]
+  events      PaymentEvent[]
+  holds       WalletHold[]
+  ledgerRefs  LedgerReference[]
+  settlements VendorSettlement[]
 
   @@index([userId, createdAt])
   @@index([status])

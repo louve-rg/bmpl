@@ -43,6 +43,9 @@ export const PERMISSIONS = [
   // ---- Messaging & Order Communication (Phase 4 · M17) ----
   'support.read', // list / view support conversations (and any conversation for moderation)
   'support.respond', // join + reply to support threads, add internal notes, close/reopen
+  // ---- Settlement & Earnings (Phase 3 · M18) ----
+  'settlements.read', // view settlements, driver earnings, financial timeline + exceptions (read-only)
+  'settlements.manage', // update the platform fee configuration + retry failed settlements
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -64,6 +67,7 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'proof_of_delivery.read',
     'support.read',
     'support.respond',
+    'settlements.read',
   ],
   ADMIN: [
     'users.read',
@@ -95,6 +99,8 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'proof_of_delivery.read',
     'support.read',
     'support.respond',
+    'settlements.read',
+    'settlements.manage',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

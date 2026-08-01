@@ -735,3 +735,31 @@ paths:
     post: { tags: [Messaging], summary: "Reply to the requester", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Sent } }, description: "Requires support.respond" }
   /admin/support/{id}/notes:
     post: { tags: [Messaging], summary: "Add an INTERNAL note (never shown to the requester)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Added } }, description: "Requires support.respond" }
+  # ---- Settlement & Earnings (Phase 3 · M18 — internal, no payouts) ----
+  /orders/{id}/settlement:
+    get: { tags: [Settlement], summary: "Settlement status of an own order", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /vendor/settlements:
+    get: { tags: [Settlement], summary: "Vendor's own settlements + pending/posted totals", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires VENDOR role" }
+  /vendor/settlements/{id}:
+    get: { tags: [Settlement], summary: "Own settlement detail (gross/fees/net + snapshot)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /driver/earnings:
+    get: { tags: [Settlement], summary: "Driver's own earnings + pending/posted totals", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires APPROVED DELIVERY_DRIVER role" }
+  /driver/earnings/{id}:
+    get: { tags: [Settlement], summary: "Own earning detail + snapshot", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /admin/settlements:
+    get: { tags: [Settlement], summary: "All settlements (status filter)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires settlements.read" }
+  /admin/settlements/reconciliation:
+    get: { tags: [Settlement], summary: "Escrow / liabilities / platform revenue + global-ledger-net balanced flag", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires settlements.read" }
+  /admin/settlements/accounts:
+    get: { tags: [Settlement], summary: "Internal system account balances (read-only)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires settlements.read" }
+  /admin/settlements/driver-earnings:
+    get: { tags: [Settlement], summary: "All driver earnings", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires settlements.read" }
+  /admin/settlements/exceptions:
+    get: { tags: [Settlement], summary: "Failed settlements needing review", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires settlements.read" }
+  /admin/settlements/fee-config:
+    get: { tags: [Settlement], summary: "Read the platform fee configuration", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires settlements.read" }
+    patch: { tags: [Settlement], summary: "Update the platform fee configuration", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: Updated }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires settlements.manage; body { commissionBps?, driverEarningMethod?, driverFlatMinor?, driverDeliveryFeeBps? }" }
+  /admin/settlements/{id}:
+    get: { tags: [Settlement], summary: "Settlement detail (+ driver earnings + snapshot)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires settlements.read" }
+  /admin/settlements/vendor-order/{vendorOrderId}/retry:
+    post: { tags: [Settlement], summary: "Retry a failed settlement (idempotent)", parameters: [ { name: vendorOrderId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "Requires settlements.manage" }

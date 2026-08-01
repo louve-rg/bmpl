@@ -22,6 +22,8 @@ enforced server-side by the global guard chain, regardless of what any UI shows.
 | `proof_of_delivery.read` | view private proof-of-delivery files via signed URLs (M15) |
 | `support.read` | list / view support conversations (and any conversation for moderation) (M17) |
 | `support.respond` | join + reply to support threads, add internal notes, close/reopen (M17) |
+| `settlements.read` | view settlements, driver earnings, escrow/internal balances, reconciliation (M18, read-only) |
+| `settlements.manage` | update platform fee configuration; retry failed settlements (M18) |
 
 ### Default bundles (`PERMISSION_BUNDLES`)
 | Staff role | Marketplace permissions |
