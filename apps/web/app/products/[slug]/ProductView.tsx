@@ -11,6 +11,8 @@ import type { RatingAggregate } from '../../../lib/reviews';
 import { VariantLineup, VariantSelector, type LineupImage } from '../../../components/products/VariantChooser';
 import { cartApi, money, notifyCartChanged } from '../../../lib/cart';
 import type { ApiError } from '../../../lib/api';
+import { SaveButton } from '../../../components/saved/SaveButton';
+import { RecordView } from '../../../components/saved/RecordView';
 import {
   pruneSelection,
   purchaseState,
@@ -199,6 +201,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
 
   return (
     <>
+    <RecordView productId={product.id} />
     <div className="mt-4 grid gap-8 md:grid-cols-2">
       <div>
         {/* key resets the active thumbnail when the shown image set changes */}
@@ -301,6 +304,12 @@ export function ProductView({ product }: { product: ProductDetail }) {
             >
               {buttonLabel}
             </button>
+
+            <SaveButton
+              productId={product.id}
+              size="lg"
+              className="border border-slate-300 hover:border-belize-blue hover:bg-belize-blue/5"
+            />
           </div>
 
           {state === 'ADD' && maxQty != null && maxQty <= 10 && (

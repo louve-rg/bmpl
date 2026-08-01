@@ -50,6 +50,7 @@ enforced server-side by the global guard chain, regardless of what any UI shows.
 | Respond to reviews of **own** product/store | — | — | ✅ | — | — |
 | Report a review · vote helpful | — | ✅ | ✅ | ✅ | ✅ |
 | Moderate reviews / resolve reports | — | — | — | read-only | ✅ |
+| Save products (wishlist) · recently-viewed (own, private) | — | ✅ | — | — | — |
 
 ## Ownership rule
 Every vendor endpoint resolves ownership through `OwnershipService`

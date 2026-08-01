@@ -450,6 +450,37 @@ export class ProductsService {
     return rows.map((p) => ({ ...this.cardShape(p), primaryImageUrl: primary.get(p.id) ?? null }));
   }
 
+  /**
+   * Storefront card shapes for a set of product ids, keyed by id — PUBLISHED
+   * products of APPROVED vendors only (so wishlists / recently-viewed never leak
+   * an unpublished or unapproved product). Ids absent from the map are no longer
+   * viewable. Used by the M20 engagement module.
+   */
+  async cardsByIds(ids: string[]) {
+    const found = ids.length
+      ? await this.prisma.product.findMany({
+          where: { id: { in: ids }, status: 'PUBLISHED', vendorProfile: { approvalStatus: 'APPROVED' } },
+          include: {
+            category: { select: { name: true, slug: true } },
+            vendorProfile: { select: { businessName: true, slug: true } },
+          },
+        })
+      : [];
+    const foundIds = found.map((p) => p.id);
+    const primary = await this.images.primaryUrls(foundIds);
+    const stock = await this.inventory.inStockMap(foundIds);
+    return new Map(found.map((p) => [p.id, { ...this.cardShape(p), primaryImageUrl: primary.get(p.id) ?? null, inStock: stock.get(p.id) ?? true }]));
+  }
+
+  /** Assert a product is publicly viewable (PUBLISHED + APPROVED vendor); else 404. */
+  async assertViewable(productId: string): Promise<void> {
+    const p = await this.prisma.product.findFirst({
+      where: { id: productId, status: 'PUBLISHED', vendorProfile: { approvalStatus: 'APPROVED' } },
+      select: { id: true },
+    });
+    if (!p) throw new NotFoundException('Product not found.');
+  }
+
   // ===========================================================================
   // Helpers
   // ===========================================================================

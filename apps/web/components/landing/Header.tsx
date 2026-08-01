@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { BrandLockup } from '../Logo';
 import { ButtonLink } from '../ui';
 import { CartButton } from '../cart/CartButton';
+import { SavedNavButton } from '../saved/SavedNavButton';
 import { api } from '../../lib/api';
 import type { MeView } from '../../lib/types';
 
@@ -67,6 +68,7 @@ export function Header() {
         </div>
 
         <div className="hidden items-center gap-3 md:flex">
+          <SavedNavButton />
           <CartButton />
           {me === undefined ? (
             <span className="h-8 w-28 animate-pulse rounded-lg bg-white/10" aria-hidden />
@@ -98,6 +100,7 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-1 md:hidden">
+          <SavedNavButton />
           <CartButton />
           <button
             className="inline-flex items-center rounded-md p-2 text-white"

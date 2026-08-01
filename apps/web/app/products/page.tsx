@@ -3,6 +3,7 @@ import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
 import { serverGetSafe } from '../../lib/server-api';
 import { Alert, Badge, Button, EmptyState, Input } from '../../components/ui';
+import { SaveButton } from '../../components/saved/SaveButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -156,31 +157,36 @@ export default async function ProductsPage({
               ) : (
                 <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                   {data.items.map((p) => (
-                    <Link key={p.id} href={`/products/${p.slug}`} className="group rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md">
-                      <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
-                        {p.primaryImageUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
-                        ) : (
-                          'No image'
+                    <div key={p.id} className="relative">
+                      <Link href={`/products/${p.slug}`} className="group block rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md">
+                        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
+                          {p.primaryImageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
+                          ) : (
+                            'No image'
+                          )}
+                        </div>
+                        <p className="mt-3 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
+                        <p className="text-xs text-slate-400">{p.vendor.businessName} · {p.category.name}</p>
+                        <p className="mt-1.5 text-sm">
+                          {p.salePriceMinor != null ? (
+                            <>
+                              <span className="font-bold text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
+                              <span className="text-slate-400 line-through">{money(p.priceMinor)}</span>
+                            </>
+                          ) : (
+                            <span className="font-bold text-belize-navy">{money(p.priceMinor)}</span>
+                          )}
+                        </p>
+                        {!p.inStock && (
+                          <Badge tone="error" className="mt-1.5">Out of stock</Badge>
                         )}
+                      </Link>
+                      <div className="absolute right-6 top-6">
+                        <SaveButton productId={p.id} className="bg-white/90 shadow-bmpl-sm backdrop-blur hover:bg-white" />
                       </div>
-                      <p className="mt-3 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
-                      <p className="text-xs text-slate-400">{p.vendor.businessName} · {p.category.name}</p>
-                      <p className="mt-1.5 text-sm">
-                        {p.salePriceMinor != null ? (
-                          <>
-                            <span className="font-bold text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
-                            <span className="text-slate-400 line-through">{money(p.priceMinor)}</span>
-                          </>
-                        ) : (
-                          <span className="font-bold text-belize-navy">{money(p.priceMinor)}</span>
-                        )}
-                      </p>
-                      {!p.inStock && (
-                        <Badge tone="error" className="mt-1.5">Out of stock</Badge>
-                      )}
-                    </Link>
+                    </div>
                   ))}
                 </div>
               )}

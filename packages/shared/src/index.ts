@@ -13,6 +13,7 @@ export * from './reviews';
 export * from './driver';
 export * from './dispatch';
 export * from './messaging';
+export * from './engagement';
 export * from './slug';
 
 /** Shared, framework-agnostic branding tokens (mirrored in the UI package). */

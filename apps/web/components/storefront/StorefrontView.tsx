@@ -3,6 +3,7 @@ import { Badge as UiBadge, EmptyState } from '../ui';
 import { EnlargeableImage } from './EnlargeableImage';
 import { StarRating } from '../reviews/StarRating';
 import { ReviewList } from '../reviews/ReviewList';
+import { SaveButton } from '../saved/SaveButton';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
@@ -103,27 +104,32 @@ export function StorefrontView({ store }: { store: Storefront }) {
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {store.featuredProducts.map((p) => (
-                  <Link key={p.id} href={`/products/${p.slug}`} className="group rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md">
-                    <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
-                      {p.primaryImageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
-                      ) : (
-                        'No image'
-                      )}
+                  <div key={p.id} className="relative">
+                    <Link href={`/products/${p.slug}`} className="group block rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md">
+                      <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
+                        {p.primaryImageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
+                        ) : (
+                          'No image'
+                        )}
+                      </div>
+                      <p className="mt-2 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
+                      <p className="text-sm font-bold text-belize-navy">
+                        {p.salePriceMinor != null ? (
+                          <>
+                            <span className="text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
+                            <span className="text-xs font-normal text-slate-400 line-through">{money(p.priceMinor)}</span>
+                          </>
+                        ) : (
+                          money(p.priceMinor)
+                        )}
+                      </p>
+                    </Link>
+                    <div className="absolute right-6 top-6">
+                      <SaveButton productId={p.id} className="bg-white/90 shadow-bmpl-sm backdrop-blur hover:bg-white" />
                     </div>
-                    <p className="mt-2 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
-                    <p className="text-sm font-bold text-belize-navy">
-                      {p.salePriceMinor != null ? (
-                        <>
-                          <span className="text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
-                          <span className="text-xs font-normal text-slate-400 line-through">{money(p.priceMinor)}</span>
-                        </>
-                      ) : (
-                        money(p.priceMinor)
-                      )}
-                    </p>
-                  </Link>
+                  </div>
                 ))}
               </div>
             )}

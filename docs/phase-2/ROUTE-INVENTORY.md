@@ -21,6 +21,7 @@
 | `/dashboard/messages` | authed | messaging center (M17): order/delivery/support conversations, composer, attachments |
 | `/dashboard/settlements` | VENDOR | vendor earnings & settlements (M18): pending/posted totals, history, calculation breakdown |
 | `/dashboard/driver/earnings` | DELIVERY_DRIVER | driver earnings (M18): pending/posted totals, earning history + detail |
+| `/wishlist` | CUSTOMER | saved products (M20): wishlist grid + remove + recently-viewed strip |
 | `/dashboard/products` | VENDOR | product list (submit/archive/delete) |
 | `/dashboard/products/new` | VENDOR | create product |
 | `/dashboard/products/[id]` | VENDOR | edit product + image manager + variants/inventory manager |

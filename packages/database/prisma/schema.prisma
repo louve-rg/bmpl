@@ -374,6 +374,8 @@ model User {
   vendorReviewsMade          VendorModerationReview[]  @relation("VendorReviewer")
   productReviewsMade         ProductModerationReview[] @relation("ProductReviewer")
   inventoryChangesMade       InventoryChange[]         @relation("InventoryActor")
+  savedProducts              SavedProduct[]
+  recentlyViewedProducts     RecentlyViewedProduct[]
 
   @@index([status])
   @@index([district])
@@ -1137,6 +1139,8 @@ model Product {
   inventory  Inventory[]
   cartItems  CartItem[]
   orderItems OrderItem[]
+  savedBy    SavedProduct[]
+  recentlyViewedBy RecentlyViewedProduct[]
 
   @@unique([vendorProfileId, sku])
   // Composite serves both the status filter and the default "newest published"
@@ -1877,6 +1881,38 @@ model ReviewHelpfulVote {
 
   @@unique([reviewId, userId])
   @@map("review_helpful_votes")
+}
+
+// ---- Saved Products (Wishlists) & Recently Viewed (Phase 4 · M20) ----
+
+// A customer's saved/wishlisted product. Product-level (variant chosen at add-to-cart
+// time). One row per (user, product); saving never reserves stock or moves money.
+model SavedProduct {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId, createdAt])
+  @@map("saved_products")
+}
+
+// A customer's recently-viewed product history (own data only, never exposed to
+// vendors/others). Upserted on view; capped to the newest N per user.
+model RecentlyViewedProduct {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId, viewedAt])
+  @@map("recently_viewed_products")
 }
 
 model DriverVehicle {

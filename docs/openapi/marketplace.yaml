@@ -28,6 +28,8 @@ tags:
     description: Wallet authorization & escrow (M12). Money moves ONLY customer↔escrow via balanced double-entry.
   - name: Reviews
     description: Verified reviews & ratings (M19) tied to completed transactions. Public reads; customer writes; vendor responses; admin moderation.
+  - name: Engagement
+    description: Saved products (wishlists) & recently-viewed history (M20). Own-account customer data only; never reserves stock or moves money.
 components:
   securitySchemes:
     cookieAuth:
@@ -805,3 +807,18 @@ paths:
     post: { tags: [Reviews], summary: "Hide / unhide / reject a review (recomputes aggregate)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Review }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires reviews.moderate; body { action (HIDE|UNHIDE|REJECT), reason? }" }
   /admin/reviews/reports/{id}/resolve:
     post: { tags: [Reviews], summary: "Resolve a report (ACTIONED | DISMISSED)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ ok: true }" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires reviews.moderate; body { status, note? }" }
+  # ---- Saved Products (Wishlists) & Recently Viewed (Phase 4 · M20) ----
+  /saved:
+    get: { tags: [Engagement], summary: "The caller's saved products (newest first, resolved cards)", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ items: [{ productId, savedAt, available, product }] }" }, "401": { $ref: "#/components/responses/Unauthorized" } }, description: "Requires CUSTOMER role; unavailable saved products return available:false, product:null (row preserved)" }
+  /saved/ids:
+    get: { tags: [Engagement], summary: "Lightweight set of saved product ids (heart-toggle state)", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ productIds: string[] }" } } }
+  /saved/count:
+    get: { tags: [Engagement], summary: "Saved-products count (badge)", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ count }" } } }
+  /saved/{productId}:
+    post: { tags: [Engagement], summary: "Save a product (idempotent)", parameters: [ { name: productId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ saved: true }" }, "404": { description: "Product not viewable" } } }
+    delete: { tags: [Engagement], summary: "Remove a saved product (idempotent)", parameters: [ { name: productId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "{ saved: false }" } } }
+  /recently-viewed:
+    get: { tags: [Engagement], summary: "The caller's recently-viewed history (newest first)", parameters: [ { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 50 } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "{ items: [{ productId, viewedAt, available, product }] }" } }, description: "Private to the owner; capped to the newest 50" }
+    delete: { tags: [Engagement], summary: "Clear the caller's recently-viewed history", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "{ ok: true }" } } }
+  /recently-viewed/{productId}:
+    post: { tags: [Engagement], summary: "Record a product view (upsert; prunes to newest 50)", parameters: [ { name: productId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ ok: true }" }, "404": { description: "Product not viewable" } } }

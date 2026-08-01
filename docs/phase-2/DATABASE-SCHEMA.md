@@ -43,6 +43,8 @@ User 1─* Review (verified) 1─* ReviewMedia                     (M19)
                           1─1 ReviewResponse                   (M19)
                           1─* ReviewReport / ReviewHelpfulVote (M19)
   subject = (subjectType ∈ {PRODUCT,VENDOR,DRIVER}, subjectId)  context = fulfilled OrderItem/VendorOrder/OrderDelivery
+User 1─* SavedProduct *─1 Product                             (M20)
+User 1─* RecentlyViewedProduct *─1 Product                   (M20)  private, own-account only
 ```
 
 ## Models
@@ -77,6 +79,8 @@ User 1─* Review (verified) 1─* ReviewMedia                     (M19)
 | `ReviewResponse` (review_responses) | reviewId*, responderId, body, editedAt? | **M19** one seller response per review (editable) |
 | `ReviewReport` (review_reports) | reviewId, reporterId, reason, note?, status (OPEN/ACTIONED/DISMISSED), resolvedById?/resolutionNote?/resolvedAt? | **M19** abuse report; unique (review, reporter) |
 | `ReviewHelpfulVote` (review_helpful_votes) | reviewId, userId | **M19** one helpful vote per user; unique (review, user) |
+| `SavedProduct` (saved_products) | userId, productId, createdAt | **M20** wishlist entry; unique (user, product); cascade from user+product; no money/inventory |
+| `RecentlyViewedProduct` (recently_viewed_products) | userId, productId, viewedAt | **M20** private view history; unique (user, product); upserted on view; capped to newest 50 |
 
 \* = unique.
 
@@ -129,6 +133,8 @@ permission). Existing rows were migrated to one recipient each (no data loss).
 - ReviewResponse (M19): unique `(reviewId)`
 - ReviewReport (M19): unique `(reviewId, reporterId)`; `(status)`
 - ReviewHelpfulVote (M19): unique `(reviewId, userId)`
+- SavedProduct (Phase 4 · M20): unique `(userId, productId)`; `(userId, createdAt)`
+- RecentlyViewedProduct (M20): unique `(userId, productId)`; `(userId, viewedAt)`
 
 ## Cascade rules
 Vendor/product child rows `onDelete: Cascade`. Category parent + Product→Category
