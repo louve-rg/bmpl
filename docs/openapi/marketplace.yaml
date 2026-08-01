@@ -32,6 +32,8 @@ tags:
     description: Saved products (wishlists) & recently-viewed history (M20). Own-account customer data only; never reserves stock or moves money.
   - name: Discovery
     description: Discovery, cross-sell, personalized recommendations & search typeahead (M21). Deterministic, non-AI; read-only over catalog + ratings + own saved/viewed signals.
+  - name: Analytics
+    description: Analytics & reporting (M22). Read-only aggregation over orders/payments/settlements. Admin (analytics.read) is platform-wide; vendor is own-store only.
 components:
   securitySchemes:
     cookieAuth:
@@ -833,3 +835,22 @@ paths:
     get: { tags: [Discovery], summary: "Search typeahead suggestions", parameters: [ { name: q, in: query, required: false, schema: { type: string } } ], responses: { "200": { description: "{ products:[{title,slug}], categories:[{name,slug}], vendors:[{businessName,slug}] }" } }, description: "Public; empty groups when q has < 2 chars; 5 per group" }
   /recommendations/for-you:
     get: { tags: [Discovery], summary: "Personalized recommendations (own signals only)", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ personalized: boolean, items: Card[] }" }, "401": { $ref: "#/components/responses/Unauthorized" } }, description: "Requires CUSTOMER role; from the caller's own recently-viewed/saved categories, excluding engaged items; popular fallback on cold start" }
+  # ---- Analytics & Reporting (Phase 4 · M22) ----
+  /admin/analytics/overview:
+    get: { tags: [Analytics], summary: "Platform KPI overview", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ gmvMinor, paidOrders, totalOrders, cancelledOrders, aovMinor, unitsSold, platformRevenueMinor, vendorNetMinor, settledGrossMinor, approvedVendors, approvedDrivers, totalCustomers, publishedProducts, reviewCount, avgRating }" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires analytics.read (ADMIN/SUPER_ADMIN). GMV = collected payments; revenue = POSTED settlements" }
+  /admin/analytics/sales:
+    get: { tags: [Analytics], summary: "Daily sales time-series", parameters: [ { name: days, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 365 } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "{ days, series: [{ date, orders, grossMinor }] }" } }, description: "Requires analytics.read; gap-filled continuous window" }
+  /admin/analytics/top-products:
+    get: { tags: [Analytics], summary: "Best-selling products", parameters: [ { name: limit, in: query, required: false, schema: { type: integer } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "[{ productId, title, unitsSold, revenueMinor }]" } }, description: "Requires analytics.read" }
+  /admin/analytics/top-vendors:
+    get: { tags: [Analytics], summary: "Top vendors by revenue", parameters: [ { name: limit, in: query, required: false, schema: { type: integer } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "[{ vendorProfileId, businessName, orders, revenueMinor }]" } }, description: "Requires analytics.read" }
+  /admin/analytics/reports/orders.csv:
+    get: { tags: [Analytics], summary: "Orders CSV export", security: [{ cookieAuth: [] }], responses: { "200": { description: "text/csv attachment" } }, description: "Requires analytics.read; RFC-4180 quoted" }
+  /vendor/analytics/overview:
+    get: { tags: [Analytics], summary: "Vendor's OWN storefront KPI overview", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ paidOrders, grossSalesMinor, unitsSold, netRevenueMinor, commissionPaidMinor, settledGrossMinor, pendingSettlements, publishedProducts, ratingAverage, ratingCount }" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires VENDOR role; ownership-scoped" }
+  /vendor/analytics/sales:
+    get: { tags: [Analytics], summary: "Vendor's own daily sales time-series", parameters: [ { name: days, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 365 } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "{ days, series: [{ date, orders, grossMinor }] }" } } }
+  /vendor/analytics/top-products:
+    get: { tags: [Analytics], summary: "Vendor's own best sellers", parameters: [ { name: limit, in: query, required: false, schema: { type: integer } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "[{ productId, title, unitsSold, revenueMinor }]" } } }
+  /vendor/analytics/reports/orders.csv:
+    get: { tags: [Analytics], summary: "Vendor's own orders CSV export", security: [{ cookieAuth: [] }], responses: { "200": { description: "text/csv attachment" } } }

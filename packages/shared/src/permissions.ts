@@ -49,6 +49,8 @@ export const PERMISSIONS = [
   // ---- Reviews & Ratings (Phase 4 · M19) ----
   'reviews.read', // view all reviews + reports in the moderation console (read-only)
   'reviews.moderate', // hide/reject reviews + resolve reports
+  // ---- Analytics & Reporting (Phase 4 · M22) ----
+  'analytics.read', // view platform analytics dashboards + export reports (read-only)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -107,6 +109,7 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'settlements.manage',
     'reviews.read',
     'reviews.moderate',
+    'analytics.read',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

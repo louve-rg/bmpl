@@ -21,6 +21,7 @@ const NAV: Array<{ label: string; href: string; icon: string }> = [
   { label: 'Payments', href: '/dashboard/payments', icon: 'M3 6h18v12H3zM3 10h18' },
   { label: 'Wallet', href: '/dashboard/wallet', icon: 'M3 7h18v12H3zM17 12h2M3 10h14a2 2 0 0 1 2 2' },
   { label: 'Settlements', href: '/dashboard/settlements', icon: 'M3 6h18v12H3z M3 10h18' },
+  { label: 'Analytics', href: '/dashboard/analytics', icon: 'M4 20V4M4 20h16M8 20v-6M13 20V9M18 20v-9' },
   { label: 'Categories', href: '/dashboard/categories', icon: 'M4 5h7v7H4zM13 5h7v7h-7zM4 14h7v5H4zM13 14h7v5h-7z' },
   { label: 'Audit Log', href: '/dashboard/audit', icon: 'M5 4h11l3 3v13H5zM9 12l2 2 4-4' },
 ];

@@ -21,6 +21,7 @@
 | `/dashboard/notifications` | authed | notification center (M16): filter, mark read/dismiss, preferences |
 | `/dashboard/messages` | authed | messaging center (M17): order/delivery/support conversations, composer, attachments |
 | `/dashboard/settlements` | VENDOR | vendor earnings & settlements (M18): pending/posted totals, history, calculation breakdown |
+| `/dashboard/analytics` | VENDOR | own-store analytics (M22): KPIs, sales chart, top products, orders CSV export |
 | `/dashboard/driver/earnings` | DELIVERY_DRIVER | driver earnings (M18): pending/posted totals, earning history + detail |
 | `/wishlist` | CUSTOMER | saved products (M20): wishlist grid + remove + recently-viewed strip |
 | `/dashboard/products` | VENDOR | product list (submit/archive/delete) |
@@ -40,6 +41,7 @@ pages `notFound()` on missing/unapproved.
 | `/dashboard/notifications` | authed staff | admin notification center (M16): admin-alert/security feed + preferences |
 | `/dashboard/support` | `support.read` | support console (M17): support conversations, join/reply, internal notes, close/reopen |
 | `/dashboard/settlements` | `settlements.read` | settlements & escrow (M18): reconciliation, internal balances, settlements, exceptions/retry, fee config |
+| `/dashboard/analytics` | `analytics.read` | platform analytics (M22): KPIs, sales chart, top products/vendors, orders CSV export |
 | `/dashboard/vendors/[id]` | `vendors.read`/`.moderate` | detail + approve/reject/suspend/restore |
 | `/dashboard/products` | `products.read` | product queue (status filter) |
 | `/dashboard/products/[id]` | `products.read`/`.moderate` | detail + images + moderation |

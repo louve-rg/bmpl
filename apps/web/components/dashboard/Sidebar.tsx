@@ -31,6 +31,7 @@ const VENDOR_NAV: NavItem[] = [
   { label: 'Store Orders', href: '/dashboard/orders', icon: 'M6 3h12l1 4H5l1-4Zm-1 4v13h14V7' },
   { label: 'Delivery', href: '/dashboard/delivery', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
   { label: 'Settlements', href: '/dashboard/settlements', icon: 'M3 6h18v12H3z M3 10h18' },
+  { label: 'Analytics', href: '/dashboard/analytics', icon: 'M4 20V4 M4 20h16 M8 20v-6 M13 20V9 M18 20v-9' },
 ];
 
 const MESSAGES_POLL_MS = 60_000;
