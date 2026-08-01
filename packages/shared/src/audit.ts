@@ -93,6 +93,10 @@ export const AUDIT_ACTIONS = [
   'PAYMENT_SETTLING',
   'PAYMENT_SETTLED',
   'PLATFORM_FEE_CONFIG_UPDATED',
+  // ---- Pickup fulfilment (Phase 3 · M18.1) ----
+  'VENDOR_ORDER_READY_FOR_PICKUP',
+  'VENDOR_ORDER_PICKED_UP',
+  'VENDOR_ORDER_PICKUP_PIN_FAILED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

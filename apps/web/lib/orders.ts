@@ -57,6 +57,16 @@ export interface VendorOrderView {
   placedAt?: string;
   customerName?: string;
   deliveryAddress?: Address | null;
+  pickedUpAt?: string | null;
+}
+
+/** Customer-facing pickup PIN for a single vendor-order (M18.1). */
+export interface PickupPinView {
+  vendorOrderId: string;
+  status: string;
+  /** Only present (non-null) while the vendor-order is READY_FOR_PICKUP. */
+  pickupPin: string | null;
+  pickedUpAt: string | null;
 }
 
 export interface OrderView {
@@ -116,6 +126,13 @@ export const ordersApi = {
   getOwn: (id: string) => api.get<OrderView>(`/orders/${id}`),
   vendorList: () => api.get<VendorOrderListItem[]>('/vendor/orders'),
   vendorGet: (id: string) => api.get<VendorOrderView>(`/vendor/orders/${id}`),
+  // Pickup fulfilment (M18.1) — PICKUP vendor-orders only.
+  vendorReadyForPickup: (vendorOrderId: string) =>
+    api.post<{ id: string; status: string }>(`/vendor/orders/${vendorOrderId}/ready-for-pickup`),
+  vendorConfirmPickup: (vendorOrderId: string, pin: string) =>
+    api.post<{ status: string }>(`/vendor/orders/${vendorOrderId}/confirm-pickup`, { pin }),
+  pickupPin: (vendorOrderId: string) =>
+    api.get<PickupPinView>(`/orders/vendor-orders/${vendorOrderId}/pickup-pin`),
 };
 
 export const DISTRICTS = ['BELIZE', 'CAYO', 'COROZAL', 'ORANGE_WALK', 'STANN_CREEK', 'TOLEDO'] as const;

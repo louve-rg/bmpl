@@ -214,6 +214,10 @@ enum AuditAction {
   PAYMENT_SETTLING
   PAYMENT_SETTLED
   PLATFORM_FEE_CONFIG_UPDATED
+  // ---- Pickup fulfilment (Phase 3 · M18.1) ----
+  VENDOR_ORDER_READY_FOR_PICKUP
+  VENDOR_ORDER_PICKED_UP
+  VENDOR_ORDER_PICKUP_PIN_FAILED
 }
 
 enum WalletAccountType {
@@ -1356,6 +1360,10 @@ enum OrderStatus {
 
 enum VendorOrderStatus {
   PENDING
+  // Pickup fulfilment (M18.1). READY_FOR_PICKUP = vendor prepared it; PICKED_UP =
+  // collection confirmed (the pickup analogue of a delivery reaching DELIVERED).
+  READY_FOR_PICKUP
+  PICKED_UP
   CANCELLED
 }
 
@@ -1399,23 +1407,31 @@ model Order {
 }
 
 model VendorOrder {
-  id               String            @id @default(cuid())
-  orderNumber      String            @unique // parent number + vendor suffix
-  orderId          String
-  order            Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  vendorProfileId  String
+  id                   String            @id @default(cuid())
+  orderNumber          String            @unique // parent number + vendor suffix
+  orderId              String
+  order                Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  vendorProfileId      String
   // Restrict: a storefront with orders cannot be hard-deleted (protects history).
-  vendorProfile    VendorProfile     @relation(fields: [vendorProfileId], references: [id], onDelete: Restrict)
-  status           VendorOrderStatus @default(PENDING)
-  deliveryMethod   DeliveryMethod
-  customerNotes    String?
+  vendorProfile        VendorProfile     @relation(fields: [vendorProfileId], references: [id], onDelete: Restrict)
+  status               VendorOrderStatus @default(PENDING)
+  deliveryMethod       DeliveryMethod
+  customerNotes        String?
   // Reserved for future shipment/tracking metadata — NOT used for order items.
-  shippingMetadata Json?
-  currency         Currency          @default(BZD)
-  itemCount        Int
-  subtotalMinor    BigInt
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  shippingMetadata     Json?
+  currency             Currency          @default(BZD)
+  itemCount            Int
+  subtotalMinor        BigInt
+  // Pickup fulfilment (M18.1). PIN held by the customer, submitted by the vendor at
+  // collection (mirrors delivery). inventoryFinalizedAt guards exactly-once stock
+  // deduction on collection.
+  readyForPickupAt     DateTime?
+  pickedUpAt           DateTime?
+  pickupPin            String?
+  pickupPinAttempts    Int               @default(0)
+  inventoryFinalizedAt DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
   items      OrderItem[]
   delivery   OrderDelivery?

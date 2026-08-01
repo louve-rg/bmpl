@@ -46,8 +46,13 @@ percent) — **capped at the delivery fee** so the platform share is ≥ 0.
 `vendorNet + driverAllocation + platformRevenue ≡ gross` (commission and driver
 allocation cancel algebraically) — so the ledger always balances.
 
-> **Default rates are engineering defaults for the configurable engine and should be
-> confirmed by the platform operator** (commission 10%, driver 80% of delivery fee).
+> **Configurable DEVELOPMENT defaults — NOT permanently approved commercial rates.**
+> Commission 10%, driver 80% of the delivery fee, platform 20%. Stored centrally in
+> `PlatformFeeConfig` (admin-editable; labeled configurable in docs + the admin UI);
+> never hardcoded across services/frontend. Do not run real production settlement on
+> these unless a legitimately funded, authorized, delivered transaction exists and
+> settlement is explicitly approved; no synthetic production funding may be introduced.
+> (Confirmed by the operator 2026-08-01 as dev defaults.)
 
 ## 5. Ledger postings (per settled vendor-order)
 One balanced `ESCROW_RELEASE` transaction, reference `settlement:<vendorOrderId>:v1`:

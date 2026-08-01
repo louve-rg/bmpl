@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ordersApi, money, type VendorOrderView } from '../../../../lib/orders';
@@ -8,13 +8,14 @@ import { OrderStatusBadge, DeliveryBadge } from '../../../../components/orders/O
 import type { ApiError } from '../../../../lib/api';
 import { Card, Alert, EmptyState, Spinner, StatusBadge } from '../../../../components/ui';
 import { VendorDeliveryPanel } from '../../../../components/VendorDeliveryPanel';
+import { VendorPickupPanel } from '../../../../components/VendorPickupPanel';
 
 export default function VendorOrderDetailPage() {
   const params = useParams<{ id: string }>();
   const [vo, setVo] = useState<VendorOrderView | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading');
 
-  useEffect(() => {
+  const load = useCallback(() => {
     ordersApi
       .vendorGet(params.id)
       .then((r) => {
@@ -23,6 +24,10 @@ export default function VendorOrderDetailPage() {
       })
       .catch((e) => setState((e as ApiError).status === 404 ? 'notfound' : 'error'));
   }, [params.id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <div>
@@ -95,6 +100,17 @@ export default function VendorOrderDetailPage() {
           {vo.deliveryMethod === 'DELIVERY' && vo.delivery?.id && (
             <div className="mt-4">
               <VendorDeliveryPanel deliveryId={vo.delivery.id} />
+            </div>
+          )}
+
+          {vo.deliveryMethod === 'PICKUP' && (
+            <div className="mt-4">
+              <VendorPickupPanel
+                vendorOrderId={vo.id}
+                status={vo.status}
+                pickedUpAt={vo.pickedUpAt}
+                onChanged={load}
+              />
             </div>
           )}
 

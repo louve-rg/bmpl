@@ -39,9 +39,14 @@ export type CancelDeliveryInput = z.infer<typeof cancelDeliverySchema>;
 export const declineJobSchema = z.object({ reason });
 export type DeclineJobInput = z.infer<typeof declineJobSchema>;
 
-/** Driver confirms pickup by submitting the vendor-held pickup PIN. */
+/** Driver confirms pickup by submitting the vendor-held pickup PIN. Also reused by
+ *  vendor pickup-collection confirmation (M18.1). */
 export const confirmPickupSchema = z.object({ pin });
 export type ConfirmPickupInput = z.infer<typeof confirmPickupSchema>;
+
+/** Admin override for pickup collection (M18.1) — requires a reason, no PIN. */
+export const pickupOverrideSchema = z.object({ reason });
+export type PickupOverrideInput = z.infer<typeof pickupOverrideSchema>;
 
 /** Driver completes delivery: recipient PIN + recipient name (+ optional notes/POD). */
 export const confirmDeliverySchema = z.object({

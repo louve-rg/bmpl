@@ -5,12 +5,13 @@ import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Roles } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
 import { OrdersService } from './orders.service';
+import { PickupService } from './pickup.service';
 
 /** Customer checkout + own order history (self-scoped by userId). */
 @Roles('CUSTOMER')
 @Controller()
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(private readonly orders: OrdersService, private readonly pickup: PickupService) {}
 
   private actor(user: AuthContext, req: Request) {
     return { userId: user.userId, ipAddress: req.ip, sessionId: user.sessionId };
@@ -34,5 +35,11 @@ export class OrdersController {
   @Get('orders/:id')
   get(@CurrentUser() user: AuthContext, @Param('id') id: string) {
     return this.orders.getOwn(user.userId, id);
+  }
+
+  /** Reveal the customer's own pickup PIN to show the store (M18.1). */
+  @Get('orders/vendor-orders/:vendorOrderId/pickup-pin')
+  pickupPin(@CurrentUser() user: AuthContext, @Param('vendorOrderId') vendorOrderId: string) {
+    return this.pickup.customerPickupPin(user.userId, vendorOrderId);
   }
 }

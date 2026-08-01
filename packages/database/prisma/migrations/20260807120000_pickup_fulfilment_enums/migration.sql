@@ -1,0 +1,6 @@
+-- Pickup fulfilment (M18.1) — enum value additions (isolated per PG rule).
+ALTER TYPE "VendorOrderStatus" ADD VALUE 'READY_FOR_PICKUP';
+ALTER TYPE "VendorOrderStatus" ADD VALUE 'PICKED_UP';
+ALTER TYPE "AuditAction" ADD VALUE 'VENDOR_ORDER_READY_FOR_PICKUP';
+ALTER TYPE "AuditAction" ADD VALUE 'VENDOR_ORDER_PICKED_UP';
+ALTER TYPE "AuditAction" ADD VALUE 'VENDOR_ORDER_PICKUP_PIN_FAILED';
