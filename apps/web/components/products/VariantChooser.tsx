@@ -8,8 +8,8 @@
 import { money } from '../../lib/cart';
 import {
   availableValuesForOption,
-  availableVariants,
   pluralizeOptionLabel,
+  variantsForSelection,
   type OptionLike,
   type Selection,
   type VariantLike,
@@ -34,24 +34,28 @@ function variantImage(images: LineupImage[], variantId: string): { url: string; 
 }
 
 /**
- * Horizontally-scrollable lineup: one card per AVAILABLE variant (zero-stock
- * hidden), each with the variant's own primary image, title and price.
- * Clicking a card selects that variant.
+ * Horizontally-scrollable lineup: one card per AVAILABLE variant that matches the
+ * current selection (zero-stock hidden), each with the variant's own primary image,
+ * title and price. Selecting a specific value for any option immediately narrows the
+ * cards to the intersection of all active selections (options left on "All" add no
+ * restriction); options are never broadened. Clicking a card selects that variant.
  */
 export function VariantLineup({
   variants,
   images,
+  selection,
   selectedId,
   fallbackPriceMinor,
   onSelect,
 }: {
   variants: VariantLike[];
   images: LineupImage[];
+  selection: Selection;
   selectedId: string | null;
   fallbackPriceMinor: number;
   onSelect: (v: VariantLike) => void;
 }) {
-  const list = availableVariants(variants);
+  const list = variantsForSelection(variants, selection);
   if (list.length === 0) return null;
 
   return (

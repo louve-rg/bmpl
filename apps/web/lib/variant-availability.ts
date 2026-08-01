@@ -78,6 +78,22 @@ export function availableVariants(variants: VariantLike[]): VariantLike[] {
 }
 
 /**
+ * Available variants that match the CURRENT selection, by intersection: every
+ * option with a specific value chosen must be present on the variant; an option
+ * left in the "All" state (empty/absent) simply adds no restriction. This is what
+ * the variant lineup shows, so picking one option (e.g. Fragrance: Gingham)
+ * immediately narrows the cards to that value only — even while another option
+ * (e.g. Size) is still "All".
+ */
+export function variantsForSelection(variants: VariantLike[], selection: Selection): VariantLike[] {
+  const active = Object.values(selection).filter(Boolean);
+  return availableVariants(variants).filter((v) => {
+    const ids = new Set(v.optionValueIds);
+    return active.every((valId) => ids.has(valId));
+  });
+}
+
+/**
  * Value ids for `optionId` that are backed by at least one AVAILABLE variant
  * given the current selection of the OTHER options (combination-aware). Drives
  * the dropdowns so only reachable, in-stock choices are offered.

@@ -11,6 +11,7 @@ import {
   purchaseState,
   resolveSelectedVariant,
   selectionForVariant,
+  variantsForSelection,
   type ProductLike,
   type PurchaseStateKind,
   type Selection,
@@ -121,7 +122,11 @@ export function StorefrontPreview({
   );
 
   function changeOption(optionId: string, valueId: string) {
-    setSelection((s) => pruneSelection(variants, view.options, { ...s, [optionId]: valueId }));
+    setSelection((s) => {
+      const pruned = pruneSelection(variants, view.options, { ...s, [optionId]: valueId });
+      const matches = variantsForSelection(variants, pruned);
+      return matches.length === 1 ? selectionForVariant(view.options, matches[0]!) : pruned;
+    });
   }
 
   if (images.filter((i) => i.url).length === 0 && !hasVariants) {
@@ -142,6 +147,7 @@ export function StorefrontPreview({
         <VariantLineup
           variants={variants}
           images={lineupImages}
+          selection={selection}
           selectedId={selectedVariant?.id ?? null}
           fallbackPriceMinor={fallbackPriceMinor}
           onSelect={(v) => setSelection(selectionForVariant(view.options, v))}

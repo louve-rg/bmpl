@@ -6,6 +6,7 @@ import { Badge } from '../ui';
 import type { InvRow, ProductImage, Variant } from './types';
 import { asApiError, centsToDollars, dollarsToCents, fieldError, SaveState, smallInput } from './shared';
 import { ImageGallery, type VariantChoice } from './ImageGallery';
+import { computeInventoryAdjustment, reasonForMode, type AdjustMode } from './inventory-adjust';
 
 type FieldKey = 'displayName' | 'sku' | 'barcode' | 'price' | 'salePrice';
 type Status = 'idle' | 'saving' | 'saved' | 'error';
@@ -232,11 +233,16 @@ function InventoryField({
   reloadVariants: () => Promise<void>;
   onError: (msg: string) => void;
 }) {
-  const [delta, setDelta] = useState('');
+  const [mode, setMode] = useState<AdjustMode>('ADD');
+  const [qtyStr, setQtyStr] = useState('1');
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const q = `?variantId=${variant.id}`;
   const unlimited = invRow?.unlimited ?? false;
+  const current = variant.quantity;
+  const reserved = invRow?.reserved ?? 0;
+  const qty = qtyStr.trim() === '' ? 0 : Number(qtyStr);
+  const plan = computeInventoryAdjustment(mode, Number.isFinite(qty) ? qty : -1, current);
 
   async function run(p: Promise<unknown>) {
     setBusy(true);
@@ -250,45 +256,112 @@ function InventoryField({
     }
   }
 
+  function apply() {
+    // Guard prevents accidental double submission (button is also disabled while busy).
+    if (busy || unlimited || !plan.valid) return;
+    void run(
+      api.post(`/vendor/products/${productId}/inventory/adjust${q}`, {
+        delta: plan.delta,
+        reason: reasonForMode(mode),
+      }),
+    ).then(() => setQtyStr(mode === 'SET' ? String(plan.result) : '1'));
+  }
+
+  function bump(step: 1 | -1) {
+    const base = Number.isFinite(qty) ? qty : 0;
+    setQtyStr(String(Math.max(0, base + step)));
+  }
+
+  const MODES: Array<{ key: AdjustMode; label: string }> = [
+    { key: 'ADD', label: 'Add' },
+    { key: 'REMOVE', label: 'Remove' },
+    { key: 'SET', label: 'Set' },
+  ];
+
   return (
     <div className="sm:col-span-2">
       <div className="mb-1 flex items-center justify-between">
         <span className="bmpl-label mb-0">Inventory</span>
-        <span className="text-xs text-slate-400">On hand: <span className="font-semibold text-belize-navy">{unlimited ? '∞' : variant.quantity}</span></span>
+        <span className="text-xs text-slate-400">
+          On hand: <span className="font-semibold text-belize-navy">{unlimited ? '∞' : current}</span>
+          {!unlimited && reserved > 0 && <span className="ml-2">Reserved: {reserved}</span>}
+        </span>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          className={`${smallInput} w-24`}
-          inputMode="numeric"
-          placeholder="+/- qty"
-          value={delta}
-          disabled={busy || unlimited}
-          onChange={(e) => setDelta(e.target.value)}
-          aria-label="Adjust quantity"
-        />
-        <button
-          type="button"
-          disabled={busy || unlimited}
-          onClick={() => {
-            const d = Number(delta);
-            if (!d) return;
-            void run(
-              api.post(`/vendor/products/${productId}/inventory/adjust${q}`, {
-                delta: d,
-                reason: d > 0 ? 'RESTOCK' : 'CORRECTION',
-              }),
-            ).then(() => setDelta(''));
-          }}
-          className="rounded-bmpl-md bg-belize-blue px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-belize-deep disabled:opacity-50"
-        >
-          Adjust
-        </button>
-        {invRow && (
-          <button type="button" onClick={() => setOpen((v) => !v)} className="text-xs font-semibold text-belize-blue hover:underline">
-            {open ? 'Hide settings' : 'Stock settings'}
+
+      {unlimited ? (
+        <p className="text-xs text-slate-400">Unlimited stock — quantity tracking is off for this variant.</p>
+      ) : (
+        <div className="rounded-bmpl-md border border-slate-200 p-2">
+          {/* Adjustment type — no minus sign needed on mobile */}
+          <div className="flex gap-1" role="group" aria-label="Adjustment type">
+            {MODES.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                aria-pressed={mode === m.key}
+                disabled={busy}
+                onClick={() => setMode(m.key)}
+                className={`flex-1 rounded-bmpl-sm px-2 py-2 text-xs font-semibold transition ${
+                  mode === m.key ? 'bg-belize-blue text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Quantity stepper — big tap targets + numeric keypad */}
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              aria-label="Decrease amount"
+              disabled={busy || qty <= 0}
+              onClick={() => bump(-1)}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-bmpl-md border border-slate-300 text-xl leading-none text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
+            >
+              −
+            </button>
+            <input
+              className={`${smallInput} h-11 flex-1 text-center text-base`}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={qtyStr}
+              disabled={busy}
+              onChange={(e) => setQtyStr(e.target.value.replace(/[^0-9]/g, ''))}
+              aria-label={`Quantity to ${mode.toLowerCase()}`}
+            />
+            <button
+              type="button"
+              aria-label="Increase amount"
+              disabled={busy}
+              onClick={() => bump(1)}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-bmpl-md border border-slate-300 text-xl leading-none text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
+            >
+              +
+            </button>
+          </div>
+
+          {/* Live result preview / inline validation */}
+          <p className={`mt-2 text-xs ${plan.valid ? 'text-slate-500' : 'text-red-600'}`} role="status">
+            {plan.valid ? <>New on-hand: <span className="font-semibold text-belize-navy">{plan.result}</span></> : plan.error}
+          </p>
+
+          <button
+            type="button"
+            disabled={busy || !plan.valid}
+            onClick={apply}
+            className="mt-2 w-full rounded-bmpl-md bg-belize-blue px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-belize-deep disabled:opacity-50 sm:w-auto sm:px-4"
+          >
+            {busy ? 'Applying…' : 'Apply adjustment'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
+
+      {invRow && (
+        <button type="button" onClick={() => setOpen((v) => !v)} className="mt-2 text-xs font-semibold text-belize-blue hover:underline">
+          {open ? 'Hide settings' : 'Stock settings'}
+        </button>
+      )}
       {invRow && open && (
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-bmpl-md bg-slate-50 p-2.5">
           <label className="flex items-center gap-1.5 text-xs text-slate-600">

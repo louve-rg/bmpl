@@ -19,6 +19,7 @@ import {
   purchaseState,
   resolveSelectedVariant,
   selectionForVariant,
+  variantsForSelection,
   type OptionLike,
   type PurchaseStateKind,
   type Selection,
@@ -97,9 +98,15 @@ export function ProductView({ product }: { product: ProductDetail }) {
     setQty(1);
   }
 
-  // A dropdown change, pruned so the remaining selection stays reachable.
+  // A dropdown change, pruned so the remaining selection stays reachable. When the
+  // narrowed selection leaves exactly one matching variant, adopt it fully so the
+  // image/title/price/SKU/inventory all sync to that variant (a valid default).
   function changeOption(optionId: string, valueId: string) {
-    setSelection((s) => pruneSelection(product.variants, product.options, { ...s, [optionId]: valueId }));
+    setSelection((s) => {
+      const pruned = pruneSelection(product.variants, product.options, { ...s, [optionId]: valueId });
+      const matches = variantsForSelection(product.variants, pruned);
+      return matches.length === 1 ? selectionForVariant(product.options, matches[0]!) : pruned;
+    });
     setQty(1);
   }
 
@@ -211,6 +218,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
           <VariantLineup
             variants={product.variants}
             images={lineupImages}
+            selection={selection}
             selectedId={selectedVariant?.id ?? null}
             fallbackPriceMinor={product.salePriceMinor ?? product.priceMinor}
             onSelect={selectVariant}
