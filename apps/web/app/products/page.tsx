@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
 import { serverGetSafe } from '../../lib/server-api';
-import { Alert, Badge, Button, EmptyState, Input } from '../../components/ui';
-import { SaveButton } from '../../components/saved/SaveButton';
+import { Alert, Button, EmptyState, Input } from '../../components/ui';
+import { ProductCard } from '../../components/discovery/ProductCard';
+import { SearchSuggest } from '../../components/discovery/SearchSuggest';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +34,6 @@ interface CatNode {
   children: CatNode[];
 }
 
-const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 const SORTS = [
   { v: 'newest', label: 'Newest' },
   { v: 'price_asc', label: 'Price ↑' },
@@ -114,17 +114,22 @@ export default async function ProductsPage({
             </div>
           </div>
 
-          <form method="get" action="/products" className="bmpl-card mt-5 flex flex-wrap items-end gap-3 p-4">
+          <div className="mt-5">
+            <SearchSuggest defaultValue={searchParams.q ?? ''} className="w-full sm:max-w-xl" />
+          </div>
+
+          <form method="get" action="/products" className="bmpl-card mt-4 flex flex-wrap items-end gap-3 p-4">
             {searchParams.vendorSlug && <input type="hidden" name="vendorSlug" value={searchParams.vendorSlug} />}
             {searchParams.categoryId && <input type="hidden" name="categoryId" value={searchParams.categoryId} />}
             {searchParams.sort && <input type="hidden" name="sort" value={searchParams.sort} />}
-            <Input name="q" aria-label="Search products" defaultValue={searchParams.q ?? ''} placeholder="Search products…" className="min-w-48 flex-1" />
+            {/* Preserve the active text query when applying price / stock filters. */}
+            {searchParams.q && <input type="hidden" name="q" value={searchParams.q} />}
             <Input name="priceMin" aria-label="Minimum price" defaultValue={searchParams.priceMin ?? ''} inputMode="decimal" placeholder="Min $" className="w-24" />
             <Input name="priceMax" aria-label="Maximum price" defaultValue={searchParams.priceMax ?? ''} inputMode="decimal" placeholder="Max $" className="w-24" />
             <label className="flex items-center gap-1.5 pb-2.5 text-sm text-slate-600">
               <input type="checkbox" name="inStock" value="true" defaultChecked={!!searchParams.inStock} className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-belize-accent" /> In stock
             </label>
-            <Button type="submit">Apply</Button>
+            <Button type="submit">Apply filters</Button>
           </form>
 
           <div className="mt-6 grid gap-6 md:grid-cols-[200px_1fr]">
@@ -157,36 +162,7 @@ export default async function ProductsPage({
               ) : (
                 <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                   {data.items.map((p) => (
-                    <div key={p.id} className="relative">
-                      <Link href={`/products/${p.slug}`} className="group block rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md">
-                        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
-                          {p.primaryImageUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
-                          ) : (
-                            'No image'
-                          )}
-                        </div>
-                        <p className="mt-3 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
-                        <p className="text-xs text-slate-400">{p.vendor.businessName} · {p.category.name}</p>
-                        <p className="mt-1.5 text-sm">
-                          {p.salePriceMinor != null ? (
-                            <>
-                              <span className="font-bold text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
-                              <span className="text-slate-400 line-through">{money(p.priceMinor)}</span>
-                            </>
-                          ) : (
-                            <span className="font-bold text-belize-navy">{money(p.priceMinor)}</span>
-                          )}
-                        </p>
-                        {!p.inStock && (
-                          <Badge tone="error" className="mt-1.5">Out of stock</Badge>
-                        )}
-                      </Link>
-                      <div className="absolute right-6 top-6">
-                        <SaveButton productId={p.id} className="bg-white/90 shadow-bmpl-sm backdrop-blur hover:bg-white" />
-                      </div>
-                    </div>
+                    <ProductCard key={p.id} product={p} />
                   ))}
                 </div>
               )}

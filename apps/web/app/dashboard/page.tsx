@@ -3,6 +3,7 @@ import { ROLE_DEFINITIONS, type RoleCode } from '@bmpl/shared';
 import { serverGet } from '../../lib/server-api';
 import type { MeView } from '../../lib/types';
 import { Alert, Card, PageHeader, StatusBadge } from '../../components/ui';
+import { ForYou } from '../../components/discovery/ForYou';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,6 +46,8 @@ export default async function DashboardHome() {
           ))}
         </ul>
       </Card>
+
+      <ForYou className="mt-10" />
     </div>
   );
 }

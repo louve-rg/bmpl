@@ -30,6 +30,8 @@ tags:
     description: Verified reviews & ratings (M19) tied to completed transactions. Public reads; customer writes; vendor responses; admin moderation.
   - name: Engagement
     description: Saved products (wishlists) & recently-viewed history (M20). Own-account customer data only; never reserves stock or moves money.
+  - name: Discovery
+    description: Discovery, cross-sell, personalized recommendations & search typeahead (M21). Deterministic, non-AI; read-only over catalog + ratings + own saved/viewed signals.
 components:
   securitySchemes:
     cookieAuth:
@@ -822,3 +824,12 @@ paths:
     delete: { tags: [Engagement], summary: "Clear the caller's recently-viewed history", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "{ ok: true }" } } }
   /recently-viewed/{productId}:
     post: { tags: [Engagement], summary: "Record a product view (upsert; prunes to newest 50)", parameters: [ { name: productId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ ok: true }" }, "404": { description: "Product not viewable" } } }
+  # ---- Discovery & Recommendations (Phase 4 · M21) ----
+  /marketplace/discovery:
+    get: { tags: [Discovery], summary: "Homepage discovery bundle", responses: { "200": { description: "{ featured, topRated, newArrivals, popular (Card[]), categories: [{id,name,slug,iconName,productCount}] }" } }, description: "Public; PUBLISHED/APPROVED only; popular = units sold with cold-start fallback (top-rated→featured→newest)" }
+  /marketplace/products/{slug}/related:
+    get: { tags: [Discovery], summary: "Product-detail cross-sell (related + more-from-vendor)", parameters: [ { name: slug, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: "{ related: Card[], moreFromVendor: Card[] }" }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Public; same-category (rating-weighted) back-filled from the same vendor; self excluded" }
+  /marketplace/search/suggest:
+    get: { tags: [Discovery], summary: "Search typeahead suggestions", parameters: [ { name: q, in: query, required: false, schema: { type: string } } ], responses: { "200": { description: "{ products:[{title,slug}], categories:[{name,slug}], vendors:[{businessName,slug}] }" } }, description: "Public; empty groups when q has < 2 chars; 5 per group" }
+  /recommendations/for-you:
+    get: { tags: [Discovery], summary: "Personalized recommendations (own signals only)", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ personalized: boolean, items: Card[] }" }, "401": { $ref: "#/components/responses/Unauthorized" } }, description: "Requires CUSTOMER role; from the caller's own recently-viewed/saved categories, excluding engaged items; popular fallback on cold start" }

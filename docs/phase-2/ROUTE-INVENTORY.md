@@ -3,14 +3,15 @@
 ## Web (`apps/web`) — public marketplace + vendor dashboard
 | Route | Access | Purpose |
 |---|---|---|
-| `/` | public | landing (nav: Shop → `/products`, Vendors → `/vendors`) |
+| `/` | public | landing + discovery rows (M21): featured / top-rated / new arrivals / popular / shop-by-category |
 | `/products` | public | catalog: search, category sidebar, price/in-stock filters, sort, pagination, `vendorSlug` (single-store view) |
-| `/products/[slug]` | public | product detail: gallery, variant list, availability, ratings & reviews (M19) |
+| `/products/[slug]` | public | product detail: gallery, variant list, availability, ratings & reviews (M19), related + more-from-vendor (M21) |
+| `/products` | public | catalog + M7 search/filters + search typeahead (M21) |
 | `/orders/[id]` | authed | customer order detail + delivery tracking (M15): timeline, driver, delivery-PIN reveal, proof of delivery |
 | `/vendors` | public | vendor directory + name search |
 | `/store/[slug]` | public | storefront: banner/logo, info, hours, locations, featured products, store rating + customer reviews (M19) |
 | `/login` | public | sign in; honors same-origin `?next=` to return after an add-to-cart/checkout bounce |
-| `/dashboard` | authed | overview + role switcher |
+| `/dashboard` | authed | overview + role switcher + "recommended for you" (M21) |
 | `/dashboard/roles` | authed | request provider roles: upload required documents, view application status + reviewer notes, respond to MORE_INFO_REQUIRED and resubmit |
 | `/dashboard/store` | VENDOR | "My Store": profile, settings, locations, hours, logo/banner, submit |
 | `/dashboard/delivery` | VENDOR | delivery settings (M13): pickup/delivery, base fee, free threshold, zones + fees, estimate |

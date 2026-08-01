@@ -7,6 +7,10 @@ import { Providers } from '../components/landing/Providers';
 import { MobilePromo } from '../components/landing/MobilePromo';
 import { FinalCTA } from '../components/landing/FinalCTA';
 import { Footer } from '../components/landing/Footer';
+import { DiscoverySections } from '../components/discovery/DiscoverySections';
+import { ForYou } from '../components/discovery/ForYou';
+
+export const dynamic = 'force-dynamic';
 
 export default function HomePage() {
   return (
@@ -15,6 +19,8 @@ export default function HomePage() {
       <main>
         <Hero />
         <Services />
+        <DiscoverySections />
+        <ForYou className="container-bmpl py-4 pb-16" />
         <WhyChooseUs />
         <Providers />
         <WalletSection />

@@ -13,6 +13,7 @@ import { cartApi, money, notifyCartChanged } from '../../../lib/cart';
 import type { ApiError } from '../../../lib/api';
 import { SaveButton } from '../../../components/saved/SaveButton';
 import { RecordView } from '../../../components/saved/RecordView';
+import { RelatedProducts } from '../../../components/discovery/RelatedProducts';
 import {
   pruneSelection,
   purchaseState,
@@ -379,6 +380,8 @@ export function ProductView({ product }: { product: ProductDetail }) {
         <ProductReviews productId={product.id} onAggregate={setReviewAggregate} />
       </div>
     </section>
+
+    <RelatedProducts slug={product.slug} vendorName={product.vendor.businessName} />
     </>
   );
 }
