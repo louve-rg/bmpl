@@ -27,6 +27,9 @@ interface ContextParties {
   customerUserId?: string | null;
   vendorUserId?: string | null;
   currentDriverUserId?: string | null;
+  // Belize Connect Jobs (M24) — employer↔applicant thread parties.
+  employerUserId?: string | null;
+  applicantUserId?: string | null;
   label: string;
   orderNumber?: string | null;
 }
@@ -88,6 +91,14 @@ export class MessagingService {
         orderNumber: d.vendorOrder.order.orderNumber,
       };
     }
+    if (contextType === 'JOB_APPLICATION') {
+      const app = await this.prisma.jobApplication.findUnique({
+        where: { id: contextId },
+        include: { job: { include: { employerProfile: { select: { userId: true, companyName: true } } } } },
+      });
+      if (!app) throw new NotFoundException('Application not found.');
+      return { applicantUserId: app.applicantId, employerUserId: app.job.employerProfile.userId, label: `${app.jobTitleSnapshot} · ${app.companySnapshot}` };
+    }
     // SUPPORT_CASE / ORDER — parties are recorded as participants directly.
     return { label: 'Support' };
   }
@@ -142,6 +153,41 @@ export class MessagingService {
     await this.persistMessage(actor, conv.id, { body: dto.message }, 'USER');
     await this.audit.record({ action: 'CONVERSATION_CREATED', actorId: actor.userId, newValue: { conversationId: conv.id, contextType: 'SUPPORT_CASE', subject: dto.subject, relatedType: dto.relatedType ?? null, relatedId: dto.relatedId ?? null } });
     return this.getConversation(actor, conv.id);
+  }
+
+  /**
+   * Open (or return) the employer↔applicant conversation for a job application
+   * (M24). Only the applicant or the employer who owns the job may open it.
+   */
+  async openJobApplication(actor: Actor, applicationId: string) {
+    if (actor.status && actor.status !== 'ACTIVE') throw new ForbiddenException('Your account cannot start conversations.');
+    const p = await this.resolveParties('JOB_APPLICATION', applicationId);
+    if (actor.userId !== p.applicantUserId && actor.userId !== p.employerUserId) throw new NotFoundException('Application not found.');
+    const conv = await this.ensureConversation('JOB_APPLICATION', applicationId, 'EMPLOYER_APPLICANT', actor.userId, p.label, [
+      { userId: p.applicantUserId!, role: 'APPLICANT' },
+      { userId: p.employerUserId!, role: 'EMPLOYER' },
+    ], p.label);
+    return this.getConversation(actor, conv.id);
+  }
+
+  /**
+   * Best-effort SYSTEM message on a job-application thread (M24). Creates/reconciles
+   * the employer↔applicant conversation and posts an immutable system line. Called
+   * from the applications pipeline after the transaction; never throws to the caller.
+   */
+  async postJobApplicationSystem(applicationId: string, applicantUserId: string, employerUserId: string, text: string): Promise<void> {
+    try {
+      const conv = await this.ensureConversation('JOB_APPLICATION', applicationId, 'EMPLOYER_APPLICANT', applicantUserId, text, [
+        { userId: applicantUserId, role: 'APPLICANT' },
+        { userId: employerUserId, role: 'EMPLOYER' },
+      ]);
+      await this.prisma.$transaction(async (tx) => {
+        await tx.message.create({ data: { conversationId: conv.id, senderId: null, type: 'SYSTEM', body: text } });
+        await tx.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: new Date() } });
+      });
+    } catch {
+      // Messaging is a best-effort side-channel — a failure never blocks the pipeline.
+    }
   }
 
   /** Idempotent conversation upsert + participant reconciliation. */
@@ -201,7 +247,12 @@ export class MessagingService {
     // conversation's pairing, so a customer related to a delivery still cannot read
     // the vendor↔driver pickup thread. Support can read any conversation.
     const rawRelated =
-      actor.userId === parties.currentDriverUserId ? 'DRIVER' : actor.userId === parties.customerUserId ? 'CUSTOMER' : actor.userId === parties.vendorUserId ? 'VENDOR' : null;
+      actor.userId === parties.currentDriverUserId ? 'DRIVER'
+      : actor.userId === parties.customerUserId ? 'CUSTOMER'
+      : actor.userId === parties.vendorUserId ? 'VENDOR'
+      : actor.userId === parties.employerUserId ? 'EMPLOYER'
+      : actor.userId === parties.applicantUserId ? 'APPLICANT'
+      : null;
     const pairingRoles = conv.pairing.split('_'); // e.g. CUSTOMER_DRIVER → [CUSTOMER, DRIVER]
     const relatedRole = rawRelated && pairingRoles.includes(rawRelated) ? rawRelated : null;
     if (!participant && !relatedRole && !isSupport) throw new NotFoundException('Conversation not found.');

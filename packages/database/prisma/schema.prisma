@@ -118,6 +118,7 @@ enum NotificationCategory {
   SECURITY
   MESSAGE
   SYSTEM
+  JOB
 }
 
 enum AuditAction {
@@ -228,6 +229,24 @@ enum AuditAction {
   REVIEW_REPORT_RESOLVED
   // ---- Platform Operations (Phase 4 · M23) ----
   PLATFORM_SETTING_UPDATED
+  // ---- Belize Connect Jobs (Phase 5 · M24) ----
+  EMPLOYER_PROFILE_UPSERTED
+  JOB_SEEKER_PROFILE_UPSERTED
+  JOB_CATEGORY_MANAGED
+  JOB_CREATED
+  JOB_UPDATED
+  JOB_SUBMITTED
+  JOB_MODERATED
+  JOB_PUBLISHED
+  JOB_CLOSED
+  JOB_ARCHIVED
+  JOB_APPLICATION_SUBMITTED
+  JOB_APPLICATION_STATUS_CHANGED
+  JOB_APPLICATION_WITHDRAWN
+  JOB_INTERVIEW_SCHEDULED
+  JOB_INTERVIEW_UPDATED
+  JOB_REPORTED
+  JOB_REPORT_RESOLVED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -378,6 +397,12 @@ model User {
   inventoryChangesMade       InventoryChange[]         @relation("InventoryActor")
   savedProducts              SavedProduct[]
   recentlyViewedProducts     RecentlyViewedProduct[]
+  // Belize Connect / Jobs (Phase 5 · M24)
+  jobSeekerProfile           JobSeekerProfile?         @relation("UserJobSeekerProfile")
+  employerProfile            EmployerProfile?          @relation("UserEmployerProfile")
+  jobApplications            JobApplication[]          @relation("ApplicantApplications")
+  savedJobs                  SavedJob[]
+  recentlyViewedJobs         RecentlyViewedJob[]
 
   @@index([status])
   @@index([district])
@@ -620,6 +645,7 @@ enum ConversationContext {
   VENDOR_ORDER
   DELIVERY
   SUPPORT_CASE
+  JOB_APPLICATION
 }
 
 enum ConversationStatus {
@@ -632,6 +658,8 @@ enum ConversationParticipantRole {
   VENDOR
   DRIVER
   SUPPORT
+  EMPLOYER
+  APPLICANT
 }
 
 enum MessageType {
@@ -1133,15 +1161,15 @@ model Product {
   createdAt       DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
 
-  tags       Tag[]                     @relation("ProductTags")
-  reviews    ProductModerationReview[]
-  images     ProductImage[]
-  options    ProductOption[]
-  variants   ProductVariant[]
-  inventory  Inventory[]
-  cartItems  CartItem[]
-  orderItems OrderItem[]
-  savedBy    SavedProduct[]
+  tags             Tag[]                     @relation("ProductTags")
+  reviews          ProductModerationReview[]
+  images           ProductImage[]
+  options          ProductOption[]
+  variants         ProductVariant[]
+  inventory        Inventory[]
+  cartItems        CartItem[]
+  orderItems       OrderItem[]
+  savedBy          SavedProduct[]
   recentlyViewedBy RecentlyViewedProduct[]
 
   @@unique([vendorProfileId, sku])
@@ -2271,4 +2299,548 @@ model IdempotencyKey {
   @@unique([userId, scope, key])
   @@index([userId])
   @@map("idempotency_keys")
+}
+
+// ============================================================================
+// Belize Connect — Jobs & Employment (Phase 5 · M24)
+// Reuses the BMPL account, JOB_SEEKER/EMPLOYER roles + role-application approval,
+// messaging, notifications, storage, search, moderation, analytics, and audit.
+// Fully normalized (no JSON blobs).
+// ============================================================================
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  TEMPORARY
+  INTERNSHIP
+  SEASONAL
+  APPRENTICESHIP
+  VOLUNTEER
+}
+
+enum WorkArrangement {
+  ONSITE
+  HYBRID
+  REMOTE
+}
+
+enum ExperienceLevel {
+  ENTRY
+  JUNIOR
+  MID
+  SENIOR
+  LEAD
+  EXECUTIVE
+}
+
+enum EducationLevel {
+  NONE
+  PRIMARY
+  SECONDARY
+  VOCATIONAL
+  ASSOCIATE
+  BACHELOR
+  MASTER
+  DOCTORATE
+}
+
+enum SalaryPeriod {
+  HOUR
+  DAY
+  WEEK
+  MONTH
+  YEAR
+}
+
+enum SalaryVisibility {
+  HIDDEN
+  RANGE
+  EXACT
+}
+
+enum JobStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  MORE_INFO_REQUIRED
+  APPROVED
+  PUBLISHED
+  REJECTED
+  CLOSED
+  ARCHIVED
+  SUSPENDED
+}
+
+enum JobApplicationMethod {
+  INTERNAL
+  EXTERNAL_URL
+  EMAIL
+}
+
+enum JobApplicationStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  SHORTLISTED
+  INTERVIEW_REQUESTED
+  INTERVIEW_SCHEDULED
+  OFFER_EXTENDED
+  HIRED
+  REJECTED
+  WITHDRAWN
+}
+
+enum JobQuestionType {
+  SHORT_TEXT
+  LONG_TEXT
+  YES_NO
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  NUMBER
+  DATE
+}
+
+enum JobSeekerVisibility {
+  PRIVATE
+  EMPLOYERS_ONLY
+  PUBLIC_SUMMARY
+}
+
+enum SeekerEmploymentStatus {
+  OPEN_TO_WORK
+  EMPLOYED
+  UNEMPLOYED
+  STUDENT
+  NOT_LOOKING
+}
+
+enum InterviewMode {
+  IN_PERSON
+  PHONE
+  VIDEO
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  RESCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum JobReportReason {
+  SCAM
+  MISLEADING
+  DISCRIMINATION
+  ILLEGAL
+  PRIVACY
+  DUPLICATE
+  EXPIRED
+  OTHER
+}
+
+enum JobReportStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+// Admin-managed job category lookup (mirrors the marketplace Category pattern).
+model JobCategory {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  isVisible Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobs JobListing[]
+
+  @@index([isVisible])
+  @@map("job_categories")
+}
+
+// ---- Job Seeker profile (normalized) ----
+model JobSeekerProfile {
+  id                 String                 @id @default(cuid())
+  userId             String                 @unique
+  user               User                   @relation("UserJobSeekerProfile", fields: [userId], references: [id], onDelete: Cascade)
+  preferredName      String
+  legalName          String?
+  headline           String?
+  summary            String?
+  district           District?
+  contactEmail       String?
+  contactPhone       String?
+  employmentStatus   SeekerEmploymentStatus @default(OPEN_TO_WORK)
+  preferredTypes     EmploymentType[]
+  preferredDistricts District[]
+  remotePreference   WorkArrangement?
+  availabilityDate   DateTime?
+  salaryExpectMinor  BigInt?
+  salaryCurrency     Currency               @default(BZD)
+  salaryPeriod       SalaryPeriod?
+  salaryExpectPublic Boolean                @default(false)
+  visibility         JobSeekerVisibility    @default(PRIVATE)
+  photoKey           String? // private storage key; signed URL only
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  skills         JobSeekerSkill[]
+  education      JobSeekerEducation[]
+  experience     JobSeekerExperience[]
+  certifications JobSeekerCertification[]
+  languages      JobSeekerLanguage[]
+  resumes        JobSeekerResume[]
+
+  @@index([visibility])
+  @@index([district])
+  @@map("job_seeker_profiles")
+}
+
+model JobSeekerSkill {
+  id        String           @id @default(cuid())
+  profileId String
+  profile   JobSeekerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime         @default(now())
+
+  @@unique([profileId, name])
+  @@index([profileId])
+  @@map("job_seeker_skills")
+}
+
+model JobSeekerEducation {
+  id           String           @id @default(cuid())
+  profileId    String
+  profile      JobSeekerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  institution  String
+  level        EducationLevel?
+  fieldOfStudy String?
+  startYear    Int?
+  endYear      Int?
+  current      Boolean          @default(false)
+  createdAt    DateTime         @default(now())
+
+  @@index([profileId])
+  @@map("job_seeker_education")
+}
+
+model JobSeekerExperience {
+  id          String           @id @default(cuid())
+  profileId   String
+  profile     JobSeekerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  title       String
+  company     String
+  district    District?
+  startDate   DateTime?
+  endDate     DateTime?
+  current     Boolean          @default(false)
+  description String?
+  createdAt   DateTime         @default(now())
+
+  @@index([profileId])
+  @@map("job_seeker_experience")
+}
+
+model JobSeekerCertification {
+  id         String           @id @default(cuid())
+  profileId  String
+  profile    JobSeekerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  name       String
+  issuer     String?
+  issuedYear Int?
+  createdAt  DateTime         @default(now())
+
+  @@index([profileId])
+  @@map("job_seeker_certifications")
+}
+
+model JobSeekerLanguage {
+  id          String           @id @default(cuid())
+  profileId   String
+  profile     JobSeekerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  name        String
+  proficiency String?
+  createdAt   DateTime         @default(now())
+
+  @@unique([profileId, name])
+  @@index([profileId])
+  @@map("job_seeker_languages")
+}
+
+// A resume/CV file in PRIVATE R2. Served only via signed URLs to the owner,
+// employers whose job the owner applied to, and permitted admins.
+model JobSeekerResume {
+  id            String               @id @default(cuid())
+  profileId     String
+  profile       JobSeekerProfile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  label         String
+  storageKey    String               @unique
+  mimeType      String
+  fileSizeBytes Int
+  scanStatus    AttachmentScanStatus @default(PENDING)
+  isPrimary     Boolean              @default(false)
+  createdAt     DateTime             @default(now())
+
+  applications JobApplication[]
+
+  @@index([profileId])
+  @@map("job_seeker_resumes")
+}
+
+// ---- Employer / Company profile (mirrors VendorProfile; approval via EMPLOYER role) ----
+model EmployerProfile {
+  id             String               @id @default(cuid())
+  userId         String               @unique
+  user           User                 @relation("UserEmployerProfile", fields: [userId], references: [id], onDelete: Cascade)
+  companyName    String
+  legalName      String?
+  slug           String               @unique
+  description    String?
+  industry       String?
+  companySize    String?
+  contactEmail   String
+  contactPhone   String?
+  website        String?
+  district       District?
+  addressLine1   String?
+  addressLine2   String?
+  city           String?
+  logoKey        String?
+  bannerKey      String?
+  approvalStatus VendorApprovalStatus @default(DRAFT)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  jobs JobListing[]
+
+  @@index([approvalStatus])
+  @@map("employer_profiles")
+}
+
+// ---- Job listing (normalized) ----
+model JobListing {
+  id                      String               @id @default(cuid())
+  employerProfileId       String
+  employerProfile         EmployerProfile      @relation(fields: [employerProfileId], references: [id], onDelete: Cascade)
+  jobCategoryId           String?
+  jobCategory             JobCategory?         @relation(fields: [jobCategoryId], references: [id], onDelete: SetNull)
+  title                   String
+  slug                    String               @unique
+  employmentType          EmploymentType
+  workArrangement         WorkArrangement      @default(ONSITE)
+  district                District?
+  city                    String?
+  remoteEligible          Boolean              @default(false)
+  description             String
+  responsibilities        String?
+  requirements            String?
+  preferredQualifications String?
+  experienceLevel         ExperienceLevel?
+  educationLevel          EducationLevel?
+  salaryMinMinor          BigInt?
+  salaryMaxMinor          BigInt?
+  salaryCurrency          Currency             @default(BZD)
+  salaryPeriod            SalaryPeriod?
+  salaryVisibility        SalaryVisibility     @default(HIDDEN)
+  openings                Int                  @default(1)
+  applicationDeadline     DateTime?
+  startDate               DateTime?
+  applicationMethod       JobApplicationMethod @default(INTERNAL)
+  externalUrl             String?
+  applicationEmail        String?
+  status                  JobStatus            @default(DRAFT)
+  moderationReason        String?
+  moderatedById           String?
+  moderatedAt             DateTime?
+  publishedAt             DateTime?
+  closedAt                DateTime?
+  archivedAt              DateTime?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  skills       JobSkill[]
+  benefits     JobBenefit[]
+  questions    JobApplicationQuestion[]
+  applications JobApplication[]
+  reports      JobReport[]
+  savedBy      SavedJob[]
+  viewedBy     RecentlyViewedJob[]
+
+  @@index([status, publishedAt])
+  @@index([employerProfileId, status])
+  @@index([jobCategoryId])
+  @@index([district])
+  @@map("job_listings")
+}
+
+model JobSkill {
+  id        String     @id @default(cuid())
+  jobId     String
+  job       JobListing @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  name      String
+  required  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+
+  @@unique([jobId, name])
+  @@index([jobId])
+  @@map("job_skills")
+}
+
+model JobBenefit {
+  id        String     @id @default(cuid())
+  jobId     String
+  job       JobListing @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime   @default(now())
+
+  @@index([jobId])
+  @@map("job_benefits")
+}
+
+// Employer-authored custom application question. Wording/options are snapshotted
+// onto each answer at submit time so later edits never alter historical applications.
+model JobApplicationQuestion {
+  id        String          @id @default(cuid())
+  jobId     String
+  job       JobListing      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  prompt    String
+  type      JobQuestionType
+  required  Boolean         @default(false)
+  options   String[] // for SINGLE_CHOICE / MULTIPLE_CHOICE
+  sortOrder Int             @default(0)
+  createdAt DateTime        @default(now())
+
+  answers JobApplicationAnswer[]
+
+  @@index([jobId])
+  @@map("job_application_questions")
+}
+
+// ---- Job application ----
+model JobApplication {
+  id               String               @id @default(cuid())
+  jobId            String
+  job              JobListing           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  applicantId      String
+  applicant        User                 @relation("ApplicantApplications", fields: [applicantId], references: [id], onDelete: Cascade)
+  resumeId         String?
+  resume           JobSeekerResume?     @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  coverLetter      String?
+  status           JobApplicationStatus @default(SUBMITTED)
+  employerNotes    String? // PRIVATE to the employer — never exposed to the applicant
+  source           String?
+  // Snapshot at submission so history survives job/company edits or deletion.
+  jobTitleSnapshot String
+  companySnapshot  String
+  submittedAt      DateTime             @default(now())
+  withdrawnAt      DateTime?
+  updatedAt        DateTime             @updatedAt
+
+  answers    JobApplicationAnswer[]
+  events     JobApplicationEvent[]
+  interviews JobInterview[]
+
+  // One ACTIVE application per (job, applicant) is enforced in the service; a
+  // withdrawn application may be re-applied (documented policy).
+  @@index([jobId, status])
+  @@index([applicantId, submittedAt])
+  @@map("job_applications")
+}
+
+model JobApplicationAnswer {
+  id             String                  @id @default(cuid())
+  applicationId  String
+  application    JobApplication          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  questionId     String?
+  question       JobApplicationQuestion? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  // Snapshot of the question wording/type at submit time (immutable history).
+  promptSnapshot String
+  typeSnapshot   JobQuestionType
+  answerText     String?
+  answerChoices  String[]
+  createdAt      DateTime                @default(now())
+
+  @@index([applicationId])
+  @@map("job_application_answers")
+}
+
+// Append-only status/pipeline history for an application.
+model JobApplicationEvent {
+  id            String                @id @default(cuid())
+  applicationId String
+  application   JobApplication        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  fromStatus    JobApplicationStatus?
+  toStatus      JobApplicationStatus
+  actorId       String?
+  note          String?
+  createdAt     DateTime              @default(now())
+
+  @@index([applicationId, createdAt])
+  @@map("job_application_events")
+}
+
+model JobInterview {
+  id            String          @id @default(cuid())
+  applicationId String
+  application   JobApplication  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  scheduledAt   DateTime
+  timezone      String          @default("America/Belize")
+  mode          InterviewMode
+  location      String? // address or meeting link (no external integration in M24)
+  notes         String?
+  status        InterviewStatus @default(SCHEDULED)
+  createdById   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([applicationId])
+  @@map("job_interviews")
+}
+
+// ---- Saved jobs & recently viewed (mirrors M20 engagement) ----
+model SavedJob {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId     String
+  job       JobListing @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  @@unique([userId, jobId])
+  @@index([userId, createdAt])
+  @@map("saved_jobs")
+}
+
+model RecentlyViewedJob {
+  id       String     @id @default(cuid())
+  userId   String
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId    String
+  job      JobListing @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  viewedAt DateTime   @default(now())
+
+  @@unique([userId, jobId])
+  @@index([userId, viewedAt])
+  @@map("recently_viewed_jobs")
+}
+
+// ---- Job reports (M23 moderation pattern) ----
+model JobReport {
+  id             String          @id @default(cuid())
+  jobId          String
+  job            JobListing      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  reporterId     String
+  reason         JobReportReason
+  note           String?
+  status         JobReportStatus @default(OPEN)
+  resolvedById   String?
+  resolutionNote String?
+  resolvedAt     DateTime?
+  createdAt      DateTime        @default(now())
+
+  @@unique([jobId, reporterId])
+  @@index([status])
+  @@map("job_reports")
 }

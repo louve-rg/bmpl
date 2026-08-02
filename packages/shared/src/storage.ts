@@ -72,4 +72,12 @@ export const STORAGE_PREFIX = {
   // Review photos uploaded privately + shown via short-lived signed URLs once
   // published (reactive moderation can reject them).
   reviewMedia: (userId: string) => `reviews/${userId}`,
+  // ---- Belize Connect Jobs (Phase 5 · M24) ----
+  // Résumés/CVs + cover-letter/portfolio docs hold personal data → PRIVATE bucket,
+  // signed URLs only to the owner, employers of jobs the owner applied to, + permitted admins.
+  jobSeekerResume: (userId: string) => `jobs/resumes/${userId}`,
+  jobSeekerPhoto: (userId: string) => `jobs/seeker-photo/${userId}`,
+  // Employer company logo/banner → PUBLIC bucket (shown on public job/company pages).
+  employerLogo: (employerProfileId: string) => `employers/${employerProfileId}/logo`,
+  employerBanner: (employerProfileId: string) => `employers/${employerProfileId}/banner`,
 } as const;

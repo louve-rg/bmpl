@@ -29,12 +29,17 @@ enforced server-side by the global guard chain, regardless of what any UI shows.
 | `analytics.read` | view platform analytics dashboards + export reports (M22, read-only; ADMIN/SUPER_ADMIN only — excludes SUPPORT_AGENT) |
 | `ops.read` | view the operations console (cross-domain action queues + audit export) (M23) |
 | `ops.manage` | manage the platform announcement / maintenance banner (M23; display-only) |
+| `employers.read` | view employer/company profiles (M24, Belize Connect) |
+| `employers.moderate` | suspend/restore employer companies (M24; role approval reuses `role_applications.review`) |
+| `jobs.read` | view job listings + moderation queue + job reports (M24, read-only) |
+| `jobs.moderate` | approve/reject/more-info/unpublish/suspend/archive jobs; resolve job reports (M24) |
+| `job_categories.manage` | manage the Belize Connect job-category lookup (M24) |
 
 ### Default bundles (`PERMISSION_BUNDLES`)
 | Staff role | Marketplace permissions |
 |---|---|
-| `SUPPORT_AGENT` | read-only bundle incl. `vendors.read`, `products.read`, `drivers.read`, `deliveries.read`, `proof_of_delivery.read`, `reviews.read` |
-| `ADMIN` | all marketplace + logistics permissions incl. all `deliveries.*` + `proof_of_delivery.read` + `reviews.read`/`reviews.moderate` + `analytics.read` + `ops.read`/`ops.manage` |
+| `SUPPORT_AGENT` | read-only bundle incl. `vendors.read`, `products.read`, `drivers.read`, `deliveries.read`, `proof_of_delivery.read`, `reviews.read`, `employers.read`, `jobs.read` (NO résumé access) |
+| `ADMIN` | all marketplace + logistics permissions incl. all `deliveries.*` + `proof_of_delivery.read` + `reviews.read`/`reviews.moderate` + `analytics.read` + `ops.read`/`ops.manage` + `employers.*`/`jobs.*`/`job_categories.manage` |
 | `SUPER_ADMIN` | all (inherits every permission) |
 
 ## Capability matrix
@@ -58,6 +63,12 @@ enforced server-side by the global guard chain, regardless of what any UI shows.
 | View platform analytics + reports (M22, `analytics.read`) | — | — | — | — | ✅ |
 | Operations console + audit export (M23, `ops.read`) | — | — | — | — | ✅ |
 | Manage announcement/maintenance banner (M23, `ops.manage`) | — | — | — | — | ✅ |
+| Belize Connect: browse/search jobs (M24) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Belize Connect: job-seeker profile / résumé / apply (own) | — | ✅ | — | — | — |
+| Belize Connect: publish jobs + manage applicants (own, APPROVED employer) | — | — | ✅¹ | — | — |
+| Belize Connect: moderate jobs / employers / reports (M24) | — | — | — | read-only | ✅ |
+
+¹ EMPLOYER is a separate approved role (not shown as a column); requires the EMPLOYER role application + approval.
 
 ## Ownership rule
 Every vendor endpoint resolves ownership through `OwnershipService`

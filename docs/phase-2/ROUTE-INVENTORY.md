@@ -24,6 +24,11 @@
 | `/dashboard/analytics` | VENDOR | own-store analytics (M22): KPIs, sales chart, top products, orders CSV export |
 | `/dashboard/driver/earnings` | DELIVERY_DRIVER | driver earnings (M18): pending/posted totals, earning history + detail |
 | `/wishlist` | CUSTOMER | saved products (M20): wishlist grid + remove + recently-viewed strip |
+| `/jobs` | public | Belize Connect (M24): job search/filters, job cards |
+| `/jobs/[slug]` | public | job detail: description, requirements, salary (if visible), apply, save, report, company + related |
+| `/companies/[slug]` | public | employer/company public page + open jobs (M24) |
+| `/dashboard/jobs` (job-seeker) | CUSTOMER | Belize Connect job-seeker (M24): profile, résumé manager, saved jobs, applications + timeline/interviews, messaging |
+| `/dashboard/employer` | EMPLOYER | employer (M24): company profile, job manager/editor, applicant pipeline, interviews, analytics |
 | `/dashboard/products` | VENDOR | product list (submit/archive/delete) |
 | `/dashboard/products/new` | VENDOR | create product |
 | `/dashboard/products/[id]` | VENDOR | edit product + image manager + variants/inventory manager |
@@ -43,6 +48,7 @@ pages `notFound()` on missing/unapproved.
 | `/dashboard/settlements` | `settlements.read` | settlements & escrow (M18): reconciliation, internal balances, settlements, exceptions/retry, fee config |
 | `/dashboard/analytics` | `analytics.read` | platform analytics (M22): KPIs, sales chart, top products/vendors, orders CSV export |
 | `/dashboard/ops` | `ops.read` | operations console (M23): cross-domain action queues, announcement/maintenance editor (`ops.manage`), audit CSV export (`audit.read`) |
+| `/dashboard/jobs` (admin) | `jobs.read` | Belize Connect moderation (M24): job queue + detail + moderate (`jobs.moderate`), reports, employers suspend/restore (`employers.*`), categories (`job_categories.manage`), analytics |
 | `/dashboard/vendors/[id]` | `vendors.read`/`.moderate` | detail + approve/reject/suspend/restore |
 | `/dashboard/products` | `products.read` | product queue (status filter) |
 | `/dashboard/products/[id]` | `products.read`/`.moderate` | detail + images + moderation |

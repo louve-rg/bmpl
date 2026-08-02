@@ -17,6 +17,7 @@ export * from './engagement';
 export * from './discovery';
 export * from './analytics';
 export * from './ops';
+export * from './jobs';
 export * from './slug';
 
 /** Shared, framework-agnostic branding tokens (mirrored in the UI package). */

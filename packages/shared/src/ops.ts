@@ -19,6 +19,8 @@ export const OPS_QUEUE_KEYS = [
   'failedSettlements',
   'deliveriesPendingAssignment',
   'awaitingPickupCollection',
+  'pendingJobModeration',
+  'openJobReports',
   'suspendedUsers',
   'suspendedRoles',
 ] as const;

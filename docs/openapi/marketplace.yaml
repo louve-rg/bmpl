@@ -36,6 +36,8 @@ tags:
     description: Analytics & reporting (M22). Read-only aggregation over orders/payments/settlements. Admin (analytics.read) is platform-wide; vendor is own-store only.
   - name: Operations
     description: Platform operations (M23). Ops console action queues (ops.read), announcement/maintenance banner (ops.manage; public read; display-only), audit CSV export (audit.read).
+  - name: Jobs
+    description: Belize Connect — Jobs & Employment (M24). Public browse; job-seeker profiles/résumés/applications; employer company + jobs + applicant pipeline; admin moderation. Reuses roles, approval, messaging, notifications, storage, moderation.
 components:
   securitySchemes:
     cookieAuth:
@@ -866,3 +868,57 @@ paths:
     get: { tags: [Operations], summary: "Audit-log CSV export", parameters: [ { name: action, in: query, required: false, schema: { type: string } }, { name: actorId, in: query, required: false, schema: { type: string } }, { name: from, in: query, required: false, schema: { type: string, format: date-time } }, { name: to, in: query, required: false, schema: { type: string, format: date-time } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "text/csv attachment" } }, description: "Requires audit.read; RFC-4180 quoted" }
   /marketplace/announcement:
     get: { tags: [Operations], summary: "Public announcement/maintenance banner (active notices only)", responses: { "200": { description: "{ announcement: { level, message } | null, maintenance: { message } | null }" } }, description: "Public; display-only" }
+  # ---- Belize Connect · Jobs & Employment (Phase 5 · M24) ----
+  /jobs:
+    get: { tags: [Jobs], summary: "Public job search", parameters: [ { name: q, in: query, schema: { type: string } }, { name: category, in: query, schema: { type: string } }, { name: district, in: query, schema: { type: string } }, { name: employmentType, in: query, schema: { type: string } }, { name: workArrangement, in: query, schema: { type: string } }, { name: remote, in: query, schema: { type: boolean } }, { name: salaryMin, in: query, schema: { type: number } }, { name: sort, in: query, schema: { type: string, enum: [relevance, newest, deadline, salary_asc, salary_desc] } }, { name: page, in: query, schema: { type: integer } } ], responses: { "200": { description: "{ total, page, pageSize, items }" } }, description: "PUBLISHED jobs of APPROVED employers only; excludes expired/closed/draft" }
+  /jobs/categories:
+    get: { tags: [Jobs], summary: "Visible job categories", responses: { "200": { description: OK } } }
+  /jobs/companies/{slug}:
+    get: { tags: [Jobs], summary: "Public company page + open jobs", parameters: [ { name: slug, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /jobs/{slug}:
+    get: { tags: [Jobs], summary: "Public job detail (+ company + related)", parameters: [ { name: slug, in: path, required: true, schema: { type: string } } ], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /job-seeker/profile:
+    get: { tags: [Jobs], summary: "Own job-seeker profile", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+    put: { tags: [Jobs], summary: "Upsert job-seeker profile (grants JOB_SEEKER)", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /job-seeker/resumes/presign:
+    post: { tags: [Jobs], summary: "Presigned private PUT for a résumé (PDF/DOCX; rate-limited)", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ uploadUrl, key }" }, "400": { description: "Disallowed type" } } }
+  /job-seeker/resumes:
+    post: { tags: [Jobs], summary: "Confirm an uploaded résumé", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "body { storageKey, label }" }
+  /job-seeker/resumes/{id}/url:
+    get: { tags: [Jobs], summary: "Signed URL for OWN résumé", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "{ url }" } } }
+  /job-seeker/saved/{jobId}:
+    post: { tags: [Jobs], summary: "Save a job", parameters: [ { name: jobId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ saved: true }" } } }
+    delete: { tags: [Jobs], summary: "Unsave a job", parameters: [ { name: jobId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "{ saved: false }" } } }
+  /job-seeker/applications:
+    get: { tags: [Jobs], summary: "The caller's own applications", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+    post: { tags: [Jobs], summary: "Submit an application (rate-limited)", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "400": { description: "Duplicate / required question / deadline / résumé ownership" }, "404": { description: "Job not accepting" } }, description: "body { jobId, resumeId?, coverLetter?, answers:[{questionId,text?,choices?}] }" }
+  /job-seeker/applications/{id}/withdraw:
+    post: { tags: [Jobs], summary: "Withdraw own application", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } } }
+  /job-seeker/applications/{id}/conversation:
+    post: { tags: [Jobs], summary: "Open the employer↔applicant thread", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Conversation } } }
+  /job-seeker/report/{jobId}:
+    post: { tags: [Jobs], summary: "Report a job listing", parameters: [ { name: jobId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ ok: true }" } }, description: "body { reason, note? }" }
+  /employer/profile:
+    get: { tags: [Jobs], summary: "Own company profile (APPROVED employer)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } } }
+    put: { tags: [Jobs], summary: "Upsert company profile", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /employer/jobs:
+    get: { tags: [Jobs], summary: "Own job listings", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+    post: { tags: [Jobs], summary: "Create a draft job", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "Requires APPROVED EMPLOYER role" }
+  /employer/jobs/{id}/submit:
+    post: { tags: [Jobs], summary: "Submit a job for moderation", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: SUBMITTED } }, description: "Employer cannot self-publish — admin approves" }
+  /employer/applications/{id}/status:
+    post: { tags: [Jobs], summary: "Advance an applicant (validated transition)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "400": { description: "Illegal transition" }, "404": { description: "Not your applicant" } }, description: "body { status, note? }; own jobs only; writes event + audit + notification + system message" }
+  /employer/applications/{id}/resume-url:
+    get: { tags: [Jobs], summary: "Signed résumé URL (own applicant only)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "{ url }" }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /employer/applications/{id}/interviews:
+    post: { tags: [Jobs], summary: "Schedule an interview", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "body { scheduledAt, mode, location?, notes? }; no external calendar/video" }
+  /admin/jobs:
+    get: { tags: [Jobs], summary: "Job moderation queue", parameters: [ { name: status, in: query, schema: { type: string } }, { name: reported, in: query, schema: { type: boolean } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires jobs.read" }
+  /admin/jobs/{id}/moderate:
+    post: { tags: [Jobs], summary: "Moderate a job", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "Requires jobs.moderate; body { action (APPROVE|REJECT|REQUEST_INFO|UNPUBLISH|SUSPEND|ARCHIVE), reason? }" }
+  /admin/jobs/reports:
+    get: { tags: [Jobs], summary: "Job report queue", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires jobs.read" }
+  /admin/jobs/analytics:
+    get: { tags: [Jobs], summary: "Belize Connect admin analytics", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires jobs.read; read-only aggregation" }
+  /admin/jobs/employers:
+    get: { tags: [Jobs], summary: "Employer companies (suspend/restore via /:id/suspend|restore)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires employers.read; approval itself is via the role-application queue" }

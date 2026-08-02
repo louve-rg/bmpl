@@ -54,6 +54,11 @@ export class OpsService {
       this.prisma.user.count({ where: { status: 'SUSPENDED' } }),
       this.prisma.userRole.count({ where: { status: 'SUSPENDED' } }),
     ]);
+    // Belize Connect Jobs (M24) queues.
+    const [pendingJobModeration, openJobReports] = await Promise.all([
+      this.prisma.jobListing.count({ where: { status: { in: ['SUBMITTED', 'UNDER_REVIEW'] } } }),
+      this.prisma.jobReport.count({ where: { status: 'OPEN' } }),
+    ]);
     const queues = {
       pendingVendorApplications,
       pendingProductModeration,
@@ -65,6 +70,8 @@ export class OpsService {
       failedSettlements,
       deliveriesPendingAssignment,
       awaitingPickupCollection,
+      pendingJobModeration,
+      openJobReports,
       suspendedUsers,
       suspendedRoles,
     };
@@ -72,7 +79,8 @@ export class OpsService {
     const totalActionable =
       pendingVendorApplications + pendingProductModeration + pendingDriverVehicles +
       pendingRoleApplications + moreInfoRoleApplications + openReviewReports +
-      openSupportCases + failedSettlements + deliveriesPendingAssignment + awaitingPickupCollection;
+      openSupportCases + failedSettlements + deliveriesPendingAssignment + awaitingPickupCollection +
+      pendingJobModeration + openJobReports;
     return { queues, totalActionable, settings: await this.getSettings() };
   }
 

@@ -54,6 +54,12 @@ export const PERMISSIONS = [
   // ---- Platform Operations (Phase 4 · M23) ----
   'ops.read', // view the operations console (cross-domain action queues + audit export)
   'ops.manage', // manage the platform announcement / maintenance banner
+  // ---- Belize Connect Jobs (Phase 5 · M24) ----
+  'employers.read', // view employer/company profiles + applications in the admin console
+  'employers.moderate', // approve/reject/suspend employers (role-application review reused)
+  'jobs.read', // view job listings + moderation queue (read-only)
+  'jobs.moderate', // approve/reject/more-info/unpublish/suspend/archive job listings + resolve job reports
+  'job_categories.manage', // manage the job-category lookup
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -77,6 +83,8 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'support.respond',
     'settlements.read',
     'reviews.read',
+    'employers.read',
+    'jobs.read',
   ],
   ADMIN: [
     'users.read',
@@ -115,6 +123,11 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'analytics.read',
     'ops.read',
     'ops.manage',
+    'employers.read',
+    'employers.moderate',
+    'jobs.read',
+    'jobs.moderate',
+    'job_categories.manage',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

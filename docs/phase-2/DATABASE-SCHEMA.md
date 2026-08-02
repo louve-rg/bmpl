@@ -82,6 +82,13 @@ User 1─* RecentlyViewedProduct *─1 Product                   (M20)  private,
 | `SavedProduct` (saved_products) | userId, productId, createdAt | **M20** wishlist entry; unique (user, product); cascade from user+product; no money/inventory |
 | `RecentlyViewedProduct` (recently_viewed_products) | userId, productId, viewedAt | **M20** private view history; unique (user, product); upserted on view; capped to newest 50 |
 | `PlatformSetting` (platform_settings) | announcementActive, announcementLevel, announcementMessage, maintenanceMode, maintenanceMessage, updatedById | **M23** singleton ops banner (created lazily); maintenanceMode is display-only, never an API gate |
+| `JobSeekerProfile` (+ `JobSeekerSkill`/`Education`/`Experience`/`Certification`/`Language`/`Resume`) | userId*, preferredName, visibility, salary/preferences, normalized children; Resume storageKey* (private R2) | **M24** normalized job-seeker profile + private résumés; visibility PRIVATE/EMPLOYERS_ONLY/PUBLIC_SUMMARY |
+| `EmployerProfile` (employer_profiles) | userId*, companyName, slug*, contacts, logoKey/bannerKey, approvalStatus | **M24** company profile (mirrors VendorProfile); approval via EMPLOYER role |
+| `JobCategory` (job_categories) | name, slug*, isVisible, sortOrder | **M24** admin-managed job-category lookup |
+| `JobListing` (+ `JobSkill`/`JobBenefit`/`JobApplicationQuestion`) | employerProfileId, title, slug*, employmentType, workArrangement, salary*, status, moderation, publishedAt/closedAt/archivedAt | **M24** normalized job listing + moderated lifecycle |
+| `JobApplication` (+ `JobApplicationAnswer`/`JobApplicationEvent`/`JobInterview`) | jobId, applicantId, resumeId?, status, employerNotes (private), jobTitle/companySnapshot; answers snapshot prompt/type; events append-only | **M24** verified applications; validated pipeline; snapshots protect history |
+| `SavedJob` / `RecentlyViewedJob` | unique (user, job) | **M24** M20-pattern saved + recently-viewed jobs |
+| `JobReport` (job_reports) | jobId, reporterId, reason, status; unique (job, reporter) | **M24** job safety reports (M23 moderation pattern) |
 
 \* = unique.
 
@@ -106,6 +113,15 @@ permission). Existing rows were migrated to one recipient each (no data loss).
 **M22** added the `analytics.read` permission only (no schema change — read-only BI).
 **M23** added `AnnouncementLevel` (INFO/WARNING/CRITICAL) + the `PlatformSetting`
 singleton + `AuditAction.PLATFORM_SETTING_UPDATED` + `ops.read`/`ops.manage` permissions.
+**M24 (Belize Connect)** added 16 enums (`EmploymentType`, `WorkArrangement`,
+`ExperienceLevel`, `EducationLevel`, `SalaryPeriod`, `SalaryVisibility`, `JobStatus`,
+`JobApplicationMethod`, `JobApplicationStatus`, `JobQuestionType`, `JobSeekerVisibility`,
+`SeekerEmploymentStatus`, `InterviewMode`, `InterviewStatus`, `JobReportReason`,
+`JobReportStatus`), extended `AuditAction` (17 `JOB_*`/`EMPLOYER_*`),
+`NotificationCategory` (`JOB`), `ConversationContext` (`JOB_APPLICATION`), and
+`ConversationParticipantRole` (`EMPLOYER`/`APPLICANT`); reuses the `District` +
+`VendorApprovalStatus` + `AttachmentScanStatus` enums. Permissions: `employers.read/
+moderate`, `jobs.read/moderate`, `job_categories.manage`.
 
 ## Indexes (beyond primary/unique keys)
 - Category: `(parentId, sortOrder)`, `(isVisible)`

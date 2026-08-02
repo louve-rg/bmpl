@@ -34,14 +34,30 @@ const VENDOR_NAV: NavItem[] = [
   { label: 'Analytics', href: '/dashboard/analytics', icon: 'M4 20V4 M4 20h16 M8 20v-6 M13 20V9 M18 20v-9' },
 ];
 
+const JOBS_NAV: NavItem[] = [
+  { label: 'Job Profile', href: '/dashboard/jobs/profile', icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0' },
+  { label: 'Saved Jobs', href: '/dashboard/jobs/saved', icon: 'M12 21s-7.5-4.9-10-9.4C.6 8.7 2 5.3 5.2 5.3c2 0 3.3 1.2 4.8 3 1.5-1.8 2.8-3 4.8-3 3.2 0 4.6 3.4 3.2 6.3C19.5 16.1 12 21 12 21Z' },
+  { label: 'My Applications', href: '/dashboard/jobs/applications', icon: 'M7 3h7l5 5v13H7V3Zm7 0v5h5M9 13h6M9 17h6' },
+];
+
+const EMPLOYER_NAV: NavItem[] = [
+  { label: 'Company', href: '/dashboard/employer', icon: 'M4 21V5l8-3 8 3v16M9 21v-5h6v5M8 9h1M8 13h1M15 9h1M15 13h1' },
+  { label: 'Job Listings', href: '/dashboard/employer/jobs', icon: 'M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2M3 7h18v13H3V7Zm0 5h18' },
+  { label: 'Applicants', href: '/dashboard/employer/applications', icon: 'M16 11a4 4 0 1 0-4-4M3 21a6 6 0 0 1 12 0M17 21a5 5 0 0 0-2-4' },
+];
+
 const MESSAGES_POLL_MS = 60_000;
 
 export function Sidebar({ me }: { me: MeView }) {
   const pathname = usePathname();
   const isVendor = me.roles.some((r) => r.roleCode === 'VENDOR' && r.status === 'APPROVED');
-  const groups: Array<{ heading?: string; items: NavItem[] }> = isVendor
-    ? [{ items: BASE_NAV }, { heading: 'Vendor', items: VENDOR_NAV }]
-    : [{ items: BASE_NAV }];
+  const isEmployer = me.roles.some((r) => r.roleCode === 'EMPLOYER' && r.status === 'APPROVED');
+  const groups: Array<{ heading?: string; items: NavItem[] }> = [
+    { items: BASE_NAV },
+    { heading: 'Belize Connect', items: JOBS_NAV },
+  ];
+  if (isVendor) groups.push({ heading: 'Vendor', items: VENDOR_NAV });
+  if (isEmployer) groups.push({ heading: 'Employer', items: EMPLOYER_NAV });
 
   // Best-effort unread-messages badge on the Messages nav item.
   const [unread, setUnread] = useState(0);

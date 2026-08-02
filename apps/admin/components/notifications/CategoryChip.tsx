@@ -17,6 +17,7 @@ const CATEGORY_TONE: Record<NotificationCategory, Tone> = {
   ADMIN_ALERT: 'warning',
   SECURITY: 'error',
   SYSTEM: 'neutral',
+  JOB: 'info',
 };
 
 const DOT: Record<Tone, string> = {
