@@ -120,6 +120,7 @@ enum NotificationCategory {
   SYSTEM
   JOB
   PROPERTY
+  PROMOTION
 }
 
 enum AuditAction {
@@ -265,6 +266,22 @@ enum AuditAction {
   PROPERTY_VIEWING_UPDATED
   PROPERTY_REPORTED
   PROPERTY_REPORT_RESOLVED
+  // ---- Marketing & Business Promotion (Phase 6 · M26) ----
+  PROMOTION_CREATED
+  PROMOTION_UPDATED
+  PROMOTION_SUBMITTED
+  PROMOTION_MODERATED
+  PROMOTION_PUBLISHED
+  PROMOTION_STATUS_CHANGED
+  PROMOTION_REPORTED
+  PROMOTION_REPORT_RESOLVED
+  CAMPAIGN_CREATED
+  CAMPAIGN_UPDATED
+  CAMPAIGN_STATUS_CHANGED
+  COUPON_CREATED
+  COUPON_UPDATED
+  COUPON_STATUS_CHANGED
+  COUPON_REDEEMED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -429,6 +446,14 @@ model User {
   recentlyViewedProperties   RecentlyViewedProperty[]
   propertyEnquiries          PropertyEnquiry[]         @relation("EnquirerEnquiries")
   propertyViewingRequests    PropertyViewingRequest[]  @relation("RequesterViewings")
+  // Marketing & Business Promotion (Phase 6 · M26)
+  campaignsOwned             Campaign[]                @relation("CampaignOwner")
+  promotionsOwned            Promotion[]               @relation("PromotionOwner")
+  promotionsModerated        Promotion[]               @relation("PromotionModerator")
+  couponsOwned               Coupon[]                  @relation("CouponOwner")
+  couponUsages               CouponUsage[]             @relation("CouponUser")
+  promotionRedemptions       PromotionRedemption[]     @relation("PromotionRedeemer")
+  promotionReportsMade       PromotionReport[]         @relation("PromotionReporter")
 
   @@index([status])
   @@index([district])
@@ -915,6 +940,8 @@ model Category {
 
   @@index([parentId, sortOrder])
   @@index([isVisible])
+  promotionPlacements PromotionPlacement[]
+
   @@map("categories")
 }
 
@@ -982,6 +1009,9 @@ model VendorProfile {
 
   @@index([approvalStatus])
   @@index([storeStatus])
+  promotionTargets PromotionTarget[]
+  coupons          Coupon[]          @relation("VendorCoupons")
+
   @@map("vendor_profiles")
 }
 
@@ -1208,6 +1238,8 @@ model Product {
   @@index([categoryId])
   @@index([vendorProfileId, status])
   @@index([featured])
+  promotionTargets PromotionTarget[]
+
   @@map("products")
 }
 
@@ -2645,6 +2677,8 @@ model EmployerProfile {
   jobs JobListing[]
 
   @@index([approvalStatus])
+  promotionTargets PromotionTarget[]
+
   @@map("employer_profiles")
 }
 
@@ -2701,6 +2735,8 @@ model JobListing {
   @@index([employerProfileId, status])
   @@index([jobCategoryId])
   @@index([district])
+  promotionTargets PromotionTarget[]
+
   @@map("job_listings")
 }
 
@@ -3051,6 +3087,8 @@ model PropertyOwnerProfile {
   assignments PropertyListingAssignment[]
 
   @@index([approvalStatus])
+  promotionTargets PromotionTarget[]
+
   @@map("property_owner_profiles")
 }
 
@@ -3084,6 +3122,8 @@ model RealEstateAgentProfile {
 
   @@index([approvalStatus])
   @@index([agencyId])
+  promotionTargets PromotionTarget[]
+
   @@map("real_estate_agent_profiles")
 }
 
@@ -3112,6 +3152,8 @@ model AgencyProfile {
   listings PropertyListing[]
 
   @@index([approvalStatus])
+  promotionTargets PromotionTarget[]
+
   @@map("agency_profiles")
 }
 
@@ -3188,6 +3230,8 @@ model PropertyListing {
   @@index([agentProfileId, status])
   @@index([district])
   @@index([purpose, propertyType])
+  promotionTargets PromotionTarget[]
+
   @@map("property_listings")
 }
 
@@ -3398,4 +3442,404 @@ model PropertyReport {
   @@unique([listingId, reporterId])
   @@index([status])
   @@map("property_reports")
+}
+
+// ===========================================================================
+// Marketing & Business Promotion (Phase 6 · M26)
+// Promotions are normalized (no JSON blobs). A promotion targets existing
+// entities (there is no separate "Business" model) via typed nullable FKs on
+// PromotionTarget. Public serving validates the target's own live status at
+// query time, so a suspended/unpublished/deleted target automatically stops
+// showing — no cascade toggles. Money is BZD minor units (BigInt), matching
+// the wallet/order convention, WITHOUT touching wallet or payment logic.
+// ===========================================================================
+
+enum CampaignType {
+  SEASONAL
+  LIMITED_TIME
+  SALE
+  COUPON
+  DISCOUNT
+  FEATURED
+  ANNOUNCEMENT
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  EXPIRED
+  ARCHIVED
+}
+
+enum PromotionType {
+  FEATURED_BUSINESS
+  FEATURED_STORE
+  FEATURED_PRODUCT
+  FEATURED_PROPERTY
+  FEATURED_JOB
+  HOMEPAGE_BANNER
+  CATEGORY_BANNER
+  ANNOUNCEMENT_BANNER
+  LIMITED_TIME
+  COUPON_CAMPAIGN
+  DISCOUNT_CAMPAIGN
+  SEASONAL_CAMPAIGN
+  HOMEPAGE_HERO
+}
+
+enum PromotionStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  MORE_INFO_REQUIRED
+  APPROVED
+  REJECTED
+  PAUSED
+  EXPIRED
+  ARCHIVED
+}
+
+enum PromotionTargetType {
+  VENDOR
+  EMPLOYER
+  AGENCY
+  AGENT
+  PROPERTY_OWNER
+  PRODUCT
+  JOB
+  PROPERTY
+  EXTERNAL_LINK
+  NONE
+}
+
+enum PromotionPlacementType {
+  HOMEPAGE_HERO
+  HOMEPAGE_FEATURED_BUSINESSES
+  HOMEPAGE_FEATURED_PRODUCTS
+  HOMEPAGE_FEATURED_JOBS
+  HOMEPAGE_FEATURED_PROPERTIES
+  CATEGORY_PAGE
+  BUSINESS_PAGE
+  MARKETPLACE
+  JOBS
+  REAL_ESTATE
+  SEARCH
+  DISCOVERY
+}
+
+enum PromotionAssetKind {
+  DESKTOP_BANNER
+  MOBILE_BANNER
+  SQUARE_IMAGE
+  HERO_IMAGE
+  LOGO
+  VIDEO_PLACEHOLDER
+}
+
+enum PromotionReportReason {
+  MISLEADING
+  INAPPROPRIATE
+  SCAM
+  PROHIBITED
+  IRRELEVANT
+  OTHER
+}
+
+enum PromotionReportStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+enum CouponDiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum CouponScope {
+  PLATFORM
+  VENDOR
+}
+
+enum CouponStatus {
+  ACTIVE
+  INACTIVE
+  DISABLED
+}
+
+/// A scheduled container grouping promotions/coupons with an activation window.
+model Campaign {
+  id            String                  @id @default(cuid())
+  ownerUserId   String
+  owner         User                    @relation("CampaignOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  name          String
+  description   String?
+  type          CampaignType            @default(FEATURED)
+  status        CampaignStatus          @default(DRAFT)
+  timezone      String                  @default("America/Belize")
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  schedules     CampaignSchedule[]
+  statusHistory CampaignStatusHistory[]
+  promotions    Promotion[]
+  coupons       Coupon[]
+
+  @@index([ownerUserId, status])
+  @@index([status])
+  @@map("campaigns")
+}
+
+/// One activation window for a campaign (a campaign may have several, e.g. seasonal).
+model CampaignSchedule {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  startAt    DateTime
+  endAt      DateTime
+  timezone   String   @default("America/Belize")
+  createdAt  DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([startAt, endAt])
+  @@map("campaign_schedules")
+}
+
+model CampaignStatusHistory {
+  id         String          @id @default(cuid())
+  campaignId String
+  campaign   Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  fromStatus CampaignStatus?
+  toStatus   CampaignStatus
+  actorId    String?
+  note       String?
+  createdAt  DateTime        @default(now())
+
+  @@index([campaignId])
+  @@map("campaign_status_history")
+}
+
+/// A single promotional unit (featured item, banner, hero) with placements,
+/// assets, targets, and daily metrics. Moderated before it can go public.
+model Promotion {
+  id               String                @id @default(cuid())
+  ownerUserId      String
+  owner            User                  @relation("PromotionOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  campaignId       String?
+  campaign         Campaign?             @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  type             PromotionType
+  title            String
+  subtitle         String?
+  description      String?
+  status           PromotionStatus       @default(DRAFT)
+  priority         Int                   @default(0)
+  isActive         Boolean               @default(false)
+  startAt          DateTime?
+  endAt            DateTime?
+  timezone         String                @default("America/Belize")
+  moderationReason String?
+  moderatedById    String?
+  moderatedBy      User?                 @relation("PromotionModerator", fields: [moderatedById], references: [id], onDelete: SetNull)
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  publishedAt      DateTime?
+  expiredAt        DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  placements       PromotionPlacement[]
+  assets           PromotionAsset[]
+  targets          PromotionTarget[]
+  metrics          PromotionMetricDaily[]
+  redemptions      PromotionRedemption[]
+  reports          PromotionReport[]
+
+  @@index([status])
+  @@index([ownerUserId, status])
+  @@index([type, status])
+  @@index([campaignId])
+  @@map("promotions")
+}
+
+/// Where a promotion renders. `placement` is an enum + optional context FK
+/// (categoryId) so placements are never hardcoded.
+model PromotionPlacement {
+  id          String                 @id @default(cuid())
+  promotionId String
+  promotion   Promotion              @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  placement   PromotionPlacementType
+  position    Int                    @default(0)
+  categoryId  String?
+  category    Category?              @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  createdAt   DateTime               @default(now())
+
+  @@unique([promotionId, placement, categoryId])
+  @@index([placement])
+  @@index([categoryId])
+  @@map("promotion_placements")
+}
+
+/// Public media for a promotion. Desktop/mobile/hero/square/logo/video variants
+/// are distinguished by an explicit `kind`, not inferred.
+model PromotionAsset {
+  id            String             @id @default(cuid())
+  promotionId   String
+  promotion     Promotion          @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  kind          PromotionAssetKind
+  storageKey    String?            @unique
+  mimeType      String?
+  fileSizeBytes Int?
+  width         Int?
+  height        Int?
+  altText       String?
+  videoUrl      String?
+  position      Int                @default(0)
+  createdAt     DateTime           @default(now())
+
+  @@index([promotionId, position])
+  @@map("promotion_assets")
+}
+
+/// What a promotion features. Polymorphic via typed nullable FKs (no JSON).
+/// Exactly one target FK is set per row, selected by `targetType`.
+model PromotionTarget {
+  id                    String                @id @default(cuid())
+  promotionId           String
+  promotion             Promotion             @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  targetType            PromotionTargetType
+  vendorProfileId       String?
+  vendorProfile         VendorProfile?        @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  employerProfileId     String?
+  employerProfile       EmployerProfile?      @relation(fields: [employerProfileId], references: [id], onDelete: Cascade)
+  agencyProfileId       String?
+  agencyProfile         AgencyProfile?        @relation(fields: [agencyProfileId], references: [id], onDelete: Cascade)
+  agentProfileId        String?
+  agentProfile          RealEstateAgentProfile? @relation(fields: [agentProfileId], references: [id], onDelete: Cascade)
+  propertyOwnerProfileId String?
+  propertyOwnerProfile  PropertyOwnerProfile? @relation(fields: [propertyOwnerProfileId], references: [id], onDelete: Cascade)
+  productId             String?
+  product               Product?              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  jobListingId          String?
+  jobListing            JobListing?           @relation(fields: [jobListingId], references: [id], onDelete: Cascade)
+  propertyListingId     String?
+  propertyListing       PropertyListing?      @relation(fields: [propertyListingId], references: [id], onDelete: Cascade)
+  externalUrl           String?
+  createdAt             DateTime              @default(now())
+
+  @@index([promotionId])
+  @@index([targetType])
+  @@index([vendorProfileId])
+  @@index([productId])
+  @@index([jobListingId])
+  @@index([propertyListingId])
+  @@map("promotion_targets")
+}
+
+/// Normalized daily metric rollup per promotion (+ optional placement).
+/// CTR/popularity are derived from these rows — never fabricated or stored raw.
+model PromotionMetricDaily {
+  id          String                  @id @default(cuid())
+  promotionId String
+  promotion   Promotion               @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  day         DateTime                @db.Date
+  placement   PromotionPlacementType?
+  impressions Int                     @default(0)
+  views       Int                     @default(0)
+  clicks      Int                     @default(0)
+  conversions Int                     @default(0)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+
+  @@unique([promotionId, day, placement])
+  @@index([promotionId, day])
+  @@map("promotion_metrics_daily")
+}
+
+/// A recorded conversion/redemption event attributed to a promotion.
+model PromotionRedemption {
+  id          String    @id @default(cuid())
+  promotionId String
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?     @relation("PromotionRedeemer", fields: [userId], references: [id], onDelete: SetNull)
+  orderId     String?
+  redeemedAt  DateTime  @default(now())
+
+  @@index([promotionId])
+  @@index([userId])
+  @@map("promotion_redemptions")
+}
+
+model PromotionReport {
+  id             String                @id @default(cuid())
+  promotionId    String
+  promotion      Promotion             @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  reporterUserId String?
+  reporter       User?                 @relation("PromotionReporter", fields: [reporterUserId], references: [id], onDelete: SetNull)
+  reason         PromotionReportReason
+  note           String?
+  status         PromotionReportStatus @default(OPEN)
+  resolvedById   String?
+  resolutionNote String?
+  resolvedAt     DateTime?
+  createdAt      DateTime              @default(now())
+
+  @@index([status])
+  @@index([promotionId])
+  @@map("promotion_reports")
+}
+
+/// Discount / coupon codes. Platform-wide (admin-owned) or vendor-scoped.
+/// Money in BZD minor units; percentages are whole percents. Wallet checkout
+/// integration is future work — no wallet/order coupling here.
+model Coupon {
+  id              String             @id @default(cuid())
+  code            String             @unique
+  ownerUserId     String?
+  owner           User?              @relation("CouponOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  vendorProfileId String?
+  vendorProfile   VendorProfile?     @relation("VendorCoupons", fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  campaignId      String?
+  campaign        Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  scope           CouponScope        @default(PLATFORM)
+  discountType    CouponDiscountType
+  percentOff      Int?
+  amountOffMinor  BigInt?
+  freeShipping    Boolean            @default(false)
+  minSpendMinor   BigInt?
+  maxDiscountMinor BigInt?
+  maxUses         Int?
+  perUserLimit    Int?
+  usedCount       Int                @default(0)
+  stackable       Boolean            @default(false)
+  status          CouponStatus       @default(INACTIVE)
+  startAt         DateTime?
+  endAt           DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  usages          CouponUsage[]
+
+  @@index([status])
+  @@index([vendorProfileId])
+  @@index([campaignId])
+  @@map("coupons")
+}
+
+/// One coupon redemption; enforces maxUses (via count) and perUserLimit.
+model CouponUsage {
+  id                  String   @id @default(cuid())
+  couponId            String
+  coupon              Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId              String
+  user                User     @relation("CouponUser", fields: [userId], references: [id], onDelete: Cascade)
+  orderId             String?
+  discountAppliedMinor BigInt  @default(0)
+  redeemedAt          DateTime @default(now())
+
+  @@index([couponId, userId])
+  @@index([userId])
+  @@map("coupon_usages")
 }

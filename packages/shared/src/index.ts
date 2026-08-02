@@ -19,6 +19,7 @@ export * from './analytics';
 export * from './ops';
 export * from './jobs';
 export * from './realestate';
+export * from './marketing';
 export * from './slug';
 
 /** Shared, framework-agnostic branding tokens (mirrored in the UI package). */

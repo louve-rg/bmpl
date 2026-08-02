@@ -8,6 +8,7 @@ import { MobilePromo } from '../components/landing/MobilePromo';
 import { FinalCTA } from '../components/landing/FinalCTA';
 import { Footer } from '../components/landing/Footer';
 import { DiscoverySections } from '../components/discovery/DiscoverySections';
+import { PromotedSections } from '../components/marketing/PromotedSections';
 import { ForYou } from '../components/discovery/ForYou';
 
 export const dynamic = 'force-dynamic';
@@ -19,6 +20,7 @@ export default function HomePage() {
       <main>
         <Hero />
         <Services />
+        <PromotedSections />
         <DiscoverySections />
         <ForYou className="container-bmpl py-4 pb-16" />
         <WhyChooseUs />

@@ -13,3 +13,4 @@ export * from './reviews';
 export * from './ops';
 export * from './jobs';
 export * from './realestate';
+export * from './marketing';

@@ -89,4 +89,6 @@ export const STORAGE_PREFIX = {
   agentPhoto: (userId: string) => `real-estate/agents/${userId}/photo`,
   agencyLogo: (agencyId: string) => `real-estate/agencies/${agencyId}/logo`,
   agencyBanner: (agencyId: string) => `real-estate/agencies/${agencyId}/banner`,
+  // Marketing & Business Promotion (M26) — public promo media
+  promotionAsset: (promotionId: string) => `marketing/promotions/${promotionId}/assets`,
 } as const;

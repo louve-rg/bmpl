@@ -71,6 +71,13 @@ const AGENT_NAV: NavItem[] = [
   { label: 'Analytics', href: '/dashboard/real-estate-agent/analytics', icon: 'M4 20V4 M4 20h16 M8 20v-6 M13 20V9 M18 20v-9' },
 ];
 
+const MARKETING_NAV: NavItem[] = [
+  { label: 'Overview', href: '/dashboard/business/marketing', icon: 'M4 20V4 M4 20h16 M8 20v-6 M13 20V9 M18 20v-9' },
+  { label: 'Promotions', href: '/dashboard/business/marketing/promotions', icon: 'M3 11l18-5v12L3 14v-3Zm0 0v4a2 2 0 0 0 2 2h1' },
+  { label: 'Campaigns', href: '/dashboard/business/marketing/campaigns', icon: 'M3 5h18v4H3zM5 9v10h14V9M9 13h6' },
+  { label: 'Coupons', href: '/dashboard/business/marketing/coupons', icon: 'M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4V7Zm10 0v10' },
+];
+
 const MESSAGES_POLL_MS = 60_000;
 
 export function Sidebar({ me }: { me: MeView }) {
@@ -88,6 +95,8 @@ export function Sidebar({ me }: { me: MeView }) {
   if (isEmployer) groups.push({ heading: 'Employer', items: EMPLOYER_NAV });
   if (isPropertyOwner) groups.push({ heading: 'Property Owner', items: PROPERTY_OWNER_NAV });
   if (isAgent) groups.push({ heading: 'Real-Estate Agent', items: AGENT_NAV });
+  // Marketing tools are available to any approved business role.
+  if (isVendor || isEmployer || isPropertyOwner || isAgent) groups.push({ heading: 'Marketing', items: MARKETING_NAV });
 
   // Best-effort unread-messages badge on the Messages nav item.
   const [unread, setUnread] = useState(0);

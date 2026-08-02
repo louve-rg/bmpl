@@ -32,6 +32,7 @@ export const NOTIFICATION_CATEGORIES = [
   'SYSTEM',
   'JOB',
   'PROPERTY',
+  'PROMOTION',
 ] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
@@ -50,6 +51,7 @@ export const NOTIFICATION_CATEGORY_LABELS: Record<NotificationCategory, string> 
   SYSTEM: 'System',
   JOB: 'Jobs',
   PROPERTY: 'Real Estate',
+  PROMOTION: 'Marketing',
 };
 
 /** Categories surfaced in the ADMIN notification center. */

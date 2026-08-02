@@ -71,6 +71,14 @@ export const PERMISSIONS = [
   'agencies.moderate', // approve/suspend agencies
   'property_reports.read', // view the property report queue
   'property_documents.read', // HIGHLY RESTRICTED — view private ownership/authority documents (SUPER_ADMIN only)
+  // Marketing & Business Promotion (M26)
+  'promotions.read', // view promotions + moderation queue (read-only)
+  'promotions.moderate', // approve/reject/more-info/pause/expire/archive promotions; resolve abuse reports
+  'promotions.manage', // admin-manage featured content, placements, priority directly
+  'campaigns.manage', // admin-manage campaigns + schedules + lifecycle
+  'coupons.manage', // admin-manage platform coupons + review vendor coupons
+  'marketing.analytics', // view cross-promotion marketing analytics
+  'homepage.manage', // curate homepage hero/featured placements
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -100,6 +108,8 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'real_estate_agents.read',
     'agencies.read',
     'property_owners.read',
+    'promotions.read',
+    'marketing.analytics',
   ],
   ADMIN: [
     'users.read',
@@ -154,6 +164,14 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'agencies.read',
     'agencies.moderate',
     'property_reports.read',
+    // Marketing & Business Promotion (M26)
+    'promotions.read',
+    'promotions.moderate',
+    'promotions.manage',
+    'campaigns.manage',
+    'coupons.manage',
+    'marketing.analytics',
+    'homepage.manage',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

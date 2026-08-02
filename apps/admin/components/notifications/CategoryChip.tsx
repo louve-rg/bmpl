@@ -19,6 +19,7 @@ const CATEGORY_TONE: Record<NotificationCategory, Tone> = {
   SYSTEM: 'neutral',
   JOB: 'info',
   PROPERTY: 'brand',
+  PROMOTION: 'brand',
 };
 
 const DOT: Record<Tone, string> = {

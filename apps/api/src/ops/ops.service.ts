@@ -64,6 +64,11 @@ export class OpsService {
       this.prisma.propertyListing.count({ where: { status: { in: ['SUBMITTED', 'UNDER_REVIEW'] } } }),
       this.prisma.propertyReport.count({ where: { status: 'OPEN' } }),
     ]);
+    // Marketing & Business Promotion (M26) queues.
+    const [pendingPromotionModeration, openPromotionReports] = await Promise.all([
+      this.prisma.promotion.count({ where: { status: { in: ['SUBMITTED', 'UNDER_REVIEW'] } } }),
+      this.prisma.promotionReport.count({ where: { status: 'OPEN' } }),
+    ]);
     const queues = {
       pendingVendorApplications,
       pendingProductModeration,
@@ -79,6 +84,8 @@ export class OpsService {
       openJobReports,
       pendingPropertyModeration,
       openPropertyReports,
+      pendingPromotionModeration,
+      openPromotionReports,
       suspendedUsers,
       suspendedRoles,
     };
@@ -88,7 +95,8 @@ export class OpsService {
       pendingRoleApplications + moreInfoRoleApplications + openReviewReports +
       openSupportCases + failedSettlements + deliveriesPendingAssignment + awaitingPickupCollection +
       pendingJobModeration + openJobReports +
-      pendingPropertyModeration + openPropertyReports;
+      pendingPropertyModeration + openPropertyReports +
+      pendingPromotionModeration + openPromotionReports;
     return { queues, totalActionable, settings: await this.getSettings() };
   }
 

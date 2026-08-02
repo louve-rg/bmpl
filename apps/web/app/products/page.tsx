@@ -5,6 +5,7 @@ import { serverGetSafe } from '../../lib/server-api';
 import { Alert, Button, EmptyState, Input } from '../../components/ui';
 import { ProductCard } from '../../components/discovery/ProductCard';
 import { SearchSuggest } from '../../components/discovery/SearchSuggest';
+import { PlacementBand } from '../../components/marketing/PlacementBand';
 
 export const dynamic = 'force-dynamic';
 
@@ -155,6 +156,14 @@ export default async function ProductsPage({
             </aside>
 
             <section>
+              {/* Sponsored band — additive, above the organic results; never reorders them. */}
+              <PlacementBand
+                placement={searchParams.categoryId ? 'CATEGORY_PAGE' : 'MARKETPLACE'}
+                categoryId={searchParams.categoryId}
+                title="Sponsored"
+                className="mb-8"
+              />
+
               {unavailable ? (
                 <Alert tone="warning">The shop is temporarily unavailable. Please try again in a moment.</Alert>
               ) : data.items.length === 0 ? (

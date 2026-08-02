@@ -38,3 +38,29 @@ describe('marketplace permissions (Phase 2)', () => {
     expect(PERMISSION_BUNDLES.SUPER_ADMIN).toContain('categories.manage');
   });
 });
+
+describe('marketing & business promotion permissions (M26)', () => {
+  it('adds the marketing permissions to the catalog', () => {
+    for (const p of [
+      'promotions.read',
+      'promotions.moderate',
+      'promotions.manage',
+      'campaigns.manage',
+      'coupons.manage',
+      'marketing.analytics',
+      'homepage.manage',
+    ] as const) {
+      expect(PERMISSIONS).toContain(p);
+    }
+  });
+
+  it('ADMIN can moderate + manage promotions; SUPPORT_AGENT is read-only', () => {
+    expect(PERMISSION_BUNDLES.ADMIN).toEqual(
+      expect.arrayContaining(['promotions.moderate', 'promotions.manage', 'coupons.manage', 'homepage.manage']),
+    );
+    expect(PERMISSION_BUNDLES.SUPPORT_AGENT).toContain('promotions.read');
+    expect(PERMISSION_BUNDLES.SUPPORT_AGENT).not.toContain('promotions.moderate');
+    expect(PERMISSION_BUNDLES.SUPPORT_AGENT).not.toContain('coupons.manage');
+    expect(PERMISSION_BUNDLES.SUPPORT_AGENT).not.toContain('homepage.manage');
+  });
+});

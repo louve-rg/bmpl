@@ -96,6 +96,14 @@ User 1─* RecentlyViewedProduct *─1 Product                   (M20)  private,
 | `PropertyEnquiry` | listingId, enquirerId, type, message, status | **M25** enquiries (owner/assigned-agent + enquirer only) |
 | `PropertyViewingRequest` (+ `PropertyViewingEvent`) | listingId, requesterId, dates/times, status; events append-only | **M25** viewing requests with validated status machine |
 | `PropertyReport` (property_reports) | listingId, reporterId, reason, status; unique (listing, reporter) | **M25** listing safety reports |
+| `Campaign` (+ `CampaignSchedule` / `CampaignStatusHistory`) | ownerUserId, type, status, timezone; schedule windows; status history | **M26** scheduled promotion container; timezone-aware lifecycle |
+| `Promotion` | ownerUserId, campaignId?, type, title, status, priority, isActive, start/end, moderation | **M26** promotional unit; moderated before serving |
+| `PromotionPlacement` | promotionId, placement, position, categoryId? | **M26** where a promotion renders (enum + optional category; not hardcoded) |
+| `PromotionAsset` | promotionId, kind (desktop/mobile/square/hero/logo/video), storageKey*, altText, position | **M26** public promo media by explicit kind |
+| `PromotionTarget` | promotionId, targetType, typed nullable FKs (vendor/employer/agency/agent/owner/product/job/property/externalUrl) | **M26** polymorphic target (no JSON); ownership-verified |
+| `PromotionMetricDaily` | promotionId, day, placement?, impressions/views/clicks/conversions; unique (promotion, day, placement) | **M26** normalized daily metric rollup (no fabricated metrics) |
+| `PromotionRedemption` / `PromotionReport` (promotion_reports) | promotionId, userId?/reporterUserId?, ... | **M26** conversion attribution + abuse reports |
+| `Coupon` (+ `CouponUsage`) | code*, scope, discountType, percentOff/amountOffMinor, limits, status, window, usedCount | **M26** platform/vendor coupons; BZD minor units; no wallet coupling |
 
 \* = unique.
 
@@ -138,6 +146,14 @@ extended `AuditAction` (16 `PROPERTY_*`/profile actions), `NotificationCategory`
 (`LISTER`/`ENQUIRER`); reuses `District`/`VendorApprovalStatus`/`AttachmentScanStatus`/
 `Currency`. Permissions: `properties.*`, `property_owners.*`, `real_estate_agents.*`,
 `agencies.*`, `property_reports.read`, `property_documents.read` (SUPER_ADMIN only).
+**M26 (Marketing & Business Promotion)** added enums `CampaignType/Status`, `PromotionType`,
+`PromotionStatus`, `PromotionTargetType`, `PromotionPlacementType`, `PromotionAssetKind`,
+`PromotionReportReason/Status`, `CouponDiscountType`, `CouponScope`, `CouponStatus`; extended
+`AuditAction` (15 `PROMOTION_*`/`CAMPAIGN_*`/`COUPON_*`) and `NotificationCategory`
+(`PROMOTION`); reuses `VendorApprovalStatus` (target liveness) and BZD minor-unit `BigInt`
+money. Permissions: `promotions.read/moderate/manage`, `campaigns.manage`, `coupons.manage`,
+`marketing.analytics`, `homepage.manage`. There is **no** `Business` entity — promotions
+target existing profiles/listings via `PromotionTarget` typed FKs.
 
 ## Indexes (beyond primary/unique keys)
 - Category: `(parentId, sortOrder)`, `(isVisible)`

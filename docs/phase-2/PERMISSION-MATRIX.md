@@ -41,12 +41,19 @@ enforced server-side by the global guard chain, regardless of what any UI shows.
 | `agencies.read` / `.moderate` | view / approve-suspend agencies (M25) |
 | `property_reports.read` | view the property report queue (M25) |
 | `property_documents.read` | **HIGHLY RESTRICTED** — view private ownership/authority documents (M25; SUPER_ADMIN only, excluded from ADMIN + SUPPORT bundles) |
+| `promotions.read` | view promotions + moderation queue (M26, read-only) |
+| `promotions.moderate` | approve/reject/more-info/pause/expire/archive promotions; resolve abuse reports (M26) |
+| `promotions.manage` | admin-manage featured content, placements, priority (M26) |
+| `campaigns.manage` | admin-manage campaigns, schedules, lifecycle (M26) |
+| `coupons.manage` | admin-manage platform coupons + review vendor coupons (M26) |
+| `marketing.analytics` | view cross-promotion marketing analytics (M26) |
+| `homepage.manage` | curate homepage hero/featured placements (M26) |
 
 ### Default bundles (`PERMISSION_BUNDLES`)
 | Staff role | Marketplace permissions |
 |---|---|
 | `SUPPORT_AGENT` | read-only bundle incl. `vendors.read`, `products.read`, `drivers.read`, `deliveries.read`, `proof_of_delivery.read`, `reviews.read`, `employers.read`, `jobs.read` (NO résumé access) |
-| `ADMIN` | all marketplace + logistics permissions incl. all `deliveries.*` + `proof_of_delivery.read` + `reviews.read`/`reviews.moderate` + `analytics.read` + `ops.read`/`ops.manage` + `employers.*`/`jobs.*`/`job_categories.manage` + `properties.*`/`property_owners.*`/`real_estate_agents.*`/`agencies.*`/`property_reports.read` (**NOT** `property_documents.read`) |
+| `ADMIN` | all marketplace + logistics permissions incl. all `deliveries.*` + `proof_of_delivery.read` + `reviews.read`/`reviews.moderate` + `analytics.read` + `ops.read`/`ops.manage` + `employers.*`/`jobs.*`/`job_categories.manage` + `properties.*`/`property_owners.*`/`real_estate_agents.*`/`agencies.*`/`property_reports.read` (**NOT** `property_documents.read`) + all M26 marketing (`promotions.*`/`campaigns.manage`/`coupons.manage`/`marketing.analytics`/`homepage.manage`) |
 | `SUPER_ADMIN` | all (inherits every permission) |
 
 ## Capability matrix

@@ -15,6 +15,7 @@ const NAV: Array<{ label: string; href: string; icon: string }> = [
   { label: 'Reviews', href: '/dashboard/reviews', icon: 'M12 3l2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.2l5.9-.9L12 3Z' },
   { label: 'Belize Connect', href: '/dashboard/jobs', icon: 'M4 7h16v12H4zM9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M4 12h16' },
   { label: 'Real Estate', href: '/dashboard/properties', icon: 'M4 11l8-6 8 6M6 10v9h12v-9M10 19v-5h4v5' },
+  { label: 'Marketing', href: '/dashboard/marketing', icon: 'M3 11v2a1 1 0 0 0 1 1h3l4 4V6L7 10H4a1 1 0 0 0-1 1Zm13-3a5 5 0 0 1 0 8M18 5a9 9 0 0 1 0 14' },
   { label: 'Applications', href: '/dashboard/applications', icon: 'M6 3h9l4 4v14H6V3Zm9 0v4h4M9 12h6M9 16h6' },
   { label: 'Users', href: '/dashboard/users', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 8a6 6 0 0 1 12 0M17 11a3 3 0 0 0 0-6M22 19a6 6 0 0 0-4-5.7' },
   { label: 'Vendors', href: '/dashboard/vendors', icon: 'M4 8h16l-1 3H5L4 8Zm1 3v9h14v-9M9 20v-5h6v5' },
