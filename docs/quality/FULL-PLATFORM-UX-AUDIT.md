@@ -70,4 +70,21 @@ No rewrites of stable modules; no URL changes (only added breadcrumbs + correcte
 - Baseline marketplace-category seed migration for fresh environments (prod already populated).
 - These are tracked in the companion docs; none blocks the platform.
 
-<!-- Deployment + production-verification results are appended after deploy. -->
+## Deployment & production verification (2026-08-02)
+Milestone commit `5ff74e4` on `main`. Railway API redeployed `--from-source` (live
+commit **`5ff74e4`**); the job-category migration applied via `preDeployCommand`. Web +
+admin auto-deployed on Vercel.
+
+Verified live against `bmplapi-production` / `bmpl-web.vercel.app`:
+- `health` → commit `5ff74e4`; `health/ready` → `200` (database/redis/storage healthy).
+- **Jobs categories:** `GET /api/jobs/categories` → **20 baseline categories** (was `[]`);
+  the live `/jobs` page renders a populated category dropdown (Healthcare, Information
+  Technology, …); `/jobs?category=healthcare` → `200`. Employer editor uses the same source.
+- **Marketplace hierarchy live:** `/vendors` shows Home → Stores breadcrumb; `/store/[slug]`
+  shows the Stores breadcrumb + "← All stores"; `/products/[slug]` shows the Stores → {store}
+  → {product} breadcrumb and "← Back to {store}" → `/store/{slug}`. The old "← Shop" → `/products`
+  is **gone**. Direct product link renders the full parent product (variant state test-locked).
+- **No regression:** `marketplace/products|categories|vendors`, `jobs`, `properties`,
+  `marketing/homepage` all `200`; no `5xx`. Additive migration (`ON CONFLICT DO NOTHING`) —
+  no data reset, no permission/audit/financial change.
+- Local test-only MinIO stopped; no production test data created.
