@@ -6,14 +6,14 @@
  */
 
 /** The business context a conversation is scoped to. */
-export const CONVERSATION_CONTEXTS = ['ORDER', 'VENDOR_ORDER', 'DELIVERY', 'SUPPORT_CASE', 'JOB_APPLICATION'] as const;
+export const CONVERSATION_CONTEXTS = ['ORDER', 'VENDOR_ORDER', 'DELIVERY', 'SUPPORT_CASE', 'JOB_APPLICATION', 'PROPERTY_ENQUIRY'] as const;
 export type ConversationContext = (typeof CONVERSATION_CONTEXTS)[number];
 
 export const CONVERSATION_STATUSES = ['OPEN', 'CLOSED'] as const;
 export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
 
 /** A participant's role WITHIN a conversation (distinct from their platform role). */
-export const CONVERSATION_PARTICIPANT_ROLES = ['CUSTOMER', 'VENDOR', 'DRIVER', 'SUPPORT', 'EMPLOYER', 'APPLICANT'] as const;
+export const CONVERSATION_PARTICIPANT_ROLES = ['CUSTOMER', 'VENDOR', 'DRIVER', 'SUPPORT', 'EMPLOYER', 'APPLICANT', 'LISTER', 'ENQUIRER'] as const;
 export type ConversationParticipantRole = (typeof CONVERSATION_PARTICIPANT_ROLES)[number];
 
 /** Message kinds. INTERNAL_NOTE is support/admin-only and never shown to end users. */
@@ -29,7 +29,7 @@ export type AttachmentScanStatus = (typeof ATTACHMENT_SCAN_STATUSES)[number];
  * contextId), makes a conversation unique. A delivery has separate customer↔driver
  * and vendor↔driver threads so pickup coordination never leaks to the customer.
  */
-export const CONVERSATION_PAIRINGS = ['CUSTOMER_VENDOR', 'CUSTOMER_DRIVER', 'VENDOR_DRIVER', 'USER_SUPPORT', 'EMPLOYER_APPLICANT'] as const;
+export const CONVERSATION_PAIRINGS = ['CUSTOMER_VENDOR', 'CUSTOMER_DRIVER', 'VENDOR_DRIVER', 'USER_SUPPORT', 'EMPLOYER_APPLICANT', 'LISTER_ENQUIRER'] as const;
 export type ConversationPairing = (typeof CONVERSATION_PAIRINGS)[number];
 
 /** Attachments reuse the private-document allowlist (images + pdf); NO executables. */

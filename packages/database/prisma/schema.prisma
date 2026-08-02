@@ -119,6 +119,7 @@ enum NotificationCategory {
   MESSAGE
   SYSTEM
   JOB
+  PROPERTY
 }
 
 enum AuditAction {
@@ -247,6 +248,23 @@ enum AuditAction {
   JOB_INTERVIEW_UPDATED
   JOB_REPORTED
   JOB_REPORT_RESOLVED
+  // ---- Real Estate (Phase 6 · M25) ----
+  PROPERTY_OWNER_PROFILE_UPSERTED
+  REAL_ESTATE_AGENT_PROFILE_UPSERTED
+  AGENCY_PROFILE_UPSERTED
+  PROPERTY_CREATED
+  PROPERTY_UPDATED
+  PROPERTY_SUBMITTED
+  PROPERTY_MODERATED
+  PROPERTY_PUBLISHED
+  PROPERTY_STATUS_CHANGED
+  PROPERTY_ASSIGNMENT_CHANGED
+  PROPERTY_ENQUIRY_CREATED
+  PROPERTY_ENQUIRY_UPDATED
+  PROPERTY_VIEWING_REQUESTED
+  PROPERTY_VIEWING_UPDATED
+  PROPERTY_REPORTED
+  PROPERTY_REPORT_RESOLVED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -403,6 +421,14 @@ model User {
   jobApplications            JobApplication[]          @relation("ApplicantApplications")
   savedJobs                  SavedJob[]
   recentlyViewedJobs         RecentlyViewedJob[]
+  // Real Estate (Phase 6 · M25)
+  propertyOwnerProfile       PropertyOwnerProfile?     @relation("UserPropertyOwnerProfile")
+  realEstateAgentProfile     RealEstateAgentProfile?   @relation("UserRealEstateAgentProfile")
+  agencyProfile              AgencyProfile?            @relation("UserAgencyManager")
+  savedProperties            SavedProperty[]
+  recentlyViewedProperties   RecentlyViewedProperty[]
+  propertyEnquiries          PropertyEnquiry[]         @relation("EnquirerEnquiries")
+  propertyViewingRequests    PropertyViewingRequest[]  @relation("RequesterViewings")
 
   @@index([status])
   @@index([district])
@@ -646,6 +672,7 @@ enum ConversationContext {
   DELIVERY
   SUPPORT_CASE
   JOB_APPLICATION
+  PROPERTY_ENQUIRY
 }
 
 enum ConversationStatus {
@@ -660,6 +687,8 @@ enum ConversationParticipantRole {
   SUPPORT
   EMPLOYER
   APPLICANT
+  LISTER
+  ENQUIRER
 }
 
 enum MessageType {
@@ -2843,4 +2872,530 @@ model JobReport {
   @@unique([jobId, reporterId])
   @@index([status])
   @@map("job_reports")
+}
+
+// ============================================================================
+// Real Estate (Phase 6 · M25)
+// Reuses the BMPL account, REAL_ESTATE_AGENT/PROPERTY_OWNER roles + role-application
+// approval, messaging, notifications, storage, search, moderation, analytics, audit.
+// Fully normalized (no JSON blobs). Location privacy: exact address stored separately
+// and never public unless the visibility policy allows.
+// ============================================================================
+
+enum ListingPurpose {
+  FOR_SALE
+  FOR_RENT
+}
+
+enum PropertyType {
+  HOUSE
+  APARTMENT
+  CONDO
+  TOWNHOUSE
+  DUPLEX
+  COMMERCIAL
+  OFFICE
+  RETAIL
+  WAREHOUSE
+  INDUSTRIAL
+  LAND
+  FARM
+  RESORT
+  HOTEL
+  OTHER
+}
+
+enum PropertyStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  MORE_INFO_REQUIRED
+  APPROVED
+  PUBLISHED
+  REJECTED
+  SUSPENDED
+  UNDER_OFFER
+  SOLD
+  RENTED
+  WITHDRAWN
+  ARCHIVED
+}
+
+enum Furnishing {
+  FURNISHED
+  SEMI_FURNISHED
+  UNFURNISHED
+  NOT_APPLICABLE
+}
+
+enum Tenure {
+  FREEHOLD
+  LEASEHOLD
+  OTHER
+  UNKNOWN
+}
+
+enum LocationVisibility {
+  DISTRICT_ONLY
+  LOCALITY_ONLY
+  APPROXIMATE_MAP
+  EXACT_ADDRESS
+}
+
+enum RentalPeriod {
+  DAY
+  WEEK
+  MONTH
+  YEAR
+}
+
+enum AreaUnit {
+  SQ_FT
+  SQ_M
+  ACRE
+  HECTARE
+}
+
+enum AgentSpecialty {
+  RESIDENTIAL_SALES
+  RESIDENTIAL_RENTALS
+  COMMERCIAL
+  LAND
+  PROPERTY_MANAGEMENT
+  LUXURY
+  AGRICULTURAL
+  INVESTMENT
+}
+
+enum PropertyDocumentKind {
+  PROOF_OF_OWNERSHIP
+  TITLE_DEED
+  OWNER_AUTHORIZATION
+  AGENT_MANDATE
+  SURVEY_PLAN
+  DISCLOSURE
+  LEASE
+  OTHER
+}
+
+enum ListingAssignmentStatus {
+  PENDING
+  ACCEPTED
+  ENDED
+  DECLINED
+}
+
+enum PropertyEnquiryType {
+  GENERAL
+  PRICE
+  AVAILABILITY
+  FINANCING
+  RENTAL_TERMS
+  PROPERTY_DETAILS
+  OTHER
+}
+
+enum PropertyEnquiryStatus {
+  OPEN
+  RESPONDED
+  CLOSED
+}
+
+enum ViewingRequestStatus {
+  REQUESTED
+  PROPOSED
+  CONFIRMED
+  RESCHEDULED
+  COMPLETED
+  CANCELLED
+  DECLINED
+  NO_SHOW
+}
+
+enum PropertyReportReason {
+  SCAM
+  INCORRECT_INFO
+  DUPLICATE
+  PROHIBITED
+  MISLEADING_PRICE
+  PRIVACY
+  DISCRIMINATION
+  ALREADY_SOLD
+  ILLEGAL
+  OTHER
+}
+
+enum PropertyReportStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+// ---- Property owner profile ----
+model PropertyOwnerProfile {
+  id               String               @id @default(cuid())
+  userId           String               @unique
+  user             User                 @relation("UserPropertyOwnerProfile", fields: [userId], references: [id], onDelete: Cascade)
+  legalName        String
+  displayName      String?
+  phone            String?
+  email            String?
+  district         District?
+  contactPreference String? // e.g. EMAIL / PHONE / MESSAGE
+  identityVerified Boolean              @default(false)
+  approvalStatus   VendorApprovalStatus @default(DRAFT)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  listings PropertyListing[] @relation("OwnerListings")
+  assignments PropertyListingAssignment[]
+
+  @@index([approvalStatus])
+  @@map("property_owner_profiles")
+}
+
+// ---- Real-estate agent profile ----
+model RealEstateAgentProfile {
+  id               String               @id @default(cuid())
+  userId           String               @unique
+  user             User                 @relation("UserRealEstateAgentProfile", fields: [userId], references: [id], onDelete: Cascade)
+  displayName      String
+  legalName        String?
+  slug             String               @unique
+  photoKey         String? // public bucket
+  bio              String?
+  phone            String?
+  email            String?
+  website          String?
+  agencyId         String?
+  agency           AgencyProfile?       @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  serviceDistricts District[]
+  specialties      AgentSpecialty[]
+  yearsExperience  Int?
+  approvalStatus   VendorApprovalStatus @default(DRAFT)
+  isActive         Boolean              @default(true)
+  ratingAverage    Float                @default(0)
+  ratingCount      Int                  @default(0)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  listings    PropertyListing[]           @relation("AgentListings")
+  assignments PropertyListingAssignment[]
+
+  @@index([approvalStatus])
+  @@index([agencyId])
+  @@map("real_estate_agent_profiles")
+}
+
+// ---- Agency profile (one manager agent; multi-user teams deferred) ----
+model AgencyProfile {
+  id             String               @id @default(cuid())
+  managerUserId  String               @unique
+  manager        User                 @relation("UserAgencyManager", fields: [managerUserId], references: [id], onDelete: Cascade)
+  name           String
+  legalName      String?
+  slug           String               @unique
+  logoKey        String?
+  bannerKey      String?
+  description    String?
+  contactEmail   String
+  contactPhone   String?
+  website        String?
+  district       District?
+  addressLine1   String?
+  city           String?
+  approvalStatus VendorApprovalStatus @default(DRAFT)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  agents   RealEstateAgentProfile[]
+  listings PropertyListing[]
+
+  @@index([approvalStatus])
+  @@map("agency_profiles")
+}
+
+// ---- Property listing ----
+model PropertyListing {
+  id                 String              @id @default(cuid())
+  ownerProfileId     String
+  ownerProfile       PropertyOwnerProfile @relation("OwnerListings", fields: [ownerProfileId], references: [id], onDelete: Cascade)
+  agentProfileId     String?
+  agentProfile       RealEstateAgentProfile? @relation("AgentListings", fields: [agentProfileId], references: [id], onDelete: SetNull)
+  agencyId           String?
+  agency             AgencyProfile?      @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  purpose            ListingPurpose
+  propertyType       PropertyType
+  title              String
+  slug               String              @unique
+  reference          String              @unique // human listing reference
+  description        String
+  priceMinor         BigInt
+  currency           Currency            @default(BZD)
+  rentalPeriod       RentalPeriod?
+  negotiable         Boolean             @default(false)
+  district           District?
+  locality           String?
+  // Public approximate location; exact address is PRIVATE (never public unless policy allows).
+  generalAddress     String?
+  exactAddress       String?
+  latitude           Float?
+  longitude          Float?
+  locationVisibility LocationVisibility  @default(DISTRICT_ONLY)
+  bedrooms           Int?
+  bathrooms          Int?
+  halfBathrooms      Int?
+  parkingSpaces      Int?
+  propertySize       Float?
+  landSize           Float?
+  areaUnit           AreaUnit?
+  yearBuilt          Int?
+  furnishing         Furnishing?
+  tenure             Tenure?
+  petPolicy          String?
+  availabilityDate   DateTime?
+  leaseTerm          String?
+  condition          String?
+  videoUrl           String?
+  authorityVerified  Boolean             @default(false)
+  status             PropertyStatus      @default(DRAFT)
+  moderationReason   String?
+  moderatedById      String?
+  moderatedAt        DateTime?
+  publishedAt        DateTime?
+  soldAt             DateTime?
+  rentedAt           DateTime?
+  archivedAt         DateTime?
+  viewCount          Int                 @default(0)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  amenities      PropertyAmenity[]
+  utilities      PropertyUtility[]
+  images         PropertyImage[]
+  documents      PropertyDocument[]
+  statusHistory  PropertyStatusHistory[]
+  priceHistory   PropertyPriceHistory[]
+  assignments    PropertyListingAssignment[]
+  enquiries      PropertyEnquiry[]
+  viewingRequests PropertyViewingRequest[]
+  reports        PropertyReport[]
+  savedBy        SavedProperty[]
+  viewedBy       RecentlyViewedProperty[]
+
+  @@index([status, publishedAt])
+  @@index([ownerProfileId, status])
+  @@index([agentProfileId, status])
+  @@index([district])
+  @@index([purpose, propertyType])
+  @@map("property_listings")
+}
+
+model PropertyAmenity {
+  id        String          @id @default(cuid())
+  listingId String
+  listing   PropertyListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime        @default(now())
+
+  @@unique([listingId, name])
+  @@index([listingId])
+  @@map("property_amenities")
+}
+
+model PropertyUtility {
+  id        String          @id @default(cuid())
+  listingId String
+  listing   PropertyListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime        @default(now())
+
+  @@unique([listingId, name])
+  @@index([listingId])
+  @@map("property_utilities")
+}
+
+model PropertyImage {
+  id         String          @id @default(cuid())
+  listingId  String
+  listing    PropertyListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  storageKey String          @unique // public bucket
+  altText    String?
+  caption    String?
+  areaLabel  String? // Exterior / Kitchen / Bedroom / Floor plan / …
+  position   Int             @default(0)
+  isPrimary  Boolean         @default(false)
+  createdAt  DateTime        @default(now())
+
+  @@index([listingId, position])
+  @@map("property_images")
+}
+
+// PRIVATE ownership/authority documents — signed URLs only to owner/assigned agent/permitted admins.
+model PropertyDocument {
+  id            String               @id @default(cuid())
+  listingId     String
+  listing       PropertyListing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  kind          PropertyDocumentKind
+  storageKey    String               @unique // PRIVATE bucket
+  label         String?
+  mimeType      String
+  fileSizeBytes Int
+  scanStatus    AttachmentScanStatus @default(PENDING)
+  createdAt     DateTime             @default(now())
+
+  @@index([listingId])
+  @@map("property_documents")
+}
+
+model PropertyStatusHistory {
+  id         String          @id @default(cuid())
+  listingId  String
+  listing    PropertyListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  fromStatus PropertyStatus?
+  toStatus   PropertyStatus
+  actorId    String?
+  note       String?
+  createdAt  DateTime        @default(now())
+
+  @@index([listingId, createdAt])
+  @@map("property_status_history")
+}
+
+model PropertyPriceHistory {
+  id         String          @id @default(cuid())
+  listingId  String
+  listing    PropertyListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  priceMinor BigInt
+  currency   Currency        @default(BZD)
+  createdAt  DateTime        @default(now())
+
+  @@index([listingId, createdAt])
+  @@map("property_price_history")
+}
+
+// Authority relationship: which owner/agent/agency may manage a listing.
+model PropertyListingAssignment {
+  id                  String                  @id @default(cuid())
+  listingId           String
+  listing             PropertyListing         @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  ownerProfileId      String
+  ownerProfile        PropertyOwnerProfile    @relation(fields: [ownerProfileId], references: [id], onDelete: Cascade)
+  agentProfileId      String?
+  agentProfile        RealEstateAgentProfile? @relation(fields: [agentProfileId], references: [id], onDelete: SetNull)
+  agencyId            String?
+  status              ListingAssignmentStatus @default(PENDING)
+  authorizationDocId  String? // references a PropertyDocument (owner authorization / agent mandate)
+  assignedAt          DateTime                @default(now())
+  acceptedAt          DateTime?
+  endedAt             DateTime?
+
+  @@index([listingId])
+  @@index([agentProfileId, status])
+  @@map("property_listing_assignments")
+}
+
+model SavedProperty {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   PropertyListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
+
+  @@unique([userId, listingId])
+  @@index([userId, createdAt])
+  @@map("saved_properties")
+}
+
+model RecentlyViewedProperty {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   PropertyListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime        @default(now())
+
+  @@unique([userId, listingId])
+  @@index([userId, viewedAt])
+  @@map("recently_viewed_properties")
+}
+
+model PropertyEnquiry {
+  id               String                @id @default(cuid())
+  listingId        String
+  listing          PropertyListing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  enquirerId       String
+  enquirer         User                  @relation("EnquirerEnquiries", fields: [enquirerId], references: [id], onDelete: Cascade)
+  type             PropertyEnquiryType   @default(GENERAL)
+  message          String
+  preferredContact String?
+  contactPhone     String?
+  status           PropertyEnquiryStatus @default(OPEN)
+  respondedAt      DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@index([listingId, status])
+  @@index([enquirerId, createdAt])
+  @@map("property_enquiries")
+}
+
+model PropertyViewingRequest {
+  id               String                @id @default(cuid())
+  listingId        String
+  listing          PropertyListing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  requesterId      String
+  requester        User                  @relation("RequesterViewings", fields: [requesterId], references: [id], onDelete: Cascade)
+  requestedDate    DateTime
+  requestedTime    String?
+  timezone         String                @default("America/Belize")
+  alternateDate    DateTime?
+  alternateTime    String?
+  message          String?
+  status           ViewingRequestStatus  @default(REQUESTED)
+  confirmedDate    DateTime?
+  confirmedTime    String?
+  cancellationReason String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  events PropertyViewingEvent[]
+
+  @@index([listingId, status])
+  @@index([requesterId, createdAt])
+  @@map("property_viewing_requests")
+}
+
+model PropertyViewingEvent {
+  id         String                @id @default(cuid())
+  requestId  String
+  request    PropertyViewingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  fromStatus ViewingRequestStatus?
+  toStatus   ViewingRequestStatus
+  actorId    String?
+  note       String?
+  createdAt  DateTime              @default(now())
+
+  @@index([requestId, createdAt])
+  @@map("property_viewing_events")
+}
+
+model PropertyReport {
+  id             String               @id @default(cuid())
+  listingId      String
+  listing        PropertyListing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  reporterId     String
+  reason         PropertyReportReason
+  note           String?
+  status         PropertyReportStatus @default(OPEN)
+  resolvedById   String?
+  resolutionNote String?
+  resolvedAt     DateTime?
+  createdAt      DateTime             @default(now())
+
+  @@unique([listingId, reporterId])
+  @@index([status])
+  @@map("property_reports")
 }

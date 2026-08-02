@@ -89,6 +89,13 @@ User 1─* RecentlyViewedProduct *─1 Product                   (M20)  private,
 | `JobApplication` (+ `JobApplicationAnswer`/`JobApplicationEvent`/`JobInterview`) | jobId, applicantId, resumeId?, status, employerNotes (private), jobTitle/companySnapshot; answers snapshot prompt/type; events append-only | **M24** verified applications; validated pipeline; snapshots protect history |
 | `SavedJob` / `RecentlyViewedJob` | unique (user, job) | **M24** M20-pattern saved + recently-viewed jobs |
 | `JobReport` (job_reports) | jobId, reporterId, reason, status; unique (job, reporter) | **M24** job safety reports (M23 moderation pattern) |
+| `PropertyOwnerProfile` / `RealEstateAgentProfile` / `AgencyProfile` | userId*/managerUserId*, approvalStatus, contacts, agent slug*/agency slug* | **M25** real-estate role profiles (approval via role application) |
+| `PropertyListing` (+ `PropertyAmenity`/`PropertyUtility`/`PropertyImage`/`PropertyDocument`/`PropertyStatusHistory`/`PropertyPriceHistory`) | ownerProfileId, agentProfileId?, agencyId?, purpose, propertyType, slug*, reference*, priceMinor, locationVisibility, exactAddress (PRIVATE), status, moderation | **M25** normalized listing; exact address private; docs private; status/price history append-only |
+| `PropertyListingAssignment` | listingId, ownerProfileId, agentProfileId?, status, authorizationDocId? | **M25** owner→agent listing authority (accepted before agent may manage) |
+| `SavedProperty` / `RecentlyViewedProperty` | unique (user, listing) | **M25** M20-pattern saved + recently-viewed |
+| `PropertyEnquiry` | listingId, enquirerId, type, message, status | **M25** enquiries (owner/assigned-agent + enquirer only) |
+| `PropertyViewingRequest` (+ `PropertyViewingEvent`) | listingId, requesterId, dates/times, status; events append-only | **M25** viewing requests with validated status machine |
+| `PropertyReport` (property_reports) | listingId, reporterId, reason, status; unique (listing, reporter) | **M25** listing safety reports |
 
 \* = unique.
 
@@ -122,6 +129,15 @@ singleton + `AuditAction.PLATFORM_SETTING_UPDATED` + `ops.read`/`ops.manage` per
 `ConversationParticipantRole` (`EMPLOYER`/`APPLICANT`); reuses the `District` +
 `VendorApprovalStatus` + `AttachmentScanStatus` enums. Permissions: `employers.read/
 moderate`, `jobs.read/moderate`, `job_categories.manage`.
+**M25 (Real Estate)** added enums `ListingPurpose`, `PropertyType`, `PropertyStatus`,
+`Furnishing`, `Tenure`, `LocationVisibility`, `RentalPeriod`, `AreaUnit`,
+`AgentSpecialty`, `PropertyDocumentKind`, `ListingAssignmentStatus`,
+`PropertyEnquiryType/Status`, `ViewingRequestStatus`, `PropertyReportReason/Status`;
+extended `AuditAction` (16 `PROPERTY_*`/profile actions), `NotificationCategory`
+(`PROPERTY`), `ConversationContext` (`PROPERTY_ENQUIRY`), `ConversationParticipantRole`
+(`LISTER`/`ENQUIRER`); reuses `District`/`VendorApprovalStatus`/`AttachmentScanStatus`/
+`Currency`. Permissions: `properties.*`, `property_owners.*`, `real_estate_agents.*`,
+`agencies.*`, `property_reports.read`, `property_documents.read` (SUPER_ADMIN only).
 
 ## Indexes (beyond primary/unique keys)
 - Category: `(parentId, sortOrder)`, `(isVisible)`

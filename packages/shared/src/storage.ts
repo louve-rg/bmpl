@@ -80,4 +80,13 @@ export const STORAGE_PREFIX = {
   // Employer company logo/banner → PUBLIC bucket (shown on public job/company pages).
   employerLogo: (employerProfileId: string) => `employers/${employerProfileId}/logo`,
   employerBanner: (employerProfileId: string) => `employers/${employerProfileId}/banner`,
+  // ---- Real Estate (Phase 6 · M25) ----
+  // Property photos → PUBLIC bucket (shown on public listings).
+  propertyImage: (listingId: string) => `properties/${listingId}/images`,
+  // Ownership/authority documents → PRIVATE bucket (signed URLs to owner/assigned agent/permitted admins).
+  propertyDocument: (listingId: string) => `properties/${listingId}/docs`,
+  // Agent photo (public) + agency logo/banner (public).
+  agentPhoto: (userId: string) => `real-estate/agents/${userId}/photo`,
+  agencyLogo: (agencyId: string) => `real-estate/agencies/${agencyId}/logo`,
+  agencyBanner: (agencyId: string) => `real-estate/agencies/${agencyId}/banner`,
 } as const;

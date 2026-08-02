@@ -1,0 +1,118 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { realEstateApi } from '../../lib/realestate';
+import type { ApiError } from '../../lib/api';
+
+type Size = 'sm' | 'md' | 'lg';
+const SIZE_PX: Record<Size, string> = { sm: 'h-4 w-4', md: 'h-5 w-5', lg: 'h-6 w-6' };
+const BTN_PAD: Record<Size, string> = { sm: 'p-1.5', md: 'p-2', lg: 'p-2.5' };
+
+/**
+ * Heart toggle for properties — safe to drop over server-rendered cards. Resolves its
+ * saved state on mount (guests / 401 → not saved). Clicks are optimistic with rollback
+ * on error; guests are routed to login with a return path.
+ */
+export function SaveButton({
+  listingId,
+  slug,
+  size = 'md',
+  className = '',
+  initialSaved,
+  withLabel = false,
+}: {
+  listingId: string;
+  slug?: string;
+  size?: Size;
+  className?: string;
+  initialSaved?: boolean;
+  withLabel?: boolean;
+}) {
+  const router = useRouter();
+  const [saved, setSaved] = useState<boolean>(initialSaved ?? false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (initialSaved !== undefined) return;
+    let active = true;
+    realEstateApi.seeker
+      .savedIds()
+      .then((r) => active && setSaved(r.listingIds.includes(listingId)))
+      .catch(() => {
+        /* guests / errors: leave as not saved */
+      });
+    return () => {
+      active = false;
+    };
+  }, [listingId, initialSaved]);
+
+  async function toggle(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    const next = !saved;
+    setSaved(next);
+    setBusy(true);
+    try {
+      if (next) await realEstateApi.seeker.save(listingId);
+      else await realEstateApi.seeker.unsave(listingId);
+    } catch (err) {
+      setSaved(!next); // rollback
+      if ((err as ApiError).status === 401) {
+        router.push(
+          `/login?next=${encodeURIComponent(slug ? `/properties/${slug}` : '/properties')}`,
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (withLabel) {
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={busy}
+        aria-pressed={saved}
+        className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold transition ${
+          saved
+            ? 'border-belize-blue bg-belize-blue/5 text-belize-blue'
+            : 'border-slate-300 text-belize-navy hover:border-belize-blue'
+        } ${className}`}
+      >
+        <Heart filled={saved} className={SIZE_PX[size]} />
+        {saved ? 'Saved' : 'Save property'}
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={busy}
+      aria-pressed={saved}
+      aria-label={saved ? 'Remove from saved properties' : 'Save property'}
+      className={`inline-flex items-center justify-center rounded-full bg-white/90 text-belize-blue shadow-bmpl-sm transition hover:bg-white disabled:opacity-60 ${BTN_PAD[size]} ${className}`}
+    >
+      <Heart filled={saved} className={SIZE_PX[size]} />
+    </button>
+  );
+}
+
+function Heart({ filled, className }: { filled: boolean; className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden
+    >
+      <path d="M12 21s-7.5-4.9-10-9.4C.6 8.7 2 5.3 5.2 5.3c2 0 3.3 1.2 4.8 3 1.5-1.8 2.8-3 4.8-3 3.2 0 4.6 3.4 3.2 6.3C19.5 16.1 12 21 12 21Z" />
+    </svg>
+  );
+}

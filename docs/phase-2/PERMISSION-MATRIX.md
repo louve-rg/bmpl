@@ -34,12 +34,19 @@ enforced server-side by the global guard chain, regardless of what any UI shows.
 | `jobs.read` | view job listings + moderation queue + job reports (M24, read-only) |
 | `jobs.moderate` | approve/reject/more-info/unpublish/suspend/archive jobs; resolve job reports (M24) |
 | `job_categories.manage` | manage the Belize Connect job-category lookup (M24) |
+| `properties.read` | view property listings + moderation queue (M25, read-only) |
+| `properties.moderate` | approve/reject/more-info/suspend/unpublish/archive listings; resolve property reports (M25) |
+| `property_owners.read` / `.moderate` | view / suspend-restore property owners (M25) |
+| `real_estate_agents.read` / `.moderate` | view / suspend-restore agents (M25) |
+| `agencies.read` / `.moderate` | view / approve-suspend agencies (M25) |
+| `property_reports.read` | view the property report queue (M25) |
+| `property_documents.read` | **HIGHLY RESTRICTED** — view private ownership/authority documents (M25; SUPER_ADMIN only, excluded from ADMIN + SUPPORT bundles) |
 
 ### Default bundles (`PERMISSION_BUNDLES`)
 | Staff role | Marketplace permissions |
 |---|---|
 | `SUPPORT_AGENT` | read-only bundle incl. `vendors.read`, `products.read`, `drivers.read`, `deliveries.read`, `proof_of_delivery.read`, `reviews.read`, `employers.read`, `jobs.read` (NO résumé access) |
-| `ADMIN` | all marketplace + logistics permissions incl. all `deliveries.*` + `proof_of_delivery.read` + `reviews.read`/`reviews.moderate` + `analytics.read` + `ops.read`/`ops.manage` + `employers.*`/`jobs.*`/`job_categories.manage` |
+| `ADMIN` | all marketplace + logistics permissions incl. all `deliveries.*` + `proof_of_delivery.read` + `reviews.read`/`reviews.moderate` + `analytics.read` + `ops.read`/`ops.manage` + `employers.*`/`jobs.*`/`job_categories.manage` + `properties.*`/`property_owners.*`/`real_estate_agents.*`/`agencies.*`/`property_reports.read` (**NOT** `property_documents.read`) |
 | `SUPER_ADMIN` | all (inherits every permission) |
 
 ## Capability matrix

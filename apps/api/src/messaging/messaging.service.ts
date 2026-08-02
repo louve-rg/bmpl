@@ -30,6 +30,9 @@ interface ContextParties {
   // Belize Connect Jobs (M24) — employer↔applicant thread parties.
   employerUserId?: string | null;
   applicantUserId?: string | null;
+  // Real Estate (M25) — lister↔enquirer thread parties.
+  listerUserId?: string | null;
+  enquirerUserId?: string | null;
   label: string;
   orderNumber?: string | null;
 }
@@ -98,6 +101,16 @@ export class MessagingService {
       });
       if (!app) throw new NotFoundException('Application not found.');
       return { applicantUserId: app.applicantId, employerUserId: app.job.employerProfile.userId, label: `${app.jobTitleSnapshot} · ${app.companySnapshot}` };
+    }
+    if (contextType === 'PROPERTY_ENQUIRY') {
+      const enq = await this.prisma.propertyEnquiry.findUnique({
+        where: { id: contextId },
+        include: { listing: { include: { ownerProfile: { select: { userId: true } }, agentProfile: { select: { userId: true } } } } },
+      });
+      if (!enq) throw new NotFoundException('Enquiry not found.');
+      // The lister is the assigned agent when present, otherwise the owner.
+      const listerUserId = enq.listing.agentProfile?.userId ?? enq.listing.ownerProfile.userId;
+      return { enquirerUserId: enq.enquirerId, listerUserId, label: `Enquiry · ${enq.listing.title}` };
     }
     // SUPPORT_CASE / ORDER — parties are recorded as participants directly.
     return { label: 'Support' };
@@ -190,6 +203,41 @@ export class MessagingService {
     }
   }
 
+  /**
+   * Open (or return) the lister↔enquirer conversation for a property enquiry (M25).
+   * Only the enquirer or the listing's owner/assigned agent may open it.
+   */
+  async openPropertyEnquiry(actor: Actor, enquiryId: string) {
+    if (actor.status && actor.status !== 'ACTIVE') throw new ForbiddenException('Your account cannot start conversations.');
+    const p = await this.resolveParties('PROPERTY_ENQUIRY', enquiryId);
+    if (actor.userId !== p.enquirerUserId && actor.userId !== p.listerUserId) throw new NotFoundException('Enquiry not found.');
+    const conv = await this.ensureConversation('PROPERTY_ENQUIRY', enquiryId, 'LISTER_ENQUIRER', actor.userId, p.label, [
+      { userId: p.enquirerUserId!, role: 'ENQUIRER' },
+      { userId: p.listerUserId!, role: 'LISTER' },
+    ], p.label);
+    return this.getConversation(actor, conv.id);
+  }
+
+  /**
+   * Best-effort SYSTEM message on a property-enquiry thread (M25). Creates/reconciles
+   * the lister↔enquirer conversation and posts an immutable system line. Called from the
+   * enquiries pipeline; never throws to the caller.
+   */
+  async postPropertyEnquirySystem(enquiryId: string, listerUserId: string, enquirerUserId: string, text: string): Promise<void> {
+    try {
+      const conv = await this.ensureConversation('PROPERTY_ENQUIRY', enquiryId, 'LISTER_ENQUIRER', enquirerUserId, text, [
+        { userId: enquirerUserId, role: 'ENQUIRER' },
+        { userId: listerUserId, role: 'LISTER' },
+      ]);
+      await this.prisma.$transaction(async (tx) => {
+        await tx.message.create({ data: { conversationId: conv.id, senderId: null, type: 'SYSTEM', body: text } });
+        await tx.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: new Date() } });
+      });
+    } catch {
+      // Messaging is a best-effort side-channel — a failure never blocks the pipeline.
+    }
+  }
+
   /** Idempotent conversation upsert + participant reconciliation. */
   private async ensureConversation(
     contextType: ConversationContext,
@@ -252,6 +300,8 @@ export class MessagingService {
       : actor.userId === parties.vendorUserId ? 'VENDOR'
       : actor.userId === parties.employerUserId ? 'EMPLOYER'
       : actor.userId === parties.applicantUserId ? 'APPLICANT'
+      : actor.userId === parties.listerUserId ? 'LISTER'
+      : actor.userId === parties.enquirerUserId ? 'ENQUIRER'
       : null;
     const pairingRoles = conv.pairing.split('_'); // e.g. CUSTOMER_DRIVER → [CUSTOMER, DRIVER]
     const relatedRole = rawRelated && pairingRoles.includes(rawRelated) ? rawRelated : null;

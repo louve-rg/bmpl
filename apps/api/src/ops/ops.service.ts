@@ -59,6 +59,11 @@ export class OpsService {
       this.prisma.jobListing.count({ where: { status: { in: ['SUBMITTED', 'UNDER_REVIEW'] } } }),
       this.prisma.jobReport.count({ where: { status: 'OPEN' } }),
     ]);
+    // Real Estate (M25) queues.
+    const [pendingPropertyModeration, openPropertyReports] = await Promise.all([
+      this.prisma.propertyListing.count({ where: { status: { in: ['SUBMITTED', 'UNDER_REVIEW'] } } }),
+      this.prisma.propertyReport.count({ where: { status: 'OPEN' } }),
+    ]);
     const queues = {
       pendingVendorApplications,
       pendingProductModeration,
@@ -72,6 +77,8 @@ export class OpsService {
       awaitingPickupCollection,
       pendingJobModeration,
       openJobReports,
+      pendingPropertyModeration,
+      openPropertyReports,
       suspendedUsers,
       suspendedRoles,
     };
@@ -80,7 +87,8 @@ export class OpsService {
       pendingVendorApplications + pendingProductModeration + pendingDriverVehicles +
       pendingRoleApplications + moreInfoRoleApplications + openReviewReports +
       openSupportCases + failedSettlements + deliveriesPendingAssignment + awaitingPickupCollection +
-      pendingJobModeration + openJobReports;
+      pendingJobModeration + openJobReports +
+      pendingPropertyModeration + openPropertyReports;
     return { queues, totalActionable, settings: await this.getSettings() };
   }
 

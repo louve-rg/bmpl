@@ -21,6 +21,8 @@ export const OPS_QUEUE_KEYS = [
   'awaitingPickupCollection',
   'pendingJobModeration',
   'openJobReports',
+  'pendingPropertyModeration',
+  'openPropertyReports',
   'suspendedUsers',
   'suspendedRoles',
 ] as const;

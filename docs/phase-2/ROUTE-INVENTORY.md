@@ -29,6 +29,13 @@
 | `/companies/[slug]` | public | employer/company public page + open jobs (M24) |
 | `/dashboard/jobs` (job-seeker) | CUSTOMER | Belize Connect job-seeker (M24): profile, résumé manager, saved jobs, applications + timeline/interviews, messaging |
 | `/dashboard/employer` | EMPLOYER | employer (M24): company profile, job manager/editor, applicant pipeline, interviews, analytics |
+| `/properties` | public | Real Estate (M25): property search/filters (purpose, type, district, price, beds/baths, furnishing, sort), cards |
+| `/properties/[slug]` | public | property detail: gallery, key facts, amenities/utilities, location per visibility (never exact address), agent/agency card, save/enquiry/viewing/report |
+| `/properties/agents/[slug]` | public | agent public profile + published listings (M25) |
+| `/properties/agencies/[slug]` | public | agency public profile + listings (M25) |
+| `/dashboard/properties` (seeker) | CUSTOMER | Real Estate seeker (M25): saved properties, enquiries + messaging, viewing requests |
+| `/dashboard/property-owner` | PROPERTY_OWNER | owner (M25): profile, listing manager/editor, images/documents, assign agent, enquiries, viewings, analytics |
+| `/dashboard/real-estate-agent` | REAL_ESTATE_AGENT | agent (M25): profile + photo, agency profile + logo/banner, assignments accept/decline, managed listings, enquiries, viewings, analytics |
 | `/dashboard/products` | VENDOR | product list (submit/archive/delete) |
 | `/dashboard/products/new` | VENDOR | create product |
 | `/dashboard/products/[id]` | VENDOR | edit product + image manager + variants/inventory manager |
@@ -49,6 +56,7 @@ pages `notFound()` on missing/unapproved.
 | `/dashboard/analytics` | `analytics.read` | platform analytics (M22): KPIs, sales chart, top products/vendors, orders CSV export |
 | `/dashboard/ops` | `ops.read` | operations console (M23): cross-domain action queues, announcement/maintenance editor (`ops.manage`), audit CSV export (`audit.read`) |
 | `/dashboard/jobs` (admin) | `jobs.read` | Belize Connect moderation (M24): job queue + detail + moderate (`jobs.moderate`), reports, employers suspend/restore (`employers.*`), categories (`job_categories.manage`), analytics |
+| `/dashboard/properties` (admin) | `properties.read` | Real Estate moderation (M25): listing queue + detail + moderate (`properties.moderate`), reports resolve, owners/agents suspend/restore (`property_owners.*`/`real_estate_agents.*`), analytics; private documents gated by `property_documents.read` (super-admin only) |
 | `/dashboard/vendors/[id]` | `vendors.read`/`.moderate` | detail + approve/reject/suspend/restore |
 | `/dashboard/products` | `products.read` | product queue (status filter) |
 | `/dashboard/products/[id]` | `products.read`/`.moderate` | detail + images + moderation |

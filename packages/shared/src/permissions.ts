@@ -60,6 +60,17 @@ export const PERMISSIONS = [
   'jobs.read', // view job listings + moderation queue (read-only)
   'jobs.moderate', // approve/reject/more-info/unpublish/suspend/archive job listings + resolve job reports
   'job_categories.manage', // manage the job-category lookup
+  // ---- Real Estate (Phase 6 · M25) ----
+  'properties.read', // view property listings + moderation queue (read-only)
+  'properties.moderate', // approve/reject/more-info/suspend/unpublish/archive listings; resolve property reports
+  'property_owners.read', // view property-owner profiles/applications
+  'property_owners.moderate', // suspend/restore property owners
+  'real_estate_agents.read', // view agent profiles/applications
+  'real_estate_agents.moderate', // suspend/restore agents
+  'agencies.read', // view agencies
+  'agencies.moderate', // approve/suspend agencies
+  'property_reports.read', // view the property report queue
+  'property_documents.read', // HIGHLY RESTRICTED — view private ownership/authority documents (SUPER_ADMIN only)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -85,6 +96,10 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'reviews.read',
     'employers.read',
     'jobs.read',
+    'properties.read',
+    'real_estate_agents.read',
+    'agencies.read',
+    'property_owners.read',
   ],
   ADMIN: [
     'users.read',
@@ -128,6 +143,17 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'jobs.read',
     'jobs.moderate',
     'job_categories.manage',
+    // Real Estate (M25) — NOTE: property_documents.read is deliberately EXCLUDED from
+    // the ADMIN bundle (private ownership docs → SUPER_ADMIN only).
+    'properties.read',
+    'properties.moderate',
+    'property_owners.read',
+    'property_owners.moderate',
+    'real_estate_agents.read',
+    'real_estate_agents.moderate',
+    'agencies.read',
+    'agencies.moderate',
+    'property_reports.read',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };
