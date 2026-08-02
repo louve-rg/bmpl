@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Badge } from '../ui';
 import { Gallery, type GalleryImage } from '../../app/products/[slug]/Gallery';
+import { buildGalleryImages } from '../../lib/gallery';
 import { VariantLineup, VariantSelector, type LineupImage } from './VariantChooser';
 import { money } from '../../lib/cart';
 import type { InvRow, Inventory, ManageView, ProductImage } from './types';
@@ -91,8 +92,10 @@ export function StorefrontPreview({
   const state: PurchaseStateKind = ps.state;
 
   const galleryImages: GalleryImage[] = useMemo(() => {
+    // Exclude the Brand Image (listing-only) so the preview matches the live API,
+    // then order via the SAME shared utility as the marketplace product page.
     const mapped: GalleryImage[] = images
-      .filter((i) => i.url)
+      .filter((i) => i.url && !i.isBrandImage && i.role !== 'BRAND')
       .map((i) => ({
         id: i.id,
         url: i.url,
@@ -101,12 +104,8 @@ export function StorefrontPreview({
         position: i.position,
         isPrimary: i.isPrimary,
       }));
-    const general = mapped.filter((i) => i.variantId == null);
-    const base = general.length ? general : mapped;
-    if (!selectedVariant) return base;
-    const forVariant = mapped.filter((i) => i.variantId === selectedVariant.id);
-    return forVariant.length ? forVariant : base;
-  }, [images, selectedVariant]);
+    return buildGalleryImages(mapped, variants.map((v) => v.id), selectedVariant?.id ?? null);
+  }, [images, variants, selectedVariant]);
 
   const lineupImages: LineupImage[] = useMemo(
     () =>

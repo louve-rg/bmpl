@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Gallery, type GalleryImage } from './Gallery';
+import { buildGalleryImages } from '../../../lib/gallery';
 import { Badge } from '../../../components/ui';
 import { ProductReviews } from '../../../components/reviews/ProductReviews';
 import { StarRating } from '../../../components/reviews/StarRating';
@@ -150,15 +151,14 @@ export function ProductView({ product }: { product: ProductDetail }) {
       ? product.priceMinor
       : null;
 
-  // Variant-aware gallery: variant images → general images → all (graceful fallback).
-  const galleryImages = useMemo(() => {
-    const all = product.images;
-    const general = all.filter((i) => i.variantId == null);
-    const base = general.length ? general : all;
-    if (!selectedVariant) return base;
-    const forVariant = all.filter((i) => i.variantId === selectedVariant.id);
-    return forVariant.length ? forVariant : base;
-  }, [product.images, selectedVariant]);
+  // Variant-aware gallery. "All" = general images first, then each variant's group in
+  // vendor order (grouped, never interleaved); a selected variant = only its images.
+  // Shared ordering utility so the Storefront Preview matches exactly. Brand Image is
+  // already excluded by the API (listGallery).
+  const galleryImages = useMemo(
+    () => buildGalleryImages(product.images, product.variants.map((v) => v.id), selectedVariant?.id ?? null),
+    [product.images, product.variants, selectedVariant],
+  );
 
   const lineupImages = useMemo(() => toLineupImages(product.images), [product.images]);
 
