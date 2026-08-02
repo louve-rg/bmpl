@@ -7,11 +7,10 @@ import { VariantLineup, VariantSelector, type LineupImage } from './VariantChoos
 import { money } from '../../lib/cart';
 import type { InvRow, Inventory, ManageView, ProductImage } from './types';
 import {
-  pruneSelection,
+  presentationVariant,
   purchaseState,
-  resolveSelectedVariant,
+  reconcileSelection,
   selectionForVariant,
-  variantsForSelection,
   type ProductLike,
   type PurchaseStateKind,
   type Selection,
@@ -85,7 +84,7 @@ export function StorefrontPreview({
   const [selection, setSelection] = useState<Selection>({});
 
   const selectedVariant = useMemo(
-    () => (hasVariants ? resolveSelectedVariant(variants, selection) : null),
+    () => (hasVariants ? presentationVariant(variants, selection) : null),
     [hasVariants, variants, selection],
   );
   const ps = useMemo(() => purchaseState(product, variants, selection), [product, variants, selection]);
@@ -122,11 +121,7 @@ export function StorefrontPreview({
   );
 
   function changeOption(optionId: string, valueId: string) {
-    setSelection((s) => {
-      const pruned = pruneSelection(variants, view.options, { ...s, [optionId]: valueId });
-      const matches = variantsForSelection(variants, pruned);
-      return matches.length === 1 ? selectionForVariant(view.options, matches[0]!) : pruned;
-    });
+    setSelection((s) => reconcileSelection(variants, view.options, s, optionId, valueId));
   }
 
   if (images.filter((i) => i.url).length === 0 && !hasVariants) {

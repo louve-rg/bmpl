@@ -15,11 +15,10 @@ import { SaveButton } from '../../../components/saved/SaveButton';
 import { RecordView } from '../../../components/saved/RecordView';
 import { RelatedProducts } from '../../../components/discovery/RelatedProducts';
 import {
-  pruneSelection,
+  presentationVariant,
   purchaseState,
-  resolveSelectedVariant,
+  reconcileSelection,
   selectionForVariant,
-  variantsForSelection,
   type OptionLike,
   type PurchaseStateKind,
   type Selection,
@@ -82,8 +81,11 @@ export function ProductView({ product }: { product: ProductDetail }) {
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [reviewAggregate, setReviewAggregate] = useState<RatingAggregate | null>(null);
 
+  // The variant to present (image/title/price/SKU/gallery): the exact variant when
+  // fully selected, else the single variant matching a partial selection. Derived —
+  // never written back into `selection`, so the dropdowns keep their "All" state.
   const selectedVariant = useMemo(
-    () => (hasVariants ? (resolveSelectedVariant(product.variants, selection) as Variant | null) : null),
+    () => (hasVariants ? (presentationVariant(product.variants, selection) as Variant | null) : null),
     [hasVariants, product.variants, selection],
   );
 
@@ -98,15 +100,11 @@ export function ProductView({ product }: { product: ProductDetail }) {
     setQty(1);
   }
 
-  // A dropdown change, pruned so the remaining selection stays reachable. When the
-  // narrowed selection leaves exactly one matching variant, adopt it fully so the
-  // image/title/price/SKU/inventory all sync to that variant (a valid default).
+  // A dropdown change: the changed option is the anchor (empty = "All"); other
+  // selections are kept only if still valid, else reset to "All". Never auto-fills a
+  // different option, so the dropdowns can never filter each other into a locked state.
   function changeOption(optionId: string, valueId: string) {
-    setSelection((s) => {
-      const pruned = pruneSelection(product.variants, product.options, { ...s, [optionId]: valueId });
-      const matches = variantsForSelection(product.variants, pruned);
-      return matches.length === 1 ? selectionForVariant(product.options, matches[0]!) : pruned;
-    });
+    setSelection((s) => reconcileSelection(product.variants, product.options, s, optionId, valueId));
     setQty(1);
   }
 

@@ -94,6 +94,47 @@ export function variantsForSelection(variants: VariantLike[], selection: Selecti
 }
 
 /**
+ * Faceted, NON-TRAPPING selection update. The just-changed option is the ANCHOR and
+ * is always honoured (an empty value = "All" = the option is cleared). Every OTHER
+ * previously-selected option is kept only if it still co-occurs with the anchor in an
+ * available variant; otherwise it is reset to "All". This is the key rule that stops
+ * the dropdowns filtering each other into a locked state: changing any option in any
+ * order always yields a valid, broadenable selection, and "All" is always reachable.
+ * Works for any number/order of options (it never assumes a first/second option).
+ */
+export function reconcileSelection(
+  variants: VariantLike[],
+  options: OptionLike[],
+  previous: Selection,
+  changedOptionId: string,
+  changedValueId: string,
+): Selection {
+  const next: Selection = changedValueId ? { [changedOptionId]: changedValueId } : {};
+  for (const opt of options) {
+    if (opt.id === changedOptionId) continue;
+    const val = previous[opt.id];
+    if (!val) continue; // already "All" — leave it broad
+    const trial: Selection = { ...next, [opt.id]: val };
+    if (variantsForSelection(variants, trial).length > 0) next[opt.id] = val;
+  }
+  return next;
+}
+
+/**
+ * The variant to PRESENT (title/image/price/SKU/gallery) for the current selection —
+ * the exact variant when every option is chosen, else the single variant that matches
+ * a partial selection. Null when zero or many variants match. Derived, never stored:
+ * showing a single match must NOT mutate the dropdowns (they keep their "All" state so
+ * the customer can always broaden or switch).
+ */
+export function presentationVariant(variants: VariantLike[], selection: Selection): VariantLike | null {
+  const exact = resolveSelectedVariant(variants, selection);
+  if (exact) return exact;
+  const matches = variantsForSelection(variants, selection);
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+/**
  * Value ids for `optionId` that are backed by at least one AVAILABLE variant
  * given the current selection of the OTHER options (combination-aware). Drives
  * the dropdowns so only reachable, in-stock choices are offered.
@@ -154,8 +195,12 @@ export interface PurchaseState {
  * Overall purchase state for the current selection:
  *  - UNAVAILABLE : no available purchasable variant exists at all
  *  - SELECT      : a valid selection is still required (an option is "All")
- *  - ADD         : a fully-selected, in-stock variant is ready
+ *  - ADD         : a fully-selected (or single-matching) in-stock variant is ready
  *  - OUT_OF_STOCK: the selected variant (or simple product) is out of stock
+ *
+ * ADD is reached whenever exactly ONE variant matches the active filters (a full
+ * selection, or a partial one that happens to be unambiguous) — so a customer can add
+ * to cart without redundantly picking an option that has only one possibility.
  */
 export function purchaseState(
   product: ProductLike,
@@ -168,7 +213,7 @@ export function purchaseState(
   if (availableVariants(variants).length === 0) {
     return { state: 'UNAVAILABLE', variant: null };
   }
-  const variant = resolveSelectedVariant(variants, selection);
+  const variant = presentationVariant(variants, selection);
   if (!variant) return { state: 'SELECT', variant: null };
   return { state: isVariantAvailable(variant) ? 'ADD' : 'OUT_OF_STOCK', variant };
 }
