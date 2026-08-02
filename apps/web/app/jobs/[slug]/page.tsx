@@ -9,7 +9,7 @@ import {
 import { Header } from '../../../components/landing/Header';
 import { Footer } from '../../../components/landing/Footer';
 import { serverGetSafe } from '../../../lib/server-api';
-import { Badge, Card } from '../../../components/ui';
+import { Badge, Breadcrumbs, Card } from '../../../components/ui';
 import { JobBadges, JobList } from '../../../components/jobs/JobCard';
 import { SaveJobButton } from '../../../components/jobs/SaveJobButton';
 import { JobApplyPanel } from '../../../components/jobs/JobApplyPanel';
@@ -54,6 +54,14 @@ export default async function JobDetailPage({ params }: { params: { slug: string
       <RecentlyViewedTracker jobId={job.id} />
       <main className="bg-slate-50 pb-16">
         <div className="container-bmpl py-8">
+          <Breadcrumbs
+            items={[
+              { label: 'Belize Connect', href: '/jobs' },
+              ...(job.category ? [{ label: job.category.name, href: `/jobs?category=${job.category.slug}` }] : []),
+              { label: job.title },
+            ]}
+            className="mb-3"
+          />
           <Link href="/jobs" className="text-sm font-medium text-belize-blue hover:underline">
             ← All jobs
           </Link>

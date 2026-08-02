@@ -221,6 +221,50 @@ export function Spinner({ className = 'h-5 w-5' }: { className?: string }) {
 
 /* --------------------------------------------------------------------- forms */
 
+/**
+ * Accessible breadcrumb trail. The last item is the current page (not a link);
+ * every earlier item links to a real ancestor level so "back" always follows the
+ * content hierarchy and works for direct/shared links (no browser-history reliance).
+ */
+export function Breadcrumbs({
+  items,
+  className = '',
+}: {
+  items: Array<{ label: string; href?: string }>;
+  className?: string;
+}) {
+  return (
+    <nav aria-label="Breadcrumb" className={`text-sm ${className}`}>
+      <ol className="flex flex-wrap items-center gap-1.5 text-slate-500">
+        {items.map((item, i) => {
+          const last = i === items.length - 1;
+          return (
+            <li key={`${item.label}-${i}`} className="flex items-center gap-1.5">
+              {item.href && !last ? (
+                <Link href={item.href} className="font-medium text-belize-blue hover:underline">
+                  {item.label}
+                </Link>
+              ) : (
+                <span
+                  className={last ? 'font-medium text-belize-navy' : ''}
+                  aria-current={last ? 'page' : undefined}
+                >
+                  {item.label}
+                </span>
+              )}
+              {!last && (
+                <span aria-hidden="true" className="text-slate-300">
+                  /
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
 export function Label({ className = '', children, ...props }: ComponentProps<'label'>) {
   return (
     <label className={`bmpl-label ${className}`} {...props}>

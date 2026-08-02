@@ -162,14 +162,50 @@ async function seedDemoData() {
   }
 }
 
+/** Baseline Belize Connect job categories (managed reference data). Idempotent
+ *  by unique slug — matches the 20260915120000_seed_job_categories migration so
+ *  fresh dev/test seeds and migrated prod converge on the same taxonomy. */
+async function seedJobCategories() {
+  const categories: Array<{ name: string; slug: string; sortOrder: number }> = [
+    { name: 'Accounting & Finance', slug: 'accounting-finance', sortOrder: 10 },
+    { name: 'Administration & Office Support', slug: 'administration-office-support', sortOrder: 20 },
+    { name: 'Agriculture & Fisheries', slug: 'agriculture-fisheries', sortOrder: 30 },
+    { name: 'Construction & Skilled Trades', slug: 'construction-skilled-trades', sortOrder: 40 },
+    { name: 'Customer Service', slug: 'customer-service', sortOrder: 50 },
+    { name: 'Education & Training', slug: 'education-training', sortOrder: 60 },
+    { name: 'Engineering', slug: 'engineering', sortOrder: 70 },
+    { name: 'Government & Public Service', slug: 'government-public-service', sortOrder: 80 },
+    { name: 'Healthcare', slug: 'healthcare', sortOrder: 90 },
+    { name: 'Hospitality & Tourism', slug: 'hospitality-tourism', sortOrder: 100 },
+    { name: 'Human Resources', slug: 'human-resources', sortOrder: 110 },
+    { name: 'Information Technology', slug: 'information-technology', sortOrder: 120 },
+    { name: 'Legal', slug: 'legal', sortOrder: 130 },
+    { name: 'Logistics & Transportation', slug: 'logistics-transportation', sortOrder: 140 },
+    { name: 'Manufacturing', slug: 'manufacturing', sortOrder: 150 },
+    { name: 'Marketing & Communications', slug: 'marketing-communications', sortOrder: 160 },
+    { name: 'Retail & Sales', slug: 'retail-sales', sortOrder: 170 },
+    { name: 'Security', slug: 'security', sortOrder: 180 },
+    { name: 'Social Services', slug: 'social-services', sortOrder: 190 },
+    { name: 'Other', slug: 'other', sortOrder: 200 },
+  ];
+  for (const c of categories) {
+    await prisma.jobCategory.upsert({
+      where: { slug: c.slug },
+      update: { name: c.name, sortOrder: c.sortOrder },
+      create: c,
+    });
+  }
+}
+
 async function main() {
   const isProduction = process.env.NODE_ENV === 'production';
   console.info('Seeding BMPL database…');
 
-  // Roles, system wallet accounts, and the super-admin are always seeded.
+  // Roles, system wallet accounts, super-admin, and baseline reference data are always seeded.
   await seedRoles();
   await seedSystemWalletAccounts();
   await seedSuperAdmin();
+  await seedJobCategories();
 
   // Demo customers / applications are development scaffolding only.
   if (isProduction) {

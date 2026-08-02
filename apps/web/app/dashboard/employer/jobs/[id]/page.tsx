@@ -82,7 +82,7 @@ export default function EditJobPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <Link href="/dashboard/employer/jobs" className="text-sm font-medium text-belize-blue hover:underline">
-        ← Jobs
+        ← Job Listings
       </Link>
       <PageHeader
         eyebrow="Employer"

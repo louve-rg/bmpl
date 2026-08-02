@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
 import { serverGetSafe } from '../../lib/server-api';
-import { Alert } from '../../components/ui';
+import { Alert, Breadcrumbs } from '../../components/ui';
 import { PropertyGrid } from '../../components/realestate/PropertyCard';
 import { SearchFilters, type PropertyFilterValues } from '../../components/realestate/SearchFilters';
 import type { PropertyList as PropertyListType } from '../../lib/realestate';
@@ -57,6 +57,15 @@ export default async function PropertiesPage({
     <>
       <Header />
       <main className="bg-slate-50">
+        <div className="container-bmpl pt-6">
+          <Breadcrumbs
+            items={[
+              { label: 'Home', href: '/' },
+              { label: 'Real Estate' },
+            ]}
+            className="mb-3"
+          />
+        </div>
         <section className="bg-gradient-to-r from-belize-navy to-belize-blue">
           <div className="container-bmpl py-12 sm:py-16">
             <p className="text-sm font-semibold uppercase tracking-wide text-belize-accent">Belize Real Estate</p>

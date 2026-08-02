@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
 import { serverGetSafe } from '../../lib/server-api';
-import { Alert, Badge as UiBadge, Button, EmptyState, Input } from '../../components/ui';
+import { Alert, Badge as UiBadge, Breadcrumbs, Button, EmptyState, Input } from '../../components/ui';
+import { storesBreadcrumbs } from '../../lib/marketplace-nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +34,7 @@ export default async function VendorsDirectoryPage({ searchParams }: { searchPar
       <Header />
       <main className="bg-slate-50 py-10">
         <div className="container-bmpl">
+          <Breadcrumbs items={storesBreadcrumbs()} className="mb-3" />
           <p className="bmpl-eyebrow">Marketplace</p>
           <h1 className="bmpl-page-title mt-1">Vendors</h1>
           <p className="mt-1.5 text-slate-500">Discover approved storefronts across Belize.</p>

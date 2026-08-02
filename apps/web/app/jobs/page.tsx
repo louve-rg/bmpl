@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
 import { serverGetSafe } from '../../lib/server-api';
-import { Alert } from '../../components/ui';
+import { Alert, Breadcrumbs } from '../../components/ui';
 import { JobList } from '../../components/jobs/JobCard';
 import { SearchFilters, type JobFilterValues } from '../../components/jobs/SearchFilters';
 import type { JobCategory, JobList as JobListType } from '../../lib/jobs';
@@ -60,6 +60,16 @@ export default async function JobsPage({
     <>
       <Header />
       <main className="bg-slate-50">
+        <div className="container-bmpl pt-6">
+          <Breadcrumbs
+            items={[
+              { label: 'Home', href: '/' },
+              { label: 'Belize Connect', href: '/jobs' },
+              { label: 'Jobs' },
+            ]}
+            className="mb-3"
+          />
+        </div>
         <section className="bg-gradient-to-r from-belize-navy to-belize-blue">
           <div className="container-bmpl py-12 sm:py-16">
             <p className="text-sm font-semibold uppercase tracking-wide text-belize-accent">Belize Connect</p>

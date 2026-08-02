@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { Header } from '../../../../components/landing/Header';
 import { Footer } from '../../../../components/landing/Footer';
 import { serverGetSafe } from '../../../../lib/server-api';
-import { Badge, Card } from '../../../../components/ui';
+import { Badge, Breadcrumbs, Card } from '../../../../components/ui';
 import { PropertyGrid } from '../../../../components/realestate/PropertyCard';
 import { type AgentPage, districtLabel, specialtyLabel } from '../../../../lib/realestate';
 
@@ -32,6 +32,15 @@ export default async function AgentPublicPage({ params }: { params: { slug: stri
     <>
       <Header />
       <main className="bg-slate-50">
+        <div className="container-bmpl pt-6">
+          <Breadcrumbs
+            items={[
+              { label: 'Real Estate', href: '/properties' },
+              { label: agent.displayName },
+            ]}
+            className="mb-3"
+          />
+        </div>
         <div className="h-32 w-full bg-gradient-to-r from-belize-navy to-belize-blue sm:h-40" />
 
         <div className="container-bmpl -mt-12 pb-14">
@@ -102,7 +111,7 @@ export default async function AgentPublicPage({ params }: { params: { slug: stri
             />
             <div className="mt-6">
               <Link href="/properties" className="text-sm font-medium text-belize-blue hover:underline">
-                ← Browse all properties
+                ← Back to Real Estate
               </Link>
             </div>
           </section>

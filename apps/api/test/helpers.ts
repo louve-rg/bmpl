@@ -43,6 +43,38 @@ export async function resetDb(prisma: PrismaClient): Promise<void> {
   }
 }
 
+/** The baseline Belize Connect job categories (mirrors seed.ts + the
+ *  20260915120000_seed_job_categories migration). Idempotent by unique slug. */
+export const BASELINE_JOB_CATEGORIES: Array<{ name: string; slug: string; sortOrder: number }> = [
+  { name: 'Accounting & Finance', slug: 'accounting-finance', sortOrder: 10 },
+  { name: 'Administration & Office Support', slug: 'administration-office-support', sortOrder: 20 },
+  { name: 'Agriculture & Fisheries', slug: 'agriculture-fisheries', sortOrder: 30 },
+  { name: 'Construction & Skilled Trades', slug: 'construction-skilled-trades', sortOrder: 40 },
+  { name: 'Customer Service', slug: 'customer-service', sortOrder: 50 },
+  { name: 'Education & Training', slug: 'education-training', sortOrder: 60 },
+  { name: 'Engineering', slug: 'engineering', sortOrder: 70 },
+  { name: 'Government & Public Service', slug: 'government-public-service', sortOrder: 80 },
+  { name: 'Healthcare', slug: 'healthcare', sortOrder: 90 },
+  { name: 'Hospitality & Tourism', slug: 'hospitality-tourism', sortOrder: 100 },
+  { name: 'Human Resources', slug: 'human-resources', sortOrder: 110 },
+  { name: 'Information Technology', slug: 'information-technology', sortOrder: 120 },
+  { name: 'Legal', slug: 'legal', sortOrder: 130 },
+  { name: 'Logistics & Transportation', slug: 'logistics-transportation', sortOrder: 140 },
+  { name: 'Manufacturing', slug: 'manufacturing', sortOrder: 150 },
+  { name: 'Marketing & Communications', slug: 'marketing-communications', sortOrder: 160 },
+  { name: 'Retail & Sales', slug: 'retail-sales', sortOrder: 170 },
+  { name: 'Security', slug: 'security', sortOrder: 180 },
+  { name: 'Social Services', slug: 'social-services', sortOrder: 190 },
+  { name: 'Other', slug: 'other', sortOrder: 200 },
+];
+
+/** Idempotently seed the baseline job categories (upsert by slug). */
+export async function seedJobCategories(prisma: PrismaClient): Promise<void> {
+  for (const c of BASELINE_JOB_CATEGORIES) {
+    await prisma.jobCategory.upsert({ where: { slug: c.slug }, update: { name: c.name, sortOrder: c.sortOrder }, create: c });
+  }
+}
+
 /** Seed the role catalog + system wallet accounts. */
 export async function seedRoles(prisma: PrismaClient): Promise<void> {
   for (const code of ROLE_CODES) {

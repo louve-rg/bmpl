@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { Header } from '../../../components/landing/Header';
 import { Footer } from '../../../components/landing/Footer';
 import { serverGetSafe } from '../../../lib/server-api';
-import { Badge, Card } from '../../../components/ui';
+import { Badge, Breadcrumbs, Card } from '../../../components/ui';
 import { PropertyBadges, PropertyGrid } from '../../../components/realestate/PropertyCard';
 import { PropertyGallery } from '../../../components/realestate/PropertyGallery';
 import { SaveButton } from '../../../components/realestate/SaveButton';
@@ -51,6 +51,13 @@ export default async function PropertyDetailPage({ params }: { params: { slug: s
       <RecentlyViewedTracker listingId={p.id} />
       <main className="bg-slate-50 pb-16">
         <div className="container-bmpl py-8">
+          <Breadcrumbs
+            items={[
+              { label: 'Real Estate', href: '/properties' },
+              { label: p.title },
+            ]}
+            className="mb-3"
+          />
           <Link href="/properties" className="text-sm font-medium text-belize-blue hover:underline">
             ← All properties
           </Link>
