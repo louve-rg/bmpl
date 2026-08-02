@@ -265,7 +265,9 @@ reversible default so the rest of the module ships safely.
 
 ## Completion status & production deployment (2026-08-02)
 
-**Built, tested, committed, and pushed — one atomic milestone `d71bbd2` on `main`.**
+**FULLY DEPLOYED AND VERIFIED IN PRODUCTION.** One atomic milestone `d71bbd2` on `main`
+(+ docs `a341cef`); live API commit **`a341cef`** (byte-identical API build to `d71bbd2` —
+`a341cef` only adds this doc).
 
 | Stage | Status |
 |---|---|
@@ -276,40 +278,33 @@ reversible default so the rest of the module ships safely.
 | Integration + security tests | ✅ 6/6 (location privacy, private-doc isolation, cross-owner isolation, moderation gating, viewing state machine, storage round-trip) |
 | Full regression | ✅ 345 integration + 30 unit + 22 shared + 22 validation |
 | Production builds (all 3 apps) | ✅ clean; every M25 route present |
-| **Vercel — web (`bmpl-web.vercel.app`) + admin (`bmpl-admin.vercel.app`)** | ✅ **auto-deployed from the push and LIVE** |
-| **Railway — API (`bmplapi-production`)** | ⛔ **BLOCKED — not deployed; still commit `ffb88e2` (M24)** |
-| Prod DB migrations | ⛔ **not yet applied** (they run in the API `preDeployCommand` on the blocked deploy) |
+| **Vercel — web (`bmpl-web.vercel.app`) + admin (`bmpl-admin.vercel.app`)** | ✅ **LIVE** |
+| **Railway — API (`bmplapi-production`)** | ✅ **LIVE — commit `a341cef`, promoted 2026-08-02 13:16** |
+| **Prod DB migrations** | ✅ **both applied** via `preDeployCommand` (`prisma migrate deploy`) |
 
-**Why the API is not deployed (honest blocker).** The Railway CLI session on this
-machine expired (last authenticated ~2026-07-26); `railway whoami` returns
-*Unauthorized*. No `RAILWAY_TOKEN`/`RAILWAY_API_TOKEN` exists in the environment or any
-`.env`, and no `config.json` credential is present. Re-authentication requires the
-interactive, browser-based `railway login`, which cannot run unattended — and per the
-autonomous-run instruction I do **not** request credentials while away. The Railway
-dashboard watch-path does **not** auto-deploy on push (proven across M21–M24), so the
-push alone does not promote the API.
+**Production verification (all live against `bmplapi-production`):**
+- `GET /api/health` → `{"status":"ok","commit":"a341cef"}`.
+- `GET /api/health/ready` → `200 {"status":"ready","checks":{"database":true,"redis":true,"storage":"ok"}}`.
+- `GET /api/properties` → `200 {"total":0,"page":1,"pageSize":20,"items":[]}`; enum-filtered
+  query (`purpose=FOR_SALE&propertyType=HOUSE&district=BELIZE&sort=price_asc`) → `200`,
+  proving the M25 tables + enum columns exist (migrations applied).
+- Not-found public routes (`/properties/{unknown}`, `/properties/agents/{unknown}`) → `404`
+  (graceful, no `500`). Role-gated routes (`property-owner/*`, `property-seeker/*`,
+  `admin/properties`) → `401` unauthenticated.
+- **Web ↔ live API:** `bmpl-web.vercel.app/properties` renders the working "No properties"
+  empty state (the earlier "temporarily unavailable" fallback is gone — the SSR fetch now
+  gets a `200`).
+- **No regression:** marketplace (`marketplace/products|categories|discovery` → `200`),
+  jobs (`jobs`, `jobs/categories` → `200`), orders/payments/driver auth-gated (`401`),
+  no `5xx` anywhere. M25 is purely additive; the app boots clean with all dependencies
+  healthy (Nest fails fast on module errors — a broken existing module would block boot).
 
-**Current production reality.** Because Vercel auto-deploys from `main` (GitHub
-integration, outside CLI control) while Railway does not, production is in a
-frontend-ahead-of-API state. This degrades **gracefully, not destructively**: the public
-`/properties*` pages use `serverGetSafe`, so with the API returning 404 for the new
-routes they render the standard "temporarily unavailable"/empty state (verified live —
-no crash); every pre-existing marketplace/jobs feature is unaffected because the API is
-unchanged (M24); and no production user holds a `PROPERTY_OWNER`/`REAL_ESTATE_AGENT` role
-yet, so no role-gated surface is exposed. No demo/test data was created in production (I
-never authenticated to the prod API).
+**Cleanup:** no demo/test data was created in production (never authenticated to the prod
+API during the build; `/api/properties` `total:0` confirms zero stray listings). Local
+disposable infra removed (the temporary native MinIO used for integration tests was
+stopped; dev/test databases are auto-reset by the integration suite). Note for future
+test runs on this machine: Docker is not installed, so MinIO must be provided out-of-band
+(the `minio.exe` binary in the session scratchpad, or `docker compose up minio` elsewhere).
 
-**Single remaining step to make M25 fully live (needs the owner):**
-```
-railway login                                             # interactive, browser
-railway redeploy --from-source --service @bmpl/api --yes  # preDeployCommand applies both M25 migrations, then promotes the API
-# verify: curl https://bmplapi-production.up.railway.app/api/health   → commit d71bbd2
-#         curl https://bmplapi-production.up.railway.app/api/health/ready → ok
-#         curl https://bmplapi-production.up.railway.app/api/properties → 200 (list)
-```
-The two additive migrations are backward-compatible with the running M24 code, so the
-order (migrate → promote) is safe.
-
-No question blocked schema/migration/authorization/privacy/financial integrity, so the
-build proceeded end-to-end; only the final **API promotion** is gated, on Railway
-re-authentication that cannot be performed unattended.
+No question blocked schema/migration/authorization/privacy/financial integrity; the
+milestone completed end-to-end including production deployment and verification.
