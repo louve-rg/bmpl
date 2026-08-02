@@ -143,5 +143,81 @@ All routes prefixed `/api`. Uploads use presign → direct PUT → confirm.
 | GET / PUT | `/admin/marketing/homepage` | `homepage.manage` |
 | GET | `/admin/marketing/analytics` | `marketing.analytics` |
 
-<!-- Sections 14–18 (tests, deployment, verification, cleanup, limitations)
-     are appended after tests + deployment complete. -->
+## 14. Tests
+`apps/api/test/marketing.integration.spec.ts` (real Postgres + MinIO), 5 cases:
+promotion lifecycle → moderation → public serving (drafts never serve); serving-time
+suppression on pause/resume/**suspended target**/expire (asserting the promotion row is
+untouched — no cascade writes); target **ownership** verification + cross-owner isolation
+(A cannot target B's product; B cannot read/mutate A's promotion; a customer cannot use the
+business surface); coupon validation policy (percentage + fixed, max-discount cap, min-spend,
+vendor scope, unknown-code graceful, status/window); and metrics → analytics + abuse reports
+→ admin resolve + admin permission gating. Full suite green: **350 integration + 30 unit +
+24 shared + 22 validation**. All three apps build clean. `permission-sync` confirms the 7 new
+permissions synced.
+
+## 15. Deployment
+Committed as one milestone `4316fd8` on `main`. Railway API redeployed
+`--from-source`; both migrations applied via `preDeployCommand` (`prisma migrate deploy`);
+promoted **2026-08-02**, live commit **`4316fd8`**. Web (`bmpl-web.vercel.app`) + admin
+(`bmpl-admin.vercel.app`) auto-deployed from the push.
+
+## 16. Production verification (live against `bmplapi-production`)
+- `GET /api/health` → `{status:ok, commit:4316fd8}`; `GET /api/health/ready` → `200`
+  `{database:true, redis:true, storage:ok}`.
+- `GET /api/marketing/homepage` → `200` `{hero:[],featuredBusinesses:[],featuredProducts:[],
+  featuredJobs:[],featuredProperties:[]}`; `GET /api/marketing/placements/HOMEPAGE_FEATURED_PRODUCTS`
+  → `200`; `POST /api/marketing/coupons/validate` → `201` `{valid:false,reason:"Coupon not
+  found."}` — all three query M26 tables, proving **migrations applied**.
+- Gating: `business/marketing/*` and `admin/marketing/*` → `401` unauthenticated.
+- **Web ↔ live API:** homepage renders the additive "Featured" band (SSR hit the live API,
+  no fallback); `/products` `200` with organic grid intact; `/dashboard/business/marketing`
+  and admin `/dashboard/marketing` exist (`307` → login).
+- **No regression:** `marketplace/products|categories|discovery` `200`, `jobs` `200`,
+  `properties` `200`, `orders`/`payments` gated `401`; zero `5xx`. Marketing is additive —
+  organic ranking, wallet, payments, orders untouched.
+
+## 17. Cleanup verification
+No demo/test data created in production (never authenticated to the prod API during the
+build; `marketing/homepage` empty confirms zero promotions). Local disposable MinIO (used for
+integration tests because Docker isn't installed on this machine) was stopped; dev/test
+databases are auto-reset by the integration suite.
+
+## 18. Remaining limitations / recommended M27 scope
+- **Coupon redemption at checkout** is intentionally NOT wired to orders/wallet (rule: no
+  wallet/payment change). `validate` computes a discount; a `redeem` hook exists + is tested
+  but is not attached to the order pipeline. Wiring it into checkout is M27 work.
+- **In-ranking sponsored boost** is deferred: promotions render as additive labelled bands,
+  never reordering organic marketplace/search results (conservative, zero-regression). A true
+  ranking boost is a reversible follow-up.
+- **Owner→target discovery**: the business promotion UI takes typed entity IDs for targets
+  (ownership enforced server-side); a searchable owned-entity picker is a UX follow-up.
+- **`PromotionMetricDaily` null-placement rows**: track events without a placement create one
+  row per event (the compound unique treats NULL as distinct); SUM aggregation stays correct,
+  but a sentinel placement would compact storage. Cosmetic; deferred.
+- Deferred by scope (per the milestone brief): AI advertising/recommendations, external ad
+  platforms (Google/Facebook), ad payment processing, marketing/email/SMS automation engines,
+  mobile.
+
+---
+
+## Questions Requiring Owner Verification
+Each ships behind a conservative, reversible default so the rest of the module is safe.
+
+1. **Paid promotion / ad billing.** *Decision needed:* whether featured placement is a paid
+   product and how it's billed. *Current conservative behavior:* promotions are **free** and
+   admin-approved; there is NO ad payment processing (explicitly out of scope). *Recommended:*
+   define pricing/billing before enabling paid placement.
+2. **Sponsored-result ranking policy.** *Decision needed:* whether sponsored promotions may be
+   interleaved into organic marketplace/search results (vs. the current separate labelled
+   band). *Why it matters:* affects marketplace neutrality + regression risk. *Current:*
+   additive labelled bands only; organic ranking untouched. *Recommended:* keep separate until
+   a disclosure/ranking policy is set.
+3. **Coupon → checkout redemption + funding.** *Decision needed:* who absorbs a coupon
+   discount (vendor vs platform) and how it flows through wallet/settlement. *Current:*
+   validation only, no wallet coupling. *Recommended:* decide funding before wiring redemption.
+4. **Homepage curation authority.** *Decision needed:* which admin roles may curate the
+   homepage hero/featured slots. *Current:* gated behind `homepage.manage` (ADMIN + SUPER_ADMIN).
+   *Recommended:* keep restricted; revisit if a dedicated marketing role is introduced.
+
+No question blocked schema/migration/authorization/privacy/financial integrity; the milestone
+completed end-to-end including production deployment and verification.
