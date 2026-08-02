@@ -255,5 +255,61 @@ reversible default so the rest of the module ships safely.
    chat is deferred (they coordinate via the assignment flow / support).
    *Recommended:* add an OWNER_AGENT pairing in a follow-up if needed.
 
-No question blocked schema/migration/auth/authorization/deployment/privacy/financial
-integrity, so the milestone proceeded end-to-end.
+6. **Owner → agent discovery for assignment.**
+   *Decision needed:* how an owner should find an agent's `agentProfileId` when assigning
+   a listing (no public agent-directory listing endpoint exists yet).
+   *Current conservative behavior:* the owner assign-agent form accepts a raw
+   `agentProfileId` (with an explanatory note); the backend authorizes it and the agent
+   must accept. No agent is exposed or contacted without their explicit accept.
+   *Recommended:* add a searchable approved-agent directory endpoint in a follow-up.
+
+## Completion status & production deployment (2026-08-02)
+
+**Built, tested, committed, and pushed — one atomic milestone `d71bbd2` on `main`.**
+
+| Stage | Status |
+|---|---|
+| Schema + 2 migrations (dev + test in sync) | ✅ |
+| Shared contract + Zod validation | ✅ builds |
+| Backend (15 files) | ✅ `tsc` = 0, `nest build` = 0 |
+| Web frontend + Admin console | ✅ `tsc` = 0; reconciled to real serializers |
+| Integration + security tests | ✅ 6/6 (location privacy, private-doc isolation, cross-owner isolation, moderation gating, viewing state machine, storage round-trip) |
+| Full regression | ✅ 345 integration + 30 unit + 22 shared + 22 validation |
+| Production builds (all 3 apps) | ✅ clean; every M25 route present |
+| **Vercel — web (`bmpl-web.vercel.app`) + admin (`bmpl-admin.vercel.app`)** | ✅ **auto-deployed from the push and LIVE** |
+| **Railway — API (`bmplapi-production`)** | ⛔ **BLOCKED — not deployed; still commit `ffb88e2` (M24)** |
+| Prod DB migrations | ⛔ **not yet applied** (they run in the API `preDeployCommand` on the blocked deploy) |
+
+**Why the API is not deployed (honest blocker).** The Railway CLI session on this
+machine expired (last authenticated ~2026-07-26); `railway whoami` returns
+*Unauthorized*. No `RAILWAY_TOKEN`/`RAILWAY_API_TOKEN` exists in the environment or any
+`.env`, and no `config.json` credential is present. Re-authentication requires the
+interactive, browser-based `railway login`, which cannot run unattended — and per the
+autonomous-run instruction I do **not** request credentials while away. The Railway
+dashboard watch-path does **not** auto-deploy on push (proven across M21–M24), so the
+push alone does not promote the API.
+
+**Current production reality.** Because Vercel auto-deploys from `main` (GitHub
+integration, outside CLI control) while Railway does not, production is in a
+frontend-ahead-of-API state. This degrades **gracefully, not destructively**: the public
+`/properties*` pages use `serverGetSafe`, so with the API returning 404 for the new
+routes they render the standard "temporarily unavailable"/empty state (verified live —
+no crash); every pre-existing marketplace/jobs feature is unaffected because the API is
+unchanged (M24); and no production user holds a `PROPERTY_OWNER`/`REAL_ESTATE_AGENT` role
+yet, so no role-gated surface is exposed. No demo/test data was created in production (I
+never authenticated to the prod API).
+
+**Single remaining step to make M25 fully live (needs the owner):**
+```
+railway login                                             # interactive, browser
+railway redeploy --from-source --service @bmpl/api --yes  # preDeployCommand applies both M25 migrations, then promotes the API
+# verify: curl https://bmplapi-production.up.railway.app/api/health   → commit d71bbd2
+#         curl https://bmplapi-production.up.railway.app/api/health/ready → ok
+#         curl https://bmplapi-production.up.railway.app/api/properties → 200 (list)
+```
+The two additive migrations are backward-compatible with the running M24 code, so the
+order (migrate → promote) is safe.
+
+No question blocked schema/migration/authorization/privacy/financial integrity, so the
+build proceeded end-to-end; only the final **API promotion** is gated, on Railway
+re-authentication that cannot be performed unattended.
