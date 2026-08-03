@@ -14,6 +14,7 @@ import {
   type Selection,
   type VariantLike,
 } from '../../lib/variant-availability';
+import { variantCardLines } from '../../lib/variant-card';
 
 /** Minimal image shape both callers can map their images into. */
 export interface LineupImage {
@@ -42,6 +43,7 @@ function variantImage(images: LineupImage[], variantId: string): { url: string; 
  */
 export function VariantLineup({
   variants,
+  options,
   images,
   selection,
   selectedId,
@@ -49,6 +51,7 @@ export function VariantLineup({
   onSelect,
 }: {
   variants: VariantLike[];
+  options: OptionLike[];
   images: LineupImage[];
   selection: Selection;
   selectedId: string | null;
@@ -68,6 +71,9 @@ export function VariantLineup({
           const img = variantImage(images, v.id);
           const price = v.salePriceMinor ?? v.priceMinor ?? fallbackPriceMinor;
           const selected = v.id === selectedId;
+          // Primary name (line 1), remaining option values on their own line (line 2),
+          // price (line 3). Secondary values are NOT truncated (wrap on narrow cards).
+          const lines = variantCardLines(v, options);
           return (
             <button
               key={v.id}
@@ -88,10 +94,13 @@ export function VariantLineup({
                   </div>
                 )}
               </div>
-              <p className="mt-1 truncate text-xs font-semibold text-belize-navy" title={v.title}>
-                {v.title}
+              <p className="mt-1 truncate text-xs font-semibold text-belize-navy" title={lines.primary}>
+                {lines.primary}
               </p>
-              <p className="text-xs text-slate-500">{money(price)}</p>
+              {lines.secondary.length > 0 && (
+                <p className="text-[11px] leading-snug text-slate-500">{lines.secondary.join(' · ')}</p>
+              )}
+              <p className="mt-0.5 text-xs font-medium text-slate-700">{money(price)}</p>
             </button>
           );
         })}

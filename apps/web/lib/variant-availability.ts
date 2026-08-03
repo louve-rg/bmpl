@@ -23,6 +23,8 @@ export interface VariantLike {
   id: string;
   /** Resolved variant title (displayName → option label → product title). */
   title: string;
+  /** The vendor's custom variant name, when set (used as the card's primary line). */
+  displayName?: string | null;
   priceMinor: number | null;
   salePriceMinor: number | null;
   optionValueIds: string[];

@@ -140,6 +140,7 @@ export function StorefrontPreview({
       {hasVariants && (
         <VariantLineup
           variants={variants}
+          options={view.options}
           images={lineupImages}
           selection={selection}
           selectedId={selectedVariant?.id ?? null}

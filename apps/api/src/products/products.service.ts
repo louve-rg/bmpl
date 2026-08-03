@@ -371,7 +371,10 @@ export class ProductsService {
     // fallback, and a stable id tie-breaker so pagination/order is deterministic and
     // never depends on DB return order. Editing a product (updatedAt) does NOT move it
     // up — only (re)publishing does, via publishedAt.
-    const newestFirst = Prisma.sql`p."publishedAt" DESC NULLS LAST, p."createdAt" DESC, p.id DESC`;
+    // Effective publish date = publishedAt, falling back to createdAt for any legacy row
+    // that lacks one — so a null publishedAt never sorts a product to the bottom (or ahead
+    // of a genuinely newer one). Stable id tie-break keeps pagination deterministic.
+    const newestFirst = Prisma.sql`COALESCE(p."publishedAt", p."createdAt") DESC, p.id DESC`;
     let orderBy: Prisma.Sql;
     switch (query.sort) {
       case 'price_asc': orderBy = Prisma.sql`p."priceMinor" ASC, ${newestFirst}`; break;

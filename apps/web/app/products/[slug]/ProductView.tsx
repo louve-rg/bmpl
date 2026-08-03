@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Gallery, type GalleryImage } from './Gallery';
@@ -110,8 +110,12 @@ export function ProductView({ product }: { product: ProductDetail }) {
     setQty(1);
   }
 
-  // Preselect from the URL (?variant=<id>) once on mount so a refresh/share
-  // restores the chosen variant without a full navigation or refetch.
+  // Guards a variant change that came FROM the browser (Back/Forward/swipe) so it does
+  // not push a new entry back.
+  const fromHistory = useRef(false);
+
+  // Preselect from the URL (?variant=<id>) once on mount so a refresh/shared link
+  // restores the chosen variant. This does NOT push (the URL already matches).
   useEffect(() => {
     if (!hasVariants) return;
     const vId = new URLSearchParams(window.location.search).get('variant');
@@ -119,26 +123,41 @@ export function ProductView({ product }: { product: ProductDetail }) {
     const v = product.variants.find((x) => x.id === vId);
     if (!v) return;
     const next = selectionForVariant(product.options, v);
-    if (Object.keys(next).length) setSelection(next);
+    if (Object.keys(next).length) { fromHistory.current = true; setSelection(next); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reflect the fully-selected variant in the URL (shareable link) WITHOUT churning
-  // history: only replace when the value actually changes. Replacing on every mount/
-  // hydration (even when the URL already matched) corrupted the App-Router history
-  // state and made mobile swipe-back skip to the Marketplace instead of the real
-  // previous page. Guarding to "only on a real change" keeps browser Back/swipe-back
-  // returning to the true referrer (storefront, search, wishlist, …).
+  // Variation history (Model A): each intentional variation the customer opens PUSHES a
+  // history entry, so browser Back — and the mobile swipe-back gesture — step back through
+  // the previous variations (Gingham → Hello Beautiful → All) and only then leave the
+  // product to the true previous page (storefront / search / wishlist / marketplace).
+  // We push (never replace) and only on a REAL change; a change that originated from a
+  // Back/Forward event is skipped so it doesn't re-push. Mount/refresh never push.
   useEffect(() => {
     if (!hasVariants || typeof window === 'undefined') return;
     const url = new URL(window.location.href);
     const currentParam = url.searchParams.get('variant');
     const nextParam = selectedVariant?.id ?? null;
-    if (!variantUrlChanged(currentParam, nextParam)) return; // no change — do not touch history
+    if (!variantUrlChanged(currentParam, nextParam)) return; // URL already correct
+    if (fromHistory.current) { fromHistory.current = false; return; } // history-driven → don't re-push
     if (nextParam) url.searchParams.set('variant', nextParam);
     else url.searchParams.delete('variant');
-    window.history.replaceState(window.history.state, '', url.toString());
+    window.history.pushState(null, '', url.toString()); // Next 14 shallow routing
   }, [hasVariants, selectedVariant]);
+
+  // Restore the presented variant on Back/Forward/swipe-back so the gallery, title,
+  // price, SKU, inventory, and options all follow the URL the browser returned to.
+  useEffect(() => {
+    if (!hasVariants) return;
+    function onPop() {
+      const vId = new URLSearchParams(window.location.search).get('variant');
+      const v = vId ? product.variants.find((x) => x.id === vId) : null;
+      fromHistory.current = true; // this selection change came from history → don't push
+      setSelection(v ? selectionForVariant(product.options, v) : {});
+    }
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [hasVariants, product.variants, product.options]);
 
   const displayTitle = selectedVariant ? selectedVariant.title : product.title;
   const avail: Availability = selectedVariant ? selectedVariant.availability : product.availability;
@@ -224,6 +243,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
         {hasVariants && (
           <VariantLineup
             variants={product.variants}
+            options={product.options}
             images={lineupImages}
             selection={selection}
             selectedId={selectedVariant?.id ?? null}

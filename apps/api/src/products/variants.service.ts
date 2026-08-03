@@ -83,6 +83,9 @@ export class VariantsService {
       }
     }
     await this.prisma.$transaction([
+      // Remove the affected variants' images first so they don't orphan into the
+      // general gallery (ProductImage→variant is SetNull).
+      this.prisma.productImage.deleteMany({ where: { productId, variantId: { in: affected.map((v) => v.id) } } }),
       this.prisma.productVariant.deleteMany({ where: { productId, optionValues: { some: { productOptionValueId: valueId } } } }),
       this.prisma.productOptionValue.delete({ where: { id: valueId } }),
     ]);
@@ -222,7 +225,14 @@ export class VariantsService {
     await this.ownership.ownedProduct(userId, productId);
     const variant = await this.prisma.productVariant.findUnique({ where: { id: variantId } });
     if (!variant || variant.productId !== productId) throw new NotFoundException('Variant not found.');
-    await this.prisma.productVariant.delete({ where: { id: variantId } }); // cascades links + inventory
+    // Delete the variant's images too. The ProductImage→variant FK is SetNull, so
+    // WITHOUT this the images would orphan into the general gallery (variantId=null)
+    // and keep showing after the variant is gone. Deleting them keeps the public
+    // gallery built only from currently-valid records.
+    await this.prisma.$transaction([
+      this.prisma.productImage.deleteMany({ where: { productId, variantId } }),
+      this.prisma.productVariant.delete({ where: { id: variantId } }), // cascades links + inventory
+    ]);
     return this.buildManageView(productId);
   }
 

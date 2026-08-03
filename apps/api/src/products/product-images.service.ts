@@ -238,9 +238,16 @@ export class ProductImagesService {
   }
 
   /** Customer-facing detail GALLERY — excludes the brand image (listing-only role). */
+  /** Public gallery: general images (variantId null) + images of ACTIVE variants only,
+   *  never the Brand Image. Images belonging to a deactivated/archived variant are
+   *  excluded so a hidden variant leaves no stale images/thumbnails behind. */
   async listGallery(productId: string) {
     const rows = await this.prisma.productImage.findMany({
-      where: { productId, isBrandImage: false },
+      where: {
+        productId,
+        isBrandImage: false,
+        OR: [{ variantId: null }, { variant: { isActive: true } }],
+      },
       orderBy: [{ isPrimary: 'desc' }, { position: 'asc' }],
     });
     return Promise.all(rows.map((r) => this.serialize(r)));
