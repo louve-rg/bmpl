@@ -48,15 +48,33 @@ export class PromotionDiscoveryService {
     };
   }
 
-  /** Served promotions for one placement (+ optional category context). */
-  async servePlacement(placement: PromotionPlacementType, categoryId?: string, limit = 50) {
+  /**
+   * Served promotions for one Admin-assigned placement (+ optional category/device).
+   * DUAL eligibility: the campaign/promotion must be serveable (servedWhere) AND the
+   * placement assignment itself must be active, within its own window, and match the
+   * device — so an approved campaign with no (or a paused/expired/wrong-device) placement
+   * renders NOTHING. Ordering follows Admin priority (promotion.priority), never DB order.
+   */
+  async servePlacement(
+    placement: PromotionPlacementType,
+    categoryId?: string,
+    opts: { device?: 'DESKTOP' | 'MOBILE'; limit?: number } = {},
+  ) {
+    const now = new Date();
+    const placementEligible: Prisma.PromotionPlacementWhereInput = {
+      placement,
+      ...(categoryId ? { categoryId } : {}),
+      isActive: true,
+      AND: [
+        { OR: [{ startAt: null }, { startAt: { lte: now } }] },
+        { OR: [{ endAt: null }, { endAt: { gte: now } }] },
+      ],
+      ...(opts.device ? { device: { in: [opts.device, 'BOTH'] } } : {}),
+    };
     const rows = await this.prisma.promotion.findMany({
-      where: {
-        ...this.servedWhere(),
-        placements: { some: { placement, ...(categoryId ? { categoryId } : {}) } },
-      },
+      where: { ...this.servedWhere(now), placements: { some: placementEligible } },
       orderBy: [{ priority: 'desc' }, { publishedAt: 'desc' }],
-      take: limit,
+      take: opts.limit ?? 50,
       include: PromotionsService.SERVE_INCLUDE,
     });
     const live = rows.filter((p) => this.promotions.targetsLive(p.targets));

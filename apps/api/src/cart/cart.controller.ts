@@ -45,6 +45,13 @@ export class CartController {
     return this.cart.removeItem(user.userId, itemId);
   }
 
+  /** Move a cart line to the wishlist (atomic: save the exact variant, then remove
+   *  the line only on success). */
+  @Post('items/:itemId/move-to-wishlist')
+  moveToWishlist(@CurrentUser() user: AuthContext, @Param('itemId') itemId: string) {
+    return this.cart.moveToWishlist(user.userId, itemId);
+  }
+
   @Delete()
   clear(@CurrentUser() user: AuthContext) {
     return this.cart.clear(user.userId);

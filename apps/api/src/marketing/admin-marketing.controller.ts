@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import {
   campaignStatusSchema,
   couponStatusSchema,
@@ -20,7 +20,7 @@ import { PromotionsService } from './promotions.service';
 import { CampaignsService } from './campaigns.service';
 import { CouponsService } from './coupons.service';
 import { MarketingAnalyticsService } from './marketing-analytics.service';
-import { MarketingAdminService, type HomepageCurationInput } from './marketing-admin.service';
+import { MarketingAdminService, type HomepageCurationInput, type AssignPlacementInput, type UpdatePlacementInput } from './marketing-admin.service';
 
 /** Admin Marketing moderation & operations (least privilege per route). */
 @Controller('admin/marketing')
@@ -127,5 +127,32 @@ export class AdminMarketingController {
   @RequirePermission('promotions.manage')
   setPriority(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body() b: { priority?: number; isActive?: boolean }) {
     return this.promotions.setPriority(this.actor(u), id, b);
+  }
+
+  // ---- Admin-controlled ad placement (promotions.manage) ----
+  @Get('placements')
+  @RequirePermission('promotions.read')
+  listPlacements(@Query('placement') placement?: string) {
+    return this.admin.listPlacements(placement);
+  }
+
+  /** Assign an approved campaign to a placement slot (Admin decides where ads appear). */
+  @Post('promotions/:id/placements')
+  @RequirePermission('promotions.manage')
+  assignPlacement(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body() b: AssignPlacementInput) {
+    return this.admin.assignPlacement(this.actor(u), id, b);
+  }
+
+  @Patch('placements/:placementId')
+  @RequirePermission('promotions.manage')
+  updatePlacement(@CurrentUser() u: AuthContext, @Param('placementId') placementId: string, @Body() b: UpdatePlacementInput) {
+    return this.admin.updatePlacement(this.actor(u), placementId, b);
+  }
+
+  /** Remove a placement (the underlying campaign is NOT deleted). */
+  @Delete('placements/:placementId')
+  @RequirePermission('promotions.manage')
+  removePlacement(@CurrentUser() u: AuthContext, @Param('placementId') placementId: string) {
+    return this.admin.removePlacement(this.actor(u), placementId);
   }
 }

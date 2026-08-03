@@ -8,6 +8,7 @@ import { MobilePromo } from '../components/landing/MobilePromo';
 import { FinalCTA } from '../components/landing/FinalCTA';
 import { Footer } from '../components/landing/Footer';
 import { DiscoverySections } from '../components/discovery/DiscoverySections';
+import { CrossModuleDiscovery } from '../components/discovery/CrossModuleDiscovery';
 import { PromotedSections } from '../components/marketing/PromotedSections';
 import { ForYou } from '../components/discovery/ForYou';
 
@@ -22,6 +23,7 @@ export default function HomePage() {
         <Services />
         <PromotedSections />
         <DiscoverySections />
+        <CrossModuleDiscovery />
         <ForYou className="container-bmpl py-4 pb-16" />
         <WhyChooseUs />
         <Providers />

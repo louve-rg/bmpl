@@ -74,7 +74,7 @@ export function ProductCard({ product: p, className = '' }: { product: ProductCa
         )}
       </Link>
       <div className="absolute right-6 top-6">
-        <SaveButton productId={p.id} className="bg-white/90 shadow-bmpl-sm backdrop-blur hover:bg-white" />
+        <SaveButton productId={p.id} productSlug={p.slug} className="bg-white/90 shadow-bmpl-sm backdrop-blur hover:bg-white" />
       </div>
     </div>
   );

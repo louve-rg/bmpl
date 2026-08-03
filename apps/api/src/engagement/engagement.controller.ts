@@ -30,14 +30,17 @@ export class EngagementController {
     return this.engagement.savedCount(u.userId);
   }
 
+  // `variantId` (query) is the EXACT selected variant; omitted/empty for a
+  // no-variant product. The service rejects a parent-level save when the product
+  // has variants ("Choose your options…").
   @Post('saved/:productId')
-  save(@CurrentUser() u: AuthContext, @Param('productId') productId: string) {
-    return this.engagement.save(u.userId, productId);
+  save(@CurrentUser() u: AuthContext, @Param('productId') productId: string, @Query('variantId') variantId?: string) {
+    return this.engagement.save(u.userId, productId, variantId || null);
   }
 
   @Delete('saved/:productId')
-  unsave(@CurrentUser() u: AuthContext, @Param('productId') productId: string) {
-    return this.engagement.unsave(u.userId, productId);
+  unsave(@CurrentUser() u: AuthContext, @Param('productId') productId: string, @Query('variantId') variantId?: string) {
+    return this.engagement.unsave(u.userId, productId, variantId || null);
   }
 
   // ---- Recently viewed ----

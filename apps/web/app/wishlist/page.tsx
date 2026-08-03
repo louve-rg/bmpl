@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
-import { StarRating } from '../../components/reviews/StarRating';
 import {
   Alert,
   Badge,
@@ -18,10 +17,11 @@ import {
   savedApi,
   money,
   notifySavedChanged,
-  invalidateSavedIds,
+  invalidateSaved,
   type SavedItem,
   type ViewedItem,
 } from '../../lib/saved';
+import { cartApi, notifyCartChanged } from '../../lib/cart';
 import type { ApiError } from '../../lib/api';
 
 type LoadState = 'loading' | 'ready' | 'guest' | 'error';
@@ -30,6 +30,7 @@ export default function WishlistPage() {
   const [items, setItems] = useState<SavedItem[]>([]);
   const [state, setState] = useState<LoadState>('loading');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   const [viewed, setViewed] = useState<ViewedItem[]>([]);
   const [viewedLoaded, setViewedLoaded] = useState(false);
@@ -50,6 +51,13 @@ export default function WishlistPage() {
     void load();
   }, [load]);
 
+  // Auto-dismiss the toast so it doesn't linger.
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   // Recently viewed loads independently; hidden entirely on empty/guest/error.
   useEffect(() => {
     if (state !== 'ready') return;
@@ -67,15 +75,15 @@ export default function WishlistPage() {
     };
   }, [state]);
 
-  async function remove(productId: string) {
-    setBusyId(productId);
+  async function remove(item: SavedItem) {
+    setBusyId(item.id);
     const prev = items;
-    const next = items.filter((i) => i.productId !== productId);
+    const next = items.filter((i) => i.id !== item.id);
     setItems(next); // optimistic
     notifySavedChanged(next.length);
     try {
-      await savedApi.unsave(productId);
-      invalidateSavedIds();
+      await savedApi.unsave(item.productId, item.variantId);
+      invalidateSaved();
       notifySavedChanged(next.length);
     } catch (e) {
       if ((e as ApiError).status === 401) {
@@ -84,6 +92,25 @@ export default function WishlistPage() {
       }
       setItems(prev); // rollback
       notifySavedChanged(prev.length);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function addToCart(item: SavedItem) {
+    setBusyId(item.id);
+    try {
+      // Add the EXACT saved selection — no re-picking options.
+      const cart = await cartApi.add({ productId: item.productId, variantId: item.variantId, quantity: 1 });
+      notifyCartChanged(cart.itemCount);
+      setToast({ kind: 'ok', text: 'Added to your cart.' });
+    } catch (e) {
+      const err = e as ApiError;
+      if (err.status === 401) {
+        setState('guest');
+        return;
+      }
+      setToast({ kind: 'err', text: err.message || 'Could not add to cart.' });
     } finally {
       setBusyId(null);
     }
@@ -103,17 +130,36 @@ export default function WishlistPage() {
     <>
       <Header />
       <main className="container-bmpl py-10">
-        <PageHeader title="Saved products" description="Products you've bookmarked to buy later." />
+        <PageHeader title="Wishlist" description="Items you've saved to buy later." />
+
+        {toast && (
+          <p
+            role="status"
+            className={`mt-4 rounded-bmpl-md px-4 py-2 text-sm font-medium ${
+              toast.kind === 'ok' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+            }`}
+          >
+            {toast.text}
+            {toast.kind === 'ok' && (
+              <>
+                {' '}
+                <Link href="/cart" className="font-semibold text-belize-blue hover:underline">
+                  View cart →
+                </Link>
+              </>
+            )}
+          </p>
+        )}
 
         {state === 'loading' && (
           <div className="mt-8 flex flex-col items-center gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-14 text-center">
             <Spinner />
-            <p className="text-sm text-slate-400">Loading your saved products…</p>
+            <p className="text-sm text-slate-400">Loading your Wishlist…</p>
           </div>
         )}
 
         {state === 'error' && (
-          <Alert tone="error" title="We couldn't load your saved products." className="mt-8">
+          <Alert tone="error" title="We couldn't load your Wishlist." className="mt-8">
             <p>Please try again in a moment.</p>
             <Button
               size="sm"
@@ -132,8 +178,8 @@ export default function WishlistPage() {
         {state === 'guest' && (
           <div className="mt-8">
             <EmptyState
-              title="Sign in to see your saved products"
-              description="Your wishlist is tied to your account so you can pick up where you left off on any device."
+              title="Sign in to see your Wishlist"
+              description="Your Wishlist is tied to your account so you can pick up where you left off on any device."
               action={<ButtonLink href="/login?next=/wishlist">Sign in</ButtonLink>}
             />
           </div>
@@ -142,8 +188,8 @@ export default function WishlistPage() {
         {state === 'ready' && items.length === 0 && (
           <div className="mt-8">
             <EmptyState
-              title="No saved products yet"
-              description="Tap the heart on any product to save it here for later."
+              title="Your Wishlist is empty"
+              description="Tap the heart on any product to add it to your Wishlist for later."
               action={<ButtonLink href="/products">Browse the marketplace</ButtonLink>}
             />
           </div>
@@ -152,11 +198,12 @@ export default function WishlistPage() {
         {state === 'ready' && items.length > 0 && (
           <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {items.map((item) => (
-              <SavedCard
-                key={item.productId}
+              <WishlistCard
+                key={item.id}
                 item={item}
-                busy={busyId === item.productId}
-                onRemove={() => remove(item.productId)}
+                busy={busyId === item.id}
+                onRemove={() => remove(item)}
+                onAddToCart={() => addToCart(item)}
               />
             ))}
           </div>
@@ -187,92 +234,126 @@ export default function WishlistPage() {
   );
 }
 
-function SavedCard({
+/** Derived presentation for one Wishlist entry — variant fields take precedence. */
+function present(item: SavedItem) {
+  const p = item.product;
+  const v = item.variant;
+  const imageUrl = v?.imageUrl ?? p?.primaryImageUrl ?? null;
+  const title = v?.title ?? p?.title ?? 'Product';
+  // Parent family shown as a secondary line when a distinct variant title is used.
+  const parentTitle = v && v.title && v.title !== p?.title ? p?.title ?? null : null;
+  const priceMinor = v ? v.priceMinor ?? p?.priceMinor ?? 0 : p?.priceMinor ?? 0;
+  const salePriceMinor = v ? v.salePriceMinor : p?.salePriceMinor ?? null;
+  // Unavailable = the product/variant is no longer viewable; OOS = present but not buyable.
+  const unavailable = !item.available || !p;
+  const outOfStock = v ? v.availability?.outOfStock === true : p ? !p.inStock : true;
+  const lowStock = v?.availability?.lowStock === true;
+  return { p, v, imageUrl, title, parentTitle, priceMinor, salePriceMinor, unavailable, outOfStock, lowStock };
+}
+
+function WishlistCard({
   item,
   busy,
   onRemove,
+  onAddToCart,
 }: {
   item: SavedItem;
   busy: boolean;
   onRemove: () => void;
+  onAddToCart: () => void;
 }) {
-  const p = item.product;
+  const m = present(item);
 
-  // Unavailable / delisted product: greyed card with remove only.
-  if (!item.available || !p) {
+  // Unavailable / delisted product (or a variant that's gone): greyed card, remove only.
+  if (m.unavailable) {
     return (
       <div className="flex flex-col rounded-bmpl-lg border border-slate-200 bg-white p-4 opacity-70 shadow-bmpl-sm">
         <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
-          {p?.primaryImageUrl ? (
+          {m.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={p.primaryImageUrl} alt={p.title ?? ''} className="h-full w-full object-cover grayscale" />
+            <img src={m.imageUrl} alt={m.title} className="h-full w-full object-cover grayscale" />
           ) : (
             'No image'
           )}
         </div>
-        <p className="mt-3 font-semibold text-belize-navy">{p?.title ?? 'Product'}</p>
-        <Badge tone="neutral" className="mt-1.5 self-start">No longer available</Badge>
+        <p className="mt-3 font-semibold text-belize-navy">{m.title}</p>
+        {m.parentTitle && <p className="text-xs text-slate-500">{m.parentTitle}</p>}
+        {item.variant?.optionLabel && <p className="text-xs text-slate-400">{item.variant.optionLabel}</p>}
+        <Badge tone="neutral" className="mt-1.5 self-start">Unavailable</Badge>
         <button
           type="button"
           onClick={onRemove}
           disabled={busy}
-          className="mt-3 self-start text-xs font-medium text-slate-500 transition hover:text-red-600 disabled:opacity-40"
+          className="mt-3 inline-flex min-h-[40px] items-center self-start text-xs font-medium text-slate-500 transition hover:text-red-600 disabled:opacity-40"
         >
-          Remove
+          Remove from Wishlist
         </button>
       </div>
     );
   }
 
+  const p = m.p!;
+
   return (
     <div className="flex flex-col rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:border-belize-light/60 hover:shadow-bmpl-md">
       <Link href={`/products/${p.slug}`} className="group block">
         <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
-          {p.primaryImageUrl ? (
+          {m.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
+            <img src={m.imageUrl} alt={m.title} className="h-full w-full object-cover" />
           ) : (
             'No image'
           )}
         </div>
-        <p className="mt-3 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
+        {/* Variant title is the primary line; never replaced by the parent title. */}
+        <p className="mt-3 font-semibold text-belize-navy group-hover:text-belize-blue">{m.title}</p>
       </Link>
-      <p className="text-xs text-slate-400">{p.vendor.businessName} · {p.category.name}</p>
+      {m.parentTitle && <p className="text-xs text-slate-500">{m.parentTitle}</p>}
+      {item.variant?.optionLabel && <p className="text-xs text-slate-400">{item.variant.optionLabel}</p>}
 
-      {p.ratingCount > 0 && (
-        <div className="mt-1.5">
-          <StarRating value={p.ratingAverage} size="sm" count={p.ratingCount} />
-        </div>
-      )}
+      <p className="mt-0.5 text-xs text-slate-400">
+        <Link href={`/store/${p.vendor.slug}`} className="hover:text-belize-blue hover:underline">
+          {p.vendor.businessName}
+        </Link>
+      </p>
+
+      {item.variant?.sku && <p className="mt-0.5 text-xs text-slate-400">SKU: {item.variant.sku}</p>}
 
       <p className="mt-1.5 text-sm">
-        {p.salePriceMinor != null ? (
+        {m.salePriceMinor != null ? (
           <>
-            <span className="font-bold text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
-            <span className="text-slate-400 line-through">{money(p.priceMinor)}</span>
+            <span className="font-bold text-belize-blue">{money(m.salePriceMinor)}</span>{' '}
+            <span className="text-slate-400 line-through">{money(m.priceMinor)}</span>
           </>
         ) : (
-          <span className="font-bold text-belize-navy">{money(p.priceMinor)}</span>
+          <span className="font-bold text-belize-navy">{money(m.priceMinor)}</span>
         )}
       </p>
 
       <div className="mt-1.5">
-        <Badge tone={p.inStock ? 'success' : 'error'}>{p.inStock ? 'In stock' : 'Out of stock'}</Badge>
+        {m.outOfStock ? (
+          <Badge tone="error">Out of stock</Badge>
+        ) : (
+          <Badge tone={m.lowStock ? 'warning' : 'success'}>{m.lowStock ? 'Low stock' : 'In stock'}</Badge>
+        )}
       </div>
 
       <div className="mt-3 flex items-center gap-3">
-        {p.inStock ? (
-          <ButtonLink href={`/products/${p.slug}`} size="sm">Add to cart</ButtonLink>
-        ) : (
-          <ButtonLink href={`/products/${p.slug}`} size="sm" variant="outline">View product</ButtonLink>
-        )}
+        <Button
+          size="sm"
+          onClick={onAddToCart}
+          disabled={busy || m.outOfStock}
+          title={m.outOfStock ? 'This item is out of stock.' : undefined}
+        >
+          Add to cart
+        </Button>
         <button
           type="button"
           onClick={onRemove}
           disabled={busy}
-          className="text-xs font-medium text-slate-500 transition hover:text-red-600 disabled:opacity-40"
+          className="inline-flex min-h-[40px] items-center text-xs font-medium text-slate-500 transition hover:text-red-600 disabled:opacity-40"
         >
-          Remove
+          Remove from Wishlist
         </button>
       </div>
     </div>

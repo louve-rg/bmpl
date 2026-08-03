@@ -54,12 +54,24 @@ export interface CartView {
   updatedAt: string;
 }
 
+/** The cart view returned by move-to-wishlist, plus the outcome of the move. */
+export interface MoveToWishlistResult extends CartView {
+  movedToWishlist: true;
+  /** true when the exact variant was already in the wishlist (still removed from cart). */
+  alreadySaved: boolean;
+  productId: string;
+  variantId: string | null;
+}
+
 export const cartApi = {
   get: () => api.get<CartView>('/cart'),
   add: (body: { productId: string; variantId?: string | null; quantity: number }) =>
     api.post<CartView>('/cart/items', body),
   update: (itemId: string, quantity: number) => api.patch<CartView>(`/cart/items/${itemId}`, { quantity }),
   remove: (itemId: string) => api.del<CartView>(`/cart/items/${itemId}`),
+  /** Save the exact variant to the wishlist and remove the line (atomic, server-side). */
+  moveToWishlist: (itemId: string) =>
+    api.post<MoveToWishlistResult>(`/cart/items/${itemId}/move-to-wishlist`),
   clear: () => api.del<CartView>('/cart'),
 };
 

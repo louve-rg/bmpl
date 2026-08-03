@@ -1345,6 +1345,7 @@ model ProductVariant {
   inventory      Inventory?
   images         ProductImage[]
   cartItems      CartItem[]
+  savedProducts  SavedProduct[]
   orderItems     OrderItem[]
 
   @@unique([productId, sku])
@@ -2002,15 +2003,25 @@ model ReviewHelpfulVote {
 // A customer's saved/wishlisted product. Product-level (variant chosen at add-to-cart
 // time). One row per (user, product); saving never reserves stock or moves money.
 model SavedProduct {
-  id        String   @id @default(cuid())
+  id        String          @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   productId String
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // The EXACT saved commerce item: null for a product-level wishlist entry, set for
+  // a specific variant. variantId is the primary identity for variant items, so a
+  // customer can wishlist different variants of the same parent independently.
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
 
-  @@unique([userId, productId])
+  // Variant entries are unique per (user, variant). Product-level entries (variantId
+  // NULL) are made unique per (user, product) by a PARTIAL unique index in the
+  // migration (Postgres treats NULLs as distinct, so this composite only constrains
+  // non-null variant rows).
+  @@unique([userId, variantId])
   @@index([userId, createdAt])
+  @@index([productId])
   @@map("saved_products")
 }
 
@@ -3665,6 +3676,17 @@ model Promotion {
 
 /// Where a promotion renders. `placement` is an enum + optional context FK
 /// (categoryId) so placements are never hardcoded.
+/// Device visibility for an admin-controlled ad placement.
+enum PromotionDevice {
+  BOTH
+  DESKTOP
+  MOBILE
+}
+
+/// Where an approved promotion appears. Placement is Admin-controlled (assignedById):
+/// a campaign exists without appearing anywhere until Admin assigns a placement, and
+/// placement has its OWN eligibility (isActive + start/end window + device) that must
+/// pass IN ADDITION TO the campaign/promotion eligibility before an ad renders.
 model PromotionPlacement {
   id          String                 @id @default(cuid())
   promotionId String
@@ -3673,7 +3695,14 @@ model PromotionPlacement {
   position    Int                    @default(0)
   categoryId  String?
   category    Category?              @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  // Admin placement controls (separate from campaign content).
+  isActive    Boolean                @default(true)
+  device      PromotionDevice        @default(BOTH)
+  startAt     DateTime?
+  endAt       DateTime?
+  assignedById String?
   createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
 
   @@unique([promotionId, placement, categoryId])
   @@index([placement])

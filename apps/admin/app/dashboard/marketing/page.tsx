@@ -21,6 +21,8 @@ import {
   COUPON_STATUS_LABELS,
   COUPON_SCOPES,
   HOMEPAGE_PLACEMENTS,
+  PROMOTION_PLACEMENTS,
+  CATEGORY_CONTEXT_PLACEMENTS,
   type PromotionType,
   type PromotionStatus,
   type PromotionPlacementType,
@@ -241,6 +243,24 @@ interface HomepageCuration {
   placements: Record<string, HomepageItem[]>;
 }
 
+type PlacementDevice = 'BOTH' | 'DESKTOP' | 'MOBILE';
+
+interface PlacementAssignment {
+  id: string;
+  promotionId: string;
+  placement: PromotionPlacementType;
+  position: number;
+  categoryId: string | null;
+  isActive: boolean;
+  device: PlacementDevice;
+  startAt: string | null;
+  endAt: string | null;
+  assignedById: string | null;
+  createdAt: string;
+  promotion: { id: string; title: string; type: PromotionType; status: PromotionStatus; priority: number; isActive: boolean };
+  category: { name: string; slug: string } | null;
+}
+
 interface MarketingAnalytics {
   servingNow: number;
   pendingModeration: number;
@@ -257,13 +277,14 @@ interface MarketingAnalytics {
 /* Page shell                                                          */
 /* ------------------------------------------------------------------ */
 
-type Tab = 'moderation' | 'promotions' | 'campaigns' | 'coupons' | 'homepage' | 'reports' | 'analytics';
+type Tab = 'moderation' | 'promotions' | 'campaigns' | 'coupons' | 'placements' | 'homepage' | 'reports' | 'analytics';
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'moderation', label: 'Moderation queue' },
   { key: 'promotions', label: 'All promotions' },
   { key: 'campaigns', label: 'Campaigns' },
   { key: 'coupons', label: 'Coupons' },
+  { key: 'placements', label: 'Ad Placements' },
   { key: 'homepage', label: 'Homepage' },
   { key: 'reports', label: 'Reports' },
   { key: 'analytics', label: 'Analytics' },
@@ -307,6 +328,7 @@ export default function MarketingPage() {
       {tab === 'promotions' && <PromotionsTab key="promotions" queue={false} />}
       {tab === 'campaigns' && <CampaignsTab />}
       {tab === 'coupons' && <CouponsTab />}
+      {tab === 'placements' && <PlacementsTab />}
       {tab === 'homepage' && <HomepageTab />}
       {tab === 'reports' && <ReportsTab />}
       {tab === 'analytics' && <AnalyticsTab />}
@@ -1560,6 +1582,515 @@ function CouponForm({
         </Button>
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Ad placements (where approved campaigns appear)                      */
+/* ------------------------------------------------------------------ */
+
+const DEVICES: readonly PlacementDevice[] = ['BOTH', 'DESKTOP', 'MOBILE'];
+const DEVICE_LABELS: Record<PlacementDevice, string> = {
+  BOTH: 'All devices',
+  DESKTOP: 'Desktop',
+  MOBILE: 'Mobile',
+};
+
+function isCategoryPlacement(p: PromotionPlacementType): boolean {
+  return CATEGORY_CONTEXT_PLACEMENTS.includes(p);
+}
+
+interface AssignFormState {
+  promotionId: string;
+  placement: PromotionPlacementType;
+  categoryId: string;
+  position: string;
+  device: PlacementDevice;
+  startAt: string;
+  endAt: string;
+}
+
+function emptyAssignForm(): AssignFormState {
+  return {
+    promotionId: '',
+    placement: PROMOTION_PLACEMENTS[0],
+    categoryId: '',
+    position: '',
+    device: 'BOTH',
+    startAt: '',
+    endAt: '',
+  };
+}
+
+function PlacementsTab() {
+  const [rows, setRows] = useState<PlacementAssignment[]>([]);
+  const [approved, setApproved] = useState<PromotionListItem[]>([]);
+  const [listState, setListState] = useState<ListState>('loading');
+  const [canManage, setCanManage] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setListState('loading');
+    try {
+      // Approved-campaign list is best-effort; a 403 here just hides the assign form.
+      const [placements, approvedList] = await Promise.all([
+        api.get<PlacementAssignment[]>('/admin/marketing/placements'),
+        api
+          .get<PromotionListItem[]>('/admin/marketing/promotions?status=APPROVED')
+          .catch(() => [] as PromotionListItem[]),
+      ]);
+      setRows(placements);
+      setApproved(approvedList);
+      setListState('ready');
+    } catch (err) {
+      setListState(apiStatus(err) === 403 ? 'forbidden' : 'error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const onCreated = useCallback((created: PlacementAssignment) => {
+    setRows((prev) => [created, ...prev]);
+    setNotice(`Placed "${created.promotion.title}" in ${placementLabel(created.placement)}.`);
+  }, []);
+
+  const onUpdated = useCallback((updated: PlacementAssignment) => {
+    setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+  }, []);
+
+  const onRemoved = useCallback((id: string) => {
+    setRows((prev) => prev.filter((r) => r.id !== id));
+    setNotice('Placement removed. The campaign itself was not deleted.');
+  }, []);
+
+  if (listState === 'forbidden') {
+    return (
+      <Alert tone="warning" title="You don't have permission">
+        You do not have the <code>promotions.read</code> permission required to view ad placements.
+      </Alert>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <Alert tone="info" title="How ad placements work">
+        Marketing owns campaign content; admin controls <strong>where</strong> approved campaigns appear. An approved campaign
+        appears only where it is assigned here, and only while <strong>both the campaign and this placement are active and
+        in-window</strong>. Removing a placement takes the campaign off that slot — it does <strong>not</strong> delete the
+        campaign.
+      </Alert>
+
+      {notice && (
+        <Alert tone="success">
+          <div className="flex items-center justify-between gap-3">
+            <span>{notice}</span>
+            <button type="button" onClick={() => setNotice(null)} className="text-xs font-semibold underline">
+              Dismiss
+            </button>
+          </div>
+        </Alert>
+      )}
+
+      {canManage && (
+        <AssignPlacementForm
+          approved={approved}
+          onCreated={onCreated}
+          onForbidden={() => setCanManage(false)}
+        />
+      )}
+
+      {listState === 'loading' ? (
+        <div className="flex items-center gap-2 rounded-bmpl-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading ad placements…
+        </div>
+      ) : listState === 'error' ? (
+        <Alert tone="error">
+          Could not load ad placements.{' '}
+          <button type="button" onClick={() => void load()} className="font-semibold underline">
+            Retry
+          </button>
+        </Alert>
+      ) : rows.length === 0 ? (
+        <EmptyState title="No placements yet" description="No approved campaigns are assigned to any slot. Use the form above to place one." />
+      ) : (
+        <div className="space-y-5">
+          {PROMOTION_PLACEMENTS.map((slot) => {
+            const slotRows = rows
+              .filter((r) => r.placement === slot)
+              .sort((a, b) => b.position - a.position);
+            if (slotRows.length === 0) return null;
+            return (
+              <div key={slot} className="rounded-bmpl-xl border border-slate-200 bg-white">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4">
+                  <h3 className="text-sm font-semibold text-belize-navy">{placementLabel(slot)}</h3>
+                  <span className="text-xs text-slate-400">
+                    {num(slotRows.length)} {slotRows.length === 1 ? 'assignment' : 'assignments'}
+                  </span>
+                </div>
+                <ul className="divide-y divide-slate-100">
+                  {slotRows.map((r) => (
+                    <PlacementRow
+                      key={r.id}
+                      row={r}
+                      canManage={canManage}
+                      onUpdated={onUpdated}
+                      onRemoved={onRemoved}
+                      onForbidden={() => setCanManage(false)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssignPlacementForm({
+  approved,
+  onCreated,
+  onForbidden,
+}: {
+  approved: PromotionListItem[];
+  onCreated: (row: PlacementAssignment) => void;
+  onForbidden: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<AssignFormState>(() => emptyAssignForm());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function set<K extends keyof AssignFormState>(key: K, value: AssignFormState[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  const needsCategory = isCategoryPlacement(form.placement);
+
+  async function submit() {
+    if (!form.promotionId) {
+      setError('Choose an approved campaign to place.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const body: {
+        placement: PromotionPlacementType;
+        categoryId?: string;
+        position?: number;
+        device?: PlacementDevice;
+        startAt?: string;
+        endAt?: string;
+      } = { placement: form.placement };
+      if (needsCategory && form.categoryId.trim()) body.categoryId = form.categoryId.trim();
+      const pos = toIntOrNull(form.position);
+      if (pos != null) body.position = pos;
+      body.device = form.device;
+      if (form.startAt) body.startAt = new Date(form.startAt).toISOString();
+      if (form.endAt) body.endAt = new Date(form.endAt).toISOString();
+      const created = await api.post<PlacementAssignment>(`/admin/marketing/promotions/${form.promotionId}/placements`, body);
+      onCreated(created);
+      setForm(emptyAssignForm());
+      setOpen(false);
+    } catch (err) {
+      if (apiStatus(err) === 403) {
+        onForbidden();
+        setError("You don't have the promotions.manage permission to assign placements.");
+      } else {
+        // Surfaces the backend 400 (e.g. "Only an approved campaign can be assigned").
+        setError(apiMessage(err, 'Could not assign the placement. Please try again.'));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-4">
+        <p className="text-sm text-slate-500">Assign an approved campaign to a placement slot.</p>
+        <Button size="sm" onClick={() => setOpen(true)}>
+          Assign a campaign
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-bmpl-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-sm font-semibold text-belize-navy">Assign an approved campaign</p>
+
+      {approved.length === 0 ? (
+        <Alert tone="warning">No approved campaigns are available to place. Approve a campaign in the moderation queue first.</Alert>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Approved campaign" htmlFor="pf-promo">
+            <Select id="pf-promo" value={form.promotionId} onChange={(e) => set('promotionId', e.target.value)}>
+              <option value="">Select a campaign…</option>
+              {approved.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title} · {promotionTypeLabel(p.type)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Placement slot" htmlFor="pf-slot">
+            <Select
+              id="pf-slot"
+              value={form.placement}
+              onChange={(e) => set('placement', e.target.value as PromotionPlacementType)}
+            >
+              {PROMOTION_PLACEMENTS.map((p) => (
+                <option key={p} value={p}>
+                  {placementLabel(p)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field
+            label="Category ID"
+            htmlFor="pf-cat"
+            hint={needsCategory ? 'Required for the category page slot.' : 'Only used by the category page slot.'}
+          >
+            <Input
+              id="pf-cat"
+              value={form.categoryId}
+              onChange={(e) => set('categoryId', e.target.value)}
+              disabled={!needsCategory}
+              placeholder={needsCategory ? 'Category id' : '—'}
+            />
+          </Field>
+
+          <Field label="Position (priority in slot)" htmlFor="pf-pos" hint="Higher shows first. Optional.">
+            <Input id="pf-pos" type="number" min={0} max={1000} value={form.position} onChange={(e) => set('position', e.target.value)} />
+          </Field>
+
+          <Field label="Device" htmlFor="pf-device">
+            <Select id="pf-device" value={form.device} onChange={(e) => set('device', e.target.value as PlacementDevice)}>
+              {DEVICES.map((d) => (
+                <option key={d} value={d}>
+                  {DEVICE_LABELS[d]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Starts" htmlFor="pf-start">
+              <Input id="pf-start" type="date" value={form.startAt} onChange={(e) => set('startAt', e.target.value)} />
+            </Field>
+            <Field label="Ends" htmlFor="pf-end">
+              <Input id="pf-end" type="date" value={form.endAt} onChange={(e) => set('endAt', e.target.value)} />
+            </Field>
+          </div>
+        </div>
+      )}
+
+      {error && <Alert tone="error">{error}</Alert>}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" disabled={busy || approved.length === 0} onClick={() => void submit()}>
+          {busy ? (
+            <>
+              <Spinner className="h-4 w-4" /> Assigning…
+            </>
+          ) : (
+            'Assign placement'
+          )}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            setOpen(false);
+            setForm(emptyAssignForm());
+            setError(null);
+          }}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PlacementRow({
+  row,
+  canManage,
+  onUpdated,
+  onRemoved,
+  onForbidden,
+}: {
+  row: PlacementAssignment;
+  canManage: boolean;
+  onUpdated: (row: PlacementAssignment) => void;
+  onRemoved: (id: string) => void;
+  onForbidden: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [position, setPosition] = useState(String(row.position));
+  const [device, setDevice] = useState<PlacementDevice>(row.device);
+  const [startAt, setStartAt] = useState(row.startAt ? row.startAt.slice(0, 10) : '');
+  const [endAt, setEndAt] = useState(row.endAt ? row.endAt.slice(0, 10) : '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function handleErr(err: unknown, fallback: string) {
+    if (apiStatus(err) === 403) {
+      onForbidden();
+      setError("You don't have the promotions.manage permission for this action.");
+    } else {
+      setError(apiMessage(err, fallback));
+    }
+  }
+
+  async function patch(body: { position?: number; device?: PlacementDevice; isActive?: boolean; startAt?: string | null; endAt?: string | null }) {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.patch<PlacementAssignment>(`/admin/marketing/placements/${row.id}`, body);
+      onUpdated(updated);
+      setEditing(false);
+    } catch (err) {
+      handleErr(err, 'Could not update the placement.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdits() {
+    const body: { position?: number; device?: PlacementDevice; startAt?: string | null; endAt?: string | null } = { device };
+    const pos = toIntOrNull(position);
+    if (pos != null) body.position = pos;
+    body.startAt = startAt ? new Date(startAt).toISOString() : null;
+    body.endAt = endAt ? new Date(endAt).toISOString() : null;
+    await patch(body);
+  }
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.del(`/admin/marketing/placements/${row.id}`);
+      onRemoved(row.id);
+    } catch (err) {
+      handleErr(err, 'Could not remove the placement.');
+      setBusy(false);
+    }
+  }
+
+  const window = promotionWindow(row);
+
+  return (
+    <li className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-semibold text-belize-navy">{row.promotion.title}</span>
+            <StatusBadge status={row.promotion.status} />
+            <Badge tone="brand">{promotionTypeLabel(row.promotion.type)}</Badge>
+            {row.isActive ? <Badge tone="success">Active</Badge> : <Badge tone="neutral">Paused</Badge>}
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+            <span>Position {num(row.position)}</span>
+            <span>{DEVICE_LABELS[row.device]}</span>
+            {window && <span>{window}</span>}
+            {isCategoryPlacement(row.placement) && (
+              <span>Category {row.category ? `${row.category.name} (${row.category.slug})` : row.categoryId ?? '—'}</span>
+            )}
+          </div>
+        </div>
+        {canManage && !editing && !confirmRemove && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void patch({ isActive: !row.isActive })}>
+              {row.isActive ? 'Pause' : 'Resume'}
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+            <Button size="sm" variant="destructive" disabled={busy} onClick={() => setConfirmRemove(true)}>
+              Remove
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div className="mt-3">
+          <Alert tone="error">{error}</Alert>
+        </div>
+      )}
+
+      {editing && (
+        <div className="mt-3 space-y-3 rounded-bmpl-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Position" htmlFor={`pl-pos-${row.id}`}>
+              <Input id={`pl-pos-${row.id}`} type="number" min={0} max={1000} value={position} onChange={(e) => setPosition(e.target.value)} />
+            </Field>
+            <Field label="Device" htmlFor={`pl-dev-${row.id}`}>
+              <Select id={`pl-dev-${row.id}`} value={device} onChange={(e) => setDevice(e.target.value as PlacementDevice)}>
+                {DEVICES.map((d) => (
+                  <option key={d} value={d}>
+                    {DEVICE_LABELS[d]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Starts" htmlFor={`pl-start-${row.id}`}>
+              <Input id={`pl-start-${row.id}`} type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
+            </Field>
+            <Field label="Ends" htmlFor={`pl-end-${row.id}`}>
+              <Input id={`pl-end-${row.id}`} type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
+            </Field>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={busy} onClick={() => void saveEdits()}>
+              {busy ? <Spinner className="h-4 w-4" /> : 'Save changes'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setEditing(false);
+                setPosition(String(row.position));
+                setDevice(row.device);
+                setStartAt(row.startAt ? row.startAt.slice(0, 10) : '');
+                setEndAt(row.endAt ? row.endAt.slice(0, 10) : '');
+                setError(null);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {confirmRemove && (
+        <div className="mt-3 space-y-2 rounded-bmpl-lg border border-red-200 bg-red-50 p-3">
+          <p className="text-sm text-red-800">
+            Remove this placement? The campaign <strong>{row.promotion.title}</strong> will no longer appear in{' '}
+            {placementLabel(row.placement)}. This removes the placement only — the campaign is <strong>not</strong> deleted.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="destructive" disabled={busy} onClick={() => void remove()}>
+              {busy ? <Spinner className="h-4 w-4" /> : 'Confirm remove'}
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmRemove(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 

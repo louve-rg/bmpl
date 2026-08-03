@@ -60,8 +60,8 @@ describe('saved products (wishlist)', () => {
     const c = (await register(`w1_${uniq()}@example.bz`)).cookies;
     const productId = await makeProduct();
 
-    expect((await post(c, `saved/${productId}`)).body).toEqual({ saved: true });
-    expect((await post(c, `saved/${productId}`)).body).toEqual({ saved: true }); // idempotent
+    expect((await post(c, `saved/${productId}`)).body).toMatchObject({ saved: true, variantId: null });
+    expect((await post(c, `saved/${productId}`)).body).toMatchObject({ saved: true, variantId: null }); // idempotent
 
     const list = await get(c, 'saved');
     expect(list.status).toBe(200);
@@ -73,7 +73,7 @@ describe('saved products (wishlist)', () => {
     expect((await get(c, 'saved/ids')).body.productIds).toEqual([productId]);
     expect((await get(c, 'saved/count')).body.count).toBe(1);
 
-    expect((await del(c, `saved/${productId}`)).body).toEqual({ saved: false });
+    expect((await del(c, `saved/${productId}`)).body).toMatchObject({ saved: false });
     expect((await del(c, `saved/${productId}`)).status).toBe(200); // idempotent unsave
     expect((await get(c, 'saved/count')).body.count).toBe(0);
   });

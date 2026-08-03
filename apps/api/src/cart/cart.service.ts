@@ -100,6 +100,33 @@ export class CartService {
     return this.buildView(cart.id);
   }
 
+  /**
+   * Move a cart line to the wishlist as ONE safe server-side operation: the EXACT
+   * variant (productId + variantId) is saved first, and the cart line is removed only
+   * after that succeeds — both inside a transaction, so a failure leaves the line in
+   * the cart (never in neither place). An already-wishlisted variant is not duplicated;
+   * the line is still removed. The parent product is never substituted for the variant.
+   */
+  async moveToWishlist(userId: string, itemId: string) {
+    const cart = await this.ensureCart(userId);
+    const item = await this.ownedItem(cart.id, itemId); // throws NotFound if not the caller's line
+    let alreadySaved = false;
+    await this.prisma.$transaction(async (tx) => {
+      // skipDuplicates = ON CONFLICT DO NOTHING: an already-wishlisted variant is not
+      // duplicated and — crucially — does NOT raise a constraint error that would abort
+      // the transaction (which would then block the delete). count===0 ⇒ it was already saved.
+      const res = await tx.savedProduct.createMany({
+        data: [{ userId, productId: item.productId, variantId: item.variantId ?? null }],
+        skipDuplicates: true,
+      });
+      alreadySaved = res.count === 0;
+      // Remove the cart line only after the wishlist entry is guaranteed to exist.
+      await tx.cartItem.delete({ where: { id: item.id } });
+      await tx.cart.update({ where: { id: cart.id }, data: { updatedAt: new Date() } });
+    });
+    return { ...(await this.buildView(cart.id)), movedToWishlist: true, alreadySaved, productId: item.productId, variantId: item.variantId ?? null };
+  }
+
   /** Empty the cart (keeps the cart row itself). */
   async clear(userId: string) {
     const cart = await this.ensureCart(userId);

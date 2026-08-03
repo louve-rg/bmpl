@@ -314,6 +314,9 @@ export function ProductView({ product }: { product: ProductDetail }) {
 
             <SaveButton
               productId={product.id}
+              variantId={selectedVariant?.id ?? null}
+              hasVariants={hasVariants}
+              onNotice={(text) => setMessage({ kind: 'err', text })}
               size="lg"
               className="border border-slate-300 hover:border-belize-blue hover:bg-belize-blue/5"
             />

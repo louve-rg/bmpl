@@ -365,13 +365,18 @@ export class ProductsService {
       ? Prisma.sql`ts_rank(p."searchVector", websearch_to_tsquery('english', ${q}))`
       : Prisma.sql`0`;
 
+    // Newest-first: most recently PUBLISHED first (publishedAt), createdAt as the
+    // fallback, and a stable id tie-breaker so pagination/order is deterministic and
+    // never depends on DB return order. Editing a product (updatedAt) does NOT move it
+    // up — only (re)publishing does, via publishedAt.
+    const newestFirst = Prisma.sql`p."publishedAt" DESC NULLS LAST, p."createdAt" DESC, p.id DESC`;
     let orderBy: Prisma.Sql;
     switch (query.sort) {
-      case 'price_asc': orderBy = Prisma.sql`p."priceMinor" ASC`; break;
-      case 'price_desc': orderBy = Prisma.sql`p."priceMinor" DESC`; break;
-      case 'featured': orderBy = Prisma.sql`p.featured DESC, p."createdAt" DESC`; break;
-      case 'relevance': orderBy = q ? Prisma.sql`rank DESC, p."createdAt" DESC` : Prisma.sql`p."createdAt" DESC`; break;
-      default: orderBy = Prisma.sql`p."createdAt" DESC`;
+      case 'price_asc': orderBy = Prisma.sql`p."priceMinor" ASC, ${newestFirst}`; break;
+      case 'price_desc': orderBy = Prisma.sql`p."priceMinor" DESC, ${newestFirst}`; break;
+      case 'featured': orderBy = Prisma.sql`p.featured DESC, ${newestFirst}`; break;
+      case 'relevance': orderBy = q ? Prisma.sql`rank DESC, ${newestFirst}` : newestFirst; break;
+      default: orderBy = newestFirst; // 'newest' + any unspecified sort
     }
 
     const rows = await this.prisma.$queryRaw<Array<{ id: string; total: bigint }>>`
@@ -439,7 +444,9 @@ export class ProductsService {
   async vendorFeatured(vendorProfileId: string, limit = 8) {
     const rows = await this.prisma.product.findMany({
       where: { vendorProfileId, status: 'PUBLISHED' },
-      orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }],
+      // Storefront grid is newest-first: most recently published at the top,
+      // createdAt fallback, stable id tie-break (editing never moves a product up).
+      orderBy: [{ publishedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }, { id: 'desc' }],
       take: limit,
       include: {
         category: { select: { name: true, slug: true } },
@@ -479,6 +486,22 @@ export class ProductsService {
       select: { id: true },
     });
     if (!p) throw new NotFoundException('Product not found.');
+  }
+
+  /** Count of active variants for a product (drives the "choose your options" rule). */
+  async activeVariantCount(productId: string): Promise<number> {
+    return this.prisma.productVariant.count({ where: { productId, isActive: true } });
+  }
+
+  /** Canonical public variant serialization ({ options, variants }) — reused by the
+   *  wishlist so a saved variant shows the exact title/options/price/availability. */
+  publicVariantView(productId: string) {
+    return this.variants.publicView(productId);
+  }
+
+  /** Signed primary image URLs per variant id (public bucket). */
+  variantPrimaryUrls(variantIds: string[]) {
+    return this.images.variantPrimaryUrls(variantIds);
   }
 
   // ===========================================================================

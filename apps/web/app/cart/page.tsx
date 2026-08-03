@@ -13,6 +13,7 @@ import {
   type CartLine,
   type CartView,
 } from '../../lib/cart';
+import { invalidateSaved, notifySavedChanged } from '../../lib/saved';
 import type { ApiError } from '../../lib/api';
 import { Alert, Button, ButtonLink, Card, EmptyState, PageHeader, Spinner } from '../../components/ui';
 
@@ -21,6 +22,7 @@ export default function CartPage() {
   const [cart, setCart] = useState<CartView | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [busyItem, setBusyItem] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -41,6 +43,13 @@ export default function CartPage() {
     void load();
   }, [load]);
 
+  // Auto-dismiss the move-to-wishlist confirmation.
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   async function mutate(fn: () => Promise<CartView>, itemId?: string) {
     if (itemId) setBusyItem(itemId);
     try {
@@ -55,11 +64,43 @@ export default function CartPage() {
     }
   }
 
+  // Move a line to the wishlist: the server saves the exact variant and removes
+  // the line atomically, returning the refreshed cart plus the move outcome.
+  async function moveToWishlist(itemId: string) {
+    setBusyItem(itemId);
+    try {
+      const res = await cartApi.moveToWishlist(itemId);
+      setCart(res);
+      notifyCartChanged(res.itemCount);
+      invalidateSaved();
+      notifySavedChanged();
+      setToast(
+        res.alreadySaved
+          ? 'This item was already in your Wishlist and has been removed from your cart.'
+          : 'Moved to your Wishlist.',
+      );
+    } catch (e) {
+      if ((e as ApiError).status === 401) router.push(`/login?next=${encodeURIComponent('/cart')}`);
+      else void load(); // refetch to reflect the true server state on any conflict
+    } finally {
+      setBusyItem(null);
+    }
+  }
+
   return (
     <>
       <Header />
       <main className="container-bmpl py-10">
         <PageHeader title="Your cart" />
+
+        {toast && (
+          <p role="status" className="mt-4 rounded-bmpl-md bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
+            {toast}{' '}
+            <Link href="/wishlist" className="font-semibold text-belize-blue hover:underline">
+              View Wishlist →
+            </Link>
+          </p>
+        )}
 
         {state === 'loading' && (
           <div className="mt-8 flex flex-col items-center gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-14 text-center">
@@ -123,6 +164,7 @@ export default function CartPage() {
                         busy={busyItem === item.id}
                         onUpdate={(q) => mutate(() => cartApi.update(item.id, q), item.id)}
                         onRemove={() => mutate(() => cartApi.remove(item.id), item.id)}
+                        onMove={() => moveToWishlist(item.id)}
                       />
                     ))}
                   </ul>
@@ -180,11 +222,13 @@ function CartRow({
   busy,
   onUpdate,
   onRemove,
+  onMove,
 }: {
   item: CartLine;
   busy: boolean;
   onUpdate: (quantity: number) => void;
   onRemove: () => void;
+  onMove: () => void;
 }) {
   const blocking = item.issues.filter((i) => i !== 'INSUFFICIENT_STOCK');
   return (
@@ -251,6 +295,14 @@ function CartRow({
               +
             </button>
           </div>
+          <button
+            type="button"
+            onClick={onMove}
+            disabled={busy}
+            className="inline-flex min-h-[40px] items-center px-1 text-xs font-medium text-slate-500 hover:text-belize-blue disabled:opacity-40"
+          >
+            Move to Wishlist
+          </button>
           <button
             type="button"
             onClick={onRemove}

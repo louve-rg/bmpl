@@ -30,8 +30,9 @@ export class MarketingPublicController {
   }
 
   @Get('placements/:placement')
-  placement(@Param('placement') placement: string, @Query('categoryId') categoryId?: string) {
-    return this.discovery.servePlacement(placement as PromotionPlacementType, categoryId);
+  placement(@Param('placement') placement: string, @Query('categoryId') categoryId?: string, @Query('device') device?: string) {
+    const dev = device === 'DESKTOP' || device === 'MOBILE' ? device : undefined;
+    return this.discovery.servePlacement(placement as PromotionPlacementType, categoryId, { device: dev });
   }
 
   @Get('promotions/:id')

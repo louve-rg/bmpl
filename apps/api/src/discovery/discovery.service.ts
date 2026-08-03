@@ -14,6 +14,14 @@ import { ProductsService } from '../products/products.service';
 
 const VIEWABLE = { status: 'PUBLISHED', vendorProfile: { approvalStatus: 'APPROVED' } } as const;
 
+/** Canonical newest-first ordering: most recently published first, createdAt fallback,
+ *  stable id tie-breaker. Editing a product never moves it up (only publishedAt does). */
+const NEWEST_FIRST: Prisma.ProductOrderByWithRelationInput[] = [
+  { publishedAt: { sort: 'desc', nulls: 'last' } },
+  { createdAt: 'desc' },
+  { id: 'desc' },
+];
+
 /**
  * Discovery & Recommendations (M21). DETERMINISTIC, non-AI heuristics over existing
  * data: the M7 catalog, M19 rating aggregates, and (for personalization) the M20
@@ -49,12 +57,13 @@ export class DiscoveryService {
   // Homepage / discovery surface
   // ===========================================================================
   async newArrivals(limit = DISCOVERY_SECTION_SIZE) {
-    const rows = await this.prisma.product.findMany({ where: VIEWABLE, orderBy: { createdAt: 'desc' }, take: limit, select: { id: true } });
+    // Newest-first: publishedAt desc → createdAt desc → id (stable tie-break).
+    const rows = await this.prisma.product.findMany({ where: VIEWABLE, orderBy: NEWEST_FIRST, take: limit, select: { id: true } });
     return this.orderedCards(rows.map((r) => r.id));
   }
 
   async featured(limit = DISCOVERY_SECTION_SIZE) {
-    const rows = await this.prisma.product.findMany({ where: { ...VIEWABLE, featured: true }, orderBy: { createdAt: 'desc' }, take: limit, select: { id: true } });
+    const rows = await this.prisma.product.findMany({ where: { ...VIEWABLE, featured: true }, orderBy: NEWEST_FIRST, take: limit, select: { id: true } });
     return this.orderedCards(rows.map((r) => r.id));
   }
 
