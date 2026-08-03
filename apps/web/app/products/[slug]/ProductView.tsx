@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Gallery, type GalleryImage } from './Gallery';
 import { buildGalleryImages } from '../../../lib/gallery';
+import { variantUrlChanged } from '../../../lib/gallery-nav';
 import { Badge } from '../../../components/ui';
 import { ProductReviews } from '../../../components/reviews/ProductReviews';
 import { StarRating } from '../../../components/reviews/StarRating';
@@ -122,11 +123,19 @@ export function ProductView({ product }: { product: ProductDetail }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reflect the fully-selected variant in the URL (shallow, client-side only).
+  // Reflect the fully-selected variant in the URL (shareable link) WITHOUT churning
+  // history: only replace when the value actually changes. Replacing on every mount/
+  // hydration (even when the URL already matched) corrupted the App-Router history
+  // state and made mobile swipe-back skip to the Marketplace instead of the real
+  // previous page. Guarding to "only on a real change" keeps browser Back/swipe-back
+  // returning to the true referrer (storefront, search, wishlist, …).
   useEffect(() => {
     if (!hasVariants || typeof window === 'undefined') return;
     const url = new URL(window.location.href);
-    if (selectedVariant) url.searchParams.set('variant', selectedVariant.id);
+    const currentParam = url.searchParams.get('variant');
+    const nextParam = selectedVariant?.id ?? null;
+    if (!variantUrlChanged(currentParam, nextParam)) return; // no change — do not touch history
+    if (nextParam) url.searchParams.set('variant', nextParam);
     else url.searchParams.delete('variant');
     window.history.replaceState(window.history.state, '', url.toString());
   }, [hasVariants, selectedVariant]);

@@ -82,6 +82,11 @@ describe('newest-first product ordering', () => {
     const store = await guest(`marketplace/vendors/${slug}`);
     const storeIds = store.body.featuredProducts.map((x: { id: string }) => x.id).filter((x: string) => ids.includes(x));
     expect(storeIds).toEqual([p2, p1, p0]);
+
+    // the vendor's OWN product list (dashboard) is newest-first too, and editing didn't move p0
+    const own = await get(vendor.cookies, 'vendor/products');
+    const ownIds = own.body.map((x: { id: string }) => x.id).filter((x: string) => ids.includes(x));
+    expect(ownIds).toEqual([p2, p1, p0]);
   });
 });
 

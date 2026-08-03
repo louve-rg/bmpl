@@ -46,7 +46,9 @@ export class ProductsService {
     const vp = await this.ownership.vendorProfileId(userId);
     const rows = await this.prisma.product.findMany({
       where: { vendorProfileId: vp },
-      orderBy: { updatedAt: 'desc' },
+      // Newest-first (published, then created, stable id tie-break) so a vendor's newest
+      // products lead and editing inventory/price/details never re-orders the list.
+      orderBy: [{ publishedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }, { id: 'desc' }],
       include: { category: { select: { name: true, slug: true } } },
     });
     const ids = rows.map((r) => r.id);

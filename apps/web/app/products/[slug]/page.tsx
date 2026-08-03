@@ -29,13 +29,14 @@ export default async function ProductDetailPage({ params }: { params: { slug: st
           {/* Breadcrumbs follow the true hierarchy: Stores → this storefront → product.
               Derived from product data, so shared/direct links get a correct trail too. */}
           <Breadcrumbs items={productBreadcrumbs(p.vendor, p.title)} />
-          {/* Primary back returns ONE logical level — to the originating storefront,
-              not the all-products list (fixes the misleading "Shop" arrow). */}
+          {/* Convenience link to the vendor storefront. This is NOT a browser-Back
+              control (kept alongside the "Sold by" link lower on the page); worded
+              "Visit {vendor}" so it never implies going back in history. */}
           <Link
             href={productBackHref(p.vendor.slug)}
             className="mt-2 inline-flex text-sm font-medium text-belize-blue hover:underline"
           >
-            ← Back to {p.vendor.businessName}
+            Visit {p.vendor.businessName}
           </Link>
           <ProductView product={p} />
         </div>
