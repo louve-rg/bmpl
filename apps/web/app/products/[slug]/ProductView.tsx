@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Gallery, type GalleryImage } from './Gallery';
 import { buildGalleryImages } from '../../../lib/gallery';
-import { variantUrlChanged } from '../../../lib/gallery-nav';
 import { Badge } from '../../../components/ui';
 import { ProductReviews } from '../../../components/reviews/ProductReviews';
 import { StarRating } from '../../../components/reviews/StarRating';
@@ -96,8 +95,15 @@ export function ProductView({ product }: { product: ProductDetail }) {
     [product, selection],
   );
 
-  // Selecting from the lineup: adopt that variant's full option selection.
+  // Opening a variant from the lineup is intentional NAVIGATION: push a history entry
+  // (?variant=<id>) so the MAIN product page stays behind it. Back then returns to the
+  // main product first (and only Back-again leaves to the source page). We optimistically
+  // set the selection for instant feedback; the URL-driven effect below is the source of
+  // truth and re-affirms it (and drives Back/Forward/swipe-back restores).
   function selectVariant(v: VariantLike) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('variant', v.id);
+    window.history.pushState(null, '', url.toString()); // Next 14 shallow routing → syncs useSearchParams
     setSelection(selectionForVariant(product.options, v));
     setQty(1);
   }
@@ -110,54 +116,23 @@ export function ProductView({ product }: { product: ProductDetail }) {
     setQty(1);
   }
 
-  // Guards a variant change that came FROM the browser (Back/Forward/swipe) so it does
-  // not push a new entry back.
-  const fromHistory = useRef(false);
-
-  // Preselect from the URL (?variant=<id>) once on mount so a refresh/shared link
-  // restores the chosen variant. This does NOT push (the URL already matches).
+  // The presented variant FOLLOWS the URL (?variant=<id>). Next 14 keeps useSearchParams
+  // in sync with BOTH window.history.pushState (a card click, below) AND browser
+  // Back/Forward/mobile-swipe-back (popstate). So this single effect restores the full
+  // presentation — variant, title, gallery, active thumbnail, price, SKU, inventory,
+  // option dropdowns, add-to-cart + wishlist target — on: initial load, a shared link,
+  // opening a variant, and stepping Back to the main product ("?variant" removed → the
+  // unfiltered "All" state). Dropdown faceting keeps its own local state (it does not
+  // change the URL), so this effect only re-runs on a genuine variant navigation.
+  const searchParams = useSearchParams();
+  const urlVariant = hasVariants ? searchParams.get('variant') : null;
   useEffect(() => {
     if (!hasVariants) return;
-    const vId = new URLSearchParams(window.location.search).get('variant');
-    if (!vId) return;
-    const v = product.variants.find((x) => x.id === vId);
-    if (!v) return;
-    const next = selectionForVariant(product.options, v);
-    if (Object.keys(next).length) { fromHistory.current = true; setSelection(next); }
+    const v = urlVariant ? product.variants.find((x) => x.id === urlVariant) : null;
+    setSelection(v ? selectionForVariant(product.options, v) : {});
+    setQty(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Variation history (Model A): each intentional variation the customer opens PUSHES a
-  // history entry, so browser Back — and the mobile swipe-back gesture — step back through
-  // the previous variations (Gingham → Hello Beautiful → All) and only then leave the
-  // product to the true previous page (storefront / search / wishlist / marketplace).
-  // We push (never replace) and only on a REAL change; a change that originated from a
-  // Back/Forward event is skipped so it doesn't re-push. Mount/refresh never push.
-  useEffect(() => {
-    if (!hasVariants || typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    const currentParam = url.searchParams.get('variant');
-    const nextParam = selectedVariant?.id ?? null;
-    if (!variantUrlChanged(currentParam, nextParam)) return; // URL already correct
-    if (fromHistory.current) { fromHistory.current = false; return; } // history-driven → don't re-push
-    if (nextParam) url.searchParams.set('variant', nextParam);
-    else url.searchParams.delete('variant');
-    window.history.pushState(null, '', url.toString()); // Next 14 shallow routing
-  }, [hasVariants, selectedVariant]);
-
-  // Restore the presented variant on Back/Forward/swipe-back so the gallery, title,
-  // price, SKU, inventory, and options all follow the URL the browser returned to.
-  useEffect(() => {
-    if (!hasVariants) return;
-    function onPop() {
-      const vId = new URLSearchParams(window.location.search).get('variant');
-      const v = vId ? product.variants.find((x) => x.id === vId) : null;
-      fromHistory.current = true; // this selection change came from history → don't push
-      setSelection(v ? selectionForVariant(product.options, v) : {});
-    }
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, [hasVariants, product.variants, product.options]);
+  }, [urlVariant]);
 
   const displayTitle = selectedVariant ? selectedVariant.title : product.title;
   const avail: Availability = selectedVariant ? selectedVariant.availability : product.availability;

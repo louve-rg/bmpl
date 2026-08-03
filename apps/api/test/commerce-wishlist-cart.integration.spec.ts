@@ -101,7 +101,7 @@ async function bathAndBodyWorks(vendor: { cookies: string[] }) {
   const mk = async (frag: string, size: string, priceMinor: number, qty: number, sku: string) => {
     const r = await post(vendor.cookies, `vendor/products/${productId}/variants`, { optionValueIds: [val('Fragrance', frag), val('Size', size)], sku, quantity: qty, priceMinor });
     // the just-created variant is the last one
-    return r.body.variants[r.body.variants.length - 1].id as string;
+    return r.body.variants[0].id as string;
   };
   const pinkMedium = await mk('Perfect in Pink', 'Medium', 2250, 5, 'PIP-M');
   const helloLarge = await mk('Hello Beautiful', 'Large', 2600, 5, 'HB-L');

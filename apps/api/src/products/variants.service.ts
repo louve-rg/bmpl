@@ -245,9 +245,12 @@ export class VariantsService {
       orderBy: { position: 'asc' },
       include: { values: { orderBy: { position: 'asc' } } },
     });
+    // Public variant lineup: newest-created variant first (deterministic id tie-break),
+    // and only ACTIVE variants — a deactivated/deleted variant never appears. Image
+    // ordering WITHIN a variant is separate (primary first, then vendor position).
     const variants = await this.prisma.productVariant.findMany({
       where: { productId, isActive: true },
-      orderBy: { position: 'asc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { optionValues: true, inventory: true },
     });
     return {
@@ -290,9 +293,12 @@ export class VariantsService {
       orderBy: { position: 'asc' },
       include: { values: { orderBy: { position: 'asc' } } },
     });
+    // Newest-first too, so the vendor's Storefront Preview + editor match exactly what
+    // customers see on the live marketplace (§ variant order consistency). Includes
+    // inactive variants — this is the owner's management view.
     const variants = await this.prisma.productVariant.findMany({
       where: { productId },
-      orderBy: { position: 'asc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { optionValues: true, inventory: true },
     });
     return {

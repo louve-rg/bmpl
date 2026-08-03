@@ -61,8 +61,8 @@ describe('gallery is built only from valid records', () => {
     await post(vendor.cookies, `vendor/products/${productId}/options`, { name: 'Color', values: ['Red', 'Blue'] });
     const view = await get(vendor.cookies, `vendor/products/${productId}/variants`);
     const val = (v: string) => view.body.options[0].values.find((x: { value: string }) => x.value === v).id;
-    const red = (await post(vendor.cookies, `vendor/products/${productId}/variants`, { optionValueIds: [val('Red')], sku: 'RED' })).body.variants.slice(-1)[0].id;
-    const blue = (await post(vendor.cookies, `vendor/products/${productId}/variants`, { optionValueIds: [val('Blue')], sku: 'BLUE' })).body.variants.slice(-1)[0].id;
+    const red = (await post(vendor.cookies, `vendor/products/${productId}/variants`, { optionValueIds: [val('Red')], sku: 'RED' })).body.variants[0].id;
+    const blue = (await post(vendor.cookies, `vendor/products/${productId}/variants`, { optionValueIds: [val('Blue')], sku: 'BLUE' })).body.variants[0].id;
 
     const gen = await seedImage(productId, null);
     const redImg = await seedImage(productId, red);
@@ -89,6 +89,38 @@ describe('gallery is built only from valid records', () => {
     expect(ids).toEqual([gen.id]); // only the general image remains
     // the deleted variant's image row is gone (not left with variantId=null)
     expect(await ctx.prisma.productImage.findUnique({ where: { id: redImg.id } })).toBeNull();
+  });
+});
+
+describe('newest variant first', () => {
+  it('lineup is newest-created first; deleting the newest makes the next first; a new variant leads', async () => {
+    const vendor = await makeVendor();
+    const p = await post(vendor.cookies, 'vendor/products', { title: `Prod ${uniq()}`, sku: `S-${uniq()}`, categoryId, priceMinor: 2000 });
+    const productId = p.body.id as string;
+    const slug = p.body.slug as string;
+    await post(vendor.cookies, `vendor/products/${productId}/options`, { name: 'Size', values: ['S', 'M', 'L', 'XL'] });
+    const view = await get(vendor.cookies, `vendor/products/${productId}/variants`);
+    const val = (v: string) => view.body.options[0].values.find((x: { value: string }) => x.value === v).id;
+    const mk = async (size: string) => (await post(vendor.cookies, `vendor/products/${productId}/variants`, { optionValueIds: [val(size)], sku: size })).body.variants[0].id as string;
+    const A = await mk('S');
+    const B = await mk('M');
+    const C = await mk('L');
+    // deterministic createdAt: A oldest → C newest
+    await ctx.prisma.productVariant.update({ where: { id: A }, data: { createdAt: new Date('2026-01-01T00:00:00Z') } });
+    await ctx.prisma.productVariant.update({ where: { id: B }, data: { createdAt: new Date('2026-02-01T00:00:00Z') } });
+    await ctx.prisma.productVariant.update({ where: { id: C }, data: { createdAt: new Date('2026-03-01T00:00:00Z') } });
+
+    const lineup = async () => ((await guest(`marketplace/products/${slug}`)).body.variants as Array<{ id: string }>).map((v) => v.id);
+    expect(await lineup()).toEqual([C, B, A]); // newest first
+
+    // delete the newest (C) → B leads
+    expect((await del(vendor.cookies, `vendor/products/${productId}/variants/${C}`)).status).toBe(200);
+    expect(await lineup()).toEqual([B, A]);
+
+    // add a new variant (D) → it leads
+    const D = await mk('XL');
+    await ctx.prisma.productVariant.update({ where: { id: D }, data: { createdAt: new Date('2026-04-01T00:00:00Z') } });
+    expect(await lineup()).toEqual([D, B, A]);
   });
 });
 
