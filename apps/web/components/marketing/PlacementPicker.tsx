@@ -59,6 +59,7 @@ export function PlacementPicker({
             {current && isCategory && (
               <div className="mt-2 pl-6">
                 <Input
+                  aria-label="Category ID (optional)"
                   placeholder="Category ID (optional)"
                   value={current.categoryId ?? ''}
                   disabled={disabled}

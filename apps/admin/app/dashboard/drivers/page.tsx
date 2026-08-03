@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Badge, EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface DriverRow {
   id: string;
@@ -62,7 +63,7 @@ export default function DriversPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Logistics" title="Drivers" />
+      <PageHeader breadcrumbs={adminCrumbs('Drivers')} eyebrow="Logistics" title="Drivers" />
 
       <div className="mb-5 grid gap-3 sm:grid-cols-3">
         <Field label="District">

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Card, EmptyState, PageHeader, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface Account { id: string; type: string; currency: string; status: string; cachedBalanceMinor: number }
 interface Entry { direction: string; amountMinor: number; accountType: string; isCustomer: boolean }
@@ -27,6 +28,7 @@ export default function AdminWalletPage() {
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs('Wallet')}
         eyebrow="Finance"
         title="Wallet & Escrow"
         description="Read-only double-entry ledger. Money moves only between customer wallets and escrow (M12)."

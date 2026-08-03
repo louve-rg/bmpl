@@ -93,7 +93,7 @@ export function SaveJobButton({
       disabled={busy}
       aria-pressed={saved}
       aria-label={saved ? 'Remove from saved jobs' : 'Save job'}
-      className={`inline-flex items-center justify-center rounded-full text-belize-blue transition hover:bg-belize-blue/5 disabled:opacity-60 ${BTN_PAD[size]} ${className}`}
+      className={`inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-full text-belize-blue transition hover:bg-belize-blue/5 disabled:opacity-60 ${BTN_PAD[size]} ${className}`}
     >
       <Heart filled={saved} className={SIZE_PX[size]} />
     </button>

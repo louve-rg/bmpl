@@ -95,7 +95,7 @@ export function SaveButton({
       disabled={busy}
       aria-pressed={saved}
       aria-label={saved ? 'Remove from saved properties' : 'Save property'}
-      className={`inline-flex items-center justify-center rounded-full bg-white/90 text-belize-blue shadow-bmpl-sm transition hover:bg-white disabled:opacity-60 ${BTN_PAD[size]} ${className}`}
+      className={`inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-full bg-white/90 text-belize-blue shadow-bmpl-sm transition hover:bg-white disabled:opacity-60 ${BTN_PAD[size]} ${className}`}
     >
       <Heart filled={saved} className={SIZE_PX[size]} />
     </button>

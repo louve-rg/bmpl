@@ -9,6 +9,7 @@ import {
   type NotificationListResponse,
 } from '../../lib/notifications';
 import { Spinner } from '../ui';
+import { badgeCount, unreadLabel } from '../../lib/badge';
 
 const POLL_MS = 60_000;
 
@@ -103,14 +104,14 @@ export function NotificationBell() {
     }
   }
 
-  const badge = count > 99 ? '99+' : String(count);
+  const badge = badgeCount(count);
 
   return (
     <div ref={rootRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label={count > 0 ? `Notifications, ${count} unread` : 'Notifications'}
+        aria-label={count > 0 ? `Notifications, ${unreadLabel(count)}` : 'Notifications'}
         aria-haspopup="true"
         aria-expanded={open}
         className="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-600 transition hover:bg-slate-100 hover:text-belize-navy focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent"
@@ -175,7 +176,7 @@ export function NotificationBell() {
                       type="button"
                       onClick={() => dismiss(item)}
                       aria-label="Dismiss notification"
-                      className="absolute right-2 top-2 hidden h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-600 group-hover:flex"
+                      className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent sm:hidden sm:group-hover:flex sm:group-focus-within:flex"
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>
                         <path d="M6 6l12 12M18 6L6 18" />

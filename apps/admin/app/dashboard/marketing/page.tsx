@@ -39,6 +39,7 @@ import { api, type ApiError } from '../../../lib/api';
 import { relativeTime } from '../../../lib/notifications';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Alert, Badge, Button, EmptyState, Field, Input, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 /**
  * Marketing & Business Promotion admin console — M26. Client shapes mirror the
@@ -274,6 +275,7 @@ export default function MarketingPage() {
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs('Marketing')}
         eyebrow="Marketing"
         title="Marketing & business promotion"
         description="Moderate promotions, oversee campaigns and platform coupons, curate the homepage, resolve abuse reports, and track marketing performance."

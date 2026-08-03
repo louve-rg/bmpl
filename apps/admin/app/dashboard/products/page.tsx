@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { PageHeader, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface ProductRow {
   id: string;
@@ -39,7 +40,7 @@ export default function AdminProductsPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Marketplace" title="Products" />
+      <PageHeader breadcrumbs={adminCrumbs('Products')} eyebrow="Marketplace" title="Products" />
       <div className="mb-5 flex flex-wrap gap-2">
         {STATUSES.map((s) => (
           <button

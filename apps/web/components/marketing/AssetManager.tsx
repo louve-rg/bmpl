@@ -86,6 +86,7 @@ export function AssetManager({
           <div>
             <input
               type="file"
+              aria-label="Upload image asset"
               accept="image/png,image/jpeg,image/webp"
               disabled={busy || atMax}
               onChange={(e) => upload(e.target.files)}

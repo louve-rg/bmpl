@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
 import { Alert, Button, Card, Field, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 /* --------------------------------------------------------------- types */
 
@@ -100,6 +101,7 @@ export default function OpsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
+        breadcrumbs={adminCrumbs('Operations')}
         eyebrow="Platform"
         title="Operations console"
         description="Action queues across the marketplace, the platform announcement banner and audit exports."

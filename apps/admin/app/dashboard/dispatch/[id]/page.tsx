@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { api, type ApiError } from '../../../../lib/api';
 import { StatusBadge } from '../../../../components/StatusBadge';
 import { Alert, Badge, Button, Field, PageHeader, Select, Spinner, Textarea } from '../../../../components/ui';
+import { adminCrumbs } from '../../../../lib/admin-nav';
 
 interface Eligibility {
   eligible: boolean;
@@ -147,6 +148,7 @@ function DetailView({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: 
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs(['Dispatch', '/dashboard/dispatch'], `Order ${d.orderNumber}`)}
         eyebrow="Delivery"
         title={`Order ${d.orderNumber}`}
         actions={<StatusBadge status={d.status} />}

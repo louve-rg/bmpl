@@ -411,7 +411,7 @@ function ChipEditor({
         {items.map((x, i) => (
           <span key={`${x}-${i}`} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
             {x}
-            <button type="button" onClick={() => onRemove(i)} className="text-xs text-red-600 hover:underline">
+            <button type="button" aria-label={`Remove ${x}`} onClick={() => onRemove(i)} className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs text-red-600 hover:bg-red-50">
               ✕
             </button>
           </span>

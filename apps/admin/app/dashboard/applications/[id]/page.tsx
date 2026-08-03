@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import { ROLE_DEFINITIONS, type RoleCode } from '@bmpl/shared';
 import { serverGet } from '../../../../lib/server-api';
 import { StatusBadge } from '../../../../components/StatusBadge';
-import { Card } from '../../../../components/ui';
+import { Breadcrumbs, Card } from '../../../../components/ui';
+import { adminCrumbs } from '../../../../lib/admin-nav';
 import { ReviewActions } from './ReviewActions';
 import { DocumentLink } from './DocumentLink';
 
@@ -37,6 +38,10 @@ export default async function ApplicationDetailPage({ params }: { params: { id: 
 
   return (
     <div className="mx-auto max-w-3xl">
+      <Breadcrumbs
+        items={adminCrumbs(['Role Applications', '/dashboard/applications'], `${app.user.firstName} ${app.user.lastName}`)}
+        className="mb-3"
+      />
       <Link href="/dashboard/applications" className="text-sm font-medium text-belize-blue hover:underline">
         ← Back to queue
       </Link>

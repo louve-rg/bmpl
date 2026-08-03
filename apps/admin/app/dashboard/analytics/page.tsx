@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
 import { Alert, Badge, Card, EmptyState, PageHeader, Select, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 /* --------------------------------------------------------------- types */
 
@@ -110,6 +111,7 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
+        breadcrumbs={adminCrumbs('Analytics')}
         eyebrow="Insights"
         title="Platform analytics"
         description="Marketplace performance at a glance — sales, top sellers and platform totals."

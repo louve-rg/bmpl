@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
 import { Alert, Button, EmptyState, Input, Label, PageHeader, Select, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface AdminCategory {
   id: string;
@@ -150,7 +151,7 @@ export default function CategoriesPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Marketplace" title="Categories" />
+      <PageHeader breadcrumbs={adminCrumbs('Categories')} eyebrow="Marketplace" title="Categories" />
 
       {error && (
         <Alert tone="warning" className="mb-5">

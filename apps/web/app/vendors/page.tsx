@@ -69,10 +69,20 @@ export default async function VendorsDirectoryPage({ searchParams }: { searchPar
                     )}
                     <div>
                       <p className="font-semibold text-belize-navy group-hover:text-belize-blue">{v.businessName}</p>
-                      <p className="text-xs text-slate-400">
-                        {'★'.repeat(Math.round(v.ratingAverage))}
-                        {v.ratingCount > 0 ? ` (${v.ratingCount})` : ' New'}
-                      </p>
+                      <span
+                        role="img"
+                        aria-label={
+                          v.ratingCount > 0
+                            ? `Rated ${v.ratingAverage.toFixed(1)} out of 5 from ${v.ratingCount} review${v.ratingCount === 1 ? '' : 's'}`
+                            : 'No reviews yet'
+                        }
+                        className="block text-xs text-slate-400"
+                      >
+                        <span aria-hidden>
+                          {'★'.repeat(Math.round(v.ratingAverage))}
+                          {v.ratingCount > 0 ? ` (${v.ratingCount})` : ' New'}
+                        </span>
+                      </span>
                     </div>
                   </div>
                   {v.description && <p className="mt-3 line-clamp-2 text-sm text-slate-600">{v.description}</p>}

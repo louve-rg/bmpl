@@ -1,5 +1,6 @@
 import { serverGet } from '../../../lib/server-api';
 import { EmptyState, PageHeader } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +30,7 @@ export default async function AuditPage({
 
   return (
     <div>
-      <PageHeader eyebrow="Governance" title="Audit Log" />
+      <PageHeader breadcrumbs={adminCrumbs('Audit Log')} eyebrow="Governance" title="Audit Log" />
       {items.length === 0 ? (
         <EmptyState title="No audit entries yet" description="Administrative actions across the platform will be recorded here." />
       ) : (

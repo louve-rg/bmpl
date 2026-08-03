@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface DeliveryRow {
   id: string;
@@ -72,7 +73,7 @@ export default function DispatchPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Logistics" title="Dispatch" description="Assign, track and manage delivery execution." />
+      <PageHeader breadcrumbs={adminCrumbs('Dispatch')} eyebrow="Logistics" title="Dispatch" description="Assign, track and manage delivery execution." />
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Status">

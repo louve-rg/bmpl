@@ -27,6 +27,7 @@ import { api, type ApiError } from '../../../lib/api';
 import { relativeTime } from '../../../lib/notifications';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 /**
  * Belize Homes (Real Estate) admin console — M25. Client shapes mirror the
@@ -304,6 +305,7 @@ export default function PropertiesPage() {
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs('Real Estate')}
         eyebrow="Belize Homes"
         title="Real estate moderation & operations"
         description="Moderate property listings, resolve community reports, manage owners and agents, and track Belize Homes performance."

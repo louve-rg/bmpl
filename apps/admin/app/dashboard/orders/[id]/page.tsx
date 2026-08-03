@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api } from '../../../../lib/api';
 import { StatusBadge } from '../../../../components/StatusBadge';
-import { Badge, Card, Spinner } from '../../../../components/ui';
+import { Badge, Breadcrumbs, Card, Spinner } from '../../../../components/ui';
+import { adminCrumbs } from '../../../../lib/admin-nav';
 
 interface Item {
   productTitle: string;
@@ -73,14 +74,24 @@ export default function AdminOrderDetailPage() {
 
   if (state === 'loading')
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
-        <Spinner className="h-4 w-4" /> Loading…
+      <div>
+        <Breadcrumbs items={adminCrumbs(['Orders', '/dashboard/orders'], 'Order')} className="mb-3" />
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading…
+        </div>
       </div>
     );
-  if (state === 'error' || !order) return <p className="text-sm text-slate-500">Order not found.</p>;
+  if (state === 'error' || !order)
+    return (
+      <div>
+        <Breadcrumbs items={adminCrumbs(['Orders', '/dashboard/orders'], 'Order')} className="mb-3" />
+        <p className="text-sm text-slate-500">Order not found.</p>
+      </div>
+    );
 
   return (
     <div>
+      <Breadcrumbs items={adminCrumbs(['Orders', '/dashboard/orders'], order.orderNumber)} className="mb-3" />
       <Link href="/dashboard/orders" className="text-sm font-medium text-belize-blue hover:underline">← Orders</Link>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <div>

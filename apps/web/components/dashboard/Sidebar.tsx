@@ -8,6 +8,7 @@ import { RoleSwitcher } from './RoleSwitcher';
 import { LogoutButton } from './LogoutButton';
 import { api } from '../../lib/api';
 import type { MeView } from '../../lib/types';
+import { badgeCount, unreadLabel } from '../../lib/badge';
 
 type NavItem = { label: string; href: string; icon: string };
 
@@ -88,6 +89,12 @@ const MESSAGES_POLL_MS = 60_000;
 
 export function Sidebar({ me }: { me: MeView }) {
   const pathname = usePathname();
+  // On mobile the full multi-group nav is collapsed behind a toggle so it doesn't
+  // push page content far down; it's always visible from `md` upward.
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
   const isVendor = me.roles.some((r) => r.roleCode === 'VENDOR' && r.status === 'APPROVED');
   const isEmployer = me.roles.some((r) => r.roleCode === 'EMPLOYER' && r.status === 'APPROVED');
   const isPropertyOwner = me.roles.some((r) => r.roleCode === 'PROPERTY_OWNER' && r.status === 'APPROVED');
@@ -123,12 +130,35 @@ export function Sidebar({ me }: { me: MeView }) {
   }, [refreshUnread]);
 
   return (
-    <aside className="flex w-full flex-col gap-6 border-r border-slate-200 bg-white p-5 md:h-screen md:w-72 md:shrink-0">
-      <Link href="/" className="rounded-bmpl-lg bg-belize-navy p-3">
-        <BrandLockup />
-      </Link>
+    <aside className="w-full border-r border-slate-200 bg-white md:h-screen md:w-72 md:shrink-0">
+      {/* Mobile-only bar: brand + a toggle that collapses the (otherwise very tall) nav. */}
+      <div className="flex items-center justify-between p-4 md:hidden">
+        <Link href="/" className="rounded-bmpl-lg bg-belize-navy p-2">
+          <BrandLockup />
+        </Link>
+        <button
+          type="button"
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-expanded={menuOpen}
+          aria-controls="dashboard-nav-panel"
+          aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-bmpl-md text-slate-600 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-5 w-5" aria-hidden>
+            {menuOpen ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
+          </svg>
+        </button>
+      </div>
 
-      <RoleSwitcher me={me} />
+      <div
+        id="dashboard-nav-panel"
+        className={`${menuOpen ? 'flex' : 'hidden'} h-full flex-col gap-6 p-4 md:flex md:p-5`}
+      >
+        <Link href="/" className="hidden rounded-bmpl-lg bg-belize-navy p-3 md:block">
+          <BrandLockup />
+        </Link>
+
+        <RoleSwitcher me={me} />
 
       <nav className="flex flex-col gap-4" aria-label="Dashboard">
         {groups.map((group, gi) => (
@@ -154,10 +184,10 @@ export function Sidebar({ me }: { me: MeView }) {
                   <span className="flex-1">{item.label}</span>
                   {item.href === '/dashboard/messages' && unread > 0 && (
                     <span
-                      aria-label={`${unread} unread`}
+                      aria-label={unreadLabel(unread)}
                       className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-belize-accent px-1.5 text-[10px] font-bold leading-[18px] text-white"
                     >
-                      {unread > 99 ? '99+' : unread}
+                      {badgeCount(unread)}
                     </span>
                   )}
                 </Link>
@@ -173,6 +203,7 @@ export function Sidebar({ me }: { me: MeView }) {
         </p>
         <p className="mb-2 px-3 text-xs text-slate-500">{me.email}</p>
         <LogoutButton />
+      </div>
       </div>
     </aside>
   );

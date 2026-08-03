@@ -12,6 +12,7 @@ import {
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, type ApiError } from '../../../lib/api';
 import { relativeTime } from '../../../lib/notifications';
+import { badgeCount, unreadLabel } from '../../../lib/badge';
 import {
   messagingApi,
   uploadAttachment,
@@ -265,8 +266,11 @@ function ConversationList({
                   {c.subject || c.contextLabel}
                 </p>
                 {c.unreadCount > 0 && (
-                  <span className="inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full bg-belize-accent px-1.5 text-[10px] font-bold leading-[18px] text-white">
-                    {c.unreadCount > 99 ? '99+' : c.unreadCount}
+                  <span
+                    aria-label={unreadLabel(c.unreadCount)}
+                    className="inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full bg-belize-accent px-1.5 text-[10px] font-bold leading-[18px] text-white"
+                  >
+                    {badgeCount(c.unreadCount)}
                   </span>
                 )}
               </div>
@@ -670,7 +674,7 @@ function Composer({
                 type="button"
                 onClick={() => removeFile(f.id)}
                 aria-label={`Remove ${f.file.name}`}
-                className="shrink-0 text-slate-400 hover:text-slate-600"
+                className="inline-flex min-h-[32px] min-w-[32px] shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>
                   <path d="M6 6l12 12M18 6L6 18" />

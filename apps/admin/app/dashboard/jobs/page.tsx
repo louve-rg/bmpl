@@ -24,6 +24,7 @@ import { api, type ApiError } from '../../../lib/api';
 import { relativeTime } from '../../../lib/notifications';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Alert, Badge, Button, EmptyState, Field, Input, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 /**
  * Belize Connect (Jobs) admin console — M24. Client shapes mirror the documented
@@ -207,6 +208,7 @@ export default function JobsPage() {
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs('Jobs')}
         eyebrow="Belize Connect"
         title="Jobs moderation & operations"
         description="Moderate job listings, resolve community reports, manage employers and categories, and track Belize Connect performance."

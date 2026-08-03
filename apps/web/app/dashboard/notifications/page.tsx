@@ -162,7 +162,10 @@ export default function NotificationsPage() {
                 <Card className={`p-4 transition ${item.read ? '' : 'ring-1 ring-belize-blue/20'}`}>
                   <div className="flex items-start gap-3">
                     {!item.read ? (
-                      <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-belize-accent" aria-hidden />
+                      <>
+                        <span className="sr-only">Unread notification.</span>
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-belize-accent" aria-hidden />
+                      </>
                     ) : (
                       <span className="mt-1.5 h-2 w-2 shrink-0" aria-hidden />
                     )}
@@ -190,7 +193,7 @@ export default function NotificationsPage() {
                         type="button"
                         onClick={() => dismiss(item)}
                         aria-label="Dismiss notification"
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4" aria-hidden>
                           <path d="M6 6l12 12M18 6L6 18" />

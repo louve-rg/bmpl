@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { serverGet } from '../../lib/server-api';
 import { Card, PageHeader } from '../../components/ui';
+import { adminCrumbs } from '../../lib/admin-nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,7 @@ export default async function AdminDashboard() {
 
   return (
     <div>
-      <PageHeader eyebrow="Admin" title="Overview" description="A quick snapshot of platform activity that needs attention." />
+      <PageHeader breadcrumbs={adminCrumbs('Overview')} eyebrow="Admin" title="Overview" description="A quick snapshot of platform activity that needs attention." />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (
           <Link key={c.label} href={c.href} className="block">

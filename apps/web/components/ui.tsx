@@ -289,12 +289,30 @@ export function Select({ className = '', children, ...props }: ComponentProps<'s
   );
 }
 
-/** Label + control + optional error, with the error wired to the field via id. */
+/**
+ * Label + control + optional error/hint.
+ *
+ * Association: when the caller passes `htmlFor` (and sets a matching `id` on the
+ * control) the label is wired explicitly. When `htmlFor` is omitted the control is
+ * wrapped inside the `<label>` element so the association is IMPLICIT — this keeps
+ * every `<Field>` accessible without requiring per-call ids, and stays a plain
+ * (hook-free) server-compatible component. The error uses `role="alert"` so it is
+ * announced when it appears.
+ */
 export function Field({ label, htmlFor, error, hint, children }: { label: string; htmlFor?: string; error?: string | null; hint?: string; children: ReactNode }) {
   return (
     <div>
-      <Label htmlFor={htmlFor}>{label}</Label>
-      {children}
+      {htmlFor ? (
+        <>
+          <Label htmlFor={htmlFor}>{label}</Label>
+          {children}
+        </>
+      ) : (
+        <label className="block">
+          <span className="bmpl-label">{label}</span>
+          {children}
+        </label>
+      )}
       {hint && !error && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
       {error && (
         <p className="mt-1 text-xs font-medium text-red-600" role="alert">

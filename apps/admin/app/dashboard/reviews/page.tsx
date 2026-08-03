@@ -5,6 +5,7 @@ import { api, type ApiError } from '../../../lib/api';
 import { relativeTime } from '../../../lib/notifications';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 /**
  * Client shapes for the M19 admin reviews moderation console. Mirrors the
@@ -93,6 +94,7 @@ export default function ReviewsPage() {
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs('Reviews')}
         eyebrow="Reviews"
         title="Reviews moderation"
         description="Moderate customer reviews across products, vendors and drivers, and resolve reports flagged by the community."

@@ -111,10 +111,10 @@ export function ImageManager({
               )}
               <div className="flex items-center justify-between gap-1 bg-white p-1.5 text-xs">
                 <div className="flex gap-1">
-                  <button type="button" disabled={busy || i === 0} onClick={() => move(i, -1)} className="rounded px-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label="Move left">
+                  <button type="button" disabled={busy || i === 0} onClick={() => move(i, -1)} className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center rounded text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label="Move left">
                     ←
                   </button>
-                  <button type="button" disabled={busy || i === images.length - 1} onClick={() => move(i, 1)} className="rounded px-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label="Move right">
+                  <button type="button" disabled={busy || i === images.length - 1} onClick={() => move(i, 1)} className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center rounded text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label="Move right">
                     →
                   </button>
                 </div>

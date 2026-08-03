@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { serverGet } from '../../../../lib/server-api';
 import { StatusBadge } from '../../../../components/StatusBadge';
-import { Alert, Badge, Card } from '../../../../components/ui';
+import { Alert, Badge, Breadcrumbs, Card } from '../../../../components/ui';
+import { adminCrumbs } from '../../../../lib/admin-nav';
 import { ProductModeration } from './ProductModeration';
 
 export const dynamic = 'force-dynamic';
@@ -40,6 +41,7 @@ export default async function AdminProductDetail({ params }: { params: { id: str
 
   return (
     <div className="mx-auto max-w-3xl">
+      <Breadcrumbs items={adminCrumbs(['Products', '/dashboard/products'], p.title)} className="mb-3" />
       <Link href="/dashboard/products" className="text-sm font-medium text-belize-blue hover:underline">← Products</Link>
 
       <div className="mt-4 flex items-start justify-between">

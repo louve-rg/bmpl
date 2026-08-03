@@ -233,7 +233,7 @@ function CartRow({
               aria-label="Decrease quantity"
               disabled={busy || item.quantity <= 1}
               onClick={() => onUpdate(item.quantity - 1)}
-              className="px-2.5 py-1 text-slate-600 disabled:opacity-40"
+              className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center text-lg text-slate-600 disabled:opacity-40"
             >
               −
             </button>
@@ -245,7 +245,7 @@ function CartRow({
               aria-label="Increase quantity"
               disabled={busy || (item.available != null && item.quantity >= item.available)}
               onClick={() => onUpdate(item.quantity + 1)}
-              className="px-2.5 py-1 text-slate-600 disabled:opacity-40"
+              className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center text-lg text-slate-600 disabled:opacity-40"
               title={item.available != null && item.quantity >= item.available ? `Only ${item.available} in stock` : undefined}
             >
               +
@@ -255,7 +255,7 @@ function CartRow({
             type="button"
             onClick={onRemove}
             disabled={busy}
-            className="text-xs font-medium text-slate-500 hover:text-red-600 disabled:opacity-40"
+            className="inline-flex min-h-[40px] items-center px-1 text-xs font-medium text-slate-500 hover:text-red-600 disabled:opacity-40"
           >
             Remove
           </button>

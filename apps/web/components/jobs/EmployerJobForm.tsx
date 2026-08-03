@@ -319,7 +319,7 @@ export function EmployerJobForm({ initial }: { initial?: EmployerJobDetail }) {
             <span key={`${s.name}-${i}`} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
               {s.name}
               {s.required && <Badge tone="brand">required</Badge>}
-              <button type="button" onClick={() => setSkills(skills.filter((_, j) => j !== i))} className="text-xs text-red-600 hover:underline">
+              <button type="button" aria-label={`Remove ${s.name}`} onClick={() => setSkills(skills.filter((_, j) => j !== i))} className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs text-red-600 hover:bg-red-50">
                 ✕
               </button>
             </span>
@@ -355,7 +355,7 @@ export function EmployerJobForm({ initial }: { initial?: EmployerJobDetail }) {
           {benefits.map((b, i) => (
             <span key={`${b}-${i}`} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
               {b}
-              <button type="button" onClick={() => setBenefits(benefits.filter((_, j) => j !== i))} className="text-xs text-red-600 hover:underline">
+              <button type="button" aria-label={`Remove ${b}`} onClick={() => setBenefits(benefits.filter((_, j) => j !== i))} className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs text-red-600 hover:bg-red-50">
                 ✕
               </button>
             </span>

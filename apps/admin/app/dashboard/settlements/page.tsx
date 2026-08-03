@@ -16,6 +16,7 @@ import {
   Spinner,
   type Tone,
 } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 /* --------------------------------------------------------------- types */
 
@@ -137,7 +138,7 @@ export default function AdminSettlementsPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader eyebrow="Finance" title="Settlements & Escrow" description="Reconciliation, internal balances, settlement history and platform fee configuration. Money is read-only — no manual balance or ledger edits." />
+      <PageHeader breadcrumbs={adminCrumbs('Settlements')} eyebrow="Finance" title="Settlements & Escrow" description="Reconciliation, internal balances, settlement history and platform fee configuration. Money is read-only — no manual balance or ledger edits." />
 
       {readOnly && (
         <Alert tone="info" title="Read-only access">

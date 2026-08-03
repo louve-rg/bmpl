@@ -88,6 +88,7 @@ export function TargetPicker({
           <div key={i} className="flex flex-wrap items-end gap-2 rounded-bmpl-md border border-slate-200 p-3">
             <div className="min-w-[10rem] flex-1">
               <Select
+                aria-label="Target type"
                 value={t.targetType}
                 disabled={disabled}
                 onChange={(e) => setType(i, e.target.value as PromotionTargetType)}
@@ -102,6 +103,7 @@ export function TargetPicker({
             {field && (
               <div className="min-w-[12rem] flex-[2]">
                 <Input
+                  aria-label="Target value"
                   placeholder={FIELD_HINT[t.targetType]}
                   value={fieldValue}
                   disabled={disabled}

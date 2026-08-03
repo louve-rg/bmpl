@@ -12,6 +12,7 @@ import { relativeTime, type NotificationFeed, type NotificationItem } from '../.
 import { CategoryChip } from '../../../components/notifications/CategoryChip';
 import { PreferencesPanel } from '../../../components/notifications/PreferencesPanel';
 import { Alert, Button, EmptyState, PageHeader, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 const ALL_KEY = '__all__';
 const PAGE_SIZE = 20;
@@ -166,6 +167,7 @@ export default function NotificationsPage() {
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs('Notifications')}
         eyebrow="Notifications"
         title="Notification center"
         description="System and moderation alerts — vendor and driver applications, order exceptions, failed deliveries, and security events."

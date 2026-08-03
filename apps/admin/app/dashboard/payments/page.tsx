@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { EmptyState, PageHeader, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface PaymentRow {
   id: string;
@@ -33,7 +34,7 @@ export default function AdminPaymentsPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Finance" title="Payments" description="Read-only. Foundation only — no funds move yet (wallet holds are reservations)." />
+      <PageHeader breadcrumbs={adminCrumbs('Payments')} eyebrow="Finance" title="Payments" description="Read-only. Foundation only — no funds move yet (wallet holds are reservations)." />
 
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-slate-500">

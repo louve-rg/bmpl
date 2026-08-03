@@ -3,6 +3,7 @@ import { ROLE_DEFINITIONS, type RoleCode } from '@bmpl/shared';
 import { serverGet } from '../../../lib/server-api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { EmptyState, PageHeader } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,7 @@ export default async function ApplicationsQueue({
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs('Role Applications')}
         eyebrow="Onboarding"
         title="Role Applications"
         actions={

@@ -5,6 +5,7 @@ import { api, type ApiError } from '../../../lib/api';
 import { relativeTime } from '../../../lib/notifications';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Alert, Badge, Button, EmptyState, PageHeader, Spinner, Textarea } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 /**
  * Client shapes for the M17 admin support console. Mirrors the documented
@@ -134,6 +135,7 @@ export default function SupportPage() {
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs('Support')}
         eyebrow="Support"
         title="Support console"
         description="Customer support conversations and order communication. Reply to customers or add staff-only internal notes."

@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api } from '../../../../lib/api';
 import { StatusBadge } from '../../../../components/StatusBadge';
-import { Card, Spinner } from '../../../../components/ui';
+import { Breadcrumbs, Card, Spinner } from '../../../../components/ui';
+import { adminCrumbs } from '../../../../lib/admin-nav';
 
 interface Hold { id: string; status: string; amountMinor: number; currency: string; heldAt: string; releasedAt: string | null; releaseReason: string | null }
 interface LedgerRef { id: string; purpose: string; direction: string; amountMinor: number; status: string; walletTransactionId: string | null }
@@ -38,14 +39,24 @@ export default function AdminPaymentDetailPage() {
 
   if (state === 'loading')
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
-        <Spinner className="h-4 w-4" /> Loading…
+      <div>
+        <Breadcrumbs items={adminCrumbs(['Payments', '/dashboard/payments'], 'Payment')} className="mb-3" />
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading…
+        </div>
       </div>
     );
-  if (state === 'error' || !p) return <p className="text-sm text-slate-500">Payment not found.</p>;
+  if (state === 'error' || !p)
+    return (
+      <div>
+        <Breadcrumbs items={adminCrumbs(['Payments', '/dashboard/payments'], 'Payment')} className="mb-3" />
+        <p className="text-sm text-slate-500">Payment not found.</p>
+      </div>
+    );
 
   return (
     <div>
+      <Breadcrumbs items={adminCrumbs(['Payments', '/dashboard/payments'], p.paymentNumber)} className="mb-3" />
       <Link href="/dashboard/payments" className="text-sm font-medium text-belize-blue hover:underline">← Payments</Link>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <div>

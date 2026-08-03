@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { serverGet } from '../../../../lib/server-api';
 import { StatusBadge } from '../../../../components/StatusBadge';
-import { Alert } from '../../../../components/ui';
+import { Alert, Breadcrumbs } from '../../../../components/ui';
+import { adminCrumbs } from '../../../../lib/admin-nav';
 import { VendorModeration } from './VendorModeration';
 
 export const dynamic = 'force-dynamic';
@@ -36,6 +37,7 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
 
   return (
     <div className="mx-auto max-w-4xl">
+      <Breadcrumbs items={adminCrumbs(['Vendors', '/dashboard/vendors'], v.businessName)} className="mb-3" />
       <Link href="/dashboard/vendors" className="text-sm font-medium text-belize-blue hover:underline">
         ← Vendors
       </Link>

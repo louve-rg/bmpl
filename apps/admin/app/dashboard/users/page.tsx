@@ -6,6 +6,7 @@ import type { RoleCode } from '@bmpl/shared';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Badge, Button, Input, PageHeader, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface UserRow {
   id: string;
@@ -50,6 +51,7 @@ export default function UsersPage() {
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs('Users')}
         eyebrow="Accounts"
         title="Users"
         actions={

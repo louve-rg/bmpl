@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { EmptyState, PageHeader, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface OrderRow {
   id: string;
@@ -35,7 +36,7 @@ export default function AdminOrdersPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Fulfilment" title="Orders" description="Read-only view. Fulfilment and payment controls are later milestones." />
+      <PageHeader breadcrumbs={adminCrumbs('Orders')} eyebrow="Fulfilment" title="Orders" description="Read-only view. Fulfilment and payment controls are later milestones." />
 
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-slate-500">

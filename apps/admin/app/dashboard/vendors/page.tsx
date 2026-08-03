@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { PageHeader, Spinner } from '../../../components/ui';
+import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface VendorRow {
   id: string;
@@ -38,7 +39,7 @@ export default function VendorsPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Marketplace" title="Vendors" />
+      <PageHeader breadcrumbs={adminCrumbs('Vendors')} eyebrow="Marketplace" title="Vendors" />
       <div className="mb-5 flex flex-wrap gap-2">
         {STATUSES.map((s) => (
           <button

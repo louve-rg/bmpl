@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { api, type ApiError } from '../../../../lib/api';
 import { StatusBadge } from '../../../../components/StatusBadge';
 import { Badge, Button, Card, PageHeader, Spinner } from '../../../../components/ui';
+import { adminCrumbs } from '../../../../lib/admin-nav';
 
 type ExpiryStatus = 'VALID' | 'EXPIRING_SOON' | 'EXPIRED' | null;
 
@@ -116,6 +117,7 @@ function DriverDetailView({ driver: d, onChanged }: { driver: DriverDetail; onCh
   return (
     <div>
       <PageHeader
+        breadcrumbs={adminCrumbs(['Drivers', '/dashboard/drivers'], d.displayName || d.legalName)}
         title={d.displayName || d.legalName}
         eyebrow="Driver"
         actions={

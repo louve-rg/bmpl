@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import { ROLE_DEFINITIONS, type RoleCode } from '@bmpl/shared';
 import { serverGet } from '../../../../lib/server-api';
 import { StatusBadge } from '../../../../components/StatusBadge';
-import { Badge, Card } from '../../../../components/ui';
+import { Badge, Breadcrumbs, Card } from '../../../../components/ui';
+import { adminCrumbs } from '../../../../lib/admin-nav';
 import { AccountActions, RoleActions } from './RoleActions';
 
 export const dynamic = 'force-dynamic';
@@ -29,6 +30,7 @@ export default async function UserDetailPage({ params }: { params: { id: string 
 
   return (
     <div className="mx-auto max-w-3xl">
+      <Breadcrumbs items={adminCrumbs(['Users', '/dashboard/users'], `${u.firstName} ${u.lastName}`)} className="mb-3" />
       <Link href="/dashboard/users" className="text-sm font-medium text-belize-blue hover:underline">
         ← Back to users
       </Link>

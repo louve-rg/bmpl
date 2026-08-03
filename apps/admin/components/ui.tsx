@@ -54,15 +54,67 @@ export function Card({ className = '', children, ...props }: ComponentProps<'div
   );
 }
 
-export function PageHeader({ title, description, eyebrow, actions }: { title: string; description?: string; eyebrow?: string; actions?: ReactNode }) {
+export type Crumb = { label: string; href?: string };
+
+/**
+ * Accessible admin breadcrumb trail. Last item is the current page (not a link,
+ * `aria-current="page"`); earlier items link to real ancestor routes so the trail
+ * matches the URL hierarchy and works for direct/shared deep links (no history reliance).
+ */
+export function Breadcrumbs({ items, className = '' }: { items: Crumb[]; className?: string }) {
   return (
-    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        {eyebrow && <p className="bmpl-eyebrow">{eyebrow}</p>}
-        <h1 className="bmpl-page-title mt-1">{title}</h1>
-        {description && <p className="mt-1.5 text-sm text-slate-500">{description}</p>}
+    <nav aria-label="Breadcrumb" className={`text-sm ${className}`}>
+      <ol className="flex flex-wrap items-center gap-1.5 text-slate-500">
+        {items.map((item, i) => {
+          const last = i === items.length - 1;
+          return (
+            <li key={`${item.label}-${i}`} className="flex items-center gap-1.5">
+              {item.href && !last ? (
+                <Link href={item.href} className="font-medium text-belize-blue hover:underline">
+                  {item.label}
+                </Link>
+              ) : (
+                <span className={last ? 'font-medium text-belize-navy' : ''} aria-current={last ? 'page' : undefined}>
+                  {item.label}
+                </span>
+              )}
+              {!last && (
+                <span aria-hidden="true" className="text-slate-300">
+                  /
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+export function PageHeader({
+  title,
+  description,
+  eyebrow,
+  actions,
+  breadcrumbs,
+}: {
+  title: string;
+  description?: string;
+  eyebrow?: string;
+  actions?: ReactNode;
+  breadcrumbs?: Crumb[];
+}) {
+  return (
+    <div className="mb-6">
+      {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs items={breadcrumbs} className="mb-3" />}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          {eyebrow && <p className="bmpl-eyebrow">{eyebrow}</p>}
+          <h1 className="bmpl-page-title mt-1">{title}</h1>
+          {description && <p className="mt-1.5 text-sm text-slate-500">{description}</p>}
+        </div>
+        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
