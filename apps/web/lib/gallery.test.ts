@@ -55,7 +55,7 @@ describe('buildGalleryImages — combined "All" gallery', () => {
   });
 });
 
-describe('buildGalleryImages — specific variant selected (unchanged behaviour)', () => {
+describe('buildGalleryImages — specific variant selected', () => {
   it('returns only Perfect in Pink images, vendor order', () => {
     expect(urls(buildGalleryImages(apiInterleaved, ORDER, 'pip'))).toEqual(['pip-group', 'pip-lotion', 'pip-spray']);
   });
@@ -69,9 +69,13 @@ describe('buildGalleryImages — specific variant selected (unchanged behaviour)
     expect(all.length).toBe(9);
     expect(all.slice(3, 6)).toEqual(pip); // PIP group intact inside the All sequence
   });
-  it('falls back to general/all when the selected variant has no images', () => {
+  it('a selected variant with NO images returns empty — never borrows general or other variants', () => {
     const withGeneral = [img('gen-1', null, 0, true), ...apiInterleaved];
-    expect(urls(buildGalleryImages(withGeneral, ORDER, 'nonexistent'))).toEqual(['gen-1']);
+    expect(buildGalleryImages(withGeneral, ORDER, 'nonexistent')).toEqual([]);
+  });
+  it('does not leak general/unassigned images when a specific variant is selected', () => {
+    const withGeneral = [img('gen-1', null, 0, true), ...apiInterleaved];
+    expect(urls(buildGalleryImages(withGeneral, ORDER, 'pip'))).toEqual(['pip-group', 'pip-lotion', 'pip-spray']);
   });
 });
 

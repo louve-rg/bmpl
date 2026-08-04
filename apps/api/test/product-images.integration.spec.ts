@@ -163,6 +163,63 @@ describe('product image manager', () => {
   });
 });
 
+describe('server-side image upload (browser → API → storage, raw body)', () => {
+  let vendor: Awaited<ReturnType<typeof makeVendorWithProduct>>;
+
+  const uploadRaw = (cookies: string[], productId: string, buf: Buffer, contentType: string, qs = '') =>
+    request(ctx.server)
+      .post(`/api/vendor/products/${productId}/images/upload${qs}`)
+      .set('Cookie', cookies)
+      .set('Content-Type', contentType)
+      .send(buf);
+
+  it('uploads a PNG via the raw endpoint (auto-primary, real sniffed MIME/size)', async () => {
+    vendor = await makeVendorWithProduct('upl_v@example.bz', 'Upl');
+    const res = await uploadRaw(vendor.cookies, vendor.productId, PNG, 'image/png');
+    expect(res.status).toBe(201);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].isPrimary).toBe(true);
+    expect(res.body[0].mimeType).toBe('image/png');
+    expect(res.body[0].fileSizeBytes).toBe(PNG.length);
+  });
+
+  it('rejects non-image bytes even when the Content-Type claims image/png', async () => {
+    const pdf = Buffer.from('%PDF-1.4 not really a png', 'utf8');
+    const res = await uploadRaw(vendor.cookies, vendor.productId, pdf, 'image/png');
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an empty body', async () => {
+    const res = await uploadRaw(vendor.cookies, vendor.productId, Buffer.alloc(0), 'image/png');
+    expect(res.status).toBe(400);
+  });
+
+  it('assigns the upload to a specific variant via ?variantId=', async () => {
+    await request(ctx.server).post(`/api/vendor/products/${vendor.productId}/options`).set('Cookie', vendor.cookies).send({ name: 'Kind', values: ['One'] }).expect(201);
+    const view = await request(ctx.server).get(`/api/vendor/products/${vendor.productId}/variants`).set('Cookie', vendor.cookies);
+    const valueId = view.body.options[0].values[0].id;
+    const created = await request(ctx.server).post(`/api/vendor/products/${vendor.productId}/variants`).set('Cookie', vendor.cookies).send({ optionValueIds: [valueId], sku: 'ONE' });
+    const variantId = created.body.variants[0].id as string;
+    const res = await uploadRaw(vendor.cookies, vendor.productId, PNG, 'image/png', `?variantId=${variantId}`);
+    expect(res.status).toBe(201);
+    expect(res.body.some((i: { variantId: string | null }) => i.variantId === variantId)).toBe(true);
+  });
+
+  it('replaces an image file in place, preserving variant + primary', async () => {
+    const list = await request(ctx.server).get(`/api/vendor/products/${vendor.productId}/images`).set('Cookie', vendor.cookies);
+    const target = list.body.find((i: { variantId: string | null }) => i.variantId === null) ?? list.body[0];
+    const res = await request(ctx.server)
+      .post(`/api/vendor/products/${vendor.productId}/images/${target.id}/replace-file`)
+      .set('Cookie', vendor.cookies)
+      .set('Content-Type', 'image/png')
+      .send(PNG);
+    expect(res.status).toBe(201);
+    const updated = res.body.find((i: { id: string }) => i.id === target.id);
+    expect(updated.isPrimary).toBe(target.isPrimary);
+    expect(updated.variantId).toBe(target.variantId);
+  });
+});
+
 describe('image ownership', () => {
   it("forbids vendor B from managing vendor A's product images", async () => {
     const a = await makeVendorWithProduct('img_a@example.bz', 'AImg');

@@ -5,7 +5,7 @@ import { api } from '../../lib/api';
 import { Badge } from '../ui';
 import type { ProductImage } from './types';
 import { asApiError, ConfirmAction } from './shared';
-import { presignAndPut } from './uploads';
+import { replaceProductImageFile, uploadErrorMessage } from './uploads';
 
 const ACCEPT = 'image/jpeg,image/png,image/webp';
 
@@ -31,15 +31,10 @@ export function BrandImageSlot({ productId, image, onMutate, onError }: Props) {
   async function replace(file: File) {
     setReplacing(true);
     try {
-      const up = await presignAndPut(productId, file);
-      await api.post(`/vendor/products/${productId}/images/${image!.id}/replace`, {
-        key: up.key,
-        width: up.width,
-        height: up.height,
-      });
+      await replaceProductImageFile(productId, image!.id, file);
       await onMutate();
     } catch (e) {
-      onError(asApiError(e).message);
+      onError(uploadErrorMessage(e));
     } finally {
       setReplacing(false);
       if (replaceRef.current) replaceRef.current.value = '';

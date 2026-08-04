@@ -92,10 +92,15 @@ export function StorefrontPreview({
   const state: PurchaseStateKind = ps.state;
 
   const galleryImages: GalleryImage[] = useMemo(() => {
-    // Exclude the Brand Image (listing-only) so the preview matches the live API,
-    // then order via the SAME shared utility as the marketplace product page.
+    // Mirror the PUBLIC gallery exactly (see API listGallery):
+    //  - exclude the Brand Image (listing-only role),
+    //  - a VARIANT product shows ONLY images assigned to an active variant — the
+    //    General (not assigned) pool is never public,
+    //  - a SIMPLE product (no variants) shows its general (variantId = null) images.
+    const activeIds = new Set(variants.map((v) => v.id));
     const mapped: GalleryImage[] = images
       .filter((i) => i.url && !i.isBrandImage && i.role !== 'BRAND')
+      .filter((i) => (hasVariants ? i.variantId != null && activeIds.has(i.variantId) : i.variantId == null))
       .map((i) => ({
         id: i.id,
         url: i.url,
@@ -105,7 +110,7 @@ export function StorefrontPreview({
         isPrimary: i.isPrimary,
       }));
     return buildGalleryImages(mapped, variants.map((v) => v.id), selectedVariant?.id ?? null);
-  }, [images, variants, selectedVariant]);
+  }, [images, variants, hasVariants, selectedVariant]);
 
   const lineupImages: LineupImage[] = useMemo(
     () =>

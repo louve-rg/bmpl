@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import {
   isAllowedProductImageMime,
   MAX_PRODUCT_IMAGE_BYTES,
+  productImageExt,
+  sniffProductImageMime,
   STORAGE_PREFIX,
 } from '@bmpl/shared';
 import type { ProductImageConfirmInput, ProductImageReplaceInput, ProductImageUpdateInput } from '@bmpl/validation';
@@ -47,28 +49,134 @@ export class ProductImagesService {
     }
     if (dto.variantId) await this.assertVariantInProduct(productId, dto.variantId);
 
+    await this.persistImage(productId, {
+      key: dto.key,
+      mimeType: meta.contentType,
+      fileSizeBytes: meta.sizeBytes,
+      width: dto.width,
+      height: dto.height,
+      altText: dto.altText,
+      caption: dto.caption,
+      variantId: dto.variantId ?? null,
+    });
+    return this.list(productId);
+  }
+
+  /**
+   * Server-side upload (browser → API → storage) for a product image. The file
+   * arrives as a raw request body through the same-origin web proxy, so there is
+   * no cross-origin browser PUT to the storage endpoint (the cause of the mobile
+   * "Load failed"). The real MIME is sniffed from the bytes — a client-declared
+   * Content-Type is never trusted — and size is enforced on the actual buffer.
+   */
+  async upload(
+    userId: string,
+    productId: string,
+    buffer: Buffer | undefined,
+    opts: { variantId?: string; width?: number; height?: number; altText?: string; caption?: string } = {},
+  ) {
+    if (!buffer || buffer.length === 0) {
+      throw new BadRequestException('No image data was received. Please choose an image and try again.');
+    }
+    if (buffer.length > MAX_PRODUCT_IMAGE_BYTES) {
+      throw new BadRequestException('The image is too large.');
+    }
+    const mime = sniffProductImageMime(buffer);
+    if (!mime) {
+      throw new BadRequestException('Unsupported image type. Use JPEG, PNG, or WebP.');
+    }
+    const product = await this.ownership.ownedProduct(userId, productId);
+    if (opts.variantId) await this.assertVariantInProduct(productId, opts.variantId);
+    const key = this.storage.buildKey(
+      STORAGE_PREFIX.productImage(product.vendorProfileId, product.id),
+      `image.${productImageExt(mime)}`,
+    );
+    await this.storage.putObject(key, buffer, mime, 'public');
+    await this.persistImage(productId, {
+      key,
+      mimeType: mime,
+      fileSizeBytes: buffer.length,
+      width: opts.width,
+      height: opts.height,
+      altText: opts.altText,
+      caption: opts.caption,
+      variantId: opts.variantId ?? null,
+    });
+    return this.list(productId);
+  }
+
+  /**
+   * Server-side in-place FILE replace (browser → API → storage). Preserves the
+   * image's variant, position, primary status, alt text and caption — same
+   * contract as {@link replace} but without a cross-origin browser PUT.
+   */
+  async replaceFile(
+    userId: string,
+    productId: string,
+    imageId: string,
+    buffer: Buffer | undefined,
+    opts: { width?: number; height?: number } = {},
+  ) {
+    const product = await this.ownership.ownedProduct(userId, productId);
+    const image = await this.ownedImage(productId, imageId);
+    if (!buffer || buffer.length === 0) {
+      throw new BadRequestException('No image data was received. Please choose an image and try again.');
+    }
+    if (buffer.length > MAX_PRODUCT_IMAGE_BYTES) throw new BadRequestException('The image is too large.');
+    const mime = sniffProductImageMime(buffer);
+    if (!mime) throw new BadRequestException('Unsupported image type. Use JPEG, PNG, or WebP.');
+    const key = this.storage.buildKey(
+      STORAGE_PREFIX.productImage(product.vendorProfileId, product.id),
+      `image.${productImageExt(mime)}`,
+    );
+    await this.storage.putObject(key, buffer, mime, 'public');
+    const oldKey = image.storageKey;
+    await this.prisma.productImage.update({
+      where: { id: imageId },
+      // variantId / position / isPrimary / altText / caption are intentionally preserved.
+      data: { storageKey: key, mimeType: mime, fileSizeBytes: buffer.length, width: opts.width ?? null, height: opts.height ?? null },
+    });
+    await this.storage.deleteObject(oldKey, 'public');
+    return this.list(productId);
+  }
+
+  /**
+   * Create a ProductImage row. The first image within a variant GROUP (or the
+   * general/unassigned group) becomes that group's primary — so every variant
+   * gallery has a primary of its own.
+   */
+  private async persistImage(
+    productId: string,
+    data: {
+      key: string;
+      mimeType: string;
+      fileSizeBytes: number;
+      width?: number | null;
+      height?: number | null;
+      altText?: string | null;
+      caption?: string | null;
+      variantId?: string | null;
+    },
+  ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const count = await tx.productImage.count({ where: { productId } });
-      // The first image within a variant GROUP (or the general group) becomes that
-      // group's primary — so every variant gallery has a primary of its own.
-      const groupCount = await tx.productImage.count({ where: { productId, variantId: dto.variantId ?? null } });
+      const groupCount = await tx.productImage.count({ where: { productId, variantId: data.variantId ?? null } });
       await tx.productImage.create({
         data: {
           productId,
-          variantId: dto.variantId ?? null,
-          storageKey: dto.key,
-          mimeType: meta.contentType,
-          fileSizeBytes: meta.sizeBytes,
-          width: dto.width ?? null,
-          height: dto.height ?? null,
-          altText: dto.altText ?? null,
-          caption: dto.caption ?? null,
+          variantId: data.variantId ?? null,
+          storageKey: data.key,
+          mimeType: data.mimeType,
+          fileSizeBytes: data.fileSizeBytes,
+          width: data.width ?? null,
+          height: data.height ?? null,
+          altText: data.altText ?? null,
+          caption: data.caption ?? null,
           position: count,
           isPrimary: groupCount === 0,
         },
       });
     });
-    return this.list(productId);
   }
 
   /** A variant referenced by an image must belong to the same product. */
@@ -237,17 +345,23 @@ export class ProductImagesService {
     return Promise.all(rows.map((r) => this.serialize(r)));
   }
 
-  /** Customer-facing detail GALLERY — excludes the brand image (listing-only role). */
-  /** Public gallery: general images (variantId null) + images of ACTIVE variants only,
-   *  never the Brand Image. Images belonging to a deactivated/archived variant are
-   *  excluded so a hidden variant leaves no stale images/thumbnails behind. */
+  /**
+   * Customer-facing detail GALLERY. Source of truth for what is publicly visible:
+   *  - A VARIANT product (has ≥1 variant): ONLY images assigned to an ACTIVE
+   *    variant. Unassigned images (variantId = null) are an internal editor pool
+   *    and are NEVER public; images of a deactivated/archived variant are excluded
+   *    so a hidden variant leaves no stale images/thumbnails behind.
+   *  - A SIMPLE product (no variants): its general (variantId = null) images ARE
+   *    the gallery — there is no variant to assign them to.
+   * The Brand Image (listing-only role) is always excluded here.
+   */
   async listGallery(productId: string) {
+    const hasVariants = (await this.prisma.productVariant.count({ where: { productId } })) > 0;
+    const where = hasVariants
+      ? { productId, isBrandImage: false, variantId: { not: null }, variant: { isActive: true } }
+      : { productId, isBrandImage: false, variantId: null };
     const rows = await this.prisma.productImage.findMany({
-      where: {
-        productId,
-        isBrandImage: false,
-        OR: [{ variantId: null }, { variant: { isActive: true } }],
-      },
+      where,
       orderBy: [{ isPrimary: 'desc' }, { position: 'asc' }],
     });
     return Promise.all(rows.map((r) => this.serialize(r)));
@@ -279,22 +393,40 @@ export class ProductImagesService {
   }
 
   /**
-   * Batch: the marketplace listing/card image URL per product id (M6.2 precedence):
-   * 1) the Brand Image, 2) the general (variantId = null) primary, 3) any primary,
-   * 4) the first image. Deterministic product-level thumbnail for catalog / search /
-   * category / storefront cards.
+   * Batch: the marketplace listing/card image URL per product id. Only publicly
+   * eligible images qualify — the unassigned pool is NEVER a card image:
+   *  1) the Brand Image (always eligible), else
+   *  2) for a VARIANT product: the primary/first image of an ACTIVE variant, else
+   *     for a SIMPLE product: the general (variantId = null) primary/first image,
+   *  3) null when nothing eligible exists.
+   * Deterministic product-level thumbnail for catalog / search / category / cards.
    */
   async primaryUrls(productIds: string[]): Promise<Map<string, string | null>> {
     const out = new Map<string, string | null>();
     if (!productIds.length) return out;
-    const rows = await this.prisma.productImage.findMany({
-      where: { productId: { in: productIds } },
-      orderBy: [{ isBrandImage: 'desc' }, { isPrimary: 'desc' }, { position: 'asc' }],
-    });
-    const rank = (r: { isBrandImage: boolean; isPrimary: boolean; variantId: string | null }): number =>
-      r.isBrandImage ? 3 : r.isPrimary && r.variantId === null ? 2 : r.isPrimary ? 1 : 0;
+    const [rows, variantRows] = await Promise.all([
+      this.prisma.productImage.findMany({
+        where: { productId: { in: productIds } },
+        orderBy: [{ isBrandImage: 'desc' }, { isPrimary: 'desc' }, { position: 'asc' }],
+        include: { variant: { select: { isActive: true } } },
+      }),
+      this.prisma.productVariant.findMany({
+        where: { productId: { in: productIds } },
+        select: { productId: true },
+        distinct: ['productId'],
+      }),
+    ]);
+    const hasVariants = new Set(variantRows.map((v) => v.productId));
+    const eligible = (r: (typeof rows)[number]): boolean => {
+      if (r.isBrandImage) return true;
+      if (hasVariants.has(r.productId)) return r.variantId != null && r.variant?.isActive === true;
+      return r.variantId === null; // simple product: general images are public
+    };
+    const rank = (r: { isBrandImage: boolean; isPrimary: boolean }): number =>
+      r.isBrandImage ? 2 : r.isPrimary ? 1 : 0;
     const chosen = new Map<string, (typeof rows)[number]>();
     for (const r of rows) {
+      if (!eligible(r)) continue;
       const cur = chosen.get(r.productId);
       if (!cur || rank(r) > rank(cur)) chosen.set(r.productId, r);
     }

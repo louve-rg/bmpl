@@ -16,7 +16,9 @@ import { StorefrontPreview } from './StorefrontPreview';
  * Variant-centric product editor (Phase M6.1). Replaces the previous
  * ImageManager + VariantsInventory pair with a single cohesive workflow:
  * Options → Variant builder → per-variant editor cards (each with its own
- * image gallery) → a general (all-variants) gallery → storefront preview.
+ * image gallery) → a General (not assigned) image pool → storefront preview.
+ * The General pool is editor-only: those images are NOT shown on the storefront
+ * until the vendor assigns them to a specific variant.
  */
 export function ProductEditorManager({ productId }: { productId: string }) {
   const [view, setView] = useState<ManageView | null>(null);
@@ -177,12 +179,13 @@ export function ProductEditorManager({ productId }: { productId: string }) {
         <BrandImageSlot productId={productId} image={brandImage} onMutate={reloadImages} onError={setActionErr} />
       </Card>
 
-      {/* General / all-variants gallery */}
+      {/* General (not assigned) image pool — editor-only, never shown publicly */}
       <Card className="space-y-4 p-5 sm:p-6">
         <div>
-          <h2 className="bmpl-eyebrow">General images</h2>
+          <h2 className="bmpl-eyebrow">General images (not assigned)</h2>
           <p className="mt-1 text-xs text-slate-400">
-            Shown for the product regardless of the selected variant. {variantChoices.length > 0 && 'Use the dropdown on an image to move it to a specific variant.'}
+            Images stored here are not assigned to a variant and are not shown on the storefront. Use the
+            assignment dropdown to attach an image to a specific variant when ready.
           </p>
         </div>
         <ImageGallery

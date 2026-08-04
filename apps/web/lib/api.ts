@@ -83,8 +83,45 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
   return data as T;
 }
 
+/**
+ * Upload raw binary (an image File/Blob) to a mutating endpoint through the
+ * same-origin `/api` proxy. Unlike `request`, it sends the file bytes as the body
+ * with the file's own Content-Type (so the API's scoped raw parser receives them)
+ * — never JSON. Carries the CSRF token + cookies and retries once after a refresh,
+ * exactly like `request`. Metadata belongs in the `path` query string.
+ */
+async function uploadBinary<T>(path: string, body: Blob, retry = true): Promise<T> {
+  const token = await csrfToken();
+  const res = await fetch(`/api${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': body.type || 'application/octet-stream',
+      'x-bmpl-client': 'web',
+      ...(token ? { 'x-csrf-token': token } : {}),
+    },
+    body,
+    credentials: 'include',
+    cache: 'no-store',
+  });
+
+  if (res.status === 401 && retry) {
+    const refreshed = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+    if (refreshed.ok) return uploadBinary<T>(path, body, false);
+  }
+
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    const raw = (data?.message as string) ?? 'Upload failed';
+    const err: ApiError = { status: res.status, message: raw, errors: data?.errors, detail: raw };
+    throw err;
+  }
+  return data as T;
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path, { method: 'GET' }),
+  upload: <T>(path: string, body: Blob) => uploadBinary<T>(path, body),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
   patch: <T>(path: string, body?: unknown) =>

@@ -11,6 +11,8 @@ import { Logger } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import type { NextFunction, Request, Response } from 'express';
+import { MAX_PRODUCT_IMAGE_BYTES } from '@bmpl/shared';
+import { rawImageBody } from './common/raw-image-body.middleware';
 import { AppModule } from './app.module';
 import { loadEnv, listenPort, corsOrigins } from './config/env';
 import { StructuredLogger } from './observability/structured-logger';
@@ -51,6 +53,12 @@ async function bootstrap() {
     next();
   });
   app.use(cookieParser(env.COOKIE_SECRET));
+  // Raw-body parser SCOPED to image content types only: product-image uploads POST
+  // the file bytes directly (browser → same-origin web proxy → API → storage), so
+  // the controller reads `req.body` as a Buffer. JSON/urlencoded bodies are
+  // untouched (they don't match these content types). Cap slightly above the image
+  // limit; the service enforces the exact MAX on the actual buffer.
+  app.use(rawImageBody(MAX_PRODUCT_IMAGE_BYTES + 1024 * 1024));
   app.setGlobalPrefix('api');
   // Trust the reverse proxy (Railway/Vercel) so req.ip and x-forwarded-* are honored.
   app.getHttpAdapter().getInstance().set('trust proxy', 1);

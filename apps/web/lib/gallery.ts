@@ -10,9 +10,13 @@
  *
  * For the unfiltered ("All") gallery, images are GROUPED by variant and concatenated
  * in variant order — never interleaved — with any general (non-variant) images first.
- * When a specific variant is selected, only that variant's images are returned (with a
- * graceful fallback to general/all). The Brand Image is excluded upstream (the API's
- * listGallery / the preview's brand filter), never here by role.
+ * NOTE: for a VARIANT product the API/preview pass only variant-assigned images here
+ * (the General/unassigned pool is never public); a SIMPLE product legitimately has
+ * general (variantId = null) images, which are its gallery.
+ * When a specific variant is selected, ONLY that variant's images are returned — a
+ * variant with no images shows the "No image" state; it never borrows general or
+ * other variants' images. The Brand Image is excluded upstream (the API's listGallery
+ * / the preview's brand filter), never here by role.
  */
 
 export interface OrderedImage {
@@ -44,11 +48,11 @@ export function buildGalleryImages<T extends OrderedImage>(
 ): T[] {
   const general = sortGroup(images.filter((i) => i.variantId == null));
 
-  // Specific variant selected → only that variant's images, vendor order.
+  // Specific variant selected → ONLY that variant's images, in vendor order.
+  // No fallback: a variant with no images shows the "No image" state (it must never
+  // borrow the unassigned pool or another variant's photos).
   if (selectedVariantId) {
-    const forVariant = sortGroup(images.filter((i) => i.variantId === selectedVariantId));
-    if (forVariant.length) return forVariant;
-    return general.length ? general : images; // graceful fallback (unchanged behaviour)
+    return sortGroup(images.filter((i) => i.variantId === selectedVariantId));
   }
 
   // "All" → general images first, then each variant group in vendor order (grouped,

@@ -41,6 +41,38 @@ export const isAllowedProductImageMime = (mime: string): mime is ProductImageMim
   (PRODUCT_IMAGE_MIME_ALLOWLIST as readonly string[]).includes(mime);
 
 /**
+ * Sniff an image's REAL MIME from its magic bytes. Used for server-side uploads
+ * (browser → API → storage) where the client-declared Content-Type must never be
+ * trusted as the source of truth. Returns null when the bytes are not one of the
+ * allowed product-image formats (JPEG/PNG/WebP), so the caller rejects the upload.
+ */
+export function sniffProductImageMime(bytes: Uint8Array): ProductImageMime | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
+    bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  // RIFF....WEBP
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+  return null;
+}
+
+/** File extension for an allowed product-image MIME (for building storage keys). */
+export const productImageExt = (mime: ProductImageMime): string =>
+  mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+
+/**
  * Storage key prefixes (namespaces). Ownership is enforced against these via
  * StorageService.assertKeyInNamespace. Marketplace images live under the owning
  * vendor's namespace so a single ownership check covers logo/banner/products.

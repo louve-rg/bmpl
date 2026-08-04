@@ -12,6 +12,8 @@ import {
   PRODUCT_IMAGE_MIME_ALLOWLIST,
   STORAGE_PREFIX,
   isAllowedProductImageMime,
+  productImageExt,
+  sniffProductImageMime,
 } from './storage';
 import { slugify, slugWithSuffix } from './slug';
 
@@ -59,6 +61,24 @@ describe('product image storage vocabulary', () => {
     expect(isAllowedProductImageMime('image/png')).toBe(true);
     expect(isAllowedProductImageMime('image/gif')).toBe(false);
     expect(isAllowedProductImageMime('application/pdf')).toBe(false);
+  });
+
+  it('sniffs the real image MIME from magic bytes (never trusts the client type)', () => {
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // "%PDF"
+    expect(sniffProductImageMime(jpeg)).toBe('image/jpeg');
+    expect(sniffProductImageMime(png)).toBe('image/png');
+    expect(sniffProductImageMime(webp)).toBe('image/webp');
+    expect(sniffProductImageMime(pdf)).toBeNull();
+    expect(sniffProductImageMime(new Uint8Array([]))).toBeNull();
+  });
+
+  it('maps an image MIME to a file extension for storage keys', () => {
+    expect(productImageExt('image/jpeg')).toBe('jpg');
+    expect(productImageExt('image/png')).toBe('png');
+    expect(productImageExt('image/webp')).toBe('webp');
   });
 
   it('namespaces product images under the owning vendor', () => {

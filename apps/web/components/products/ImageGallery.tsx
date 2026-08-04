@@ -5,7 +5,7 @@ import { api } from '../../lib/api';
 import { Badge } from '../ui';
 import type { ProductImage } from './types';
 import { asApiError, tinyInput } from './shared';
-import { presignAndPut } from './uploads';
+import { replaceProductImageFile, uploadErrorMessage, uploadProductImage } from './uploads';
 
 const ACCEPT = 'image/jpeg,image/png,image/webp';
 
@@ -30,7 +30,7 @@ function RoleChip({ img, variantChoices }: { img: ProductImage; variantChoices: 
     const name = variantChoices.find((v) => v.id === img.variantId)?.label ?? 'unassigned';
     return <Badge tone="info" className="px-1.5 py-0 text-[10px]">Variant: {name}</Badge>;
   }
-  return <Badge tone="neutral" className="px-1.5 py-0 text-[10px]">General</Badge>;
+  return <Badge tone="neutral" className="px-1.5 py-0 text-[10px]">Not assigned</Badge>;
 }
 
 interface Props {
@@ -51,17 +51,11 @@ export function ImageGallery({ productId, variantId, images, variantChoices, mov
     setBusy(true);
     try {
       for (const file of Array.from(files)) {
-        const up = await presignAndPut(productId, file);
-        await api.post(`/vendor/products/${productId}/images/confirm`, {
-          key: up.key,
-          variantId: variantId ?? undefined,
-          width: up.width,
-          height: up.height,
-        });
+        await uploadProductImage(productId, file, { variantId: variantId ?? undefined });
       }
       await onMutate();
     } catch (e) {
-      onError(asApiError(e).message);
+      onError(uploadErrorMessage(e));
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -145,15 +139,10 @@ function ImageCard({
   async function replace(file: File) {
     setReplacing(true);
     try {
-      const up = await presignAndPut(productId, file);
-      await api.post(`/vendor/products/${productId}/images/${img.id}/replace`, {
-        key: up.key,
-        width: up.width,
-        height: up.height,
-      });
+      await replaceProductImageFile(productId, img.id, file);
       await onMutate();
     } catch (e) {
-      onError(asApiError(e).message);
+      onError(uploadErrorMessage(e));
     } finally {
       setReplacing(false);
       if (replaceRef.current) replaceRef.current.value = '';
@@ -221,7 +210,7 @@ function ImageCard({
             aria-label="Move image to variant"
             className={`${tinyInput} w-full`}
           >
-            <option value="">General (all variants)</option>
+            <option value="">General (not assigned)</option>
             {variantChoices.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.label}

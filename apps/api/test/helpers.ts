@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import {
+  MAX_PRODUCT_IMAGE_BYTES,
   ROLE_CODES,
   ROLE_DEFINITIONS,
   PERMISSION_BUNDLES,
@@ -22,6 +23,9 @@ export async function bootApp(): Promise<TestContext> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
   app.use(cookieParser(process.env.COOKIE_SECRET));
+  // Mirror main.ts: scoped raw-body parser for image uploads (browser → API → storage).
+  const { rawImageBody } = await import('../src/common/raw-image-body.middleware');
+  app.use(rawImageBody(MAX_PRODUCT_IMAGE_BYTES + 1024 * 1024));
   app.setGlobalPrefix('api');
   // Mirror main.ts so the CORS allow-list is genuinely exercised by tests.
   const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000,http://localhost:3001')

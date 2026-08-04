@@ -153,6 +153,31 @@ export class StorageService implements OnModuleInit {
     }
   }
 
+  /**
+   * Server-side upload: PUT an object to storage from the API process (not the
+   * browser). Used for product images so the file streams browser → API (same
+   * origin, via the web `/api` proxy) → storage, avoiding a cross-origin browser
+   * PUT to the storage endpoint (which requires bucket CORS and fails as
+   * "Load failed" on mobile Safari when the bucket doesn't allow the domain).
+   */
+  async putObject(
+    key: string,
+    body: Buffer,
+    contentType: string,
+    visibility: Visibility = 'private',
+  ): Promise<void> {
+    const client = this.requireClient();
+    await client.send(
+      new PutObjectCommand({
+        Bucket: this.bucketFor(visibility),
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        ContentLength: body.length,
+      }),
+    );
+  }
+
   /** Presigned PUT URL for a PRIVATE object the client uploads directly to. */
   async presignUpload(
     key: string,
