@@ -22,6 +22,7 @@ import {
   type ViewedItem,
 } from '../../lib/saved';
 import { cartApi, notifyCartChanged } from '../../lib/cart';
+import { variantDisplay, secondaryLine } from '../../lib/variant-display';
 import type { ApiError } from '../../lib/api';
 
 type LoadState = 'loading' | 'ready' | 'guest' | 'error';
@@ -239,16 +240,33 @@ function present(item: SavedItem) {
   const p = item.product;
   const v = item.variant;
   const imageUrl = v?.imageUrl ?? p?.primaryImageUrl ?? null;
-  const title = v?.title ?? p?.title ?? 'Product';
-  // Parent family shown as a secondary line when a distinct variant title is used.
-  const parentTitle = v && v.title && v.title !== p?.title ? p?.title ?? null : null;
+  // Shared hierarchy: variant name (primary) → remaining option values → base product family.
+  const disp = variantDisplay({
+    displayName: v?.displayName ?? null,
+    optionValues: v?.optionValues ?? [],
+    title: v?.title ?? null,
+    productTitle: p?.title ?? null,
+  });
+  const title = disp.primary || p?.title || 'Product';
   const priceMinor = v ? v.priceMinor ?? p?.priceMinor ?? 0 : p?.priceMinor ?? 0;
   const salePriceMinor = v ? v.salePriceMinor : p?.salePriceMinor ?? null;
   // Unavailable = the product/variant is no longer viewable; OOS = present but not buyable.
   const unavailable = !item.available || !p;
   const outOfStock = v ? v.availability?.outOfStock === true : p ? !p.inStock : true;
   const lowStock = v?.availability?.lowStock === true;
-  return { p, v, imageUrl, title, parentTitle, priceMinor, salePriceMinor, unavailable, outOfStock, lowStock };
+  return {
+    p,
+    v,
+    imageUrl,
+    title,
+    secondary: disp.secondary,
+    family: disp.family,
+    priceMinor,
+    salePriceMinor,
+    unavailable,
+    outOfStock,
+    lowStock,
+  };
 }
 
 function WishlistCard({
@@ -277,8 +295,8 @@ function WishlistCard({
           )}
         </div>
         <p className="mt-3 font-semibold text-belize-navy">{m.title}</p>
-        {m.parentTitle && <p className="text-xs text-slate-500">{m.parentTitle}</p>}
-        {item.variant?.optionLabel && <p className="text-xs text-slate-400">{item.variant.optionLabel}</p>}
+        {m.secondary.length > 0 && <p className="text-xs text-slate-500">{secondaryLine(m.secondary)}</p>}
+        {m.family && <p className="text-xs text-slate-400">{m.family}</p>}
         <Badge tone="neutral" className="mt-1.5 self-start">Unavailable</Badge>
         <button
           type="button"
@@ -305,11 +323,11 @@ function WishlistCard({
             'No image'
           )}
         </div>
-        {/* Variant title is the primary line; never replaced by the parent title. */}
+        {/* Variant name is the primary line; never replaced by the parent title. */}
         <p className="mt-3 font-semibold text-belize-navy group-hover:text-belize-blue">{m.title}</p>
       </Link>
-      {m.parentTitle && <p className="text-xs text-slate-500">{m.parentTitle}</p>}
-      {item.variant?.optionLabel && <p className="text-xs text-slate-400">{item.variant.optionLabel}</p>}
+      {m.secondary.length > 0 && <p className="text-xs text-slate-500">{secondaryLine(m.secondary)}</p>}
+      {m.family && <p className="text-xs text-slate-400">{m.family}</p>}
 
       <p className="mt-0.5 text-xs text-slate-400">
         <Link href={`/store/${p.vendor.slug}`} className="hover:text-belize-blue hover:underline">

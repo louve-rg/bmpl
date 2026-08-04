@@ -266,6 +266,9 @@ export class VariantsService {
         title: resolveVariantTitle(v.displayName, this.labelForVariant(v.optionValues.map((ov) => ov.productOptionValueId), options), product.title),
         displayName: v.displayName,
         optionLabel: this.labelForVariant(v.optionValues.map((ov) => ov.productOptionValueId), options) || null,
+        // Structured selected option VALUES (ordered) so clients format the display
+        // without splitting the combined label.
+        optionValues: this.valuesForVariant(v.optionValues.map((ov) => ov.productOptionValueId), options),
         sku: v.sku,
         priceMinor: v.priceMinor == null ? null : Number(v.priceMinor),
         salePriceMinor: v.salePriceMinor == null ? null : Number(v.salePriceMinor),
@@ -329,13 +332,19 @@ export class VariantsService {
 
   /** Option-value label join for a set of value ids, ordered by option position. */
   private labelForVariant(valueIds: string[], options: OptionWithValues[]): string {
+    return this.valuesForVariant(valueIds, options).join(' / ');
+  }
+
+  /** The variant's selected option VALUES, ordered by option position (structured —
+   *  clients build their own display from these instead of splitting a label). */
+  private valuesForVariant(valueIds: string[], options: OptionWithValues[]): string[] {
     const parts: Array<{ position: number; value: string }> = [];
     for (const o of options) {
       for (const v of o.values) {
         if (valueIds.includes(v.id)) parts.push({ position: o.position, value: v.value });
       }
     }
-    return parts.sort((a, b) => a.position - b.position).map((p) => p.value).join(' / ');
+    return parts.sort((a, b) => a.position - b.position).map((p) => p.value);
   }
 
   private labelFor(valueIds: string[], options: OptionWithValues[]): string {

@@ -10,6 +10,8 @@ import { ProductReviews } from '../../../components/reviews/ProductReviews';
 import { StarRating } from '../../../components/reviews/StarRating';
 import type { RatingAggregate } from '../../../lib/reviews';
 import { VariantLineup, VariantSelector, type LineupImage } from '../../../components/products/VariantChooser';
+import { optionValuesFor } from '../../../lib/variant-card';
+import { variantDisplay } from '../../../lib/variant-display';
 import { cartApi, money, notifyCartChanged } from '../../../lib/cart';
 import type { ApiError } from '../../../lib/api';
 import { SaveButton } from '../../../components/saved/SaveButton';
@@ -134,7 +136,15 @@ export function ProductView({ product }: { product: ProductDetail }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlVariant]);
 
-  const displayTitle = selectedVariant ? selectedVariant.title : product.title;
+  // Shared display model: variant name (primary), remaining option values (secondary,
+  // each on its own line), then the base product family — never a slash-combined title,
+  // never a repeated option value. For no selection it collapses to the product title.
+  const disp = variantDisplay({
+    displayName: selectedVariant?.displayName ?? null,
+    optionValues: selectedVariant ? optionValuesFor(selectedVariant.optionValueIds, product.options) : [],
+    title: selectedVariant?.title ?? null,
+    productTitle: product.title,
+  });
   const avail: Availability = selectedVariant ? selectedVariant.availability : product.availability;
   const state: PurchaseStateKind = ps.state;
   const cap = selectedVariant ? stockCap(avail) : hasVariants ? null : stockCap(avail);
@@ -230,17 +240,16 @@ export function ProductView({ product }: { product: ProductDetail }) {
 
       <div>
         <p className="bmpl-eyebrow">{product.category.name}</p>
-        {/* Single source of truth for the shown title: the selected variant, else the product. */}
-        <h1 className="mt-1 text-3xl font-bold tracking-tight text-belize-navy">{displayTitle}</h1>
-        {product.brand && <p className="text-sm text-slate-500">by {product.brand}</p>}
+        {/* Hierarchy: variant name → remaining option values (own lines) → base product family. */}
+        <h1 className="mt-1 text-3xl font-bold tracking-tight text-belize-navy">{disp.primary || product.title}</h1>
+        {disp.secondary.map((s) => (
+          <p key={s} className="text-sm text-slate-600">{s}</p>
+        ))}
+        {disp.family && <p className="text-sm text-slate-500">{disp.family}</p>}
         {reviewAggregate && reviewAggregate.count > 0 && (
           <a href="#reviews" className="mt-1.5 inline-flex items-center gap-1.5 hover:underline">
             <StarRating value={reviewAggregate.average} size="sm" showValue count={reviewAggregate.count} />
           </a>
-        )}
-        {/* Base product family kept visible as a secondary line when a variant title is shown. */}
-        {selectedVariant && displayTitle !== product.title && (
-          <p className="text-sm text-slate-500">{product.title}</p>
         )}
 
         <p className="mt-4 text-2xl">

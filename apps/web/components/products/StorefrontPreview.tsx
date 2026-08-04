@@ -5,6 +5,8 @@ import { Badge } from '../ui';
 import { Gallery, type GalleryImage } from '../../app/products/[slug]/Gallery';
 import { buildGalleryImages } from '../../lib/gallery';
 import { VariantLineup, VariantSelector, type LineupImage } from './VariantChooser';
+import { optionValuesFor } from '../../lib/variant-card';
+import { variantDisplay } from '../../lib/variant-display';
 import { money } from '../../lib/cart';
 import type { InvRow, Inventory, ManageView, ProductImage } from './types';
 import {
@@ -63,6 +65,7 @@ export function StorefrontPreview({
         .map((v) => ({
           id: v.id,
           title: v.title,
+          displayName: v.displayName,
           priceMinor: v.priceMinor,
           salePriceMinor: v.salePriceMinor,
           optionValueIds: v.optionValueIds,
@@ -132,7 +135,13 @@ export function StorefrontPreview({
     return <p className="text-sm text-slate-400">Add images to preview the storefront gallery.</p>;
   }
 
-  const displayTitle = selectedVariant ? selectedVariant.title : view.productTitle;
+  // Same shared display model as the live product page: name → option values → family.
+  const disp = variantDisplay({
+    displayName: selectedVariant?.displayName ?? null,
+    optionValues: selectedVariant ? optionValuesFor(selectedVariant.optionValueIds, view.options) : [],
+    title: selectedVariant?.title ?? null,
+    productTitle: view.productTitle,
+  });
   const effectivePrice = selectedVariant
     ? selectedVariant.salePriceMinor ?? selectedVariant.priceMinor ?? fallbackPriceMinor
     : fallbackPriceMinor;
@@ -155,10 +164,11 @@ export function StorefrontPreview({
       )}
 
       <div className="mt-4">
-        <p className="text-lg font-bold text-belize-navy">{displayTitle}</p>
-        {selectedVariant && displayTitle !== view.productTitle && (
-          <p className="text-sm text-slate-500">{view.productTitle}</p>
-        )}
+        <p className="text-lg font-bold text-belize-navy">{disp.primary || view.productTitle}</p>
+        {disp.secondary.map((s) => (
+          <p key={s} className="text-sm text-slate-600">{s}</p>
+        ))}
+        {disp.family && <p className="text-sm text-slate-500">{disp.family}</p>}
         <p className="mt-1 text-xl font-bold text-belize-navy">{money(effectivePrice)}</p>
         <p className="mt-2">
           <PreviewBadge state={state} />

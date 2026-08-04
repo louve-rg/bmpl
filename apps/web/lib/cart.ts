@@ -9,7 +9,11 @@ export interface CartLine {
   slug: string;
   /** Variant-specific display name (e.g. "Perfect in Pink"); null for non-variant lines. */
   variantTitle?: string | null;
+  /** Raw vendor display name (preferred primary title); null when unset/non-variant. */
+  displayName?: string | null;
   variantLabel: string | null;
+  /** Structured selected option VALUES in option order (e.g. ["Twisted Peppermint","Small"]). */
+  optionValues?: string[];
   sku: string | null;
   imageUrl: string | null;
   currency: string;

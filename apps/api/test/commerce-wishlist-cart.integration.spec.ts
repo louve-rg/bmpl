@@ -133,6 +133,9 @@ describe('wishlist saves the EXACT variant', () => {
     expect(pink).toBeTruthy();
     expect(pink.variant.optionLabel).toMatch(/Perfect in Pink/);
     expect(pink.variant.optionLabel).toMatch(/Medium/);
+    // Structured option VALUES (ordered) for the shared display formatter — the client
+    // formats "Perfect in Pink" / "Medium" from these, never by splitting a label.
+    expect(pink.variant.optionValues).toEqual(['Perfect in Pink', 'Medium']);
     expect(pink.variant.priceMinor).toBe(2250); // variant price, not the 2000 parent
     expect(pink.variant.sku).toBe('PIP-M');
     // the parent title never replaces the variant title
@@ -172,7 +175,11 @@ describe('cart Move-to-Wishlist (atomic, exact variant)', () => {
     // add Perfect in Pink / Medium to the cart (view is vendor-grouped)
     const added = await post(cust, 'cart/items', { productId: fx.productId, variantId: fx.pinkMedium, quantity: 1 });
     expect(added.status).toBe(201);
-    const itemId = added.body.vendors[0].items[0].id;
+    const line = added.body.vendors[0].items[0];
+    const itemId = line.id;
+    // Cart line carries structured option values (+ raw displayName) for the formatter.
+    expect(line.optionValues).toEqual(['Perfect in Pink', 'Medium']);
+    expect('displayName' in line).toBe(true);
 
     // move to wishlist → saved exact variant + cart line gone
     const moved = await post(cust, `cart/items/${itemId}/move-to-wishlist`);

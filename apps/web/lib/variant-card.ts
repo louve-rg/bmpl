@@ -5,6 +5,7 @@
  * without repeating a value that the primary name already is.
  */
 import type { OptionLike, VariantLike } from './variant-availability';
+import { variantDisplay, type VariantDisplay } from './variant-display';
 
 /** The variant's selected option VALUES, in option order (e.g. ["Hello Beautiful","Large"]). */
 export function optionValuesFor(optionValueIds: string[], options: OptionLike[]): string[] {
@@ -26,13 +27,18 @@ export interface VariantCardLines {
 }
 
 /**
- * Compute the card lines:
- * - primary = the vendor's displayName if set, else the first option value, else the title.
- * - secondary = the option values EXCLUDING one that equals the primary (dedup).
+ * Card lines via the SHARED display model (lib/variant-display) so cards, detail,
+ * Cart and Wishlist all apply one dedup rule. Cards omit the base product family
+ * (the surrounding context already names the product).
  */
-export function variantCardLines(v: Pick<VariantLike, 'title' | 'displayName' | 'optionValueIds'>, options: OptionLike[]): VariantCardLines {
-  const values = optionValuesFor(v.optionValueIds, options);
-  const primary = (v.displayName && v.displayName.trim()) || values[0] || v.title;
-  const secondary = values.filter((val) => val !== primary);
-  return { primary, secondary };
+export function variantCardLines(
+  v: Pick<VariantLike, 'title' | 'displayName' | 'optionValueIds'>,
+  options: OptionLike[],
+): VariantCardLines {
+  const d: VariantDisplay = variantDisplay({
+    displayName: v.displayName,
+    optionValues: optionValuesFor(v.optionValueIds, options),
+    title: v.title,
+  });
+  return { primary: d.primary, secondary: d.secondary };
 }

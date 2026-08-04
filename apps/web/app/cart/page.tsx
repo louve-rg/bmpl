@@ -14,6 +14,7 @@ import {
   type CartView,
 } from '../../lib/cart';
 import { invalidateSaved, notifySavedChanged } from '../../lib/saved';
+import { variantDisplay, secondaryLine } from '../../lib/variant-display';
 import type { ApiError } from '../../lib/api';
 import { Alert, Button, ButtonLink, Card, EmptyState, PageHeader, Spinner } from '../../components/ui';
 
@@ -231,6 +232,13 @@ function CartRow({
   onMove: () => void;
 }) {
   const blocking = item.issues.filter((i) => i !== 'INSUFFICIENT_STOCK');
+  // Shared hierarchy: variant name → remaining option values → base product family.
+  const disp = variantDisplay({
+    displayName: item.displayName ?? null,
+    optionValues: item.optionValues ?? [],
+    title: item.variantTitle ?? null,
+    productTitle: item.title,
+  });
   return (
     <li className={`flex gap-4 p-4 ${item.purchasable ? '' : 'opacity-70'}`}>
       <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center overflow-hidden rounded-bmpl-md bg-slate-100 text-xs text-slate-300">
@@ -244,12 +252,10 @@ function CartRow({
 
       <div className="min-w-0 flex-1">
         <Link href={`/products/${item.slug}`} className="font-medium text-belize-navy hover:text-belize-blue">
-          {item.variantTitle ?? item.title}
+          {disp.primary || item.title}
         </Link>
-        {item.variantTitle && item.variantTitle !== item.title && (
-          <p className="text-xs text-slate-500">{item.title}</p>
-        )}
-        {item.variantLabel && <p className="text-xs text-slate-400">{item.variantLabel}</p>}
+        {disp.secondary.length > 0 && <p className="text-xs text-slate-500">{secondaryLine(disp.secondary)}</p>}
+        {disp.family && <p className="text-xs text-slate-400">{disp.family}</p>}
         <p className="mt-1 text-sm">
           <span className="font-semibold text-belize-navy">{money(item.unitPriceMinor)}</span>
           {item.priceChanged && (

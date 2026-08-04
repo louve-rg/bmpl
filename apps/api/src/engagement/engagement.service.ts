@@ -102,6 +102,8 @@ export class EngagementService {
         title: v?.title ?? null, // resolved variant title (displayName → options → product title)
         displayName: v?.displayName ?? null,
         optionLabel: v?.optionLabel ?? null, // "Fragrance: Perfect in Pink · Size: Medium"
+        // Structured selected option VALUES (ordered) for the shared display formatter.
+        optionValues: v?.optionValues ?? [],
         sku: v?.sku ?? null,
         priceMinor: v?.priceMinor ?? product?.priceMinor ?? null,
         salePriceMinor: v?.salePriceMinor ?? null,

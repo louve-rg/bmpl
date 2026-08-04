@@ -276,13 +276,16 @@ export class CartService {
 
       const priceChanged = money(item.unitPriceMinorSnapshot) !== money(unitPriceMinor);
       const purchasable = issues.length === 0;
-      const variantLabel = v
+      // Structured selected option VALUES (ordered) — clients format the display from
+      // these (never by splitting the combined label). `variantLabel` is the legacy
+      // slash join, retained for back-compat.
+      const optionValues = v
         ? v.optionValues
             .map((ov) => ov.optionValue)
             .sort((x, y) => x.option.position - y.option.position)
             .map((ov) => ov.value)
-            .join(' / ') || null
-        : null;
+        : [];
+      const variantLabel = optionValues.length ? optionValues.join(' / ') : null;
       // Variant-specific marketplace title (displayName → option label → product title).
       const variantTitle = v ? resolveVariantTitle(v.displayName, variantLabel, p.title) : null;
       // Prefer the purchased variant's own image; fall back to the product primary.
@@ -296,6 +299,8 @@ export class CartService {
         slug: p.slug,
         variantLabel,
         variantTitle,
+        displayName: v?.displayName ?? null,
+        optionValues,
         sku: v?.sku ?? null,
         imageUrl,
         currency: p.currency,

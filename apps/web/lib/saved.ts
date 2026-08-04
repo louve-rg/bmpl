@@ -43,6 +43,8 @@ export interface SavedVariant {
   displayName: string | null;
   /** e.g. "Fragrance: Perfect in Pink · Size: Medium". */
   optionLabel: string | null;
+  /** Structured selected option VALUES in option order (e.g. ["Twisted Peppermint","Small"]). */
+  optionValues?: string[];
   sku: string | null;
   priceMinor: number | null;
   salePriceMinor: number | null;
