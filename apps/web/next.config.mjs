@@ -3,7 +3,16 @@
  * as report/planning (see docs/DEPLOYMENT.md) to avoid breaking Next's inline
  * runtime; the headers below are safe to enforce today.
  */
+// Non-secret build identifier so a domain audit can prove the custom domain and
+// the Vercel URL serve the same commit (Vercel injects VERCEL_GIT_COMMIT_SHA).
+const COMMIT = (
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.NEXT_PUBLIC_COMMIT_SHA ||
+  'dev'
+).slice(0, 12);
+
 const securityHeaders = [
+  { key: 'X-BMPL-Commit', value: COMMIT },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },

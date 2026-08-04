@@ -8,6 +8,8 @@ export interface ApiError {
   status: number;
   message: string;
   errors?: Array<{ path: string; message: string }>;
+  /** Raw server message, kept for logs/debugging when `message` is a friendly fallback. */
+  detail?: string;
 }
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -60,10 +62,21 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
   const data = text ? JSON.parse(text) : null;
 
   if (!res.ok) {
+    const raw = (data?.message as string) ?? 'Request failed';
+    // A 403 from the origin/CSRF guard is an infrastructure/session issue, not
+    // something the shopper did. Show an actionable message; keep the raw detail
+    // (still logged to the console) so debugging is never hidden.
+    const isOriginOrCsrf = res.status === 403 && /origin is not allowed|csrf/i.test(raw);
+    if (isOriginOrCsrf && typeof console !== 'undefined') {
+      console.warn(`[api] ${method} ${path} blocked: ${raw}`);
+    }
     const err: ApiError = {
       status: res.status,
-      message: data?.message ?? 'Request failed',
+      message: isOriginOrCsrf
+        ? 'We couldn’t complete that request. Please refresh the page and try again.'
+        : raw,
       errors: data?.errors,
+      detail: raw,
     };
     throw err;
   }

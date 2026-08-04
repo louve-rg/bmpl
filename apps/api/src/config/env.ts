@@ -136,9 +136,28 @@ export const listenPort = (env: Env): number => env.PORT ?? env.API_PORT;
 /** Whether cookies should carry the Secure attribute. */
 export const cookiesSecure = (env: Env): boolean => env.COOKIE_SECURE || isProd(env);
 
+/**
+ * Normalize an origin for exact-match comparison (CORS + CSRF origin check).
+ * Browsers send a canonical `scheme://host[:port]` Origin with no path or
+ * trailing slash, but operator-configured allow-list entries are hand-typed and
+ * routinely drift (trailing slash, upper-case, an accidental path). We collapse
+ * both sides to `URL.origin` (lower-cased scheme+host, default ports dropped, no
+ * path/trailing slash) so a legitimate origin is never rejected over cosmetics.
+ * An unparseable value falls back to a trimmed, lower-cased, slash-stripped form.
+ */
+export function normalizeOrigin(value: string): string {
+  const s = value.trim();
+  if (!s) return s;
+  try {
+    return new URL(s).origin.toLowerCase();
+  } catch {
+    return s.replace(/\/+$/, '').toLowerCase();
+  }
+}
+
 export const corsOrigins = (env: Env): string[] =>
   env.CORS_ORIGINS.split(',')
-    .map((o) => o.trim())
+    .map((o) => normalizeOrigin(o))
     .filter(Boolean);
 
 /**

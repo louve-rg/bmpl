@@ -62,6 +62,16 @@ describe('CSRF protection', () => {
     expect(res.status).toBe(201);
   });
 
+  it('normalizes the origin: a trailing-slash / upper-case variant of an allowed origin is accepted', async () => {
+    const res = await request(ctx.server)
+      .post('/api/roles/switch')
+      .set('Cookie', cookies)
+      .set('Origin', 'HTTP://LOCALHOST:3000/') // cosmetic variant of the allow-listed origin
+      .set('x-csrf-token', csrf)
+      .send(switchBody);
+    expect(res.status).toBe(201);
+  });
+
   it('allows a non-browser request (no Origin) without a CSRF token', async () => {
     const res = await request(ctx.server)
       .post('/api/roles/switch')

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cookiesSecure, listenPort, loadEnv, storageEnabled } from './env';
+import { cookiesSecure, corsOrigins, listenPort, loadEnv, normalizeOrigin, storageEnabled } from './env';
 
 const STRONG = 'a'.repeat(64);
 const base = {
@@ -58,6 +58,27 @@ describe('loadEnv — required variables', () => {
     expect(env.API_URL).toBe('http://localhost:4000');
     expect(env.NEXT_PUBLIC_SITE_URL).toBe('https://dev.bzemarketplace.com');
     expect(env.ADMIN_SITE_URL).toBe('http://localhost:3001');
+  });
+});
+
+describe('normalizeOrigin / corsOrigins — allow-list matching is drift-proof', () => {
+  it('collapses cosmetic differences to a canonical scheme://host[:port]', () => {
+    expect(normalizeOrigin('https://www.bzemarketplace.com/')).toBe('https://www.bzemarketplace.com');
+    expect(normalizeOrigin('HTTPS://WWW.BZEMARKETPLACE.COM')).toBe('https://www.bzemarketplace.com');
+    expect(normalizeOrigin('https://www.bzemarketplace.com/cart')).toBe('https://www.bzemarketplace.com');
+    expect(normalizeOrigin('  https://www.bzemarketplace.com  ')).toBe('https://www.bzemarketplace.com');
+  });
+
+  it('parses a comma-separated CORS_ORIGINS into normalized entries (trailing slash / case tolerated)', () => {
+    const env = loadEnv({
+      ...base,
+      CORS_ORIGINS: 'https://www.bzemarketplace.com/, https://BZEMARKETPLACE.com , https://bmpl-web.vercel.app',
+    } as NodeJS.ProcessEnv);
+    expect(corsOrigins(env)).toEqual([
+      'https://www.bzemarketplace.com',
+      'https://bzemarketplace.com',
+      'https://bmpl-web.vercel.app',
+    ]);
   });
 });
 

@@ -10,6 +10,7 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { loadEnv, listenPort, corsOrigins } from './config/env';
 import { StructuredLogger } from './observability/structured-logger';
@@ -37,6 +38,18 @@ async function bootstrap() {
 
   app.use(requestIdMiddleware);
   app.use(helmet());
+  // Non-secret build identifier so a domain/deploy audit can prove which commit
+  // each environment is serving (Railway injects RAILWAY_GIT_COMMIT_SHA).
+  const apiCommit = (
+    process.env.RAILWAY_GIT_COMMIT_SHA ??
+    process.env.GIT_COMMIT_SHA ??
+    env.APP_VERSION ??
+    'dev'
+  ).slice(0, 12);
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('X-BMPL-Api-Commit', apiCommit);
+    next();
+  });
   app.use(cookieParser(env.COOKIE_SECRET));
   app.setGlobalPrefix('api');
   // Trust the reverse proxy (Railway/Vercel) so req.ip and x-forwarded-* are honored.

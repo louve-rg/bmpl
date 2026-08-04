@@ -9,7 +9,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { ENV } from '../config/config.module';
-import { corsOrigins, type Env } from '../config/env';
+import { corsOrigins, normalizeOrigin, type Env } from '../config/env';
 import { IS_PUBLIC_KEY } from '../common/decorators';
 import { CSRF_COOKIE } from './cookies';
 
@@ -90,7 +90,7 @@ export class CsrfGuard implements CanActivate {
     // No browser origin at all → treat as non-browser client (allowed).
     if (!origin) return true;
 
-    if (!this.allowed.has(origin)) {
+    if (!this.allowed.has(normalizeOrigin(origin))) {
       throw new ForbiddenException('Request origin is not allowed.');
     }
 
