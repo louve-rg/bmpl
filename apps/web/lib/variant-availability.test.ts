@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   availableValuesForOption,
   presentationVariant,
+  purchaseState,
   reconcileSelection,
   resolveSelectedVariant,
   variantsForSelection,
   type OptionLike,
+  type ProductLike,
   type Selection,
   type VariantLike,
 } from './variant-availability';
+import { variantCardLines } from './variant-card';
 
 // Options: Fragrance {hb, pip, ging} × Size {small, medium, large}
 const options: OptionLike[] = [
@@ -70,9 +73,83 @@ describe('variantsForSelection (intersection filtering)', () => {
     expect(ids(variantsForSelection(variants, {}))).toEqual(['ging-small', 'hb-large', 'hb-small', 'pip-medium']);
   });
 
-  it('hides out-of-stock variants even when they match the selection', () => {
+  it('INCLUDES out-of-stock variants that match the selection (shown + marked, never hidden)', () => {
     const withOos = [variant('hb-small', ['hb', 'small']), variant('hb-large', ['hb', 'large'], false)];
-    expect(ids(variantsForSelection(withOos, { frag: 'hb' }))).toEqual(['hb-small']);
+    const shown = variantsForSelection(withOos, { frag: 'hb' });
+    expect(ids(shown)).toEqual(['hb-large', 'hb-small']); // BOTH — the OOS one is not dropped
+    expect(shown.find((v) => v.id === 'hb-large')?.availability.inStock).toBe(false);
+  });
+});
+
+// ===========================================================================
+// The reported "Bags" fixture — 4 variants, only ONE in stock, and TWO sharing the
+// display name "Hand Bag". The lineup must show all four (out-of-stock included) and
+// never collapse to the single in-stock / first-added variant.
+// ===========================================================================
+const bagOptions: OptionLike[] = [
+  { id: 'type', name: 'Type', values: [
+    { id: 'hand', value: 'Hand Bag' }, { id: 'purse', value: 'Purse' }, { id: 'sling', value: 'Sling Bag' },
+  ] },
+  { id: 'color', name: 'Color', values: [
+    { id: 'black', value: 'Black' }, { id: 'mblack', value: 'Matte Black' }, { id: 'beige', value: 'Beige' },
+  ] },
+  { id: 'size', name: 'Size', values: [
+    { id: 'small', value: 'Small' }, { id: 'medium', value: 'Medium' }, { id: 'large', value: 'Large' },
+  ] },
+];
+// A: Hand Bag/Black/Large (OOS), B: Sling/Beige/Small (in stock), C: Purse/Beige/Small (OOS),
+// D: Hand Bag/Matte Black/Medium (OOS) — newest-first order as the API returns them.
+const bags: VariantLike[] = [
+  variant('D-hand-mblack-med', ['hand', 'mblack', 'medium'], false),
+  variant('C-purse-beige-sm', ['purse', 'beige', 'small'], false),
+  variant('B-sling-beige-sm', ['sling', 'beige', 'small'], true),
+  variant('A-hand-black-lg', ['hand', 'black', 'large'], false),
+];
+const bagIds = (vs: VariantLike[]) => vs.map((v) => v.id);
+
+describe('Bags fixture — all valid variants shown (out-of-stock included, duplicate names kept)', () => {
+  it('initial All state lists ALL FOUR variants, not just the in-stock / first one', () => {
+    const all = variantsForSelection(bags, {});
+    expect(all).toHaveLength(4);
+    expect(bagIds(all).sort()).toEqual(['A-hand-black-lg', 'B-sling-beige-sm', 'C-purse-beige-sm', 'D-hand-mblack-med']);
+    // exactly one is in stock — the other three must still be present
+    expect(all.filter((v) => v.availability.inStock)).toHaveLength(1);
+  });
+
+  it('keeps the two "Hand Bag" variants separate (identity is the option combination, not the name)', () => {
+    const all = variantsForSelection(bags, {});
+    const handBags = all.filter((v) => v.optionValueIds.includes('hand'));
+    expect(handBags).toHaveLength(2);
+    // unique ids → unique React keys (never keyed by display name)
+    expect(new Set(handBags.map((v) => v.id)).size).toBe(2);
+    const black = handBags.find((v) => v.id === 'A-hand-black-lg')!;
+    const matte = handBags.find((v) => v.id === 'D-hand-mblack-med')!;
+    expect(variantCardLines(black, bagOptions)).toEqual({ primary: 'Hand Bag', secondary: ['Black', 'Large'] });
+    expect(variantCardLines(matte, bagOptions)).toEqual({ primary: 'Hand Bag', secondary: ['Matte Black', 'Medium'] });
+  });
+
+  it('initial All state has NO presentation variant (main view is product-level; gallery = all)', () => {
+    expect(presentationVariant(bags, {})).toBeNull();
+  });
+
+  it('filters correctly: Type=Sling → 1, Size=Small → both Small variants, Color=Black → 1', () => {
+    expect(bagIds(variantsForSelection(bags, { type: 'sling' }))).toEqual(['B-sling-beige-sm']);
+    expect(bagIds(variantsForSelection(bags, { size: 'small' })).sort()).toEqual(['B-sling-beige-sm', 'C-purse-beige-sm']);
+    expect(bagIds(variantsForSelection(bags, { color: 'black' }))).toEqual(['A-hand-black-lg']);
+    // returning to All restores all four
+    expect(variantsForSelection(bags, {})).toHaveLength(4);
+  });
+
+  it('dropdowns offer values that lead to out-of-stock variants too (so every combo is reachable)', () => {
+    const colors = availableValuesForOption(bags, bagOptions, {}, 'color');
+    expect([...colors].sort()).toEqual(['beige', 'black', 'mblack']); // Black/Matte Black are OOS but still offered
+  });
+
+  it('selecting a fully out-of-stock combination presents it as OUT_OF_STOCK (not hidden/SELECT)', () => {
+    const product: ProductLike = { priceMinor: 3000, salePriceMinor: null, availability: { inStock: true, outOfStock: false, available: null, unlimited: true, allowBackorders: false } };
+    const ps = purchaseState(product, bags, { type: 'hand', color: 'black', size: 'large' });
+    expect(ps.state).toBe('OUT_OF_STOCK');
+    expect(ps.variant?.id).toBe('A-hand-black-lg');
   });
 });
 

@@ -71,6 +71,7 @@ export function VariantLineup({
           const img = variantImage(images, v.id);
           const price = v.salePriceMinor ?? v.priceMinor ?? fallbackPriceMinor;
           const selected = v.id === selectedId;
+          const outOfStock = !v.availability.inStock;
           // Primary name (line 1), remaining option values on their own line (line 2),
           // price (line 3). Secondary values are NOT truncated (wrap on narrow cards).
           const lines = variantCardLines(v, options);
@@ -87,7 +88,11 @@ export function VariantLineup({
               <div className="aspect-square overflow-hidden rounded-bmpl-sm bg-slate-100">
                 {img ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={img.url} alt={img.alt} className="h-full w-full object-cover" />
+                  <img
+                    src={img.url}
+                    alt={img.alt}
+                    className={`h-full w-full object-cover ${outOfStock ? 'opacity-60' : ''}`}
+                  />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">
                     No image
@@ -101,6 +106,9 @@ export function VariantLineup({
                 <p className="text-[11px] leading-snug text-slate-500">{lines.secondary.join(' · ')}</p>
               )}
               <p className="mt-0.5 text-xs font-medium text-slate-700">{money(price)}</p>
+              {outOfStock && (
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-red-500">Out of stock</p>
+              )}
             </button>
           );
         })}

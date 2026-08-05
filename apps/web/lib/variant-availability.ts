@@ -74,22 +74,26 @@ export function isVariantAvailable(v: VariantLike): boolean {
   return v.availability.inStock;
 }
 
-/** The variants to show in the lineup: in-stock only (zero-stock hidden). */
+/** The purchasable (in-stock) subset — used ONLY for purchase-state decisions,
+ *  never to build the variation lineup (out-of-stock variants are still shown). */
 export function availableVariants(variants: VariantLike[]): VariantLike[] {
   return variants.filter(isVariantAvailable);
 }
 
 /**
- * Available variants that match the CURRENT selection, by intersection: every
+ * EVERY valid variant that matches the CURRENT selection, by intersection: every
  * option with a specific value chosen must be present on the variant; an option
- * left in the "All" state (empty/absent) simply adds no restriction. This is what
- * the variant lineup shows, so picking one option (e.g. Fragrance: Gingham)
- * immediately narrows the cards to that value only — even while another option
- * (e.g. Size) is still "All".
+ * left in the "All" state (empty/absent) simply adds no restriction. This is the
+ * source for the variation lineup + the "All" gallery grouping, so it includes
+ * OUT-OF-STOCK variants (they render, marked unavailable — never hidden or merged;
+ * two variants sharing a display name stay separate because identity is the full
+ * option combination). Stock is a display concern handled by each card/button, not
+ * a reason to drop a variant. Picking one option (e.g. Type: Sling Bag) narrows the
+ * cards to that value while another option (e.g. Size) is still "All".
  */
 export function variantsForSelection(variants: VariantLike[], selection: Selection): VariantLike[] {
   const active = Object.values(selection).filter(Boolean);
-  return availableVariants(variants).filter((v) => {
+  return variants.filter((v) => {
     const ids = new Set(v.optionValueIds);
     return active.every((valId) => ids.has(valId));
   });
@@ -137,9 +141,12 @@ export function presentationVariant(variants: VariantLike[], selection: Selectio
 }
 
 /**
- * Value ids for `optionId` that are backed by at least one AVAILABLE variant
- * given the current selection of the OTHER options (combination-aware). Drives
- * the dropdowns so only reachable, in-stock choices are offered.
+ * Value ids for `optionId` that are backed by at least one valid variant given the
+ * current selection of the OTHER options (combination-aware). Drives the dropdowns
+ * so every REACHABLE choice is offered — including values that lead to an
+ * out-of-stock variant, so a customer can still filter to and view every valid
+ * combination (the out-of-stock state is surfaced on the card/button, not by hiding
+ * the option).
  */
 export function availableValuesForOption(
   variants: VariantLike[],
@@ -157,7 +164,6 @@ export function availableValuesForOption(
     .map(([, vid]) => vid);
 
   for (const v of variants) {
-    if (!isVariantAvailable(v)) continue;
     const ids = new Set(v.optionValueIds);
     if (!otherSelected.every((vid) => ids.has(vid))) continue;
     for (const valId of v.optionValueIds) {
