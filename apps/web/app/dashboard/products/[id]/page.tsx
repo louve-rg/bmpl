@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api, type ApiError } from '../../../../lib/api';
+import { gramsToPoundsInput, mmToInchesInput } from '@bmpl/shared';
 import { ProductForm, type ProductValues } from '../ProductForm';
 import { ProductEditorManager } from '../../../../components/products/ProductEditorManager';
 import { Badge, Alert, Button, Spinner, type Tone } from '../../../../components/ui';
@@ -40,7 +41,6 @@ interface OwnProduct {
 }
 
 const dollars = (c: number | null) => (c == null ? '' : (c / 100).toString());
-const str = (n: number | null) => (n == null ? '' : String(n));
 
 export default function EditProductPage() {
   const { id } = useParams<{ id: string }>();
@@ -65,10 +65,10 @@ export default function EditProductPage() {
         brand: p.brand ?? '',
         price: dollars(p.priceMinor),
         salePrice: dollars(p.salePriceMinor),
-        weightGrams: str(p.weightGrams),
-        lengthMm: str(p.lengthMm),
-        widthMm: str(p.widthMm),
-        heightMm: str(p.heightMm),
+        weightLb: gramsToPoundsInput(p.weightGrams),
+        lengthIn: mmToInchesInput(p.lengthMm),
+        widthIn: mmToInchesInput(p.widthMm),
+        heightIn: mmToInchesInput(p.heightMm),
         featured: p.featured,
         tags: p.tags.join(', '),
         metaTitle: p.metaTitle ?? '',

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../lib/api';
+import { poundsInputToGrams, inchesInputToMm } from '@bmpl/shared';
 import { Card, Field, Input, Textarea, Select, Button, Alert } from '../../../components/ui';
 
 interface CategoryNode {
@@ -21,10 +22,11 @@ export interface ProductValues {
   brand: string;
   price: string; // dollars
   salePrice: string; // dollars
-  weightGrams: string;
-  lengthMm: string;
-  widthMm: string;
-  heightMm: string;
+  // Imperial inputs (Belize) — converted to canonical grams/mm before the API call.
+  weightLb: string;
+  lengthIn: string;
+  widthIn: string;
+  heightIn: string;
   featured: boolean;
   tags: string; // comma-separated
   metaTitle: string;
@@ -33,7 +35,7 @@ export interface ProductValues {
 
 const EMPTY: ProductValues = {
   title: '', description: '', sku: '', barcode: '', categoryId: '', brand: '',
-  price: '', salePrice: '', weightGrams: '', lengthMm: '', widthMm: '', heightMm: '',
+  price: '', salePrice: '', weightLb: '', lengthIn: '', widthIn: '', heightIn: '',
   featured: false, tags: '', metaTitle: '', metaDescription: '',
 };
 
@@ -44,7 +46,6 @@ function flatten(nodes: CategoryNode[], depth = 0): Array<{ id: string; label: s
   ]);
 }
 const toCents = (v: string) => (v.trim() === '' ? null : Math.round(Number(v) * 100));
-const toInt = (v: string) => (v.trim() === '' ? null : Math.round(Number(v)));
 
 export function ProductForm({ initial }: { initial?: ProductValues }) {
   const router = useRouter();
@@ -76,10 +77,11 @@ export function ProductForm({ initial }: { initial?: ProductValues }) {
       brand: v.brand || (isEdit ? null : undefined),
       priceMinor: price ?? 0,
       salePriceMinor: toCents(v.salePrice),
-      weightGrams: toInt(v.weightGrams),
-      lengthMm: toInt(v.lengthMm),
-      widthMm: toInt(v.widthMm),
-      heightMm: toInt(v.heightMm),
+      // Store canonical metric; the vendor entered imperial.
+      weightGrams: poundsInputToGrams(v.weightLb),
+      lengthMm: inchesInputToMm(v.lengthIn),
+      widthMm: inchesInputToMm(v.widthIn),
+      heightMm: inchesInputToMm(v.heightIn),
       featured: v.featured,
       tags: v.tags.split(',').map((t) => t.trim()).filter(Boolean),
       metaTitle: v.metaTitle || (isEdit ? null : undefined),
@@ -133,10 +135,10 @@ export function ProductForm({ initial }: { initial?: ProductValues }) {
       <Card className="space-y-4 p-5 sm:p-6">
         <h2 className="bmpl-eyebrow">Shipping</h2>
         <div className="grid gap-4 sm:grid-cols-4">
-          <Field label="Weight (g)"><Input inputMode="numeric" value={v.weightGrams} onChange={(e) => set('weightGrams', e.target.value)} /></Field>
-          <Field label="Length (mm)"><Input inputMode="numeric" value={v.lengthMm} onChange={(e) => set('lengthMm', e.target.value)} /></Field>
-          <Field label="Width (mm)"><Input inputMode="numeric" value={v.widthMm} onChange={(e) => set('widthMm', e.target.value)} /></Field>
-          <Field label="Height (mm)"><Input inputMode="numeric" value={v.heightMm} onChange={(e) => set('heightMm', e.target.value)} /></Field>
+          <Field label="Weight (lb)"><Input inputMode="decimal" value={v.weightLb} onChange={(e) => set('weightLb', e.target.value)} placeholder="0.0" /></Field>
+          <Field label="Length (in)"><Input inputMode="decimal" value={v.lengthIn} onChange={(e) => set('lengthIn', e.target.value)} placeholder="0.0" /></Field>
+          <Field label="Width (in)"><Input inputMode="decimal" value={v.widthIn} onChange={(e) => set('widthIn', e.target.value)} placeholder="0.0" /></Field>
+          <Field label="Height (in)"><Input inputMode="decimal" value={v.heightIn} onChange={(e) => set('heightIn', e.target.value)} placeholder="0.0" /></Field>
         </div>
       </Card>
 

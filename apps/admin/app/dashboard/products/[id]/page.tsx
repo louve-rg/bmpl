@@ -4,6 +4,7 @@ import { serverGet } from '../../../../lib/server-api';
 import { StatusBadge } from '../../../../components/StatusBadge';
 import { Alert, Badge, Breadcrumbs, Card } from '../../../../components/ui';
 import { adminCrumbs } from '../../../../lib/admin-nav';
+import { formatWeight } from '@bmpl/shared';
 import { ProductModeration } from './ProductModeration';
 
 export const dynamic = 'force-dynamic';
@@ -69,7 +70,7 @@ export default async function AdminProductDetail({ params }: { params: { id: str
           <Row label="Sale price">{money(p.salePriceMinor)}</Row>
           <Row label="Brand">{p.brand ?? '—'}</Row>
           <Row label="Barcode">{p.barcode ?? '—'}</Row>
-          <Row label="Weight">{p.weightGrams ? `${p.weightGrams} g` : '—'}</Row>
+          <Row label="Weight">{formatWeight(p.weightGrams) ?? '—'}</Row>
           <Row label="Featured">{p.featured ? 'Yes' : 'No'}</Row>
         </div>
         {p.description && <p className="mt-4 whitespace-pre-wrap text-sm text-slate-600">{p.description}</p>}

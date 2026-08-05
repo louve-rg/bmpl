@@ -3,6 +3,7 @@
 import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
+import { kmToMilesInput, milesInputToKm } from '@bmpl/shared';
 import {
   Card as UiCard,
   PageHeader,
@@ -193,7 +194,8 @@ function PricingSection({ data, onDone }: { data: DeliveryData; onDone: () => Pr
     baseDeliveryFeeMinor: toDollarStr(s.baseDeliveryFeeMinor),
     freeDeliveryThresholdMinor: toDollarStr(s.freeDeliveryThresholdMinor),
     minimumOrderMinor: toDollarStr(s.minimumOrderMinor),
-    deliveryRadiusKm: s.deliveryRadiusKm != null ? String(s.deliveryRadiusKm) : '',
+    // Displayed/entered in miles; stored canonically in km.
+    deliveryRadiusMi: kmToMilesInput(s.deliveryRadiusKm),
   });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -211,7 +213,7 @@ function PricingSection({ data, onDone }: { data: DeliveryData; onDone: () => Pr
         baseDeliveryFeeMinor: dollarsToCentsOrNull(f.baseDeliveryFeeMinor),
         freeDeliveryThresholdMinor: dollarsToCentsOrNull(f.freeDeliveryThresholdMinor),
         minimumOrderMinor: dollarsToCentsOrNull(f.minimumOrderMinor),
-        deliveryRadiusKm: f.deliveryRadiusKm.trim() === '' ? null : Number(f.deliveryRadiusKm),
+        deliveryRadiusKm: milesInputToKm(f.deliveryRadiusMi),
       });
       setMsg('Delivery settings saved.');
       await onDone();
@@ -267,13 +269,13 @@ function PricingSection({ data, onDone }: { data: DeliveryData; onDone: () => Pr
               onChange={(e) => setF({ ...f, minimumOrderMinor: e.target.value })}
             />
           </Field>
-          <Field label="Maximum delivery radius (km)" htmlFor="deliveryRadiusKm" hint="Optional — leave blank for no limit.">
+          <Field label="Maximum delivery radius (mi)" htmlFor="deliveryRadiusMi" hint="Optional — leave blank for no limit.">
             <Input
-              id="deliveryRadiusKm"
+              id="deliveryRadiusMi"
               inputMode="decimal"
               placeholder="none"
-              value={f.deliveryRadiusKm}
-              onChange={(e) => setF({ ...f, deliveryRadiusKm: e.target.value })}
+              value={f.deliveryRadiusMi}
+              onChange={(e) => setF({ ...f, deliveryRadiusMi: e.target.value })}
             />
           </Field>
         </div>

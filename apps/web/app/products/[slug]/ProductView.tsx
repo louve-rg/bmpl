@@ -12,6 +12,7 @@ import type { RatingAggregate } from '../../../lib/reviews';
 import { VariantLineup, VariantSelector, type LineupImage } from '../../../components/products/VariantChooser';
 import { optionValuesFor } from '../../../lib/variant-card';
 import { variantDisplay } from '../../../lib/variant-display';
+import { formatWeight, formatDimensionsMm } from '@bmpl/shared';
 import { cartApi, money, notifyCartChanged } from '../../../lib/cart';
 import type { ApiError } from '../../../lib/api';
 import { SaveButton } from '../../../components/saved/SaveButton';
@@ -365,24 +366,29 @@ export function ProductView({ product }: { product: ProductDetail }) {
 
         {product.description && <p className="mt-5 whitespace-pre-wrap text-slate-600">{product.description}</p>}
 
-        {(product.weightGrams || dims.length || dims.width || dims.height) && (
-          <dl className="mt-6 grid grid-cols-2 gap-2 text-sm text-slate-600">
-            {product.weightGrams && (
-              <div>
-                <dt className="text-slate-400">Weight</dt>
-                <dd>{product.weightGrams} g</dd>
-              </div>
-            )}
-            {(dims.length || dims.width || dims.height) && (
-              <div>
-                <dt className="text-slate-400">Dimensions</dt>
-                <dd>
-                  {dims.length ?? '—'}×{dims.width ?? '—'}×{dims.height ?? '—'} mm
-                </dd>
-              </div>
-            )}
-          </dl>
-        )}
+        {(() => {
+          // Imperial display (Belize) — canonical values are stored metric and
+          // converted here via the shared units helpers.
+          const weight = formatWeight(product.weightGrams);
+          const dimensions = formatDimensionsMm(dims.length, dims.width, dims.height);
+          if (!weight && !dimensions) return null;
+          return (
+            <dl className="mt-6 grid grid-cols-2 gap-2 text-sm text-slate-600">
+              {weight && (
+                <div>
+                  <dt className="text-slate-400">Weight</dt>
+                  <dd>{weight}</dd>
+                </div>
+              )}
+              {dimensions && (
+                <div>
+                  <dt className="text-slate-400">Dimensions</dt>
+                  <dd>{dimensions}</dd>
+                </div>
+              )}
+            </dl>
+          );
+        })()}
 
         {product.tags.length > 0 && (
           <div className="mt-5 flex flex-wrap gap-1.5">
