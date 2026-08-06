@@ -17,6 +17,7 @@ import {
   type ImagePresignInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
+import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -56,10 +57,18 @@ export class DriverController {
     return this.driver.updateProfile(u.userId, body);
   }
 
+  /** @deprecated Superseded by `profile/photo/upload` — see DriverService.presignProfilePhoto. */
   @StrictThrottle()
   @Post('profile/photo/presign')
   presignPhoto(@CurrentUser() u: AuthContext, @Body(ZodBody(imagePresignSchema)) body: ImagePresignInput) {
     return this.driver.presignProfilePhoto(u.userId, body.fileName, body.contentType);
+  }
+
+  /** Server-side profile-photo upload: raw bytes in, storage key out. */
+  @StrictThrottle()
+  @Post('profile/photo/upload')
+  uploadPhoto(@CurrentUser() u: AuthContext, @Req() req: Request) {
+    return this.driver.uploadProfilePhoto(u.userId, rawBody(req), uploadFileName(req));
   }
 
   @Get('profile/photo')
@@ -87,10 +96,18 @@ export class DriverController {
     return this.driver.deleteVehicle(u.userId, id);
   }
 
+  /** @deprecated Superseded by `vehicles/photo/upload`. */
   @StrictThrottle()
   @Post('vehicles/photo/presign')
   presignVehiclePhoto(@CurrentUser() u: AuthContext, @Body(ZodBody(imagePresignSchema)) body: ImagePresignInput) {
     return this.driver.presignVehiclePhoto(u.userId, body.fileName, body.contentType);
+  }
+
+  /** Server-side vehicle-photo upload: raw bytes in, storage key out. */
+  @StrictThrottle()
+  @Post('vehicles/photo/upload')
+  uploadVehiclePhoto(@CurrentUser() u: AuthContext, @Req() req: Request) {
+    return this.driver.uploadVehiclePhoto(u.userId, rawBody(req), uploadFileName(req));
   }
 
   @Put('service-areas')

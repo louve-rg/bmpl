@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   enquiryReplySchema,
   imagePresignSchema,
@@ -20,6 +21,7 @@ import {
   type ViewingTransitionInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
+import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -57,6 +59,12 @@ export class AgentController {
     return this.agents.upsertProfile(this.actor(u), b);
   }
   @StrictThrottle()
+  /** Server-side agent-photo upload: raw bytes in, storage key out. */
+  @Post('profile/photo/upload')
+  uploadPhoto(@CurrentUser() u: AuthContext, @Req() req: Request) {
+    return this.agents.uploadPhoto(u.userId, rawBody(req), uploadFileName(req));
+  }
+
   @Post('profile/photo/presign')
   presignPhoto(@CurrentUser() u: AuthContext, @Body(ZodBody(imagePresignSchema)) b: ImagePresignInput) {
     return this.agents.presignPhoto(u.userId, b.fileName, b.contentType);
@@ -76,6 +84,12 @@ export class AgentController {
     return this.agencies.upsertProfile(this.actor(u), b);
   }
   @StrictThrottle()
+  /** Server-side agency logo/banner upload: raw bytes in, storage key out. */
+  @Post('agency/:kind/upload')
+  uploadAgencyImage(@CurrentUser() u: AuthContext, @Param('kind') kind: string, @Req() req: Request) {
+    return this.agencies.uploadImage(u.userId, kind === 'banner' ? 'banner' : 'logo', rawBody(req), uploadFileName(req));
+  }
+
   @Post('agency/:kind/presign')
   presignAgencyImage(@CurrentUser() u: AuthContext, @Param('kind') kind: string, @Body(ZodBody(imagePresignSchema)) b: ImagePresignInput) {
     return this.agencies.presignImage(u.userId, kind === 'banner' ? 'banner' : 'logo', b.fileName, b.contentType);
@@ -123,6 +137,12 @@ export class AgentController {
 
   // ---- images ----
   @StrictThrottle()
+  /** Server-side listing-image upload: raw bytes in, storage key out. */
+  @Post('listings/:id/images/upload')
+  uploadImage(@CurrentUser() u: AuthContext, @Param('id') id: string, @Req() req: Request) {
+    return this.properties.uploadImage(this.actor(u), id, rawBody(req), uploadFileName(req));
+  }
+
   @Post('listings/:id/images/presign')
   presignImage(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(imagePresignSchema)) b: ImagePresignInput) {
     return this.properties.presignImage(this.actor(u), id, b.fileName, b.contentType);
@@ -146,6 +166,12 @@ export class AgentController {
 
   // ---- private documents ----
   @StrictThrottle()
+  /** Server-side listing-document upload: raw bytes in, storage key out. */
+  @Post('listings/:id/documents/upload')
+  uploadDocument(@CurrentUser() u: AuthContext, @Param('id') id: string, @Req() req: Request) {
+    return this.properties.uploadDocument(this.actor(u), id, rawBody(req), uploadFileName(req));
+  }
+
   @Post('listings/:id/documents/presign')
   presignDocument(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(imagePresignSchema)) b: ImagePresignInput) {
     return this.properties.presignDocument(this.actor(u), id, b.fileName, b.contentType);

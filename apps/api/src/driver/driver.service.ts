@@ -19,6 +19,7 @@ import type {
 import type { DriverProfile, DriverVehicle, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
 
 interface Actor {
@@ -32,6 +33,7 @@ export class DriverService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
     private readonly audit: AuditService,
   ) {}
 
@@ -99,15 +101,37 @@ export class DriverService {
   }
 
   // ---- private photo uploads (profile + vehicle) ----
+  /**
+   * @deprecated Prefer {@link uploadProfilePhoto}. The presigned URL points at the R2
+   * S3 endpoint, so the browser PUT is cross-origin; the bucket has no CORS policy for
+   * the custom domain and it fails as "Load failed". Kept for API compatibility.
+   */
   async presignProfilePhoto(userId: string, fileName: string, contentType: string) {
     if (!isAllowedProductImageMime(contentType)) throw new BadRequestException('Use a JPEG, PNG, or WebP image.');
     const key = this.storage.buildKey(STORAGE_PREFIX.driverPhoto(userId), fileName);
     return this.storage.presignUpload(key, contentType, 'private');
   }
+  /** @deprecated Prefer {@link uploadVehiclePhoto} — same reason as above. */
   async presignVehiclePhoto(userId: string, fileName: string, contentType: string) {
     if (!isAllowedProductImageMime(contentType)) throw new BadRequestException('Use a JPEG, PNG, or WebP image.');
     const key = this.storage.buildKey(STORAGE_PREFIX.driverVehiclePhoto(userId), fileName);
     return this.storage.presignUpload(key, contentType, 'private');
+  }
+
+  /** Server-side profile-photo upload (browser → API → private storage). */
+  async uploadProfilePhoto(userId: string, buffer: Buffer | undefined, fileName?: string) {
+    return this.ingest.image(buffer, STORAGE_PREFIX.driverPhoto(userId), 'private', {
+      fileName,
+      fallbackName: 'profile',
+    });
+  }
+
+  /** Server-side vehicle-photo upload (browser → API → private storage). */
+  async uploadVehiclePhoto(userId: string, buffer: Buffer | undefined, fileName?: string) {
+    return this.ingest.image(buffer, STORAGE_PREFIX.driverVehiclePhoto(userId), 'private', {
+      fileName,
+      fallbackName: 'vehicle',
+    });
   }
   /** Validate uploaded keys live in this user's namespace + are real images. */
   private async resolveKeys(userId: string, keys: string[], namespace: string): Promise<string[]> {

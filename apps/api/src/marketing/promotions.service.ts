@@ -22,6 +22,7 @@ import type {
 import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -96,6 +97,7 @@ export class PromotionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
   ) {}
@@ -430,6 +432,20 @@ export class PromotionsService {
   // ===========================================================================
   // Assets (PUBLIC bucket)
   // ===========================================================================
+  /** Server-side promotion-asset upload (browser → API → public storage). */
+  async uploadAsset(actor: Actor, promotionId: string, kind: PromotionAssetKind, buffer: Buffer | undefined, fileName?: string) {
+    const promo = await this.requireOwned(actor, promotionId);
+    this.assertEditable(promo.status);
+    if (!IMAGE_ASSET_KINDS.includes(kind)) throw new BadRequestException('This asset kind is a URL reference, not an uploaded image.');
+    const count = await this.prisma.promotionAsset.count({ where: { promotionId } });
+    if (count >= MAX_PROMOTION_ASSETS) throw new BadRequestException(`At most ${MAX_PROMOTION_ASSETS} assets per promotion.`);
+    return this.ingest.image(buffer, STORAGE_PREFIX.promotionAsset(promotionId), 'public', {
+      fileName,
+      fallbackName: 'asset',
+    });
+  }
+
+  /** @deprecated Prefer {@link uploadAsset} — the browser PUT is cross-origin and fails as "Load failed". */
   async presignAsset(actor: Actor, promotionId: string, kind: PromotionAssetKind, fileName: string, contentType: string) {
     const promo = await this.requireOwned(actor, promotionId);
     this.assertEditable(promo.status);

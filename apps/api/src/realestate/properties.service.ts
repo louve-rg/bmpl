@@ -22,6 +22,7 @@ import type {
 import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PropertyOwnerService } from './property-owner.service';
@@ -52,6 +53,7 @@ export class PropertiesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly owners: PropertyOwnerService,
@@ -321,6 +323,18 @@ export class PropertiesService {
   // ===========================================================================
   // Images (PUBLIC bucket)
   // ===========================================================================
+  /** Server-side listing-image upload (browser → API → public storage). */
+  async uploadImage(actor: Actor, listingId: string, buffer: Buffer | undefined, fileName?: string) {
+    await this.requireManageable(actor, listingId);
+    const count = await this.prisma.propertyImage.count({ where: { listingId } });
+    if (count >= MAX_PROPERTY_IMAGES) throw new BadRequestException(`At most ${MAX_PROPERTY_IMAGES} images per listing.`);
+    return this.ingest.image(buffer, STORAGE_PREFIX.propertyImage(listingId), 'public', {
+      fileName,
+      fallbackName: 'image',
+    });
+  }
+
+  /** @deprecated Prefer {@link uploadImage} — the browser PUT is cross-origin and fails as "Load failed". */
   async presignImage(actor: Actor, listingId: string, fileName: string, contentType: string) {
     await this.requireManageable(actor, listingId);
     if (!isAllowedProductImageMime(contentType)) throw new BadRequestException('Use a JPEG, PNG, or WebP image.');
@@ -385,6 +399,16 @@ export class PropertiesService {
   // ===========================================================================
   // Documents (PRIVATE bucket) — owner / assigned-accepted agent / permitted admin
   // ===========================================================================
+  /** Server-side listing-document upload (browser → API → private storage). */
+  async uploadDocument(actor: Actor, listingId: string, buffer: Buffer | undefined, fileName?: string) {
+    await this.requireManageable(actor, listingId);
+    return this.ingest.document(buffer, STORAGE_PREFIX.propertyDocument(listingId), 'private', {
+      fileName,
+      fallbackName: 'document',
+    });
+  }
+
+  /** @deprecated Prefer {@link uploadDocument} — the browser PUT is cross-origin and fails as "Load failed". */
   async presignDocument(actor: Actor, listingId: string, fileName: string, contentType: string) {
     await this.requireManageable(actor, listingId);
     if (!isAllowedDocumentMime(contentType)) throw new BadRequestException('Upload a PDF or image (JPEG, PNG, WebP, HEIC).');

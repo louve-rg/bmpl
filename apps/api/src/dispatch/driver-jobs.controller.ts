@@ -13,6 +13,7 @@ import {
   type PodConfirmInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
+import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -78,6 +79,13 @@ export class DriverJobsController {
   @Post(':id/pod/presign')
   presignPod(@CurrentUser() u: AuthContext, @Body(ZodBody(imagePresignSchema)) b: ImagePresignInput) {
     return this.jobs.presignPod(u.userId, b.fileName, b.contentType);
+  }
+
+  /** Server-side POD photo upload: raw bytes in, storage key out. */
+  @StrictThrottle()
+  @Post(':id/pod/upload')
+  uploadPod(@CurrentUser() u: AuthContext, @Req() req: Request) {
+    return this.jobs.uploadPod(u.userId, rawBody(req), uploadFileName(req));
   }
 
   @Post(':id/pod/confirm')

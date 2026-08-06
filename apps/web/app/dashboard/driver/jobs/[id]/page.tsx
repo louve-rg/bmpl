@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../../lib/api';
+import { uploadFile } from '../../../../../lib/uploads';
 import {
   Card,
   PageHeader,
@@ -587,14 +588,8 @@ function CompleteDeliveryForm({
     setPhotoBusy(true);
     setErr(null);
     try {
-      const presign = await api.post<{ uploadUrl: string; key: string }>(`/driver/jobs/${job.id}/pod/presign`, {
-        fileName: file.name,
-        contentType: file.type,
-        sizeBytes: file.size,
-      });
-      const put = await fetch(presign.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-      if (!put.ok) throw { message: 'Upload to storage failed.' } as ApiError;
-      setPhotoKeys((k) => [...k, presign.key]);
+      const key = await uploadFile(`/driver/jobs/${job.id}/pod/upload`, file);
+      setPhotoKeys((k) => [...k, key]);
     } catch (e) {
       setErr(errMessage(e));
     } finally {

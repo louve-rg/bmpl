@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   imagePresignSchema,
   jobReportSchema,
@@ -16,6 +17,7 @@ import {
   type UpsertJobSeekerProfileInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
+import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -77,6 +79,13 @@ export class JobSeekerController {
   }
 
   // ---- résumés (private) ----
+  /** Server-side résumé upload: raw bytes in, storage key out. */
+  @StrictThrottle()
+  @Post('resumes/upload')
+  uploadResume(@CurrentUser() u: AuthContext, @Req() req: Request) {
+    return this.seeker.uploadResume(u.userId, rawBody(req), uploadFileName(req));
+  }
+
   @StrictThrottle()
   @Post('resumes/presign')
   presignResume(@CurrentUser() u: AuthContext, @Body(ZodBody(imagePresignSchema)) b: ImagePresignInput) {

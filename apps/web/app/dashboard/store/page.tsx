@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
+import { uploadFile } from '../../../lib/uploads';
 import { centsToDollars, dollarsToCentsOrNull } from '../../../lib/money-input';
 import {
   Card as UiCard,
@@ -251,14 +252,8 @@ function ImagesSection({ store, onDone, onError }: SectionProps) {
   const p = store.profile!;
   async function upload(kind: 'logo' | 'banner', file: File) {
     try {
-      const presign = await api.post<{ uploadUrl: string; key: string }>(`/vendor/profile/${kind}/presign`, {
-        fileName: file.name,
-        contentType: file.type,
-        sizeBytes: file.size,
-      });
-      const put = await fetch(presign.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-      if (!put.ok) throw { message: 'Upload to storage failed.' };
-      await api.post(`/vendor/profile/${kind}/confirm`, { key: presign.key });
+      const key = await uploadFile(`/vendor/profile/${kind}/upload`, file);
+      await api.post(`/vendor/profile/${kind}/confirm`, { key });
       await onDone();
     } catch (e) {
       onError(e);

@@ -9,6 +9,7 @@ import {
   type SendMessageInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
+import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -36,6 +37,13 @@ export class MessagingController {
   @Get('unread-count')
   unreadCount(@CurrentUser() u: AuthContext, @Req() req: Request) {
     return this.messaging.unreadCount(this.actor(u, req));
+  }
+
+  /** Server-side attachment upload: raw bytes in, storage key out. */
+  @StrictThrottle()
+  @Post('attachments/upload')
+  uploadAttachment(@CurrentUser() u: AuthContext, @Req() req: Request) {
+    return this.messaging.uploadAttachment(u.userId, rawBody(req), uploadFileName(req));
   }
 
   @StrictThrottle()

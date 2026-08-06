@@ -11,6 +11,7 @@ import type { CreateSupportConversationInput, InternalNoteInput, SendMessageInpu
 import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -54,6 +55,7 @@ export class MessagingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
   ) {}
@@ -391,6 +393,15 @@ export class MessagingService {
     return out;
   }
 
+  /** Server-side message-attachment upload (browser → API → private storage). */
+  async uploadAttachment(userId: string, buffer: Buffer | undefined, fileName?: string) {
+    return this.ingest.document(buffer, STORAGE_PREFIX.messageAttachment(userId), 'private', {
+      fileName,
+      fallbackName: 'attachment',
+    });
+  }
+
+  /** @deprecated Prefer {@link uploadAttachment} — the browser PUT is cross-origin and fails as "Load failed". */
   async presignAttachment(userId: string, fileName: string, contentType: string) {
     if (!isAllowedMessageAttachmentMime(contentType)) throw new BadRequestException('Use an image or PDF.');
     const key = this.storage.buildKey(STORAGE_PREFIX.messageAttachment(userId), fileName);

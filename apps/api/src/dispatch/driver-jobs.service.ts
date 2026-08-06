@@ -11,6 +11,7 @@ import type { ConfirmDeliveryInput, ConfirmPickupInput, DeclineJobInput, PodConf
 import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../products/inventory.service';
 import { MessagingService } from '../messaging/messaging.service';
@@ -34,6 +35,7 @@ export class DriverJobService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
     private readonly audit: AuditService,
     private readonly inventory: InventoryService,
     private readonly core: DeliveryCoreService,
@@ -243,13 +245,22 @@ export class DriverJobService {
 
   // ---- proof of delivery -------------------------------------------------
 
+  /** @deprecated Prefer {@link uploadPod} — the browser PUT is cross-origin and fails as "Load failed". */
   async presignPod(userId: string, fileName: string, contentType: string) {
     if (!isAllowedProductImageMime(contentType)) throw new BadRequestException('Use a JPEG, PNG, or WebP image.');
     const key = this.storage.buildKey(STORAGE_PREFIX.deliveryProof(userId), fileName);
     return this.storage.presignUpload(key, contentType, 'private');
   }
 
-  /** Attach POD photos (uploaded via presign) to an owned, not-yet-delivered job. */
+  /** Server-side proof-of-delivery photo upload (browser → API → private storage). */
+  async uploadPod(userId: string, buffer: Buffer | undefined, fileName?: string) {
+    return this.ingest.image(buffer, STORAGE_PREFIX.deliveryProof(userId), 'private', {
+      fileName,
+      fallbackName: 'proof',
+    });
+  }
+
+  /** Attach POD photos (uploaded via presign or upload) to an owned, not-yet-delivered job. */
   async confirmPod(actor: Actor, deliveryId: string, dto: PodConfirmInput) {
     const { d } = await this.ownedDelivery(actor.userId, deliveryId);
     if (d.status === 'DELIVERED' || d.status === 'CANCELLED') throw new BadRequestException('Delivery is already completed.');

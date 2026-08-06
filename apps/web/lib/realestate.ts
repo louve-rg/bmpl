@@ -36,6 +36,7 @@ import {
   type PropertySort,
 } from '@bmpl/shared';
 import { api } from './api';
+import { uploadFile } from './uploads';
 
 /* ------------------------------------------------------------------ types */
 
@@ -733,33 +734,23 @@ export function formatBytes(bytes: number): string {
 
 export type ListerBase = 'property-owner' | 'real-estate-agent';
 
-async function putBytes(url: string, file: File): Promise<void> {
-  const put = await fetch(url, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-  if (!put.ok) throw { status: put.status, message: 'Upload to storage failed.' };
-}
-
-/** Listing image presign → PUT → confirm. Returns the updated managed listing. */
+/** Listing image upload → confirm. Returns the updated managed listing. */
 export async function uploadPropertyImage(
   base: ListerBase,
   listingId: string,
   file: File,
   meta: { altText?: string; caption?: string; areaLabel?: string } = {},
 ): Promise<ManagedProperty> {
-  const presign = await api.post<Presign>(`/${base}/listings/${listingId}/images/presign`, {
-    fileName: file.name,
-    contentType: file.type,
-    sizeBytes: file.size,
-  });
-  await putBytes(presign.uploadUrl, file);
+  const storageKey = await uploadFile(`/${base}/listings/${listingId}/images/upload`, file);
   return api.post<ManagedProperty>(`/${base}/listings/${listingId}/images`, {
-    storageKey: presign.key,
+    storageKey,
     altText: meta.altText || undefined,
     caption: meta.caption || undefined,
     areaLabel: meta.areaLabel || undefined,
   });
 }
 
-/** Listing document presign → PUT → confirm. Returns the updated managed listing. */
+/** Listing document upload → confirm. Returns the updated managed listing. */
 export async function uploadPropertyDocument(
   base: ListerBase,
   listingId: string,
@@ -767,44 +758,27 @@ export async function uploadPropertyDocument(
   kind: PropertyDocumentKind,
   label?: string,
 ): Promise<ManagedProperty> {
-  const presign = await api.post<Presign>(`/${base}/listings/${listingId}/documents/presign`, {
-    fileName: file.name,
-    contentType: file.type,
-    sizeBytes: file.size,
-  });
-  await putBytes(presign.uploadUrl, file);
+  const storageKey = await uploadFile(`/${base}/listings/${listingId}/documents/upload`, file);
   return api.post<ManagedProperty>(`/${base}/listings/${listingId}/documents`, {
-    storageKey: presign.key,
+    storageKey,
     kind,
     label: label?.trim() || undefined,
   });
 }
 
-/** Agent profile photo presign → PUT → confirm. Returns the updated agent profile. */
+/** Agent profile photo upload → confirm. Returns the updated agent profile. */
 export async function uploadAgentPhoto(file: File): Promise<AgentProfile> {
-  const presign = await api.post<Presign>('/real-estate-agent/profile/photo/presign', {
-    fileName: file.name,
-    contentType: file.type,
-    sizeBytes: file.size,
-  });
-  await putBytes(presign.uploadUrl, file);
-  return api.post<AgentProfile>('/real-estate-agent/profile/photo', { storageKey: presign.key });
+  const storageKey = await uploadFile('/real-estate-agent/profile/photo/upload', file);
+  return api.post<AgentProfile>('/real-estate-agent/profile/photo', { storageKey });
 }
 
-/** Agency logo/banner presign → PUT → confirm. Returns the updated agency profile. */
+/** Agency logo/banner upload → confirm. Returns the updated agency profile. */
 export async function uploadAgencyAsset(
   kind: 'logo' | 'banner',
   file: File,
 ): Promise<AgencyProfile> {
-  const presign = await api.post<Presign>(`/real-estate-agent/agency/${kind}/presign`, {
-    fileName: file.name,
-    contentType: file.type,
-    sizeBytes: file.size,
-  });
-  await putBytes(presign.uploadUrl, file);
-  return api.post<AgencyProfile>(`/real-estate-agent/agency/${kind}/confirm`, {
-    storageKey: presign.key,
-  });
+  const storageKey = await uploadFile(`/real-estate-agent/agency/${kind}/upload`, file);
+  return api.post<AgencyProfile>(`/real-estate-agent/agency/${kind}/confirm`, { storageKey });
 }
 
 /* ------------------------------------------------------------------- api */

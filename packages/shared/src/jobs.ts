@@ -101,6 +101,49 @@ export const RESUME_MIME_TYPES = ['application/pdf', 'application/vnd.openxmlfor
 export type ResumeMime = (typeof RESUME_MIME_TYPES)[number];
 export const isAllowedResumeMime = (m: string): m is ResumeMime => (RESUME_MIME_TYPES as readonly string[]).includes(m);
 export const MAX_RESUME_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/**
+ * Sniff a résumé's REAL type from its magic bytes, for server-side uploads where a
+ * client-declared Content-Type must never be trusted.
+ *
+ * PDF is a plain signature check. DOCX is an OOXML package — a ZIP archive — so the
+ * ZIP signature alone would also match .xlsx, .pptx, .jar or any renamed .zip. We
+ * additionally require the archive to name a `word/` part, which is what makes an
+ * OOXML package specifically a WordprocessingML document. Returns null otherwise, so
+ * the caller rejects the upload.
+ */
+export function sniffResumeMime(bytes: Uint8Array): ResumeMime | null {
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 // "%PDF"
+  ) {
+    return 'application/pdf';
+  }
+  // "PK\x03\x04" — a ZIP local file header, the container OOXML uses.
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04
+  ) {
+    // Entry names are stored uncompressed in the archive's headers, so "word/"
+    // appears as literal bytes in a DOCX and not in xlsx/pptx/plain zips.
+    const needle = [0x77, 0x6f, 0x72, 0x64, 0x2f]; // "word/"
+    const limit = Math.min(bytes.length, 64 * 1024) - needle.length;
+    for (let i = 0; i <= limit; i += 1) {
+      let hit = true;
+      for (let j = 0; j < needle.length; j += 1) {
+        if (bytes[i + j] !== needle[j]) {
+          hit = false;
+          break;
+        }
+      }
+      if (hit) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+  }
+  return null;
+}
+
+/** File extension for an allowed résumé MIME (for building storage keys). */
+export const resumeExt = (mime: ResumeMime): string => (mime === 'application/pdf' ? 'pdf' : 'docx');
 export const MAX_RESUMES_PER_SEEKER = 5;
 
 export const JOBS_PAGE_SIZE = 20;

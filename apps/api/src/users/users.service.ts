@@ -9,6 +9,7 @@ import {
 } from '@bmpl/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 
 /** Serializable view of the signed-in user + their roles. */
 export interface MeView {
@@ -38,6 +39,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
   ) {}
 
   async getMe(userId: string): Promise<MeView> {
@@ -89,9 +91,19 @@ export class UsersService {
     return this.getMe(userId);
   }
 
+  /** @deprecated Prefer {@link uploadAvatar} — the browser PUT is cross-origin and fails as "Load failed". */
   async presignAvatar(userId: string, fileName: string, contentType: string) {
     const key = this.storage.buildKey(STORAGE_PREFIX.avatar(userId), fileName);
     return this.storage.presignUpload(key, contentType);
+  }
+
+  /** Server-side avatar upload (browser → API → private storage). */
+  async uploadAvatar(userId: string, buffer: Buffer | undefined, fileName?: string) {
+    return this.ingest.image(buffer, STORAGE_PREFIX.avatar(userId), 'private', {
+      fileName,
+      fallbackName: 'avatar',
+      maxBytes: MAX_AVATAR_BYTES,
+    });
   }
 
   /**

@@ -32,6 +32,7 @@ import {
   type CouponScope,
 } from '@bmpl/shared';
 import { api } from './api';
+import { uploadFile } from './uploads';
 
 /* ------------------------------------------------------------------ types */
 
@@ -463,7 +464,7 @@ interface Presign {
 }
 
 /**
- * Promotion image asset: presign → PUT → confirm (mirrors jobs/realestate). Only image
+ * Promotion image asset: upload → confirm (mirrors jobs/realestate). Only image
  * kinds go through here; VIDEO_PLACEHOLDER is confirmed with a URL, not uploaded.
  * Returns the updated managed promotion detail.
  */
@@ -473,21 +474,13 @@ export async function uploadPromotionAsset(
   file: File,
   altText?: string,
 ): Promise<PromotionDetail> {
-  const presign = await api.post<Presign>(`/business/marketing/promotions/${promotionId}/assets/presign`, {
-    kind,
-    fileName: file.name,
-    contentType: file.type,
-    sizeBytes: file.size,
-  });
-  const put = await fetch(presign.uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type },
-    body: file,
-  });
-  if (!put.ok) throw { status: put.status, message: 'Upload to storage failed.' };
+  const storageKey = await uploadFile(
+    `/business/marketing/promotions/${promotionId}/assets/upload?kind=${encodeURIComponent(kind)}`,
+    file,
+  );
   return api.post<PromotionDetail>(`/business/marketing/promotions/${promotionId}/assets`, {
     kind,
-    storageKey: presign.key,
+    storageKey,
     altText: altText?.trim() || undefined,
   });
 }

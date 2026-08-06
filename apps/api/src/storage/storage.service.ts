@@ -27,7 +27,7 @@ export interface ObjectMetadata {
 
 export type StorageHealth = 'ok' | 'not_configured' | 'error';
 
-type Visibility = 'private' | 'public';
+export type Visibility = 'private' | 'public';
 
 /**
  * S3-compatible object storage. Works with **MinIO** (local dev) and

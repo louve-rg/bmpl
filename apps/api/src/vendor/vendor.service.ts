@@ -21,6 +21,7 @@ import { Prisma } from '@bmpl/database';
 import type { VendorProfile } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ProductsService } from '../products/products.service';
@@ -46,6 +47,7 @@ export class VendorService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly products: ProductsService,
@@ -283,6 +285,15 @@ export class VendorService {
   }
 
   // ---- Images (public bucket) ----
+  /** Server-side vendor logo/banner upload (browser → API → public storage). */
+  async uploadImage(userId: string, kind: ImageKind, buffer: Buffer | undefined, fileName?: string) {
+    const profile = await this.ownProfileOrThrow(userId);
+    const prefix =
+      kind === 'logo' ? STORAGE_PREFIX.vendorLogo(profile.id) : STORAGE_PREFIX.vendorBanner(profile.id);
+    return this.ingest.image(buffer, prefix, 'public', { fileName, fallbackName: kind });
+  }
+
+  /** @deprecated Prefer {@link uploadImage} — the browser PUT is cross-origin and fails as "Load failed". */
   async presignImage(userId: string, kind: ImageKind, fileName: string, contentType: string) {
     if (!isAllowedProductImageMime(contentType)) {
       throw new BadRequestException('Unsupported image type. Use JPEG, PNG, or WebP.');

@@ -3,6 +3,7 @@ import { isAllowedProductImageMime, slugify, slugWithSuffix, STORAGE_PREFIX } fr
 import type { UpsertAgentProfileInput } from '@bmpl/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
 
 export interface Actor {
@@ -21,6 +22,7 @@ export class AgentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
     private readonly audit: AuditService,
   ) {}
 
@@ -79,6 +81,16 @@ export class AgentService {
     return { ...p, photoUrl: await this.urlOrNull(p.photoKey) };
   }
 
+  /** Server-side agent-photo upload (browser → API → public storage). */
+  async uploadPhoto(userId: string, buffer: Buffer | undefined, fileName?: string) {
+    await this.requireAgentProfile(userId);
+    return this.ingest.image(buffer, STORAGE_PREFIX.agentPhoto(userId), 'public', {
+      fileName,
+      fallbackName: 'photo',
+    });
+  }
+
+  /** @deprecated Prefer {@link uploadPhoto} — the browser PUT is cross-origin and fails as "Load failed". */
   async presignPhoto(userId: string, fileName: string, contentType: string) {
     await this.requireAgentProfile(userId);
     if (!isAllowedProductImageMime(contentType)) throw new BadRequestException('Use a JPEG, PNG, or WebP image.');

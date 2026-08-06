@@ -18,6 +18,7 @@ import {
   type VendorSettingsInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
+import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -110,6 +111,19 @@ export class VendorController {
   }
 
   // ---- Logo / banner (public bucket) ----
+  /** Server-side logo/banner upload: raw bytes in, storage key out. */
+  @StrictThrottle()
+  @Post('profile/logo/upload')
+  uploadLogo(@CurrentUser() user: AuthContext, @Req() req: Request) {
+    return this.vendor.uploadImage(user.userId, 'logo', rawBody(req), uploadFileName(req));
+  }
+
+  @StrictThrottle()
+  @Post('profile/banner/upload')
+  uploadBanner(@CurrentUser() user: AuthContext, @Req() req: Request) {
+    return this.vendor.uploadImage(user.userId, 'banner', rawBody(req), uploadFileName(req));
+  }
+
   @StrictThrottle()
   @Post('profile/logo/presign')
   presignLogo(

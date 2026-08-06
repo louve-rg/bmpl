@@ -3,6 +3,7 @@ import { isAllowedProductImageMime, slugify, slugWithSuffix, STORAGE_PREFIX } fr
 import type { UpsertEmployerProfileInput } from '@bmpl/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
 
 export interface Actor {
@@ -22,6 +23,7 @@ export class EmployerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
     private readonly audit: AuditService,
   ) {}
 
@@ -82,6 +84,14 @@ export class EmployerService {
     return { ...p, logoUrl: await this.urlOrNull(p.logoKey), bannerUrl: await this.urlOrNull(p.bannerKey) };
   }
 
+  /** Server-side employer logo/banner upload (browser → API → public storage). */
+  async uploadImage(userId: string, kind: 'logo' | 'banner', buffer: Buffer | undefined, fileName?: string) {
+    const p = await this.requireProfile(userId);
+    const prefix = kind === 'logo' ? STORAGE_PREFIX.employerLogo(p.id) : STORAGE_PREFIX.employerBanner(p.id);
+    return this.ingest.image(buffer, prefix, 'public', { fileName, fallbackName: kind });
+  }
+
+  /** @deprecated Prefer {@link uploadImage} — the browser PUT is cross-origin and fails as "Load failed". */
   async presignImage(userId: string, kind: 'logo' | 'banner', fileName: string, contentType: string) {
     const p = await this.requireProfile(userId);
     if (!isAllowedProductImageMime(contentType)) throw new BadRequestException('Use a JPEG, PNG, or WebP image.');

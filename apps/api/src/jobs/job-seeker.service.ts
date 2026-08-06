@@ -12,6 +12,7 @@ import type {
 import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
 
 export interface Actor {
@@ -30,6 +31,7 @@ export class JobSeekerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
     private readonly audit: AuditService,
   ) {}
 
@@ -142,6 +144,13 @@ export class JobSeekerService {
   }
 
   // ---- résumés (PRIVATE R2) ----
+  /** Server-side résumé upload (browser → API → private storage). PDF/DOCX only. */
+  async uploadResume(userId: string, buffer: Buffer | undefined, fileName?: string) {
+    await this.requireProfile(userId);
+    return this.ingest.resume(buffer, STORAGE_PREFIX.jobSeekerResume(userId), 'private', { fileName });
+  }
+
+  /** @deprecated Prefer {@link uploadResume} — the browser PUT is cross-origin and fails as "Load failed". */
   async presignResume(userId: string, fileName: string, contentType: string) {
     await this.requireProfile(userId);
     if (!isAllowedResumeMime(contentType)) throw new BadRequestException('Upload a PDF or DOCX file.');

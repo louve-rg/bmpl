@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   assignAgentSchema,
   createPropertySchema,
@@ -22,6 +23,7 @@ import {
   type ViewingTransitionInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
+import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -89,6 +91,12 @@ export class PropertyOwnerController {
 
   // ---- images (public bucket) ----
   @StrictThrottle()
+  /** Server-side listing-image upload: raw bytes in, storage key out. */
+  @Post('listings/:id/images/upload')
+  uploadImage(@CurrentUser() u: AuthContext, @Param('id') id: string, @Req() req: Request) {
+    return this.properties.uploadImage(this.actor(u), id, rawBody(req), uploadFileName(req));
+  }
+
   @Post('listings/:id/images/presign')
   presignImage(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(imagePresignSchema)) b: ImagePresignInput) {
     return this.properties.presignImage(this.actor(u), id, b.fileName, b.contentType);
@@ -112,6 +120,12 @@ export class PropertyOwnerController {
 
   // ---- private documents ----
   @StrictThrottle()
+  /** Server-side listing-document upload: raw bytes in, storage key out. */
+  @Post('listings/:id/documents/upload')
+  uploadDocument(@CurrentUser() u: AuthContext, @Param('id') id: string, @Req() req: Request) {
+    return this.properties.uploadDocument(this.actor(u), id, rawBody(req), uploadFileName(req));
+  }
+
   @Post('listings/:id/documents/presign')
   presignDocument(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(imagePresignSchema)) b: ImagePresignInput) {
     return this.properties.presignDocument(this.actor(u), id, b.fileName, b.contentType);

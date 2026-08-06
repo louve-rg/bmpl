@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import type { Request } from 'express';
+import type { PromotionAssetKind } from '@bmpl/shared';
 import {
   campaignScheduleSchema,
   campaignStatusSchema,
@@ -30,6 +32,7 @@ import {
   type UpdatePromotionInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
+import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -111,6 +114,12 @@ export class BusinessMarketingController {
     return this.promotions.setTargets(this.actor(u), id, b);
   }
   @StrictThrottle()
+  /** Server-side promotion-asset upload: raw bytes in, storage key out. */
+  @Post('promotions/:id/assets/upload')
+  uploadAsset(@CurrentUser() u: AuthContext, @Param('id') id: string, @Query('kind') kind: string, @Req() req: Request) {
+    return this.promotions.uploadAsset(this.actor(u), id, (kind || 'IMAGE') as PromotionAssetKind, rawBody(req), uploadFileName(req));
+  }
+
   @Post('promotions/:id/assets/presign')
   presignAsset(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(promotionAssetPresignSchema)) b: PromotionAssetPresignInput) {
     return this.promotions.presignAsset(this.actor(u), id, b.kind, b.fileName, b.contentType);

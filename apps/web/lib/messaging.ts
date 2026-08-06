@@ -11,6 +11,7 @@ import {
   type AttachmentScanStatus,
 } from '@bmpl/shared';
 import { api } from './api';
+import { uploadFile } from './uploads';
 
 /* ------------------------------------------------------------------ types */
 
@@ -108,25 +109,9 @@ export { MAX_MESSAGE_ATTACHMENTS, MAX_MESSAGE_ATTACHMENT_BYTES };
 
 /* ------------------------------------------------------------------- api */
 
-interface PresignResponse {
-  uploadUrl: string;
-  key: string;
-}
-
-/** Presign → PUT bytes → return the storage key to pass as an attachmentKey. */
+/** Upload bytes via the API → return the storage key to pass as an attachmentKey. */
 export async function uploadAttachment(file: File): Promise<string> {
-  const presign = await api.post<PresignResponse>('/conversations/attachments/presign', {
-    fileName: file.name,
-    contentType: file.type,
-    sizeBytes: file.size,
-  });
-  const put = await fetch(presign.uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type },
-    body: file,
-  });
-  if (!put.ok) throw { status: put.status, message: 'Upload to storage failed.' };
-  return presign.key;
+  return uploadFile('/conversations/attachments/upload', file);
 }
 
 export const messagingApi = {

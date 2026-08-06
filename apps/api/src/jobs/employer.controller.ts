@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   applicationNoteSchema,
   applicationStatusSchema,
@@ -20,6 +21,7 @@ import {
   type UpsertEmployerProfileInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
+import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -53,6 +55,13 @@ export class EmployerController {
   upsert(@CurrentUser() u: AuthContext, @Body(ZodBody(upsertEmployerProfileSchema)) b: UpsertEmployerProfileInput) {
     return this.employers.upsertProfile(this.actor(u), b);
   }
+  /** Server-side logo/banner upload: raw bytes in, storage key out. */
+  @StrictThrottle()
+  @Post('profile/:kind/upload')
+  uploadImage(@CurrentUser() u: AuthContext, @Param('kind') kind: string, @Req() req: Request) {
+    return this.employers.uploadImage(u.userId, kind === 'banner' ? 'banner' : 'logo', rawBody(req), uploadFileName(req));
+  }
+
   @StrictThrottle()
   @Post('profile/:kind/presign')
   presignImage(@CurrentUser() u: AuthContext, @Param('kind') kind: string, @Body(ZodBody(imagePresignSchema)) b: ImagePresignInput) {

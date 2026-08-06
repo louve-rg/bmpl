@@ -25,6 +25,7 @@ import {
   type JobReportReason,
 } from '@bmpl/shared';
 import { api } from './api';
+import { uploadFile } from './uploads';
 
 /* ------------------------------------------------------------------ types */
 
@@ -512,40 +513,22 @@ export function fmtDateTime(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
 }
 
-/* Résumé presign → PUT → confirm. Returns the created résumé record. */
+/* Résumé upload → confirm. Returns the created résumé record. */
 export async function uploadResume(file: File, label: string): Promise<SeekerResume> {
-  const presign = await api.post<{ uploadUrl: string; key: string }>(
-    '/job-seeker/resumes/presign',
-    { fileName: file.name, contentType: file.type, sizeBytes: file.size },
-  );
-  const put = await fetch(presign.uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type },
-    body: file,
-  });
-  if (!put.ok) throw { status: put.status, message: 'Upload to storage failed.' };
+  const storageKey = await uploadFile('/job-seeker/resumes/upload', file);
   return api.post<SeekerResume>('/job-seeker/resumes', {
-    storageKey: presign.key,
+    storageKey,
     label: label.trim() || file.name,
   });
 }
 
-/* Employer logo / banner presign → PUT → confirm. Returns the updated profile. */
+/* Employer logo / banner upload → confirm. Returns the updated profile. */
 export async function uploadEmployerImage(
   kind: 'logo' | 'banner',
   file: File,
 ): Promise<EmployerProfile> {
-  const presign = await api.post<{ uploadUrl: string; key: string }>(
-    `/employer/profile/${kind}/presign`,
-    { fileName: file.name, contentType: file.type, sizeBytes: file.size },
-  );
-  const put = await fetch(presign.uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type },
-    body: file,
-  });
-  if (!put.ok) throw { status: put.status, message: 'Upload to storage failed.' };
-  return api.post<EmployerProfile>(`/employer/profile/${kind}/confirm`, { storageKey: presign.key });
+  const storageKey = await uploadFile(`/employer/profile/${kind}/upload`, file);
+  return api.post<EmployerProfile>(`/employer/profile/${kind}/confirm`, { storageKey });
 }
 
 /* ------------------------------------------------------------------- api */
