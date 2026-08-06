@@ -62,7 +62,9 @@ function CheckoutItem({ it }: { it: CartLine }) {
           </Fragment>
         ))}
         <dt className="text-xs uppercase tracking-wide text-slate-400">Cost</dt>
-        <dd className="text-slate-700">{money(it.unitPriceMinor)}</dd>
+        <dd className="text-slate-700">
+          {money(it.unitPriceMinor)} <span className="text-slate-400">BZD</span>
+        </dd>
         <dt className="text-xs uppercase tracking-wide text-slate-400">Quantity</dt>
         <dd className="text-slate-700">×{it.quantity}</dd>
       </dl>

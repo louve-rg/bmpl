@@ -66,8 +66,12 @@ export function StorefrontView({ store }: { store: Storefront }) {
             </span>
           )}
           <div className="pb-1">
-            <h1 className="text-2xl font-bold tracking-tight text-belize-navy">{store.businessName}</h1>
-            <div className="mt-0.5">
+            {/* Floating white label — keeps the name legible over dark banner artwork.
+                w-fit so the pill hugs the text instead of stretching the row. */}
+            <h1 className="w-fit rounded-bmpl-lg bg-white px-4 py-2 text-2xl font-bold tracking-tight text-belize-navy shadow-bmpl-md">
+              {store.businessName}
+            </h1>
+            <div className="mt-1.5">
               <StarRating value={store.ratingAverage} size="sm" showValue count={store.ratingCount} />
             </div>
           </div>

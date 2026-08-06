@@ -3,15 +3,9 @@
 import { useState, type ReactNode } from 'react';
 import type { ApiError } from '../../lib/api';
 
-/* Money helpers — the API speaks integer cents; the UI speaks dollars. */
-export const centsToDollars = (c: number | null): string => (c == null ? '' : (c / 100).toFixed(2));
-export const dollarsToCents = (v: string): number | null => {
-  const t = v.trim();
-  if (t === '') return null;
-  const n = Number(t);
-  if (!Number.isFinite(n)) return null;
-  return Math.round(n * 100);
-};
+/* Money helpers — the API speaks integer cents; the UI speaks dollars.
+   Re-exported from lib/money-input so every money field converts identically. */
+export { centsToDollars, dollarsToCentsOrNull as dollarsToCents } from '../../lib/money-input';
 export const money = (c: number | null): string => (c == null ? '—' : `$${(c / 100).toFixed(2)}`);
 
 /** Normalize an unknown throw into an ApiError-ish shape. */

@@ -3,6 +3,7 @@
 import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
+import { centsToDollars, dollarsToCents, dollarsToCentsOrNull } from '../../../lib/money-input';
 import { kmToMilesInput, milesInputToKm } from '@bmpl/shared';
 import {
   Card as UiCard,
@@ -48,17 +49,8 @@ interface DeliveryData {
   estimate: DeliveryEstimate | null;
 }
 
-function toDollarStr(minor: number | null): string {
-  return minor == null ? '' : (minor / 100).toFixed(2);
-}
-function dollarsToCentsOrNull(v: string): number | null {
-  const t = v.trim();
-  return t === '' ? null : Math.round(Number(t) * 100);
-}
-function dollarsToCents(v: string): number {
-  const t = v.trim();
-  return t === '' ? 0 : Math.round(Number(t) * 100);
-}
+const toDollarStr = centsToDollars;
+
 function districtLabel(d: string): string {
   return d
     .split('_')

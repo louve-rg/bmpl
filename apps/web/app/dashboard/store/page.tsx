@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
+import { centsToDollars, dollarsToCentsOrNull } from '../../../lib/money-input';
 import {
   Card as UiCard,
   PageHeader,
@@ -299,7 +300,8 @@ function SettingsForm({ store, onDone, onError }: SectionProps) {
     deliveryEnabled: s.deliveryEnabled,
     vacationMode: s.vacationMode,
     hideOutOfStock: s.hideOutOfStock,
-    minimumOrderMinor: s.minimumOrderMinor?.toString() ?? '',
+    // Stored in cents, entered/displayed in dollars.
+    minimumOrderMinor: centsToDollars(s.minimumOrderMinor),
   });
   const [busy, setBusy] = useState(false);
   return (
@@ -315,7 +317,7 @@ function SettingsForm({ store, onDone, onError }: SectionProps) {
               deliveryEnabled: f.deliveryEnabled,
               vacationMode: f.vacationMode,
               hideOutOfStock: f.hideOutOfStock,
-              minimumOrderMinor: f.minimumOrderMinor === '' ? null : Number(f.minimumOrderMinor),
+              minimumOrderMinor: dollarsToCentsOrNull(f.minimumOrderMinor),
             });
             await onDone();
           } catch (err) {
@@ -333,12 +335,14 @@ function SettingsForm({ store, onDone, onError }: SectionProps) {
           checked={f.hideOutOfStock}
           onChange={(v) => setF({ ...f, hideOutOfStock: v })}
         />
-        <Field label="Minimum order (cents)">
+        <Field label="Minimum order (BZD)" hint="Optional — leave blank for no minimum.">
           <Input
             className="w-32"
+            inputMode="decimal"
             value={f.minimumOrderMinor}
             onChange={(e) => setF({ ...f, minimumOrderMinor: e.target.value })}
-            placeholder="none"
+            onBlur={(e) => setF({ ...f, minimumOrderMinor: centsToDollars(dollarsToCentsOrNull(e.target.value)) })}
+            placeholder="25.00"
           />
         </Field>
         <Button disabled={busy}>Save operations</Button>
