@@ -21,13 +21,23 @@ export class HealthController {
   /** Liveness — process is up. `commit` (Railway-injected git SHA) makes it
    *  possible to confirm exactly which build is live during a deploy (and that
    *  the pre-deploy migration hook ran, since a failed hook halts promotion).
+   *  `startedAt` is when THIS container booted: together with `commit` it
+   *  distinguishes "the deploy promoted a fresh build" from "an older container is
+   *  still serving", which a commit SHA alone cannot show when a deploy is skipped.
+   *  See docs/DEPLOYMENT.md §2a — Railway only rebuilds on a watch-path match.
    *  M10: checkout/orders. M11.1: startup maintenance releases the verification
    *  account's reservations + wallet holds on boot (idempotent). */
   @Public()
   @Get()
   live() {
     const sha = process.env.RAILWAY_GIT_COMMIT_SHA ?? null;
-    return { status: 'ok', uptime: process.uptime(), commit: sha ? sha.slice(0, 7) : null };
+    const uptime = process.uptime();
+    return {
+      status: 'ok',
+      uptime,
+      commit: sha ? sha.slice(0, 7) : null,
+      startedAt: new Date(Date.now() - uptime * 1000).toISOString(),
+    };
   }
 
   /**
