@@ -6,11 +6,14 @@ import {
 } from '@nestjs/common';
 import {
   APPLICABLE_ROLE_CODES,
+  documentExt,
   isAllowedDocumentMime,
   MAX_DOCUMENT_BYTES,
   ROLE_DEFINITIONS,
   roleRequiresApproval,
+  sniffDocumentMime,
   STORAGE_PREFIX,
+  type DocumentMime,
   type RoleCode,
 } from '@bmpl/shared';
 import type { SubmitRoleApplicationInput } from '@bmpl/validation';
@@ -18,6 +21,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../storage/storage.service';
+
+/**
+ * Base name (no directory, no extension) for a client-supplied filename, or
+ * "document" when absent/unusable. Character sanitizing is left to
+ * StorageService.buildKey; this only strips path segments and the old extension.
+ */
+function documentBaseName(fileName?: string): string {
+  const base = (fileName ?? '').split(/[\\/]/).pop() ?? '';
+  const stem = base.replace(/\.[^.]+$/, '').trim();
+  return stem.length > 0 ? stem.slice(0, 60) : 'document';
+}
 
 @Injectable()
 export class RolesService {
@@ -59,10 +73,55 @@ export class RolesService {
     });
   }
 
-  /** Presign an application document upload (private storage). */
+  /**
+   * Presign an application document upload (private storage).
+   *
+   * @deprecated Prefer {@link uploadDocument}. The presigned URL points at the R2 S3
+   * endpoint, so the browser PUT is cross-origin and the bucket has no CORS policy
+   * for the custom domain — it surfaced as "Failed to fetch". Kept for API
+   * compatibility with any client still on the old flow.
+   */
   async presignDocument(userId: string, roleCode: RoleCode, fileName: string, contentType: string) {
     const key = this.storage.buildKey(STORAGE_PREFIX.applicationDocs(userId, roleCode), fileName);
     return this.storage.presignUpload(key, contentType);
+  }
+
+  /**
+   * Server-side application-document upload (browser → API → private storage). The
+   * file arrives as a raw request body through the same-origin web `/api` proxy, so
+   * there is no cross-origin browser PUT to the storage endpoint. The real MIME is
+   * sniffed from the bytes — a client-declared Content-Type is never trusted — and
+   * the size cap is enforced on the actual buffer. Returns the storage key, which the
+   * caller passes to submitApplication/provideMoreInfo exactly like a presigned key.
+   */
+  async uploadDocument(
+    userId: string,
+    roleCode: RoleCode,
+    buffer: Buffer | undefined,
+    fileName?: string,
+  ): Promise<{ key: string; contentType: DocumentMime; sizeBytes: number }> {
+    if (!ROLE_DEFINITIONS[roleCode]) {
+      throw new BadRequestException('Unknown role.');
+    }
+    if (!buffer || buffer.length === 0) {
+      throw new BadRequestException('No document data was received. Please choose a file and try again.');
+    }
+    if (buffer.length > MAX_DOCUMENT_BYTES) {
+      throw new BadRequestException('A document exceeds the maximum allowed size.');
+    }
+    const mime = sniffDocumentMime(buffer);
+    if (!mime) {
+      throw new BadRequestException('Unsupported document type. Use PDF, JPEG, PNG, WebP, or HEIC.');
+    }
+    // Keep the applicant's filename in the key so admin review stays legible, but
+    // force the extension to the SNIFFED type — a ".pdf" name on JPEG bytes must not
+    // survive. buildKey sanitizes the characters and adds a UUID segment.
+    const key = this.storage.buildKey(
+      STORAGE_PREFIX.applicationDocs(userId, roleCode),
+      `${documentBaseName(fileName)}.${documentExt(mime)}`,
+    );
+    await this.storage.putObject(key, buffer, mime, 'private');
+    return { key, contentType: mime, sizeBytes: buffer.length };
   }
 
   /**

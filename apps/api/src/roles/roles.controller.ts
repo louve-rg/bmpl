@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   documentUploadRequestSchema,
   provideMoreInfoSchema,
@@ -28,6 +29,12 @@ export class RolesController {
     return this.roles.myApplications(user.userId);
   }
 
+  /**
+   * Legacy presign flow. Superseded by `documents/upload` — the presigned URL is
+   * cross-origin to the browser and the storage bucket has no CORS policy for the
+   * custom domain, which surfaced as "Failed to fetch". Retained so older clients
+   * keep working; new clients POST the bytes instead.
+   */
   @StrictThrottle()
   @Post('applications/:roleCode/documents/presign')
   presignDoc(
@@ -36,6 +43,25 @@ export class RolesController {
     @Body(ZodBody(documentUploadRequestSchema)) body: { fileName: string; contentType: string },
   ) {
     return this.roles.presignDocument(user.userId, roleCode, body.fileName, body.contentType);
+  }
+
+  /**
+   * Server-side document upload: the browser POSTs the raw file bytes (Content-Type
+   * = the document MIME) through the same-origin web `/api` proxy; the scoped raw
+   * parser (see main.ts) exposes them as `req.body: Buffer`. Same transport as
+   * product-image upload, so no cross-origin browser PUT to storage. Returns the
+   * storage key to pass to `POST /roles/applications`.
+   */
+  @StrictThrottle()
+  @Post('applications/:roleCode/documents/upload')
+  uploadDoc(
+    @CurrentUser() user: AuthContext,
+    @Param('roleCode') roleCode: RoleCode,
+    @Req() req: Request,
+  ) {
+    const body = Buffer.isBuffer(req.body) ? req.body : undefined;
+    const fileName = (req.query as Record<string, string | undefined>).filename;
+    return this.roles.uploadDocument(user.userId, roleCode, body, fileName);
   }
 
   @Post('applications')

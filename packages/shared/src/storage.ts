@@ -72,6 +72,50 @@ export function sniffProductImageMime(bytes: Uint8Array): ProductImageMime | nul
 export const productImageExt = (mime: ProductImageMime): string =>
   mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
 
+/** ISO-BMFF brands that identify a HEIC/HEIF still image. */
+const HEIC_BRANDS = new Set(['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'mif1', 'msf1']);
+
+/**
+ * Sniff a DOCUMENT's real MIME from its magic bytes — the document counterpart of
+ * {@link sniffProductImageMime}, covering the full {@link DOCUMENT_MIME_ALLOWLIST}
+ * (PDF, JPEG, PNG, WebP, HEIC). Used for server-side document uploads
+ * (browser → API → storage) where a client-declared Content-Type is never trusted.
+ * Returns null when the bytes are not an allowed document, so the caller rejects it.
+ */
+export function sniffDocumentMime(bytes: Uint8Array): DocumentMime | null {
+  // "%PDF"
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46
+  ) {
+    return 'application/pdf';
+  }
+  // JPEG/PNG/WebP are all on the document allow-list too.
+  const image = sniffProductImageMime(bytes);
+  if (image) return image;
+  // ISO-BMFF container: [size][ftyp][brand]. iPhone photos arrive as HEIC.
+  if (
+    bytes.length >= 12 &&
+    bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70 &&
+    HEIC_BRANDS.has(String.fromCharCode(...Array.from(bytes.subarray(8, 12))))
+  ) {
+    return 'image/heic';
+  }
+  return null;
+}
+
+/** File extension for an allowed document MIME (for building storage keys). */
+export const documentExt = (mime: DocumentMime): string =>
+  mime === 'application/pdf'
+    ? 'pdf'
+    : mime === 'image/png'
+      ? 'png'
+      : mime === 'image/webp'
+        ? 'webp'
+        : mime === 'image/heic'
+          ? 'heic'
+          : 'jpg';
+
 /**
  * Storage key prefixes (namespaces). Ownership is enforced against these via
  * StorageService.assertKeyInNamespace. Marketplace images live under the owning

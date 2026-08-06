@@ -22,15 +22,20 @@ interface RoleApplication {
   reviews: AppReview[];
 }
 
-/** Upload one file to the role-application private bucket; returns the storage key. */
+/**
+ * Upload one file to the role-application private bucket; returns the storage key.
+ *
+ * Sends the bytes to the API through the same-origin `/api` proxy. The previous
+ * flow (presign → browser PUT straight to the storage endpoint) is cross-origin and
+ * the bucket has no CORS policy for the custom domain, so the PUT was blocked and
+ * surfaced as "Failed to fetch". Mirrors the product-image upload transport.
+ */
 async function uploadDoc(roleCode: string, file: File): Promise<string> {
-  const presign = await api.post<{ uploadUrl: string; key: string }>(
-    `/roles/applications/${roleCode}/documents/presign`,
-    { fileName: file.name, contentType: file.type || 'application/octet-stream', sizeBytes: file.size },
+  const { key } = await api.upload<{ key: string }>(
+    `/roles/applications/${roleCode}/documents/upload?filename=${encodeURIComponent(file.name)}`,
+    file,
   );
-  const put = await fetch(presign.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
-  if (!put.ok) throw new Error('Upload failed. Please try again.');
-  return presign.key;
+  return key;
 }
 
 export default function RolesPage() {
