@@ -38,6 +38,7 @@ import {
   Spinner,
   EmptyState,
 } from '../../../components/ui';
+import { Avatar } from '../../../components/Avatar';
 import { MAX_MESSAGE_BODY_LENGTH } from '@bmpl/shared';
 
 function errMessage(e: unknown): string {
@@ -439,33 +440,46 @@ function MessageBubble({ message }: { message: Message }) {
 
   const mine = message.isMine;
   return (
-    <div className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
-      <div className="mb-1 flex items-center gap-2 px-1">
-        {!mine && <span className="text-xs font-semibold text-belize-navy">{message.senderName}</span>}
-        <span className="text-[11px] text-slate-400" title={absoluteTime(message.createdAt)}>
-          {relativeTime(message.createdAt)}
-          {message.editedAt ? ' · edited' : ''}
-        </span>
-      </div>
-      <div
-        className={`max-w-[85%] rounded-bmpl-lg px-3.5 py-2 text-sm shadow-bmpl-sm sm:max-w-[75%] ${
-          mine ? 'bg-belize-blue text-white' : 'border border-slate-200 bg-white text-slate-700'
-        }`}
-      >
-        {message.deleted ? (
-          <p className="italic opacity-80">Message removed</p>
-        ) : (
-          <>
-            {message.body && <p className="whitespace-pre-wrap break-words">{message.body}</p>}
-            {message.attachments.length > 0 && (
-              <div className={`flex flex-wrap gap-2 ${message.body ? 'mt-2' : ''}`}>
-                {message.attachments.map((a) => (
-                  <AttachmentView key={a.id} attachment={a} mine={mine} />
-                ))}
-              </div>
-            )}
-          </>
-        )}
+    // The other party's picture sits beside their bubble; your own messages don't
+    // need your face repeated down the right-hand side of your own thread.
+    <div className={`flex items-end gap-2 ${mine ? 'flex-row-reverse' : ''}`}>
+      {!mine && (
+        <Avatar
+          name={message.senderName}
+          src={message.senderAvatarUrl}
+          initials={message.senderInitials}
+          size="sm"
+          className="mb-5"
+        />
+      )}
+      <div className={`flex min-w-0 flex-1 flex-col ${mine ? 'items-end' : 'items-start'}`}>
+        <div className="mb-1 flex items-center gap-2 px-1">
+          {!mine && <span className="text-xs font-semibold text-belize-navy">{message.senderName}</span>}
+          <span className="text-[11px] text-slate-400" title={absoluteTime(message.createdAt)}>
+            {relativeTime(message.createdAt)}
+            {message.editedAt ? ' · edited' : ''}
+          </span>
+        </div>
+        <div
+          className={`max-w-[85%] rounded-bmpl-lg px-3.5 py-2 text-sm shadow-bmpl-sm sm:max-w-[75%] ${
+            mine ? 'bg-belize-blue text-white' : 'border border-slate-200 bg-white text-slate-700'
+          }`}
+        >
+          {message.deleted ? (
+            <p className="italic opacity-80">Message removed</p>
+          ) : (
+            <>
+              {message.body && <p className="whitespace-pre-wrap break-words">{message.body}</p>}
+              {message.attachments.length > 0 && (
+                <div className={`flex flex-wrap gap-2 ${message.body ? 'mt-2' : ''}`}>
+                  {message.attachments.map((a) => (
+                    <AttachmentView key={a.id} attachment={a} mine={mine} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

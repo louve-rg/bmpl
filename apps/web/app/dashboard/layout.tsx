@@ -1,7 +1,10 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { serverGet } from '../../lib/server-api';
 import { Sidebar } from '../../components/dashboard/Sidebar';
+import { AvatarRequiredBanner } from '../../components/dashboard/AvatarRequiredBanner';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
+import { Avatar } from '../../components/Avatar';
 import type { MeView } from '../../lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -14,9 +17,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="min-h-screen bg-slate-50 md:flex">
       <Sidebar me={me} />
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-end border-b border-slate-200 bg-white px-5 py-2.5 md:px-8">
+        <header className="flex items-center justify-end gap-3 border-b border-slate-200 bg-white px-5 py-2.5 md:px-8">
           <NotificationBell />
+          <Link
+            href="/dashboard/profile"
+            aria-label="Your profile"
+            className="rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent"
+          >
+            <Avatar name={`${me.firstName} ${me.lastName}`} src={me.avatarUrl} size="sm" />
+          </Link>
         </header>
+        <AvatarRequiredBanner me={me} />
         <div className="flex-1 p-5 md:p-8">{children}</div>
       </main>
     </div>

@@ -20,6 +20,13 @@ export interface ReviewResponse {
   editedAt: string | null;
 }
 
+/** Public identity of a review's author: first name + surname initial, plus face. */
+export interface ReviewAuthor {
+  name: string;
+  initials: string;
+  avatarUrl: string | null;
+}
+
 export interface Review {
   id: string;
   subjectType: ReviewSubjectType;
@@ -35,6 +42,7 @@ export interface Review {
   sku: string | null;
   media: ReviewMedia[];
   response: ReviewResponse | null;
+  reviewer: ReviewAuthor;
   isMine: boolean;
   createdAt: string;
   editedAt: string | null;

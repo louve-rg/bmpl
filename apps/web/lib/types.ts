@@ -1,4 +1,4 @@
-import type { RoleCode } from '@bmpl/shared';
+import type { AvatarStatus, RoleCode } from '@bmpl/shared';
 
 export interface MeView {
   id: string;
@@ -10,7 +10,15 @@ export interface MeView {
   addressLine1: string | null;
   addressLine2: string | null;
   city: string | null;
+  /** Stable public URL of the APPROVED picture, or null while there isn't one. */
   avatarUrl: string | null;
+  avatarStatus: AvatarStatus;
+  /** Short-lived signed URL for a picture still awaiting review (owner only). */
+  avatarPendingUrl: string | null;
+  /** Plain-language explanation when avatarStatus is REJECTED. */
+  avatarRejectedReason: string | null;
+  /** True when one of this user's approved roles makes a picture mandatory. */
+  avatarRequired: boolean;
   status: string;
   emailVerified: boolean;
   activeRole: RoleCode | null;

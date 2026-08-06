@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { BrandLockup } from '../Logo';
+import { Avatar } from '../Avatar';
 import { RoleSwitcher } from './RoleSwitcher';
 import { LogoutButton } from './LogoutButton';
 import { api } from '../../lib/api';
@@ -213,10 +214,18 @@ export function Sidebar({ me }: { me: MeView }) {
       </nav>
 
       <div className="mt-auto border-t border-slate-100 pt-4">
-        <p className="px-3 text-sm font-semibold text-belize-navy">
-          {me.firstName} {me.lastName}
-        </p>
-        <p className="mb-2 px-3 text-xs text-slate-500">{me.email}</p>
+        <Link
+          href="/dashboard/profile"
+          className="mb-2 flex items-center gap-3 rounded-bmpl-md px-3 py-1.5 transition hover:bg-slate-50"
+        >
+          <Avatar name={`${me.firstName} ${me.lastName}`} src={me.avatarUrl} size="md" />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-belize-navy">
+              {me.firstName} {me.lastName}
+            </span>
+            <span className="block truncate text-xs text-slate-500">{me.email}</span>
+          </span>
+        </Link>
         <LogoutButton />
       </div>
       </div>

@@ -17,6 +17,7 @@ const NAV: Array<{ label: string; href: string; icon: string }> = [
   { label: 'Real Estate', href: '/dashboard/properties', icon: 'M4 11l8-6 8 6M6 10v9h12v-9M10 19v-5h4v5' },
   { label: 'Marketing', href: '/dashboard/marketing', icon: 'M3 11v2a1 1 0 0 0 1 1h3l4 4V6L7 10H4a1 1 0 0 0-1 1Zm13-3a5 5 0 0 1 0 8M18 5a9 9 0 0 1 0 14' },
   { label: 'Applications', href: '/dashboard/applications', icon: 'M6 3h9l4 4v14H6V3Zm9 0v4h4M9 12h6M9 16h6' },
+  { label: 'Profile Photos', href: '/dashboard/avatars', icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0M3 3h4M3 3v4M21 3h-4M21 3v4M3 21h4M3 21v-4M21 21h-4M21 21v-4' },
   { label: 'Users', href: '/dashboard/users', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 8a6 6 0 0 1 12 0M17 11a3 3 0 0 0 0-6M22 19a6 6 0 0 0-4-5.7' },
   { label: 'Vendors', href: '/dashboard/vendors', icon: 'M4 8h16l-1 3H5L4 8Zm1 3v9h14v-9M9 20v-5h6v5' },
   { label: 'Drivers', href: '/dashboard/drivers', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },

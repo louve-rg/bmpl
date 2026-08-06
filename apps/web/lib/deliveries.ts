@@ -7,6 +7,9 @@ export interface DeliveryDriver {
   displayName: string;
   ratingAverage: number | null;
   completedDeliveries: number | null;
+  initials: string;
+  /** Approved profile picture — lets the customer check who is at the door. */
+  avatarUrl: string | null;
 }
 
 export interface DeliveryVehicle {

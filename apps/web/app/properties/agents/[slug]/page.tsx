@@ -5,6 +5,7 @@ import { Footer } from '../../../../components/landing/Footer';
 import { serverGetSafe } from '../../../../lib/server-api';
 import { Badge, Breadcrumbs, Card } from '../../../../components/ui';
 import { PropertyGrid } from '../../../../components/realestate/PropertyCard';
+import { Avatar } from '../../../../components/Avatar';
 import { type AgentPage, districtLabel, specialtyLabel } from '../../../../lib/realestate';
 
 export const dynamic = 'force-dynamic';
@@ -45,18 +46,15 @@ export default async function AgentPublicPage({ params }: { params: { slug: stri
 
         <div className="container-bmpl -mt-12 pb-14">
           <div className="flex items-end gap-4">
-            {agent.photoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={agent.photoUrl}
-                alt={agent.displayName}
-                className="h-24 w-24 shrink-0 rounded-full border-4 border-white object-cover shadow-bmpl-md"
-              />
-            ) : (
-              <span className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full border-4 border-white bg-belize-blue text-2xl font-bold text-white shadow-bmpl-md">
-                {agent.displayName.slice(0, 2).toUpperCase()}
-              </span>
-            )}
+            {/* photoUrl may be an absolute signed URL (agent headshot) or the
+                API-relative account-picture path — Avatar resolves both. */}
+            <Avatar
+              name={agent.displayName}
+              src={agent.photoUrl}
+              initials={agent.initials}
+              size="xl"
+              className="border-4 border-white shadow-bmpl-md"
+            />
             <div className="pb-1">
               <h1 className="text-2xl font-bold tracking-tight text-belize-navy">{agent.displayName}</h1>
               {agent.agency && (

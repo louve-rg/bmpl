@@ -5,6 +5,7 @@ import { DISTRICTS, DISTRICT_LABELS } from '@bmpl/shared';
 import { api } from '../../../lib/api';
 import type { MeView } from '../../../lib/types';
 import { FormError, FormSuccess } from '../../../components/auth/AuthShell';
+import { AvatarUploader } from '../../../components/dashboard/AvatarUploader';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, Spinner } from '../../../components/ui';
 
 export default function ProfilePage() {
@@ -54,7 +55,8 @@ export default function ProfilePage() {
   return (
     <div className="mx-auto max-w-2xl">
       <PageHeader title="Profile" />
-      <Card className="p-6">
+      <AvatarUploader me={me} onChange={setMe} />
+      <Card className="mt-4 p-6">
         <form onSubmit={onSubmit} className="space-y-4">
           <FormError message={error} />
           {saved && <FormSuccess message="Profile saved." />}

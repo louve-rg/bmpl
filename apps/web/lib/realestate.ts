@@ -191,7 +191,9 @@ export interface PublicAgent {
   ratingAverage: number | null;
   ratingCount: number;
   agency: AgencyRef | null;
+  /** Agent headshot; falls back server-side to the agent's approved account picture. */
   photoUrl: string | null;
+  initials: string;
   activeListings: number;
 }
 export interface AgentPage {

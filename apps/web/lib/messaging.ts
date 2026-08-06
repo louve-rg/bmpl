@@ -50,6 +50,9 @@ export interface Message {
   deleted: boolean;
   senderId: string;
   senderName: string;
+  senderInitials: string | null;
+  /** Approved profile picture of the sender, or null → render initials. */
+  senderAvatarUrl: string | null;
   isMine: boolean;
   attachments: MessageAttachment[];
   createdAt: string;
@@ -60,6 +63,9 @@ export interface ConversationParticipant {
   userId: string;
   role: ConversationParticipantRole;
   name: string;
+  initials: string;
+  /** Approved profile picture, or null → render initials. */
+  avatarUrl: string | null;
   canSend: boolean;
 }
 

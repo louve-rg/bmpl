@@ -15,6 +15,7 @@ import {
 import type { DeliveryEstimate } from '../lib/orders';
 import type { ApiError } from '../lib/api';
 import { Alert, Button, Spinner, StatusBadge } from './ui';
+import { Avatar } from './Avatar';
 
 /* ------------------------------------------------------------ shared bits */
 
@@ -98,24 +99,34 @@ export function DriverCard({ driver, vehicle }: { driver: DeliveryDriver | null;
       null
     : null;
   return (
-    <div className="rounded-bmpl-md border border-slate-100 bg-slate-50 px-3 py-2.5 text-sm">
+    <div className="flex items-center gap-3 rounded-bmpl-md border border-slate-100 bg-slate-50 px-3 py-2.5 text-sm">
       {driver && (
-        <p className="font-medium text-belize-navy">
-          {driver.displayName}
-          {driver.ratingAverage != null && (
-            <span className="ml-2 font-normal text-slate-500">★ {driver.ratingAverage.toFixed(1)}</span>
-          )}
-          {driver.completedDeliveries != null && (
-            <span className="ml-2 font-normal text-slate-400">· {driver.completedDeliveries} deliveries</span>
-          )}
-        </p>
+        <Avatar
+          name={driver.displayName}
+          src={driver.avatarUrl}
+          initials={driver.initials}
+          size="md"
+        />
       )}
-      {vehicle && (
-        <p className="mt-0.5 text-slate-500">
-          {vehicleSummary}
-          {vehicle.licencePlate ? ` · ${vehicle.licencePlate}` : ''}
-        </p>
-      )}
+      <div className="min-w-0">
+        {driver && (
+          <p className="font-medium text-belize-navy">
+            {driver.displayName}
+            {driver.ratingAverage != null && (
+              <span className="ml-2 font-normal text-slate-500">★ {driver.ratingAverage.toFixed(1)}</span>
+            )}
+            {driver.completedDeliveries != null && (
+              <span className="ml-2 font-normal text-slate-400">· {driver.completedDeliveries} deliveries</span>
+            )}
+          </p>
+        )}
+        {vehicle && (
+          <p className="mt-0.5 text-slate-500">
+            {vehicleSummary}
+            {vehicle.licencePlate ? ` · ${vehicle.licencePlate}` : ''}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

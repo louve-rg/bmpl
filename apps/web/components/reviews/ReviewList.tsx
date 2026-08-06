@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Badge, Button, EmptyState, Field, Select, Spinner, Textarea } from '../ui';
 import { StarRating } from './StarRating';
+import { Avatar } from '../Avatar';
 import { relativeTime } from '../../lib/notifications';
 import { api, type ApiError } from '../../lib/api';
 import {
@@ -149,11 +150,23 @@ function ReviewRow({ review }: { review: Review }) {
 
   return (
     <li className="border-b border-slate-100 py-5 last:border-b-0">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2.5">
+        <Avatar
+          name={review.reviewer.name}
+          src={review.reviewer.avatarUrl}
+          initials={review.reviewer.initials}
+          size="sm"
+        />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-belize-navy">{review.reviewer.name}</p>
+          <span className="text-xs text-slate-400">{relativeTime(review.createdAt)}</span>
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <StarRating value={review.rating} size="sm" />
         {review.verifiedPurchase && <Badge tone="success">Verified purchase</Badge>}
         {review.isMine && <Badge tone="brand">Your review</Badge>}
-        <span className="text-xs text-slate-400">{relativeTime(review.createdAt)}</span>
       </div>
 
       {review.title && <p className="mt-2 font-semibold text-belize-navy">{review.title}</p>}
