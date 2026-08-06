@@ -432,6 +432,7 @@ model User {
   inventoryChangesMade       InventoryChange[]         @relation("InventoryActor")
   savedProducts              SavedProduct[]
   recentlyViewedProducts     RecentlyViewedProduct[]
+  backInStockSubscriptions   BackInStockSubscription[]
   // Belize Connect / Jobs (Phase 5 · M24)
   jobSeekerProfile           JobSeekerProfile?         @relation("UserJobSeekerProfile")
   employerProfile            EmployerProfile?          @relation("UserEmployerProfile")
@@ -1030,6 +1031,10 @@ model VendorSettings {
   freeDeliveryThresholdMinor BigInt? // subtotal at/above which delivery is free
   taxesEnabled               Boolean       @default(false)
   autoAcceptOrders           Boolean       @default(false)
+  // Out-of-stock visibility (M-usability). false (default) = keep OOS products/variants
+  // visible with an "Out of Stock" badge + "Notify me" (Add to Cart disabled); true =
+  // auto-hide OOS products/variants from the public marketplace until restocked.
+  hideOutOfStock             Boolean       @default(false)
   createdAt                  DateTime      @default(now())
   updatedAt                  DateTime      @updatedAt
 
@@ -1228,6 +1233,7 @@ model Product {
   inventory        Inventory[]
   cartItems        CartItem[]
   orderItems       OrderItem[]
+  backInStockSubs  BackInStockSubscription[]
   savedBy          SavedProduct[]
   recentlyViewedBy RecentlyViewedProduct[]
 
@@ -1345,6 +1351,7 @@ model ProductVariant {
   inventory      Inventory?
   images         ProductImage[]
   cartItems      CartItem[]
+  backInStockSubs BackInStockSubscription[]
   savedProducts  SavedProduct[]
   orderItems     OrderItem[]
 
@@ -2023,6 +2030,27 @@ model SavedProduct {
   @@index([userId, createdAt])
   @@index([productId])
   @@map("saved_products")
+}
+
+// A customer's "notify me when back in stock" subscription for an exact product or
+// variant. One-shot: when the item is restocked above zero the subscriber is notified
+// and the row is removed, so a fresh subscription is needed for the next restock.
+// Unique per (user, variant); product-level (variantId NULL) unique per (user, product)
+// via a partial index (Postgres treats NULLs as distinct).
+model BackInStockSubscription {
+  id         String          @id @default(cuid())
+  userId     String
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  createdAt  DateTime        @default(now())
+
+  @@unique([userId, variantId])
+  @@index([productId, variantId])
+  @@index([userId])
+  @@map("back_in_stock_subscriptions")
 }
 
 // A customer's recently-viewed product history (own data only, never exposed to

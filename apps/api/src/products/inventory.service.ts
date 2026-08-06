@@ -4,6 +4,7 @@ import type { Inventory, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { OwnershipService } from './ownership.service';
+import { BackInStockService } from './back-in-stock.service';
 
 export interface ActorContext {
   userId: string;
@@ -31,6 +32,7 @@ export class InventoryService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly ownership: OwnershipService,
+    private readonly backInStock: BackInStockService,
   ) {}
 
   /** Pure derivation of stock state from an inventory row. */
@@ -122,12 +124,16 @@ export class InventoryService {
     await this.ownership.ownedProduct(actor.userId, productId);
     const inv = await this.resolveTarget(productId, variantId);
 
+    // Detect an out-of-stock → in-stock crossing so we can fire back-in-stock alerts.
+    let becameInStock = false;
     await this.prisma.$transaction(async (tx) => {
       const current = await tx.inventory.findUniqueOrThrow({ where: { id: inv.id } });
       const newQty = current.quantity + dto.delta;
       if (newQty < 0) {
         throw new BadRequestException('Adjustment would drive on-hand quantity below zero.');
       }
+      becameInStock =
+        this.availability(current).outOfStock && this.availability({ ...current, quantity: newQty }).inStock;
       await tx.inventory.update({ where: { id: inv.id }, data: { quantity: newQty } });
       await tx.inventoryChange.create({
         data: {
@@ -152,6 +158,10 @@ export class InventoryService {
         tx,
       );
     });
+    // After the restock commits, notify + clear "back in stock" subscribers (one-shot).
+    if (becameInStock) {
+      await this.backInStock.notifyRestock(productId, inv.variantId);
+    }
     return this.getForProduct(actor.userId, productId);
   }
 

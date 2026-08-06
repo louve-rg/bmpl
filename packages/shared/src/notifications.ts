@@ -75,6 +75,7 @@ export const NOTIFICATION_EVENTS = [
   // customer / order + payment + delivery
   'ORDER_PLACED',
   'ORDER_CANCELLED',
+  'BACK_IN_STOCK',
   'PAYMENT_AUTHORIZED',
   'DELIVERY_DRIVER_ASSIGNED',
   'DELIVERY_DRIVER_ACCEPTED',

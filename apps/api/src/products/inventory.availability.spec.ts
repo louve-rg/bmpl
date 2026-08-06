@@ -3,7 +3,7 @@ import type { Inventory } from '@bmpl/database';
 import { InventoryService } from './inventory.service';
 
 // availability() is a pure derivation and uses none of the injected deps.
-const svc = new InventoryService(null as never, null as never, null as never);
+const svc = new InventoryService(null as never, null as never, null as never, null as never);
 
 function inv(over: Partial<Inventory>): Inventory {
   return {

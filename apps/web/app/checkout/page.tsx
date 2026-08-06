@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
-import { cartApi, money, type CartView } from '../../lib/cart';
+import { cartApi, money, type CartLine, type CartView } from '../../lib/cart';
+import { variantDisplay } from '../../lib/variant-display';
 import { DISTRICTS, type OrderView } from '../../lib/orders';
 import { api, type ApiError } from '../../lib/api';
 import { Alert, Button, Card, EmptyState, ButtonLink, Field, Input, PageHeader, Select, Spinner } from '../../components/ui';
@@ -29,6 +30,45 @@ interface QuoteResponse {
   subtotalMinor: number;
   deliveryFeeMinor: number;
   totalMinor: number;
+}
+
+/**
+ * A checkout line item in a clean STACKED layout: Product, each selected option on its
+ * own labeled line, Cost (unit price), and Quantity. Works for any number of variant
+ * options and never repeats the product name as an option. Presentation-only — the
+ * cart figures (unit price, line total, quantity) are unchanged.
+ */
+function CheckoutItem({ it }: { it: CartLine }) {
+  const disp = variantDisplay({
+    displayName: it.displayName ?? null,
+    optionValues: it.optionValues ?? [],
+    title: it.variantTitle ?? null,
+    productTitle: it.title,
+  });
+  const pairs =
+    it.options && it.options.length
+      ? it.options.filter((o) => o.value.toLowerCase() !== disp.primary.toLowerCase())
+      : disp.secondary.map((value) => ({ name: 'Option', value }));
+
+  return (
+    <li className="flex items-start justify-between gap-4 py-3">
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
+        <dt className="text-xs uppercase tracking-wide text-slate-400">Product</dt>
+        <dd className="font-medium text-belize-navy">{disp.primary || it.title}</dd>
+        {pairs.map((o, i) => (
+          <Fragment key={`${o.name}-${i}`}>
+            <dt className="text-xs uppercase tracking-wide text-slate-400">{o.name}</dt>
+            <dd className="text-slate-700">{o.value}</dd>
+          </Fragment>
+        ))}
+        <dt className="text-xs uppercase tracking-wide text-slate-400">Cost</dt>
+        <dd className="text-slate-700">{money(it.unitPriceMinor)}</dd>
+        <dt className="text-xs uppercase tracking-wide text-slate-400">Quantity</dt>
+        <dd className="text-slate-700">×{it.quantity}</dd>
+      </dl>
+      <span className="shrink-0 text-right font-semibold text-belize-navy">{money(it.lineSubtotalMinor)}</span>
+    </li>
+  );
 }
 
 const estText = (e: { minHours: number; maxHours: number; label: string | null } | null): string | null => {
@@ -178,13 +218,7 @@ export default function CheckoutPage() {
                     </div>
                     <ul className="divide-y divide-slate-100 text-sm">
                       {v.items.map((it) => (
-                        <li key={it.id} className="flex justify-between py-2">
-                          <span className="text-slate-600">
-                            {it.variantTitle ?? it.title}
-                            {it.variantLabel ? ` · ${it.variantLabel}` : ''} × {it.quantity}
-                          </span>
-                          <span className="text-slate-700">{money(it.lineSubtotalMinor)}</span>
-                        </li>
+                        <CheckoutItem key={it.id} it={it} />
                       ))}
                     </ul>
                     <fieldset className="mt-3">

@@ -238,7 +238,7 @@ export class VariantsService {
 
   // ---- Public view (used by ProductsService.publicDetail) ----
 
-  async publicView(productId: string) {
+  async publicView(productId: string, opts: { hideOutOfStock?: boolean } = {}) {
     const product = await this.prisma.product.findUniqueOrThrow({ where: { id: productId }, select: { title: true } });
     const options = await this.prisma.productOption.findMany({
       where: { productId },
@@ -253,13 +253,7 @@ export class VariantsService {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { optionValues: true, inventory: true },
     });
-    return {
-      options: options.map((o) => ({
-        id: o.id,
-        name: o.name,
-        values: o.values.map((v) => ({ id: v.id, value: v.value })),
-      })),
-      variants: variants.map((v) => ({
+    const mapped = variants.map((v) => ({
         id: v.id,
         // Resolved marketplace title (displayName → option label → product title)
         // + the raw parts, so any client can apply the precedence itself.
@@ -283,7 +277,17 @@ export class VariantsService {
               allowBackorders,
             }))(this.inventory.availability(v.inventory))
           : { inStock: true, lowStock: false, outOfStock: false, available: null, unlimited: false, allowBackorders: false },
+      }));
+    // When the vendor opts to hide out-of-stock, drop OOS variants from the public
+    // lineup entirely (they reappear automatically once restocked — a live query).
+    const visible = opts.hideOutOfStock ? mapped.filter((v) => v.availability.inStock) : mapped;
+    return {
+      options: options.map((o) => ({
+        id: o.id,
+        name: o.name,
+        values: o.values.map((val) => ({ id: val.id, value: val.value })),
       })),
+      variants: visible,
     };
   }
 

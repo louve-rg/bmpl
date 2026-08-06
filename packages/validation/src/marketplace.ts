@@ -158,6 +158,8 @@ export const vendorSettingsSchema = z
     freeDeliveryThresholdMinor: moneyMinorSchema.nullable(),
     taxesEnabled: z.boolean(),
     autoAcceptOrders: z.boolean(),
+    // Auto-hide out-of-stock products/variants from the public marketplace.
+    hideOutOfStock: z.boolean(),
   })
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });

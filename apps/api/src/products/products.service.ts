@@ -363,6 +363,13 @@ export class ProductsService {
     const searchFilter = q
       ? Prisma.sql`AND (p."searchVector" @@ websearch_to_tsquery('english', ${q}) OR p.title ILIKE ${`%${q}%`})`
       : Prisma.empty;
+    // Vendors that opted to hide out-of-stock: exclude their products that have no
+    // purchasable inventory. Products auto-reappear once restocked (live query).
+    const hideOosFilter = Prisma.sql`AND (
+        vs."hideOutOfStock" IS NOT TRUE
+        OR NOT EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id)
+        OR EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id
+          AND (i.unlimited OR i."allowBackorders" OR (i.quantity - i.reserved) > 0)))`;
     const rankExpr = q
       ? Prisma.sql`ts_rank(p."searchVector", websearch_to_tsquery('english', ${q}))`
       : Prisma.sql`0`;
@@ -388,8 +395,9 @@ export class ProductsService {
       SELECT p.id, ${rankExpr} AS rank, count(*) OVER() AS total
       FROM products p
       JOIN vendor_profiles vp ON vp.id = p."vendorProfileId"
+      LEFT JOIN vendor_settings vs ON vs."vendorProfileId" = p."vendorProfileId"
       WHERE p.status = 'PUBLISHED' AND vp."approvalStatus" = 'APPROVED'
-        ${catFilter} ${vendorFilter} ${featuredFilter} ${priceMinFilter} ${priceMaxFilter} ${inStockFilter} ${searchFilter}
+        ${catFilter} ${vendorFilter} ${featuredFilter} ${priceMinFilter} ${priceMaxFilter} ${inStockFilter} ${hideOosFilter} ${searchFilter}
       ORDER BY ${orderBy}
       LIMIT ${query.pageSize} OFFSET ${offset}`;
 
@@ -428,6 +436,16 @@ export class ProductsService {
       },
     });
     if (!p) throw new NotFoundException('Product not found.');
+    // Vendor out-of-stock visibility: when hidden, a fully out-of-stock product is
+    // treated as not found, and OOS variants are dropped from the lineup. Restocking
+    // restores visibility automatically (these are live queries — no stored flag).
+    const settings = await this.prisma.vendorSettings.findUnique({
+      where: { vendorProfileId: p.vendorProfileId },
+      select: { hideOutOfStock: true },
+    });
+    const hideOutOfStock = settings?.hideOutOfStock ?? false;
+    const availability = await this.inventory.publicAvailability(p.id);
+    if (hideOutOfStock && availability.outOfStock) throw new NotFoundException('Product not found.');
     return {
       ...this.cardShape(p),
       description: p.description,
@@ -440,8 +458,8 @@ export class ProductsService {
       // Detail gallery EXCLUDES the brand image (listing-only role, M6.2).
       images: await this.images.listGallery(p.id),
       brandImageUrl: await this.images.brandImageUrl(p.id),
-      ...(await this.variants.publicView(p.id)), // { options, variants }
-      availability: await this.inventory.publicAvailability(p.id),
+      ...(await this.variants.publicView(p.id, { hideOutOfStock })), // { options, variants }
+      availability,
     };
   }
 
@@ -458,8 +476,18 @@ export class ProductsService {
         vendorProfile: { select: { businessName: true, slug: true } },
       },
     });
-    const primary = await this.images.primaryUrls(rows.map((r) => r.id));
-    return rows.map((p) => ({ ...this.cardShape(p), primaryImageUrl: primary.get(p.id) ?? null }));
+    // Hide out-of-stock products from the storefront grid when the vendor opts in.
+    const settings = await this.prisma.vendorSettings.findUnique({
+      where: { vendorProfileId },
+      select: { hideOutOfStock: true },
+    });
+    let list = rows;
+    if (settings?.hideOutOfStock) {
+      const stock = await this.inventory.inStockMap(rows.map((r) => r.id));
+      list = rows.filter((r) => stock.get(r.id) ?? true);
+    }
+    const primary = await this.images.primaryUrls(list.map((r) => r.id));
+    return list.map((p) => ({ ...this.cardShape(p), primaryImageUrl: primary.get(p.id) ?? null }));
   }
 
   /**

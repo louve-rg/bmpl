@@ -279,12 +279,15 @@ export class CartService {
       // Structured selected option VALUES (ordered) — clients format the display from
       // these (never by splitting the combined label). `variantLabel` is the legacy
       // slash join, retained for back-compat.
-      const optionValues = v
+      const sortedOptions = v
         ? v.optionValues
             .map((ov) => ov.optionValue)
             .sort((x, y) => x.option.position - y.option.position)
-            .map((ov) => ov.value)
         : [];
+      const optionValues = sortedOptions.map((ov) => ov.value);
+      // Labeled option pairs (e.g. { name: "Size", value: "Small" }) for the stacked
+      // checkout summary; ordered by option position.
+      const options = sortedOptions.map((ov) => ({ name: ov.option.name, value: ov.value }));
       const variantLabel = optionValues.length ? optionValues.join(' / ') : null;
       // Variant-specific marketplace title (displayName → option label → product title).
       const variantTitle = v ? resolveVariantTitle(v.displayName, variantLabel, p.title) : null;
@@ -301,6 +304,7 @@ export class CartService {
         variantTitle,
         displayName: v?.displayName ?? null,
         optionValues,
+        options,
         sku: v?.sku ?? null,
         imageUrl,
         currency: p.currency,

@@ -195,6 +195,7 @@ export class VendorService {
           dto.freeDeliveryThresholdMinor === undefined ? undefined : dto.freeDeliveryThresholdMinor === null ? null : BigInt(dto.freeDeliveryThresholdMinor),
         taxesEnabled: dto.taxesEnabled ?? undefined,
         autoAcceptOrders: dto.autoAcceptOrders ?? undefined,
+        hideOutOfStock: dto.hideOutOfStock ?? undefined,
       },
     });
     return this.getOwn(userId);
@@ -646,6 +647,7 @@ function settingsShape(
         deliveryRadiusKm: number | null;
         taxesEnabled: boolean;
         autoAcceptOrders: boolean;
+        hideOutOfStock: boolean;
       }
     | null
     | undefined,
@@ -659,6 +661,7 @@ function settingsShape(
     deliveryRadiusKm: s.deliveryRadiusKm,
     taxesEnabled: s.taxesEnabled,
     autoAcceptOrders: s.autoAcceptOrders,
+    hideOutOfStock: s.hideOutOfStock,
   };
 }
 

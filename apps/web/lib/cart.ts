@@ -14,6 +14,8 @@ export interface CartLine {
   variantLabel: string | null;
   /** Structured selected option VALUES in option order (e.g. ["Twisted Peppermint","Small"]). */
   optionValues?: string[];
+  /** Labeled option pairs in option order (e.g. [{name:"Size",value:"Small"}]) for the checkout summary. */
+  options?: Array<{ name: string; value: string }>;
   sku: string | null;
   imageUrl: string | null;
   currency: string;

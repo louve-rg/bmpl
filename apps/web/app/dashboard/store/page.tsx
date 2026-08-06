@@ -39,6 +39,7 @@ interface Store {
     pickupEnabled: boolean;
     deliveryEnabled: boolean;
     vacationMode: boolean;
+    hideOutOfStock: boolean;
     minimumOrderMinor: number | null;
   };
   locations?: Array<{ id: string; label: string; addressLine1: string; city: string; district: string; isPrimary: boolean }>;
@@ -297,6 +298,7 @@ function SettingsForm({ store, onDone, onError }: SectionProps) {
     pickupEnabled: s.pickupEnabled,
     deliveryEnabled: s.deliveryEnabled,
     vacationMode: s.vacationMode,
+    hideOutOfStock: s.hideOutOfStock,
     minimumOrderMinor: s.minimumOrderMinor?.toString() ?? '',
   });
   const [busy, setBusy] = useState(false);
@@ -312,6 +314,7 @@ function SettingsForm({ store, onDone, onError }: SectionProps) {
               pickupEnabled: f.pickupEnabled,
               deliveryEnabled: f.deliveryEnabled,
               vacationMode: f.vacationMode,
+              hideOutOfStock: f.hideOutOfStock,
               minimumOrderMinor: f.minimumOrderMinor === '' ? null : Number(f.minimumOrderMinor),
             });
             await onDone();
@@ -325,6 +328,11 @@ function SettingsForm({ store, onDone, onError }: SectionProps) {
         <Check label="Pickup available" checked={f.pickupEnabled} onChange={(v) => setF({ ...f, pickupEnabled: v })} />
         <Check label="Delivery available" checked={f.deliveryEnabled} onChange={(v) => setF({ ...f, deliveryEnabled: v })} />
         <Check label="Vacation mode (temporarily hide)" checked={f.vacationMode} onChange={(v) => setF({ ...f, vacationMode: v })} />
+        <Check
+          label="Hide out-of-stock items (otherwise shown with an “Out of Stock” badge + Notify Me)"
+          checked={f.hideOutOfStock}
+          onChange={(v) => setF({ ...f, hideOutOfStock: v })}
+        />
         <Field label="Minimum order (cents)">
           <Input
             className="w-32"

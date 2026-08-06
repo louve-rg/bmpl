@@ -13,6 +13,7 @@ import { VariantLineup, VariantSelector, type LineupImage } from '../../../compo
 import { optionValuesFor } from '../../../lib/variant-card';
 import { variantDisplay } from '../../../lib/variant-display';
 import { formatWeight, formatDimensionsMm } from '@bmpl/shared';
+import { backInStockApi } from '../../../lib/back-in-stock';
 import { cartApi, money, notifyCartChanged } from '../../../lib/cart';
 import type { ApiError } from '../../../lib/api';
 import { SaveButton } from '../../../components/saved/SaveButton';
@@ -84,6 +85,8 @@ export function ProductView({ product }: { product: ProductDetail }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [reviewAggregate, setReviewAggregate] = useState<RatingAggregate | null>(null);
+  // "Notify me when back in stock" state for the currently-presented (out-of-stock) item.
+  const [notifyState, setNotifyState] = useState<'idle' | 'busy' | 'done'>('idle');
 
   // The variant to present (image/title/price/SKU/gallery): the exact variant when
   // fully selected, else the single variant matching a partial selection. Derived —
@@ -117,6 +120,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
   function changeOption(optionId: string, valueId: string) {
     setSelection((s) => reconcileSelection(product.variants, product.options, s, optionId, valueId));
     setQty(1);
+    setNotifyState('idle'); // a different selection is a different back-in-stock target
   }
 
   // The presented variant FOLLOWS the URL (?variant=<id>). Next 14 keeps useSearchParams
@@ -134,6 +138,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
     const v = urlVariant ? product.variants.find((x) => x.id === urlVariant) : null;
     setSelection(v ? selectionForVariant(product.options, v) : {});
     setQty(1);
+    setNotifyState('idle');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlVariant]);
 
@@ -202,6 +207,23 @@ export function ProductView({ product }: { product: ProductDetail }) {
       setMessage({ kind: 'err', text: err.message || 'Could not add to cart.' });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function notifyMe() {
+    setNotifyState('busy');
+    setMessage(null);
+    try {
+      await backInStockApi.subscribe(product.id, selectedVariant?.id ?? null);
+      setNotifyState('done');
+    } catch (e) {
+      const err = e as ApiError;
+      if (err.status === 401) {
+        router.push(`/login?next=${encodeURIComponent(`/products/${product.slug}`)}`);
+        return;
+      }
+      setMessage({ kind: 'err', text: err.message || 'Could not subscribe to alerts.' });
+      setNotifyState('idle');
     }
   }
 
@@ -354,6 +376,26 @@ export function ProductView({ product }: { product: ProductDetail }) {
                 </>
               )}
             </p>
+          )}
+
+          {/* Out-of-stock: let the customer subscribe to a back-in-stock alert. */}
+          {state === 'OUT_OF_STOCK' && (
+            <div className="mt-3">
+              {notifyState === 'done' ? (
+                <p role="status" className="text-sm font-medium text-emerald-600">
+                  ✓ We’ll notify you when this is back in stock.
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={notifyMe}
+                  disabled={notifyState === 'busy'}
+                  className="w-full rounded-bmpl-md border border-belize-blue px-5 py-2.5 text-sm font-semibold text-belize-blue transition hover:bg-belize-blue/5 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {notifyState === 'busy' ? 'Subscribing…' : 'Notify Me When Back in Stock'}
+                </button>
+              )}
+            </div>
           )}
         </div>
 
