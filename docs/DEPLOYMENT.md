@@ -41,38 +41,71 @@ Runtime baseline: **Node 24 LTS**, **pnpm 9**, Prisma migrations via
 ### 2a. Watch patterns — what triggers an API deployment
 
 The API service only rebuilds when a pushed commit touches a **watch pattern**. The
-authoritative list lives in `railway.json` (`build.watchPatterns`) so it is reviewed
-and versioned with the code:
+list is kept in two places that must agree — `railway.json` (`build.watchPatterns`,
+versioned and reviewable) and the service's **Settings → Build → Watch Paths** in the
+Railway dashboard, which is the one that actually gates the trigger (see below):
 
+| Pattern | Why the API build needs it |
+| --- | --- |
+| `apps/api/**` | the API source, plus `apps/api/Dockerfile` itself |
+| `packages/shared/**` | `@bmpl/shared` — compiled into the API bundle |
+| `packages/validation/**` | `@bmpl/validation` — every request schema |
+| `packages/database/**` | `@bmpl/database` — Prisma client, schema **and migrations** (`prisma migrate deploy` runs pre-deploy) |
+| `packages/authentication/**` | `@bmpl/authentication` — password/token handling |
+| `packages/authorization/**` | `@bmpl/authorization` — permission checks |
+| `packages/wallet/**` | `@bmpl/wallet` — ledger maths |
+| `packages/notifications/**` | `@bmpl/notifications` — delivery channels |
+| `pnpm-lock.yaml` | the exact dependency tree `pnpm install --frozen-lockfile` resolves |
+| `pnpm-workspace.yaml` | which packages exist in the workspace |
+| `package.json` | root scripts + pinned toolchain (`packageManager`, engines) |
+| `turbo.json` | build-task graph used to build the packages |
+| `tsconfig.base.json` | compiler options every package inherits |
+| `tsconfig.lib.json` | compiler options the buildable packages inherit |
+| `.npmrc` | pnpm resolution settings (hoisting, peer handling) |
+| `railway.json` | the build/deploy config itself |
+
+Those are exactly the seven `@bmpl/*` packages `apps/api/package.json` depends on
+(their transitive closure adds nothing new), plus exactly the root files
+`apps/api/Dockerfile` copies in its build stage:
+`pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc turbo.json tsconfig.base.json tsconfig.lib.json`.
+
+Deliberately **absent**: `apps/web/**`, `apps/admin/**`, `apps/mobile/**`,
+`packages/ui/**`, `docs/**`, `scripts/**`. `@bmpl/ui` is web-only — the API does not
+import it, so a UI change must not redeploy the API. (The Dockerfile does still build
+it, so a UI change that breaks compilation surfaces on the next API deploy rather
+than immediately.) A dependency change in any app still edits `pnpm-lock.yaml`, which
+is watched on purpose: it changes the tree the API image installs.
+
+> **The `packages/*` entries matter most.** The API compiles those packages into its
+> bundle, so a change confined to `packages/` alters the deployed API even though
+> nothing under `apps/api/` was touched. Without them the API silently keeps serving
+> stale code and nothing anywhere reports an error.
+
+**Dashboard vs. repository — the dashboard wins for the trigger.** Railway's
+config-as-code reference says *"Configuration defined in code will always override
+values from the dashboard"*, and that is true for a deployment that has **started**.
+The decision of *whether to start one* is made by Railway's GitHub webhook **before
+the repo is cloned**, so `railway.json` has not been read yet and cannot influence
+it. Proof: skipped deployments record the dashboard's watch patterns and
+`builder: RAILPACK`, while successful ones record `builder: DOCKERFILE` from
+`railway.json`. Keep both in sync; if they ever disagree, the dashboard decides
+whether a build happens.
+
+Patterns are written **without a leading slash**, matching Railway's own documented
+example (`"watchPatterns": ["src/**"]`). The previous value `/apps/api/**` matched
+**nothing** — commit `4814015` changed five files under `apps/api/src/` and was still
+`SKIPPED`, leaving the API frozen on `e2a46c1` while Vercel kept deploying.
+
+To read or change the live value without the dashboard:
+
+```bash
+railway api 'query($s:String!,$e:String!){ serviceInstance(serviceId:$s, environmentId:$e){ watchPatterns } }' \
+  --raw-var s=<serviceId> --raw-var e=<environmentId>
 ```
-apps/api/**          packages/**          pnpm-lock.yaml       pnpm-workspace.yaml
-package.json         turbo.json           tsconfig.base.json   tsconfig.lib.json
-.npmrc               railway.json
-```
 
-Every entry is a path the API build genuinely consumes — compare `apps/api/Dockerfile`,
-whose build stage copies exactly `pnpm-workspace.yaml package.json pnpm-lock.yaml
-.npmrc turbo.json tsconfig.base.json tsconfig.lib.json`, then `packages/` and `apps/`.
-The Prisma schema and migrations are covered by `packages/**`
-(`packages/database/prisma/**`), and `apps/api/Dockerfile` by `apps/api/**`.
-
-`apps/web/**`, `apps/admin/**`, `apps/mobile/**`, `docs/**` and `scripts/**` are
-deliberately **absent** — a web-only change must not redeploy the API. Note that a
-dependency change in any app still edits `pnpm-lock.yaml`, which is watched on
-purpose: it changes the dependency graph the API image installs.
-
-> **`packages/**` is the entry that matters most.** The API compiles the shared
-> workspace packages into its bundle, so a change confined to `packages/` alters the
-> deployed API even though nothing under `apps/api/` was touched. Without it, the API
-> silently keeps serving stale code and nothing anywhere reports an error.
-
-**Dashboard vs. repository.** Railway's config-as-code reference states:
-*"Configuration defined in code will always override values from the dashboard."*
-So `railway.json` is the source of truth and the dashboard's **Settings → Build →
-Watch Paths** field should be **cleared**. If you would rather keep it populated, it
-must be set to exactly the ten values above, one per line, or it will disagree with
-the repository. Patterns are written **without a leading slash**, matching Railway's
-own documented example (`"watchPatterns": ["src/**"]`).
+`serviceInstanceUpdate(serviceId, environmentId, input)` writes it; passing only
+`watchPatterns` leaves the builder, start command, health check, pre-deploy hook and
+variables untouched.
 
 ### 2b. Deployment sequencing — changes that span API and web
 
