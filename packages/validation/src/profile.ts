@@ -1,8 +1,7 @@
 import { z } from 'zod';
 import {
-  AVATAR_MIME_ALLOWLIST,
+  AVATAR_REJECTION_REASON_CODES,
   DOCUMENT_MIME_ALLOWLIST,
-  MAX_AVATAR_BYTES,
   MAX_DOCUMENT_BYTES,
 } from '@bmpl/shared';
 import { districtSchema, phoneSchema } from './common';
@@ -34,15 +33,18 @@ export const documentUploadRequestSchema = z.object({
 });
 export type DocumentUploadRequestInput = z.infer<typeof documentUploadRequestSchema>;
 
-/** Presign request for a profile avatar upload (images only). */
-export const avatarUploadRequestSchema = z.object({
-  fileName: fileNameSchema,
-  contentType: z.enum(AVATAR_MIME_ALLOWLIST, {
-    errorMap: () => ({ message: 'Unsupported image type. Allowed: JPEG, PNG, WEBP.' }),
-  }),
-  sizeBytes: z.number().int().positive().max(MAX_AVATAR_BYTES, 'Image must be 5 MB or smaller.'),
+/**
+ * Admin decision on a profile picture awaiting review.
+ *
+ * There is deliberately no client-supplied schema for the UPLOAD itself: avatars
+ * are posted as raw bytes and judged from those bytes (real MIME sniffed, size
+ * measured, face checked), so a client-declared contentType/sizeBytes would be
+ * decoration the backend must ignore anyway.
+ */
+export const avatarReviewSchema = z.object({
+  reason: z.enum(AVATAR_REJECTION_REASON_CODES).optional(),
 });
-export type AvatarUploadRequestInput = z.infer<typeof avatarUploadRequestSchema>;
+export type AvatarReviewInput = z.infer<typeof avatarReviewSchema>;
 
 /** @deprecated Kept for backward compatibility; prefer the specific schemas above. */
 export const uploadRequestSchema = documentUploadRequestSchema;

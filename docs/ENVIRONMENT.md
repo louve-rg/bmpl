@@ -74,6 +74,24 @@ Placeholders below are **examples only** — never commit real secrets.
 | `STORAGE_FORCE_PATH_STYLE` | api | ⭕ | 🌐 | `true` for MinIO/R2 | `true` |
 | `STORAGE_SIGNED_URL_TTL` | api | ⭕ | 🌐 | Signed-URL lifetime (seconds) | `300` |
 
+## Profile-picture face check
+
+Verifies that an uploaded profile picture is a photo of a person. **Optional** —
+with no provider configured the feature still works end to end: every upload is
+queued for an admin in **Admin → Profile Photos** instead of being auto-approved.
+Setting a provider turns on automatic approval and rejection.
+
+| Name | App | Req? | Secret? | Purpose | Example |
+|---|---|---|---|---|---|
+| `AVATAR_VISION_PROVIDER` | api | ⭕ | 🌐 | `none` (admin queue only) or `google` | `google` |
+| `GOOGLE_VISION_API_KEY` | api | ⭕* | 🔒 | Required when provider=`google`. Cloud Vision API key with `FACE_DETECTION` + `SAFE_SEARCH_DETECTION` enabled | `AIza«key»` |
+| `AVATAR_VISION_TIMEOUT_MS` | api | ⭕ | 🌐 | Give-up time for the check; on timeout the picture falls back to the admin queue | `8000` |
+
+> **What this proves.** The check confirms the image *contains* one clear human
+> face and safe content. It cannot confirm the face is the account holder's —
+> anyone can upload a stranger's photo. Binding a face to an identity requires
+> liveness capture matched against an ID document (KYC), which is separate work.
+
 ## Email
 
 | Name | App | Req? | Secret? | Purpose | Example |

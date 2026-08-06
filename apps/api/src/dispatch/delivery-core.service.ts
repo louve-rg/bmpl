@@ -5,6 +5,7 @@ import {
   DELIVERY_PIN_LENGTH,
   DELIVERY_STATUS_LABELS,
   canPerform,
+  userInitials,
   type DeliveryAction,
   type DeliveryStatus,
 } from '@bmpl/shared';
@@ -14,6 +15,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../storage/storage.service';
+import { AVATAR_SELECT, publicAvatarUrl } from '../common/avatar-url';
 
 const money = (v: bigint | null | undefined): number | null => (v == null ? null : Number(v));
 
@@ -61,7 +63,9 @@ export const DELIVERY_INCLUDE = {
       items: { orderBy: { createdAt: 'asc' as const } },
     },
   },
-  assignedDriver: { include: { user: { select: { firstName: true, lastName: true } } } },
+  assignedDriver: {
+    include: { user: { select: { firstName: true, lastName: true, ...AVATAR_SELECT } } },
+  },
   assignedVehicle: true,
   timeline: { orderBy: { createdAt: 'asc' as const } },
   assignments: {
@@ -168,7 +172,15 @@ export class DeliveryCoreService {
   private driverSummary(d: DeliveryWithGraph['assignedDriver']) {
     if (!d) return null;
     // Display name only — never legal name, phone, documents, or emergency contact.
-    return { displayName: d.displayName, ratingAverage: d.ratingAverage, completedDeliveries: d.completedDeliveries };
+    // The face is the point here: a customer opening the door should be able to
+    // check that the person in front of them is the driver they were assigned.
+    return {
+      displayName: d.displayName,
+      ratingAverage: d.ratingAverage,
+      completedDeliveries: d.completedDeliveries,
+      initials: userInitials(d.user.firstName, d.user.lastName),
+      avatarUrl: publicAvatarUrl(d.user),
+    };
   }
 
   timeline(d: DeliveryWithGraph) {

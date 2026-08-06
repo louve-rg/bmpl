@@ -4,7 +4,9 @@ import {
   isAllowedProductImageMime,
   MAX_PRODUCT_IMAGE_BYTES,
   MAX_REVIEW_MEDIA,
+  publicDisplayName,
   STORAGE_PREFIX,
+  userInitials,
   type ReviewSubjectType,
 } from '@bmpl/shared';
 import type { CreateReviewInput, EditReviewInput, ResolveReportInput, ReviewModerateInput, ReviewReportInput, ReviewResponseInput } from '@bmpl/validation';
@@ -14,12 +16,27 @@ import { StorageService } from '../storage/storage.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OwnershipService } from '../products/ownership.service';
+import { AVATAR_SELECT, publicAvatarUrl } from '../common/avatar-url';
 
 export interface Actor {
   userId: string;
   status?: string;
   permissions?: string[];
 }
+
+/**
+ * Everything {@link ReviewsService.serialize} reads. The reviewer is included so a
+ * published review carries a face and a name — an anonymous star rating is the
+ * easiest kind to fake, and readers weigh a review differently when a real person
+ * is standing behind it.
+ */
+const REVIEW_INCLUDE = {
+  media: true,
+  response: true,
+  reviewer: { select: { firstName: true, lastName: true, ...AVATAR_SELECT } },
+} satisfies Prisma.ReviewInclude;
+
+type ReviewRow = Prisma.ReviewGetPayload<{ include: typeof REVIEW_INCLUDE }>;
 
 /** A vendor-order is fulfilled when its delivery is DELIVERED or (pickup) PICKED_UP. */
 function isFulfilled(vo: { status: string; deliveryMethod: string; delivery: { status: string } | null }): boolean {
@@ -175,7 +192,7 @@ export class ReviewsService {
     const where: Prisma.ReviewWhereInput = { subjectType, subjectId, status: 'PUBLISHED', ...(opts.rating ? { rating: opts.rating } : {}) };
     const orderBy: Prisma.ReviewOrderByWithRelationInput = opts.sort === 'helpful' ? { helpfulCount: 'desc' } : opts.sort === 'rating_desc' ? { rating: 'desc' } : opts.sort === 'rating_asc' ? { rating: 'asc' } : { createdAt: 'desc' };
     const [rows, total, all] = await Promise.all([
-      this.prisma.review.findMany({ where, orderBy, skip: (page - 1) * pageSize, take: pageSize, include: { media: { where: { status: 'APPROVED' } }, response: true } }),
+      this.prisma.review.findMany({ where, orderBy, skip: (page - 1) * pageSize, take: pageSize, include: { ...REVIEW_INCLUDE, media: { where: { status: 'APPROVED' } } } }),
       this.prisma.review.count({ where }),
       this.prisma.review.findMany({ where: { subjectType, subjectId, status: 'PUBLISHED' }, select: { rating: true } }),
     ]);
@@ -189,13 +206,13 @@ export class ReviewsService {
   }
 
   async getById(reviewId: string, actor?: Actor) {
-    const r = await this.prisma.review.findUnique({ where: { id: reviewId }, include: { media: true, response: true } });
+    const r = await this.prisma.review.findUnique({ where: { id: reviewId }, include: REVIEW_INCLUDE });
     if (!r) throw new NotFoundException('Review not found.');
     return this.serialize(r, actor?.userId);
   }
 
   async ownReviews(userId: string) {
-    const rows = await this.prisma.review.findMany({ where: { reviewerId: userId }, orderBy: { createdAt: 'desc' }, take: 100, include: { media: true, response: true } });
+    const rows = await this.prisma.review.findMany({ where: { reviewerId: userId }, orderBy: { createdAt: 'desc' }, take: 100, include: REVIEW_INCLUDE });
     return Promise.all(rows.map((r) => this.serialize(r, userId)));
   }
 
@@ -296,7 +313,7 @@ export class ReviewsService {
       ...(filter.subjectType ? { subjectType: filter.subjectType as never } : {}),
       ...(filter.reported ? { reports: { some: { status: 'OPEN' } } } : {}),
     };
-    const rows = await this.prisma.review.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200, include: { media: true, response: true, _count: { select: { reports: true } } } });
+    const rows = await this.prisma.review.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200, include: { ...REVIEW_INCLUDE, _count: { select: { reports: true } } } });
     return Promise.all(rows.map(async (r) => ({ ...(await this.serialize(r)), reportCount: r._count.reports, moderationReason: r.moderationReason })));
   }
 
@@ -327,7 +344,7 @@ export class ReviewsService {
   // ===========================================================================
   // serialization
   // ===========================================================================
-  private async serialize(r: Prisma.ReviewGetPayload<{ include: { media: true; response: true } }>, viewerId?: string) {
+  private async serialize(r: ReviewRow, viewerId?: string) {
     const media = await Promise.all(
       r.media.filter((m) => m.status === 'APPROVED').map(async (m) => {
         try {
@@ -353,6 +370,13 @@ export class ReviewsService {
       sku: r.sku,
       media,
       response: r.response ? { body: r.response.body, createdAt: r.response.createdAt, editedAt: r.response.editedAt } : null,
+      // Public identity: first name + surname initial, plus the approved picture
+      // (null while there isn't one — the UI draws initials instead).
+      reviewer: {
+        name: publicDisplayName(r.reviewer.firstName, r.reviewer.lastName),
+        initials: userInitials(r.reviewer.firstName, r.reviewer.lastName),
+        avatarUrl: publicAvatarUrl(r.reviewer),
+      },
       isMine: viewerId === r.reviewerId,
       createdAt: r.createdAt,
       editedAt: r.editedAt,

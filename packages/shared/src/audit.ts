@@ -158,6 +158,13 @@ export const AUDIT_ACTIONS = [
   'COUPON_UPDATED',
   'COUPON_STATUS_CHANGED',
   'COUPON_REDEEMED',
+  // ---- Profile pictures ----
+  'AVATAR_SUBMITTED',
+  'AVATAR_AUTO_APPROVED',
+  'AVATAR_AUTO_REJECTED',
+  'AVATAR_APPROVED',
+  'AVATAR_REJECTED',
+  'AVATAR_REMOVED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

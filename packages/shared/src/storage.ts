@@ -76,6 +76,91 @@ export function sniffProductImageMime(bytes: Uint8Array): ProductImageMime | nul
 export const productImageExt = (mime: ProductImageMime): string =>
   mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
 
+export interface ImageSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * Pixel dimensions of a JPEG/PNG/WebP, read straight from the header bytes.
+ *
+ * Deliberately dependency-free: the API needs the dimensions to judge how much of
+ * the frame a detected face fills (a person standing in a landscape shot is a
+ * face, but a useless 40px avatar), and pulling a native image library into the
+ * deployed bundle for two integers is not worth it. Returns null when the format
+ * is unrecognised or the header is truncated — callers treat that as "unknown"
+ * and skip the coverage rule rather than rejecting the upload.
+ */
+export function readImageSize(bytes: Uint8Array): ImageSize | null {
+  const mime = sniffProductImageMime(bytes);
+  if (mime === 'image/png') return pngSize(bytes);
+  if (mime === 'image/jpeg') return jpegSize(bytes);
+  if (mime === 'image/webp') return webpSize(bytes);
+  return null;
+}
+
+const u16be = (b: Uint8Array, i: number) => (b[i]! << 8) | b[i + 1]!;
+const u16le = (b: Uint8Array, i: number) => b[i]! | (b[i + 1]! << 8);
+const u24le = (b: Uint8Array, i: number) => b[i]! | (b[i + 1]! << 8) | (b[i + 2]! << 16);
+const u32be = (b: Uint8Array, i: number) =>
+  ((b[i]! << 24) | (b[i + 1]! << 16) | (b[i + 2]! << 8) | b[i + 3]!) >>> 0;
+
+/** PNG: the IHDR chunk is always first, so width/height sit at a fixed offset. */
+function pngSize(b: Uint8Array): ImageSize | null {
+  if (b.length < 24) return null;
+  return { width: u32be(b, 16), height: u32be(b, 20) };
+}
+
+/**
+ * JPEG: walk the marker segments until a Start-Of-Frame, whose payload carries
+ * the dimensions. SOF markers are 0xC0–0xCF excluding 0xC4/0xC8/0xCC, which are
+ * Huffman/arithmetic tables rather than frame headers.
+ */
+function jpegSize(b: Uint8Array): ImageSize | null {
+  let i = 2; // skip SOI
+  while (i + 9 < b.length) {
+    if (b[i] !== 0xff) {
+      i += 1; // resynchronise on padding/garbage between segments
+      continue;
+    }
+    const marker = b[i + 1]!;
+    // Standalone markers (RSTn, SOI, EOI, TEM) carry no length field.
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) {
+      i += 2;
+      continue;
+    }
+    const length = u16be(b, i + 2);
+    if (length < 2) return null;
+    const isSof =
+      marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isSof) return { height: u16be(b, i + 5), width: u16be(b, i + 7) };
+    i += 2 + length;
+  }
+  return null;
+}
+
+/** WebP: three container flavours (lossy VP8, lossless VP8L, extended VP8X). */
+function webpSize(b: Uint8Array): ImageSize | null {
+  if (b.length < 30) return null;
+  const chunk = String.fromCharCode(b[12]!, b[13]!, b[14]!, b[15]!);
+  if (chunk === 'VP8 ') {
+    // Frame header: 3-byte tag, then the 0x9d012a sync code, then 14-bit dims.
+    if (b[23] !== 0x9d || b[24] !== 0x01 || b[25] !== 0x2a) return null;
+    return { width: u16le(b, 26) & 0x3fff, height: u16le(b, 28) & 0x3fff };
+  }
+  if (chunk === 'VP8L') {
+    // 1 signature byte, then 14 bits of width-1 followed by 14 bits of height-1.
+    if (b[20] !== 0x2f) return null;
+    const bits = b[21]! | (b[22]! << 8) | (b[23]! << 16) | (b[24]! << 24);
+    return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+  }
+  if (chunk === 'VP8X') {
+    // Extended format stores canvas size as two 24-bit little-endian (value - 1).
+    return { width: u24le(b, 24) + 1, height: u24le(b, 27) + 1 };
+  }
+  return null;
+}
+
 /** ISO-BMFF brands that identify a HEIC/HEIF still image. */
 const HEIC_BRANDS = new Set(['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'mif1', 'msf1']);
 

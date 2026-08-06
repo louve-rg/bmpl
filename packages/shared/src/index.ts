@@ -5,6 +5,7 @@ export * from './audit';
 export * from './notifications';
 export * from './wallet';
 export * from './user';
+export * from './avatar';
 export * from './storage';
 export * from './marketplace';
 export * from './payments';

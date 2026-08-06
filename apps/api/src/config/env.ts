@@ -86,6 +86,17 @@ const envSchema = z.object({
   STORAGE_FORCE_PATH_STYLE: boolFromString(true),
   STORAGE_SIGNED_URL_TTL: z.coerce.number().int().default(300),
 
+  // ---- Profile-picture face check ----
+  // 'none' (default) means no vision provider is wired up: every uploaded avatar
+  // goes to the admin moderation queue instead of being auto-approved. Setting
+  // 'google' + GOOGLE_VISION_API_KEY turns on automatic face + safe-content
+  // checking. See avatarVisionEnabled() below.
+  AVATAR_VISION_PROVIDER: z.enum(['none', 'google']).default('none'),
+  GOOGLE_VISION_API_KEY: z.string().optional(),
+  // A slow provider must never hold up an upload; on timeout the picture falls
+  // back to the admin queue.
+  AVATAR_VISION_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+
   // ---- Email ----
   EMAIL_PROVIDER: z.enum(['console', 'resend', 'smtp']).default('console'),
   EMAIL_FROM: z.string().default('Belize Marketplace & Logistics <no-reply@bzemarketplace.com>'),
@@ -175,3 +186,13 @@ export const storageEnabled = (env: Env): boolean => {
   if (env.STORAGE_PROVIDER === 'minio') return !isProd(env);
   return true; // 'r2'
 };
+
+/**
+ * Whether automatic profile-picture face checking is configured.
+ *
+ * When this is false the feature still works end to end — uploads are simply
+ * queued for an admin instead of being auto-approved — so the platform ships and
+ * runs with no vision credentials, and switches on the moment they are set.
+ */
+export const avatarVisionEnabled = (env: Env): boolean =>
+  env.AVATAR_VISION_PROVIDER === 'google' && !!env.GOOGLE_VISION_API_KEY;

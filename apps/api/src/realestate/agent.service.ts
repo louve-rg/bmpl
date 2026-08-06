@@ -1,10 +1,11 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { isAllowedProductImageMime, slugify, slugWithSuffix, STORAGE_PREFIX } from '@bmpl/shared';
+import { isAllowedProductImageMime, slugify, slugWithSuffix, STORAGE_PREFIX, userInitials } from '@bmpl/shared';
 import type { UpsertAgentProfileInput } from '@bmpl/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
+import { AVATAR_SELECT, publicAvatarUrl } from '../common/avatar-url';
 
 export interface Actor {
   userId: string;
@@ -109,7 +110,13 @@ export class AgentService {
 
   /** Public agent page (no private metadata). */
   async publicAgent(slug: string) {
-    const p = await this.prisma.realEstateAgentProfile.findFirst({ where: { slug, approvalStatus: 'APPROVED' }, include: { agency: { select: { name: true, slug: true } } } });
+    const p = await this.prisma.realEstateAgentProfile.findFirst({
+      where: { slug, approvalStatus: 'APPROVED' },
+      include: {
+        agency: { select: { name: true, slug: true } },
+        user: { select: { firstName: true, lastName: true, ...AVATAR_SELECT } },
+      },
+    });
     if (!p) throw new NotFoundException('Agent not found.');
     const activeListings = await this.prisma.propertyListing.count({ where: { agentProfileId: p.id, status: { in: ['PUBLISHED', 'UNDER_OFFER'] } } });
     return {
@@ -125,7 +132,11 @@ export class AgentService {
       ratingAverage: p.ratingAverage,
       ratingCount: p.ratingCount,
       agency: p.agency,
-      photoUrl: await this.urlOrNull(p.photoKey),
+      // A dedicated professional headshot wins when the agent has uploaded one;
+      // otherwise fall back to their approved account picture, so an agent page
+      // is never a faceless card just because they skipped the agent-photo step.
+      photoUrl: (await this.urlOrNull(p.photoKey)) ?? publicAvatarUrl(p.user),
+      initials: userInitials(p.user.firstName, p.user.lastName),
       activeListings,
     };
   }

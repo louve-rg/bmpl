@@ -79,6 +79,8 @@ export const PERMISSIONS = [
   'coupons.manage', // admin-manage platform coupons + review vendor coupons
   'marketing.analytics', // view cross-promotion marketing analytics
   'homepage.manage', // curate homepage hero/featured placements
+  // ---- Profile pictures ----
+  'avatars.moderate', // approve/reject profile pictures the automatic face check was unsure about
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -172,6 +174,8 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'coupons.manage',
     'marketing.analytics',
     'homepage.manage',
+    // Profile pictures
+    'avatars.moderate',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

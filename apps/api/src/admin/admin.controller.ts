@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
+  avatarReviewSchema,
+  type AvatarReviewInput,
   restoreRoleSchema,
   reviewApproveSchema,
   reviewMoreInfoSchema,
@@ -17,6 +19,7 @@ import { CurrentUser, RequirePermission } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { AdminService } from './admin.service';
+import { UsersService } from '../users/users.service';
 
 /**
  * All admin routes require an explicit AdminPermission (rule #2/#4: admin
@@ -25,7 +28,10 @@ import { AdminService } from './admin.service';
  */
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly admin: AdminService) {}
+  constructor(
+    private readonly admin: AdminService,
+    private readonly users: UsersService,
+  ) {}
 
   private actor(user: AuthContext, req: Request) {
     return { userId: user.userId, ipAddress: req.ip, sessionId: user.sessionId };
@@ -176,5 +182,34 @@ export class AdminController {
     @Body(ZodBody(setAdminPermissionsSchema)) body: { userId: string; permissions: Permission[] },
   ) {
     return this.admin.setPermissions(this.actor(user, req), body.userId, body.permissions);
+  }
+
+  // ---- Profile-picture moderation -------------------------------------------
+  // Only pictures the automatic face check was UNSURE about reach this queue
+  // (and, when no vision provider is configured, all of them). A confident
+  // rejection never gets here — the uploader was told immediately.
+
+  @Get('avatars')
+  @RequirePermission('avatars.moderate')
+  avatarQueue() {
+    return this.users.avatarQueue();
+  }
+
+  @Post('avatars/:userId/approve')
+  @RequirePermission('avatars.moderate')
+  async approveAvatar(@CurrentUser() admin: AuthContext, @Param('userId') userId: string) {
+    await this.users.approveAvatar(userId, admin.userId);
+    return { ok: true };
+  }
+
+  @Post('avatars/:userId/reject')
+  @RequirePermission('avatars.moderate')
+  async rejectAvatar(
+    @CurrentUser() admin: AuthContext,
+    @Param('userId') userId: string,
+    @Body(ZodBody(avatarReviewSchema)) body: AvatarReviewInput,
+  ) {
+    await this.users.rejectAvatar(userId, admin.userId, body.reason);
+    return { ok: true };
   }
 }

@@ -33,6 +33,15 @@ enum UserStatus {
   DEACTIVATED
 }
 
+// Moderation state of a user's profile picture. A picture is only ever shown to
+// other users at APPROVED; every other state falls back to generated initials.
+enum AvatarStatus {
+  NONE // never uploaded, or the user removed theirs
+  PENDING // uploaded, awaiting the automated face check or an admin decision
+  APPROVED // verified to contain a single human face and safe content
+  REJECTED // failed the check (no face, multiple faces, unsafe content, …)
+}
+
 enum District {
   BELIZE
   CAYO
@@ -282,6 +291,13 @@ enum AuditAction {
   COUPON_UPDATED
   COUPON_STATUS_CHANGED
   COUPON_REDEEMED
+  // ---- Profile pictures ----
+  AVATAR_SUBMITTED
+  AVATAR_AUTO_APPROVED
+  AVATAR_AUTO_REJECTED
+  AVATAR_APPROVED
+  AVATAR_REJECTED
+  AVATAR_REMOVED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -377,17 +393,31 @@ enum Currency {
 // ---- Identity ---------------------------------------------------------------
 
 model User {
-  id              String     @id @default(cuid())
-  email           String     @unique
-  passwordHash    String
-  firstName       String
-  lastName        String
-  phone           String?
-  district        District?
-  addressLine1    String?
-  addressLine2    String?
-  city            String?
-  avatarKey       String? // private storage key; served via signed URL
+  id                   String       @id @default(cuid())
+  email                String       @unique
+  passwordHash         String
+  firstName            String
+  lastName             String
+  phone                String?
+  district             District?
+  addressLine1         String?
+  addressLine2         String?
+  city                 String?
+  // ---- Profile picture ----
+  // avatarKey is the LIVE, approved picture; avatarPendingKey is a newer upload
+  // still under review. Keeping them apart means a rejected replacement never
+  // wipes the photo the user already had approved.
+  avatarKey            String? // private storage key; served via /users/:id/avatar
+  avatarPendingKey     String?
+  avatarStatus         AvatarStatus @default(NONE)
+  avatarRejectedReason String?
+  // Highest face-detection confidence (0–100) returned by the vision provider,
+  // kept so an admin reviewing the queue can see why it was flagged.
+  avatarFaceScore      Float?
+  avatarSubmittedAt    DateTime?
+  avatarReviewedAt     DateTime?
+  avatarReviewedById   String?
+
   status          UserStatus @default(ACTIVE)
   emailVerifiedAt DateTime?
   suspendedAt     DateTime?
@@ -417,6 +447,7 @@ model User {
   auditLogsAsActor           AuditLog[]                @relation("AuditActor")
   auditLogsAsTarget          AuditLog[]                @relation("AuditTarget")
   reviewsPerformed           RoleApplicationReview[]   @relation("ReviewReviewer")
+  reviewsWritten             Review[]                  @relation("ReviewAuthor")
   walletAccounts             WalletAccount[]
   cart                       Cart?
   orders                     Order[]
@@ -455,9 +486,14 @@ model User {
   couponUsages               CouponUsage[]             @relation("CouponUser")
   promotionRedemptions       PromotionRedemption[]     @relation("PromotionRedeemer")
   promotionReportsMade       PromotionReport[]         @relation("PromotionReporter")
+  // Profile-picture moderation (self-relation: the admin who decided this avatar).
+  avatarReviewedBy           User?                     @relation("AvatarReviewer", fields: [avatarReviewedById], references: [id], onDelete: SetNull)
+  avatarReviewsMade          User[]                    @relation("AvatarReviewer")
 
   @@index([status])
   @@index([district])
+  // Drives the admin moderation queue (PENDING first, oldest submission first).
+  @@index([avatarStatus, avatarSubmittedAt])
   @@map("users")
 }
 
@@ -921,28 +957,27 @@ model WalletLedgerEntry {
 // still has children cannot be deleted out from under them.
 
 model Category {
-  id          String     @id @default(cuid())
-  name        String
-  slug        String     @unique
-  description String?
+  id                  String               @id @default(cuid())
+  name                String
+  slug                String               @unique
+  description         String?
   // Icon is a short symbolic name (e.g. a lucide icon key) resolved by the UI.
-  iconName    String?
+  iconName            String?
   // Optional hero/thumbnail image stored as a PUBLIC-bucket storage key (never a URL).
-  imageKey    String?
-  featured    Boolean    @default(false)
-  isVisible   Boolean    @default(true)
-  sortOrder   Int        @default(0)
-  parentId    String?
-  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
-  children    Category[] @relation("CategoryHierarchy")
-  products    Product[]
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  imageKey            String?
+  featured            Boolean              @default(false)
+  isVisible           Boolean              @default(true)
+  sortOrder           Int                  @default(0)
+  parentId            String?
+  parent              Category?            @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children            Category[]           @relation("CategoryHierarchy")
+  products            Product[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  promotionPlacements PromotionPlacement[]
 
   @@index([parentId, sortOrder])
   @@index([isVisible])
-  promotionPlacements PromotionPlacement[]
-
   @@map("categories")
 }
 
@@ -1007,12 +1042,11 @@ model VendorProfile {
   deliveryZones    DeliveryZone[]
   deliveryEstimate DeliveryEstimate?
   settlements      VendorSettlement[]
+  promotionTargets PromotionTarget[]
+  coupons          Coupon[]                 @relation("VendorCoupons")
 
   @@index([approvalStatus])
   @@index([storeStatus])
-  promotionTargets PromotionTarget[]
-  coupons          Coupon[]          @relation("VendorCoupons")
-
   @@map("vendor_profiles")
 }
 
@@ -1236,6 +1270,7 @@ model Product {
   backInStockSubs  BackInStockSubscription[]
   savedBy          SavedProduct[]
   recentlyViewedBy RecentlyViewedProduct[]
+  promotionTargets PromotionTarget[]
 
   @@unique([vendorProfileId, sku])
   // Composite serves both the status filter and the default "newest published"
@@ -1244,8 +1279,6 @@ model Product {
   @@index([categoryId])
   @@index([vendorProfileId, status])
   @@index([featured])
-  promotionTargets PromotionTarget[]
-
   @@map("products")
 }
 
@@ -1331,29 +1364,29 @@ model ProductOptionValue {
 }
 
 model ProductVariant {
-  id             String               @id @default(cuid())
-  productId      String
-  product        Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
-  sku            String?
-  barcode        String?
+  id              String                    @id @default(cuid())
+  productId       String
+  product         Product                   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku             String?
+  barcode         String?
   // First-class, variant-specific marketplace display name (M6.1). Independent of
   // the base product title and the option-value labels. Title precedence is
   // displayName → option-value label join → base product title (never overwritten
   // by publication, image edits, price/inventory changes, or re-serialization).
-  displayName    String?
-  priceMinor     BigInt? // null = inherit the product price
-  salePriceMinor BigInt?
-  position       Int                  @default(0)
-  isActive       Boolean              @default(true)
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-  optionValues   VariantOptionValue[]
-  inventory      Inventory?
-  images         ProductImage[]
-  cartItems      CartItem[]
+  displayName     String?
+  priceMinor      BigInt? // null = inherit the product price
+  salePriceMinor  BigInt?
+  position        Int                       @default(0)
+  isActive        Boolean                   @default(true)
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  optionValues    VariantOptionValue[]
+  inventory       Inventory?
+  images          ProductImage[]
+  cartItems       CartItem[]
   backInStockSubs BackInStockSubscription[]
-  savedProducts  SavedProduct[]
-  orderItems     OrderItem[]
+  savedProducts   SavedProduct[]
+  orderItems      OrderItem[]
 
   @@unique([productId, sku])
   @@index([productId])
@@ -1937,6 +1970,11 @@ model Review {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
+  // The author. `reviewerId` predates this relation (it was a bare column); the
+  // relation exists so a published review can show who wrote it — name and face —
+  // rather than an anonymous star rating.
+  reviewer User @relation("ReviewAuthor", fields: [reviewerId], references: [id], onDelete: Cascade)
+
   media    ReviewMedia[]
   response ReviewResponse?
   reports  ReviewReport[]
@@ -2038,14 +2076,14 @@ model SavedProduct {
 // Unique per (user, variant); product-level (variantId NULL) unique per (user, product)
 // via a partial index (Postgres treats NULLs as distinct).
 model BackInStockSubscription {
-  id         String          @id @default(cuid())
-  userId     String
-  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  productId  String
-  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
-  variantId  String?
-  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  createdAt  DateTime        @default(now())
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
 
   @@unique([userId, variantId])
   @@index([productId, variantId])
@@ -2713,11 +2751,10 @@ model EmployerProfile {
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
-  jobs JobListing[]
-
-  @@index([approvalStatus])
+  jobs             JobListing[]
   promotionTargets PromotionTarget[]
 
+  @@index([approvalStatus])
   @@map("employer_profiles")
 }
 
@@ -2762,20 +2799,19 @@ model JobListing {
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
 
-  skills       JobSkill[]
-  benefits     JobBenefit[]
-  questions    JobApplicationQuestion[]
-  applications JobApplication[]
-  reports      JobReport[]
-  savedBy      SavedJob[]
-  viewedBy     RecentlyViewedJob[]
+  skills           JobSkill[]
+  benefits         JobBenefit[]
+  questions        JobApplicationQuestion[]
+  applications     JobApplication[]
+  reports          JobReport[]
+  savedBy          SavedJob[]
+  viewedBy         RecentlyViewedJob[]
+  promotionTargets PromotionTarget[]
 
   @@index([status, publishedAt])
   @@index([employerProfileId, status])
   @@index([jobCategoryId])
   @@index([district])
-  promotionTargets PromotionTarget[]
-
   @@map("job_listings")
 }
 
@@ -3108,26 +3144,25 @@ enum PropertyReportStatus {
 
 // ---- Property owner profile ----
 model PropertyOwnerProfile {
-  id               String               @id @default(cuid())
-  userId           String               @unique
-  user             User                 @relation("UserPropertyOwnerProfile", fields: [userId], references: [id], onDelete: Cascade)
-  legalName        String
-  displayName      String?
-  phone            String?
-  email            String?
-  district         District?
+  id                String               @id @default(cuid())
+  userId            String               @unique
+  user              User                 @relation("UserPropertyOwnerProfile", fields: [userId], references: [id], onDelete: Cascade)
+  legalName         String
+  displayName       String?
+  phone             String?
+  email             String?
+  district          District?
   contactPreference String? // e.g. EMAIL / PHONE / MESSAGE
-  identityVerified Boolean              @default(false)
-  approvalStatus   VendorApprovalStatus @default(DRAFT)
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  identityVerified  Boolean              @default(false)
+  approvalStatus    VendorApprovalStatus @default(DRAFT)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
-  listings PropertyListing[] @relation("OwnerListings")
-  assignments PropertyListingAssignment[]
-
-  @@index([approvalStatus])
+  listings         PropertyListing[]           @relation("OwnerListings")
+  assignments      PropertyListingAssignment[]
   promotionTargets PromotionTarget[]
 
+  @@index([approvalStatus])
   @@map("property_owner_profiles")
 }
 
@@ -3156,13 +3191,12 @@ model RealEstateAgentProfile {
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 
-  listings    PropertyListing[]           @relation("AgentListings")
-  assignments PropertyListingAssignment[]
+  listings         PropertyListing[]           @relation("AgentListings")
+  assignments      PropertyListingAssignment[]
+  promotionTargets PromotionTarget[]
 
   @@index([approvalStatus])
   @@index([agencyId])
-  promotionTargets PromotionTarget[]
-
   @@map("real_estate_agent_profiles")
 }
 
@@ -3187,34 +3221,33 @@ model AgencyProfile {
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
-  agents   RealEstateAgentProfile[]
-  listings PropertyListing[]
-
-  @@index([approvalStatus])
+  agents           RealEstateAgentProfile[]
+  listings         PropertyListing[]
   promotionTargets PromotionTarget[]
 
+  @@index([approvalStatus])
   @@map("agency_profiles")
 }
 
 // ---- Property listing ----
 model PropertyListing {
-  id                 String              @id @default(cuid())
+  id                 String                  @id @default(cuid())
   ownerProfileId     String
-  ownerProfile       PropertyOwnerProfile @relation("OwnerListings", fields: [ownerProfileId], references: [id], onDelete: Cascade)
+  ownerProfile       PropertyOwnerProfile    @relation("OwnerListings", fields: [ownerProfileId], references: [id], onDelete: Cascade)
   agentProfileId     String?
   agentProfile       RealEstateAgentProfile? @relation("AgentListings", fields: [agentProfileId], references: [id], onDelete: SetNull)
   agencyId           String?
-  agency             AgencyProfile?      @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  agency             AgencyProfile?          @relation(fields: [agencyId], references: [id], onDelete: SetNull)
   purpose            ListingPurpose
   propertyType       PropertyType
   title              String
-  slug               String              @unique
-  reference          String              @unique // human listing reference
+  slug               String                  @unique
+  reference          String                  @unique // human listing reference
   description        String
   priceMinor         BigInt
-  currency           Currency            @default(BZD)
+  currency           Currency                @default(BZD)
   rentalPeriod       RentalPeriod?
-  negotiable         Boolean             @default(false)
+  negotiable         Boolean                 @default(false)
   district           District?
   locality           String?
   // Public approximate location; exact address is PRIVATE (never public unless policy allows).
@@ -3222,7 +3255,7 @@ model PropertyListing {
   exactAddress       String?
   latitude           Float?
   longitude          Float?
-  locationVisibility LocationVisibility  @default(DISTRICT_ONLY)
+  locationVisibility LocationVisibility      @default(DISTRICT_ONLY)
   bedrooms           Int?
   bathrooms          Int?
   halfBathrooms      Int?
@@ -3238,8 +3271,8 @@ model PropertyListing {
   leaseTerm          String?
   condition          String?
   videoUrl           String?
-  authorityVerified  Boolean             @default(false)
-  status             PropertyStatus      @default(DRAFT)
+  authorityVerified  Boolean                 @default(false)
+  status             PropertyStatus          @default(DRAFT)
   moderationReason   String?
   moderatedById      String?
   moderatedAt        DateTime?
@@ -3247,30 +3280,29 @@ model PropertyListing {
   soldAt             DateTime?
   rentedAt           DateTime?
   archivedAt         DateTime?
-  viewCount          Int                 @default(0)
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  viewCount          Int                     @default(0)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
 
-  amenities      PropertyAmenity[]
-  utilities      PropertyUtility[]
-  images         PropertyImage[]
-  documents      PropertyDocument[]
-  statusHistory  PropertyStatusHistory[]
-  priceHistory   PropertyPriceHistory[]
-  assignments    PropertyListingAssignment[]
-  enquiries      PropertyEnquiry[]
-  viewingRequests PropertyViewingRequest[]
-  reports        PropertyReport[]
-  savedBy        SavedProperty[]
-  viewedBy       RecentlyViewedProperty[]
+  amenities        PropertyAmenity[]
+  utilities        PropertyUtility[]
+  images           PropertyImage[]
+  documents        PropertyDocument[]
+  statusHistory    PropertyStatusHistory[]
+  priceHistory     PropertyPriceHistory[]
+  assignments      PropertyListingAssignment[]
+  enquiries        PropertyEnquiry[]
+  viewingRequests  PropertyViewingRequest[]
+  reports          PropertyReport[]
+  savedBy          SavedProperty[]
+  viewedBy         RecentlyViewedProperty[]
+  promotionTargets PromotionTarget[]
 
   @@index([status, publishedAt])
   @@index([ownerProfileId, status])
   @@index([agentProfileId, status])
   @@index([district])
   @@index([purpose, propertyType])
-  promotionTargets PromotionTarget[]
-
   @@map("property_listings")
 }
 
@@ -3359,19 +3391,19 @@ model PropertyPriceHistory {
 
 // Authority relationship: which owner/agent/agency may manage a listing.
 model PropertyListingAssignment {
-  id                  String                  @id @default(cuid())
-  listingId           String
-  listing             PropertyListing         @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  ownerProfileId      String
-  ownerProfile        PropertyOwnerProfile    @relation(fields: [ownerProfileId], references: [id], onDelete: Cascade)
-  agentProfileId      String?
-  agentProfile        RealEstateAgentProfile? @relation(fields: [agentProfileId], references: [id], onDelete: SetNull)
-  agencyId            String?
-  status              ListingAssignmentStatus @default(PENDING)
-  authorizationDocId  String? // references a PropertyDocument (owner authorization / agent mandate)
-  assignedAt          DateTime                @default(now())
-  acceptedAt          DateTime?
-  endedAt             DateTime?
+  id                 String                  @id @default(cuid())
+  listingId          String
+  listing            PropertyListing         @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  ownerProfileId     String
+  ownerProfile       PropertyOwnerProfile    @relation(fields: [ownerProfileId], references: [id], onDelete: Cascade)
+  agentProfileId     String?
+  agentProfile       RealEstateAgentProfile? @relation(fields: [agentProfileId], references: [id], onDelete: SetNull)
+  agencyId           String?
+  status             ListingAssignmentStatus @default(PENDING)
+  authorizationDocId String? // references a PropertyDocument (owner authorization / agent mandate)
+  assignedAt         DateTime                @default(now())
+  acceptedAt         DateTime?
+  endedAt            DateTime?
 
   @@index([listingId])
   @@index([agentProfileId, status])
@@ -3426,23 +3458,23 @@ model PropertyEnquiry {
 }
 
 model PropertyViewingRequest {
-  id               String                @id @default(cuid())
-  listingId        String
-  listing          PropertyListing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  requesterId      String
-  requester        User                  @relation("RequesterViewings", fields: [requesterId], references: [id], onDelete: Cascade)
-  requestedDate    DateTime
-  requestedTime    String?
-  timezone         String                @default("America/Belize")
-  alternateDate    DateTime?
-  alternateTime    String?
-  message          String?
-  status           ViewingRequestStatus  @default(REQUESTED)
-  confirmedDate    DateTime?
-  confirmedTime    String?
+  id                 String               @id @default(cuid())
+  listingId          String
+  listing            PropertyListing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  requesterId        String
+  requester          User                 @relation("RequesterViewings", fields: [requesterId], references: [id], onDelete: Cascade)
+  requestedDate      DateTime
+  requestedTime      String?
+  timezone           String               @default("America/Belize")
+  alternateDate      DateTime?
+  alternateTime      String?
+  message            String?
+  status             ViewingRequestStatus @default(REQUESTED)
+  confirmedDate      DateTime?
+  confirmedTime      String?
   cancellationReason String?
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 
   events PropertyViewingEvent[]
 
@@ -3452,14 +3484,14 @@ model PropertyViewingRequest {
 }
 
 model PropertyViewingEvent {
-  id         String                @id @default(cuid())
+  id         String                 @id @default(cuid())
   requestId  String
   request    PropertyViewingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
   fromStatus ViewingRequestStatus?
   toStatus   ViewingRequestStatus
   actorId    String?
   note       String?
-  createdAt  DateTime              @default(now())
+  createdAt  DateTime               @default(now())
 
   @@index([requestId, createdAt])
   @@map("property_viewing_events")
@@ -3610,16 +3642,16 @@ enum CouponStatus {
 
 /// A scheduled container grouping promotions/coupons with an activation window.
 model Campaign {
-  id            String                  @id @default(cuid())
-  ownerUserId   String
-  owner         User                    @relation("CampaignOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  name          String
-  description   String?
-  type          CampaignType            @default(FEATURED)
-  status        CampaignStatus          @default(DRAFT)
-  timezone      String                  @default("America/Belize")
-  createdAt     DateTime                @default(now())
-  updatedAt     DateTime                @updatedAt
+  id          String         @id @default(cuid())
+  ownerUserId String
+  owner       User           @relation("CampaignOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  type        CampaignType   @default(FEATURED)
+  status      CampaignStatus @default(DRAFT)
+  timezone    String         @default("America/Belize")
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
   schedules     CampaignSchedule[]
   statusHistory CampaignStatusHistory[]
@@ -3663,37 +3695,37 @@ model CampaignStatusHistory {
 /// A single promotional unit (featured item, banner, hero) with placements,
 /// assets, targets, and daily metrics. Moderated before it can go public.
 model Promotion {
-  id               String                @id @default(cuid())
+  id               String          @id @default(cuid())
   ownerUserId      String
-  owner            User                  @relation("PromotionOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  owner            User            @relation("PromotionOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   campaignId       String?
-  campaign         Campaign?             @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  campaign         Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   type             PromotionType
   title            String
   subtitle         String?
   description      String?
-  status           PromotionStatus       @default(DRAFT)
-  priority         Int                   @default(0)
-  isActive         Boolean               @default(false)
+  status           PromotionStatus @default(DRAFT)
+  priority         Int             @default(0)
+  isActive         Boolean         @default(false)
   startAt          DateTime?
   endAt            DateTime?
-  timezone         String                @default("America/Belize")
+  timezone         String          @default("America/Belize")
   moderationReason String?
   moderatedById    String?
-  moderatedBy      User?                 @relation("PromotionModerator", fields: [moderatedById], references: [id], onDelete: SetNull)
+  moderatedBy      User?           @relation("PromotionModerator", fields: [moderatedById], references: [id], onDelete: SetNull)
   submittedAt      DateTime?
   approvedAt       DateTime?
   publishedAt      DateTime?
   expiredAt        DateTime?
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
-  placements       PromotionPlacement[]
-  assets           PromotionAsset[]
-  targets          PromotionTarget[]
-  metrics          PromotionMetricDaily[]
-  redemptions      PromotionRedemption[]
-  reports          PromotionReport[]
+  placements  PromotionPlacement[]
+  assets      PromotionAsset[]
+  targets     PromotionTarget[]
+  metrics     PromotionMetricDaily[]
+  redemptions PromotionRedemption[]
+  reports     PromotionReport[]
 
   @@index([status])
   @@index([ownerUserId, status])
@@ -3716,21 +3748,21 @@ enum PromotionDevice {
 /// placement has its OWN eligibility (isActive + start/end window + device) that must
 /// pass IN ADDITION TO the campaign/promotion eligibility before an ad renders.
 model PromotionPlacement {
-  id          String                 @id @default(cuid())
-  promotionId String
-  promotion   Promotion              @relation(fields: [promotionId], references: [id], onDelete: Cascade)
-  placement   PromotionPlacementType
-  position    Int                    @default(0)
-  categoryId  String?
-  category    Category?              @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  id           String                 @id @default(cuid())
+  promotionId  String
+  promotion    Promotion              @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  placement    PromotionPlacementType
+  position     Int                    @default(0)
+  categoryId   String?
+  category     Category?              @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   // Admin placement controls (separate from campaign content).
-  isActive    Boolean                @default(true)
-  device      PromotionDevice        @default(BOTH)
-  startAt     DateTime?
-  endAt       DateTime?
+  isActive     Boolean                @default(true)
+  device       PromotionDevice        @default(BOTH)
+  startAt      DateTime?
+  endAt        DateTime?
   assignedById String?
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
 
   @@unique([promotionId, placement, categoryId])
   @@index([placement])
@@ -3762,28 +3794,28 @@ model PromotionAsset {
 /// What a promotion features. Polymorphic via typed nullable FKs (no JSON).
 /// Exactly one target FK is set per row, selected by `targetType`.
 model PromotionTarget {
-  id                    String                @id @default(cuid())
-  promotionId           String
-  promotion             Promotion             @relation(fields: [promotionId], references: [id], onDelete: Cascade)
-  targetType            PromotionTargetType
-  vendorProfileId       String?
-  vendorProfile         VendorProfile?        @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
-  employerProfileId     String?
-  employerProfile       EmployerProfile?      @relation(fields: [employerProfileId], references: [id], onDelete: Cascade)
-  agencyProfileId       String?
-  agencyProfile         AgencyProfile?        @relation(fields: [agencyProfileId], references: [id], onDelete: Cascade)
-  agentProfileId        String?
-  agentProfile          RealEstateAgentProfile? @relation(fields: [agentProfileId], references: [id], onDelete: Cascade)
+  id                     String                  @id @default(cuid())
+  promotionId            String
+  promotion              Promotion               @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  targetType             PromotionTargetType
+  vendorProfileId        String?
+  vendorProfile          VendorProfile?          @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  employerProfileId      String?
+  employerProfile        EmployerProfile?        @relation(fields: [employerProfileId], references: [id], onDelete: Cascade)
+  agencyProfileId        String?
+  agencyProfile          AgencyProfile?          @relation(fields: [agencyProfileId], references: [id], onDelete: Cascade)
+  agentProfileId         String?
+  agentProfile           RealEstateAgentProfile? @relation(fields: [agentProfileId], references: [id], onDelete: Cascade)
   propertyOwnerProfileId String?
-  propertyOwnerProfile  PropertyOwnerProfile? @relation(fields: [propertyOwnerProfileId], references: [id], onDelete: Cascade)
-  productId             String?
-  product               Product?              @relation(fields: [productId], references: [id], onDelete: Cascade)
-  jobListingId          String?
-  jobListing            JobListing?           @relation(fields: [jobListingId], references: [id], onDelete: Cascade)
-  propertyListingId     String?
-  propertyListing       PropertyListing?      @relation(fields: [propertyListingId], references: [id], onDelete: Cascade)
-  externalUrl           String?
-  createdAt             DateTime              @default(now())
+  propertyOwnerProfile   PropertyOwnerProfile?   @relation(fields: [propertyOwnerProfileId], references: [id], onDelete: Cascade)
+  productId              String?
+  product                Product?                @relation(fields: [productId], references: [id], onDelete: Cascade)
+  jobListingId           String?
+  jobListing             JobListing?             @relation(fields: [jobListingId], references: [id], onDelete: Cascade)
+  propertyListingId      String?
+  propertyListing        PropertyListing?        @relation(fields: [propertyListingId], references: [id], onDelete: Cascade)
+  externalUrl            String?
+  createdAt              DateTime                @default(now())
 
   @@index([promotionId])
   @@index([targetType])
@@ -3852,32 +3884,32 @@ model PromotionReport {
 /// Money in BZD minor units; percentages are whole percents. Wallet checkout
 /// integration is future work — no wallet/order coupling here.
 model Coupon {
-  id              String             @id @default(cuid())
-  code            String             @unique
-  ownerUserId     String?
-  owner           User?              @relation("CouponOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
-  vendorProfileId String?
-  vendorProfile   VendorProfile?     @relation("VendorCoupons", fields: [vendorProfileId], references: [id], onDelete: Cascade)
-  campaignId      String?
-  campaign        Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  scope           CouponScope        @default(PLATFORM)
-  discountType    CouponDiscountType
-  percentOff      Int?
-  amountOffMinor  BigInt?
-  freeShipping    Boolean            @default(false)
-  minSpendMinor   BigInt?
+  id               String             @id @default(cuid())
+  code             String             @unique
+  ownerUserId      String?
+  owner            User?              @relation("CouponOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  vendorProfileId  String?
+  vendorProfile    VendorProfile?     @relation("VendorCoupons", fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  campaignId       String?
+  campaign         Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  scope            CouponScope        @default(PLATFORM)
+  discountType     CouponDiscountType
+  percentOff       Int?
+  amountOffMinor   BigInt?
+  freeShipping     Boolean            @default(false)
+  minSpendMinor    BigInt?
   maxDiscountMinor BigInt?
-  maxUses         Int?
-  perUserLimit    Int?
-  usedCount       Int                @default(0)
-  stackable       Boolean            @default(false)
-  status          CouponStatus       @default(INACTIVE)
-  startAt         DateTime?
-  endAt           DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  maxUses          Int?
+  perUserLimit     Int?
+  usedCount        Int                @default(0)
+  stackable        Boolean            @default(false)
+  status           CouponStatus       @default(INACTIVE)
+  startAt          DateTime?
+  endAt            DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
-  usages          CouponUsage[]
+  usages CouponUsage[]
 
   @@index([status])
   @@index([vendorProfileId])
@@ -3887,14 +3919,14 @@ model Coupon {
 
 /// One coupon redemption; enforces maxUses (via count) and perUserLimit.
 model CouponUsage {
-  id                  String   @id @default(cuid())
-  couponId            String
-  coupon              Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
-  userId              String
-  user                User     @relation("CouponUser", fields: [userId], references: [id], onDelete: Cascade)
-  orderId             String?
-  discountAppliedMinor BigInt  @default(0)
-  redeemedAt          DateTime @default(now())
+  id                   String   @id @default(cuid())
+  couponId             String
+  coupon               Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId               String
+  user                 User     @relation("CouponUser", fields: [userId], references: [id], onDelete: Cascade)
+  orderId              String?
+  discountAppliedMinor BigInt   @default(0)
+  redeemedAt           DateTime @default(now())
 
   @@index([couponId, userId])
   @@index([userId])

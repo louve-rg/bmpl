@@ -4,6 +4,7 @@ import {
   isAllowedMessageAttachmentMime,
   MAX_MESSAGE_ATTACHMENT_BYTES,
   STORAGE_PREFIX,
+  userInitials,
   type ConversationContext,
   type ConversationParticipantRole,
 } from '@bmpl/shared';
@@ -14,6 +15,7 @@ import { StorageService } from '../storage/storage.service';
 import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AVATAR_SELECT, publicAvatarUrl } from '../common/avatar-url';
 
 export interface Actor {
   userId: string;
@@ -39,9 +41,22 @@ interface ContextParties {
 }
 
 const CONV_INCLUDE = {
-  participants: { include: { user: { select: { firstName: true, lastName: true } } } },
+  participants: {
+    include: { user: { select: { firstName: true, lastName: true, ...AVATAR_SELECT } } },
+  },
 } satisfies Prisma.ConversationInclude;
 type ConversationRow = Prisma.ConversationGetPayload<{ include: typeof CONV_INCLUDE }>;
+
+/**
+ * Everything a serialized message needs. The sender's picture rides along so a
+ * thread shows who is talking — the two parties in an order conversation already
+ * know each other's full names, so unlike public reviews these are not shortened.
+ */
+const MESSAGE_INCLUDE = {
+  attachments: true,
+  sender: { select: { firstName: true, lastName: true, ...AVATAR_SELECT } },
+} satisfies Prisma.MessageInclude;
+type MessageRow = Prisma.MessageGetPayload<{ include: typeof MESSAGE_INCLUDE }>;
 
 /**
  * Scoped, context-bound conversations (M17). No arbitrary user-to-user chat: every
@@ -484,7 +499,7 @@ export class MessagingService {
     const messages = await this.prisma.message.findMany({
       where: { conversationId, ...(showInternal ? {} : { type: { not: 'INTERNAL_NOTE' } }) },
       orderBy: { createdAt: 'asc' },
-      include: { attachments: true, sender: { select: { firstName: true, lastName: true } } },
+      include: MESSAGE_INCLUDE,
       take: 500,
     });
     const serialized = await Promise.all(messages.map((m) => this.serializeMessage(m, actor.userId)));
@@ -498,7 +513,14 @@ export class MessagingService {
       status: ctx.conv.status,
       viewerRole: ctx.role,
       canSend: this.computeCanSend(actor, ctx),
-      participants: ctx.conv.participants.map((p) => ({ userId: p.userId, role: p.role, name: `${p.user.firstName} ${p.user.lastName}`, canSend: p.canSend })),
+      participants: ctx.conv.participants.map((p) => ({
+        userId: p.userId,
+        role: p.role,
+        name: `${p.user.firstName} ${p.user.lastName}`,
+        initials: userInitials(p.user.firstName, p.user.lastName),
+        avatarUrl: publicAvatarUrl(p.user),
+        canSend: p.canSend,
+      })),
       messages: serialized,
     };
   }
@@ -512,7 +534,7 @@ export class MessagingService {
     }
   }
 
-  private async serializeMessage(m: Prisma.MessageGetPayload<{ include: { attachments: true; sender: { select: { firstName: true; lastName: true } } } }>, viewerId: string) {
+  private async serializeMessage(m: MessageRow, viewerId: string) {
     const attachments = await Promise.all(
       m.attachments.map(async (a) => {
         let url: string | null = null;
@@ -531,6 +553,8 @@ export class MessagingService {
       deleted: !!m.deletedAt,
       senderId: m.senderId,
       senderName: m.sender ? `${m.sender.firstName} ${m.sender.lastName}` : null,
+      senderInitials: m.sender ? userInitials(m.sender.firstName, m.sender.lastName) : null,
+      senderAvatarUrl: m.sender ? publicAvatarUrl(m.sender) : null,
       isMine: m.senderId === viewerId,
       attachments,
       createdAt: m.createdAt,
