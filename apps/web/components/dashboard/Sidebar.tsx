@@ -8,6 +8,7 @@ import { RoleSwitcher } from './RoleSwitcher';
 import { LogoutButton } from './LogoutButton';
 import { api } from '../../lib/api';
 import type { MeView } from '../../lib/types';
+import { visibleRoleGroups, type RoleGatedGroup } from '../../lib/dashboard-nav';
 import { badgeCount, unreadLabel } from '../../lib/badge';
 
 type NavItem = { label: string; href: string; icon: string };
@@ -85,6 +86,31 @@ const MARKETING_NAV: NavItem[] = [
   { label: 'Coupons', href: '/dashboard/business/marketing/coupons', icon: 'M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4V7Zm10 0v10' },
 ];
 
+/**
+ * Every role-gated section of the sidebar, in display order. `requires` is
+ * deliberately NOT optional: a section is only ever shown to users holding one of
+ * its roles (status APPROVED), and a future section cannot be added without saying
+ * which roles it belongs to.
+ *
+ * The seeker groups are gated too, even though their APIs accept any CUSTOMER:
+ * - Belize Connect → JOB_SEEKER, an opt-in role that needs no approval, so a user
+ *   self-grants it from My Roles the moment they want the job tools.
+ * - Real Estate → the seller-side real-estate roles. There is no seeker role, and
+ *   the tools stay reachable by URL; this only keeps the sidebar to roles the user
+ *   actually holds.
+ */
+export const ROLE_GROUPS: ReadonlyArray<RoleGatedGroup<NavItem>> = [
+  { heading: 'Belize Connect', items: JOBS_NAV, requires: ['JOB_SEEKER'] },
+  { heading: 'Real Estate', items: REALESTATE_NAV, requires: ['PROPERTY_OWNER', 'REAL_ESTATE_AGENT'] },
+  { heading: 'Driver', items: DRIVER_NAV, requires: ['DELIVERY_DRIVER'] },
+  { heading: 'Vendor', items: VENDOR_NAV, requires: ['VENDOR'] },
+  { heading: 'Employer', items: EMPLOYER_NAV, requires: ['EMPLOYER'] },
+  { heading: 'Property Owner', items: PROPERTY_OWNER_NAV, requires: ['PROPERTY_OWNER'] },
+  { heading: 'Real-Estate Agent', items: AGENT_NAV, requires: ['REAL_ESTATE_AGENT'] },
+  // Marketing tools are available to any approved business role.
+  { heading: 'Marketing', items: MARKETING_NAV, requires: ['VENDOR', 'EMPLOYER', 'PROPERTY_OWNER', 'REAL_ESTATE_AGENT'] },
+];
+
 const MESSAGES_POLL_MS = 60_000;
 
 export function Sidebar({ me }: { me: MeView }) {
@@ -95,23 +121,12 @@ export function Sidebar({ me }: { me: MeView }) {
   useEffect(() => {
     setMenuOpen(false);
   }, [pathname]);
-  const isVendor = me.roles.some((r) => r.roleCode === 'VENDOR' && r.status === 'APPROVED');
-  const isEmployer = me.roles.some((r) => r.roleCode === 'EMPLOYER' && r.status === 'APPROVED');
-  const isPropertyOwner = me.roles.some((r) => r.roleCode === 'PROPERTY_OWNER' && r.status === 'APPROVED');
-  const isAgent = me.roles.some((r) => r.roleCode === 'REAL_ESTATE_AGENT' && r.status === 'APPROVED');
-  const isDriver = me.roles.some((r) => r.roleCode === 'DELIVERY_DRIVER' && r.status === 'APPROVED');
+  // BASE_NAV is the customer baseline every signed-in user gets; everything after it
+  // is role-gated by visibleRoleGroups (see lib/dashboard-nav.ts).
   const groups: Array<{ heading?: string; items: NavItem[] }> = [
     { items: BASE_NAV },
-    { heading: 'Belize Connect', items: JOBS_NAV },
-    { heading: 'Real Estate', items: REALESTATE_NAV },
+    ...visibleRoleGroups(ROLE_GROUPS, me.roles),
   ];
-  if (isDriver) groups.push({ heading: 'Driver', items: DRIVER_NAV });
-  if (isVendor) groups.push({ heading: 'Vendor', items: VENDOR_NAV });
-  if (isEmployer) groups.push({ heading: 'Employer', items: EMPLOYER_NAV });
-  if (isPropertyOwner) groups.push({ heading: 'Property Owner', items: PROPERTY_OWNER_NAV });
-  if (isAgent) groups.push({ heading: 'Real-Estate Agent', items: AGENT_NAV });
-  // Marketing tools are available to any approved business role.
-  if (isVendor || isEmployer || isPropertyOwner || isAgent) groups.push({ heading: 'Marketing', items: MARKETING_NAV });
 
   // Best-effort unread-messages badge on the Messages nav item.
   const [unread, setUnread] = useState(0);
