@@ -4,6 +4,10 @@
  * These are enforced on the BACKEND at two points: (1) when a presigned upload
  * URL is requested, and (2) after upload, by inspecting the actual stored object
  * (HEAD) before persisting its metadata. Client-side checks are convenience only.
+ *
+ * NOTE: the API compiles this package into its deployed bundle, so editing this
+ * file changes production API behaviour. `packages/**` is therefore one of the
+ * Railway watch patterns in `railway.json` — see docs/DEPLOYMENT.md §2a.
  */
 
 /** Allowed MIME types for role-application / KYC documents. */
