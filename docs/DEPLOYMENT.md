@@ -38,6 +38,61 @@ Runtime baseline: **Node 24 LTS**, **pnpm 9**, Prisma migrations via
 4. Set env vars (see ENVIRONMENT.md → API/Auth/Storage/Email/Monitoring). Generate
    strong secrets: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
 
+### 2a. Watch patterns — what triggers an API deployment
+
+The API service only rebuilds when a pushed commit touches a **watch pattern**. The
+authoritative list lives in `railway.json` (`build.watchPatterns`) so it is reviewed
+and versioned with the code:
+
+```
+apps/api/**          packages/**          pnpm-lock.yaml       pnpm-workspace.yaml
+package.json         turbo.json           tsconfig.base.json   tsconfig.lib.json
+.npmrc               railway.json
+```
+
+Every entry is a path the API build genuinely consumes — compare `apps/api/Dockerfile`,
+whose build stage copies exactly `pnpm-workspace.yaml package.json pnpm-lock.yaml
+.npmrc turbo.json tsconfig.base.json tsconfig.lib.json`, then `packages/` and `apps/`.
+The Prisma schema and migrations are covered by `packages/**`
+(`packages/database/prisma/**`), and `apps/api/Dockerfile` by `apps/api/**`.
+
+`apps/web/**`, `apps/admin/**`, `apps/mobile/**`, `docs/**` and `scripts/**` are
+deliberately **absent** — a web-only change must not redeploy the API. Note that a
+dependency change in any app still edits `pnpm-lock.yaml`, which is watched on
+purpose: it changes the dependency graph the API image installs.
+
+> **`packages/**` is the entry that matters most.** The API compiles the shared
+> workspace packages into its bundle, so a change confined to `packages/` alters the
+> deployed API even though nothing under `apps/api/` was touched. Without it, the API
+> silently keeps serving stale code and nothing anywhere reports an error.
+
+**Dashboard vs. repository.** Railway's config-as-code reference states:
+*"Configuration defined in code will always override values from the dashboard."*
+So `railway.json` is the source of truth and the dashboard's **Settings → Build →
+Watch Paths** field should be **cleared**. If you would rather keep it populated, it
+must be set to exactly the ten values above, one per line, or it will disagree with
+the repository. Patterns are written **without a leading slash**, matching Railway's
+own documented example (`"watchPatterns": ["src/**"]`).
+
+### 2b. Deployment sequencing — changes that span API and web
+
+The API (Railway, Docker build) deploys in minutes; the web app (Vercel) deploys in
+about a minute. A change that spans both therefore has a window in which the new web
+build is live against the old API. If the web build calls an endpoint the API has not
+shipped yet, users get `Cannot POST /api/...` — a hard 404, not a graceful failure.
+
+Rules, in order:
+
+1. **Deploy and verify the API first.** Confirm with
+   `curl -sI https://www.bzemarketplace.com/api/health` → the `X-BMPL-Api-Commit`
+   header must show the intended commit. `X-BMPL-Commit` is the web build's commit;
+   the two are independent and routinely differ.
+2. **Only then deploy the web app** that depends on the new endpoint.
+3. **For breaking API changes, keep the old path working** for the length of the
+   transition — add the new endpoint alongside the old one and remove the old one in a
+   later release, or gate the new client path behind a feature flag. The faster Vercel
+   deployment must never be able to call something that is not live yet.
+
 ## 3. Railway PostgreSQL
 
 1. Add a **PostgreSQL** plugin/service to the project. **[needs creds]**
