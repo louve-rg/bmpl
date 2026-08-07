@@ -4,6 +4,7 @@ import {
   DELIVERY_ACTIONS,
   DELIVERY_PIN_LENGTH,
   DELIVERY_STATUS_LABELS,
+  buildDeliveryProgress,
   canPerform,
   userInitials,
   type DeliveryAction,
@@ -269,7 +270,28 @@ export class DeliveryCoreService {
     }
 
     if (audience === 'CUSTOMER') {
-      return { ...base, deliveryAddress, items, podPhotoUrls };
+      // `timeline` is the stored event log, which only begins at assignment. A
+      // customer waiting for the shop to pack their order saw nothing in it, so
+      // `progress` stitches the vendor-order stages onto the delivery ones and
+      // always returns the full set of steps, reached or not.
+      return {
+        ...base,
+        deliveryAddress,
+        items,
+        podPhotoUrls,
+        progress: buildDeliveryProgress({
+          placedAt: order.placedAt,
+          preparingAt: vo.preparingAt,
+          readyAt: vo.readyForPickupAt,
+          assignedAt: d.assignedAt,
+          acceptedAt: d.acceptedAt,
+          pickupConfirmedAt: d.pickupConfirmedAt,
+          inTransitAt: d.inTransitAt,
+          arrivingAt: d.arrivingAt,
+          deliveredAt: d.deliveredAt,
+          cancelledAt: d.cancelledAt,
+        }),
+      };
     }
 
     if (audience === 'VENDOR') {

@@ -5,6 +5,7 @@ import { api, type ApiError } from '../../../lib/api';
 import { uploadFile } from '../../../lib/uploads';
 import { StarRating } from '../../../components/reviews/StarRating';
 import { Avatar } from '../../../components/Avatar';
+import { DriverOperations, type DriverOperationsView } from '../../../components/dashboard/DriverOperations';
 import {
   Card as UiCard,
   PageHeader,
@@ -138,6 +139,8 @@ interface DashboardData {
   vehicles: Vehicle[];
   serviceAreas: ServiceArea[];
   eligibility: Eligibility;
+  /** Operations summary (M26.3). Absent for an applicant with no profile yet. */
+  operations?: DriverOperationsView;
 }
 
 /* ----------------------------------------------------------------- page */
@@ -178,6 +181,7 @@ export default function DriverPage() {
       {data && (
         <>
           <StatusBanner hasProfile={data.hasProfile} roleStatus={data.roleStatus} application={data.application} />
+          {data.operations && <DriverOperations ops={data.operations} />}
           <DocumentsCallout />
 
           {data.profile && <AvailabilityControl profile={data.profile} eligibility={data.eligibility} onDone={reload} />}

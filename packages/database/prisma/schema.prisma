@@ -1632,6 +1632,10 @@ model VendorOrder {
   // Pickup fulfilment (M18.1). PIN held by the customer, submitted by the vendor at
   // collection (mirrors delivery). inventoryFinalizedAt guards exactly-once stock
   // deduction on collection.
+  // When the vendor started assembling the order. A real column rather than
+  // reusing updatedAt, which moves on any write and would misdate the customer's
+  // timeline the moment anything else touched the row.
+  preparingAt          DateTime?
   readyForPickupAt     DateTime?
   pickedUpAt           DateTime?
   pickupPin            String?

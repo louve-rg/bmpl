@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { DriverService } from './driver.service';
 import { AdminDriverService } from './admin-driver.service';
+import { DriverOperationsService } from './driver-operations.service';
 import { DriverController } from './driver.controller';
 import { AdminDriverController } from './admin-driver.controller';
 
@@ -13,7 +14,7 @@ import { AdminDriverController } from './admin-driver.controller';
 @Module({
   imports: [PrismaModule],
   controllers: [DriverController, AdminDriverController],
-  providers: [DriverService, AdminDriverService],
+  providers: [DriverService, AdminDriverService, DriverOperationsService],
   // DriverService is exported so the DispatchModule (M15) reuses driver
   // assignment-eligibility instead of re-implementing driver rules.
   exports: [DriverService],

@@ -48,7 +48,7 @@ export class VendorFulfilmentService {
     }
     await this.prisma.vendorOrder.update({
       where: { id: vendorOrderId },
-      data: { status: 'PREPARING' },
+      data: { status: 'PREPARING', preparingAt: new Date() },
     });
     await this.audit.record({
       action: 'VENDOR_ORDER_PREPARING',

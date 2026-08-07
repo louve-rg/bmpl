@@ -21,6 +21,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { UploadIngestService } from '../storage/upload-ingest.service';
 import { AuditService } from '../audit/audit.service';
+import { DriverOperationsService } from './driver-operations.service';
 
 interface Actor {
   userId: string;
@@ -35,6 +36,7 @@ export class DriverService {
     private readonly storage: StorageService,
     private readonly ingest: UploadIngestService,
     private readonly audit: AuditService,
+    private readonly operations: DriverOperationsService,
   ) {}
 
   // ---- role approval (source of truth: the DELIVERY_DRIVER UserRole) ----
@@ -428,10 +430,13 @@ export class DriverService {
         eligibility: { canGoOnline: false, reasons: ['start your driver application'] },
       };
     }
-    const [vehicles, serviceAreas, eligibility] = await Promise.all([
+    const [vehicles, serviceAreas, eligibility, operations] = await Promise.all([
       this.listVehicles(userId),
       this.serviceAreas(p.id),
       this.eligibility(userId, p),
+      // Attached to the existing dashboard rather than exposed as a second
+      // endpoint: the driver opens one screen, so it should be one request.
+      this.operations.summary(p.id, userId),
     ]);
     return {
       hasProfile: true,
@@ -441,6 +446,7 @@ export class DriverService {
       vehicles,
       serviceAreas,
       eligibility,
+      operations,
     };
   }
 

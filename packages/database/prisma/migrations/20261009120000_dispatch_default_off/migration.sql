@@ -16,3 +16,8 @@
 ALTER TABLE "platform_settings" ALTER COLUMN "dispatchAutomatic" SET DEFAULT false;
 
 UPDATE "platform_settings" SET "dispatchAutomatic" = false;
+
+-- When the vendor started assembling the order, for the customer timeline.
+-- A real column rather than reusing updatedAt, which moves on any write and
+-- would misdate the timeline as soon as anything else touched the row.
+ALTER TABLE "vendor_orders" ADD COLUMN "preparingAt" TIMESTAMP(3);
