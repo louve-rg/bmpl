@@ -20,9 +20,19 @@ import type { AvatarStatus } from '@bmpl/shared';
  * rejected image can never leak into a public payload by accident: the caller
  * gets null and the UI falls back to initials.
  */
-export function publicAvatarUrl(user: { id: string; avatarStatus: AvatarStatus }): string | null {
-  return user.avatarStatus === 'APPROVED' ? `/users/${user.id}/avatar` : null;
+export function publicAvatarUrl(user: {
+  id: string;
+  avatarStatus: AvatarStatus;
+  avatarModerated: boolean;
+}): string | null {
+  // BOTH conditions matter, and for different reasons. `APPROVED` means the
+  // picture is live rather than pending or rejected. `avatarModerated` means it
+  // is an identity claim that passed review — a customer's cosmetic avatar is
+  // approved but never public, because it is shown only inside their own account.
+  return user.avatarStatus === 'APPROVED' && user.avatarModerated
+    ? `/users/${user.id}/avatar`
+    : null;
 }
 
 /** Prisma `select` for the fields {@link publicAvatarUrl} needs. */
-export const AVATAR_SELECT = { id: true, avatarStatus: true } as const;
+export const AVATAR_SELECT = { id: true, avatarStatus: true, avatarModerated: true } as const;

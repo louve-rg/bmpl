@@ -104,7 +104,13 @@ export class UsersService {
       addressLine1: user.addressLine1,
       addressLine2: user.addressLine2,
       city: user.city,
-      avatarUrl: publicAvatarUrl(user),
+      // The OWNER always sees their own picture, moderated or not — a customer's
+      // avatar is cosmetic and shown inside their own account, which is exactly
+      // here. Signed directly rather than via the public route, because that
+      // route deliberately 404s for unmoderated pictures.
+      avatarUrl: user.avatarKey
+        ? await this.signedOrNull(user.avatarKey)
+        : publicAvatarUrl(user),
       avatarStatus: user.avatarStatus,
       avatarPendingUrl,
       avatarRejectedReason:
@@ -284,7 +290,8 @@ export class UsersService {
       fallbackName: 'avatar',
       maxBytes: MAX_AVATAR_BYTES,
     });
-    const previousKey = await this.replaceApprovedAvatar(userId, key, null);
+    // moderated=false: cosmetic, so it never reaches the public avatar route.
+    const previousKey = await this.replaceApprovedAvatar(userId, key, null, undefined, false);
     await this.deleteQuietly(previousKey);
     await this.audit.record({
       action: 'AVATAR_AUTO_APPROVED',
@@ -328,12 +335,16 @@ export class UsersService {
   async approvedAvatarDownloadUrl(userId: string): Promise<string | null> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { avatarKey: true, avatarStatus: true, status: true },
+      select: { avatarKey: true, avatarStatus: true, avatarModerated: true, status: true },
     });
     if (!user) throw new NotFoundException('User not found.');
     // A suspended account's face stops being shown alongside its activity.
     if (user.status !== 'ACTIVE') return null;
     if (user.avatarStatus !== 'APPROVED' || !user.avatarKey) return null;
+    // Cosmetic customer avatars are not public. Enforced HERE as well as in
+    // publicAvatarUrl: the serializers decide what to link, this decides what is
+    // actually served, so a stale or hand-built URL cannot leak one either.
+    if (!user.avatarModerated) return null;
     return this.signedOrNull(user.avatarKey);
   }
 
@@ -424,6 +435,8 @@ export class UsersService {
     key: string,
     faceScore: number | null,
     reviewedById?: string,
+    /** False only for the cosmetic customer path — see publishUnmoderated. */
+    moderated = true,
   ): Promise<string | null> {
     const previous = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
@@ -435,6 +448,7 @@ export class UsersService {
         avatarKey: key,
         avatarPendingKey: null,
         avatarStatus: 'APPROVED',
+        avatarModerated: moderated,
         avatarRejectedReason: null,
         ...(faceScore === null ? {} : { avatarFaceScore: faceScore }),
         avatarSubmittedAt: new Date(),

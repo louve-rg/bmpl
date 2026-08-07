@@ -13,6 +13,7 @@ export * from './settlement';
 export * from './reviews';
 export * from './driver';
 export * from './dispatch';
+export * from './dispatch-ranking';
 export * from './messaging';
 export * from './engagement';
 export * from './discovery';

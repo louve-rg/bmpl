@@ -410,6 +410,12 @@ model User {
   avatarKey            String? // private storage key; served via /users/:id/avatar
   avatarPendingKey     String?
   avatarStatus         AvatarStatus @default(NONE)
+  // Whether THIS approved picture passed identity review. Customer avatars are
+  // cosmetic and auto-approved (false); provider avatars are verified (true).
+  // Only a moderated picture is ever served publicly — recorded on the row rather
+  // than re-derived from roles, so a picture approved as a driver's cannot become
+  // public-by-accident, nor stay public if the role is later revoked.
+  avatarModerated      Boolean      @default(false)
   avatarRejectedReason String?
   // Highest face-detection confidence (0–100) returned by the vision provider,
   // kept so an admin reviewing the queue can see why it was flagged.
