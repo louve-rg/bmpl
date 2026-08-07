@@ -288,9 +288,31 @@ describe('admin assignment + eligibility', () => {
 
   it('auto-assign preview never assigns', async () => {
     const { order } = await assignedDelivery();
+    const before = await get(adminCookies, `admin/deliveries/${order.deliveryId}`);
+    const historyBefore = await get(adminCookies, `admin/deliveries/${order.deliveryId}/history`);
+
     const res = await get(adminCookies, `admin/deliveries/${order.deliveryId}/auto-assign-preview`);
     expect(res.status).toBe(200);
-    expect(res.body.implemented).toBe(false);
+    // `implemented` reported whether an auto-assignment engine EXISTED. It was
+    // false while the endpoint was a stub; M26.3 built the engine, so asserting
+    // false here would now assert that automatic dispatch is missing.
+    expect(res.body.implemented).toBe(true);
+    expect(typeof res.body.candidateCount).toBe('number');
+
+    // The invariant this test is NAMED for — previously never actually checked,
+    // since the stub flag was its only assertion. Preview is a read: it may
+    // report who would be offered the job, and change nothing while doing so.
+    const after = await get(adminCookies, `admin/deliveries/${order.deliveryId}`);
+    expect(after.body.status).toBe(before.body.status);
+    expect(after.body.driver?.displayName).toBe(before.body.driver?.displayName);
+    expect(after.body.timestamps.assignedAt).toBe(before.body.timestamps.assignedAt);
+
+    // No new assignment row, and no extra timeline event.
+    const historyAfter = await get(adminCookies, `admin/deliveries/${order.deliveryId}/history`);
+    expect(historyAfter.body).toHaveLength(historyBefore.body.length);
+    const timeline = await get(adminCookies, `admin/deliveries/${order.deliveryId}/timeline`);
+    expect(timeline.body.some((t: { event: string }) => t.event === 'ASSIGN')).toBe(true);
+    expect(timeline.body.filter((t: { event: string }) => t.event === 'ASSIGN')).toHaveLength(1);
   });
 });
 
