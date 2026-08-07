@@ -126,6 +126,12 @@ export const ordersApi = {
   getOwn: (id: string) => api.get<OrderView>(`/orders/${id}`),
   vendorList: () => api.get<VendorOrderListItem[]>('/vendor/orders'),
   vendorGet: (id: string) => api.get<VendorOrderView>(`/vendor/orders/${id}`),
+  // Fulfilment (M26.3) — works for BOTH delivery methods. Marking a DELIVERY
+  // order ready is what starts automatic dispatch.
+  vendorStartPreparing: (vendorOrderId: string) =>
+    api.post<{ id: string; status: string }>(`/vendor/orders/${vendorOrderId}/start-preparing`),
+  vendorMarkReady: (vendorOrderId: string) =>
+    api.post<{ id: string; status: string }>(`/vendor/orders/${vendorOrderId}/ready`),
   // Pickup fulfilment (M18.1) — PICKUP vendor-orders only.
   vendorReadyForPickup: (vendorOrderId: string) =>
     api.post<{ id: string; status: string }>(`/vendor/orders/${vendorOrderId}/ready-for-pickup`),

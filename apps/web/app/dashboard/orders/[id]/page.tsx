@@ -9,6 +9,7 @@ import type { ApiError } from '../../../../lib/api';
 import { Card, Alert, EmptyState, Spinner, StatusBadge } from '../../../../components/ui';
 import { VendorDeliveryPanel } from '../../../../components/VendorDeliveryPanel';
 import { VendorPickupPanel } from '../../../../components/VendorPickupPanel';
+import { VendorFulfilmentPanel } from '../../../../components/VendorFulfilmentPanel';
 
 export default function VendorOrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -97,9 +98,16 @@ export default function VendorOrderDetailPage() {
             )}
           </div>
 
-          {vo.deliveryMethod === 'DELIVERY' && vo.delivery?.id && (
-            <div className="mt-4">
-              <VendorDeliveryPanel deliveryId={vo.delivery.id} />
+          {vo.deliveryMethod === 'DELIVERY' && (
+            <div className="mt-4 grid gap-4">
+              {/* Fulfilment first: this is what the vendor acts on. The delivery
+                  panel below it is progress they watch, not something they drive. */}
+              <VendorFulfilmentPanel
+                vendorOrderId={vo.id}
+                status={vo.status as 'PENDING' | 'PREPARING' | 'READY_FOR_PICKUP' | 'PICKED_UP' | 'CANCELLED'}
+                onChanged={load}
+              />
+              {vo.delivery?.id && <VendorDeliveryPanel deliveryId={vo.delivery.id} />}
             </div>
           )}
 

@@ -59,7 +59,10 @@ export class DispatchEngineService {
   async settings(): Promise<DispatchSettings> {
     const row = await this.prisma.platformSetting.findFirst();
     return {
-      automatic: row?.dispatchAutomatic ?? true,
+      // Defaults OFF, including when no settings row exists at all. Dispatch
+      // moves real orders, so "not configured" must mean "do nothing" rather
+      // than "do everything" — the safe direction for a missing row.
+      automatic: row?.dispatchAutomatic ?? false,
       offerTimeoutSeconds: row?.dispatchOfferTimeoutSeconds ?? DISPATCH_OFFER_TIMEOUT_SECONDS,
       maxOffers: row?.dispatchMaxOffers ?? DISPATCH_MAX_OFFERS,
       maxConcurrentPerDriver: row?.dispatchMaxConcurrentPerDriver ?? 3,

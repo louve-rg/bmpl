@@ -1915,7 +1915,10 @@ model PlatformSetting {
   // @bmpl/shared/dispatch-ranking, so an untouched install behaves exactly as the
   // tested defaults describe. Extends the existing singleton rather than adding a
   // second settings table — one row, one admin screen, one cache to reason about.
-  dispatchAutomatic              Boolean @default(true) // master switch; false = manual assignment only
+  // Master switch. Defaults OFF: the engine ships before the vendor UI that
+  // drives it, and a half-wired workflow must not start moving real customers'
+  // orders. Flipped on once the whole path is production-verified.
+  dispatchAutomatic              Boolean @default(false)
   dispatchOfferTimeoutSeconds    Int     @default(90)
   dispatchMaxOffers              Int     @default(5) // distinct drivers before escalating to a human
   dispatchMaxConcurrentPerDriver Int     @default(3)

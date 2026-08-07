@@ -155,7 +155,7 @@ export function Badge({ tone = 'neutral', className = '', children }: { tone?: T
  *  communicated by colour alone — the label text is always shown. */
 const STATUS_TONE: Record<string, Tone> = {
   APPROVED: 'success', ACTIVE: 'success', PAID: 'success', AUTHORIZED: 'success', POSTED: 'success', RELEASED: 'success', DELIVERED: 'success', COMPLETED: 'success', PUBLISHED: 'success', BALANCED: 'success', PICKED_UP: 'success',
-  PENDING: 'warning', PENDING_REVIEW: 'warning', MORE_INFO_REQUIRED: 'info', PROCESSING: 'info', HELD: 'info', RESERVED: 'info', READY_FOR_PICKUP: 'info',
+  PENDING: 'warning', PENDING_REVIEW: 'warning', MORE_INFO_REQUIRED: 'info', PROCESSING: 'info', PREPARING: 'info', HELD: 'info', RESERVED: 'info', READY_FOR_PICKUP: 'info',
   REJECTED: 'error', FAILED: 'error', CANCELLED: 'error', SUSPENDED: 'warning', UNBALANCED: 'error',
   DRAFT: 'neutral', REVOKED: 'neutral', WITHDRAWN: 'neutral', VOID: 'neutral', DEACTIVATED: 'neutral', ARCHIVED: 'neutral',
 };
