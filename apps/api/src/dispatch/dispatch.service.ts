@@ -226,6 +226,11 @@ export class DispatchService {
         tx,
       );
     });
+    // Open the customer↔driver and vendor↔driver threads now rather than waiting
+    // for someone to navigate to one. Assignment is the moment these parties can
+    // need each other — a customer with a gate code should not have to discover a
+    // conversation first. Idempotent, and reconciles participants on reassignment.
+    await this.messaging.ensureDeliveryThreads(deliveryId, e.profile.userId);
     // Best-effort: system message + driver-participant swap in any DELIVERY thread.
     await this.messaging.onDeliveryEvent(deliveryId, action === 'REASSIGN' ? 'Delivery reassigned to a new driver.' : 'A driver was assigned.', e.profile.userId);
     return this.get(deliveryId);

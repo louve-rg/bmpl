@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   DELIVERY_PIN_MAX_ATTEMPTS,
   DELIVERY_STATUS_LABELS,
@@ -17,6 +17,7 @@ import { InventoryService } from '../products/inventory.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { DeliveryCoreService } from './delivery-core.service';
+import { DispatchEngineService } from './dispatch-engine.service';
 
 interface Actor {
   userId: string;
@@ -32,6 +33,8 @@ interface Actor {
  */
 @Injectable()
 export class DriverJobService {
+  private readonly logger = new Logger(DriverJobService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -41,6 +44,7 @@ export class DriverJobService {
     private readonly core: DeliveryCoreService,
     private readonly messaging: MessagingService,
     private readonly settlement: SettlementService,
+    private readonly engine: DispatchEngineService,
   ) {}
 
   private async myProfileId(userId: string): Promise<string> {
@@ -135,6 +139,16 @@ export class DriverJobService {
       // Notify the admin who assigned so they can reassign.
       await this.core.notify([d.assignedByUserId, d.vendorOrder.vendorProfile.userId], { title: 'Driver declined', body: `A driver declined the delivery for order ${d.vendorOrder.order.orderNumber}. Reassignment needed.`, data: { deliveryId } }, tx);
     });
+    // Re-offer immediately rather than waiting for the sweeper's next pass. A
+    // decline is a known, instantaneous event — making the customer's order sit
+    // idle for a tick because a driver was honest enough to decline promptly is
+    // exactly backwards. Best-effort: the sweeper is still the safety net, so a
+    // failure here delays the next offer rather than losing it.
+    try {
+      await this.engine.dispatch(deliveryId);
+    } catch (err) {
+      this.logger.warn(`re-dispatch after decline failed for ${deliveryId}: ${String(err)}`);
+    }
     // Declined jobs leave the driver's active feed; return a light ack.
     return { ok: true, status: 'DRIVER_DECLINED' as const };
   }

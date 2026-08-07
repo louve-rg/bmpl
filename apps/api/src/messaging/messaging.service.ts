@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   isAllowedMessageAttachmentMime,
   MAX_MESSAGE_ATTACHMENT_BYTES,
@@ -67,6 +67,8 @@ type MessageRow = Prisma.MessageGetPayload<{ include: typeof MESSAGE_INCLUDE }>;
  */
 @Injectable()
 export class MessagingService {
+  private readonly logger = new Logger(MessagingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -654,6 +656,44 @@ export class MessagingService {
   // ===========================================================================
   // Dispatch hook (best-effort; never throws) — SYSTEM messages + driver swap.
   // ===========================================================================
+  /**
+   * Open the customer↔driver and vendor↔driver threads for a delivery, so both
+   * exist the moment a driver is assigned (M26.3 · Part 11).
+   *
+   * Previously a conversation only came into being when somebody navigated to it
+   * and called openDelivery — which meant `onDeliveryEvent` had nothing to post
+   * into, and a customer wanting to tell their driver "gate code is 4821" had to
+   * discover the thread first. Assignment is the moment both parties become able
+   * to need each other, so it is the moment the threads should exist.
+   *
+   * Reuses ensureConversation, which is already idempotent and already reconciles
+   * participants when a driver is replaced — so a reassignment moves send rights
+   * to the new driver without creating a second thread.
+   *
+   * Best-effort by design: messaging must never fail an assignment. A delivery
+   * with no chat thread is a degraded experience; a delivery that failed to
+   * assign because chat was unavailable is a broken one.
+   */
+  async ensureDeliveryThreads(deliveryId: string, driverUserId: string): Promise<void> {
+    try {
+      const parties = await this.resolveParties('DELIVERY', deliveryId);
+      if (parties.customerUserId) {
+        await this.ensureConversation('DELIVERY', deliveryId, 'CUSTOMER_DRIVER', driverUserId, parties.label, [
+          { userId: parties.customerUserId, role: 'CUSTOMER' },
+          { userId: driverUserId, role: 'DRIVER' },
+        ]);
+      }
+      if (parties.vendorUserId) {
+        await this.ensureConversation('DELIVERY', deliveryId, 'VENDOR_DRIVER', driverUserId, parties.label, [
+          { userId: parties.vendorUserId, role: 'VENDOR' },
+          { userId: driverUserId, role: 'DRIVER' },
+        ]);
+      }
+    } catch (err) {
+      this.logger.warn(`could not open delivery threads for ${deliveryId}: ${String(err)}`);
+    }
+  }
+
   async onDeliveryEvent(deliveryId: string, text: string, newDriverUserId?: string | null): Promise<void> {
     try {
       const convs = await this.prisma.conversation.findMany({ where: { contextType: 'DELIVERY', contextId: deliveryId }, select: { id: true } });
