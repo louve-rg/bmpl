@@ -291,6 +291,12 @@ enum AuditAction {
   COUPON_UPDATED
   COUPON_STATUS_CHANGED
   COUPON_REDEEMED
+  // ---- Vendor fulfilment + automatic dispatch (M26.3) ----
+  VENDOR_ORDER_PREPARING
+  VENDOR_ORDER_READY_FOR_DISPATCH
+  DELIVERY_AUTO_ASSIGNED
+  DELIVERY_OFFER_EXPIRED
+  DELIVERY_DISPATCH_EXHAUSTED
   // ---- Profile pictures ----
   AVATAR_SUBMITTED
   AVATAR_AUTO_APPROVED
@@ -1555,8 +1561,14 @@ enum OrderStatus {
 
 enum VendorOrderStatus {
   PENDING
+  // Vendor has started putting the order together (M26.3). Distinct from PENDING
+  // so the customer timeline can say "preparing" instead of leaving a delivery
+  // order visibly idle between payment and a driver appearing.
+  PREPARING
   // Pickup fulfilment (M18.1). READY_FOR_PICKUP = vendor prepared it; PICKED_UP =
   // collection confirmed (the pickup analogue of a delivery reaching DELIVERED).
+  // Reused unchanged for DELIVERY orders, where "ready for pickup" means ready
+  // for the DRIVER to collect — the same physical fact, so it needs no new state.
   READY_FOR_PICKUP
   PICKED_UP
   CANCELLED
@@ -1684,6 +1696,18 @@ model OrderDelivery {
   cancellationReason String?
   deliveryNotes      String?
 
+  // ---- Automatic dispatch (M26.3) ----
+  // The engine offers a delivery to one driver at a time and rolls forward when
+  // the offer lapses. `offerExpiresAt` is what the sweeper scans for, `offerCount`
+  // is what stops it looping forever, and `dispatchExhaustedAt` marks the point a
+  // human genuinely is needed — the one case an admin should still see.
+  offerExpiresAt      DateTime?
+  offerCount          Int       @default(0)
+  dispatchExhaustedAt DateTime?
+  // Set once the vendor marks the order ready; dispatch never offers a delivery
+  // for goods that are not yet packed, or a driver arrives to wait at a counter.
+  readyForDispatchAt  DateTime?
+
   // ---- Pickup verification (driver submits a PIN the vendor holds) ----
   pickupPin                String? // access-controlled; never returned to driver/public/logs
   pickupPinAttempts        Int                @default(0)
@@ -1711,6 +1735,12 @@ model OrderDelivery {
 
   @@index([status])
   @@index([assignedDriverProfileId, status])
+  // The dispatch sweeper runs on an interval and asks exactly one question:
+  // which offers have lapsed? Without this it is a full scan of every delivery
+  // ever made, every tick, forever.
+  @@index([offerExpiresAt])
+  // Finding work to dispatch: deliveries the vendor has readied but nobody holds.
+  @@index([status, readyForDispatchAt])
   @@map("order_deliveries")
 }
 
@@ -1879,6 +1909,22 @@ model PlatformSetting {
   announcementMessage String?
   maintenanceMode     Boolean           @default(false) // display-only notice; not an API gate
   maintenanceMessage  String?
+
+  // ---- Automatic dispatch (M26.3 · Part 4) ----
+  // Tunable without a deploy. Defaults mirror the constants in
+  // @bmpl/shared/dispatch-ranking, so an untouched install behaves exactly as the
+  // tested defaults describe. Extends the existing singleton rather than adding a
+  // second settings table — one row, one admin screen, one cache to reason about.
+  dispatchAutomatic              Boolean @default(true) // master switch; false = manual assignment only
+  dispatchOfferTimeoutSeconds    Int     @default(90)
+  dispatchMaxOffers              Int     @default(5) // distinct drivers before escalating to a human
+  dispatchMaxConcurrentPerDriver Int     @default(3)
+  dispatchWeightWorkload         Int     @default(40)
+  dispatchWeightFairness         Int     @default(30)
+  dispatchWeightRating           Int     @default(15)
+  dispatchWeightLocality         Int     @default(10)
+  dispatchWeightExperience       Int     @default(5)
+
   updatedById         String?
   updatedAt           DateTime          @updatedAt
   createdAt           DateTime          @default(now())

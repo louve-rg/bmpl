@@ -303,6 +303,18 @@ export class DriverService {
     return this.serializeProfile(updated);
   }
 
+  /**
+   * Public read of a driver's ONLINE eligibility.
+   *
+   * Exposed so admin actions that change an input to it — vehicle approval above
+   * all — can report the RESULT rather than leaving the driver to work out
+   * whether "vehicle approved" means they may now go online. Always computed
+   * from live rows, never cached, so it cannot go stale.
+   */
+  async eligibilityFor(userId: string) {
+    return this.eligibility(userId);
+  }
+
   /** ONLINE eligibility: approved active role + valid licence + ≥1 approved active
    *  vehicle with valid registration + insurance. */
   private async eligibility(userId: string, profile?: DriverProfile) {

@@ -13,6 +13,17 @@ interface Actor {
   sessionId?: string | null;
 }
 
+/**
+ * Who performed an assignment. A null userId means the DISPATCH ENGINE acted, not
+ * a person — the audit trail and timeline distinguish the two, and
+ * `assignedByUserId` is already nullable for exactly this case.
+ */
+interface AssigningActor {
+  userId: string | null;
+  ipAddress?: string | null;
+  sessionId?: string | null;
+}
+
 const money = (v: bigint) => Number(v);
 
 /**
@@ -109,14 +120,47 @@ export class DispatchService {
     return this.drivers.eligibleDriversForDistrict(district);
   }
 
-  /** Placeholder for a future auto-assignment engine — it MUST NOT assign. */
+  /**
+   * Candidate pool for an admin preview. Automatic dispatch is live (see
+   * DispatchEngineService); this is now a read-only "who would be considered"
+   * view rather than the old stub that reported the feature as unimplemented.
+   */
   async autoAssignPreview(deliveryId: string) {
     const candidates = await this.eligibleDrivers(deliveryId);
     return {
-      implemented: false,
-      message: 'Automatic matching is not enabled. Assign a driver manually.',
+      implemented: true,
+      message:
+        candidates.length > 0
+          ? 'Automatic dispatch will offer this delivery to the highest-ranked driver.'
+          : 'No eligible driver is online for this district right now.',
       candidateCount: candidates.length,
+      candidates,
     };
+  }
+
+  /**
+   * Assign on behalf of the DISPATCH ENGINE rather than a person.
+   *
+   * Deliberately a thin entry into the same `assignInternal` an admin uses, so
+   * automatic and manual assignment produce identical state: the same
+   * assignment-time eligibility re-check, the same fresh pickup/delivery PINs,
+   * the same append-only DeliveryAssignment history, timeline event, audit row,
+   * notifications and messaging side effects. Duplicating any of that for the
+   * automatic path is how the two silently diverge.
+   *
+   * `assignedByUserId` stays null, which is already nullable in the schema and is
+   * what distinguishes a system assignment from an administrator's in the audit
+   * trail.
+   */
+  async systemAssign(deliveryId: string, driverProfileId: string, vehicleId: string) {
+    return this.assignInternal(
+      { userId: null },
+      deliveryId,
+      driverProfileId,
+      vehicleId,
+      null,
+      'ASSIGN',
+    );
   }
 
   // ---- assignment mutations ---------------------------------------------
@@ -129,7 +173,7 @@ export class DispatchService {
     return this.assignInternal(actor, deliveryId, dto.driverProfileId, dto.vehicleId, dto.reason, 'REASSIGN');
   }
 
-  private async assignInternal(actor: Actor, deliveryId: string, driverProfileId: string, vehicleId: string, reason: string | null, action: 'ASSIGN' | 'REASSIGN') {
+  private async assignInternal(actor: AssigningActor, deliveryId: string, driverProfileId: string, vehicleId: string, reason: string | null, action: 'ASSIGN' | 'REASSIGN') {
     const current = await this.core.loadOrThrow(deliveryId);
     this.core.assertAction(action, current.status);
     const district = this.districtOrThrow(current);
@@ -174,7 +218,7 @@ export class DispatchService {
       await tx.deliveryAssignment.create({
         data: { orderDeliveryId: deliveryId, driverProfileId, vehicleId, assignedByUserId: actor.userId, status: 'ACTIVE' },
       });
-      await this.core.appendTimeline(tx, deliveryId, { fromStatus, toStatus: 'ASSIGNED', event: action, actorRole: 'ADMIN', actorUserId: actor.userId, note: reason });
+      await this.core.appendTimeline(tx, deliveryId, { fromStatus, toStatus: 'ASSIGNED', event: action, actorRole: actor.userId ? 'ADMIN' : 'SYSTEM', actorUserId: actor.userId, note: reason });
       await this.core.auditTransition(action, actor.userId, deliveryId, { driverProfileId, vehicleId, reason }, tx);
       await this.core.notify(
         [e.profile.userId, current.vendorOrder.order.userId, current.vendorOrder.vendorProfile.userId],

@@ -307,7 +307,9 @@ export class DeliveryCoreService {
   /** Record an audit row for a delivery transition (outside or inside a tx). */
   async auditTransition(
     action: DeliveryAction | 'POD',
-    actorId: string,
+    // Nullable: the dispatch engine assigns with no human actor, and the audit
+    // row's null actorId is precisely what marks it as a system decision.
+    actorId: string | null,
     deliveryId: string,
     extra?: Record<string, unknown>,
     tx?: Prisma.TransactionClient,

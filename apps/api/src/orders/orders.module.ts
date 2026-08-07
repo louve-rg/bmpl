@@ -5,16 +5,18 @@ import { DeliveryModule } from '../delivery/delivery.module';
 import { OrdersController } from './orders.controller';
 import { VendorOrdersController } from './vendor-orders.controller';
 import { AdminOrdersController } from './admin-orders.controller';
+import { DispatchModule } from '../dispatch/dispatch.module';
 import { OrdersService } from './orders.service';
 import { PickupService } from './pickup.service';
+import { VendorFulfilmentService } from './vendor-fulfilment.service';
 
 // Reuses InventoryService (reservation + M18.1 pickup finalization), ProductImagesService
 // (thumbnails), and OwnershipService (vendor scoping) from ProductsModule, and
 // PaymentsService from PaymentsModule. Prisma/Audit/Notifications come from @Global().
 @Module({
-  imports: [ProductsModule, PaymentsModule, DeliveryModule],
+  imports: [ProductsModule, PaymentsModule, DeliveryModule, DispatchModule],
   controllers: [OrdersController, VendorOrdersController, AdminOrdersController],
-  providers: [OrdersService, PickupService],
-  exports: [OrdersService, PickupService],
+  providers: [OrdersService, PickupService, VendorFulfilmentService],
+  exports: [OrdersService, PickupService, VendorFulfilmentService],
 })
 export class OrdersModule {}

@@ -6,6 +6,8 @@ import { MessagingModule } from '../messaging/messaging.module';
 import { SettlementModule } from '../settlement/settlement.module';
 import { DeliveryCoreService } from './delivery-core.service';
 import { DispatchService } from './dispatch.service';
+import { DispatchEngineService } from './dispatch-engine.service';
+import { DispatchSchedulerService } from './dispatch-scheduler.service';
 import { DriverJobService } from './driver-jobs.service';
 import { DeliveryAccessService } from './delivery-access.service';
 import { AdminDispatchController } from './admin-dispatch.controller';
@@ -24,6 +26,17 @@ import { CustomerDeliveryController, VendorDeliveryStatusController } from './de
 @Module({
   imports: [PrismaModule, ProductsModule, DriverModule, MessagingModule, SettlementModule],
   controllers: [AdminDispatchController, DriverJobsController, CustomerDeliveryController, VendorDeliveryStatusController],
-  providers: [DeliveryCoreService, DispatchService, DriverJobService, DeliveryAccessService],
+  providers: [
+    DeliveryCoreService,
+    DispatchService,
+    DriverJobService,
+    DeliveryAccessService,
+    DispatchEngineService,
+    DispatchSchedulerService,
+  ],
+  // Exported so vendor fulfilment can start dispatch the moment an order is
+  // marked ready — the vendor's action, not an administrator's, puts the job in
+  // front of a driver.
+  exports: [DispatchEngineService],
 })
 export class DispatchModule {}

@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DriverService } from './driver.service';
 
 interface Actor {
   userId: string;
@@ -22,6 +23,7 @@ export class AdminDriverService {
     private readonly storage: StorageService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly drivers: DriverService,
   ) {}
 
   async list(filter: { district?: string; availability?: string; roleStatus?: string }) {
@@ -113,14 +115,28 @@ export class AdminDriverService {
       sessionId: actor.sessionId ?? null,
       newValue: { vehicleId, reason: reason ?? null },
     });
+    // Recompute eligibility right now and say what actually changed for them.
+    // Driver eligibility is derived live from the vehicle/licence/role rows on
+    // every read, so there is no server-side cache to invalidate — approving the
+    // vehicle IS the state change. What was missing is telling the driver, who
+    // otherwise sees "vehicle approved" and has to guess whether they may now
+    // work. Deliveries waiting on a driver are picked up by the dispatch sweeper
+    // within a tick, so a newly-eligible driver needs no admin follow-up either.
+    const eligibility = await this.drivers.eligibilityFor(v.driverProfile.userId);
+    const canWorkNow = decision === 'approve' && eligibility.canGoOnline;
     await this.notifications.createInApp({
       userId: v.driverProfile.userId,
       type: 'ACCOUNT',
       title: decision === 'approve' ? 'Vehicle approved' : 'Vehicle needs attention',
-      body: decision === 'approve' ? `Your ${updated.make} ${updated.model} was approved.` : `Your ${updated.make} ${updated.model} was rejected${reason ? `: ${reason}` : '.'}`,
-      data: { vehicleId },
+      body:
+        decision === 'approve'
+          ? canWorkNow
+            ? `Your ${updated.make} ${updated.model} was approved. You can go online and start accepting deliveries.`
+            : `Your ${updated.make} ${updated.model} was approved. Before you can go online: ${eligibility.reasons.join('; ')}.`
+          : `Your ${updated.make} ${updated.model} was rejected${reason ? `: ${reason}` : '.'}`,
+      data: { vehicleId, canGoOnline: eligibility.canGoOnline },
     });
-    return this.serializeVehicle(updated);
+    return { ...(await this.serializeVehicle(updated)), driverEligibility: eligibility };
   }
 
   private serializeProfile(p: DriverProfile) {
