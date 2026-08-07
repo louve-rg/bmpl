@@ -84,6 +84,15 @@ requires a reason). `deliveries.manage` — cancel (reason required). `deliverie
 matching:** an `auto-assign-preview` endpoint exists but only counts candidates and
 never assigns. Vendors cannot assign.
 
+> **Superseded by M26.3.** Automatic matching now exists — see
+> [docs/DISPATCH.md](../DISPATCH.md). Two consequences for this section:
+> `auto-assign-preview` now returns `implemented: true` (the flag reported whether
+> an engine existed, and one does), and a vendor marking an order ready is what
+> starts dispatch. **The preview endpoint itself is unchanged in kind: it remains
+> read-only and never assigns.** Assignment happens only in
+> `DispatchEngineService.dispatch` / `DispatchService.systemAssign`. Manual admin
+> assign/reassign/cancel remain available and behave exactly as described above.
+
 ## 6. Driver job workflow
 Requires an APPROVED `DELIVERY_DRIVER` role (guard). A driver sees only jobs assigned
 to their own profile (others → `404`). Flow: view assigned job → accept / decline
