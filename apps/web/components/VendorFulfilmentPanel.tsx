@@ -42,7 +42,16 @@ export function VendorFulfilmentPanel({
       else await ordersApi.vendorMarkReady(vendorOrderId);
       onChanged();
     } catch (e) {
-      setError((e as ApiError).message || 'That didn’t go through. Please try again.');
+      const err = e as ApiError;
+      // A 404 here means the ROUTE is missing, not the order — the API has not
+      // caught up with this build. Web and API deploy independently, so that
+      // window is real, and "Request failed" would send a vendor hunting for a
+      // problem with their own order. Say what is actually happening.
+      setError(
+        err.status === 404
+          ? 'Order fulfilment isn’t available yet — this feature is still rolling out. Your order is safe; please try again shortly.'
+          : err.message || 'That didn’t go through. Please try again.',
+      );
     } finally {
       setBusy(null);
     }
