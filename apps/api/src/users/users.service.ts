@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import type { UpdateProfileInput } from '@bmpl/validation';
 import {
   AVATAR_REJECTION_REASONS,
+  avatarNeedsApproval,
   avatarRejectionMessage,
   isAllowedAvatarMime,
   MAX_AVATAR_BYTES,
@@ -169,6 +170,15 @@ export class UsersService {
       throw new BadRequestException('Unsupported image type. Use JPEG, PNG, or WebP.');
     }
 
+    // Whether this picture is an identity claim or decoration depends entirely on
+    // who is uploading it. A customer's avatar asserts nothing, so it publishes
+    // instantly; a driver's is what someone checks at their door, so it is
+    // reviewed. Gating both on the same queue made every new customer wait for a
+    // decision that protects nobody.
+    if (!(await this.avatarNeedsApproval(userId))) {
+      return this.publishUnmoderated(userId, buffer, fileName);
+    }
+
     const verdict = await this.vision.check(buffer);
     if (verdict.decision === 'REJECT') {
       // Record the attempt so repeat offenders are visible, but store nothing.
@@ -241,6 +251,48 @@ export class UsersService {
       message: PENDING_MESSAGE,
       avatarUrl: previous.avatarKey ? this.avatarUrlFor(userId) : null,
     };
+  }
+
+  /**
+   * True when this user holds a role whose picture is a verified identity claim.
+   * Read from APPROVED roles only — a pending driver application does not yet put
+   * anyone at someone's door, so it does not yet gate their avatar.
+   */
+  private async avatarNeedsApproval(userId: string): Promise<boolean> {
+    const roles = await this.prisma.userRole.findMany({
+      where: { userId, status: 'APPROVED' },
+      select: { roleCode: true },
+    });
+    return avatarNeedsApproval(roles.map((r) => r.roleCode));
+  }
+
+  /**
+   * Store and publish a picture immediately — the customer path. No face check,
+   * no pending state, no queue.
+   *
+   * Content safety still has a backstop: an admin can take any avatar down (see
+   * {@link rejectAvatar}), which is takedown-on-report rather than review-before-
+   * publish. That keeps the abuse lever without making 99% of users wait.
+   */
+  private async publishUnmoderated(
+    userId: string,
+    buffer: Buffer,
+    fileName?: string,
+  ): Promise<AvatarUploadResult> {
+    const { key } = await this.ingest.image(buffer, STORAGE_PREFIX.avatar(userId), 'private', {
+      fileName,
+      fallbackName: 'avatar',
+      maxBytes: MAX_AVATAR_BYTES,
+    });
+    const previousKey = await this.replaceApprovedAvatar(userId, key, null);
+    await this.deleteQuietly(previousKey);
+    await this.audit.record({
+      action: 'AVATAR_AUTO_APPROVED',
+      actorId: userId,
+      targetUserId: userId,
+      newValue: { moderated: false },
+    });
+    return { status: 'APPROVED', message: APPROVED_MESSAGE, avatarUrl: this.avatarUrlFor(userId) };
   }
 
   /** Remove the user's picture entirely, falling back to their initials. */

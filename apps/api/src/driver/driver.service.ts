@@ -78,7 +78,8 @@ export class DriverService {
       vehicleOwnership: dto.vehicleOwnership,
       termsAcceptedAt: dto.termsAccepted ? new Date() : null,
       applicantNotes: dto.applicantNotes ?? null,
-      profilePhotoKey: dto.profilePhotoKey ?? undefined,
+      // Never trust a client-supplied storage key — see resolveProfilePhotoKey.
+      profilePhotoKey: (await this.resolveProfilePhotoKey(userId, dto.profilePhotoKey)) ?? undefined,
     };
     const p = await this.prisma.driverProfile.upsert({ where: { userId }, create: { userId, ...data }, update: data });
     await this.audit.record({ action: 'DRIVER_PROFILE_UPSERTED', actorId: userId, targetUserId: userId });
@@ -91,8 +92,14 @@ export class DriverService {
     for (const k of ['legalName', 'displayName', 'phone', 'homeDistrict', 'licenceNumber', 'vehicleOwnership'] as const) {
       if (dto[k] !== undefined) (data as Record<string, unknown>)[k] = dto[k];
     }
-    for (const k of ['homeAddress', 'latitude', 'longitude', 'emergencyContactName', 'emergencyContactPhone', 'applicantNotes', 'profilePhotoKey'] as const) {
+    for (const k of ['homeAddress', 'latitude', 'longitude', 'emergencyContactName', 'emergencyContactPhone', 'applicantNotes'] as const) {
       if (dto[k] !== undefined) (data as Record<string, unknown>)[k] = dto[k] ?? null;
+    }
+    // Handled separately from the plain passthrough fields above: a storage key
+    // must be proven to belong to this driver before it is stored, because the
+    // profile-photo endpoint will later sign it. See resolveProfilePhotoKey.
+    if (dto.profilePhotoKey !== undefined) {
+      data.profilePhotoKey = (await this.resolveProfilePhotoKey(userId, dto.profilePhotoKey)) ?? null;
     }
     if (dto.licenceExpiry !== undefined) data.licenceExpiry = dto.licenceExpiry;
     if (dto.termsAccepted !== undefined) data.termsAcceptedAt = dto.termsAccepted ? new Date() : null;
@@ -133,6 +140,26 @@ export class DriverService {
       fallbackName: 'vehicle',
     });
   }
+  /**
+   * Validate a client-supplied PROFILE-photo key before it is stored.
+   *
+   * This has to exist because `profilePhotoKey` arrives in the request body and is
+   * later handed to `presignDownload` by {@link profilePhotoUrl}. Without an
+   * ownership check the server would sign whatever private key it was given — a
+   * driver could point their profile photo at another user's KYC document and read
+   * it back through their own profile endpoint. Every other upload surface already
+   * goes through assertKeyInNamespace; this one was the gap.
+   */
+  private async resolveProfilePhotoKey(
+    userId: string,
+    key: string | null | undefined,
+  ): Promise<string | null | undefined> {
+    // undefined = "field absent, leave alone"; null = "clear it". Neither names an object.
+    if (key === undefined || key === null) return key;
+    const [resolved] = await this.resolveKeys(userId, [key], STORAGE_PREFIX.driverPhoto(userId));
+    return resolved;
+  }
+
   /** Validate uploaded keys live in this user's namespace + are real images. */
   private async resolveKeys(userId: string, keys: string[], namespace: string): Promise<string[]> {
     for (const key of keys) {
@@ -398,7 +425,7 @@ export class DriverService {
       hasProfile: true,
       roleStatus: status,
       application: application ? this.serializeApplication(application) : null,
-      profile: this.serializeProfile(p),
+      profile: await this.serializeProfile(p),
       vehicles,
       serviceAreas,
       eligibility,
@@ -408,7 +435,7 @@ export class DriverService {
   // ===========================================================================
   // serialization
   // ===========================================================================
-  private serializeProfile(p: DriverProfile) {
+  private async serializeProfile(p: DriverProfile) {
     return {
       id: p.id,
       legalName: p.legalName,
@@ -424,7 +451,13 @@ export class DriverService {
       vehicleOwnership: p.vehicleOwnership,
       termsAccepted: !!p.termsAcceptedAt,
       applicantNotes: p.applicantNotes,
-      profilePhotoUrl: null as string | null, // resolved on demand via a signed-URL endpoint
+      // Resolved eagerly. This used to be hardcoded null with a note that a
+      // separate signed-URL endpoint would supply it — but nothing ever called
+      // that endpoint, so a driver who had uploaded a photo saw "Photo on file"
+      // next to a permanently empty frame. One signed URL on a page the driver
+      // already loads costs a single HEAD-free presign; a boolean nobody can
+      // render costs a support ticket.
+      profilePhotoUrl: await this.signedOrNull(p.profilePhotoKey),
       hasProfilePhoto: !!p.profilePhotoKey,
       // A suspended/unapproved role forces effective availability to SUSPENDED.
       availability: p.availability,
@@ -480,5 +513,19 @@ export class DriverService {
     const p = await this.ownProfileOrThrow(userId);
     if (!p.profilePhotoKey) throw new NotFoundException('No profile photo.');
     return this.storage.presignDownload(p.profilePhotoKey, 'private');
+  }
+
+  /**
+   * Signed URL for a private key, or null when storage is unavailable or the key
+   * is unset. A missing photo must degrade to initials, never to a 500 on a page
+   * that is mostly about licence dates and availability.
+   */
+  private async signedOrNull(key: string | null): Promise<string | null> {
+    if (!key) return null;
+    try {
+      return (await this.storage.presignDownload(key, 'private')).url;
+    } catch {
+      return null;
+    }
   }
 }

@@ -4,6 +4,7 @@ import {
   AVATAR_REJECTION_MESSAGES,
   AVATAR_REJECTION_REASON_CODES,
   avatarFallbackColor,
+  avatarNeedsApproval,
   avatarRejectionMessage,
   publicDisplayName,
   roleRequiresAvatar,
@@ -48,16 +49,41 @@ describe('avatarFallbackColor', () => {
 });
 
 describe('roleRequiresAvatar', () => {
-  it('covers the roles that meet customers in person', () => {
+  it('covers the roles a customer meets in person', () => {
     expect(roleRequiresAvatar('DELIVERY_DRIVER')).toBe(true);
-    expect(roleRequiresAvatar('VENDOR')).toBe(true);
+    expect(roleRequiresAvatar('PASSENGER_DRIVER')).toBe(true);
     expect(roleRequiresAvatar('REAL_ESTATE_AGENT')).toBe(true);
+    expect(roleRequiresAvatar('EMPLOYER')).toBe(true);
   });
 
   it('leaves everyone else optional', () => {
     expect(roleRequiresAvatar('CUSTOMER')).toBe(false);
     expect(roleRequiresAvatar('JOB_SEEKER')).toBe(false);
     expect(roleRequiresAvatar('NOT_A_ROLE')).toBe(false);
+  });
+
+  it('excludes VENDOR — a storefront is matched by its brand, not the owner’s face', () => {
+    // Deliberate, and the reason it is asserted: a customer at a vendor counter
+    // identifies the business by its (already moderated) logo and name. Requiring
+    // the owner's face adds a verification step that protects nobody.
+    expect(roleRequiresAvatar('VENDOR')).toBe(false);
+  });
+});
+
+describe('avatarNeedsApproval', () => {
+  it('moderates a user who holds ANY provider role', () => {
+    expect(avatarNeedsApproval(['CUSTOMER', 'DELIVERY_DRIVER'])).toBe(true);
+  });
+
+  it('publishes instantly for a plain customer', () => {
+    expect(avatarNeedsApproval(['CUSTOMER'])).toBe(false);
+    expect(avatarNeedsApproval([])).toBe(false);
+  });
+
+  it('holds a customer-who-is-also-a-driver to the driver standard', () => {
+    // The stricter rule has to win, or a provider could dodge review simply by
+    // also being a shopper — which every provider is.
+    expect(avatarNeedsApproval(['CUSTOMER', 'JOB_SEEKER', 'REAL_ESTATE_AGENT'])).toBe(true);
   });
 });
 

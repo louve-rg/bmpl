@@ -12,24 +12,51 @@ export const AVATAR_STATUSES = ['NONE', 'PENDING', 'APPROVED', 'REJECTED'] as co
 export type AvatarStatus = (typeof AVATAR_STATUSES)[number];
 
 /**
- * Roles that MUST have an approved profile picture.
+ * Roles whose profile picture is a VERIFIED IDENTITY CLAIM, not decoration.
  *
- * These are the roles another user meets in person or hands money to — a driver
- * at the door, a vendor at pickup, an agent at a viewing — so a real face is part
- * of the safety story rather than decoration. Everyone else (customers, job
- * seekers, employers, property owners) keeps their initials avatar and is only
- * ever nudged, never blocked.
+ * These people show up at a customer's door, drive them somewhere, or meet them
+ * at a viewing. The customer uses the photo to check that the person in front of
+ * them is who was dispatched, so it goes through review before anyone sees it.
+ *
+ * Everyone else — plain customers above all — gets an instant, unmoderated
+ * picture. A customer avatar is cosmetic: it never asserts identity, so putting
+ * it behind a review queue buys no safety and costs every new user a wait.
+ *
+ * NOTE ON VENDOR: deliberately NOT in this list. A vendor is met at a counter
+ * under their business name and brand, and the storefront logo (already
+ * moderated) is what a customer matches against — not the owner's face.
  */
-export const AVATAR_REQUIRED_ROLES = [
-  'VENDOR',
+export const AVATAR_MODERATED_ROLES = [
   'DELIVERY_DRIVER',
   'PASSENGER_DRIVER',
+  'SHIPPING_PROVIDER',
+  'PASSENGER_PROVIDER',
   'REAL_ESTATE_AGENT',
+  'EMPLOYER',
 ] as const;
-export type AvatarRequiredRole = (typeof AVATAR_REQUIRED_ROLES)[number];
+export type AvatarModeratedRole = (typeof AVATAR_MODERATED_ROLES)[number];
+
+export const roleModeratesAvatar = (code: string): code is AvatarModeratedRole =>
+  (AVATAR_MODERATED_ROLES as readonly string[]).includes(code);
+
+/**
+ * Whether this user's picture is an identity claim that must be reviewed before
+ * it is shown. Driven by the roles they ACTUALLY hold (approved ones only) — a
+ * customer who is also an approved driver is held to the driver standard.
+ */
+export const avatarNeedsApproval = (approvedRoleCodes: readonly string[]): boolean =>
+  approvedRoleCodes.some(roleModeratesAvatar);
+
+/**
+ * Roles that must HAVE an approved picture, not merely have theirs reviewed.
+ * Identical to the moderated set today: if a photo is worth verifying because a
+ * customer meets that person, it is worth requiring.
+ */
+export const AVATAR_REQUIRED_ROLES = AVATAR_MODERATED_ROLES;
+export type AvatarRequiredRole = AvatarModeratedRole;
 
 export const roleRequiresAvatar = (code: string): code is AvatarRequiredRole =>
-  (AVATAR_REQUIRED_ROLES as readonly string[]).includes(code);
+  roleModeratesAvatar(code);
 
 /**
  * The face-check policy. A picture is auto-approved only when EVERY rule holds;
