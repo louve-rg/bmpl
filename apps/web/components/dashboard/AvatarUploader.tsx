@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import { AVATAR_MIME_ALLOWLIST, MAX_AVATAR_BYTES, type AvatarStatus } from '@bmpl/shared';
 import { api, type ApiError } from '../../lib/api';
+import { cropAndResizeSquare } from '../../lib/image-resize';
 import type { MeView } from '../../lib/types';
 import { Alert, Button, Card } from '../ui';
 import { Avatar } from '../Avatar';
@@ -51,9 +52,12 @@ export function AvatarUploader({ me, onChange }: { me: MeView; onChange: (me: Me
 
     setBusy(true);
     try {
+      // Crop to the circle we actually render and downscale before sending, so a
+      // phone photo doesn't travel at 6 MB to be drawn at 32px in the sidebar.
+      const prepared = await cropAndResizeSquare(file);
       const result = await api.upload<UploadResult>(
-        `/me/avatar/upload?filename=${encodeURIComponent(file.name)}`,
-        file,
+        `/me/avatar/upload?filename=${encodeURIComponent(prepared.name)}`,
+        prepared,
       );
       setNotice(result.message);
       onChange(await api.get<MeView>('/me'));
@@ -89,9 +93,13 @@ export function AvatarUploader({ me, onChange }: { me: MeView; onChange: (me: Me
         <div className="min-w-[16rem] flex-1 space-y-3">
           <div>
             <h2 className="font-semibold text-belize-navy">Profile picture</h2>
+            {/* Providers are held to a verification standard, so they get the
+                rules. Customers are not, so telling them about a face check
+                would describe a gate that does not exist for them. */}
             <p className="mt-0.5 text-sm text-slate-500">
-              A clear, well-lit photo of your face — just you, looking at the camera. Logos,
-              products, pets and group photos are not accepted.
+              {me.avatarRequired
+                ? 'A clear, well-lit photo of your face — just you, looking at the camera. Customers use it to check who has arrived, so logos, products, pets and group photos are not accepted.'
+                : 'Add a photo so people recognise you. It appears on your orders, messages and reviews, and goes live straight away.'}
             </p>
           </div>
 

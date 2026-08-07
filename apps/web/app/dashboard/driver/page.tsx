@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, type ApiError } from '../../../lib/api';
 import { uploadFile } from '../../../lib/uploads';
 import { StarRating } from '../../../components/reviews/StarRating';
+import { Avatar } from '../../../components/Avatar';
 import {
   Card as UiCard,
   PageHeader,
@@ -91,6 +92,8 @@ interface DriverProfile {
   ratingAverage?: number | null;
   completedDeliveries?: number;
   hasProfilePhoto?: boolean;
+  /** Short-lived signed URL for the driver's own photo (private bucket). */
+  profilePhotoUrl?: string | null;
   termsAccepted?: boolean;
   applicantNotes?: string | null;
 }
@@ -551,18 +554,30 @@ function ProfileEditor({ profile, onDone }: { profile: DriverProfile | null; onD
 
         <div>
           <Label>Profile photo</Label>
-          <div className="mt-1.5 flex flex-wrap items-center gap-3">
-            {profile?.hasProfilePhoto ? <Badge tone="success">Photo on file</Badge> : <Badge tone="neutral">No photo yet</Badge>}
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5">
-              {photoBusy ? <Spinner className="h-4 w-4" /> : 'Upload photo'}
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                disabled={photoBusy}
-                onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0])}
-              />
-            </label>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Customers see this photo when you’re on your way to them, so they know who to expect.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            {/* Show the actual photo. A "Photo on file" badge with nothing beside
+                it is indistinguishable from a broken upload. */}
+            <Avatar
+              name={f.displayName || f.legalName || 'Driver'}
+              src={profile?.profilePhotoUrl}
+              size="lg"
+            />
+            <div className="flex flex-col gap-1.5">
+              {profile?.hasProfilePhoto ? <Badge tone="success">Photo on file</Badge> : <Badge tone="neutral">No photo yet</Badge>}
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5">
+                {photoBusy ? <Spinner className="h-4 w-4" /> : profile?.hasProfilePhoto ? 'Replace photo' : 'Upload photo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={photoBusy}
+                  onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0])}
+                />
+              </label>
+            </div>
           </div>
         </div>
 
