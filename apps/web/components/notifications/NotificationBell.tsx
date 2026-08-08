@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { audienceForRoles, notificationHref } from '@bmpl/shared';
 import { api } from '../../lib/api';
 import {
   relativeTime,
@@ -13,7 +15,8 @@ import { badgeCount, unreadLabel } from '../../lib/badge';
 
 const POLL_MS = 60_000;
 
-export function NotificationBell() {
+export function NotificationBell({ roleCodes = [] }: { roleCodes?: readonly string[] } = {}) {
+  const router = useRouter();
   const [count, setCount] = useState(0);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationItem[]>([]);
@@ -82,6 +85,31 @@ export function NotificationBell() {
     } catch {
       void refreshCount();
     }
+  }
+
+  /**
+   * Mark read, then go to whatever the notification is about.
+   *
+   * Clicking used to only mark it read, leaving the reader to go and find the
+   * thing themselves — a driver told "New delivery offer" had to hunt for the
+   * delivery. The target comes from the notification's own `data` payload.
+   *
+   * The read call is deliberately NOT awaited before navigating: the optimistic
+   * update has already dropped the badge, and making someone watch a spinner
+   * before their order opens is the wrong trade. A failed read self-corrects on
+   * the next poll.
+   */
+  async function open_(item: NotificationItem) {
+    void markRead(item);
+    const href = notificationHref(
+      { category: item.category, event: item.event, data: item.data },
+      audienceForRoles(roleCodes, { category: item.category, data: item.data }),
+    );
+    // No specific target (e.g. a broadcast announcement) → stay put rather than
+    // dumping the reader on an unrelated page.
+    if (!href) return;
+    setOpen(false);
+    router.push(href);
   }
 
   async function dismiss(item: NotificationItem) {
@@ -160,7 +188,7 @@ export function NotificationBell() {
                     key={item.id}
                     className={`group relative px-4 py-3 transition hover:bg-slate-50 ${item.read ? '' : 'bg-belize-blue/[0.03]'}`}
                   >
-                    <button type="button" onClick={() => markRead(item)} className="block w-full pr-6 text-left">
+                    <button type="button" onClick={() => void open_(item)} className="block w-full pr-6 text-left">
                       <div className="flex items-start gap-2">
                         {!item.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-belize-accent" aria-hidden />}
                         <div className={`min-w-0 ${item.read ? 'pl-4' : ''}`}>

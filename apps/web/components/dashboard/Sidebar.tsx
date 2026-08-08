@@ -29,8 +29,8 @@ const BASE_NAV: NavItem[] = [
 // Driver tools — only for an approved DELIVERY_DRIVER (these routes are role-gated,
 // so showing them to everyone created dead-end links for plain customers).
 const DRIVER_NAV: NavItem[] = [
-  { label: 'Driver Home', href: '/dashboard/driver', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
-  { label: 'Deliveries', href: '/dashboard/driver/jobs', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
+  { label: 'Driver Dashboard', href: '/dashboard/driver', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
+  { label: 'My Deliveries', href: '/dashboard/driver/jobs', icon: 'M3 7h11v9H3z M14 10h4l3 3v3h-7' },
   { label: 'Earnings', href: '/dashboard/driver/earnings', icon: 'M12 3v18 M6 8h9a3 3 0 0 1 0 6H8' },
 ];
 

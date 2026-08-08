@@ -3,6 +3,7 @@ export * from './districts';
 export * from './permissions';
 export * from './audit';
 export * from './notifications';
+export * from './notification-links';
 export * from './wallet';
 export * from './user';
 export * from './avatar';

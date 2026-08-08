@@ -238,7 +238,10 @@ function ShippingCard() {
         </span>
       </div>
 
-      <Cta href="/register">Learn more</Cta>
+      {/* Public informational page. "Learn more" pointed at /register, which asked
+          a visitor to create an account before they could find out what the
+          service was — that reads as a broken link, not a gate. */}
+      <Cta href="/shipping">Learn more</Cta>
     </article>
   );
 }

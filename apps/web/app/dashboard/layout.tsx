@@ -18,7 +18,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <Sidebar me={me} />
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-end gap-3 border-b border-slate-200 bg-white px-5 py-2.5 md:px-8">
-          <NotificationBell />
+          {/* Approved roles only: a pending driver application should not make
+              delivery notifications open the driver job screen. */}
+          <NotificationBell
+            roleCodes={me.roles.filter((r) => r.status === 'APPROVED').map((r) => r.roleCode)}
+          />
           <Link
             href="/dashboard/profile"
             aria-label="Your profile"

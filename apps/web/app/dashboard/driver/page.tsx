@@ -174,17 +174,21 @@ export default function DriverPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader title="Delivery Driver" description="Manage your driver profile, vehicles, service areas, and availability." />
+      <PageHeader title="Driver Dashboard" description="Your shift at a glance — availability, current work, earnings and performance." />
 
       {error && <Alert tone="error">{error}</Alert>}
 
       {data && (
         <>
           <StatusBanner hasProfile={data.hasProfile} roleStatus={data.roleStatus} application={data.application} />
+
+          {/* Availability first: 'am I available for work right now?' is the
+              question a driver opens this page to settle. It previously sat
+              below the operations block and profile-shaped content. */}
+          {data.profile && <AvailabilityControl profile={data.profile} eligibility={data.eligibility} onDone={reload} />}
+
           {data.operations && <DriverOperations ops={data.operations} />}
           <DocumentsCallout />
-
-          {data.profile && <AvailabilityControl profile={data.profile} eligibility={data.eligibility} onDone={reload} />}
 
           {data.profile && <RatingSummary profile={data.profile} />}
 
