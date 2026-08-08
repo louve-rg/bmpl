@@ -17,6 +17,19 @@ export const updatePlatformSettingsSchema = z
     announcementMessage: text(1, 500).nullable().optional(),
     maintenanceMode: z.boolean().optional(),
     maintenanceMessage: text(1, 500).nullable().optional(),
+    // ---- Automatic dispatch (M26.3 · Part 4) ----
+    // Operators must be able to retune dispatch, and switch it off in a hurry,
+    // without waiting for a deploy. Bounds are deliberately narrow: a 1-second
+    // offer timeout or a 500-deep retry budget would be an outage, not a setting.
+    dispatchAutomatic: z.boolean().optional(),
+    dispatchOfferTimeoutSeconds: z.number().int().min(30).max(600).optional(),
+    dispatchMaxOffers: z.number().int().min(1).max(20).optional(),
+    dispatchMaxConcurrentPerDriver: z.number().int().min(1).max(10).optional(),
+    dispatchWeightWorkload: z.number().int().min(0).max(100).optional(),
+    dispatchWeightFairness: z.number().int().min(0).max(100).optional(),
+    dispatchWeightRating: z.number().int().min(0).max(100).optional(),
+    dispatchWeightLocality: z.number().int().min(0).max(100).optional(),
+    dispatchWeightExperience: z.number().int().min(0).max(100).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
 export type UpdatePlatformSettingsInput = z.infer<typeof updatePlatformSettingsSchema>;

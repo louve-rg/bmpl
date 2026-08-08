@@ -120,14 +120,30 @@ export class OpsService {
         announcementMessage: dto.announcementMessage === undefined ? undefined : dto.announcementMessage,
         maintenanceMode: dto.maintenanceMode ?? undefined,
         maintenanceMessage: dto.maintenanceMessage === undefined ? undefined : dto.maintenanceMessage,
+        // Automatic dispatch tuning (M26.3). `?? undefined` throughout so an
+        // omitted field is left alone rather than nulled — this endpoint is a
+        // partial update and an operator toggling the announcement banner must
+        // not silently reset the dispatch weights.
+        dispatchAutomatic: dto.dispatchAutomatic ?? undefined,
+        dispatchOfferTimeoutSeconds: dto.dispatchOfferTimeoutSeconds ?? undefined,
+        dispatchMaxOffers: dto.dispatchMaxOffers ?? undefined,
+        dispatchMaxConcurrentPerDriver: dto.dispatchMaxConcurrentPerDriver ?? undefined,
+        dispatchWeightWorkload: dto.dispatchWeightWorkload ?? undefined,
+        dispatchWeightFairness: dto.dispatchWeightFairness ?? undefined,
+        dispatchWeightRating: dto.dispatchWeightRating ?? undefined,
+        dispatchWeightLocality: dto.dispatchWeightLocality ?? undefined,
+        dispatchWeightExperience: dto.dispatchWeightExperience ?? undefined,
         updatedById: actor.userId,
       },
     });
     await this.audit.record({
       action: 'PLATFORM_SETTING_UPDATED',
       actorId: actor.userId,
-      previousValue: { announcementActive: current.announcementActive, announcementLevel: current.announcementLevel, maintenanceMode: current.maintenanceMode },
-      newValue: { announcementActive: updated.announcementActive, announcementLevel: updated.announcementLevel, maintenanceMode: updated.maintenanceMode },
+      // dispatchAutomatic is included on both sides: switching automatic dispatch
+      // on or off changes how every delivery on the platform is assigned, and the
+      // audit trail should say who did it and when.
+      previousValue: { announcementActive: current.announcementActive, announcementLevel: current.announcementLevel, maintenanceMode: current.maintenanceMode, dispatchAutomatic: current.dispatchAutomatic },
+      newValue: { announcementActive: updated.announcementActive, announcementLevel: updated.announcementLevel, maintenanceMode: updated.maintenanceMode, dispatchAutomatic: updated.dispatchAutomatic },
     });
     return updated;
   }
