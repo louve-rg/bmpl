@@ -144,6 +144,17 @@ export class DriverJobService {
         'This delivery is no longer available — the offer expired or was passed to another driver.',
       );
     }
+
+    // Open the customer↔driver and vendor↔driver threads HERE, on acceptance —
+    // not at assignment. A driver who was merely offered the job, and let it
+    // expire or declined it, must not end up a permanent member of a customer's
+    // conversation; automatic dispatch can offer one delivery to several drivers
+    // in turn, so enrolling on assignment would accumulate them. Accepting is the
+    // point the driver becomes the person the customer and vendor need to reach.
+    //
+    // Best-effort by design: a delivery with no chat thread is degraded, a
+    // delivery that failed to accept because chat was unavailable is broken.
+    await this.messaging.ensureDeliveryThreads(deliveryId, actor.userId);
     return this.getJob(actor.userId, deliveryId);
   }
 

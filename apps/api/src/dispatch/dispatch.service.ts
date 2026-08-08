@@ -226,11 +226,12 @@ export class DispatchService {
         tx,
       );
     });
-    // Open the customer↔driver and vendor↔driver threads now rather than waiting
-    // for someone to navigate to one. Assignment is the moment these parties can
-    // need each other — a customer with a gate code should not have to discover a
-    // conversation first. Idempotent, and reconciles participants on reassignment.
-    await this.messaging.ensureDeliveryThreads(deliveryId, e.profile.userId);
+    // NOTE: threads are deliberately NOT opened here. Being offered a job is not
+    // the same as taking it — see DriverJobService.accept, which opens them once
+    // the driver commits. M17 §4 specifies participants are "added on access",
+    // and under automatic dispatch a single delivery may be offered to several
+    // drivers in turn; enrolling each one at assignment would leave every driver
+    // who ignored an offer holding permanent read access to a customer's thread.
     // Best-effort: system message + driver-participant swap in any DELIVERY thread.
     await this.messaging.onDeliveryEvent(deliveryId, action === 'REASSIGN' ? 'Delivery reassigned to a new driver.' : 'A driver was assigned.', e.profile.userId);
     return this.get(deliveryId);

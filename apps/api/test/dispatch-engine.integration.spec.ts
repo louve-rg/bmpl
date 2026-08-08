@@ -18,6 +18,7 @@ import { DispatchEngineService } from '../src/dispatch/dispatch-engine.service';
 
 let ctx: TestContext;
 let engine: DispatchEngineService;
+let adminCookies: string[];
 let categoryId: string;
 let seq = 0;
 const uniq = () => `${Date.now()}_${(seq += 1)}`;
@@ -179,9 +180,10 @@ beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
   await seedRoles(ctx.prisma);
-  // A super admin must exist for the app to behave normally, but these tests
-  // drive the engine and driver endpoints directly — no admin session needed.
-  await seedSuperAdmin(ctx.prisma);
+  const admin = await seedSuperAdmin(ctx.prisma);
+  const login = await request(ctx.server).post('/api/auth/login').send({ email: admin.email, password: admin.password });
+  expect(login.status).toBe(201);
+  adminCookies = cookiesOf(login);
   const cat = await ctx.prisma.category.create({ data: { name: `Cat ${uniq()}`, slug: `cat-${uniq()}`, isActive: true } });
   categoryId = cat.id;
   engine = ctx.app.get(DispatchEngineService);
@@ -466,5 +468,121 @@ describe('automatic dispatch — earnings safety', () => {
       where: { driverProfileId: a.driverProfileId },
     });
     expect(earnings).toHaveLength(0);
+  });
+});
+
+describe('conversation membership — authorization model (M17 §4)', () => {
+  /**
+   * M17 specifies participants are "added on access": you join a delivery
+   * conversation by taking part in it, not by being named on a row somewhere.
+   *
+   * Automatic dispatch makes that distinction matter. One delivery may be offered
+   * to up to dispatchMaxOffers drivers in turn. If assignment enrolled them, every
+   * driver who ignored an offer would keep permanent read access to a customer's
+   * thread — a set that grows on its own, with no act by the driver and no way for
+   * the customer to see who is in it.
+   */
+  const conversationsFor = (deliveryId: string) =>
+    ctx.prisma.conversation.findMany({
+      where: { contextType: 'DELIVERY', contextId: deliveryId },
+      include: { participants: true },
+    });
+
+  it('does NOT enrol a driver who was only offered the job', async () => {
+    const vendor = await makeVendor();
+    const { deliveryId } = await readyDelivery(vendor);
+    const offered = await makeDriver();
+
+    expect((await engine.dispatch(deliveryId)).result).toBe('ASSIGNED');
+
+    // Offered, not accepted: no thread, and therefore no membership.
+    const convs = await conversationsFor(deliveryId);
+    const memberships = convs.flatMap((c) => c.participants).filter((p) => p.userId === offered.userId);
+    expect(memberships).toHaveLength(0);
+  });
+
+  it('enrols the driver on acceptance, and both threads open automatically', async () => {
+    const vendor = await makeVendor();
+    const { deliveryId } = await readyDelivery(vendor);
+    const driver = await makeDriver();
+    await engine.dispatch(deliveryId);
+
+    await post(driver.cookies, `driver/jobs/${deliveryId}/accept`).expect(201);
+
+    const convs = await conversationsFor(deliveryId);
+    // Part 11 still holds: no manual setup, both pairings exist.
+    expect(convs.map((c) => c.pairing).sort()).toEqual(['CUSTOMER_DRIVER', 'VENDOR_DRIVER']);
+    for (const c of convs) {
+      const me = c.participants.find((p) => p.userId === driver.userId);
+      expect(me, `driver missing from ${c.pairing}`).toBeTruthy();
+      expect(me!.canSend).toBe(true);
+    }
+  });
+
+  it('leaves no membership behind when an offer expires and moves on', async () => {
+    // The exact shape of the production finding: a driver who never responded
+    // must not be left holding read access to someone else's delivery.
+    const vendor = await makeVendor();
+    const { deliveryId } = await readyDelivery(vendor);
+    const ignored = await makeDriver();
+    await engine.dispatch(deliveryId);
+
+    const next = await makeDriver();
+    await ctx.prisma.orderDelivery.update({
+      where: { id: deliveryId },
+      data: { offerExpiresAt: new Date(Date.now() - 1000) },
+    });
+    await engine.sweepExpiredOffers();
+    await post(next.cookies, `driver/jobs/${deliveryId}/accept`).expect(201);
+
+    const convs = await conversationsFor(deliveryId);
+    const stale = convs.flatMap((c) => c.participants).filter((p) => p.userId === ignored.userId);
+    expect(stale).toHaveLength(0);
+    // And the driver who actually took the job is in.
+    const active = convs.flatMap((c) => c.participants).filter((p) => p.userId === next.userId);
+    expect(active.length).toBeGreaterThan(0);
+  });
+
+  it('a driver who declined cannot read the conversation', async () => {
+    const vendor = await makeVendor();
+    const { deliveryId } = await readyDelivery(vendor);
+    const decliner = await makeDriver();
+    await engine.dispatch(deliveryId);
+
+    const taker = await makeDriver();
+    await post(decliner.cookies, `driver/jobs/${deliveryId}/decline`, { reason: 'no' }).expect(201);
+    await post(taker.cookies, `driver/jobs/${deliveryId}/accept`).expect(201);
+
+    const conv = (await conversationsFor(deliveryId)).find((c) => c.pairing === 'CUSTOMER_DRIVER')!;
+    // 404, not 403 — a non-participant should not learn the thread exists.
+    await request(ctx.server).get(`/api/conversations/${conv.id}`).set('Cookie', decliner.cookies).expect(404);
+    await request(ctx.server).get(`/api/conversations/${conv.id}`).set('Cookie', taker.cookies).expect(200);
+  });
+
+  it('KEEPS M17 retention: a driver who accepted keeps read but loses send after reassignment', async () => {
+    // This is the retention the spec DOES intend, and the fix must not remove it —
+    // a driver who genuinely worked the delivery keeps their history.
+    const vendor = await makeVendor();
+    const { deliveryId } = await readyDelivery(vendor);
+    const first = await makeDriver();
+    await engine.dispatch(deliveryId);
+    await post(first.cookies, `driver/jobs/${deliveryId}/accept`).expect(201);
+
+    const conv = (await conversationsFor(deliveryId)).find((c) => c.pairing === 'CUSTOMER_DRIVER')!;
+    await post(first.cookies, `conversations/${conv.id}/messages`, { body: 'On my way' }).expect(201);
+
+    const second = await makeDriver();
+    await post(adminCookies, `admin/deliveries/${deliveryId}/reassign`, {
+      driverProfileId: second.driverProfileId,
+      vehicleId: second.vehicleId,
+      reason: 'swap',
+    }).expect(201);
+    await post(second.cookies, `driver/jobs/${deliveryId}/accept`).expect(201);
+
+    // Previous driver: history preserved, sending refused.
+    await request(ctx.server).get(`/api/conversations/${conv.id}`).set('Cookie', first.cookies).expect(200);
+    await post(first.cookies, `conversations/${conv.id}/messages`, { body: 'still here?' }).expect(403);
+    // Current driver can send.
+    await post(second.cookies, `conversations/${conv.id}/messages`, { body: 'took over' }).expect(201);
   });
 });
