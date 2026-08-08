@@ -89,6 +89,7 @@ export class DispatchEngineService {
         readyForDispatchAt: true,
         vendorOrder: {
           select: {
+            status: true,
             order: {
               select: { orderNumber: true, addresses: { select: { district: true } } },
             },
@@ -103,8 +104,20 @@ export class DispatchEngineService {
     if (delivery.status !== 'PENDING_ASSIGNMENT' && delivery.status !== 'DRIVER_DECLINED') {
       return { result: 'SKIPPED', reason: `delivery is ${delivery.status}` };
     }
+    // TWO independent checks on the same fact, deliberately. readyForDispatchAt
+    // is a timestamp that a migration or a manual fix can get wrong — and did:
+    // an over-broad backfill once made every unassigned delivery look dispatchable
+    // and offered live, unprepared orders to a driver the moment dispatch was
+    // enabled. The vendor order's own status is the authoritative statement that
+    // the goods are packed, so the engine now requires both to agree.
     if (!delivery.readyForDispatchAt) {
       return { result: 'SKIPPED', reason: 'vendor has not marked the order ready' };
+    }
+    if (delivery.vendorOrder.status !== 'READY_FOR_PICKUP') {
+      return {
+        result: 'SKIPPED',
+        reason: `vendor order is ${delivery.vendorOrder.status}, not ready for collection`,
+      };
     }
     if (delivery.offerCount >= cfg.maxOffers) {
       await this.markExhausted(deliveryId, delivery.offerCount);
