@@ -369,7 +369,28 @@ function AvailabilityControl({
         <p className="text-sm text-slate-500">Your driver role is suspended, so availability can&rsquo;t be changed.</p>
       ) : (
         <>
-          <div className="inline-flex overflow-hidden rounded-bmpl-md border border-slate-200" role="group" aria-label="Set availability">
+          {/* Blockers ABOVE the control, not as a footnote under a greyed-out
+              button. A driver who cannot start their shift needs to know what to
+              fix, and a disabled button with no visible cause reads as a bug. */}
+          {!eligibility.canGoOnline && eligibility.reasons.length > 0 && (
+            <Alert tone="warning" title="You can’t go online yet" className="mb-3">
+              <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                {eligibility.reasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs">
+                Fix these below and this updates straight away — no need to sign out.
+              </p>
+            </Alert>
+          )}
+          {/* Full width and stacked on phones: this is the control a driver uses
+              most, one-handed, and 36px segments are too small to hit reliably. */}
+          <div
+            className="flex w-full overflow-hidden rounded-bmpl-md border border-slate-200"
+            role="group"
+            aria-label="Set availability"
+          >
             {options.map((o, i) => {
               const active = current === o.value;
               const disabled = busy || (o.value === 'ONLINE' && !eligibility.canGoOnline);
@@ -379,8 +400,9 @@ function AvailabilityControl({
                   type="button"
                   disabled={disabled}
                   aria-pressed={active}
+                  title={disabled && o.value === 'ONLINE' ? eligibility.reasons.join('; ') : undefined}
                   onClick={() => setAvailability(o.value)}
-                  className={`px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`min-h-[44px] flex-1 px-4 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                     i > 0 ? 'border-l border-slate-200' : ''
                   } ${active ? 'bg-belize-blue text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
                 >
@@ -389,9 +411,6 @@ function AvailabilityControl({
               );
             })}
           </div>
-          {!eligibility.canGoOnline && eligibility.reasons.length > 0 && (
-            <p className="mt-2 text-xs text-amber-600">Can&rsquo;t go online: {eligibility.reasons.join('; ')}</p>
-          )}
         </>
       )}
     </Card>

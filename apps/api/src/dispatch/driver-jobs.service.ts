@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   DELIVERY_PIN_MAX_ATTEMPTS,
   DELIVERY_STATUS_LABELS,
@@ -110,35 +110,72 @@ export class DriverJobService {
   // ---- transitions -------------------------------------------------------
 
   async accept(actor: Actor, deliveryId: string) {
-    const { d } = await this.ownedDelivery(actor.userId, deliveryId);
+    const { d, profileId } = await this.ownedDelivery(actor.userId, deliveryId);
     if (d.status === 'DRIVER_ACCEPTED') return this.core.serialize(d, 'DRIVER'); // idempotent
     this.core.assertAction('ACCEPT', d.status);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.orderDelivery.update({ where: { id: deliveryId }, data: { status: 'DRIVER_ACCEPTED', acceptedAt: new Date() } });
+
+    const won = await this.prisma.$transaction(async (tx) => {
+      // Conditional write, NOT an unconditional update by id. Automatic dispatch
+      // introduced a second writer: the sweeper can expire this offer and hand the
+      // delivery to another driver between ownedDelivery's read above and this
+      // write. An unconditional update would then mark the delivery ACCEPTED while
+      // it belongs to a driver who never accepted it, and this driver would get a
+      // 404 on the job they were just told they had.
+      //
+      // Re-asserting status AND ownership inside the same statement makes the
+      // database the arbiter: exactly one of the two racers updates a row.
+      const claimed = await tx.orderDelivery.updateMany({
+        where: { id: deliveryId, status: 'ASSIGNED', assignedDriverProfileId: profileId },
+        // Clearing offerExpiresAt takes the job out of the sweeper's reach; the
+        // sweeper also filters on acceptedAt, so this is belt and braces.
+        data: { status: 'DRIVER_ACCEPTED', acceptedAt: new Date(), offerExpiresAt: null },
+      });
+      if (claimed.count === 0) return false;
+
       await tx.deliveryAssignment.updateMany({ where: { orderDeliveryId: deliveryId, status: 'ACTIVE' }, data: { status: 'ACCEPTED', respondedAt: new Date() } });
       await this.core.appendTimeline(tx, deliveryId, { fromStatus: 'ASSIGNED', toStatus: 'DRIVER_ACCEPTED', event: 'ACCEPT', actorRole: 'DRIVER', actorUserId: actor.userId });
       await this.core.auditTransition('ACCEPT', actor.userId, deliveryId, undefined, tx);
       await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId], { title: 'Driver accepted', body: `Your driver accepted the delivery for order ${d.vendorOrder.order.orderNumber}.`, data: { deliveryId } }, tx);
+      return true;
     });
+
+    if (!won) {
+      throw new ConflictException(
+        'This delivery is no longer available — the offer expired or was passed to another driver.',
+      );
+    }
     return this.getJob(actor.userId, deliveryId);
   }
 
   async decline(actor: Actor, deliveryId: string, dto: DeclineJobInput) {
-    const { d } = await this.ownedDelivery(actor.userId, deliveryId);
+    const { d, profileId } = await this.ownedDelivery(actor.userId, deliveryId);
     this.core.assertAction('DECLINE', d.status);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.orderDelivery.update({
-        where: { id: deliveryId },
+    const released = await this.prisma.$transaction(async (tx) => {
+      // Same optimistic guard as accept: if the sweeper already expired this offer
+      // and moved on, declining must not stamp DRIVER_DECLINED over the next
+      // driver's live assignment.
+      const cleared = await tx.orderDelivery.updateMany({
+        where: { id: deliveryId, status: 'ASSIGNED', assignedDriverProfileId: profileId },
         // Clear the current-driver denormalization so the delivery returns to the
         // dispatch pool; assignment history is preserved on the DeliveryAssignment row.
-        data: { status: 'DRIVER_DECLINED', declinedAt: new Date(), declineReason: dto.reason, assignedDriverProfileId: null, assignedVehicleId: null },
+        data: { status: 'DRIVER_DECLINED', declinedAt: new Date(), declineReason: dto.reason, assignedDriverProfileId: null, assignedVehicleId: null, offerExpiresAt: null },
       });
+      if (cleared.count === 0) return false;
       await tx.deliveryAssignment.updateMany({ where: { orderDeliveryId: deliveryId, status: { in: ['ACTIVE', 'ACCEPTED'] } }, data: { status: 'DECLINED', respondedAt: new Date(), endedAt: new Date(), declineReason: dto.reason } });
       await this.core.appendTimeline(tx, deliveryId, { fromStatus: 'ASSIGNED', toStatus: 'DRIVER_DECLINED', event: 'DECLINE', actorRole: 'DRIVER', actorUserId: actor.userId, note: dto.reason });
       await this.core.auditTransition('DECLINE', actor.userId, deliveryId, { reason: dto.reason }, tx);
-      // Notify the admin who assigned so they can reassign.
-      await this.core.notify([d.assignedByUserId, d.vendorOrder.vendorProfile.userId], { title: 'Driver declined', body: `A driver declined the delivery for order ${d.vendorOrder.order.orderNumber}. Reassignment needed.`, data: { deliveryId } }, tx);
+      // The vendor is told; the admin who assigned is told only when there WAS
+      // one. Under automatic dispatch assignedByUserId is null and the engine
+      // re-offers below, so there is nothing for an admin to act on.
+      await this.core.notify([d.assignedByUserId, d.vendorOrder.vendorProfile.userId], { title: 'Driver declined', body: `A driver declined the delivery for order ${d.vendorOrder.order.orderNumber}. Finding another driver.`, data: { deliveryId } }, tx);
+      return true;
     });
+
+    if (!released) {
+      throw new ConflictException(
+        'This delivery is no longer yours — the offer expired or was passed to another driver.',
+      );
+    }
     // Re-offer immediately rather than waiting for the sweeper's next pass. A
     // decline is a known, instantaneous event — making the customer's order sit
     // idle for a tick because a driver was honest enough to decline promptly is

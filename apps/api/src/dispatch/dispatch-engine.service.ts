@@ -185,16 +185,20 @@ export class DispatchEngineService {
     });
 
     let reassigned = 0;
+    let expired = 0;
     for (const d of stale) {
       try {
-        await this.expireOffer(d.id, d.assignedDriverProfileId);
+        // The driver may have accepted between the query and here — expireOffer
+        // reports that by returning false, and we leave their job alone.
+        if (!(await this.expireOffer(d.id, d.assignedDriverProfileId))) continue;
+        expired += 1;
         const outcome = await this.dispatch(d.id);
         if (outcome.result === 'ASSIGNED') reassigned += 1;
       } catch (err) {
         this.logger.error(`offer sweep failed for ${d.id}: ${String(err)}`);
       }
     }
-    return { expired: stale.length, reassigned };
+    return { expired, reassigned };
   }
 
   /** Pick up deliveries that are ready but unheld — a safety net for missed triggers. */
@@ -287,14 +291,14 @@ export class DispatchEngineService {
   }
 
   /** Release a lapsed offer so the delivery is dispatchable again. */
-  private async expireOffer(deliveryId: string, driverProfileId: string | null): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await tx.deliveryAssignment.updateMany({
-        where: { orderDeliveryId: deliveryId, status: 'ACTIVE' },
-        data: { status: 'DECLINED', endedAt: new Date(), endReason: 'Offer expired' },
-      });
-      await tx.orderDelivery.update({
-        where: { id: deliveryId },
+  private async expireOffer(deliveryId: string, driverProfileId: string | null): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      // Conditional, and ordered so the delivery is claimed FIRST. The driver may
+      // be accepting this very offer between the sweep query and this write; if
+      // they got there first the row no longer matches and the sweep backs off,
+      // rather than expiring a job somebody is already driving to collect.
+      const expired = await tx.orderDelivery.updateMany({
+        where: { id: deliveryId, status: 'ASSIGNED', acceptedAt: null },
         data: {
           status: 'DRIVER_DECLINED',
           declinedAt: new Date(),
@@ -304,6 +308,11 @@ export class DispatchEngineService {
           assignedVehicleId: null,
         },
       });
+      if (expired.count === 0) return false;
+      await tx.deliveryAssignment.updateMany({
+        where: { orderDeliveryId: deliveryId, status: 'ACTIVE' },
+        data: { status: 'DECLINED', endedAt: new Date(), endReason: 'Offer expired' },
+      });
       await this.core.appendTimeline(tx, deliveryId, {
         fromStatus: 'ASSIGNED',
         toStatus: 'DRIVER_DECLINED',
@@ -311,11 +320,11 @@ export class DispatchEngineService {
         actorRole: 'SYSTEM',
         note: 'The driver did not respond in time.',
       });
-    });
-    await this.audit.record({
-      action: 'DELIVERY_OFFER_EXPIRED',
-      actorId: null,
-      newValue: { deliveryId, driverProfileId },
+      await this.audit.record(
+        { action: 'DELIVERY_OFFER_EXPIRED', actorId: null, newValue: { deliveryId, driverProfileId } },
+        tx,
+      );
+      return true;
     });
   }
 
