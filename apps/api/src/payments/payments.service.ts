@@ -285,6 +285,33 @@ export class PaymentsService {
         }
         await tx.order.update({ where: { id: payment.orderId }, data: { status: 'CANCELLED', reservationsReleasedAt: new Date() } });
         await tx.vendorOrder.updateMany({ where: { orderId: payment.orderId }, data: { status: 'CANCELLED' } });
+        // Cancel the DELIVERIES too. Cancelling the order and its vendor orders
+        // used to leave any attached delivery sitting in PENDING_ASSIGNMENT
+        // forever: an order nobody would ever fulfil, still presenting itself as
+        // work awaiting a driver. They accumulated silently in the dispatch queue,
+        // and one of them was offered to a driver during M26.3 verification.
+        //
+        // Scoped to deliveries not yet collected: once a driver has physically
+        // picked goods up, cancelling the row would misrepresent what happened.
+        // Payment authorization failure happens long before pickup, so in practice
+        // this always matches — the guard is here so a future caller cannot use
+        // this path to erase a delivery already in progress.
+        await tx.orderDelivery.updateMany({
+          where: {
+            vendorOrder: { orderId: payment.orderId },
+            status: { in: ['PENDING_ASSIGNMENT', 'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_DECLINED'] },
+          },
+          data: {
+            status: 'CANCELLED',
+            cancelledAt: new Date(),
+            cancellationReason: 'Order cancelled — payment authorization failed',
+            // Take it out of the dispatch engine's reach as well as the queue.
+            readyForDispatchAt: null,
+            offerExpiresAt: null,
+            assignedDriverProfileId: null,
+            assignedVehicleId: null,
+          },
+        });
         await this.audit.record({ action: 'ORDER_RESERVATION_RELEASED', actorId: actor.userId, newValue: { orderId: payment.orderId, reason: 'authorization_failed' } }, tx);
       }
 
