@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { api, type ApiError } from '../../../../lib/api';
+import { DriverBreadcrumb } from '../../../../components/driver/DriverBreadcrumb';
 import {
   Card,
   PageHeader,
@@ -97,13 +97,10 @@ export default function DriverEarningsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <Link href="/dashboard/driver" className="text-sm font-medium text-belize-blue hover:underline">
-        ← Driver
-      </Link>
+      <DriverBreadcrumb current="My Earnings" />
 
       <PageHeader
-        eyebrow="Delivery driver"
-        title="Earnings"
+        title="My Earnings"
         description="Your delivery earnings and how each one was calculated. Balances are read-only."
       />
 

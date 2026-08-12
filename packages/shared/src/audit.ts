@@ -59,6 +59,9 @@ export const AUDIT_ACTIONS = [
   'DRIVER_AVAILABILITY_CHANGED',
   'DRIVER_VEHICLE_APPROVED',
   'DRIVER_VEHICLE_REJECTED',
+  // The driver's own queue ordering. Recorded because it is a driver-initiated
+  // write against delivery rows, even though it changes only display sequence.
+  'DRIVER_QUEUE_REORDERED',
   // ---- Logistics: Dispatch & Delivery Execution (Phase 4 · M15) ----
   'DELIVERY_ASSIGNED',
   'DELIVERY_REASSIGNED',

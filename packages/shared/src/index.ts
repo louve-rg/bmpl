@@ -15,6 +15,8 @@ export * from './reviews';
 export * from './driver';
 export * from './dispatch';
 export * from './dispatch-ranking';
+export * from './driver-queue';
+export * from './route-optimizer';
 export * from './delivery-progress';
 export * from './messaging';
 export * from './engagement';

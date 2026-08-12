@@ -45,6 +45,12 @@ export function notificationHref(
   const orderId = str(d.orderId);
   const vehicleId = str(d.vehicleId);
   const conversationId = str(d.conversationId);
+  const earningId = str(d.earningId);
+  // A DELIVERY_DRIVER role application. Keyed on roleCode, not on the presence of
+  // an applicationId: job applications carry that key too, and routing a Belize
+  // Connect notification to the driver documents page would be worse than not
+  // routing it at all.
+  const isDriverApplication = str(d.roleCode) === 'DELIVERY_DRIVER';
 
   // Messaging is unambiguous across audiences — the thread is the thread.
   if (conversationId) return `/dashboard/messages?conversation=${conversationId}`;
@@ -53,7 +59,18 @@ export function notificationHref(
     // A driver's delivery notification is always about work they must act on,
     // so it opens the job itself rather than a list they then have to search.
     if (deliveryId) return `/dashboard/driver/jobs/${deliveryId}`;
-    if (vehicleId) return '/dashboard/driver/profile?section=vehicle';
+    // A vehicle approval/rejection is about one vehicle, and the vehicle profile
+    // is where its status and rejection reason live.
+    if (vehicleId) return '/dashboard/driver/vehicles';
+    // Money events open the earnings ledger. There is no per-earning page, so a
+    // specific earningId still resolves to the list that contains it rather than
+    // to a route that would 404.
+    if (earningId || n.category === 'PAYMENT') return '/dashboard/driver/earnings';
+    // A document problem (expired licence, missing registration) and an
+    // application decision are both handled from Application & Documents.
+    if (isDriverApplication || n.category === 'ROLE_APPLICATION') return '/dashboard/driver/documents';
+    // Everything else about the account — profile photo moderation above all —
+    // belongs on the driver profile, where the photo and its status are shown.
     if (n.category === 'ACCOUNT') return '/dashboard/driver/profile';
     return null;
   }
@@ -90,6 +107,13 @@ export function audienceForRoles(
 
   if (isDriverRole && n.category === 'DELIVERY' && str(d.deliveryId)) return 'DRIVER';
   if (isDriverRole && n.category === 'ACCOUNT' && str(d.vehicleId)) return 'DRIVER';
+  // "Earning credited" is filed under DELIVERY and carries only an earningId, so
+  // it fell through to CUSTOMER and opened nothing. Money a driver was paid is
+  // unambiguously driver business.
+  if (isDriverRole && str(d.earningId)) return 'DRIVER';
+  // A decision on the DELIVERY_DRIVER role application belongs to the driver even
+  // while the role itself is still PENDING — which is precisely when these arrive.
+  if (str(d.roleCode) === 'DELIVERY_DRIVER') return 'DRIVER';
   if (isVendorRole && str(d.vendorOrderId)) return 'VENDOR';
   return 'CUSTOMER';
 }

@@ -1,13 +1,24 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
+  canReorderQueueItem,
   DELIVERY_PIN_MAX_ATTEMPTS,
   DELIVERY_STATUS_LABELS,
+  DRIVER_OPEN_STATUSES,
+  DRIVER_VIEW_STATUSES,
+  driverViewForStatus,
   isAllowedProductImageMime,
   MAX_PRODUCT_IMAGE_BYTES,
+  nextDriverAction,
+  queueStopKind,
+  recommendRoute,
+  reorderBlockedReason,
+  ROUTE_ESTIMATE_DISCLOSURE,
   STORAGE_PREFIX,
   type DeliveryStatus,
+  type DriverDeliveryView,
+  type LocationInput,
 } from '@bmpl/shared';
-import type { ConfirmDeliveryInput, ConfirmPickupInput, DeclineJobInput, PodConfirmInput } from '@bmpl/validation';
+import type { ConfirmDeliveryInput, ConfirmPickupInput, DeclineJobInput, PodConfirmInput, ReorderDriverQueueInput } from '@bmpl/validation';
 import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
@@ -24,6 +35,43 @@ interface Actor {
   ipAddress?: string | null;
   sessionId?: string | null;
 }
+
+/**
+ * Rows needed to summarize a job in a list.
+ *
+ * Deliberately narrow. A list is read by a driver who has not necessarily
+ * accepted the work yet, so it carries the destination AREA (city + district) and
+ * never the customer's name, phone or street address — those stay on the job
+ * detail, behind the ownership check. Coordinates are selected because the route
+ * optimizer needs them, and are consumed server-side only; nothing in
+ * `summarize` puts them in a response.
+ */
+const LIST_INCLUDE = {
+  vendorOrder: {
+    select: {
+      orderNumber: true,
+      itemCount: true,
+      vendorProfile: {
+        select: {
+          businessName: true,
+          locations: {
+            orderBy: { isPrimary: 'desc' as const },
+            take: 1,
+            select: { city: true, district: true, latitude: true, longitude: true },
+          },
+        },
+      },
+      order: {
+        select: {
+          orderNumber: true,
+          addresses: { select: { city: true, district: true, latitude: true, longitude: true } },
+        },
+      },
+    },
+  },
+} satisfies Prisma.OrderDeliveryInclude;
+
+type DeliveryListRow = Prisma.OrderDeliveryGetPayload<{ include: typeof LIST_INCLUDE }>;
 
 /**
  * Driver job feed + operational transitions. A driver only ever sees/acts on
@@ -64,47 +112,236 @@ export class DriverJobService {
 
   // ---- reads -------------------------------------------------------------
 
-  async listJobs(userId: string, scope: 'active' | 'completed' | 'all' = 'active') {
+  /**
+   * The driver's job feed, narrowed to one of the four driver-facing views.
+   *
+   * The views are a PRESENTATION mapping over the existing state machine (see
+   * `driverViewForStatus` in @bmpl/shared) — no status was added or reinterpreted
+   * to produce them, and dispatch is untouched. `available` and `assigned` both
+   * draw on ASSIGNED because that is the only status an offer has; they are split
+   * on `acceptedAt`, in the database rather than in the mapper, so a driver
+   * cannot be shown an offer as if it were already theirs.
+   *
+   * `active`/`completed` keep their existing meanings for any caller still using
+   * them; the legacy sense of `active` (every open job, offers included) is
+   * preserved as `open`.
+   */
+  async listJobs(userId: string, scope: DriverDeliveryView | 'open' | 'all' = 'open') {
     const profileId = await this.myProfileId(userId);
-    const active: DeliveryStatus[] = ['ASSIGNED', 'DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'];
-    const done: DeliveryStatus[] = ['DELIVERED'];
-    const where: Prisma.OrderDeliveryWhereInput = {
-      assignedDriverProfileId: profileId,
-      ...(scope === 'active' ? { status: { in: active } } : scope === 'completed' ? { status: { in: done } } : {}),
-    };
     const rows = await this.prisma.orderDelivery.findMany({
-      where,
-      orderBy: { assignedAt: 'desc' },
+      where: { assignedDriverProfileId: profileId, ...scopeFilter(scope) },
+      // Open work reads best oldest-first (the thing waiting longest is the thing
+      // to do); history reads best newest-first.
+      orderBy: scope === 'completed' ? { deliveredAt: 'desc' } : [{ driverQueuePosition: 'asc' }, { assignedAt: 'asc' }],
       take: 200,
-      include: {
-        vendorOrder: {
-          select: {
-            orderNumber: true,
-            itemCount: true,
-            vendorProfile: { select: { businessName: true } },
-            order: { select: { orderNumber: true, addresses: { select: { city: true, district: true } } } },
-          },
-        },
-      },
+      include: LIST_INCLUDE,
     });
-    return rows.map((d) => ({
-      id: d.id,
-      status: d.status,
-      statusLabel: DELIVERY_STATUS_LABELS[d.status],
-      orderNumber: d.vendorOrder.order.orderNumber,
-      vendor: d.vendorOrder.vendorProfile.businessName,
-      itemCount: d.vendorOrder.itemCount,
-      city: d.vendorOrder.order.addresses[0]?.city ?? null,
-      district: d.vendorOrder.order.addresses[0]?.district ?? null,
-      feeMinor: Number(d.feeMinor),
-      assignedAt: d.assignedAt,
-      deliveredAt: d.deliveredAt,
-    }));
+    return rows.map((d) => this.summarize(d));
+  }
+
+  /** How many jobs sit in each view — drives the tab badges in one round trip. */
+  async viewCounts(userId: string): Promise<Record<DriverDeliveryView, number>> {
+    const profileId = await this.myProfileId(userId);
+    const grouped = await this.prisma.orderDelivery.groupBy({
+      by: ['status', 'acceptedAt'],
+      where: {
+        assignedDriverProfileId: profileId,
+        status: { in: [...DRIVER_OPEN_STATUSES, 'DELIVERED'] as DeliveryStatus[] as never },
+      },
+      _count: { _all: true },
+    });
+    const counts: Record<DriverDeliveryView, number> = { available: 0, assigned: 0, active: 0, completed: 0 };
+    for (const row of grouped) {
+      const view = driverViewForStatus(row.status as DeliveryStatus, row.acceptedAt);
+      if (view) counts[view] += row._count._all;
+    }
+    return counts;
   }
 
   async getJob(userId: string, deliveryId: string) {
     const { d } = await this.ownedDelivery(userId, deliveryId);
     return this.core.serialize(d, 'DRIVER');
+  }
+
+  // ---- queue + route recommendation --------------------------------------
+
+  /**
+   * The driver's actionable queue, in their order, with a recommended order
+   * alongside it.
+   *
+   * Two orderings are returned rather than one: `position` is what the driver
+   * chose (or, absent a choice, arrival order), `recommendedPosition` is what the
+   * route optimizer suggests. Overwriting the driver's sequence with the
+   * computed one would be the platform quietly disagreeing with the person in
+   * the vehicle; showing both lets them take the suggestion or ignore it.
+   *
+   * Only ONE stop per delivery is fed to the optimizer — the store while the
+   * goods are still there, the customer once they have been collected. That is
+   * what makes the recommendation lifecycle-safe: a drop-off is not a candidate
+   * stop until its own pickup has actually happened, so no ordering can put it
+   * first. Coordinates are used server-side and never returned.
+   */
+  async queue(userId: string) {
+    const profileId = await this.myProfileId(userId);
+    const [rows, profile] = await Promise.all([
+      this.prisma.orderDelivery.findMany({
+        where: { assignedDriverProfileId: profileId, status: { in: DRIVER_OPEN_STATUSES as DeliveryStatus[] as never } },
+        orderBy: [{ driverQueuePosition: 'asc' }, { assignedAt: 'asc' }],
+        take: 50,
+        include: LIST_INCLUDE,
+      }),
+      this.prisma.driverProfile.findUnique({ where: { id: profileId }, select: { homeDistrict: true } }),
+    ]);
+
+    // Unaccepted offers are shown but not routed: the driver has not taken the
+    // job, so planning a route around it would be planning around work that may
+    // belong to someone else in ninety seconds.
+    const routable = rows.filter((d) => canReorderQueueItem(d.status, d.acceptedAt));
+    const route = recommendRoute(
+      routable.map((d) => ({
+        id: d.id,
+        location: this.stopLocation(d),
+        manualPosition: d.driverQueuePosition,
+      })),
+      // BMPL has no live driver GPS. The home district is the best legitimate
+      // proxy for a starting point, and it is the driver's own data.
+      profile?.homeDistrict ? { district: profile.homeDistrict } : null,
+    );
+    const legByDelivery = new Map(route.legs.map((l) => [l.id, l]));
+
+    const items = rows.map((d, i) => {
+      const leg = legByDelivery.get(d.id);
+      const stopKind = queueStopKind(d.status);
+      const pickup = d.vendorOrder.vendorProfile.locations[0] ?? null;
+      const dropoff = d.vendorOrder.order.addresses[0] ?? null;
+      return {
+        ...this.summarize(d),
+        position: i + 1,
+        recommendedPosition: leg?.position ?? null,
+        // What the driver is heading to right now, and roughly how far it is.
+        stopKind,
+        stopArea: stopKind === 'PICKUP' ? areaLabel(pickup) : areaLabel(dropoff),
+        legDistanceKm: leg?.legDistanceKm ?? null,
+        legMinutes: leg?.legMinutes ?? null,
+        estimatePrecision: leg?.precision ?? 'UNKNOWN',
+        nextAction: nextDriverAction(d.status, d.acceptedAt),
+        canReorder: canReorderQueueItem(d.status, d.acceptedAt),
+        reorderBlockedReason: reorderBlockedReason(d.status, d.acceptedAt),
+      };
+    });
+
+    return {
+      items,
+      route: {
+        totalDistanceKm: route.totalDistanceKm,
+        totalMinutes: route.totalMinutes,
+        precision: route.precision,
+        // Never presented as a live ETA — there is no traffic data behind it.
+        disclosure: ROUTE_ESTIMATE_DISCLOSURE[route.precision],
+        // The recommendation as an ordered list of delivery ids, so the UI can
+        // offer "use this order" as one action.
+        recommendedOrder: route.legs.map((l) => l.id),
+      },
+      // True when the driver's order already matches the recommendation — the UI
+      // uses it to hide the "use recommended order" action rather than offering
+      // a button that would change nothing.
+      followsRecommendation: items
+        .filter((i) => i.recommendedPosition != null)
+        .every((i, index) => i.recommendedPosition === index + 1),
+    };
+  }
+
+  /**
+   * Persist the driver's own queue order.
+   *
+   * This writes ONE column, `driverQueuePosition`, and touches nothing else. It
+   * cannot reassign a delivery, change a status, skip a pickup or affect
+   * settlement — every update re-asserts `assignedDriverProfileId` in its WHERE
+   * clause, so an id belonging to another driver matches no row and is reported
+   * rather than silently applied. Jobs the lifecycle pins in place (an unaccepted
+   * offer, a delivery being handed over) are rejected outright.
+   */
+  async reorderQueue(actor: Actor, dto: ReorderDriverQueueInput) {
+    const profileId = await this.myProfileId(actor.userId);
+    const ids = dto.deliveryIds;
+
+    // Load the caller's own open deliveries and validate the request against
+    // them. Anything not in this set is either someone else's or not orderable.
+    const owned = await this.prisma.orderDelivery.findMany({
+      where: { assignedDriverProfileId: profileId, status: { in: DRIVER_OPEN_STATUSES as DeliveryStatus[] as never } },
+      select: { id: true, status: true, acceptedAt: true },
+    });
+    const byId = new Map(owned.map((d) => [d.id, d]));
+
+    for (const id of ids) {
+      const row = byId.get(id);
+      // 404 rather than 403, consistent with ownedDelivery: a driver must not be
+      // able to probe which delivery ids exist by watching the error change.
+      if (!row) throw new NotFoundException('One of those deliveries is not in your queue.');
+      if (!canReorderQueueItem(row.status, row.acceptedAt)) {
+        throw new BadRequestException(reorderBlockedReason(row.status, row.acceptedAt) ?? 'That delivery cannot be reordered.');
+      }
+    }
+
+    await this.prisma.$transaction(
+      ids.map((id, i) =>
+        this.prisma.orderDelivery.updateMany({
+          // Ownership re-asserted in the write itself, not merely checked above:
+          // between the read and here an admin could have reassigned the job, and
+          // stamping a position onto another driver's delivery — even a harmless
+          // one — is a write we have no business making.
+          where: { id, assignedDriverProfileId: profileId },
+          data: { driverQueuePosition: i + 1 },
+        }),
+      ),
+    );
+
+    await this.audit.record({
+      action: 'DRIVER_QUEUE_REORDERED',
+      actorId: actor.userId,
+      ipAddress: actor.ipAddress ?? null,
+      sessionId: actor.sessionId ?? null,
+      newValue: { deliveryIds: ids },
+    });
+
+    return this.queue(actor.userId);
+  }
+
+  // ---- shaping -----------------------------------------------------------
+
+  private summarize(d: DeliveryListRow) {
+    const address = d.vendorOrder.order.addresses[0] ?? null;
+    const pickup = d.vendorOrder.vendorProfile.locations[0] ?? null;
+    return {
+      id: d.id,
+      status: d.status,
+      statusLabel: DELIVERY_STATUS_LABELS[d.status],
+      // The tab this row belongs under, computed once on the server so the UI
+      // cannot drift from the API about what "Active" means.
+      view: driverViewForStatus(d.status, d.acceptedAt),
+      orderNumber: d.vendorOrder.order.orderNumber,
+      vendor: d.vendorOrder.vendorProfile.businessName,
+      pickupArea: areaLabel(pickup),
+      itemCount: d.vendorOrder.itemCount,
+      city: address?.city ?? null,
+      district: address?.district ?? null,
+      feeMinor: Number(d.feeMinor),
+      assignedAt: d.assignedAt,
+      acceptedAt: d.acceptedAt,
+      deliveredAt: d.deliveredAt,
+      // Drives the accept/decline countdown on an outstanding offer.
+      offerExpiresAt: d.offerExpiresAt,
+      queuePosition: d.driverQueuePosition,
+    };
+  }
+
+  /** The location the driver is currently heading to for this delivery. */
+  private stopLocation(d: DeliveryListRow): LocationInput {
+    const target =
+      queueStopKind(d.status) === 'PICKUP'
+        ? d.vendorOrder.vendorProfile.locations[0]
+        : d.vendorOrder.order.addresses[0];
+    return { latitude: target?.latitude ?? null, longitude: target?.longitude ?? null, district: target?.district ?? null };
   }
 
   // ---- transitions -------------------------------------------------------
@@ -385,6 +622,42 @@ export class DriverJobService {
       throw new BadRequestException(locked ? 'Incorrect code. This delivery is now locked; ask an admin to verify.' : 'Incorrect code. Please try again.');
     }
   }
+}
+
+/**
+ * The status filter for a driver-facing view.
+ *
+ * `available` and `assigned` are the interesting pair: both narrow to statuses
+ * from DRIVER_VIEW_STATUSES, then split on `acceptedAt` IN THE QUERY. Doing the
+ * split in SQL rather than in a post-filter is what guarantees a driver's
+ * "Assigned" tab can never contain an offer they have not taken.
+ */
+function scopeFilter(scope: DriverDeliveryView | 'open' | 'all'): Prisma.OrderDeliveryWhereInput {
+  switch (scope) {
+    case 'available':
+      return { status: 'ASSIGNED', acceptedAt: null };
+    case 'assigned':
+      return {
+        OR: [
+          { status: 'ASSIGNED', acceptedAt: { not: null } },
+          { status: 'DRIVER_ACCEPTED' },
+        ],
+      };
+    case 'active':
+    case 'completed':
+      return { status: { in: DRIVER_VIEW_STATUSES[scope] as DeliveryStatus[] as never } };
+    case 'open':
+      return { status: { in: DRIVER_OPEN_STATUSES as DeliveryStatus[] as never } };
+    default:
+      return {};
+  }
+}
+
+/** "City, District" for a stored location, or null. Area only — never a street. */
+function areaLabel(loc: { city?: string | null; district?: string | null } | null | undefined): string | null {
+  if (!loc) return null;
+  const district = loc.district ? loc.district.replace(/_/g, ' ') : null;
+  return [loc.city, district].filter(Boolean).join(', ') || null;
 }
 
 /** Constant-time string comparison to avoid PIN timing leaks. */

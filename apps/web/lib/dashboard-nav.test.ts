@@ -4,11 +4,11 @@ import { approvedRoles, visibleRoleGroups, type HeldRole, type RoleGatedGroup } 
 
 const role = (roleCode: RoleCode, status = 'APPROVED'): HeldRole => ({ roleCode, status });
 
-/** Mirrors the real ROLE_GROUPS shape from the Sidebar (headings + required roles). */
+/** Mirrors the real ROLE_GROUPS shape from lib/dashboard-nav-items (headings + required roles). */
 const GROUPS: ReadonlyArray<RoleGatedGroup<string>> = [
   { heading: 'Belize Connect', items: ['Job Profile'], requires: ['JOB_SEEKER'] },
   { heading: 'Real Estate', items: ['Saved Properties'], requires: ['PROPERTY_OWNER', 'REAL_ESTATE_AGENT'] },
-  { heading: 'Driver', items: ['Driver Home'], requires: ['DELIVERY_DRIVER'] },
+  { heading: 'Driver', items: ['Driver Dashboard'], requires: ['DELIVERY_DRIVER'] },
   { heading: 'Vendor', items: ['My Store'], requires: ['VENDOR'] },
   { heading: 'Marketing', items: ['Promotions'], requires: ['VENDOR', 'EMPLOYER'] },
 ];

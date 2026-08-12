@@ -62,3 +62,20 @@ export const podConfirmSchema = z.object({
   photoKeys: z.array(storageKey).min(1).max(6),
 });
 export type PodConfirmInput = z.infer<typeof podConfirmSchema>;
+
+/**
+ * A driver's own ordering of their delivery queue.
+ *
+ * Ids only, in the order the driver wants to work them. The bound matches the
+ * queue read's `take: 50`, and duplicates are rejected here rather than in the
+ * service: the same delivery listed twice would write two positions for one row
+ * and leave the final order dependent on statement ordering.
+ */
+export const reorderDriverQueueSchema = z.object({
+  deliveryIds: z
+    .array(cuid)
+    .min(1, 'Nothing to reorder.')
+    .max(50)
+    .refine((ids) => new Set(ids).size === ids.length, 'A delivery cannot appear twice in the queue.'),
+});
+export type ReorderDriverQueueInput = z.infer<typeof reorderDriverQueueSchema>;

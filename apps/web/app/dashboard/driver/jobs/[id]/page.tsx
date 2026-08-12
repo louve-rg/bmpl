@@ -187,17 +187,17 @@ export default function DriverJobDetailPage() {
 
       <ActionPanel job={job} onDone={reload} />
 
-      <Card className="p-5 sm:p-6">
+      <Card className="p-4 sm:p-6">
         <h2 className="bmpl-eyebrow mb-3">Pickup location</h2>
         <PickupBlock pickup={job.pickupLocation} />
       </Card>
 
-      <Card className="p-5 sm:p-6">
+      <Card className="p-4 sm:p-6">
         <h2 className="bmpl-eyebrow mb-3">Delivery address</h2>
         <AddressBlock address={job.deliveryAddress} />
       </Card>
 
-      <Card className="p-5 sm:p-6">
+      <Card className="p-4 sm:p-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="bmpl-eyebrow">Items</h2>
           <span className="text-sm font-semibold text-belize-navy">Fee {money(job.feeMinor)}</span>
@@ -221,20 +221,20 @@ export default function DriverJobDetailPage() {
       </Card>
 
       {job.instructions && (
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">Delivery instructions</h2>
           <p className="text-sm text-slate-600">{job.instructions}</p>
         </Card>
       )}
 
       {job.vehicle && (job.vehicle.make || job.vehicle.model || job.vehicle.licencePlate) && (
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-3">Assigned vehicle</h2>
           <VehicleBlock vehicle={job.vehicle} />
         </Card>
       )}
 
-      <Card className="p-5 sm:p-6">
+      <Card className="p-4 sm:p-6">
         <h2 className="bmpl-eyebrow mb-3">Timeline</h2>
         <Timeline entries={job.timeline} />
       </Card>
@@ -337,7 +337,7 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
   switch (job.status) {
     case 'ASSIGNED':
       return (
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">New delivery request</h2>
           <p className="mb-4 text-sm text-slate-600">Accept this job to start the delivery, or decline it with a reason.</p>
           {errAlert}
@@ -347,7 +347,7 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
 
     case 'DRIVER_ACCEPTED':
       return (
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">Confirm pickup</h2>
           <p className="mb-4 text-sm text-slate-600">Enter the pickup PIN the vendor gives you at hand-off.</p>
           {errAlert}
@@ -365,11 +365,12 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
 
     case 'PICKUP_CONFIRMED':
       return (
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">On the way</h2>
           <p className="mb-4 text-sm text-slate-600">Start the delivery once you&rsquo;re heading to the customer.</p>
           {errAlert}
           <Button
+            className="w-full sm:w-auto"
             disabled={busy}
             onClick={() => run(async () => {
               await api.post(`/driver/jobs/${job.id}/in-transit`);
@@ -383,11 +384,12 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
 
     case 'IN_TRANSIT':
       return (
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">In transit</h2>
           <p className="mb-4 text-sm text-slate-600">Let the customer know you&rsquo;re almost there.</p>
           {errAlert}
           <Button
+            className="w-full sm:w-auto"
             disabled={busy}
             onClick={() => run(async () => {
               await api.post(`/driver/jobs/${job.id}/arriving`);
@@ -401,7 +403,7 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
 
     case 'ARRIVING':
       return (
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">Complete delivery</h2>
           <p className="mb-4 text-sm text-slate-600">Enter the delivery PIN the recipient gives you and confirm the drop-off.</p>
           {errAlert}
@@ -411,7 +413,7 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
 
     case 'DELIVERED':
       return (
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-3">Delivery completed</h2>
           <Alert tone="success" className="mb-4">
             This delivery is complete.
@@ -512,11 +514,11 @@ function AssignedActions({
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
-      <Button disabled={busy} onClick={accept}>
+    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+      <Button className="w-full sm:w-auto" disabled={busy} onClick={accept}>
         {busy ? <Spinner className="h-4 w-4" /> : 'Accept'}
       </Button>
-      <Button type="button" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
+      <Button className="w-full sm:w-auto" type="button" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
         Decline
       </Button>
     </div>
@@ -556,7 +558,7 @@ function PinAction({
           required
         />
       </Field>
-      <Button type="submit" disabled={busy || pin.trim().length === 0}>
+      <Button type="submit" className="w-full sm:w-auto" disabled={busy || pin.trim().length === 0}>
         {busy ? <Spinner className="h-4 w-4" /> : label}
       </Button>
     </form>
@@ -666,7 +668,7 @@ function CompleteDeliveryForm({
         <p className="mt-1 text-xs text-slate-400">Optional</p>
       </div>
 
-      <Button type="submit" disabled={busy || photoBusy || pin.trim().length === 0 || recipientName.trim().length === 0}>
+      <Button type="submit" className="w-full sm:w-auto" disabled={busy || photoBusy || pin.trim().length === 0 || recipientName.trim().length === 0}>
         {busy ? <Spinner className="h-4 w-4" /> : 'Complete delivery'}
       </Button>
     </form>

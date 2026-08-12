@@ -9,14 +9,32 @@ describe('notificationHref — driver', () => {
     expect(asDriver({ deliveryId: 'del_1' })).toBe('/dashboard/driver/jobs/del_1');
   });
 
-  it('sends a vehicle decision to the vehicle section', () => {
+  // Was '/dashboard/driver/profile?section=vehicle', which had no page behind it —
+  // a driver clicking "Vehicle approved" landed on a 404. Vehicles now have their
+  // own route, so the target is a page that exists.
+  it('sends a vehicle decision to the vehicle profile', () => {
     expect(notificationHref({ category: 'ACCOUNT', data: { vehicleId: 'v1' } }, 'DRIVER')).toBe(
-      '/dashboard/driver/profile?section=vehicle',
+      '/dashboard/driver/vehicles',
     );
   });
 
   it('falls back to the driver profile for other account events', () => {
     expect(notificationHref({ category: 'ACCOUNT', data: {} }, 'DRIVER')).toBe('/dashboard/driver/profile');
+  });
+
+  it('opens the earnings ledger for a credited earning', () => {
+    expect(asDriver({ earningId: 'e1' })).toBe('/dashboard/driver/earnings');
+    expect(notificationHref({ category: 'PAYMENT', data: {} }, 'DRIVER')).toBe('/dashboard/driver/earnings');
+  });
+
+  it('opens Application & Documents for a driver application decision', () => {
+    expect(
+      notificationHref({ category: 'ROLE_APPLICATION', data: { roleCode: 'DELIVERY_DRIVER', applicationId: 'a1' } }, 'DRIVER'),
+    ).toBe('/dashboard/driver/documents');
+  });
+
+  it('prefers the delivery over anything else in the same payload', () => {
+    expect(asDriver({ deliveryId: 'd1', earningId: 'e1', vehicleId: 'v1' })).toBe('/dashboard/driver/jobs/d1');
   });
 });
 
@@ -89,5 +107,25 @@ describe('audienceForRoles', () => {
     expect(audienceForRoles(['CUSTOMER'], { category: 'DELIVERY', data: { deliveryId: 'd1' } })).toBe(
       'CUSTOMER',
     );
+  });
+
+  it('treats a credited delivery earning as driver business', () => {
+    // Settlement files this under DELIVERY with only an earningId, so it used to
+    // fall through to CUSTOMER and resolve to no target at all.
+    expect(audienceForRoles(['CUSTOMER', 'DELIVERY_DRIVER'], { category: 'DELIVERY', data: { earningId: 'e1' } })).toBe(
+      'DRIVER',
+    );
+  });
+
+  it('routes a driver-application decision to the driver even before approval', () => {
+    // These arrive precisely when DELIVERY_DRIVER is not yet an approved role, so
+    // gating on the held roles would send the applicant nowhere.
+    expect(
+      audienceForRoles(['CUSTOMER'], { category: 'ROLE_APPLICATION', data: { roleCode: 'DELIVERY_DRIVER' } }),
+    ).toBe('DRIVER');
+  });
+
+  it('does not hijack a job-seeker application that happens to carry an applicationId', () => {
+    expect(audienceForRoles(['CUSTOMER'], { category: 'JOB', data: { applicationId: 'a1' } })).toBe('CUSTOMER');
   });
 });

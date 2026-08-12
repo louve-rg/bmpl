@@ -5,6 +5,7 @@ import { serverGetSafe } from '../../lib/server-api';
 import { Alert, Button, EmptyState, Input } from '../../components/ui';
 import { ProductCard } from '../../components/discovery/ProductCard';
 import { SearchSuggest } from '../../components/discovery/SearchSuggest';
+import { CategoryNav, type CatNode } from '../../components/discovery/CategoryNav';
 import { PlacementBand } from '../../components/marketing/PlacementBand';
 
 export const dynamic = 'force-dynamic';
@@ -28,13 +29,6 @@ interface ProductList {
   pageSize: number;
   items: ProductCard[];
 }
-interface CatNode {
-  id: string;
-  name: string;
-  slug: string;
-  children: CatNode[];
-}
-
 const SORTS = [
   { v: 'newest', label: 'Newest' },
   { v: 'price_asc', label: 'Price ↑' },
@@ -133,29 +127,15 @@ export default async function ProductsPage({
             <Button type="submit">Apply filters</Button>
           </form>
 
-          <div className="mt-6 grid gap-6 md:grid-cols-[200px_1fr]">
-            <aside className="md:sticky md:top-24 md:self-start">
-              <h2 className="bmpl-eyebrow mb-3">Categories</h2>
-              <nav className="flex flex-col gap-0.5">
-                <Link href={qp({ categoryId: undefined, page: '1' })} className={`rounded-bmpl-sm px-3 py-1.5 text-sm transition ${!searchParams.categoryId ? 'bg-belize-blue/10 font-semibold text-belize-blue' : 'text-slate-600 hover:bg-slate-100'}`}>
-                  All
-                </Link>
-                {cats.map((c) => (
-                  <div key={c.id}>
-                    <Link href={qp({ categoryId: c.id, page: '1' })} className={`block rounded-bmpl-sm px-3 py-1.5 text-sm transition ${searchParams.categoryId === c.id ? 'bg-belize-blue/10 font-semibold text-belize-blue' : 'text-slate-600 hover:bg-slate-100'}`}>
-                      {c.name}
-                    </Link>
-                    {(c.children ?? []).map((ch) => (
-                      <Link key={ch.id} href={qp({ categoryId: ch.id, page: '1' })} className={`block rounded-bmpl-sm px-3 py-1.5 pl-6 text-sm transition ${searchParams.categoryId === ch.id ? 'bg-belize-blue/10 font-semibold text-belize-blue' : 'text-slate-500 hover:bg-slate-100'}`}>
-                        {ch.name}
-                      </Link>
-                    ))}
-                  </div>
-                ))}
-              </nav>
-            </aside>
+          <div className="mt-6 grid gap-4 md:grid-cols-[200px_1fr] md:gap-6">
+            {/* Collapsed to a single row on phones, unchanged sidebar from `md`. */}
+            <CategoryNav
+              cats={cats}
+              activeId={searchParams.categoryId}
+              hrefFor={(categoryId) => qp({ categoryId, page: '1' })}
+            />
 
-            <section>
+            <section className="min-w-0">
               {/* Sponsored band — additive, above the organic results; never reorders them. */}
               <PlacementBand
                 placement={searchParams.categoryId ? 'CATEGORY_PAGE' : 'MARKETPLACE'}

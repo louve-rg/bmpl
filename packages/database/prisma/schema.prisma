@@ -192,6 +192,7 @@ enum AuditAction {
   DRIVER_AVAILABILITY_CHANGED
   DRIVER_VEHICLE_APPROVED
   DRIVER_VEHICLE_REJECTED
+  DRIVER_QUEUE_REORDERED
   // ---- Dispatch & Delivery Execution (Phase 4 · M15) ----
   DELIVERY_ASSIGNED
   DELIVERY_REASSIGNED
@@ -1712,6 +1713,12 @@ model OrderDelivery {
   // for goods that are not yet packed, or a driver arrives to wait at a counter.
   readyForDispatchAt  DateTime?
 
+  // ---- The driver's own queue ordering (M26.3 client feedback) ----
+  // A preference, not a lifecycle field. It says which job the driver intends to
+  // do next and is read by nothing except the queue view. Null = no preference,
+  // fall back to the computed route recommendation.
+  driverQueuePosition Int?
+
   // ---- Pickup verification (driver submits a PIN the vendor holds) ----
   pickupPin                String? // access-controlled; never returned to driver/public/logs
   pickupPinAttempts        Int                @default(0)
@@ -1739,6 +1746,8 @@ model OrderDelivery {
 
   @@index([status])
   @@index([assignedDriverProfileId, status])
+  // "My open deliveries, in my order" — covers the queue read's sort.
+  @@index([assignedDriverProfileId, driverQueuePosition])
   // The dispatch sweeper runs on an interval and asks exactly one question:
   // which offers have lapsed? Without this it is a full scan of every delivery
   // ever made, every tick, forever.
