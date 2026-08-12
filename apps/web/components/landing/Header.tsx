@@ -59,12 +59,16 @@ export function Header() {
     <>
       <AnnouncementBanner />
       <header className="sticky top-0 z-50 bg-belize-navy/95 backdrop-blur supports-[backdrop-filter]:bg-belize-navy/80">
+      {/* The desktop nav switches in at `lg`, not `md`. At exactly 768px the
+          brand, five nav links and four account controls measured 978px against
+          a 768px viewport — a tablet in portrait scrolled sideways on every
+          public page. They fit from 1024px; below that the hamburger is correct. */}
       <nav className="container-bmpl flex h-16 items-center justify-between" aria-label="Primary">
         <Link href="/" aria-label="Belize Marketplace & Logistics home">
           <BrandLockup />
         </Link>
 
-        <div className="hidden items-center gap-7 md:flex">
+        <div className="hidden items-center gap-7 lg:flex">
           {NAV.map((item) => (
             <a key={item.label} href={item.href} className="text-sm font-medium text-blue-100 transition hover:text-white">
               {item.label}
@@ -72,7 +76,7 @@ export function Header() {
           ))}
         </div>
 
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="hidden items-center gap-3 lg:flex">
           <SavedNavButton />
           <CartButton />
           {me === undefined ? (
@@ -104,7 +108,7 @@ export function Header() {
           )}
         </div>
 
-        <div className="flex items-center gap-1 md:hidden">
+        <div className="flex items-center gap-1 lg:hidden">
           <SavedNavButton />
           <CartButton />
           <button
@@ -121,7 +125,7 @@ export function Header() {
       </nav>
 
       {open && (
-        <div className="border-t border-white/10 bg-belize-navy md:hidden">
+        <div className="border-t border-white/10 bg-belize-navy lg:hidden">
           <div className="container-bmpl flex flex-col gap-1 py-3">
             {NAV.map((item) => (
               <a
