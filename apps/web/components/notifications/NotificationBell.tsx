@@ -2,21 +2,19 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { audienceForRoles, notificationHref } from '@bmpl/shared';
 import { api } from '../../lib/api';
 import {
   relativeTime,
   type NotificationItem,
   type NotificationListResponse,
 } from '../../lib/notifications';
+import { markNotificationRead, useOpenNotification } from '../../lib/use-open-notification';
 import { Spinner } from '../ui';
 import { badgeCount, unreadLabel } from '../../lib/badge';
 
 const POLL_MS = 60_000;
 
 export function NotificationBell({ roleCodes = [] }: { roleCodes?: readonly string[] } = {}) {
-  const router = useRouter();
   const [count, setCount] = useState(0);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationItem[]>([]);
@@ -76,41 +74,22 @@ export function NotificationBell({ roleCodes = [] }: { roleCodes?: readonly stri
     };
   }, [open]);
 
-  async function markRead(item: NotificationItem) {
-    if (item.read) return;
-    setItems((prev) => prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)));
-    setCount((c) => Math.max(0, c - 1));
-    try {
-      await api.patch(`/notifications/${item.id}/read`);
-    } catch {
-      void refreshCount();
-    }
-  }
+  /** Optimistic read state; the server call is fired and not awaited. */
+  const markReadLocally = useCallback(
+    (item: NotificationItem) => {
+      setItems((prev) => prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)));
+      setCount((c) => Math.max(0, c - 1));
+      void markNotificationRead(item.id, () => void refreshCount());
+    },
+    [refreshCount],
+  );
 
-  /**
-   * Mark read, then go to whatever the notification is about.
-   *
-   * Clicking used to only mark it read, leaving the reader to go and find the
-   * thing themselves — a driver told "New delivery offer" had to hunt for the
-   * delivery. The target comes from the notification's own `data` payload.
-   *
-   * The read call is deliberately NOT awaited before navigating: the optimistic
-   * update has already dropped the badge, and making someone watch a spinner
-   * before their order opens is the wrong trade. A failed read self-corrects on
-   * the next poll.
-   */
-  async function open_(item: NotificationItem) {
-    void markRead(item);
-    const href = notificationHref(
-      { category: item.category, event: item.event, data: item.data },
-      audienceForRoles(roleCodes, { category: item.category, data: item.data }),
-    );
-    // No specific target (e.g. a broadcast announcement) → stay put rather than
-    // dumping the reader on an unrelated page.
-    if (!href) return;
-    setOpen(false);
-    router.push(href);
-  }
+  // Shared with the notifications page — see lib/use-open-notification.ts.
+  const openNotification = useOpenNotification({
+    roleCodes,
+    onRead: markReadLocally,
+    onNavigate: () => setOpen(false),
+  });
 
   async function dismiss(item: NotificationItem) {
     setItems((prev) => prev.filter((n) => n.id !== item.id));
@@ -188,7 +167,7 @@ export function NotificationBell({ roleCodes = [] }: { roleCodes?: readonly stri
                     key={item.id}
                     className={`group relative px-4 py-3 transition hover:bg-slate-50 ${item.read ? '' : 'bg-belize-blue/[0.03]'}`}
                   >
-                    <button type="button" onClick={() => void open_(item)} className="block w-full pr-6 text-left">
+                    <button type="button" onClick={() => openNotification(item)} className="block w-full pr-6 text-left">
                       <div className="flex items-start gap-2">
                         {!item.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-belize-accent" aria-hidden />}
                         <div className={`min-w-0 ${item.read ? 'pl-4' : ''}`}>

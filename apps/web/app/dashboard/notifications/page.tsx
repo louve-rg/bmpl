@@ -9,6 +9,8 @@ import {
   type NotificationItem,
   type NotificationListResponse,
 } from '../../../lib/notifications';
+import { markNotificationRead, useOpenNotification } from '../../../lib/use-open-notification';
+import type { MeView } from '../../../lib/types';
 import { PageHeader, Card, Badge, Button, ButtonLink, Alert, Spinner, EmptyState } from '../../../components/ui';
 
 type Filter = NotificationCategory | 'ALL';
@@ -24,6 +26,26 @@ export default function NotificationsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // APPROVED roles decide which audience's routes a notification resolves to.
+  // The bell gets these from the dashboard layout, which already has `me`; this
+  // page is a route child and cannot be handed props, so it reads them itself.
+  // Failure is non-fatal — an empty set just resolves customer routes.
+  const [roleCodes, setRoleCodes] = useState<readonly string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<MeView>('/me')
+      .then((me) => {
+        if (!cancelled) setRoleCodes(me.roles.filter((r) => r.status === 'APPROVED').map((r) => r.roleCode));
+      })
+      .catch(() => {
+        /* non-fatal — see above */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const buildQuery = useCallback(
     (cursor?: string) => {
@@ -70,16 +92,20 @@ export default function NotificationsPage() {
     }
   }
 
-  async function markRead(item: NotificationItem) {
+  const markRead = useCallback((item: NotificationItem) => {
     if (item.read) return;
     setItems((prev) => prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)));
     setUnreadCount((c) => Math.max(0, c - 1));
-    try {
-      await api.patch(`/notifications/${item.id}/read`);
-    } catch {
-      void load();
-    }
-  }
+    void markNotificationRead(item.id, () => void load());
+  }, [load]);
+
+  /**
+   * Clicking an item here used to ONLY mark it read, while the bell showing the
+   * same list navigated to the thing. "View all" is the most likely way a driver
+   * reaches this page, so the surface with the most items was the one that went
+   * nowhere. Both now share one handler.
+   */
+  const openNotification = useOpenNotification({ roleCodes, onRead: markRead });
 
   async function dismiss(item: NotificationItem) {
     setItems((prev) => prev.filter((n) => n.id !== item.id));
@@ -169,7 +195,7 @@ export default function NotificationsPage() {
                     ) : (
                       <span className="mt-1.5 h-2 w-2 shrink-0" aria-hidden />
                     )}
-                    <button type="button" onClick={() => markRead(item)} className="min-w-0 flex-1 text-left">
+                    <button type="button" onClick={() => openNotification(item)} className="min-w-0 flex-1 text-left">
                       <div className="mb-1 flex flex-wrap items-center gap-2">
                         <Badge tone="neutral">{NOTIFICATION_CATEGORY_LABELS[item.category] ?? item.category}</Badge>
                         <span className="text-xs text-slate-400">{relativeTime(item.createdAt)}</span>

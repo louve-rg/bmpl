@@ -252,10 +252,33 @@ export class DeliveryCoreService {
     const podPhotoUrls = await this.podUrls(d.podPhotoKeys);
 
     if (audience === 'DRIVER') {
+      /**
+       * The customer's identity is earned by ACCEPTING, not by being offered.
+       *
+       * Automatic dispatch offers one delivery to up to five drivers in turn
+       * (DISPATCH_MAX_OFFERS). Serializing the full address for anyone the job is
+       * merely assigned to therefore handed a customer's name, phone number and
+       * street to every driver who glanced at the offer and passed — people with
+       * no relationship to them and no delivery to make.
+       *
+       * Before acceptance a driver gets what the decision actually needs: the
+       * area, the fee, the vendor and the item count. `acceptedAt` is the gate
+       * because it is the moment the driver commits, and it is cleared on every
+       * re-offer, so a declined driver does not keep the details.
+       */
+      const committed = d.acceptedAt != null;
+      const driverAddress = address
+        ? committed
+          ? deliveryAddress
+          : { fullName: null, phone: null, addressLine1: null, addressLine2: null, city: address.city, district: address.district, country: address.country }
+        : null;
+
       return {
         ...base,
-        // Fulfilment-only customer data (name/phone/address from the order snapshot).
-        deliveryAddress,
+        // Area only until accepted; full fulfilment details afterwards.
+        deliveryAddress: driverAddress,
+        /** Whether `deliveryAddress` is the full address or the area-only view. */
+        addressUnlocked: committed,
         pickupLocation: pickupLocation
           ? { label: pickupLocation.label, addressLine1: pickupLocation.addressLine1, addressLine2: pickupLocation.addressLine2, city: pickupLocation.city, district: pickupLocation.district }
           : null,

@@ -90,6 +90,8 @@ interface JobDetail {
   estimate?: string | null;
   instructions?: string | null;
   deliveryAddress: Address;
+  /** False until the driver accepts — deliveryAddress is then area-only. */
+  addressUnlocked?: boolean;
   pickupLocation: PickupLocation;
   items: JobItem[];
   vehicle?: Vehicle | null;
@@ -195,6 +197,11 @@ export default function DriverJobDetailPage() {
       <Card className="p-4 sm:p-6">
         <h2 className="bmpl-eyebrow mb-3">Delivery address</h2>
         <AddressBlock address={job.deliveryAddress} />
+        {job.addressUnlocked === false && (
+          <p className="mt-2 text-xs text-slate-400">
+            The customer&rsquo;s name, phone and street address appear once you accept this delivery.
+          </p>
+        )}
       </Card>
 
       <Card className="p-4 sm:p-6">
