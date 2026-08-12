@@ -44,9 +44,9 @@ const vehiclePayload = (over: Record<string, unknown> = {}) => ({
   registrationExpiry: FUTURE, insuranceExpiry: FUTURE, insuranceProvider: 'Acme', ...over,
 });
 
-const put = (c: string[], p: string, b: unknown) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
-const post = (c: string[], p: string, b: unknown) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
-const patch = (c: string[], p: string, b: unknown) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
+const put = (c: string[], p: string, b: object | string) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
+const post = (c: string[], p: string, b: object | string) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+const patch = (c: string[], p: string, b: object | string) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
 
 beforeAll(async () => {

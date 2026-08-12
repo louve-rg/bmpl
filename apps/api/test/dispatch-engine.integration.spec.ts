@@ -26,7 +26,7 @@ const uniq = () => `${Date.now()}_${(seq += 1)}`;
 const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 const PAST = new Date(Date.now() - 24 * 3600 * 1000);
 
-const post = (c: string[], p: string, b: unknown = {}) =>
+const post = (c: string[], p: string, b: object | string = {}) =>
   request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
 
 async function registerCustomer(email: string) {
@@ -166,10 +166,26 @@ async function makeDriver(
   return { cookies, userId, driverProfileId: profile.id, vehicleId: vehicle.id };
 }
 
-/** Turn automatic dispatch on for a test. Production default is OFF. */
+/**
+ * Turn automatic dispatch on for a test. Production default is OFF.
+ *
+ * Writes the FULL tuning set every time, not just `over`. There is one
+ * platform_settings row and it is a singleton, so a test that narrowed a knob —
+ * `dispatchMaxOffers: 1`, to prove the retry budget escalates — left it narrowed
+ * for every test after it. Those tests then watched a second offer get refused
+ * as "budget spent" and failed on assertions about re-offering that had nothing
+ * to do with what they were testing. Restating the defaults makes each test start
+ * from the same configuration whatever ran before it.
+ */
 async function enableDispatch(over: Record<string, unknown> = {}) {
   const existing = await ctx.prisma.platformSetting.findFirst();
-  const data = { dispatchAutomatic: true, ...over };
+  const data = {
+    dispatchAutomatic: true,
+    dispatchOfferTimeoutSeconds: 90,
+    dispatchMaxOffers: 5,
+    dispatchMaxConcurrentPerDriver: 3,
+    ...over,
+  };
   if (existing) await ctx.prisma.platformSetting.update({ where: { id: existing.id }, data });
   else await ctx.prisma.platformSetting.create({ data });
 }
@@ -184,7 +200,12 @@ beforeAll(async () => {
   const login = await request(ctx.server).post('/api/auth/login').send({ email: admin.email, password: admin.password });
   expect(login.status).toBe(201);
   adminCookies = cookiesOf(login);
-  const cat = await ctx.prisma.category.create({ data: { name: `Cat ${uniq()}`, slug: `cat-${uniq()}`, isActive: true } });
+  // `isVisible`, not `isActive` — Category has never had an `isActive` field.
+  // Prisma rejects the unknown argument at runtime, so this threw in beforeAll,
+  // skipped all 28 tests, failed the CI check suite, and made Railway SKIP every
+  // API deploy for four days. Nothing typechecked it: apps/api/tsconfig.json
+  // covered only `src`. That gap is closed by tsconfig.test.json.
+  const cat = await ctx.prisma.category.create({ data: { name: `Cat ${uniq()}`, slug: `cat-${uniq()}`, isVisible: true } });
   categoryId = cat.id;
   engine = ctx.app.get(DispatchEngineService);
 });
@@ -195,6 +216,20 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await enableDispatch();
+  // Park every driver that already exists.
+  //
+  // Each test creates the driver it expects to be chosen and then asserts the
+  // delivery went to exactly that profile — but drivers from earlier tests are
+  // still ONLINE and still serve the same district, and ranking quite correctly
+  // prefers whichever is least loaded, which is usually an older one. Nineteen of
+  // these twenty-eight tests were therefore failing on a delivery that had been
+  // offered to a perfectly eligible driver, just not the one the test had in
+  // mind. Nothing was wrong with the engine; the pool was wrong.
+  //
+  // Every makeDriver() call happens INSIDE a test, so this leaves each test with
+  // only the drivers it created itself — the single-candidate pool the
+  // assertions have always assumed.
+  await ctx.prisma.driverProfile.updateMany({ data: { availability: 'OFFLINE' } });
 });
 
 describe('automatic dispatch — gating', () => {

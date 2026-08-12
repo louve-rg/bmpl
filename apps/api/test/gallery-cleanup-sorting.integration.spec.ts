@@ -19,7 +19,7 @@ let admin: string[];
 let categoryId: string;
 let seq = 0;
 const uniq = () => `${Date.now()}_${(seq += 1)}`;
-const post = (c: string[], p: string, b: unknown = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+const post = (c: string[], p: string, b: object | string = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
 const del = (c: string[], p: string) => request(ctx.server).delete(`/api/${p}`).set('Cookie', c);
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
 const guest = (p: string) => request(ctx.server).get(`/api/${p}`);

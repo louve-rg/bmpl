@@ -17,7 +17,7 @@ const uniq = () => `${Date.now()}_${(seq += 1)}`;
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
 const patch = (c: string[], p: string) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c);
 const del = (c: string[], p: string) => request(ctx.server).delete(`/api/${p}`).set('Cookie', c);
-const put = (c: string[], p: string, b: unknown) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
+const put = (c: string[], p: string, b: object | string) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
 
 async function registerCustomer(email: string): Promise<{ cookies: string[]; userId: string }> {
   const reg = await request(ctx.server).post('/api/auth/register').send({ email, password: 'CustomerPass123', firstName: 'N', lastName: 'C', acceptedTerms: true });

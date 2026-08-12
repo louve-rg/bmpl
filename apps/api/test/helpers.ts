@@ -1,3 +1,4 @@
+import type { Server } from 'node:http';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
@@ -15,7 +16,13 @@ import type { PrismaClient } from '@bmpl/database';
 export interface TestContext {
   app: INestApplication;
   prisma: PrismaClient;
-  server: unknown;
+  /**
+   * The HTTP server supertest drives. Typed as the real `Server` rather than
+   * `unknown`: every spec passes this straight to `request()`, so `unknown` made
+   * each of those call sites a type error the moment the specs were brought under
+   * typechecking at all — which is why they never were.
+   */
+  server: Server;
 }
 
 export async function bootApp(): Promise<TestContext> {
@@ -34,7 +41,7 @@ export async function bootApp(): Promise<TestContext> {
     .map((o) => o.trim());
   app.enableCors({ origin: origins, credentials: true });
   await app.init();
-  return { app, prisma, server: app.getHttpServer() };
+  return { app, prisma, server: app.getHttpServer() as Server };
 }
 
 /** Wipe all application data between test groups (keeps schema + migrations). */

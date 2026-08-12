@@ -151,16 +151,33 @@ export class DispatchService {
    * `assignedByUserId` stays null, which is already nullable in the schema and is
    * what distinguishes a system assignment from an administrator's in the audit
    * trail.
+   *
+   * The ACTION is chosen from the delivery's CURRENT status, not hard-coded.
+   * This used to always pass 'ASSIGN', whose only legal `from` is
+   * PENDING_ASSIGNMENT — so the moment a delivery reached DRIVER_DECLINED
+   * (a driver declined, or an offer lapsed and the sweeper released it) every
+   * re-offer threw the state-machine guard, the engine's candidate loop logged
+   * "candidate became ineligible" for each driver in turn and returned
+   * NO_CANDIDATES. Automatic dispatch could therefore only ever make the FIRST
+   * offer on a delivery: one decline and it sat unassigned while the sweeper
+   * retried and silently failed every twenty seconds.
+   *
+   * DELIVERY_ACTIONS.REASSIGN already lists DRIVER_DECLINED as a legal `from`, so
+   * the state machine is not widened here — the right existing action is used.
+   * Its extra behaviour is a no-op for this case: the "close any ACTIVE/ACCEPTED
+   * assignment" write matches nothing, because releasing the offer already marked
+   * that row DECLINED.
    */
   async systemAssign(deliveryId: string, driverProfileId: string, vehicleId: string) {
-    return this.assignInternal(
-      { userId: null },
-      deliveryId,
-      driverProfileId,
-      vehicleId,
-      null,
-      'ASSIGN',
-    );
+    const current = await this.prisma.orderDelivery.findUnique({
+      where: { id: deliveryId },
+      select: { status: true },
+    });
+    // assignInternal re-reads and re-asserts inside its own flow, so a status
+    // change between here and there produces the ordinary BadRequest the engine's
+    // candidate loop already handles rather than a bad write.
+    const action = current?.status === 'DRIVER_DECLINED' ? 'REASSIGN' : 'ASSIGN';
+    return this.assignInternal({ userId: null }, deliveryId, driverProfileId, vehicleId, null, action);
   }
 
   // ---- assignment mutations ---------------------------------------------

@@ -18,8 +18,8 @@ const uniq = () => `${Date.now()}_${(seq += 1)}`;
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
-const post = (c: string[], p: string, b: unknown = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
-const patch = (c: string[], p: string, b: unknown = {}) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
+const post = (c: string[], p: string, b: object | string = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+const patch = (c: string[], p: string, b: object | string = {}) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
 const del = (c: string[], p: string) => request(ctx.server).delete(`/api/${p}`).set('Cookie', c);
 
 async function login(email: string, password: string): Promise<string[]> {
@@ -203,7 +203,7 @@ describe('per-variant image galleries', () => {
     const afterPrimary = (await post(v.cookies, `vendor/products/${v.productId}/images/${secondRed.id}/primary`)).body as typeof imgs;
     const redPrimaries = afterPrimary.filter((i) => i.variantId === redV && i.isPrimary);
     expect(redPrimaries).toHaveLength(1);
-    expect(redPrimaries[0].id).toBe(secondRed.id);
+    expect(redPrimaries[0]!.id).toBe(secondRed.id);
     // Blue's own primary is unaffected (still its single image)
     expect(afterPrimary.find((i) => i.id === blueImg.id)!.isPrimary).toBe(true);
 

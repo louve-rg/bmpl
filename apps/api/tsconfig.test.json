@@ -1,0 +1,31 @@
+{
+  // Typechecking for the test suites.
+  //
+  // The build config deliberately covers only `src` (nest build emits from
+  // rootDir: src), which meant NOTHING typechecked the integration specs. A spec
+  // that passed `isActive` to a Prisma model with no such field therefore looked
+  // fine locally, threw at runtime in CI's beforeAll, failed the check suite, and
+  // — because Railway skips a deploy whose check suite failed — silently held
+  // every API deploy back for four days.
+  //
+  // A separate config rather than widening the build's `include`: adding `test`
+  // there would change rootDir and pull specs into dist.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "target": "ES2022",
+    "noEmit": true,
+    // Mirrors the build config. The base config turns declaration emit on, and
+    // with it a pile of TS2742/TS4053 "cannot be named" complaints about Prisma's
+    // runtime types that the build has always suppressed the same way. This
+    // config exists to typecheck the specs, not to start emitting .d.ts for the
+    // API.
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src", "test"],
+  "exclude": ["node_modules", "dist"]
+}

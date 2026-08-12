@@ -23,8 +23,8 @@ const uniq = () => `${Date.now()}_${(seq += 1)}`;
 const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
-const post = (c: string[], p: string, b: unknown = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
-const put = (c: string[], p: string, b: unknown = {}) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
+const post = (c: string[], p: string, b: object | string = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+const put = (c: string[], p: string, b: object | string = {}) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
 
 async function registerCustomer(email: string): Promise<{ cookies: string[]; userId: string }> {
   const reg = await request(ctx.server)

@@ -14,7 +14,7 @@ let seq = 0;
 const uniq = () => `${Date.now()}_${(seq += 1)}`;
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
-const patch = (c: string[], p: string, b: unknown) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
+const patch = (c: string[], p: string, b: object | string) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
 
 async function login(email: string, password: string) {
   const r = await request(ctx.server).post('/api/auth/login').send({ email, password });

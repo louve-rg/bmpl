@@ -17,9 +17,9 @@ const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 const PDF = Buffer.from('%PDF-1.4 test');
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
-const post = (c: string[], p: string, b: unknown = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
-const patch = (c: string[], p: string, b: unknown = {}) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
-const put = (c: string[], p: string, b: unknown = {}) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
+const post = (c: string[], p: string, b: object | string = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+const patch = (c: string[], p: string, b: object | string = {}) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
+const put = (c: string[], p: string, b: object | string = {}) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
 const guest = (p: string) => request(ctx.server).get(`/api/${p}`);
 
 async function login(email: string, pw: string) { const r = await request(ctx.server).post('/api/auth/login').send({ email, password: pw }); expect(r.status).toBe(201); return cookiesOf(r); }

@@ -19,9 +19,9 @@ const uniq = () => `${Date.now()}_${(seq += 1)}`;
 const couponCode = (prefix: string) => `${prefix}${uniq().replace(/_/g, '')}`.slice(0, 24).toUpperCase();
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
-const post = (c: string[], p: string, b: unknown = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
-const patch = (c: string[], p: string, b: unknown = {}) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
-const put = (c: string[], p: string, b: unknown = {}) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
+const post = (c: string[], p: string, b: object | string = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+const patch = (c: string[], p: string, b: object | string = {}) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
+const put = (c: string[], p: string, b: object | string = {}) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
 const guest = (p: string) => request(ctx.server).get(`/api/${p}`);
 
 async function login(email: string, pw: string) {
