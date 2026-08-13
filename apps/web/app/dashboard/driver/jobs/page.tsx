@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DRIVER_DELIVERY_VIEWS, DRIVER_VIEW_DESCRIPTIONS, DRIVER_VIEW_LABELS, type DriverDeliveryView } from '@bmpl/shared';
 import { api, type ApiError } from '../../../../lib/api';
 import { Alert, Card, EmptyState, PageHeader, Spinner, StatusBadge } from '../../../../components/ui';
@@ -62,21 +62,47 @@ type Counts = Record<DriverDeliveryView, number>;
  * a driver with two jobs is deciding between them, not filtering.
  */
 export default function DriverJobsPage() {
-  const [view, setView] = useState<DriverDeliveryView>('assigned');
+  // Null until the counts say which tab is worth opening — see below.
+  const [view, setView] = useState<DriverDeliveryView | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [counts, setCounts] = useState<Counts | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Once the driver picks a tab themselves, never move it under them.
+  const chosenByDriver = useRef(false);
 
   const loadCounts = useCallback(async () => {
     try {
       setCounts(await api.get<Counts>('/driver/jobs/counts'));
     } catch {
-      /* badges are best-effort — the lists below are the real content */
+      // Badges are best-effort, but the opening tab depends on this. Fall back
+      // to Assigned rather than leaving the driver on a spinner.
+      setView((v) => v ?? 'assigned');
     }
   }, []);
 
+  /**
+   * Open on the first view that actually has work in it.
+   *
+   * This page used to open on Assigned unconditionally. A driver with two offers
+   * waiting and nothing accepted therefore landed on "Nothing waiting to be
+   * collected" and concluded there was no work — with the offers sitting one tab
+   * to the left, unread. DRIVER_DELIVERY_VIEWS is already ordered by urgency
+   * (available → assigned → active → completed), so the first non-empty one is
+   * the right place to land.
+   */
   useEffect(() => {
+    if (chosenByDriver.current || view !== null || !counts) return;
+    setView(DRIVER_DELIVERY_VIEWS.find((v) => (counts[v] ?? 0) > 0) ?? 'assigned');
+  }, [counts, view]);
+
+  const selectView = useCallback((v: DriverDeliveryView) => {
+    chosenByDriver.current = true;
+    setView(v);
+  }, []);
+
+  useEffect(() => {
+    if (view === null) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -102,6 +128,7 @@ export default function DriverJobsPage() {
 
   const refresh = useCallback(() => {
     void loadCounts();
+    if (view === null) return;
     api
       .get<JobSummary[]>(`/driver/jobs?scope=${view}`)
       .then((d) => setJobs(d ?? []))
@@ -137,7 +164,7 @@ export default function DriverJobsPage() {
                 role="tab"
                 aria-selected={active}
                 aria-controls="driver-jobs-panel"
-                onClick={() => setView(v)}
+                onClick={() => selectView(v)}
                 className={`flex min-h-[44px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-sm font-semibold transition ${
                   i > 0 ? 'border-l border-slate-200' : ''
                 } ${active ? 'bg-belize-blue text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
@@ -158,12 +185,12 @@ export default function DriverJobsPage() {
         </div>
       </div>
 
-      <p className="text-sm text-slate-500">{DRIVER_VIEW_DESCRIPTIONS[view]}</p>
+      {view && <p className="text-sm text-slate-500">{DRIVER_VIEW_DESCRIPTIONS[view]}</p>}
 
       {error && <Alert tone="error">{error}</Alert>}
 
       <div id="driver-jobs-panel" role="tabpanel">
-        {loading ? (
+        {view === null || loading ? (
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <Spinner className="h-4 w-4" /> Loading…
           </div>
