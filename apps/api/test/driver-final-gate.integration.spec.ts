@@ -204,6 +204,32 @@ async function enableDispatch(over: Record<string, unknown> = {}) {
 }
 
 const deliveryOf = (id: string) => ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id } });
+
+/**
+ * Walk a payload and report anywhere a PIN is exposed.
+ *
+ * Deliberately NOT `JSON.stringify(body).includes(pin)`. A PIN is four digits,
+ * and a serialized delivery is full of cuids, ISO timestamps and money amounts —
+ * so a random four-digit run collides by chance often enough to fail roughly one
+ * CI run in fifteen. That is worse than no test at all here: a red check suite
+ * makes Railway SKIP the deploy silently, which has already frozen this API for
+ * days once.
+ *
+ * The real property is structural: no key called *Pin, and no field whose VALUE
+ * is exactly the PIN.
+ */
+function pinLeaks(node: unknown, pins: string[], path = '$'): string[] {
+  if (node === null || node === undefined) return [];
+  if (Array.isArray(node)) return node.flatMap((v, i) => pinLeaks(v, pins, `${path}[${i}]`));
+  if (typeof node === 'object') {
+    return Object.entries(node as Record<string, unknown>).flatMap(([k, v]) =>
+      /pin$/i.test(k) && typeof v === 'string' && pins.includes(v)
+        ? [`${path}.${k}`]
+        : pinLeaks(v, pins, `${path}.${k}`),
+    );
+  }
+  return typeof node === 'string' && pins.includes(node) ? [path] : [];
+}
 const conversationsFor = (deliveryId: string) =>
   ctx.prisma.conversation.findMany({
     where: { contextType: 'DELIVERY', contextId: deliveryId },
@@ -468,20 +494,17 @@ describe('Part 11 — what a driver may see and do', () => {
       where: { id: order.deliveryId },
       select: { pickupPin: true, deliveryPin: true },
     });
-    const detail = JSON.stringify((await get(driver.cookies, `driver/jobs/${order.deliveryId}`)).body);
-    expect(detail).not.toContain(row.pickupPin);
-    expect(detail).not.toContain(row.deliveryPin);
-    // The driver is told a code is REQUIRED, never what it is.
-    const body = (await get(driver.cookies, `driver/jobs/${order.deliveryId}`)).body;
-    expect(body.requiresPickupPin).toBe(true);
-    expect(body).not.toHaveProperty('pickupPin');
 
-    const list = JSON.stringify((await get(driver.cookies, 'driver/jobs?scope=assigned')).body);
-    expect(list).not.toContain(row.pickupPin);
-    expect(list).not.toContain(row.deliveryPin);
-    const queue = JSON.stringify((await get(driver.cookies, 'driver/jobs/queue')).body);
-    expect(queue).not.toContain(row.pickupPin);
-    expect(queue).not.toContain(row.deliveryPin);
+    for (const path of [`driver/jobs/${order.deliveryId}`, 'driver/jobs?scope=assigned', 'driver/jobs/queue']) {
+      const body = (await get(driver.cookies, path)).body;
+      expect(pinLeaks(body, [row.pickupPin!, row.deliveryPin!]), path).toEqual([]);
+    }
+
+    // The driver is told a code is REQUIRED, never what it is.
+    const detail = (await get(driver.cookies, `driver/jobs/${order.deliveryId}`)).body;
+    expect(detail.requiresPickupPin).toBe(true);
+    expect(detail).not.toHaveProperty('pickupPin');
+    expect(detail).not.toHaveProperty('deliveryPin');
   });
 
   it('gives an accepting driver the fulfilment details they need', async () => {
