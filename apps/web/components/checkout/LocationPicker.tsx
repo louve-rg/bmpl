@@ -5,8 +5,15 @@ import type * as LeafletNS from 'leaflet';
 // Leaflet's stylesheet. A static import is what Next expects; it is scoped to
 // this component's chunk, which only the checkout route loads.
 import 'leaflet/dist/leaflet.css';
-import { BELIZE_BOUNDS, OUT_OF_BOUNDS_MESSAGE, isWithinBelize, type Coordinates } from '@bmpl/shared';
-import { Alert, Button } from '../ui';
+import { BELIZE_BOUNDS, DISTRICT_CENTROIDS, OUT_OF_BOUNDS_MESSAGE, asDistrict, isWithinBelize, type Coordinates } from '@bmpl/shared';
+import { api } from '../../lib/api';
+import { Alert, Button, Spinner } from '../ui';
+
+interface GeocodeResult {
+  label: string;
+  latitude: number;
+  longitude: number;
+}
 
 /** Belize City — where the map opens before the customer has done anything. */
 const DEFAULT_CENTRE: Coordinates = { latitude: 17.4995, longitude: -88.1976 };
@@ -46,10 +53,16 @@ export function LocationPicker({
   value,
   onChange,
   disabled,
+  address,
+  district,
 }: {
   value: Coordinates | null;
   onChange: (next: Coordinates | null) => void;
   disabled?: boolean;
+  /** The typed street address, so the customer can find it on the map. */
+  address?: string;
+  /** The chosen district — the map follows it immediately, with no network call. */
+  district?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletNS.Map | null>(null);
@@ -62,6 +75,11 @@ export function LocationPicker({
   const [ready, setReady] = useState(false);
   const [geo, setGeo] = useState<GeoState>({ kind: 'idle' });
   const [outOfBounds, setOutOfBounds] = useState(false);
+  const [lookup, setLookup] = useState<{ busy: boolean; message: string | null; results: GeocodeResult[] }>({
+    busy: false,
+    message: null,
+    results: [],
+  });
   const headingId = useId();
 
   /** Move (or create) the marker and tell the parent, rejecting anything outside Belize. */
@@ -154,6 +172,67 @@ export function LocationPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Follow the chosen district.
+   *
+   * The map used to open on Belize City and stay there whatever the customer
+   * selected, so someone ordering to Punta Gorda was looking at a map 200 km
+   * from their address and had to hunt for themselves. District centroids are
+   * already in @bmpl/shared, so this is instant and needs no network — which
+   * makes it the reliable half of "show me my address": it always works, even
+   * when the address lookup below finds nothing.
+   *
+   * Only moves the VIEW. An existing pin is never touched — the customer placed
+   * it deliberately and changing the district must not silently relocate it.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    const d = asDistrict(district ?? null);
+    if (!map || !d || markerRef.current) return;
+    const c = DISTRICT_CENTROIDS[d];
+    map.setView([c.latitude, c.longitude], DEFAULT_ZOOM);
+  }, [district, ready]);
+
+  /**
+   * Find the typed address on the map.
+   *
+   * Best-effort by design. OpenStreetMap's Belize address coverage is patchy, so
+   * a miss is normal and is reported as "place the pin yourself" rather than as
+   * an error the customer has to fix. A hit drops a PROVISIONAL pin the customer
+   * is asked to confirm or drag — the pin stays the authoritative location, and
+   * a geocoder's guess never silently becomes the delivery address.
+   */
+  const findAddress = useCallback(async () => {
+    const q = (address ?? '').trim();
+    if (q.length < 3) {
+      setLookup({ busy: false, message: 'Type your street address above first, then tap this.', results: [] });
+      return;
+    }
+    setLookup({ busy: true, message: null, results: [] });
+    try {
+      const res = await api.get<{ results: GeocodeResult[] }>(
+        `/geocode?q=${encodeURIComponent(q)}${district ? `&district=${encodeURIComponent(district)}` : ''}`,
+      );
+      if (res.results.length === 0) {
+        setLookup({
+          busy: false,
+          message: 'We couldn’t find that address on the map — many Belize addresses aren’t mapped. Tap the map to place your pin.',
+          results: [],
+        });
+        return;
+      }
+      const best = res.results[0]!;
+      place(best.latitude, best.longitude, { pan: true, zoom: PINNED_ZOOM });
+      setLookup({ busy: false, message: null, results: res.results });
+    } catch {
+      setLookup({
+        busy: false,
+        message: 'Address lookup isn’t available right now. Tap the map to place your pin instead.',
+        results: [],
+      });
+    }
+  }, [address, district, place]);
+
   /** GPS. Every failure path ends with the customer still able to continue. */
   const useCurrentLocation = useCallback(() => {
     if (!('geolocation' in navigator)) {
@@ -201,8 +280,8 @@ export function LocationPicker({
         Delivery location
       </h3>
       <p className="mt-0.5 text-xs text-slate-500">
-        Place the pin at the exact spot where you want your order delivered. This is optional, but it helps your driver
-        find you.
+        Place the pin at the exact spot where you want your order delivered — the map follows the district you choose,
+        and &ldquo;Show my address&rdquo; will try to find what you typed. This is optional, but it helps your driver find you.
       </p>
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -219,6 +298,17 @@ export function LocationPicker({
         >
           {geo.kind === 'locating' ? 'Finding you…' : '📍 Use my current location'}
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-[44px] flex-1 sm:flex-none"
+          disabled={disabled || lookup.busy}
+          onClick={findAddress}
+          aria-label="Show the address you typed on the map"
+        >
+          {lookup.busy ? <Spinner className="h-4 w-4" /> : '🔎 Show my address'}
+        </Button>
         {value && (
           <Button type="button" variant="outline" size="sm" className="min-h-[44px]" disabled={disabled} onClick={clear}>
             Remove pin
@@ -230,6 +320,42 @@ export function LocationPicker({
         <Alert tone="warning" className="mt-3">
           {geo.message}
         </Alert>
+      )}
+      {lookup.message && (
+        <Alert tone="info" className="mt-3">
+          {lookup.message}
+        </Alert>
+      )}
+      {lookup.results.length > 0 && (
+        <div className="mt-3 rounded-bmpl-md bg-slate-50 p-2.5">
+          <p className="text-xs font-semibold text-belize-navy">
+            Is this the right place? Drag the pin if it&rsquo;s slightly off.
+          </p>
+          <p className="mt-0.5 break-words text-xs text-slate-500">{lookup.results[0]!.label}</p>
+          {lookup.results.length > 1 && (
+            <details className="mt-1.5">
+              <summary className="cursor-pointer text-xs font-medium text-belize-blue">
+                Not right? {lookup.results.length - 1} other match{lookup.results.length > 2 ? 'es' : ''}
+              </summary>
+              <ul className="mt-1 space-y-1">
+                {lookup.results.slice(1).map((r) => (
+                  <li key={`${r.latitude},${r.longitude}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        place(r.latitude, r.longitude, { pan: true, zoom: PINNED_ZOOM });
+                        setLookup((l) => ({ ...l, results: [r, ...l.results.filter((x) => x !== r)] }));
+                      }}
+                      className="w-full break-words rounded px-2 py-1.5 text-left text-xs text-slate-600 transition hover:bg-white"
+                    >
+                      {r.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       )}
       {outOfBounds && (
         <Alert tone="warning" className="mt-3">

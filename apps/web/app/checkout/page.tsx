@@ -341,7 +341,13 @@ export default function CheckoutPage() {
                       driver human context ("Ladyville"), the pin gives them a
                       navigable point. Neither replaces the other. */}
                   <div className="mt-4">
-                    <LocationPicker value={pin} onChange={setPin} disabled={placing} />
+                    <LocationPicker
+                      value={pin}
+                      onChange={setPin}
+                      disabled={placing}
+                      address={[address.addressLine1, address.addressLine2, address.city].filter(Boolean).join(', ')}
+                      district={address.district}
+                    />
                   </div>
                 </Card>
               )}
