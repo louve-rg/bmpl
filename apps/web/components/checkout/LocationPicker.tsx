@@ -196,7 +196,7 @@ export function LocationPicker({
   }, []);
 
   return (
-    <section aria-labelledby={headingId} className="rounded-bmpl-md border border-slate-200 p-3 sm:p-4">
+    <section aria-labelledby={headingId} className="overflow-hidden rounded-bmpl-md border border-slate-200 p-2.5 sm:p-4">
       <h3 id={headingId} className="bmpl-label">
         Delivery location
       </h3>
@@ -210,6 +210,9 @@ export function LocationPicker({
           type="button"
           variant="outline"
           size="sm"
+          // The primary action here, tapped one-handed. `size="sm"` renders 34px,
+          // which is below a comfortable target, so the height is set explicitly.
+          className="min-h-[44px] flex-1 sm:flex-none"
           disabled={disabled || geo.kind === 'locating'}
           onClick={useCurrentLocation}
           aria-label="Use my current location to place the delivery pin"
@@ -217,7 +220,7 @@ export function LocationPicker({
           {geo.kind === 'locating' ? 'Finding you…' : '📍 Use my current location'}
         </Button>
         {value && (
-          <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={clear}>
+          <Button type="button" variant="outline" size="sm" className="min-h-[44px]" disabled={disabled} onClick={clear}>
             Remove pin
           </Button>
         )}
@@ -236,9 +239,12 @@ export function LocationPicker({
 
       {/* h-64 with a hard max-width: the map must never be wider than the page,
           and touch-pan-y lets a one-finger swipe scroll the checkout past it. */}
+      {/* -mx on phones: the map claws back the section's own padding so it is as
+          wide as the card allows. At 320px that is the difference between a
+          usable map and a postage stamp. */}
       <div
         ref={containerRef}
-        className="mt-3 h-64 w-full max-w-full overflow-hidden rounded-bmpl-md border border-slate-200 bg-slate-100"
+        className="-mx-2.5 mt-3 h-64 overflow-hidden border-y border-slate-200 bg-slate-100 sm:mx-0 sm:rounded-bmpl-md sm:border"
         style={{ touchAction: 'pan-y' }}
         role="application"
         aria-label="Map for choosing your delivery location. Use the current-location button, or tap the map to place the pin."
