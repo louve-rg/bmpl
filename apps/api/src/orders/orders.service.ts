@@ -212,6 +212,30 @@ export class OrdersService {
         deliveryFeeMinor += q.feeMinor;
       }
 
+      // ---- Simulation flag: DERIVED from the storefront, never from the request ----
+      //
+      // An order is a simulation because of WHERE it was bought, not because the
+      // client asked for it. `isTest` appears nowhere in CheckoutInput, so there
+      // is no field to forge: buying from a real store can never produce a test
+      // order however the request is crafted, and buying from a simulation store
+      // yields nothing real — those storefronts stock nothing a customer wants,
+      // and their deliveries can only ever reach a designated test driver.
+      //
+      // A cart mixing both is refused rather than silently resolved. Either
+      // answer would be wrong: false would let a rehearsal delivery be offered to
+      // a real driver, true would hide a genuine purchase from revenue.
+      const vendorFlags = await tx.vendorProfile.findMany({
+        where: { id: { in: [...linesByVendor.keys()] } },
+        select: { id: true, isTest: true, businessName: true },
+      });
+      const testVendors = vendorFlags.filter((v) => v.isTest);
+      if (testVendors.length > 0 && testVendors.length !== vendorFlags.length) {
+        throw new BadRequestException(
+          'A simulation store cannot be checked out together with a real store. Please order from them separately.',
+        );
+      }
+      const isTest = vendorFlags.length > 0 && testVendors.length === vendorFlags.length;
+
       // ---- Create the order graph ----
       const orderNumber = genOrderNumber();
       const allLines = [...linesByVendor.values()].flat();
@@ -229,6 +253,7 @@ export class OrdersService {
           subtotalMinor,
           deliveryFeeMinor,
           totalMinor, // subtotal + delivery (no tax/discounts yet)
+          isTest,
         },
       });
 

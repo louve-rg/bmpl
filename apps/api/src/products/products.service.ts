@@ -396,7 +396,7 @@ export class ProductsService {
       FROM products p
       JOIN vendor_profiles vp ON vp.id = p."vendorProfileId"
       LEFT JOIN vendor_settings vs ON vs."vendorProfileId" = p."vendorProfileId"
-      WHERE p.status = 'PUBLISHED' AND vp."approvalStatus" = 'APPROVED'
+      WHERE p.status = 'PUBLISHED' AND vp."approvalStatus" = 'APPROVED' AND vp."isTest" = FALSE
         ${catFilter} ${vendorFilter} ${featuredFilter} ${priceMinFilter} ${priceMaxFilter} ${inStockFilter} ${hideOosFilter} ${searchFilter}
       ORDER BY ${orderBy}
       LIMIT ${query.pageSize} OFFSET ${offset}`;

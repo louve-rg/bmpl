@@ -92,6 +92,14 @@ interface JobDetail {
   deliveryAddress: Address;
   /** False until the driver accepts — deliveryAddress is then area-only. */
   addressUnlocked?: boolean;
+  /** The customer's exact map pin. Null until this driver accepts. */
+  pinnedLocation?: { latitude: number; longitude: number } | null;
+  /** Opens the pin in the device's maps app. Null when there is no pin. */
+  navigationUrl?: string | null;
+  /** What the customer wrote ("blue gate"). Null until accepted. */
+  deliveryInstructions?: string | null;
+  /** A simulation order — labelled so it is never mistaken for a real one. */
+  isTest?: boolean;
   pickupLocation: PickupLocation;
   items: JobItem[];
   vehicle?: Vehicle | null;
@@ -185,6 +193,13 @@ export default function DriverJobDetailPage() {
         }
       />
 
+      {job.isTest && (
+        <Alert tone="info" title="Simulation delivery">
+          This is a TEST order for training. Run it exactly as you would a real one — nothing is charged and no real
+          customer is waiting.
+        </Alert>
+      )}
+
       {error && <Alert tone="error">{error}</Alert>}
 
       <ActionPanel job={job} onDone={reload} />
@@ -197,9 +212,42 @@ export default function DriverJobDetailPage() {
       <Card className="p-4 sm:p-6">
         <h2 className="bmpl-eyebrow mb-3">Delivery address</h2>
         <AddressBlock address={job.deliveryAddress} />
+
+        {job.deliveryInstructions && (
+          <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <span className="font-semibold">From the customer:</span> {job.deliveryInstructions}
+          </p>
+        )}
+
+        {/* The pin is the navigable target; the written address is the human
+            context. The driver needs both, so both are shown. */}
+        {job.pinnedLocation && job.navigationUrl ? (
+          <div className="mt-3">
+            <p className="text-sm font-semibold text-emerald-700">📍 Customer pinned an exact location</p>
+            <a
+              href={job.navigationUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-bmpl-md bg-belize-blue px-4 text-sm font-semibold text-white transition hover:bg-belize-deep sm:w-auto"
+            >
+              Navigate to the pin
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-4 w-4" aria-hidden>
+                <path d="M7 17 17 7M9 7h8v8" />
+              </svg>
+            </a>
+            <p className="mt-1 text-xs text-slate-400">Opens in your maps app for turn-by-turn directions.</p>
+          </div>
+        ) : (
+          job.addressUnlocked !== false && (
+            <p className="mt-2 text-xs text-slate-400">
+              The customer didn&rsquo;t pin a location — use the written address above.
+            </p>
+          )
+        )}
+
         {job.addressUnlocked === false && (
           <p className="mt-2 text-xs text-slate-400">
-            The customer&rsquo;s name, phone and street address appear once you accept this delivery.
+            The customer&rsquo;s name, phone, street address and pinned location appear once you accept this delivery.
           </p>
         )}
       </Card>

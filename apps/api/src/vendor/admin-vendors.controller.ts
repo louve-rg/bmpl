@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import { moderationDecisionSchema, type ModerationDecision } from '@bmpl/validation';
+import { moderationDecisionSchema, type ModerationDecision, testModeSchema, type TestModeInput } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, RequirePermission } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -25,6 +25,25 @@ export class AdminVendorsController {
   @RequirePermission('vendors.read')
   get(@Param('id') id: string) {
     return this.vendor.adminGet(id);
+  }
+
+  /**
+   * Mark a storefront as a SIMULATION store, or back to a real one.
+   *
+   * This is the root of test isolation: checkout derives an order's `isTest`
+   * from the storefront, so flagging a store here is what makes rehearsal orders
+   * possible at all — and what keeps a customer from ever producing one, since
+   * the flag exists nowhere in the checkout request.
+   */
+  @Patch(':id/test-mode')
+  @RequirePermission('vendors.moderate')
+  setTestMode(
+    @CurrentUser() user: AuthContext,
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(ZodBody(testModeSchema)) body: TestModeInput,
+  ) {
+    return this.vendor.setTestMode(this.actor(user, req), id, body.isTest, body.reason);
   }
 
   @Post(':id/approve')

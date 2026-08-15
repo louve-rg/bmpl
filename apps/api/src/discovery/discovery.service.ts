@@ -12,7 +12,19 @@ import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProductsService } from '../products/products.service';
 
-const VIEWABLE = { status: 'PUBLISHED', vendorProfile: { approvalStatus: 'APPROVED' } } as const;
+/**
+ * Publicly discoverable products.
+ *
+ * `isTest: false` keeps simulation storefronts out of search, recommendations
+ * and every other discovery surface. Their storefront and product pages stay
+ * reachable by direct URL — a rehearsal still shops through the real UI — but a
+ * genuine customer can never stumble into one, which matters because buying from
+ * a test store produces an order no real driver will ever be offered.
+ */
+const VIEWABLE = {
+  status: 'PUBLISHED',
+  vendorProfile: { approvalStatus: 'APPROVED', isTest: false },
+} as const;
 
 /** Canonical newest-first ordering: most recently published first, createdAt fallback,
  *  stable id tie-breaker. Editing a product never moves it up (only publishedAt does). */

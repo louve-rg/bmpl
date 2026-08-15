@@ -1,6 +1,8 @@
 import { randomInt } from 'node:crypto';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  isWithinBelize,
+  mapsNavigationUrl,
   DELIVERY_ACTIONS,
   DELIVERY_PIN_LENGTH,
   DELIVERY_STATUS_LABELS,
@@ -57,6 +59,8 @@ export const DELIVERY_INCLUDE = {
           userId: true,
           status: true,
           placedAt: true,
+          // Drives the simulation boundary in every assignment path.
+          isTest: true,
           addresses: true,
           payment: { select: { status: true, amountMinor: true, currency: true } },
         },
@@ -273,12 +277,32 @@ export class DeliveryCoreService {
           : { fullName: null, phone: null, addressLine1: null, addressLine2: null, city: address.city, district: address.district, country: address.country }
         : null;
 
+      /**
+       * The customer's map pin, and a link that opens it in the driver's own maps
+       * app. Both are gated on acceptance for the same reason as the street
+       * address — a pinned doorstep is MORE precise than the address, so if
+       * anything it is the more sensitive of the two. Before acceptance the
+       * driver has the area and the fee, which is what the decision needs.
+       */
+      const pin =
+        committed && isWithinBelize(address?.latitude, address?.longitude)
+          ? { latitude: address!.latitude as number, longitude: address!.longitude as number }
+          : null;
+
       return {
         ...base,
         // Area only until accepted; full fulfilment details afterwards.
         deliveryAddress: driverAddress,
         /** Whether `deliveryAddress` is the full address or the area-only view. */
         addressUnlocked: committed,
+        /** The customer's exact pin, once this driver has taken the job. */
+        pinnedLocation: pin,
+        /** Opens the pin in the device's maps application. No mapping API involved. */
+        navigationUrl: pin ? mapsNavigationUrl(pin, `Order ${order.orderNumber}`) : null,
+        /** Free-text instructions the customer left ("blue gate"). Post-acceptance only. */
+        deliveryInstructions: committed ? d.instructions : null,
+        /** Flagged so a simulation is never mistaken for a real customer's order. */
+        isTest: order.isTest,
         pickupLocation: pickupLocation
           ? { label: pickupLocation.label, addressLine1: pickupLocation.addressLine1, addressLine2: pickupLocation.addressLine2, city: pickupLocation.city, district: pickupLocation.district }
           : null,

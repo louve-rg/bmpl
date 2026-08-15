@@ -90,7 +90,9 @@ export class DispatchService {
     if (d.assignedDriverProfileId) {
       const district = d.vendorOrder.order.addresses[0]?.district;
       if (district) {
-        const e = await this.drivers.assignmentEligibility(d.assignedDriverProfileId, district, d.assignedVehicleId ?? undefined);
+        const e = await this.drivers.assignmentEligibility(d.assignedDriverProfileId, district, d.assignedVehicleId ?? undefined, {
+          isTestDelivery: d.vendorOrder.order.isTest,
+        });
         currentDriverEligibility = { eligible: e.eligible, reasons: e.reasons };
       }
     }
@@ -117,7 +119,9 @@ export class DispatchService {
   async eligibleDrivers(deliveryId: string) {
     const d = await this.core.loadOrThrow(deliveryId);
     const district = this.districtOrThrow(d);
-    return this.drivers.eligibleDriversForDistrict(district);
+    // Only the matching side of the simulation boundary — an admin should not be
+    // offered a choice the assignment would then refuse.
+    return this.drivers.eligibleDriversForDistrict(district, { isTest: d.vendorOrder.order.isTest });
   }
 
   /**
@@ -195,8 +199,14 @@ export class DispatchService {
     this.core.assertAction(action, current.status);
     const district = this.districtOrThrow(current);
 
-    // Re-check eligibility AT ASSIGNMENT TIME (spec requirement).
-    const e = await this.drivers.assignmentEligibility(driverProfileId, district, vehicleId);
+    // Re-check eligibility AT ASSIGNMENT TIME (spec requirement). Passing the
+    // order's simulation flag makes the test/real boundary a hard server-side
+    // rule on the ADMIN path too, not just in the dispatch engine — an
+    // administrator cannot hand a rehearsal to a real driver by mistake, nor a
+    // real customer's delivery to a test account.
+    const e = await this.drivers.assignmentEligibility(driverProfileId, district, vehicleId, {
+      isTestDelivery: current.vendorOrder.order.isTest,
+    });
     if (!e.eligible) throw new BadRequestException(`Driver is not eligible: ${e.reasons.join('; ')}.`);
 
     const fromStatus = current.status;

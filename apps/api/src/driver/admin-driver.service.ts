@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { expiryStatus, isExpiredOrMissing } from '@bmpl/shared';
 import type { DriverProfile, DriverVehicle } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
@@ -98,6 +98,46 @@ export class AdminDriverService {
       serviceAreas: p.serviceAreas.map((s) => ({ district: s.district, isActive: s.isActive })),
       recentActivity: audit,
     };
+  }
+
+  /**
+   * Designate a driver profile as a SIMULATION driver, or return it to a real one.
+   *
+   * Refused while the driver holds open work on the other side of the boundary:
+   * flipping mid-delivery would leave a job assigned to a driver the eligibility
+   * rules say may not have it, which is precisely the inconsistency the flag
+   * exists to prevent.
+   */
+  async setTestMode(actor: Actor, driverProfileId: string, isTest: boolean, reason?: string) {
+    const p = await this.prisma.driverProfile.findUnique({
+      where: { id: driverProfileId },
+      select: { id: true, displayName: true, isTest: true, userId: true },
+    });
+    if (!p) throw new NotFoundException('Driver not found.');
+    if (p.isTest === isTest) return { id: p.id, displayName: p.displayName, isTest };
+
+    const openWork = await this.prisma.orderDelivery.count({
+      where: {
+        assignedDriverProfileId: driverProfileId,
+        status: { in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'] },
+      },
+    });
+    if (openWork > 0) {
+      throw new BadRequestException(
+        `This driver has ${openWork} delivery(ies) in progress. Let them finish before changing test mode.`,
+      );
+    }
+
+    const updated = await this.prisma.driverProfile.update({ where: { id: driverProfileId }, data: { isTest } });
+    await this.audit.record({
+      action: 'DRIVER_TEST_MODE_CHANGED',
+      actorId: actor.userId,
+      targetUserId: p.userId,
+      ipAddress: actor.ipAddress ?? null,
+      sessionId: actor.sessionId ?? null,
+      newValue: { driverProfileId, isTest, reason: reason ?? null },
+    });
+    return { id: updated.id, displayName: updated.displayName, isTest: updated.isTest };
   }
 
   async moderateVehicle(actor: Actor, vehicleId: string, decision: 'approve' | 'reject', reason?: string) {

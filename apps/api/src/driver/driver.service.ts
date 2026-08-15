@@ -343,8 +343,19 @@ export class DriverService {
 
   /** Full eligibility for assigning `driverProfileId` to a delivery in `district`
    *  (optionally with a specific `vehicleId`). Never throws for ineligibility —
-   *  returns reasons so the admin sees exactly why. */
-  async assignmentEligibility(driverProfileId: string, district: string, vehicleId?: string) {
+   *  returns reasons so the admin sees exactly why.
+   *
+   *  `isTestDelivery` enforces the simulation boundary. It lives here, in the one
+   *  authority every assignment path already funnels through — the dispatch
+   *  engine's `pickVehicle`, admin assign and admin reassign all call this — so
+   *  there is no second place for the rule to drift to, and no path that can skip
+   *  it. Frontend filtering and TEST labels are cosmetic; this is the boundary. */
+  async assignmentEligibility(
+    driverProfileId: string,
+    district: string,
+    vehicleId?: string,
+    opts: { isTestDelivery?: boolean } = {},
+  ) {
     const p = await this.prisma.driverProfile.findUnique({
       where: { id: driverProfileId },
       include: { vehicles: true, serviceAreas: true },
@@ -352,6 +363,12 @@ export class DriverService {
     if (!p) throw new NotFoundException('Driver not found.');
     const status = await this.roleStatus(p.userId);
     const reasons: string[] = [];
+    // Symmetric, and deliberately so. A rehearsal must never reach a real driver
+    // — that is the incident this prevents — and a real customer's order must
+    // never land on a test account, where nobody is actually going to deliver it.
+    const isTestDelivery = opts.isTestDelivery ?? false;
+    if (isTestDelivery && !p.isTest) reasons.push('simulation deliveries are only offered to designated test drivers');
+    if (!isTestDelivery && p.isTest) reasons.push('a test driver cannot be assigned a real customer delivery');
     if (status !== 'APPROVED') reasons.push(status === 'SUSPENDED' ? 'driver role suspended' : status === 'REVOKED' ? 'driver role revoked' : 'driver role not approved');
     if (!p.isActive) reasons.push('driver account inactive');
     if (p.availability !== 'ONLINE') reasons.push('driver is not online');
@@ -370,10 +387,20 @@ export class DriverService {
     return { eligible: reasons.length === 0, reasons, usableVehicles, vehicle, profile: p, roleStatus: status };
   }
 
-  /** Approved, online, valid drivers who serve `district` — the admin dispatch pool. */
-  async eligibleDriversForDistrict(district: string) {
+  /** Approved, online, valid drivers who serve `district` — the admin dispatch pool.
+   *
+   *  `isTest` narrows the pool to the matching side of the simulation boundary,
+   *  in the QUERY rather than in a post-filter, so a test driver is never even a
+   *  candidate for a real delivery (nor the reverse). `assignmentEligibility`
+   *  re-checks it at assignment time regardless; this keeps the ranking honest. */
+  async eligibleDriversForDistrict(district: string, opts: { isTest?: boolean } = {}) {
     const candidates = await this.prisma.driverProfile.findMany({
-      where: { availability: 'ONLINE', isActive: true, serviceAreas: { some: { district: district as never, isActive: true } } },
+      where: {
+        availability: 'ONLINE',
+        isActive: true,
+        isTest: opts.isTest ?? false,
+        serviceAreas: { some: { district: district as never, isActive: true } },
+      },
       include: {
         user: { select: { firstName: true, lastName: true } },
         vehicles: true,

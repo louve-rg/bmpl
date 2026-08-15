@@ -28,6 +28,11 @@ export const AUDIT_ACTIONS = [
   'VENDOR_REJECTED',
   'VENDOR_SUSPENDED',
   'VENDOR_RESTORED',
+  // Designating a storefront / driver profile as a simulation account. Security
+  // relevant: the vendor flag is what makes an order a test order, and the driver
+  // flag is what decides who may be offered one.
+  'VENDOR_TEST_MODE_CHANGED',
+  'DRIVER_TEST_MODE_CHANGED',
   // ---- Marketplace: Products (Phase 2 · M4) ----
   'PRODUCT_CREATED',
   'PRODUCT_SUBMITTED',

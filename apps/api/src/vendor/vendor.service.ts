@@ -492,6 +492,47 @@ export class VendorService {
     };
   }
 
+  /**
+   * Designate a storefront as a SIMULATION store (or return it to a real one).
+   *
+   * Everything bought from a simulation store becomes an `isTest` order, which
+   * is excluded from analytics and can only ever be offered to a driver profile
+   * that is itself flagged for testing. Because the flag lives on the STORE
+   * rather than in the checkout request, a customer has nothing to forge.
+   *
+   * Refused once the store has real orders behind it: flipping a live storefront
+   * into test mode would make its future orders invisible to revenue and
+   * undeliverable by real drivers, and flipping a test store to real would let a
+   * rehearsal's history leak into the figures.
+   */
+  async setTestMode(actor: ActorContext, vendorProfileId: string, isTest: boolean, reason?: string) {
+    const vp = await this.prisma.vendorProfile.findUnique({
+      where: { id: vendorProfileId },
+      select: { id: true, businessName: true, isTest: true },
+    });
+    if (!vp) throw new NotFoundException('Vendor not found.');
+    if (vp.isTest === isTest) return { id: vp.id, businessName: vp.businessName, isTest };
+
+    const realOrders = await this.prisma.vendorOrder.count({
+      where: { vendorProfileId, order: { isTest: !isTest } },
+    });
+    if (realOrders > 0) {
+      throw new BadRequestException(
+        `This store already has ${realOrders} order(s) on the other side of the test boundary. Create a separate storefront for simulations.`,
+      );
+    }
+
+    const updated = await this.prisma.vendorProfile.update({ where: { id: vendorProfileId }, data: { isTest } });
+    await this.audit.record({
+      action: 'VENDOR_TEST_MODE_CHANGED',
+      actorId: actor.userId,
+      ipAddress: actor.ipAddress ?? null,
+      sessionId: actor.sessionId ?? null,
+      newValue: { vendorProfileId, isTest, reason: reason ?? null },
+    });
+    return { id: updated.id, businessName: updated.businessName, isTest: updated.isTest };
+  }
+
   async moderate(actor: ActorContext, id: string, kind: ModerationKind, note?: string) {
     const profile = await this.prisma.vendorProfile.findUnique({ where: { id } });
     if (!profile) throw new NotFoundException('Vendor profile not found.');

@@ -161,6 +161,8 @@ enum AuditAction {
   VENDOR_REJECTED
   VENDOR_SUSPENDED
   VENDOR_RESTORED
+  VENDOR_TEST_MODE_CHANGED
+  DRIVER_TEST_MODE_CHANGED
   // ---- Marketplace: Products (Phase 2 · M4) ----
   PRODUCT_CREATED
   PRODUCT_SUBMITTED
@@ -1024,6 +1026,9 @@ enum ModerationAction {
 
 model VendorProfile {
   id              String               @id @default(cuid())
+  // A simulation storefront. Admin-set only. Everything bought here becomes an
+  // isTest order, which is what keeps the test flag unforgeable by a customer.
+  isTest          Boolean              @default(false)
   userId          String               @unique
   user            User                 @relation("UserVendorProfile", fields: [userId], references: [id], onDelete: Cascade)
   businessName    String
@@ -1587,6 +1592,11 @@ enum OrderAddressType {
 model Order {
   id                     String      @id @default(cuid())
   orderNumber            String      @unique
+  // Simulation order (M26.3). NEVER accepted from client input — checkout derives
+  // it from the vendor being bought from, so an ordinary customer buying from a
+  // real store cannot produce one. Excluded from analytics, and its delivery may
+  // only be offered to a driver profile that is itself flagged isTest.
+  isTest                 Boolean     @default(false)
   userId                 String
   user                   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   status                 OrderStatus @default(PENDING)
@@ -1840,6 +1850,12 @@ enum VehicleApprovalStatus {
 
 model DriverProfile {
   id                    String             @id @default(cuid())
+  // A designated simulation driver. Admin-set only. Test deliveries are offered
+  // ONLY to these, and these are offered ONLY test deliveries — the isolation is
+  // symmetric so a rehearsal can never touch a real customer, and a real order
+  // can never land on a test account. Enforced in DriverService, which every
+  // assignment path already goes through.
+  isTest                Boolean            @default(false)
   userId                String             @unique
   user                  User               @relation("UserDriverProfile", fields: [userId], references: [id], onDelete: Cascade)
   // Application / identity data (captured with the driver-role application).

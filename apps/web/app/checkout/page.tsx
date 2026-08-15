@@ -8,7 +8,24 @@ import { Footer } from '../../components/landing/Footer';
 import { cartApi, money, type CartLine, type CartView } from '../../lib/cart';
 import { variantDisplay } from '../../lib/variant-display';
 import { DISTRICTS, type OrderView } from '../../lib/orders';
+import dynamic from 'next/dynamic';
+import type { Coordinates } from '@bmpl/shared';
 import { api, type ApiError } from '../../lib/api';
+
+/**
+ * Browser-only: Leaflet touches `window` at import time, and the map is
+ * meaningless server-rendered. Loading it dynamically also keeps Leaflet and its
+ * CSS out of every bundle except this route's.
+ */
+const LocationPicker = dynamic(
+  () => import('../../components/checkout/LocationPicker').then((m) => m.LocationPicker),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-64 w-full animate-pulse rounded-bmpl-md border border-slate-200 bg-slate-100" aria-hidden />
+    ),
+  },
+);
 import { Alert, Button, Card, EmptyState, ButtonLink, Field, Input, PageHeader, Select, Spinner } from '../../components/ui';
 
 type Method = 'PICKUP' | 'DELIVERY';
@@ -88,6 +105,9 @@ export default function CheckoutPage() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [instructions, setInstructions] = useState<Record<string, string>>({});
   const [address, setAddress] = useState({ fullName: '', phone: '', addressLine1: '', addressLine2: '', city: '', district: 'BELIZE' });
+  // The customer's map pin. Held separately from `address` so a delivery-quote
+  // refresh (which re-runs on district/method changes) can never drop it.
+  const [pin, setPin] = useState<Coordinates | null>(null);
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +174,10 @@ export default function CheckoutPage() {
             addressLine2: address.addressLine2.trim() || undefined,
             city: address.city.trim(),
             district: address.district,
+            // Optional. The server re-validates the bounds — this is convenience,
+            // not trust.
+            latitude: pin?.latitude,
+            longitude: pin?.longitude,
           }
         : undefined,
     };
@@ -311,6 +335,13 @@ export default function CheckoutPage() {
                         ))}
                       </Select>
                     </Field>
+                  </div>
+
+                  {/* Written address + exact pin, together. The address gives the
+                      driver human context ("Ladyville"), the pin gives them a
+                      navigable point. Neither replaces the other. */}
+                  <div className="mt-4">
+                    <LocationPicker value={pin} onChange={setPin} disabled={placing} />
                   </div>
                 </Card>
               )}

@@ -91,7 +91,7 @@ export class DispatchEngineService {
           select: {
             status: true,
             order: {
-              select: { orderNumber: true, addresses: { select: { district: true } } },
+              select: { orderNumber: true, isTest: true, addresses: { select: { district: true } } },
             },
           },
         },
@@ -127,7 +127,11 @@ export class DispatchEngineService {
     const district = this.districtOf(delivery.vendorOrder.order.addresses);
     if (!district) return { result: 'SKIPPED', reason: 'delivery has no destination district' };
 
-    const ranked = await this.rankFor(deliveryId, district, cfg);
+    // Simulation boundary: a test order's pool is test drivers, a real order's
+    // pool is real drivers. Narrowed in the candidate query AND re-asserted by
+    // assignmentEligibility at assignment time.
+    const isTest = delivery.vendorOrder.order.isTest;
+    const ranked = await this.rankFor(deliveryId, district, cfg, isTest);
     if (ranked.length === 0) {
       // Not exhausted — nobody is online right now. The sweeper retries, so a
       // quiet hour resolves itself once a driver comes online.
@@ -145,7 +149,7 @@ export class DispatchEngineService {
     // offline or had a document lapse in between. systemAssign re-checks too;
     // this loop just moves on to the next candidate instead of failing the batch.
     for (const candidate of ranked) {
-      const vehicleId = await this.pickVehicle(candidate.driverProfileId, district);
+      const vehicleId = await this.pickVehicle(candidate.driverProfileId, district, isTest);
       if (!vehicleId) continue;
       try {
         await this.assignments.systemAssign(deliveryId, candidate.driverProfileId, vehicleId);
@@ -247,8 +251,8 @@ export class DispatchEngineService {
    * per driver — the pool is up to 200 rows, and a per-driver round trip here
    * would be an N+1 on the hottest path in the system.
    */
-  private async rankFor(deliveryId: string, district: string, cfg: DispatchSettings) {
-    const pool = await this.drivers.eligibleDriversForDistrict(district);
+  private async rankFor(deliveryId: string, district: string, cfg: DispatchSettings, isTest = false) {
+    const pool = await this.drivers.eligibleDriversForDistrict(district, { isTest });
     if (pool.length === 0) return [];
     const ids = pool.map((d) => d.driverProfileId);
 
@@ -297,8 +301,8 @@ export class DispatchEngineService {
   }
 
   /** The driver's primary usable vehicle for this district, if any. */
-  private async pickVehicle(driverProfileId: string, district: string): Promise<string | null> {
-    const e = await this.drivers.assignmentEligibility(driverProfileId, district);
+  private async pickVehicle(driverProfileId: string, district: string, isTest = false): Promise<string | null> {
+    const e = await this.drivers.assignmentEligibility(driverProfileId, district, undefined, { isTestDelivery: isTest });
     if (!e.eligible || e.usableVehicles.length === 0) return null;
     return (e.usableVehicles.find((v) => v.isPrimary) ?? e.usableVehicles[0])!.id;
   }

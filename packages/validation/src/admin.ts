@@ -15,3 +15,16 @@ export const setAdminPermissionsSchema = z.object({
   userId: cuidSchema,
   permissions: z.array(permissionSchema).max(PERMISSIONS.length),
 });
+
+/**
+ * Designate a storefront or driver profile as a SIMULATION account.
+ *
+ * Admin-only, and it is the root of the whole test-isolation design: orders
+ * derive `isTest` from the storefront, and only a driver flagged here may ever
+ * be offered one. Nothing customer-facing can set either flag.
+ */
+export const testModeSchema = z.object({
+  isTest: z.boolean(),
+  reason: z.string().trim().max(500).optional(),
+});
+export type TestModeInput = z.infer<typeof testModeSchema>;

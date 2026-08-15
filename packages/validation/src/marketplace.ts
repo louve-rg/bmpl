@@ -4,10 +4,12 @@ import {
   DISTRICTS,
   INVENTORY_CHANGE_REASONS,
   MODERATION_ACTIONS,
+  OUT_OF_BOUNDS_MESSAGE,
   PRODUCT_SORTS,
   PRODUCT_STATUSES,
   STORE_STATUSES,
   VENDOR_APPROVAL_STATUSES,
+  isWithinBelize,
 } from '@bmpl/shared';
 
 /**
@@ -448,17 +450,41 @@ export type UpdateCartItemInput = z.infer<typeof updateCartItemSchema>;
 
 const deliveryMethodSchema = z.enum(DELIVERY_METHODS);
 
-/** A snapshotted delivery address (required when any vendor uses DELIVERY). */
-export const orderAddressSchema = z.object({
-  fullName: z.string().trim().min(1, 'Full name is required.').max(160),
-  phone: z.string().trim().max(40).optional(),
-  addressLine1: z.string().trim().min(1, 'Address is required.').max(200),
-  addressLine2: z.string().trim().max(200).optional(),
-  city: z.string().trim().min(1, 'City is required.').max(120),
-  district: z.enum(DISTRICTS),
-  latitude: z.coerce.number().min(-90).max(90).optional(),
-  longitude: z.coerce.number().min(-180).max(180).optional(),
-});
+/**
+ * A snapshotted delivery address (required when any vendor uses DELIVERY).
+ *
+ * The optional coordinate pair is the customer's map pin. Two rules beyond the
+ * obvious range check, both of which have to hold on the SERVER because a
+ * request body can claim anything:
+ *
+ *  - both or neither. A lone latitude is not a location, and storing half a
+ *    pin would leave the route optimizer reading a null as "unknown" while the
+ *    UI showed a location as pinned.
+ *  - inside Belize. A generic -90..90 / -180..180 check happily accepts the
+ *    middle of the Pacific, and a transposed lat/lng — the single most likely
+ *    mistake — passes it too. Such a coordinate would be snapshotted onto the
+ *    order and then distort the sequencing of every other stop in the driver's
+ *    queue.
+ */
+export const orderAddressSchema = z
+  .object({
+    fullName: z.string().trim().min(1, 'Full name is required.').max(160),
+    phone: z.string().trim().max(40).optional(),
+    addressLine1: z.string().trim().min(1, 'Address is required.').max(200),
+    addressLine2: z.string().trim().max(200).optional(),
+    city: z.string().trim().min(1, 'City is required.').max(120),
+    district: z.enum(DISTRICTS),
+    latitude: z.coerce.number().min(-90).max(90).optional(),
+    longitude: z.coerce.number().min(-180).max(180).optional(),
+  })
+  .refine((v) => (v.latitude == null) === (v.longitude == null), {
+    message: 'A pinned location needs both a latitude and a longitude.',
+    path: ['latitude'],
+  })
+  .refine((v) => v.latitude == null || isWithinBelize(v.latitude, v.longitude), {
+    message: OUT_OF_BOUNDS_MESSAGE,
+    path: ['latitude'],
+  });
 export type OrderAddressInput = z.infer<typeof orderAddressSchema>;
 
 /** Per-vendor fulfilment choice at checkout. */

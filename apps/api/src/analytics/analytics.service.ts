@@ -18,6 +18,15 @@ interface SeriesPoint { date: string; orders: number; grossMinor: number }
  * (AUTHORIZED/SETTLING/SETTLED payments); realized platform/vendor revenue comes from
  * POSTED settlements.
  */
+/**
+ * Every analytics aggregate excludes simulation orders.
+ *
+ * A rehearsal placed through the real checkout is a real row in `orders`. It
+ * must never reach GMV, order volume, units sold or the CSV export, or the
+ * client's own dashboards would lie to them the moment anyone tests anything.
+ */
+const NOT_TEST = { isTest: false } as const;
+
 @Injectable()
 export class AnalyticsService {
   constructor(
@@ -51,11 +60,14 @@ export class AnalyticsService {
   async adminOverview() {
     const [gmvAgg, totalOrders, cancelledOrders, settlementAgg, unitsAgg, approvedVendors, approvedDrivers, totalCustomers, publishedProducts, reviewAgg] =
       await Promise.all([
-        this.prisma.payment.aggregate({ where: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } }, _sum: { amountMinor: true }, _count: true }),
-        this.prisma.order.count(),
-        this.prisma.order.count({ where: { status: 'CANCELLED' } }),
+        // NOT_TEST on every aggregate: a rehearsal must not move GMV, order
+        // volume or units. Payments are filtered through their order because a
+        // simulation never has one anyway — belt and braces if that changes.
+        this.prisma.payment.aggregate({ where: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] }, order: NOT_TEST }, _sum: { amountMinor: true }, _count: true }),
+        this.prisma.order.count({ where: NOT_TEST }),
+        this.prisma.order.count({ where: { ...NOT_TEST, status: 'CANCELLED' } }),
         this.prisma.vendorSettlement.aggregate({ where: { status: 'POSTED' }, _sum: { commissionMinor: true, platformFeeMinor: true, netMinor: true, grossMinor: true } }),
-        this.prisma.orderItem.aggregate({ where: { vendorOrder: { order: { payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } } }, _sum: { quantity: true } }),
+        this.prisma.orderItem.aggregate({ where: { vendorOrder: { order: { ...NOT_TEST, payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } } }, _sum: { quantity: true } }),
         this.prisma.userRole.count({ where: { roleCode: 'VENDOR', status: 'APPROVED' } }),
         this.prisma.userRole.count({ where: { roleCode: 'DELIVERY_DRIVER', status: 'APPROVED' } }),
         this.prisma.user.count(),
@@ -128,6 +140,7 @@ export class AnalyticsService {
 
   async adminOrdersCsv() {
     const orders = await this.prisma.order.findMany({
+      where: NOT_TEST,
       orderBy: { createdAt: 'desc' },
       take: 5000,
       include: { payment: { select: { status: true } }, vendorOrders: { select: { vendorProfile: { select: { businessName: true } } } } },
@@ -154,7 +167,7 @@ export class AnalyticsService {
     const vp = await this.ownership.vendorProfileId(userId); // throws if not a vendor
     const [paidAgg, unitsAgg, settlementAgg, pendingSettlements, publishedProducts, profile] = await Promise.all([
       this.prisma.vendorOrder.aggregate({ where: { vendorProfileId: vp, order: { payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } }, _sum: { subtotalMinor: true }, _count: true }),
-      this.prisma.orderItem.aggregate({ where: { vendorOrder: { vendorProfileId: vp, order: { payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } } }, _sum: { quantity: true } }),
+      this.prisma.orderItem.aggregate({ where: { vendorOrder: { vendorProfileId: vp, order: { ...NOT_TEST, payment: { status: { in: ['AUTHORIZED', 'SETTLING', 'SETTLED'] } } } } }, _sum: { quantity: true } }),
       this.prisma.vendorSettlement.aggregate({ where: { vendorProfileId: vp, status: 'POSTED' }, _sum: { netMinor: true, commissionMinor: true, grossMinor: true } }),
       this.prisma.vendorSettlement.count({ where: { vendorProfileId: vp, status: 'PENDING' } }),
       this.prisma.product.count({ where: { vendorProfileId: vp, status: 'PUBLISHED' } }),

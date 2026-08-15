@@ -1,5 +1,6 @@
 export * from './roles';
 export * from './districts';
+export * from './geo';
 export * from './permissions';
 export * from './audit';
 export * from './notifications';
