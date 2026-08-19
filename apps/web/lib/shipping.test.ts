@@ -104,7 +104,7 @@ describe('headlineFor', () => {
       status: 'AWAITING_COLLECTION',
       statusLabel: 'Ready to collect',
       endsAtHub: true,
-      legs: [leg({ destinationHub: { id: 'h1', code: 'SPA', name: 'San Pedro Airstrip', city: 'San Pedro', instructions: null } })],
+      legs: [leg({ destinationHub: { id: 'h1', code: 'SPA', name: 'San Pedro Airstrip', city: 'San Pedro', instructions: null, latitude: 17.9139, longitude: -87.9711 } })],
     });
     expect(headlineFor(s)).toBe('Ready to collect at San Pedro Airstrip');
   });

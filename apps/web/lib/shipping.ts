@@ -24,6 +24,16 @@ export interface ShippingHub {
   instructions: string | null;
 }
 
+export interface ShipmentLegHub {
+  id: string;
+  code: string;
+  name: string;
+  city: string;
+  instructions: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
 export interface ShipmentLegView {
   id: string;
   sequence: number;
@@ -35,8 +45,8 @@ export interface ShipmentLegView {
   priceMinor: number;
   durationMinutes: number;
   isCurrent: boolean;
-  originHub: { id: string; code: string; name: string; city: string; instructions: string | null } | null;
-  destinationHub: { id: string; code: string; name: string; city: string; instructions: string | null } | null;
+  originHub: ShipmentLegHub | null;
+  destinationHub: ShipmentLegHub | null;
   carrier: string | null;
   scheduleNote: string | null;
   departedAt: string | null;

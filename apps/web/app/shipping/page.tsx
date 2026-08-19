@@ -62,9 +62,15 @@ export default function ShippingAndDeliveryPage() {
               driver, with verified handover and tracking from the shop counter to your door.
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
+              {/* The primary action on a shipping page is to ship something.
+                  `next=` carries an unauthenticated visitor straight into the
+                  booking form after signing in, rather than dumping them on a
+                  dashboard to find it again. */}
+              <ButtonLink href="/login?next=/dashboard/shipments/new">Ship a package</ButtonLink>
               {/* Public browsing needs no account. */}
-              <ButtonLink href="/products">Browse the marketplace</ButtonLink>
-              {/* This one genuinely needs a session, so it returns you here after. */}
+              <ButtonLink href="/products" variant="outline">
+                Browse the marketplace
+              </ButtonLink>
               <ButtonLink href="/register?next=/dashboard/roles" variant="outline">
                 Drive with us
               </ButtonLink>

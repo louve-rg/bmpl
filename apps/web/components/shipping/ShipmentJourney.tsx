@@ -119,8 +119,25 @@ export function ShipmentJourney({ shipment }: { shipment: ShipmentView }) {
 
       {collectHub && (
         <div className="rounded-bmpl-xl border border-emerald-200 bg-emerald-50 p-4">
-          <p className="text-sm font-medium text-emerald-900">Collect from {collectHub.name}</p>
-          {collectHub.instructions && <p className="mt-1 text-xs text-emerald-800">{collectHub.instructions}</p>}
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Ready to collect</p>
+          <p className="mt-1 break-words text-base font-semibold text-emerald-900">{collectHub.name}</p>
+          {collectHub.city && <p className="mt-0.5 break-words text-sm text-emerald-800">{collectHub.city}</p>}
+          {collectHub.instructions && (
+            // Opening hours and which counter, as the operator configured them.
+            // A parcel "ready to collect" from a place you cannot find is not
+            // ready for anything.
+            <p className="mt-2 break-words text-sm text-emerald-800">{collectHub.instructions}</p>
+          )}
+          {collectHub.latitude != null && collectHub.longitude != null && (
+            <a
+              href={`https://www.google.com/maps/dir/?api=1&destination=${collectHub.latitude},${collectHub.longitude}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-flex min-h-[44px] items-center rounded-bmpl-md bg-emerald-700 px-4 text-sm font-semibold text-white"
+            >
+              Directions
+            </a>
+          )}
         </div>
       )}
 

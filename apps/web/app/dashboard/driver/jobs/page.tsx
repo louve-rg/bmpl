@@ -2,7 +2,14 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DRIVER_DELIVERY_VIEWS, DRIVER_VIEW_DESCRIPTIONS, DRIVER_VIEW_LABELS, type DriverDeliveryView } from '@bmpl/shared';
+import {
+  DRIVER_DELIVERY_VIEWS,
+  DRIVER_VIEW_DESCRIPTIONS,
+  DRIVER_VIEW_LABELS,
+  isShipmentJob,
+  type DriverDeliveryView,
+  type DriverJobKind,
+} from '@bmpl/shared';
 import { api, type ApiError } from '../../../../lib/api';
 import { Alert, Card, EmptyState, PageHeader, Spinner, StatusBadge } from '../../../../components/ui';
 import { DeliveryQueue } from '../../../../components/driver/DeliveryQueue';
@@ -25,24 +32,41 @@ function formatDate(iso?: string | null): string {
 
 /* --------------------------------------------------------------- types */
 
+/**
+ * One job, whatever it came from.
+ *
+ * The normalized half (`kind`, `pickup`, `dropoff`, `load`, `reference`) works
+ * for every job. The marketplace fields below it are the original contract and
+ * are still populated for marketplace work — kept so nothing that reads them
+ * breaks, not because a shipping job has an order number.
+ */
 interface JobSummary {
   id: string;
+  kind: DriverJobKind;
+  kindLabel: string;
+  reference: string;
+  pickup: { name: string | null; area: string | null };
+  dropoff: { name: string | null; area: string | null };
+  load: string;
   status: string;
   statusLabel: string;
   view: DriverDeliveryView | null;
-  orderNumber: string;
-  vendor: string;
-  pickupArea: string | null;
-  itemCount: number;
-  city: string | null;
-  district: string | null;
   feeMinor: number;
   assignedAt: string | null;
   acceptedAt: string | null;
-  deliveredAt: string | null;
+  completedAt: string | null;
   offerExpiresAt: string | null;
   queuePosition: number | null;
+  // ---- marketplace only ----
+  orderNumber?: string;
+  vendor?: string;
+  itemCount?: number;
+  deliveredAt?: string | null;
 }
+
+/** Shipping legs live on their own detail route; marketplace jobs on theirs. */
+const jobHref = (job: JobSummary) =>
+  isShipmentJob(job.kind) ? `/dashboard/driver/shipping/${job.id}` : `/dashboard/driver/jobs/${job.id}`;
 
 type Counts = Record<DriverDeliveryView, number>;
 
@@ -224,9 +248,12 @@ const EMPTY: Record<DriverDeliveryView, { title: string; description: string }> 
 };
 
 function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
-  const destination = [job.city, job.district?.replace(/_/g, ' ')].filter(Boolean).join(', ');
+  const shipping = isShipmentJob(job.kind);
+  // A parcel leg names both ends; a marketplace job names the store and an area.
+  const from = job.pickup.name ?? job.pickup.area;
+  const to = job.dropoff.name ?? job.dropoff.area;
   return (
-    <Link href={`/dashboard/driver/jobs/${job.id}`} className="block">
+    <Link href={jobHref(job)} className="block">
       <Card
         className={`p-4 transition hover:border-belize-blue/40 hover:shadow-bmpl-md active:scale-[0.995] sm:p-5 ${
           view === 'available' ? 'border-belize-accent/40 bg-belize-accent/5' : ''
@@ -235,20 +262,37 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <b className="text-sm text-belize-navy">Order #{job.orderNumber}</b>
+              {/* What KIND of job, before anything else. A driver glancing at a
+                  list needs to know whether this is a store run or a parcel leg
+                  before they read a single address. */}
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
+                  shipping ? 'bg-belize-accent/15 text-belize-deep' : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {job.kindLabel}
+              </span>
               <StatusBadge status={job.status} />
             </div>
-            {/* break-words, not truncate: a long business name on a 320px screen
-                should wrap rather than become "Aurora Tro…". */}
-            <p className="mt-1 break-words text-sm text-slate-600">{job.vendor}</p>
-            <p className="mt-0.5 break-words text-sm text-slate-500">
-              {job.itemCount} {job.itemCount === 1 ? 'item' : 'items'}
-              {destination ? ` · to ${destination}` : ''}
+
+            <p className="mt-1.5 break-words text-sm font-semibold text-belize-navy">
+              {shipping ? job.reference : `Order #${job.orderNumber}`}
             </p>
-            {job.pickupArea && <p className="mt-0.5 break-words text-xs text-slate-400">Collect from {job.pickupArea}</p>}
+
+            {/* Both ends on their own lines. On a 320px screen a single
+                "A → B" line wraps in the middle of an address and reads as one
+                place; two labelled lines never do. */}
+            <p className="mt-1 break-words text-sm text-slate-600">
+              <span className="text-slate-400">Collect</span> {from ?? '—'}
+            </p>
+            <p className="mt-0.5 break-words text-sm text-slate-600">
+              <span className="text-slate-400">Deliver</span> {to ?? '—'}
+            </p>
+            <p className="mt-0.5 break-words text-xs text-slate-500">{job.load}</p>
+
             <p className="mt-1 text-xs text-slate-400">
-              {view === 'completed' && job.deliveredAt
-                ? `Delivered ${formatDate(job.deliveredAt)}`
+              {view === 'completed' && job.completedAt
+                ? `Completed ${formatDate(job.completedAt)}`
                 : view === 'available' && job.offerExpiresAt
                   ? `Offer expires ${formatDate(job.offerExpiresAt)}`
                   : job.acceptedAt
