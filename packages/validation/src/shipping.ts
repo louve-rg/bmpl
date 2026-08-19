@@ -220,11 +220,24 @@ export const cancelShipmentSchema = z.object({
 });
 export type CancelShipmentInput = z.infer<typeof cancelShipmentSchema>;
 
+/**
+ * A query-string boolean that respects the word "false".
+ *
+ * `z.coerce.boolean()` runs JavaScript's Boolean(), and Boolean('false') is
+ * TRUE — so `?includeTest=false` would have done the opposite of what it says.
+ * On a filter that decides whether simulation shipments appear on an operations
+ * board, that is the wrong direction to fail in.
+ */
+const queryBoolean = z
+  .enum(['true', 'false', '1', '0'])
+  .transform((v) => v === 'true' || v === '1')
+  .or(z.boolean());
+
 /** Admin listing filters. */
 export const shipmentListSchema = z.object({
   status: z.string().trim().max(40).optional(),
   service: z.enum(SHIPPING_SERVICES).optional(),
-  includeTest: z.coerce.boolean().optional(),
+  includeTest: queryBoolean.optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
