@@ -209,6 +209,12 @@ export const legExceptionSchema = z.object({
 });
 export type LegExceptionInput = z.infer<typeof legExceptionSchema>;
 
+/** Recording that a recipient collected their parcel from a terminal. */
+export const collectShipmentSchema = z.object({
+  collectedByName: z.string().trim().min(2, 'Who collected it?').max(120),
+});
+export type CollectShipmentInput = z.infer<typeof collectShipmentSchema>;
+
 export const cancelShipmentSchema = z.object({
   reason: z.string().trim().min(4, 'Say why it is being cancelled.').max(500),
 });

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
   cancelShipmentSchema,
+  collectShipmentSchema,
   createHubSchema,
   createRouteSchema,
   createShipmentSchema,
@@ -12,6 +13,7 @@ import {
   updateHubSchema,
   updateRouteSchema,
   type CancelShipmentInput,
+  type CollectShipmentInput,
   type CreateHubInput,
   type CreateRouteInput,
   type CreateShipmentInput,
@@ -184,6 +186,14 @@ export class AdminLogisticsController {
   @Post('legs/:id/exception')
   exception(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legExceptionSchema)) dto: LegExceptionInput) {
     return this.shipments.flagException(id, dto, { userId: u.userId });
+  }
+
+  /** The recipient walked in and picked it up. No leg moves, so nothing else can
+   *  close out a hub-ending journey. */
+  @RequirePermission('logistics.operate')
+  @Post('shipments/:id/collect')
+  collect(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(collectShipmentSchema)) dto: CollectShipmentInput) {
+    return this.shipments.recordCollection(id, dto.collectedByName, { userId: u.userId });
   }
 
   @RequirePermission('logistics.manage')

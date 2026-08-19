@@ -552,14 +552,22 @@ export class ShipmentService {
     if (next) await tx.shipmentLeg.update({ where: { id: next.id }, data: { status: 'READY' } });
   }
 
-  /** Recompute the shipment's status from its legs and persist it. */
+  /**
+   * Recompute the shipment's status from its legs and persist it.
+   *
+   * The one thing the legs cannot tell us is whether a recipient has walked into
+   * a terminal and picked their parcel up — no leg moves when that happens. So a
+   * recorded collection is layered on top: once `collectedAt` is set, a journey
+   * that would otherwise sit at AWAITING_COLLECTION forever reads as DELIVERED.
+   */
   private async recompute(tx: Prisma.TransactionClient, shipmentId: string): Promise<ShipmentStatus> {
     const s = await tx.shipment.findUniqueOrThrow({
       where: { id: shipmentId },
-      select: { service: true, legs: { select: { sequence: true, kind: true, mode: true, status: true } } },
+      select: { service: true, collectedAt: true, legs: { select: { sequence: true, kind: true, mode: true, status: true } } },
     });
-    const status = this.statusFrom(s.legs, !needsLastMile(s.service));
-    const done = status === 'DELIVERED' ? { deliveredAt: new Date() } : status === 'AWAITING_COLLECTION' ? { collectedAt: null } : {};
+    let status = this.statusFrom(s.legs, !needsLastMile(s.service));
+    if (status === 'AWAITING_COLLECTION' && s.collectedAt) status = 'DELIVERED';
+    const done = status === 'DELIVERED' ? { deliveredAt: new Date() } : {};
     await tx.shipment.update({ where: { id: shipmentId }, data: { status, ...done } });
     return status;
   }
@@ -614,6 +622,54 @@ export class ShipmentService {
         data: { shipmentId: r.shipmentId, reference: r.reference, status: r.status },
       },
     );
+  }
+
+  /**
+   * The recipient collected their parcel from the terminal.
+   *
+   * Without this a hub-ending shipment reaches "Ready to collect" and stays
+   * there forever: no leg moves when somebody walks into a counter and picks a
+   * box up, so nothing in the leg-derived status could ever close it out.
+   */
+  async recordCollection(id: string, collectedByName: string, actor: { userId: string }) {
+    const shipment = await this.prisma.$transaction(async (tx) => {
+      const s = await tx.shipment.findUnique({
+        where: { id },
+        select: { id: true, reference: true, status: true, collectedAt: true, customerUserId: true, legs: { select: { id: true, sequence: true, destinationHubId: true } } },
+      });
+      if (!s) throw new NotFoundException('Shipment not found.');
+      if (s.collectedAt) throw new BadRequestException('That shipment has already been collected.');
+      if (s.status !== 'AWAITING_COLLECTION') {
+        throw new BadRequestException('That shipment is not waiting to be collected yet.');
+      }
+
+      await tx.shipment.update({ where: { id }, data: { collectedAt: new Date() } });
+      const finalLeg = [...s.legs].sort((a, b) => b.sequence - a.sequence)[0];
+      await this.appendCustody(tx, s.id, finalLeg?.id ?? null, {
+        fromHolder: 'HUB',
+        toHolder: 'RECIPIENT',
+        hubId: finalLeg?.destinationHubId ?? null,
+        actorUserId: actor.userId,
+        actorLabel: collectedByName,
+        verification: 'VERIFIED',
+        note: `Collected by ${collectedByName}.`,
+      });
+      await this.recompute(tx, s.id);
+      return tx.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
+    });
+
+    await this.audit.record({
+      action: 'SHIPMENT_LEG_HANDOFF',
+      actorId: actor.userId,
+      newValue: { shipmentId: shipment.id, reference: shipment.reference, collectedBy: collectedByName },
+    });
+    await this.notifyCustomer({
+      customerUserId: shipment.customerUserId,
+      reference: shipment.reference,
+      status: shipment.status,
+      shipmentId: shipment.id,
+    });
+    return this.serialize(shipment, { audience: 'STAFF' });
   }
 
   /* ---------------------------------------------------------- cancellation */

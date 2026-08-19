@@ -386,6 +386,59 @@ describe('sequence is authority', () => {
   });
 });
 
+describe('collecting from a terminal', () => {
+  /** A DOOR_TO_HUB journey, walked to the point where it is waiting on a counter. */
+  async function awaitingCollection() {
+    const s = await book({
+      service: 'DOOR_TO_HUB',
+      origin: { district: 'STANN_CREEK', city: 'Placencia', address: '1 Sidewalk', name: 'S', phone: '501-2223333' },
+      destination: { hubId: hub.SPA, name: 'Recipient', phone: '501-4445555' },
+      preferredMode: 'AIR',
+    });
+    const ids = legIds(s);
+    await completeLeg(ids('FIRST_MILE_1'), await pinOf(ids('FIRST_MILE_1')), false);
+    await completeLeg(ids('LINE_HAUL_2'), await pinOf(ids('LINE_HAUL_2')), true);
+    const done = await completeLeg(ids('LINE_HAUL_3'), await pinOf(ids('LINE_HAUL_3')), true);
+    expect(done.status).toBe('AWAITING_COLLECTION');
+    return s;
+  }
+
+  it('closes out a journey that no leg can close', async () => {
+    // Nobody moves a leg when a recipient walks into a counter, so without this
+    // the shipment would read "Ready to collect" forever.
+    const s = await awaitingCollection();
+    const r = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
+    expect(r.status).toBe(201);
+    expect(r.body.status).toBe('DELIVERED');
+  });
+
+  it('records the collection as the final custody transfer', async () => {
+    const s = await awaitingCollection();
+    await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
+    const events = await ctx.prisma.custodyEvent.findMany({ where: { shipmentId: s.id }, orderBy: { occurredAt: 'asc' } });
+    expect(events.at(-1)).toMatchObject({ fromHolder: 'HUB', toHolder: 'RECIPIENT', actorLabel: 'Maria Cruz' });
+  });
+
+  it('will not collect a parcel that has not arrived', async () => {
+    const s = await book();
+    const r = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Too Early' });
+    expect(r.status).toBe(400);
+  });
+
+  it('will not collect the same parcel twice', async () => {
+    const s = await awaitingCollection();
+    await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
+    const again = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Someone Else' });
+    expect(again.status).toBe(400);
+  });
+
+  it('does not let a customer record their own collection', async () => {
+    const s = await awaitingCollection();
+    const r = await post(customer, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Me' });
+    expect([401, 403]).toContain(r.status);
+  });
+});
+
 describe('handoff verification', () => {
   it('refuses a wrong code and counts the attempt down', async () => {
     const s = await book();
