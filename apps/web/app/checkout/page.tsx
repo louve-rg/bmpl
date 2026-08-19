@@ -18,7 +18,7 @@ import { api, type ApiError } from '../../lib/api';
  * CSS out of every bundle except this route's.
  */
 const LocationPicker = dynamic(
-  () => import('../../components/checkout/LocationPicker').then((m) => m.LocationPicker),
+  () => import('../../components/maps/LocationPicker').then((m) => m.LocationPicker),
   {
     ssr: false,
     loading: () => (

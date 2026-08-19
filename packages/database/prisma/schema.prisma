@@ -1188,8 +1188,15 @@ model VendorLocation {
   city            String
   district        District
   country         String        @default("BZ")
+  // The pickup pin. Already existed and was never populated; the vendor can now
+  // drop it on a map, and it becomes the authoritative point a driver navigates
+  // to for collection. Same coordinate abstraction the customer's pin uses — no
+  // second geographic system.
   latitude        Float?
   longitude       Float?
+  // "Loading bay round the back", "ask at the pharmacy counter". Shown to the
+  // driver once they have accepted, alongside the address.
+  pickupInstructions String?
   isPrimary       Boolean       @default(false)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt

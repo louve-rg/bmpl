@@ -1,8 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
+import type { Coordinates } from '@bmpl/shared';
 import { api, type ApiError } from '../../../lib/api';
 import { uploadFile } from '../../../lib/uploads';
+
+/** Browser-only: Leaflet touches `window` at import time. Same picker the
+ *  customer uses at checkout, so vendors and customers pin the same way. */
+const LocationPicker = dynamic(
+  () => import('../../../components/maps/LocationPicker').then((m) => m.LocationPicker),
+  {
+    ssr: false,
+    loading: () => <div className="h-64 w-full animate-pulse rounded-bmpl-md border border-slate-200 bg-slate-100" aria-hidden />,
+  },
+);
 import { centsToDollars, dollarsToCentsOrNull } from '../../../lib/money-input';
 import {
   Card as UiCard,
@@ -44,7 +56,17 @@ interface Store {
     hideOutOfStock: boolean;
     minimumOrderMinor: number | null;
   };
-  locations?: Array<{ id: string; label: string; addressLine1: string; city: string; district: string; isPrimary: boolean }>;
+  locations?: Array<{
+    id: string;
+    label: string;
+    addressLine1: string;
+    city: string;
+    district: string;
+    isPrimary: boolean;
+    latitude?: number | null;
+    longitude?: number | null;
+    pickupInstructions?: string | null;
+  }>;
   openingHours?: Array<{ dayOfWeek: number; isClosed: boolean; openTime: string | null; closeTime: string | null }>;
 }
 
@@ -361,10 +383,15 @@ function Check({ label, checked, onChange }: { label: string; checked: boolean; 
 
 function LocationsSection({ store, onDone, onError }: SectionProps) {
   const locations = store.locations ?? [];
-  const [f, setF] = useState({ label: '', addressLine1: '', city: '', district: 'BELIZE', isPrimary: false });
+  const [f, setF] = useState({ label: '', addressLine1: '', city: '', district: 'BELIZE', isPrimary: false, pickupInstructions: '' });
+  const [pin, setPin] = useState<Coordinates | null>(null);
   const [busy, setBusy] = useState(false);
   return (
-    <Card title="Locations">
+    <Card title="Pickup locations">
+      <p className="mb-3 text-sm text-slate-500">
+        Drivers navigate to the pin you drop here. Without one they only get the written address, and the delivery
+        distance we estimate is a district-level guess.
+      </p>
       <ul className="mb-4 space-y-2">
         {locations.map((l) => (
           <li
@@ -379,6 +406,18 @@ function LocationsSection({ store, onDone, onError }: SectionProps) {
                 </Badge>
               )}{' '}
               — {l.addressLine1}, {l.city}, {l.district}
+              {l.latitude != null ? (
+                <Badge tone="success" className="ml-2">
+                  Pinned
+                </Badge>
+              ) : (
+                <Badge tone="warning" className="ml-2">
+                  No pin
+                </Badge>
+              )}
+              {l.pickupInstructions && (
+                <span className="mt-1 block text-xs text-slate-500">“{l.pickupInstructions}”</span>
+              )}
             </span>
             <button
               className="text-xs font-semibold text-red-600 hover:underline"
@@ -403,8 +442,14 @@ function LocationsSection({ store, onDone, onError }: SectionProps) {
           e.preventDefault();
           setBusy(true);
           try {
-            await api.post('/vendor/profile/locations', f);
-            setF({ label: '', addressLine1: '', city: '', district: 'BELIZE', isPrimary: false });
+            await api.post('/vendor/profile/locations', {
+              ...f,
+              pickupInstructions: f.pickupInstructions.trim() || undefined,
+              latitude: pin?.latitude,
+              longitude: pin?.longitude,
+            });
+            setF({ label: '', addressLine1: '', city: '', district: 'BELIZE', isPrimary: false, pickupInstructions: '' });
+            setPin(null);
             await onDone();
           } catch (err) {
             onError(err);
@@ -423,6 +468,28 @@ function LocationsSection({ store, onDone, onError }: SectionProps) {
             </option>
           ))}
         </Select>
+        <div className="md:col-span-2">
+          <Input
+            placeholder="Pickup instructions for drivers (optional) — e.g. loading bay round the back"
+            value={f.pickupInstructions}
+            onChange={(e) => setF({ ...f, pickupInstructions: e.target.value })}
+            maxLength={1000}
+            aria-label="Pickup instructions for drivers"
+          />
+        </div>
+        {/* The same picker the customer uses at checkout — one map component,
+            one coordinate abstraction, one set of Belize bounds. */}
+        <div className="md:col-span-2">
+          <LocationPicker
+            value={pin}
+            onChange={setPin}
+            disabled={busy}
+            address={[f.addressLine1, f.city].filter(Boolean).join(', ')}
+            district={f.district}
+            heading="Pickup pin"
+            hint="Drop the pin where drivers should actually collect from — the door they use, not the middle of the block."
+          />
+        </div>
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
             type="checkbox"

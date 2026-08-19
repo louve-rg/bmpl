@@ -167,21 +167,45 @@ export const vendorSettingsSchema = z
   .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
 export type VendorSettingsInput = z.infer<typeof vendorSettingsSchema>;
 
-export const vendorLocationSchema = z.object({
-  label: z.string().trim().min(1).max(120),
-  addressLine1: z.string().trim().min(1).max(200),
-  addressLine2: z.string().trim().max(200).optional(),
-  city: z.string().trim().min(1).max(120),
-  district: districtSchema,
-  latitude: z.coerce.number().min(-90).max(90).optional(),
-  longitude: z.coerce.number().min(-180).max(180).optional(),
-  isPrimary: z.boolean().optional().default(false),
+/**
+ * A vendor pickup location. The optional coordinate pair is the store's pin, and
+ * it is validated exactly like the customer's delivery pin — both or neither,
+ * and inside Belize — because it feeds the same route optimizer and the same
+ * driver navigation link. One rule, one place.
+ */
+const vendorLocationBase = z.object({
+    label: z.string().trim().min(1).max(120),
+    addressLine1: z.string().trim().min(1).max(200),
+    addressLine2: z.string().trim().max(200).optional(),
+    city: z.string().trim().min(1).max(120),
+    district: districtSchema,
+    latitude: z.coerce.number().min(-90).max(90).optional(),
+    longitude: z.coerce.number().min(-180).max(180).optional(),
+    // Shown to a driver who has accepted the job: "loading bay round the back".
+    pickupInstructions: z.string().trim().max(1000).optional(),
+    isPrimary: z.boolean().optional().default(false),
 });
-export type VendorLocationInput = z.infer<typeof vendorLocationSchema>;
 
-export const updateVendorLocationSchema = vendorLocationSchema
-  .partial()
-  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+/** Both-or-neither, and inside Belize. Shared by create and update. */
+const withPinRules = <T extends z.ZodTypeAny>(schema: T) =>
+  schema
+    .refine((v: { latitude?: number | null; longitude?: number | null }) => (v.latitude == null) === (v.longitude == null), {
+      message: 'A pinned location needs both a latitude and a longitude.',
+      path: ['latitude'],
+    })
+    .refine((v: { latitude?: number | null; longitude?: number | null }) => v.latitude == null || isWithinBelize(v.latitude, v.longitude), {
+      message: OUT_OF_BOUNDS_MESSAGE,
+      path: ['latitude'],
+    });
+
+export const vendorLocationSchema = withPinRules(vendorLocationBase);
+export type VendorLocationInput = z.infer<typeof vendorLocationBase>;
+
+// `.partial()` has to be applied to the plain object — a refined schema is a
+// ZodEffects and has no .partial().
+export const updateVendorLocationSchema = withPinRules(
+  vendorLocationBase.partial().refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' }),
+);
 
 /** Replace-all opening hours: one entry per provided day (0–6). */
 export const vendorHoursSchema = z.object({

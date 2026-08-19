@@ -22,14 +22,50 @@ const PINNED_ZOOM = 17;
 
 /** How long to wait for a GPS fix before telling the customer it isn't coming. */
 const GEO_TIMEOUT_MS = 12_000;
-/** Above this many metres a fix is too vague to be a doorstep; say so. */
-const LOW_ACCURACY_M = 100;
+
+/**
+ * Accuracy bands, in metres.
+ *
+ * A phone with GPS typically reports single-digit to tens of metres. A desktop
+ * has no GPS at all and derives position from Wi-Fi or IP, which is routinely
+ * 100 m to several kilometres out — one tester saw "109 m" on a computer and a
+ * few metres on their phone, and reasonably wondered whether the map was broken.
+ * It was not: the browser was reporting an honest, and honestly vague, fix.
+ *
+ * So the number is always shown, and the wording changes with it. Anything
+ * beyond GOOD_M asks the customer to check the pin rather than presenting the
+ * result as their doorstep.
+ */
+const GOOD_ACCURACY_M = 25;
+const FAIR_ACCURACY_M = 100;
 
 type GeoState =
   | { kind: 'idle' }
   | { kind: 'locating' }
   | { kind: 'error'; message: string }
   | { kind: 'located'; accuracyM: number | null };
+
+/** How to describe a reported accuracy, and whether to nudge for a correction. */
+function describeAccuracy(m: number | null): { tone: 'success' | 'warning'; text: string; nudge: string | null } {
+  if (m == null) return { tone: 'success', text: 'Location detected.', nudge: null };
+  const rounded = m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+  if (m <= GOOD_ACCURACY_M) {
+    return { tone: 'success', text: `Location detected — accurate to about ${rounded}.`, nudge: null };
+  }
+  if (m <= FAIR_ACCURACY_M) {
+    return {
+      tone: 'success',
+      text: `Location detected — accurate to about ${rounded}.`,
+      nudge: 'Worth a quick check — drag the pin if it isn’t quite on your door.',
+    };
+  }
+  return {
+    tone: 'warning',
+    text: `Location detected — accurate to about ${rounded}.`,
+    nudge:
+      'Your device gave an approximate position — that is normal on a computer, which has no GPS. Drag the pin to your exact delivery point.',
+  };
+}
 
 /**
  * Pick the exact delivery spot on a map, the way you'd share a location in a
@@ -42,8 +78,8 @@ type GeoState =
  *
  * Leaflet + OpenStreetMap, deliberately: no API key, no billing account, no
  * per-load cost. Leaflet is imported dynamically inside an effect so neither it
- * nor its CSS reaches any other page's bundle — checkout is the only route that
- * pays for it.
+ * nor its CSS reaches any other page's bundle — only the routes that actually
+ * show a map (checkout, and the vendor's pickup locations) pay for it.
  *
  * The pin is OPTIONAL. A customer who refuses location permission, or whose GPS
  * fails, or who simply doesn't want to, completes checkout on the typed address
@@ -55,6 +91,8 @@ export function LocationPicker({
   disabled,
   address,
   district,
+  heading,
+  hint,
 }: {
   value: Coordinates | null;
   onChange: (next: Coordinates | null) => void;
@@ -63,10 +101,16 @@ export function LocationPicker({
   address?: string;
   /** The chosen district — the map follows it immediately, with no network call. */
   district?: string;
+  /** Section heading. Defaults to the customer wording. */
+  heading?: string;
+  /** Explanatory line under the heading. Defaults to the customer wording. */
+  hint?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletNS.Map | null>(null);
   const markerRef = useRef<LeafletNS.Marker | null>(null);
+  /** The translucent "somewhere in here" circle drawn around a GPS fix. */
+  const accuracyRef = useRef<LeafletNS.Circle | null>(null);
   const leafletRef = useRef<typeof LeafletNS | null>(null);
   // Read inside the map callbacks without re-running the setup effect.
   const onChangeRef = useRef(onChange);
@@ -75,15 +119,38 @@ export function LocationPicker({
   const [ready, setReady] = useState(false);
   const [geo, setGeo] = useState<GeoState>({ kind: 'idle' });
   const [outOfBounds, setOutOfBounds] = useState(false);
+  /**
+   * Is the current pin still exactly where the DEVICE put it?
+   *
+   * State rather than a ref because the accuracy wording below depends on it and
+   * has to re-render when it flips. False the instant the customer taps or drags:
+   * their own choice has no margin of error to quote.
+   */
+  const [pinIsFromGps, setPinIsFromGps] = useState(false);
   const [lookup, setLookup] = useState<{ busy: boolean; message: string | null; results: GeocodeResult[] }>({
     busy: false,
     message: null,
     results: [],
   });
   const headingId = useId();
+  const accuracy = describeAccuracy(geo.kind === 'located' ? geo.accuracyM : null);
 
-  /** Move (or create) the marker and tell the parent, rejecting anything outside Belize. */
-  const place = useCallback((lat: number, lng: number, opts: { pan?: boolean; zoom?: number } = {}) => {
+  /** Remove the GPS uncertainty circle. */
+  const clearAccuracyCircle = useCallback(() => {
+    accuracyRef.current?.remove();
+    accuracyRef.current = null;
+  }, []);
+
+  /**
+   * Move (or create) the marker and tell the parent, rejecting anything outside
+   * Belize.
+   *
+   * `fromGps` is what decides whether the uncertainty circle survives. A GPS fix
+   * genuinely is "somewhere in this circle" and should say so. The moment the
+   * customer taps or drags, the pin is a deliberate human choice and continuing
+   * to draw a margin of error around it would misrepresent it as still automatic.
+   */
+  const place = useCallback((lat: number, lng: number, opts: { pan?: boolean; zoom?: number; fromGps?: boolean } = {}) => {
     const L = leafletRef.current;
     const map = mapRef.current;
     if (!L || !map) return;
@@ -96,6 +163,13 @@ export function LocationPicker({
     }
     setOutOfBounds(false);
 
+    if (opts.fromGps) {
+      setPinIsFromGps(true);
+    } else {
+      setPinIsFromGps(false);
+      clearAccuracyCircle();
+    }
+
     if (markerRef.current) {
       markerRef.current.setLatLng([lat, lng]);
     } else {
@@ -103,11 +177,31 @@ export function LocationPicker({
         .addTo(map)
         .on('dragend', () => {
           const p = markerRef.current!.getLatLng();
+          // A drag is a human decision — drop the uncertainty circle.
           place(p.lat, p.lng);
         });
     }
     if (opts.pan) map.setView([lat, lng], opts.zoom ?? map.getZoom());
     onChangeRef.current({ latitude: lat, longitude: lng });
+  }, [clearAccuracyCircle]);
+
+  /** Draw the "your device thinks you're somewhere in here" circle. */
+  const drawAccuracyCircle = useCallback((lat: number, lng: number, accuracyM: number) => {
+    const L = leafletRef.current;
+    const map = mapRef.current;
+    if (!L || !map || !Number.isFinite(accuracyM) || accuracyM <= 0) return;
+    accuracyRef.current?.remove();
+    accuracyRef.current = L.circle([lat, lng], {
+      radius: accuracyM,
+      color: '#0ea5e9',
+      weight: 1,
+      fillColor: '#0ea5e9',
+      fillOpacity: 0.12,
+      interactive: false, // never steals a tap meant for the map
+    }).addTo(map);
+    // Frame the whole uncertainty, so a vague desktop fix visibly IS vague
+    // rather than looking like a confident pin in the wrong place.
+    map.fitBounds(accuracyRef.current.getBounds(), { maxZoom: PINNED_ZOOM, padding: [20, 20] });
   }, []);
 
   // Build the map once, client-side only.
@@ -250,7 +344,8 @@ export function LocationPicker({
           });
           return;
         }
-        place(latitude, longitude, { pan: true, zoom: PINNED_ZOOM });
+        place(latitude, longitude, { pan: true, zoom: PINNED_ZOOM, fromGps: true });
+        if (Number.isFinite(accuracy) && accuracy > 0) drawAccuracyCircle(latitude, longitude, accuracy);
         setGeo({ kind: 'located', accuracyM: Number.isFinite(accuracy) ? Math.round(accuracy) : null });
       },
       (err) => {
@@ -264,24 +359,26 @@ export function LocationPicker({
       },
       { enableHighAccuracy: true, timeout: GEO_TIMEOUT_MS, maximumAge: 0 },
     );
-  }, [place]);
+  }, [drawAccuracyCircle, place]);
 
   const clear = useCallback(() => {
     markerRef.current?.remove();
     markerRef.current = null;
+    clearAccuracyCircle();
+    setPinIsFromGps(false);
     setGeo({ kind: 'idle' });
     setOutOfBounds(false);
     onChangeRef.current(null);
-  }, []);
+  }, [clearAccuracyCircle]);
 
   return (
     <section aria-labelledby={headingId} className="overflow-hidden rounded-bmpl-md border border-slate-200 p-2.5 sm:p-4">
       <h3 id={headingId} className="bmpl-label">
-        Delivery location
+        {heading ?? 'Delivery location'}
       </h3>
       <p className="mt-0.5 text-xs text-slate-500">
-        Place the pin at the exact spot where you want your order delivered — the map follows the district you choose,
-        and &ldquo;Show my address&rdquo; will try to find what you typed. This is optional, but it helps your driver find you.
+        {hint ??
+          'Place the pin at the exact spot where you want your order delivered — the map follows the district you choose, and “Show my address” will try to find what you typed. This is optional, but it helps your driver find you.'}
       </p>
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -381,22 +478,27 @@ export function LocationPicker({
       {/* The state a screen reader needs, and the reassurance everyone else does.
           Coordinates are deliberately not the headline — they mean nothing to a
           customer — but they are available for anyone who wants them. */}
-      <p aria-live="polite" className="mt-2 text-sm">
+      <div aria-live="polite" className="mt-2 text-sm">
         {value ? (
-          <span className="font-semibold text-emerald-700">
-            ✓ Delivery location selected
-            {geo.kind === 'located' && geo.accuracyM != null && (
-              <span className="font-normal text-slate-500">
-                {geo.accuracyM > LOW_ACCURACY_M
-                  ? ` — accurate to about ${geo.accuracyM} m, so please check the pin`
-                  : ` — accurate to about ${geo.accuracyM} m`}
-              </span>
+          <>
+            <p className="font-semibold text-emerald-700">✓ Location selected</p>
+            {/* The accuracy line only applies while the pin is still where the
+                DEVICE put it. `place` clears the circle on any manual tap or
+                drag, so once the customer has corrected it we stop quoting a
+                margin of error at them for a point they chose themselves. */}
+            {geo.kind === 'located' && pinIsFromGps && (
+              <>
+                <p className={`mt-0.5 ${accuracy.tone === 'warning' ? 'text-amber-700' : 'text-slate-500'}`}>
+                  {accuracy.text}
+                </p>
+                {accuracy.nudge && <p className="mt-0.5 text-xs text-slate-500">{accuracy.nudge}</p>}
+              </>
             )}
-          </span>
+          </>
         ) : (
-          <span className="text-slate-500">No pin yet — your typed address will be used.</span>
+          <p className="text-slate-500">No pin yet — your typed address will be used.</p>
         )}
-      </p>
+      </div>
       {value && (
         <details className="mt-1">
           <summary className="cursor-pointer text-xs text-slate-400">Coordinates</summary>

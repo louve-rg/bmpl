@@ -1,0 +1,12 @@
+-- Vendor pickup pin + instructions.
+--
+-- vendor_locations already carried latitude/longitude and nothing ever wrote to
+-- them, so every driver's collection point was a written address and, for route
+-- estimates, a district centroid. The vendor can now drop a pin on the same
+-- Leaflet/OpenStreetMap picker the customer uses at checkout, and it becomes the
+-- authoritative point the driver navigates to.
+--
+-- Only the instructions column is new; the coordinates were already there. That
+-- is deliberate — one coordinate abstraction across customers, vendors and, next,
+-- logistics hubs.
+ALTER TABLE "vendor_locations" ADD COLUMN "pickupInstructions" TEXT;

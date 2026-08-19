@@ -437,3 +437,74 @@ describe('coordinate validation is server-side', () => {
     expect(res.status).toBe(400);
   });
 });
+
+/* ============== PHASE A — THE DRIVER'S TWO ENDS ========================= */
+
+describe('the driver is told where to collect and where to deliver', () => {
+  it('carries the vendor pin and instructions through to the driver', async () => {
+    const vendor = await makeVendor({ isTest: true });
+    // The vendor pins their collection door and leaves a note for drivers.
+    await ctx.prisma.vendorLocation.updateMany({
+      where: { vendorProfileId: vendor.vendorProfileId },
+      data: { latitude: 17.4995, longitude: -88.1976, pickupInstructions: 'Loading bay round the back.' },
+    });
+    const driver = await makeDriver({ isTest: true });
+    const customer = await registerCustomer(`sc_${uniq()}@example.com`);
+    const placed = await placeOrder(customer, vendor);
+    const delivery = await deliveryOfOrder(placed.body.id);
+    await ctx.prisma.orderDelivery.update({ where: { id: delivery.id }, data: { readyForDispatchAt: new Date() } });
+    await ctx.prisma.vendorOrder.updateMany({ where: { orderId: placed.body.id }, data: { status: 'READY_FOR_PICKUP' } });
+    expect((await engine.dispatch(delivery.id)).result).toBe('ASSIGNED');
+
+    // BEFORE accepting: the shop's address and pin are business information the
+    // driver needs to judge the job, so they are available — but the store's
+    // private note to its courier is not.
+    const before = await get(driver.cookies, `driver/jobs/${delivery.id}`);
+    expect(before.body.pickupLocation.pinnedLocation).toEqual({ latitude: 17.4995, longitude: -88.1976 });
+    expect(before.body.pickupLocation.navigationUrl).toContain('google.com/maps');
+    expect(before.body.pickupLocation.pickupInstructions).toBeNull();
+
+    // AFTER accepting: both ends are fully navigable and the note appears.
+    await post(driver.cookies, `driver/jobs/${delivery.id}/accept`);
+    const after = await get(driver.cookies, `driver/jobs/${delivery.id}`);
+    expect(after.body.pickupLocation.pickupInstructions).toBe('Loading bay round the back.');
+    expect(after.body.pickupLocation.navigationUrl).toContain('google.com/maps');
+    expect(after.body.navigationUrl).toContain('google.com/maps');
+    // The two ends are genuinely different places, not the same link twice.
+    expect(after.body.pickupLocation.navigationUrl).not.toBe(after.body.navigationUrl);
+  });
+
+  it('degrades to the written address when the store has not pinned itself', async () => {
+    const vendor = await makeVendor({ isTest: true });
+    await ctx.prisma.vendorLocation.updateMany({
+      where: { vendorProfileId: vendor.vendorProfileId },
+      data: { latitude: null, longitude: null },
+    });
+    const driver = await makeDriver({ isTest: true });
+    const customer = await registerCustomer(`sc_${uniq()}@example.com`);
+    const placed = await placeOrder(customer, vendor);
+    const delivery = await deliveryOfOrder(placed.body.id);
+    await ctx.prisma.orderDelivery.update({ where: { id: delivery.id }, data: { readyForDispatchAt: new Date() } });
+    await ctx.prisma.vendorOrder.updateMany({ where: { orderId: placed.body.id }, data: { status: 'READY_FOR_PICKUP' } });
+    expect((await engine.dispatch(delivery.id)).result).toBe('ASSIGNED');
+
+    const body = (await get(driver.cookies, `driver/jobs/${delivery.id}`)).body;
+    expect(body.pickupLocation.pinnedLocation).toBeNull();
+    expect(body.pickupLocation.navigationUrl).toBeNull();
+    // The address is still there — the driver is never left with nothing.
+    expect(body.pickupLocation.addressLine1).toBeTruthy();
+    expect(body.pickupLocation.city).toBeTruthy();
+  });
+
+  it('rejects a vendor pin outside Belize', async () => {
+    const vendor = await makeVendor({ isTest: true });
+    const owner = await ctx.prisma.user.findUniqueOrThrow({ where: { id: vendor.vendorUserId } });
+    const login = await request(ctx.server).post('/api/auth/login').send({ email: owner.email, password: 'CustomerPass123' });
+    const cookies = cookiesOf(login);
+    const res = await post(cookies, 'vendor/profile/locations', {
+      label: 'Bad', addressLine1: '1 St', city: 'Belize City', district: 'BELIZE',
+      latitude: 51.5074, longitude: -0.1278, // London
+    });
+    expect(res.status).toBe(400);
+  });
+});

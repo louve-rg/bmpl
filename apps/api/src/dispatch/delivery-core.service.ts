@@ -289,6 +289,19 @@ export class DeliveryCoreService {
           ? { latitude: address!.latitude as number, longitude: address!.longitude as number }
           : null;
 
+      /**
+       * WHERE TO COLLECT FROM.
+       *
+       * A business address, not a person's home, so it is not gated on
+       * acceptance the way the customer's doorstep is — a driver deciding
+       * whether to take the job needs to know how far the shop is. The pin and
+       * the navigation link come from the vendor's configured location, which is
+       * the authoritative collection point.
+       */
+      const pickupPin = isWithinBelize(pickupLocation?.latitude, pickupLocation?.longitude)
+        ? { latitude: pickupLocation!.latitude as number, longitude: pickupLocation!.longitude as number }
+        : null;
+
       return {
         ...base,
         // Area only until accepted; full fulfilment details afterwards.
@@ -304,7 +317,17 @@ export class DeliveryCoreService {
         /** Flagged so a simulation is never mistaken for a real customer's order. */
         isTest: order.isTest,
         pickupLocation: pickupLocation
-          ? { label: pickupLocation.label, addressLine1: pickupLocation.addressLine1, addressLine2: pickupLocation.addressLine2, city: pickupLocation.city, district: pickupLocation.district }
+          ? {
+              label: pickupLocation.label,
+              addressLine1: pickupLocation.addressLine1,
+              addressLine2: pickupLocation.addressLine2,
+              city: pickupLocation.city,
+              district: pickupLocation.district,
+              // The vendor's own pin and note to the driver.
+              pinnedLocation: pickupPin,
+              navigationUrl: pickupPin ? mapsNavigationUrl(pickupPin, vo.vendorProfile.businessName) : null,
+              pickupInstructions: committed ? pickupLocation.pickupInstructions : null,
+            }
           : null,
         items,
         pickupVerified: d.pickupVerificationStatus !== 'PENDING',

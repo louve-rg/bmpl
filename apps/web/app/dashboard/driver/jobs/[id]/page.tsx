@@ -61,6 +61,9 @@ interface PickupLocation {
   addressLine2?: string | null;
   city?: string | null;
   district?: string | null;
+  pinnedLocation?: { latitude: number; longitude: number } | null;
+  navigationUrl?: string | null;
+  pickupInstructions?: string | null;
 }
 interface JobItem {
   productTitle: string;
@@ -205,12 +208,12 @@ export default function DriverJobDetailPage() {
       <ActionPanel job={job} onDone={reload} />
 
       <Card className="p-4 sm:p-6">
-        <h2 className="bmpl-eyebrow mb-3">Pickup location</h2>
-        <PickupBlock pickup={job.pickupLocation} />
+        <h2 className="bmpl-eyebrow mb-3">1 · Collect from</h2>
+        <PickupBlock pickup={job.pickupLocation} vendorName={job.vendor?.businessName} />
       </Card>
 
       <Card className="p-4 sm:p-6">
-        <h2 className="bmpl-eyebrow mb-3">Delivery address</h2>
+        <h2 className="bmpl-eyebrow mb-3">2 · Deliver to</h2>
         <AddressBlock address={job.deliveryAddress} />
 
         {job.deliveryInstructions && (
@@ -224,17 +227,7 @@ export default function DriverJobDetailPage() {
         {job.pinnedLocation && job.navigationUrl ? (
           <div className="mt-3">
             <p className="text-sm font-semibold text-emerald-700">📍 Customer pinned an exact location</p>
-            <a
-              href={job.navigationUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-2 inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-bmpl-md bg-belize-blue px-4 text-sm font-semibold text-white transition hover:bg-belize-deep sm:w-auto"
-            >
-              Navigate to the pin
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-4 w-4" aria-hidden>
-                <path d="M7 17 17 7M9 7h8v8" />
-              </svg>
-            </a>
+            <NavigateButton url={job.navigationUrl} label="Navigate to the customer" />
             <p className="mt-1 text-xs text-slate-400">Opens in your maps app for turn-by-turn directions.</p>
           </div>
         ) : (
@@ -299,15 +292,52 @@ export default function DriverJobDetailPage() {
 
 /* ------------------------------------------------------------- sub-blocks */
 
-function PickupBlock({ pickup }: { pickup: PickupLocation }) {
+/**
+ * "Open in Maps" for either end of the job. Deliberately identical for pickup and
+ * drop-off: the driver learns one control, and both open the device's own maps
+ * app rather than an embedded map they cannot navigate with.
+ */
+function NavigateButton({ url, label }: { url: string; label: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-2 inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-bmpl-md bg-belize-blue px-4 text-sm font-semibold text-white transition hover:bg-belize-deep sm:w-auto"
+    >
+      {label}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-4 w-4" aria-hidden>
+        <path d="M7 17 17 7M9 7h8v8" />
+      </svg>
+    </a>
+  );
+}
+
+function PickupBlock({ pickup, vendorName }: { pickup: PickupLocation; vendorName?: string | null }) {
+  const hasAddress = pickup.addressLine1 || pickup.city;
   return (
     <div className="text-sm text-slate-600">
-      {pickup.label && <p className="font-semibold text-belize-navy">{pickup.label}</p>}
-      {pickup.addressLine1 && <p>{pickup.addressLine1}</p>}
-      {pickup.addressLine2 && <p>{pickup.addressLine2}</p>}
-      <p>
-        {[pickup.city, districtLabel(pickup.district)].filter(Boolean).join(', ')}
-      </p>
+      {vendorName && <p className="font-semibold text-belize-navy">{vendorName}</p>}
+      {pickup.label && <p className="text-xs uppercase tracking-wide text-slate-400">{pickup.label}</p>}
+      {pickup.addressLine1 && <p className="mt-1 break-words">{pickup.addressLine1}</p>}
+      {pickup.addressLine2 && <p className="break-words">{pickup.addressLine2}</p>}
+      <p>{[pickup.city, districtLabel(pickup.district)].filter(Boolean).join(', ')}</p>
+
+      {pickup.pickupInstructions && (
+        <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <span className="font-semibold">From the store:</span> {pickup.pickupInstructions}
+        </p>
+      )}
+
+      {pickup.navigationUrl ? (
+        <NavigateButton url={pickup.navigationUrl} label="Navigate to the store" />
+      ) : (
+        hasAddress && (
+          <p className="mt-2 text-xs text-slate-400">
+            This store hasn&rsquo;t pinned its location — use the written address above.
+          </p>
+        )
+      )}
     </div>
   );
 }
