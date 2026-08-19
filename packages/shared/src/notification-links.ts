@@ -46,6 +46,11 @@ export function notificationHref(
   const vehicleId = str(d.vehicleId);
   const conversationId = str(d.conversationId);
   const earningId = str(d.earningId);
+  // Multi-leg shipping. A shipment is tracked by its customer-facing reference,
+  // not its id, so that is what the link carries; a courier leg opens the
+  // driver's own job screen for that leg.
+  const shipmentReference = str(d.reference);
+  const driverJobId = str(d.driverJobId);
   // A DELIVERY_DRIVER role application. Keyed on roleCode, not on the presence of
   // an applicationId: job applications carry that key too, and routing a Belize
   // Connect notification to the driver documents page would be worse than not
@@ -59,6 +64,9 @@ export function notificationHref(
     // A driver's delivery notification is always about work they must act on,
     // so it opens the job itself rather than a list they then have to search.
     if (deliveryId) return `/dashboard/driver/jobs/${deliveryId}`;
+    // A shipment courier leg is a different record on a different route, so it
+    // cannot reuse the delivery link above.
+    if (driverJobId) return `/dashboard/driver/shipping/${driverJobId}`;
     // A vehicle approval/rejection is about one vehicle, and the vehicle profile
     // is where its status and rejection reason live.
     if (vehicleId) return '/dashboard/driver/vehicles';
@@ -86,6 +94,10 @@ export function notificationHref(
   if (orderId) return `/orders/${orderId}`;
   if (vendorOrderId) return `/orders/${vendorOrderId}`;
   if (deliveryId) return `/orders?delivery=${deliveryId}`;
+  // Every shipping event — booked, collected, in transit, ready to collect —
+  // opens the ONE tracker. The whole point of the unified view is that the
+  // customer never needs a different page per leg.
+  if (shipmentReference) return `/dashboard/shipments/${encodeURIComponent(shipmentReference)}`;
   return null;
 }
 

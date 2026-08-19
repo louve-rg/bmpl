@@ -17,6 +17,7 @@ import type { AuditAction, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MessagingService } from '../messaging/messaging.service';
 import { ShipmentService } from './shipment.service';
 import { ShipmentDispatchService } from './shipment-dispatch.service';
 
@@ -73,6 +74,7 @@ export class ShipmentDriverService {
     private readonly notifications: NotificationsService,
     private readonly shipments: ShipmentService,
     private readonly dispatch: ShipmentDispatchService,
+    private readonly messaging: MessagingService,
   ) {}
 
   private async myProfileId(userId: string): Promise<string> {
@@ -121,6 +123,11 @@ export class ShipmentDriverService {
       throw new ConflictException('This job is no longer available — the offer expired or went to another driver.');
     }
 
+    // Opened HERE, on acceptance — not at assignment. Automatic dispatch can
+    // offer one leg to several drivers in turn, and enrolling each of them would
+    // accumulate strangers in a customer's conversation. Accepting is the point
+    // this driver becomes the person the customer needs to reach.
+    await this.messaging.ensureShipmentLegThread(legId, actor.userId);
     await this.notifyCustomer(leg, leg.kind === 'FIRST_MILE' ? 'A driver is on the way to collect your parcel.' : 'A driver is collecting your parcel for the final delivery.');
     return this.getJob(actor.userId, legId);
   }

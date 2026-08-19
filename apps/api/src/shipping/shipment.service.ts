@@ -17,6 +17,7 @@ import {
 } from '@bmpl/shared';
 import type {
   CancelShipmentInput,
+  ShipmentListInput,
   CreateShipmentInput,
   LegDepartInput,
   LegExceptionInput,
@@ -345,6 +346,114 @@ export class ShipmentService {
       take: 50,
     });
     return rows.map((s) => this.serialize(s, { audience: 'CUSTOMER' }));
+  }
+
+  /**
+   * The operations board.
+   *
+   * Ordered by "needs a human first": exceptions, then anything stalled waiting
+   * for a driver nobody could find, then everything else newest-first. An
+   * operations list sorted purely by date makes the one shipment in trouble as
+   * hard to find as the ninety that are fine.
+   */
+  async listForOps(input: ShipmentListInput) {
+    const where: Prisma.ShipmentWhereInput = {
+      ...(input.status ? { status: input.status as ShipmentStatus } : {}),
+      ...(input.service ? { service: input.service } : {}),
+      // Test shipments are hidden by default so the board reflects real work.
+      ...(input.includeTest ? {} : { isTest: false }),
+    };
+    const [rows, total] = await Promise.all([
+      this.prisma.shipment.findMany({
+        where,
+        orderBy: [{ exceptionAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+        skip: (input.page - 1) * input.pageSize,
+        take: input.pageSize,
+        include: {
+          customer: { select: { firstName: true, lastName: true, email: true } },
+          legs: {
+            orderBy: { sequence: 'asc' },
+            select: {
+              id: true, sequence: true, kind: true, mode: true, status: true, courierStatus: true,
+              dispatchExhaustedAt: true,
+              originHub: { select: { code: true, name: true } },
+              destinationHub: { select: { code: true, name: true } },
+              assignedDriver: { select: { displayName: true } },
+              carrierName: true,
+            },
+          },
+        },
+      }),
+      this.prisma.shipment.count({ where }),
+    ]);
+
+    return {
+      total,
+      page: input.page,
+      pageSize: input.pageSize,
+      rows: rows.map((s) => ({
+        id: s.id,
+        reference: s.reference,
+        service: s.service,
+        serviceLabel: SHIPPING_SERVICE_LABELS[s.service],
+        status: s.status,
+        statusLabel: SHIPMENT_STATUS_LABELS[s.status] ?? s.status,
+        isTest: s.isTest,
+        customer: s.customer ? `${s.customer.firstName} ${s.customer.lastName}`.trim() || s.customer.email : null,
+        origin: [s.originCity, s.originDistrict?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
+        destination: [s.destinationCity, s.destinationDistrict?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
+        totalMinor: money(s.quotedTotalMinor),
+        exceptionReason: s.exceptionReason,
+        // The two things an operator scans for.
+        needsAttention: s.status === 'EXCEPTION',
+        needsDriver: s.legs.some((l) => l.dispatchExhaustedAt != null),
+        createdAt: s.createdAt,
+        legs: s.legs.map((l) => ({
+          id: l.id,
+          sequence: l.sequence,
+          kind: l.kind,
+          mode: l.mode,
+          status: l.status,
+          courierStatus: l.courierStatus,
+          from: l.originHub?.name ?? 'Door',
+          to: l.destinationHub?.name ?? 'Door',
+          operator: l.assignedDriver?.displayName ?? l.carrierName ?? null,
+          needsDriver: l.dispatchExhaustedAt != null,
+        })),
+      })),
+    };
+  }
+
+  /** Terminals expecting a parcel, for the hub handoff desk. */
+  async expectedAtHub(hubId: string) {
+    const legs = await this.prisma.shipmentLeg.findMany({
+      where: {
+        destinationHubId: hubId,
+        status: { in: ['READY', 'IN_PROGRESS'] },
+      },
+      orderBy: [{ arrivedAt: { sort: 'desc', nulls: 'last' } }, { sequence: 'asc' }],
+      take: 100,
+      include: {
+        shipment: { select: { reference: true, description: true, pieces: true, destinationName: true } },
+        originHub: { select: { name: true } },
+        assignedDriver: { select: { displayName: true, phone: true } },
+      },
+    });
+    return legs.map((l) => ({
+      legId: l.id,
+      reference: l.shipment.reference,
+      kind: l.kind,
+      // Who is bringing it: a BMPL driver on a first mile, a carrier on a flight.
+      broughtBy: l.assignedDriver?.displayName ?? l.carrierName ?? 'Carrier',
+      contactPhone: l.assignedDriver?.phone ?? null,
+      from: l.originHub?.name ?? 'Door collection',
+      parcel: l.shipment.description || `${l.shipment.pieces} ${l.shipment.pieces === 1 ? 'parcel' : 'parcels'}`,
+      // Whether it is actually here yet, or still on its way.
+      arrived: l.arrivedAt != null || l.courierStatus === 'ARRIVING',
+      departedAt: l.departedAt,
+      arrivedAt: l.arrivedAt,
+      forRecipient: l.shipment.destinationName,
+    }));
   }
 
   /* --------------------------------------------------------- leg operation */

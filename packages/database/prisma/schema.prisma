@@ -774,6 +774,11 @@ enum ConversationContext {
   SUPPORT_CASE
   JOB_APPLICATION
   PROPERTY_ENQUIRY
+  /// One courier leg of a multi-leg shipment. Scoped to the LEG, not the
+  /// shipment: a first-mile driver has no business in a conversation with the
+  /// recipient at the far end of the country, and a last-mile driver has none
+  /// with the sender.
+  SHIPMENT_LEG
 }
 
 enum ConversationStatus {

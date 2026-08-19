@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
   cancelShipmentSchema,
@@ -9,6 +9,7 @@ import {
   legDepartSchema,
   legExceptionSchema,
   legHandoffSchema,
+  shipmentListSchema,
   shipmentQuoteSchema,
   updateHubSchema,
   updateRouteSchema,
@@ -20,6 +21,7 @@ import {
   type LegDepartInput,
   type LegExceptionInput,
   type LegHandoffInput,
+  type ShipmentListInput,
   type ShipmentQuoteInput,
   type UpdateHubInput,
   type UpdateRouteInput,
@@ -147,6 +149,20 @@ export class AdminLogisticsController {
   }
 
   /* ---- shipments ---- */
+
+  /** The operations board. Declared BEFORE `:reference` so it is not swallowed. */
+  @RequirePermission('logistics.read')
+  @Get('shipments')
+  listShipments(@Query() query: Record<string, string>) {
+    return this.shipments.listForOps(shipmentListSchema.parse(query) as ShipmentListInput);
+  }
+
+  /** What a terminal should be expecting, for the handoff desk. */
+  @RequirePermission('logistics.read')
+  @Get('hubs/:id/expected')
+  expected(@Param('id') id: string) {
+    return this.shipments.expectedAtHub(id);
+  }
 
   @RequirePermission('logistics.read')
   @Get('shipments/:reference')

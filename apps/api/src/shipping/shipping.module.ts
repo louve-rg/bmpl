@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { DriverModule } from '../driver/driver.module';
 import { DispatchModule } from '../dispatch/dispatch.module';
+import { MessagingModule } from '../messaging/messaging.module';
 import { ShipmentDispatchService } from './shipment-dispatch.service';
 import { ShipmentDriverService } from './shipment-driver.service';
 import { DriverShippingController } from './driver-shipping.controller';
@@ -19,7 +20,7 @@ import { AdminLogisticsController, ShippingController, ShippingHubsController } 
  * works.
  */
 @Module({
-  imports: [PrismaModule, DriverModule, DispatchModule],
+  imports: [PrismaModule, DriverModule, DispatchModule, MessagingModule],
   controllers: [ShippingHubsController, ShippingController, AdminLogisticsController, DriverShippingController],
   providers: [LogisticsNetworkService, ShipmentService, ShipmentDispatchService, ShipmentDriverService, ShipmentDispatchScheduler],
   exports: [ShipmentService, LogisticsNetworkService, ShipmentDispatchService],

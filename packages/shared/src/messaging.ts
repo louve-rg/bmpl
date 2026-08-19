@@ -6,7 +6,7 @@
  */
 
 /** The business context a conversation is scoped to. */
-export const CONVERSATION_CONTEXTS = ['ORDER', 'VENDOR_ORDER', 'DELIVERY', 'SUPPORT_CASE', 'JOB_APPLICATION', 'PROPERTY_ENQUIRY'] as const;
+export const CONVERSATION_CONTEXTS = ['ORDER', 'VENDOR_ORDER', 'DELIVERY', 'SUPPORT_CASE', 'JOB_APPLICATION', 'PROPERTY_ENQUIRY', 'SHIPMENT_LEG'] as const;
 export type ConversationContext = (typeof CONVERSATION_CONTEXTS)[number];
 
 export const CONVERSATION_STATUSES = ['OPEN', 'CLOSED'] as const;

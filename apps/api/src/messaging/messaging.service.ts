@@ -113,6 +113,23 @@ export class MessagingService {
         orderNumber: d.vendorOrder.order.orderNumber,
       };
     }
+    if (contextType === 'SHIPMENT_LEG') {
+      const leg = await this.prisma.shipmentLeg.findUnique({
+        where: { id: contextId },
+        include: {
+          assignedDriver: { select: { userId: true } },
+          shipment: { select: { customerUserId: true, reference: true } },
+        },
+      });
+      if (!leg) throw new NotFoundException('Job not found.');
+      // No vendor: a shipment is between a sender and a recipient, and the
+      // customer who booked it is the party the driver may need to reach.
+      return {
+        customerUserId: leg.shipment.customerUserId ?? undefined,
+        currentDriverUserId: leg.assignedDriver?.userId ?? null,
+        label: `Shipment ${leg.shipment.reference} · ${leg.kind === 'FIRST_MILE' ? 'collection' : 'delivery'}`,
+      };
+    }
     if (contextType === 'JOB_APPLICATION') {
       const app = await this.prisma.jobApplication.findUnique({
         where: { id: contextId },
@@ -691,6 +708,28 @@ export class MessagingService {
       }
     } catch (err) {
       this.logger.warn(`could not open delivery threads for ${deliveryId}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Open the one thread a courier leg needs, on acceptance.
+   *
+   * Deliberately ONE conversation, not two: there is no vendor in a shipment,
+   * and the leg's own scope already decides which end of the journey this driver
+   * is allowed to talk to. Best-effort, exactly as the delivery version is — a
+   * leg with no chat thread is degraded, a leg that failed to accept because
+   * chat was unavailable is broken.
+   */
+  async ensureShipmentLegThread(legId: string, driverUserId: string): Promise<void> {
+    try {
+      const parties = await this.resolveParties('SHIPMENT_LEG', legId);
+      if (!parties.customerUserId) return;
+      await this.ensureConversation('SHIPMENT_LEG', legId, 'CUSTOMER_DRIVER', driverUserId, parties.label, [
+        { userId: parties.customerUserId, role: 'CUSTOMER' },
+        { userId: driverUserId, role: 'DRIVER' },
+      ]);
+    } catch (err) {
+      this.logger.warn(`could not open shipment leg thread for ${legId}: ${String(err)}`);
     }
   }
 

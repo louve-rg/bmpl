@@ -129,3 +129,38 @@ describe('audienceForRoles', () => {
     expect(audienceForRoles(['CUSTOMER'], { category: 'JOB', data: { applicationId: 'a1' } })).toBe('CUSTOMER');
   });
 });
+
+describe('multi-leg shipping', () => {
+  it('sends every customer shipping event to the one tracker', () => {
+    // The whole point of the unified view: booked, collected, in transit and
+    // ready-to-collect all open the same page, not a page per leg.
+    for (const event of ['SHIPMENT_STATUS', 'SHIPMENT_COURIER']) {
+      expect(
+        notificationHref({ category: 'DELIVERY', event, data: { shipmentId: 's1', reference: 'BMPL-ABCD2345' } }, 'CUSTOMER'),
+      ).toBe('/dashboard/shipments/BMPL-ABCD2345');
+    }
+  });
+
+  it('opens the driver on their own leg, not the shipment', () => {
+    expect(
+      notificationHref(
+        { category: 'DELIVERY', event: 'SHIPMENT_LEG_OFFERED', data: { driverJobId: 'leg1', jobKind: 'FIRST_MILE', reference: 'BMPL-ABCD2345' } },
+        'DRIVER',
+      ),
+    ).toBe('/dashboard/driver/shipping/leg1');
+  });
+
+  it('still prefers a marketplace delivery link when both are somehow present', () => {
+    // A driver notification carrying both is a bug upstream, but routing to the
+    // delivery is the safer of the two: it is the older, more-used path.
+    expect(
+      notificationHref({ category: 'DELIVERY', data: { deliveryId: 'd1', driverJobId: 'leg1' } }, 'DRIVER'),
+    ).toBe('/dashboard/driver/jobs/d1');
+  });
+
+  it('escapes a reference rather than trusting it into a URL', () => {
+    expect(notificationHref({ data: { reference: 'BMPL /../x' } }, 'CUSTOMER')).toBe(
+      '/dashboard/shipments/BMPL%20%2F..%2Fx',
+    );
+  });
+});
