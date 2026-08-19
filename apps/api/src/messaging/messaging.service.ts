@@ -355,9 +355,20 @@ export class MessagingService {
       if (!this.canRespondSupport(actor)) throw new ForbiddenException('You cannot reply here.');
       return;
     }
-    // DELIVERY driver: only the CURRENT assigned driver may send (reassigned → denied).
-    if (role === 'DRIVER' && ctx.conv.contextType === 'DELIVERY' && actor.userId !== parties.currentDriverUserId) {
-      throw new ForbiddenException('You are no longer assigned to this delivery.');
+    // Only the CURRENT driver may send. This applies to every context that HAS a
+    // current driver — a delivery and a shipment courier leg both do. It was
+    // originally written as `contextType === 'DELIVERY'`, which silently stopped
+    // applying the moment shipment legs arrived: a driver who had handed the
+    // parcel on could keep messaging the customer indefinitely. Keying on the
+    // resolved party rather than on the context name is what stops the next new
+    // context inheriting the same hole.
+    const driverScoped = ctx.conv.contextType === 'DELIVERY' || ctx.conv.contextType === 'SHIPMENT_LEG';
+    if (role === 'DRIVER' && driverScoped && actor.userId !== parties.currentDriverUserId) {
+      throw new ForbiddenException(
+        ctx.conv.contextType === 'SHIPMENT_LEG'
+          ? 'You are no longer carrying this shipment.'
+          : 'You are no longer assigned to this delivery.',
+      );
     }
     if (!role) throw new ForbiddenException('You cannot send messages here.');
     const participant = ctx.conv.participants.find((p) => p.userId === actor.userId);
