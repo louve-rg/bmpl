@@ -294,6 +294,88 @@ describe('the full door-to-door journey', () => {
   });
 });
 
+describe('every service type, end to end', () => {
+  /** Walk whatever legs a shipment has, in order, by whoever operates them. */
+  async function runWholeJourney(driver: { cookies: string[] }, shipmentId: string) {
+    // Re-read between legs: a last-mile leg has no driver until the line-haul
+    // before it completes, so a list captured up front would be stale.
+    for (let guard = 0; guard < 8; guard++) {
+      const rows = await legs(shipmentId);
+      const next = rows.find((l) => l.status === 'READY' || l.status === 'IN_PROGRESS');
+      if (!next) break;
+      if (next.kind === 'LINE_HAUL') await flyLineHaul(next.id);
+      else await driveCourierLeg(driver, next.id);
+    }
+    return ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+  }
+
+  it('DOOR_TO_HUB ends waiting on a counter, then collected', async () => {
+    const driver = await makeDriver();
+    const s = await book({
+      service: 'DOOR_TO_HUB',
+      origin: { district: 'STANN_CREEK', city: 'Placencia', address: '1 Sidewalk', name: 'S', phone: '501-2223333' },
+      destination: { hubId: hub.SPA, name: 'Recipient', phone: '501-4445555' },
+      preferredMode: 'AIR',
+    });
+    // The first mile is a driver's job; the rest is the carrier's.
+    expect((await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!.assignedDriverProfileId).toBe(driver.driverProfileId);
+
+    const done = await runWholeJourney(driver, s.id);
+    expect(done.status).toBe('AWAITING_COLLECTION');
+
+    const collected = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
+    expect(collected.body.status).toBe('DELIVERED');
+  });
+
+  it('HUB_TO_HUB never involves a driver at all', async () => {
+    await makeDriver();
+    const s = await book({
+      service: 'HUB_TO_HUB',
+      origin: { hubId: hub.PLA, name: 'S', phone: '501-2223333' },
+      destination: { hubId: hub.SPA, name: 'Recipient', phone: '501-4445555' },
+      preferredMode: 'AIR',
+    });
+    const rows = await legs(s.id);
+    expect(rows.every((l) => l.kind === 'LINE_HAUL')).toBe(true);
+    // No courier legs means nothing was offered to anybody.
+    expect(await ctx.prisma.shipmentLegOffer.count({ where: { shipmentLeg: { shipmentId: s.id } } })).toBe(0);
+
+    const done = await runWholeJourney({ cookies: [] }, s.id);
+    expect(done.status).toBe('AWAITING_COLLECTION');
+  });
+
+  it('HUB_TO_DOOR gives the driver only the final leg, and only once it lands', async () => {
+    const driver = await makeDriver();
+    const s = await book({
+      service: 'HUB_TO_DOOR',
+      origin: { hubId: hub.PLA, name: 'S', phone: '501-2223333' },
+      destination: { district: 'BELIZE', city: 'San Pedro', address: '5 Barrier Reef Drive', name: 'Recipient', phone: '501-4445555' },
+      preferredMode: 'AIR',
+    });
+    const rows = await legs(s.id);
+    expect(rows.find((l) => l.kind === 'FIRST_MILE')).toBeUndefined();
+    // The journey starts with a flight, so at booking there is nothing to drive.
+    expect(rows.find((l) => l.kind === 'LAST_MILE')!.assignedDriverProfileId).toBeNull();
+
+    const done = await runWholeJourney(driver, s.id);
+    expect(done.status).toBe('DELIVERED');
+  });
+
+  it('local marketplace delivery is not routed through any of this', async () => {
+    // The regression that matters most, asserted from the shipping side too:
+    // nothing here writes a shipment for an ordinary delivery.
+    await makeDriver();
+    const before = await ctx.prisma.shipment.count();
+    const r = await post(customer, 'shipping/quote', {
+      service: 'DOOR_TO_DOOR',
+      origin: { district: 'BELIZE', city: 'Belize City' },
+      destination: { district: 'BELIZE', city: 'Belize City' },
+    });
+    expect(r.body.reason).toBe('LOCAL_DELIVERY');
+    expect(await ctx.prisma.shipment.count()).toBe(before);
+  });
+});
+
 describe('the driver sees one queue', () => {
   it('lists a shipping job and a marketplace job side by side', async () => {
     const driver = await makeDriver();

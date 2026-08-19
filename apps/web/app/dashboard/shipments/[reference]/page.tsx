@@ -91,7 +91,7 @@ export default function TrackShipmentPage() {
 
           {canCancel && (
             <div className="mt-4">
-              <Button onClick={cancel} disabled={cancelling} className="w-full sm:w-auto">
+              <Button onClick={cancel} disabled={cancelling} className="min-h-[44px] w-full sm:w-auto">
                 {cancelling ? 'Cancelling…' : 'Cancel this shipment'}
               </Button>
             </div>

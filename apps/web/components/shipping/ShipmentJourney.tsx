@@ -154,7 +154,10 @@ export function ShipmentJourney({ shipment }: { shipment: ShipmentView }) {
         <details className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
           {/* Collapsed by default: most people want the headline, and the ones
               who want the full chain really want it. */}
-          <summary className="cursor-pointer text-sm font-semibold text-slate-900">
+          {/* min-h-11: measured at 20px in the mobile pass, which is half a
+              thumb. The flex wrapper keeps the text vertically centred in the
+              taller target rather than pinned to the top of it. */}
+          <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-slate-900">
             Who has handled it ({shipment.custody.length})
           </summary>
           <ul className="mt-3 space-y-2 text-xs text-slate-600">

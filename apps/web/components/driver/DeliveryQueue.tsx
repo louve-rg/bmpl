@@ -9,12 +9,30 @@ import { errMessage } from './dashboard-data';
 
 /* ----------------------------------------------------------------- types */
 
+/**
+ * Where this queue row goes when tapped.
+ *
+ * Courier legs and deliveries are different records on different routes. Sending
+ * a shipping leg to /driver/jobs/:id 404s — which is exactly what happened
+ * before the mobile pass caught it.
+ */
+function queueItemHref(item: { id: string; kind: QueueItem['kind'] }): string {
+  return item.kind === 'MARKETPLACE'
+    ? `/dashboard/driver/jobs/${item.id}`
+    : `/dashboard/driver/shipping/${item.id}`;
+}
+
 export interface QueueItem {
   id: string;
   status: string;
   statusLabel: string;
   view: 'available' | 'assigned' | 'active' | 'completed' | null;
-  orderNumber: string;
+  /** Which kind of work this is. Shipping legs share the queue with deliveries. */
+  kind: 'MARKETPLACE' | 'FIRST_MILE' | 'LAST_MILE';
+  kindLabel: string;
+  /** Order number for a delivery, shipment reference for a courier leg. */
+  reference: string;
+  orderNumber?: string;
   vendor: string;
   pickupArea: string | null;
   itemCount: number;
@@ -227,10 +245,12 @@ export function DeliveryQueue({ onChanged }: { onChanged?: () => void }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <Link
-                      href={`/dashboard/driver/jobs/${item.id}`}
-                      className="truncate text-sm font-bold text-belize-navy hover:underline"
+                      href={queueItemHref(item)}
+                      // min-h-11: measured at 20px in the mobile pass. A driver
+                      // taps this in a moving vehicle.
+                      className="flex min-h-11 items-center truncate text-sm font-bold text-belize-navy hover:underline"
                     >
-                      Order #{item.orderNumber}
+                      {item.kind === 'MARKETPLACE' ? `Order #${item.orderNumber}` : item.reference}
                     </Link>
                     <StatusBadge status={item.status} />
                     {item.recommendedPosition != null && item.recommendedPosition !== item.position && (
@@ -262,7 +282,7 @@ export function DeliveryQueue({ onChanged }: { onChanged?: () => void }) {
                 </div>
 
                 <Link
-                  href={`/dashboard/driver/jobs/${item.id}`}
+                  href={queueItemHref(item)}
                   className="inline-flex min-h-[44px] shrink-0 items-center rounded-bmpl-md px-2 text-sm font-semibold text-belize-blue transition hover:bg-belize-blue/5"
                 >
                   Open
@@ -313,7 +333,7 @@ function QueueHandle({
         type="button"
         disabled={busy || index <= 0}
         onClick={() => onMove(index, -1)}
-        aria-label={`Move order ${item.orderNumber} earlier in your queue`}
+        aria-label={`Move ${item.kind === 'MARKETPLACE' ? `order ${item.orderNumber}` : `shipment ${item.reference}`} earlier in your queue`}
         className="flex h-7 w-7 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-belize-navy disabled:opacity-30 disabled:hover:bg-transparent"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>
@@ -343,7 +363,7 @@ function QueueHandle({
         type="button"
         disabled={busy || index < 0 || index >= total - 1}
         onClick={() => onMove(index, 1)}
-        aria-label={`Move order ${item.orderNumber} later in your queue`}
+        aria-label={`Move ${item.kind === 'MARKETPLACE' ? `order ${item.orderNumber}` : `shipment ${item.reference}`} later in your queue`}
         className="flex h-7 w-7 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-belize-navy disabled:opacity-30 disabled:hover:bg-transparent"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>

@@ -80,3 +80,18 @@ body {
 .container-bmpl {
   @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
 }
+
+/*
+ * Leaflet's zoom controls ship at 30px square, which is well under a thumb.
+ * Bumped to 44 for the same reason every other control on the site is: the map
+ * is used one-handed on a phone, and a mis-tap pans instead of zooming.
+ */
+/* Leaflet's own stylesheet is imported by the map component, so it lands after
+   this file in the cascade; the !important is what makes the rule win rather
+   than a specificity arms race with a third-party file. */
+.leaflet-touch .leaflet-bar a,
+.leaflet-bar a {
+  width: 44px !important;
+  height: 44px !important;
+  line-height: 44px !important;
+}
