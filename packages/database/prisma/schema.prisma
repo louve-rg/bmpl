@@ -504,6 +504,8 @@ model User {
   // Profile-picture moderation (self-relation: the admin who decided this avatar).
   avatarReviewedBy           User?                     @relation("AvatarReviewer", fields: [avatarReviewedById], references: [id], onDelete: SetNull)
   avatarReviewsMade          User[]                    @relation("AvatarReviewer")
+  shipments                  Shipment[]                @relation("ShipmentCustomer")
+  custodyEventsRecorded      CustodyEvent[]            @relation("CustodyActor")
 
   @@index([status])
   @@index([district])
@@ -1179,27 +1181,27 @@ model DeliveryEstimate {
 }
 
 model VendorLocation {
-  id              String        @id @default(cuid())
-  vendorProfileId String
-  vendorProfile   VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
-  label           String
-  addressLine1    String
-  addressLine2    String?
-  city            String
-  district        District
-  country         String        @default("BZ")
+  id                 String        @id @default(cuid())
+  vendorProfileId    String
+  vendorProfile      VendorProfile @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  label              String
+  addressLine1       String
+  addressLine2       String?
+  city               String
+  district           District
+  country            String        @default("BZ")
   // The pickup pin. Already existed and was never populated; the vendor can now
   // drop it on a map, and it becomes the authoritative point a driver navigates
   // to for collection. Same coordinate abstraction the customer's pin uses — no
   // second geographic system.
-  latitude        Float?
-  longitude       Float?
+  latitude           Float?
+  longitude          Float?
   // "Loading bay round the back", "ask at the pharmacy counter". Shown to the
   // driver once they have accepted, alongside the address.
   pickupInstructions String?
-  isPrimary       Boolean       @default(false)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  isPrimary          Boolean       @default(false)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   @@index([vendorProfileId])
   @@map("vendor_locations")
@@ -1665,6 +1667,9 @@ model VendorOrder {
   items      OrderItem[]
   delivery   OrderDelivery?
   settlement VendorSettlement?
+  // Set only when this order travels as a multi-leg shipment. A local delivery
+  // has none, and nothing about it changes.
+  shipment   Shipment?         @relation("VendorOrderShipment")
 
   @@index([orderId])
   @@index([vendorProfileId, createdAt])
@@ -1760,6 +1765,9 @@ model OrderDelivery {
   assignments   DeliveryAssignment[]
   timeline      DeliveryTimelineEvent[]
   driverEarning DriverEarning?
+  // Set when this delivery is one leg of a longer journey. Null for every
+  // ordinary local delivery, which is the overwhelming majority.
+  shipmentLeg   ShipmentLeg?            @relation("LegDelivery")
 
   @@index([status])
   @@index([assignedDriverProfileId, status])
@@ -1964,9 +1972,9 @@ model PlatformSetting {
   dispatchWeightLocality         Int     @default(10)
   dispatchWeightExperience       Int     @default(5)
 
-  updatedById         String?
-  updatedAt           DateTime          @updatedAt
-  createdAt           DateTime          @default(now())
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
 
   @@map("platform_settings")
 }
@@ -4022,4 +4030,359 @@ model CouponUsage {
   @@index([couponId, userId])
   @@index([userId])
   @@map("coupon_usages")
+}
+
+// ============================================================================
+// MULTI-LEG LOGISTICS
+//
+// Local delivery — one vendor, one courier, one town — stays exactly where it
+// is: VendorOrder → OrderDelivery, dispatched by the existing engine. Nothing
+// below touches that path.
+//
+// These models sit ABOVE it, for the journeys a single courier cannot make:
+// Placencia to San Pedro is a collection, a flight, and a delivery, with the
+// parcel resting at two terminals in between. A Shipment is the plan; its legs
+// are the steps. A courier leg IS an OrderDelivery (same engine, same drivers,
+// same tested state machine) — the shipment only sequences them and records who
+// is holding the parcel.
+//
+// The network is DATA. Adding a water taxi terminal, grounding a flight, or
+// opening a new district is a row, never a deploy.
+// ============================================================================
+
+/// How a leg physically moves. Mirrors TRANSPORT_MODES in @bmpl/shared.
+enum TransportMode {
+  LAND
+  AIR
+  SEA
+}
+
+/// What kind of place a hub is. Broad on purpose: BMPL owns none of the
+/// airports or water taxi terminals it hands parcels to.
+enum HubType {
+  AIRPORT
+  AIRSTRIP
+  WATER_TAXI_TERMINAL
+  SEA_TERMINAL
+  BUS_TERMINAL
+  WAREHOUSE
+  DISTRIBUTION_CENTER
+  BMPL_HUB
+}
+
+/// Which ends BMPL is responsible for. "Door" means we collect from or deliver
+/// to an address; "Hub" means the customer handles that end at a terminal.
+enum ShippingService {
+  DOOR_TO_DOOR
+  DOOR_TO_HUB
+  HUB_TO_DOOR
+  HUB_TO_HUB
+}
+
+/// A leg's role in the journey.
+enum LegKind {
+  FIRST_MILE
+  LINE_HAUL
+  LAST_MILE
+}
+
+enum LegStatus {
+  PENDING
+  READY
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  EXCEPTION
+}
+
+/// Derived from the legs by deriveShipmentStatus() in @bmpl/shared, never set
+/// independently. Two writable sources for one fact is how they drift.
+enum ShipmentStatus {
+  DRAFT
+  AWAITING_PICKUP
+  FIRST_MILE
+  AT_ORIGIN_HUB
+  IN_TRANSIT
+  AT_DESTINATION_HUB
+  OUT_FOR_DELIVERY
+  AWAITING_COLLECTION
+  DELIVERED
+  EXCEPTION
+  CANCELLED
+}
+
+/// Who is holding the parcel right now.
+enum CustodyHolder {
+  SENDER
+  DRIVER
+  HUB
+  CARRIER
+  RECIPIENT
+}
+
+/// Somewhere a parcel can change hands.
+///
+/// `code` is the short handle operators actually say out loud ("SPW"), and it is
+/// also the deterministic tie-break the route planner falls back on, so it must
+/// be unique and stable.
+model LogisticsHub {
+  id           String          @id @default(cuid())
+  code         String          @unique
+  name         String
+  type         HubType
+  district     District
+  city         String
+  addressLine1 String?
+  addressLine2 String?
+  latitude     Float?
+  longitude    Float?
+  /// Modes this hub can physically handle. An airstrip cannot take a boat, and
+  /// the planner will not route one to it.
+  modes        TransportMode[]
+  /// Shown to whoever is dropping off or collecting: which counter, what hours.
+  instructions String?
+  contactName  String?
+  contactPhone String?
+  /// Deactivating a hub removes it from planning without deleting the history of
+  /// everything that ever moved through it.
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  routesFrom    LogisticsRoute[] @relation("RouteOrigin")
+  routesTo      LogisticsRoute[] @relation("RouteDestination")
+  legsFrom      ShipmentLeg[]    @relation("LegOriginHub")
+  legsTo        ShipmentLeg[]    @relation("LegDestinationHub")
+  shipmentsFrom Shipment[]       @relation("ShipmentOriginHub")
+  shipmentsTo   Shipment[]       @relation("ShipmentDestinationHub")
+  custodyEvents CustodyEvent[]
+
+  // Attaching a door to a terminal is always "active hubs in this district".
+  @@index([district, isActive])
+  @@map("logistics_hubs")
+}
+
+/// A transport service someone actually runs between two hubs.
+///
+/// Deliberately NOT unique on (origin, destination, mode): two carriers may fly
+/// the same pair, and operations should be able to configure both and let the
+/// planner pick. Planning stays deterministic because ties break on route id.
+model LogisticsRoute {
+  id               String        @id @default(cuid())
+  originHubId      String
+  originHub        LogisticsHub  @relation("RouteOrigin", fields: [originHubId], references: [id], onDelete: Restrict)
+  destinationHubId String
+  destinationHub   LogisticsHub  @relation("RouteDestination", fields: [destinationHubId], references: [id], onDelete: Restrict)
+  mode             TransportMode
+  /// Who operates it. BMPL does not fly the planes.
+  carrierName      String?
+  carrierPhone     String?
+  /// Scheduling is a label, not a calendar — operations write "Mon/Wed/Fri 09:00"
+  /// and the planner only reports it. Real timetables are a later problem.
+  scheduleNote     String?
+  durationMinutes  Int
+  /// The transport component of the quote, in minor units. Courier legs are
+  /// priced by the existing delivery rules, not here.
+  priceMinor       BigInt        @default(0)
+  isActive         Boolean       @default(true)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  legs ShipmentLeg[]
+
+  @@index([originHubId, isActive])
+  @@index([destinationHubId, isActive])
+  @@map("logistics_routes")
+}
+
+/// One parcel's journey, however many legs it takes.
+///
+/// Addresses are SNAPSHOTS. A shipment in flight must not change shape because
+/// someone edited a saved address, and the driver on leg 3 must see what was
+/// agreed at booking.
+model Shipment {
+  id        String          @id @default(cuid())
+  /// Customer-facing tracking reference.
+  reference String          @unique
+  service   ShippingService
+  /// Derived from the legs. Stored so it can be indexed and listed; recomputed
+  /// on every leg transition rather than set by hand.
+  status    ShipmentStatus  @default(DRAFT)
+  /// Inherited from the order, which inherits it from the vendor. A test
+  /// shipment can never be created by flipping a flag on a request.
+  isTest    Boolean         @default(false)
+
+  customerUserId String?
+  customer       User?   @relation("ShipmentCustomer", fields: [customerUserId], references: [id], onDelete: SetNull)
+
+  /// Set when the shipment fulfils a marketplace order. Null for a standalone
+  /// courier booking, which is why it is optional rather than the parent.
+  vendorOrderId String?      @unique
+  vendorOrder   VendorOrder? @relation("VendorOrderShipment", fields: [vendorOrderId], references: [id], onDelete: SetNull)
+
+  // ---- Origin (snapshot) ----
+  originHubId        String?
+  originHub          LogisticsHub? @relation("ShipmentOriginHub", fields: [originHubId], references: [id], onDelete: Restrict)
+  originName         String?
+  originPhone        String?
+  originAddress      String?
+  originCity         String?
+  originDistrict     District?
+  originLatitude     Float?
+  originLongitude    Float?
+  originInstructions String?
+
+  // ---- Destination (snapshot) ----
+  destinationHubId        String?
+  destinationHub          LogisticsHub? @relation("ShipmentDestinationHub", fields: [destinationHubId], references: [id], onDelete: Restrict)
+  destinationName         String?
+  destinationPhone        String?
+  destinationAddress      String?
+  destinationCity         String?
+  destinationDistrict     District?
+  destinationLatitude     Float?
+  destinationLongitude    Float?
+  destinationInstructions String?
+
+  // ---- The plan ----
+  preferredMode    TransportMode?
+  /// One price for the whole journey — the sum of every leg, quoted once.
+  quotedTotalMinor BigInt         @default(0)
+  quotedMinutes    Int?
+  /// Plain-language account of the route the planner chose, kept so the same
+  /// explanation shown at booking is still there at 3am when it goes wrong.
+  planExplanation  String?
+
+  // ---- The parcel ----
+  description String?
+  weightGrams Int?
+  pieces      Int     @default(1)
+
+  // ---- Outcomes ----
+  bookedAt           DateTime?
+  deliveredAt        DateTime?
+  collectedAt        DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  exceptionAt        DateTime?
+  exceptionReason    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  legs          ShipmentLeg[]
+  custodyEvents CustodyEvent[]
+
+  @@index([customerUserId, createdAt])
+  @@index([status, isTest])
+  @@map("shipments")
+}
+
+/// One step of a journey.
+///
+/// `sequence` is authority: nothing may start until every earlier live leg has
+/// completed (isLegActionable in @bmpl/shared). That rule is what stops a
+/// last-mile courier being dispatched to a terminal the parcel is still flying
+/// towards.
+model ShipmentLeg {
+  id         String        @id @default(cuid())
+  shipmentId String
+  shipment   Shipment      @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  sequence   Int
+  kind       LegKind
+  mode       TransportMode
+  status     LegStatus     @default(PENDING)
+
+  originHubId      String?
+  originHub        LogisticsHub?   @relation("LegOriginHub", fields: [originHubId], references: [id], onDelete: Restrict)
+  destinationHubId String?
+  destinationHub   LogisticsHub?   @relation("LegDestinationHub", fields: [destinationHubId], references: [id], onDelete: Restrict)
+  routeId          String?
+  route            LogisticsRoute? @relation(fields: [routeId], references: [id], onDelete: Restrict)
+
+  /// A courier leg IS an ordinary delivery. The existing dispatch engine offers
+  /// it, the existing driver app works it, the existing PIN verifies it. The
+  /// shipment layer creates this row and then gets out of the way.
+  orderDeliveryId String?        @unique
+  orderDelivery   OrderDelivery? @relation("LegDelivery", fields: [orderDeliveryId], references: [id], onDelete: SetNull)
+
+  /// A line-haul leg is operated by someone BMPL does not employ, so there is no
+  /// driver to track — an operator confirms departure and arrival by hand.
+  carrierName          String?
+  carrierBookingRef    String?
+  scheduledDepartureAt DateTime?
+  scheduledArrivalAt   DateTime?
+  departedAt           DateTime?
+  arrivedAt            DateTime?
+
+  durationMinutes Int     @default(0)
+  priceMinor      BigInt  @default(0)
+  /// The customer-facing sentence for this step, written by the planner.
+  description     String?
+
+  // ---- Handoff verification at the end of this leg ----
+  // Same shape as the delivery PIN that already works: the receiver holds a code
+  // the deliverer must produce. Access-controlled; never returned to the party
+  // that has to submit it, and never logged.
+  handoffPin                String?
+  handoffPinAttempts        Int                @default(0)
+  handoffVerifiedAt         DateTime?
+  handoffVerificationStatus VerificationStatus @default(PENDING)
+  handoffReceivedByName     String?
+  handoffPhotoKeys          String[]
+
+  startedAt       DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  exceptionAt     DateTime?
+  exceptionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  custodyEvents CustodyEvent[]
+
+  // Sequence is unique per shipment — two legs numbered 3 would make "what is
+  // next" ambiguous, and the sequencing rule depends on it being answerable.
+  @@unique([shipmentId, sequence])
+  @@index([shipmentId, sequence])
+  @@index([status, kind])
+  @@map("shipment_legs")
+}
+
+/// Append-only chain of custody. One row per transfer, never updated, never
+/// deleted — the answer to "who had it when it went missing" is only worth
+/// having if nothing can rewrite it.
+model CustodyEvent {
+  id            String       @id @default(cuid())
+  shipmentId    String
+  shipment      Shipment     @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipmentLegId String?
+  shipmentLeg   ShipmentLeg? @relation(fields: [shipmentLegId], references: [id], onDelete: SetNull)
+
+  /// Null on the first event: nobody held it before the sender.
+  fromHolder CustodyHolder?
+  toHolder   CustodyHolder
+
+  hubId String?
+  hub   LogisticsHub? @relation(fields: [hubId], references: [id], onDelete: SetNull)
+
+  /// Who recorded the transfer. Not every party has an account — a carrier's
+  /// counter staff do not — so `actorLabel` carries the name when `actor` cannot.
+  actorUserId String?
+  actor       User?   @relation("CustodyActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorLabel  String?
+
+  latitude  Float?
+  longitude Float?
+
+  verification VerificationStatus @default(PENDING)
+  note         String?
+
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([shipmentId, occurredAt])
+  @@index([shipmentLegId])
+  @@map("custody_events")
 }

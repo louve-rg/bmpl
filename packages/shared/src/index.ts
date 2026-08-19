@@ -15,6 +15,8 @@ export * from './settlement';
 export * from './reviews';
 export * from './driver';
 export * from './dispatch';
+export * from './shipping';
+export * from './route-planner';
 export * from './dispatch-ranking';
 export * from './driver-queue';
 export * from './route-optimizer';
