@@ -1,5 +1,11 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
+import { DriverModule } from '../driver/driver.module';
+import { DispatchModule } from '../dispatch/dispatch.module';
+import { ShipmentDispatchService } from './shipment-dispatch.service';
+import { ShipmentDriverService } from './shipment-driver.service';
+import { DriverShippingController } from './driver-shipping.controller';
+import { ShipmentDispatchScheduler } from './shipment-dispatch.scheduler';
 import { LogisticsNetworkService } from './logistics-network.service';
 import { ShipmentService } from './shipment.service';
 import { AdminLogisticsController, ShippingController, ShippingHubsController } from './shipping.controller';
@@ -13,9 +19,9 @@ import { AdminLogisticsController, ShippingController, ShippingHubsController } 
  * works.
  */
 @Module({
-  imports: [PrismaModule],
-  controllers: [ShippingHubsController, ShippingController, AdminLogisticsController],
-  providers: [LogisticsNetworkService, ShipmentService],
-  exports: [ShipmentService, LogisticsNetworkService],
+  imports: [PrismaModule, DriverModule, DispatchModule],
+  controllers: [ShippingHubsController, ShippingController, AdminLogisticsController, DriverShippingController],
+  providers: [LogisticsNetworkService, ShipmentService, ShipmentDispatchService, ShipmentDriverService, ShipmentDispatchScheduler],
+  exports: [ShipmentService, LogisticsNetworkService, ShipmentDispatchService],
 })
 export class ShippingModule {}

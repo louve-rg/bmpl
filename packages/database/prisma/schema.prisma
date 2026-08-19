@@ -320,6 +320,15 @@ enum AuditAction {
   SHIPMENT_LEG_HANDOFF_PIN_FAILED
   SHIPMENT_LEG_EXCEPTION
   SHIPMENT_HANDOFF_PIN_REVEALED
+  SHIPMENT_LEG_OFFERED
+  SHIPMENT_LEG_OFFER_EXPIRED
+  SHIPMENT_LEG_DISPATCH_EXHAUSTED
+  SHIPMENT_LEG_ACCEPTED
+  SHIPMENT_LEG_DECLINED
+  SHIPMENT_LEG_PICKED_UP
+  SHIPMENT_LEG_IN_TRANSIT
+  SHIPMENT_LEG_ARRIVING
+  SHIPMENT_LEG_DRIVER_ASSIGNED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -1916,6 +1925,8 @@ model DriverProfile {
   serviceAreas        DriverServiceArea[]
   // Dispatch (M15): the current deliveries assigned to this driver + full history.
   activeDeliveries    OrderDelivery[]      @relation("DriverActiveDeliveries")
+  activeShipmentLegs  ShipmentLeg[]        @relation("DriverShipmentLegs")
+  shipmentLegOffers   ShipmentLegOffer[]   @relation("DriverShipmentLegOffers")
   deliveryAssignments DeliveryAssignment[]
   driverEarnings      DriverEarning[]
 
@@ -2243,6 +2254,8 @@ model DriverVehicle {
 
   // Dispatch (M15): deliveries currently using this vehicle + assignment history.
   activeDeliveries    OrderDelivery[]      @relation("VehicleActiveDeliveries")
+  activeShipmentLegs  ShipmentLeg[]        @relation("VehicleShipmentLegs")
+  shipmentLegOffers   ShipmentLegOffer[]   @relation("VehicleShipmentLegOffers")
   deliveryAssignments DeliveryAssignment[]
 
   @@index([driverProfileId])
@@ -4324,6 +4337,34 @@ model ShipmentLeg {
   orderDeliveryId String?        @unique
   orderDelivery   OrderDelivery? @relation("LegDelivery", fields: [orderDeliveryId], references: [id], onDelete: SetNull)
 
+  // ---- Courier legs are worked by BMPL drivers ----
+  //
+  // A first- or last-mile leg is real driver work, so it carries the same
+  // assignment shape a delivery does. `courierStatus` deliberately reuses the
+  // proven DeliveryStatus vocabulary rather than inventing a parallel one: the
+  // driver app's state machine, view mapping and next-action helpers then work
+  // on a shipment leg without a single new branch. `status` above stays the
+  // SHIPMENT's view of the leg; this is the DRIVER's view of the same thing.
+  courierStatus           DeliveryStatus?
+  assignedDriverProfileId String?
+  assignedDriver          DriverProfile?  @relation("DriverShipmentLegs", fields: [assignedDriverProfileId], references: [id], onDelete: SetNull)
+  assignedVehicleId       String?
+  assignedVehicle         DriverVehicle?  @relation("VehicleShipmentLegs", fields: [assignedVehicleId], references: [id], onDelete: SetNull)
+  assignedAt              DateTime?
+  acceptedAt              DateTime?
+  declinedAt              DateTime?
+  declineReason           String?
+  pickedUpAt              DateTime?
+  inTransitAt             DateTime?
+  arrivingAt              DateTime?
+  /// Rolling single offer, same as delivery dispatch: what the sweeper scans for,
+  /// what stops it looping forever, and the point a human is genuinely needed.
+  offerExpiresAt          DateTime?
+  offerCount              Int             @default(0)
+  dispatchExhaustedAt     DateTime?
+  /// The driver's own ordering preference across all their work.
+  driverQueuePosition     Int?
+
   /// A line-haul leg is operated by someone BMPL does not employ, so there is no
   /// driver to track — an operator confirms departure and arrival by hand.
   carrierName          String?
@@ -4359,13 +4400,45 @@ model ShipmentLeg {
   updatedAt DateTime @updatedAt
 
   custodyEvents CustodyEvent[]
+  offers        ShipmentLegOffer[]
 
   // Sequence is unique per shipment — two legs numbered 3 would make "what is
   // next" ambiguous, and the sequencing rule depends on it being answerable.
   @@unique([shipmentId, sequence])
   @@index([shipmentId, sequence])
   @@index([status, kind])
+  // The driver's feed and their queue ordering.
+  @@index([assignedDriverProfileId, courierStatus])
+  @@index([assignedDriverProfileId, driverQueuePosition])
+  // What the offer sweeper asks every tick.
+  @@index([offerExpiresAt])
+  // Finding courier work to dispatch: legs whose turn has come and nobody holds.
+  @@index([status, kind, courierStatus])
   @@map("shipment_legs")
+}
+
+/// Append-only offer history for a courier leg. The CURRENT offer is
+/// denormalized onto the leg for fast reads; this is the record of everyone who
+/// was ever asked, which is what stops the dispatcher offering the same leg to
+/// the same driver twice and what answers "why did this take four hours".
+model ShipmentLegOffer {
+  id              String                   @id @default(cuid())
+  shipmentLegId   String
+  shipmentLeg     ShipmentLeg              @relation(fields: [shipmentLegId], references: [id], onDelete: Cascade)
+  driverProfileId String
+  driverProfile   DriverProfile            @relation("DriverShipmentLegOffers", fields: [driverProfileId], references: [id], onDelete: Restrict)
+  vehicleId       String?
+  vehicle         DriverVehicle?           @relation("VehicleShipmentLegOffers", fields: [vehicleId], references: [id], onDelete: SetNull)
+  status          DeliveryAssignmentStatus @default(ACTIVE)
+  assignedAt      DateTime                 @default(now())
+  respondedAt     DateTime?
+  endedAt         DateTime?
+  declineReason   String?
+  createdAt       DateTime                 @default(now())
+
+  @@index([shipmentLegId, assignedAt])
+  @@index([driverProfileId, status])
+  @@map("shipment_leg_offers")
 }
 
 /// Append-only chain of custody. One row per transfer, never updated, never

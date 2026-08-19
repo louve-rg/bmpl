@@ -21,6 +21,7 @@ import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { DriverJobService } from './driver-jobs.service';
+import { DriverJobFeedService } from './driver-job-feed.service';
 
 /**
  * Driver job feed + operational transitions. Requires an APPROVED DELIVERY_DRIVER
@@ -36,7 +37,10 @@ function normalizeScope(scope?: string): DriverDeliveryView | 'open' | 'all' {
 @Roles('DELIVERY_DRIVER')
 @Controller('driver/jobs')
 export class DriverJobsController {
-  constructor(private readonly jobs: DriverJobService) {}
+  constructor(
+    private readonly jobs: DriverJobService,
+    private readonly feed: DriverJobFeedService,
+  ) {}
 
   private actor(user: AuthContext, req: Request) {
     return { userId: user.userId, ipAddress: req.ip, sessionId: user.sessionId };
@@ -53,13 +57,14 @@ export class DriverJobsController {
    */
   @Get()
   list(@CurrentUser() u: AuthContext, @Query('scope') scope?: string) {
-    return this.jobs.listJobs(u.userId, normalizeScope(scope));
+    // Both kinds of work, one list. A driver holds one queue, not two.
+    return this.feed.list(u.userId, normalizeScope(scope));
   }
 
   /** Per-view counts for the tab badges. */
   @Get('counts')
   counts(@CurrentUser() u: AuthContext) {
-    return this.jobs.viewCounts(u.userId);
+    return this.feed.counts(u.userId);
   }
 
   /**
@@ -71,7 +76,7 @@ export class DriverJobsController {
    */
   @Get('queue')
   queue(@CurrentUser() u: AuthContext) {
-    return this.jobs.queue(u.userId);
+    return this.feed.queue(u.userId);
   }
 
   /**

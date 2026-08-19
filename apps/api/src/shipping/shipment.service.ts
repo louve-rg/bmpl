@@ -28,6 +28,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LogisticsNetworkService } from './logistics-network.service';
+import { ShipmentDispatchService } from './shipment-dispatch.service';
 
 /** Minor units go out as numbers; see the note in logistics-network.service.ts. */
 const money = (v: bigint) => Number(v);
@@ -69,6 +70,7 @@ export class ShipmentService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly network: LogisticsNetworkService,
+    private readonly dispatch: ShipmentDispatchService,
   ) {}
 
   /* -------------------------------------------------------------- quoting */
@@ -279,6 +281,13 @@ export class ShipmentService {
       actorId: userId,
       newValue: { shipmentId: shipment.id, reference: shipment.reference, service: shipment.service, legs: shipment.legs.length, isTest },
     });
+
+    // If the journey starts at a door, a driver has to go and collect it. Offer
+    // that leg now rather than waiting up to twenty seconds for the sweeper —
+    // the customer has just pressed Book and is watching the screen.
+    const firstLeg = shipment.legs.find((l) => l.sequence === 1);
+    if (firstLeg?.kind === 'FIRST_MILE') await this.dispatch.dispatchLeg(firstLeg.id);
+
     return this.serialize(shipment, { audience: 'CUSTOMER' });
   }
 
@@ -400,13 +409,14 @@ export class ShipmentService {
 
   /** Complete a leg: verify the handoff, then hand custody to whoever now holds it. */
   async completeLeg(legId: string, input: LegHandoffInput, actor: { userId: string; label?: string }) {
+    let released = false;
     // The code is checked BEFORE the transition transaction, in its own write.
     // A failed attempt recorded inside the transaction is rolled back when that
     // transaction throws, so the counter would never climb and the lockout below
     // would be unreachable — the code could be guessed forever.
     await this.verifyHandoffPin(legId, input.pin, actor);
 
-    return this.transition(legId, actor, async (tx, leg, shipment) => {
+    const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
       await tx.shipmentLeg.update({
         where: { id: leg.id },
         data: {
@@ -436,8 +446,38 @@ export class ShipmentService {
       // Release the next leg. THIS is the moment a last-mile courier becomes
       // dispatchable, and not one moment before.
       await this.releaseNext(tx, shipment.id);
+      // Offering happens AFTER the transaction commits (see below) — a driver
+      // must never be told about a leg whose release could still roll back.
+      released = true;
       return { action: 'SHIPMENT_LEG_HANDOFF' as const, note: input.note ?? null };
     });
+
+    // The parcel has physically moved, so a leg that was impossible a moment ago
+    // may now be workable. Offering it here — after the commit — is what makes
+    // "the last mile becomes dispatchable when the line-haul arrives" true in
+    // seconds rather than on the next sweeper tick.
+    if (released) await this.offerNewlyReadyCourierLeg(legId);
+    return result;
+  }
+
+  /** Offer whichever courier leg this shipment has just unlocked, if any. */
+  private async offerNewlyReadyCourierLeg(completedLegId: string) {
+    const completed = await this.prisma.shipmentLeg.findUnique({
+      where: { id: completedLegId },
+      select: { shipmentId: true },
+    });
+    if (!completed) return;
+    const next = await this.prisma.shipmentLeg.findFirst({
+      where: {
+        shipmentId: completed.shipmentId,
+        kind: { in: ['FIRST_MILE', 'LAST_MILE'] },
+        status: 'READY',
+        assignedDriverProfileId: null,
+      },
+      orderBy: { sequence: 'asc' },
+      select: { id: true },
+    });
+    if (next) await this.dispatch.dispatchLeg(next.id);
   }
 
   /**

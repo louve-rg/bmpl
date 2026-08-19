@@ -9,6 +9,7 @@ import { DispatchService } from './dispatch.service';
 import { DispatchEngineService } from './dispatch-engine.service';
 import { DispatchSchedulerService } from './dispatch-scheduler.service';
 import { DriverJobService } from './driver-jobs.service';
+import { DriverJobFeedService } from './driver-job-feed.service';
 import { DeliveryAccessService } from './delivery-access.service';
 import { AdminDispatchController } from './admin-dispatch.controller';
 import { DriverJobsController } from './driver-jobs.controller';
@@ -30,6 +31,7 @@ import { CustomerDeliveryController, VendorDeliveryStatusController } from './de
     DeliveryCoreService,
     DispatchService,
     DriverJobService,
+    DriverJobFeedService,
     DeliveryAccessService,
     DispatchEngineService,
     DispatchSchedulerService,
@@ -37,6 +39,6 @@ import { CustomerDeliveryController, VendorDeliveryStatusController } from './de
   // Exported so vendor fulfilment can start dispatch the moment an order is
   // marked ready — the vendor's action, not an administrator's, puts the job in
   // front of a driver.
-  exports: [DispatchEngineService],
+  exports: [DispatchEngineService, DriverJobFeedService],
 })
 export class DispatchModule {}
