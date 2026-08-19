@@ -307,6 +307,19 @@ enum AuditAction {
   AVATAR_APPROVED
   AVATAR_REJECTED
   AVATAR_REMOVED
+  LOGISTICS_HUB_CREATED
+  LOGISTICS_HUB_UPDATED
+  LOGISTICS_ROUTE_CREATED
+  LOGISTICS_ROUTE_UPDATED
+  SHIPMENT_CREATED
+  SHIPMENT_CANCELLED
+  SHIPMENT_LEG_STARTED
+  SHIPMENT_LEG_DEPARTED
+  SHIPMENT_LEG_ARRIVED
+  SHIPMENT_LEG_HANDOFF
+  SHIPMENT_LEG_HANDOFF_PIN_FAILED
+  SHIPMENT_LEG_EXCEPTION
+  SHIPMENT_HANDOFF_PIN_REVEALED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -4126,28 +4139,33 @@ enum CustodyHolder {
 /// also the deterministic tie-break the route planner falls back on, so it must
 /// be unique and stable.
 model LogisticsHub {
-  id           String          @id @default(cuid())
-  code         String          @unique
-  name         String
-  type         HubType
-  district     District
-  city         String
-  addressLine1 String?
-  addressLine2 String?
-  latitude     Float?
-  longitude    Float?
+  id              String          @id @default(cuid())
+  code            String          @unique
+  name            String
+  type            HubType
+  district        District
+  city            String
+  addressLine1    String?
+  addressLine2    String?
+  latitude        Float?
+  longitude       Float?
   /// Modes this hub can physically handle. An airstrip cannot take a boat, and
   /// the planner will not route one to it.
-  modes        TransportMode[]
+  modes           TransportMode[]
+  /// What BMPL charges for a door leg at this hub - the courier run between this
+  /// terminal and an address in its town. Owner-configured DATA, not a rule this
+  /// code invented; 0 means "not set yet" and a quote says so out loud rather
+  /// than quietly shipping for free.
+  courierFeeMinor BigInt          @default(0)
   /// Shown to whoever is dropping off or collecting: which counter, what hours.
-  instructions String?
-  contactName  String?
-  contactPhone String?
+  instructions    String?
+  contactName     String?
+  contactPhone    String?
   /// Deactivating a hub removes it from planning without deleting the history of
   /// everything that ever moved through it.
-  isActive     Boolean         @default(true)
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   routesFrom    LogisticsRoute[] @relation("RouteOrigin")
   routesTo      LogisticsRoute[] @relation("RouteDestination")

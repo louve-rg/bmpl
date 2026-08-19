@@ -14,6 +14,24 @@
 -- cannot see a GIN/trgm index, so Prisma proposes dropping it on every diff.
 -- They are stripped here, as they were in the previous migrations.
 
+-- AlterEnum
+-- Every privileged action in this system is audited, so the new logistics
+-- transitions need their own audit actions. ADD VALUE is additive and cannot
+-- invalidate an existing row.
+ALTER TYPE "AuditAction" ADD VALUE 'LOGISTICS_HUB_CREATED';
+ALTER TYPE "AuditAction" ADD VALUE 'LOGISTICS_HUB_UPDATED';
+ALTER TYPE "AuditAction" ADD VALUE 'LOGISTICS_ROUTE_CREATED';
+ALTER TYPE "AuditAction" ADD VALUE 'LOGISTICS_ROUTE_UPDATED';
+ALTER TYPE "AuditAction" ADD VALUE 'SHIPMENT_CREATED';
+ALTER TYPE "AuditAction" ADD VALUE 'SHIPMENT_CANCELLED';
+ALTER TYPE "AuditAction" ADD VALUE 'SHIPMENT_LEG_STARTED';
+ALTER TYPE "AuditAction" ADD VALUE 'SHIPMENT_LEG_DEPARTED';
+ALTER TYPE "AuditAction" ADD VALUE 'SHIPMENT_LEG_ARRIVED';
+ALTER TYPE "AuditAction" ADD VALUE 'SHIPMENT_LEG_HANDOFF';
+ALTER TYPE "AuditAction" ADD VALUE 'SHIPMENT_LEG_HANDOFF_PIN_FAILED';
+ALTER TYPE "AuditAction" ADD VALUE 'SHIPMENT_LEG_EXCEPTION';
+ALTER TYPE "AuditAction" ADD VALUE 'SHIPMENT_HANDOFF_PIN_REVEALED';
+
 -- CreateEnum
 CREATE TYPE "TransportMode" AS ENUM ('LAND', 'AIR', 'SEA');
 
@@ -48,6 +66,7 @@ CREATE TABLE "logistics_hubs" (
     "latitude" DOUBLE PRECISION,
     "longitude" DOUBLE PRECISION,
     "modes" "TransportMode"[],
+    "courierFeeMinor" BIGINT NOT NULL DEFAULT 0,
     "instructions" TEXT,
     "contactName" TEXT,
     "contactPhone" TEXT,

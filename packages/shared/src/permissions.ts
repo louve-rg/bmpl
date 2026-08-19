@@ -40,6 +40,11 @@ export const PERMISSIONS = [
   'deliveries.manage', // cancel an assignment; other operational dispatch actions
   'deliveries.verify', // reveal pickup/delivery PINs; admin override of verification
   'proof_of_delivery.read', // view private proof-of-delivery files via signed URLs
+  // ---- Logistics: Multi-leg shipping ----
+  'logistics.read', // view hubs, routes, shipments and their legs (read-only)
+  'logistics.manage', // configure the hub / route network; cancel a shipment
+  'logistics.operate', // work a leg: confirm departure, arrival, handoff, exception
+  'logistics.verify', // reveal a leg handoff PIN; override a handoff verification
   // ---- Messaging & Order Communication (Phase 4 · M17) ----
   'support.read', // list / view support conversations (and any conversation for moderation)
   'support.respond', // join + reply to support threads, add internal notes, close/reopen
@@ -100,6 +105,7 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'drivers.read',
     'deliveries.read',
     'proof_of_delivery.read',
+    'logistics.read',
     'support.read',
     'support.respond',
     'settlements.read',
@@ -141,6 +147,10 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'deliveries.manage',
     'deliveries.verify',
     'proof_of_delivery.read',
+    'logistics.read',
+    'logistics.manage',
+    'logistics.operate',
+    'logistics.verify',
     'support.read',
     'support.respond',
     'settlements.read',
