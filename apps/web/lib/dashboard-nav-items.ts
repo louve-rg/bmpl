@@ -36,6 +36,9 @@ export const BASE_NAV: NavItem[] = [
   { label: 'Notifications', href: '/dashboard/notifications', icon: 'M12 3a6 6 0 0 0-6 6v3l-2 3h16l-2-3V9a6 6 0 0 0-6-6ZM9 19a3 3 0 0 0 6 0' },
   { label: 'Messages', href: '/dashboard/messages', icon: CHAT_ICON },
   { label: 'My Orders', href: '/orders', icon: 'M6 3h12l1 4H5l1-4Zm-1 4v13h14V7M9 11h6' },
+  // Separate from Orders on purpose: a shipment can exist without a purchase,
+  // and a locally-delivered order has no shipment at all.
+  { label: 'Shipments', href: '/dashboard/shipments', icon: 'M3 8h11v8H3zM14 11h4l3 3v2h-7zM6.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm11 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z' },
   { label: 'Wishlist', href: '/wishlist', icon: HEART_ICON },
   { label: 'My Reviews', href: '/dashboard/reviews', icon: 'M12 3l2.9 5.88 6.49.94-4.7 4.58 1.11 6.46L12 17.3l-5.8 3.06 1.1-6.46-4.69-4.58 6.49-.94L12 3Z' },
   { label: 'Payments', href: '/payments', icon: CARD_ICON },
