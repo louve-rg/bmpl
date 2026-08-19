@@ -126,40 +126,40 @@ export default function HubsPage() {
       <Card className="p-4">
         <h2 className="text-sm font-semibold text-slate-900">Add a terminal</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="Code" hint="Short handle, e.g. SPA. Used by operators and by the planner.">
-            <Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="SPA" />
+          <Field label="Code" htmlFor="hub-code" hint="Short handle, e.g. SPA. Used by operators and by the planner.">
+            <Input id="hub-code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="SPA" />
           </Field>
-          <Field label="Name">
-            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="San Pedro Airstrip" />
+          <Field label="Name" htmlFor="hub-name">
+            <Input id="hub-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="San Pedro Airstrip" />
           </Field>
-          <Field label="Type">
-            <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+          <Field label="Type" htmlFor="hub-type">
+            <Select id="hub-type" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
               {HUB_TYPES.map((t) => (
                 <option key={t} value={t}>{t.replace(/_/g, ' ').toLowerCase()}</option>
               ))}
             </Select>
           </Field>
-          <Field label="District">
-            <Select value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })}>
+          <Field label="District" htmlFor="hub-district">
+            <Select id="hub-district" value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })}>
               {DISTRICTS.map((d) => (
                 <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>
               ))}
             </Select>
           </Field>
-          <Field label="Town" hint="What separates two terminals in the same district.">
-            <Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} placeholder="San Pedro" />
+          <Field label="Town" htmlFor="hub-city" hint="What separates two terminals in the same district.">
+            <Input id="hub-city" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} placeholder="San Pedro" />
           </Field>
-          <Field label="Address">
-            <Input value={form.addressLine1} onChange={(e) => setForm({ ...form, addressLine1: e.target.value })} />
+          <Field label="Address" htmlFor="hub-address">
+            <Input id="hub-address" value={form.addressLine1} onChange={(e) => setForm({ ...form, addressLine1: e.target.value })} />
           </Field>
-          <Field label="Latitude" hint="Optional. Used for driver navigation.">
-            <Input value={form.latitude} onChange={(e) => setForm({ ...form, latitude: e.target.value })} placeholder="17.9139" />
+          <Field label="Latitude" htmlFor="hub-lat" hint="Optional. Used for driver navigation.">
+            <Input id="hub-lat" value={form.latitude} onChange={(e) => setForm({ ...form, latitude: e.target.value })} placeholder="17.9139" />
           </Field>
-          <Field label="Longitude">
-            <Input value={form.longitude} onChange={(e) => setForm({ ...form, longitude: e.target.value })} placeholder="-87.9711" />
+          <Field label="Longitude" htmlFor="hub-lng">
+            <Input id="hub-lng" value={form.longitude} onChange={(e) => setForm({ ...form, longitude: e.target.value })} placeholder="-87.9711" />
           </Field>
-          <Field label="Contact phone">
-            <Input value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} />
+          <Field label="Contact phone" htmlFor="hub-phone">
+            <Input id="hub-phone" value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} />
           </Field>
           <div className="sm:col-span-2 lg:col-span-3">
             <Field label="Modes it can handle" hint="An airstrip cannot take a boat; the planner will not route one to it.">
@@ -185,8 +185,8 @@ export default function HubsPage() {
             </Field>
           </div>
           <div className="sm:col-span-2 lg:col-span-3">
-            <Field label="Counter instructions" hint="Shown to whoever drops off or collects — hours, which desk.">
-              <Input value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} />
+            <Field label="Counter instructions" htmlFor="hub-instructions" hint="Shown to whoever drops off or collects — hours, which desk.">
+              <Input id="hub-instructions" value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} />
             </Field>
           </div>
         </div>

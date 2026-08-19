@@ -122,21 +122,23 @@ interface Delivered {
 /**
  * Run `step`, then return ONLY the notifications it produced.
  *
- * Scoping by timestamp rather than counting totals is what makes "exactly one"
- * a meaningful claim: a lifecycle legitimately fires many notifications, and an
- * absolute count would either pass by accident or fail for the wrong reason.
+ * Scoping to one step is what makes "exactly one" a meaningful claim: a
+ * lifecycle legitimately fires many notifications, and an absolute count would
+ * either pass by accident or fail for the wrong reason.
+ *
+ * The window is an ID DIFF, not a timestamp. The first version compared a JS
+ * clock against Postgres `now()`, and the sub-millisecond skew between them let
+ * a notification from the SETUP fall inside the window — intermittently, which
+ * is the worst way for a test to be wrong. Comparing sets of rows cannot skew.
  */
 async function capture(step: () => Promise<unknown>): Promise<Delivered[]> {
-  const since = new Date();
-  // Postgres timestamps have sub-millisecond resolution; nudge the boundary so a
-  // notification written in the same millisecond as `since` is still counted.
-  since.setMilliseconds(since.getMilliseconds() - 1);
+  const before = new Set(
+    (await ctx.prisma.notificationRecipient.findMany({ select: { id: true } })).map((r) => r.id),
+  );
   await step();
-  const rows = await ctx.prisma.notificationRecipient.findMany({
-    where: { notification: { createdAt: { gte: since } } },
-    include: { notification: true },
-    orderBy: { id: 'asc' },
-  });
+  const rows = (
+    await ctx.prisma.notificationRecipient.findMany({ include: { notification: true }, orderBy: { id: 'asc' } })
+  ).filter((r) => !before.has(r.id));
   return rows.map((r) => ({
     event: r.notification.event,
     category: r.notification.category,

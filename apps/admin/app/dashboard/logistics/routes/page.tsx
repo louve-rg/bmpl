@@ -125,43 +125,43 @@ export default function RoutesPage() {
       <Card className="p-4">
         <h2 className="text-sm font-semibold text-slate-900">Add a route</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Mode">
-            <Select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value, originHubId: '', destinationHubId: '' })}>
+          <Field label="Mode" htmlFor="route-mode">
+            <Select id="route-mode" value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value, originHubId: '', destinationHubId: '' })}>
               <option value="LAND">Road</option>
               <option value="AIR">Flight</option>
               <option value="SEA">Boat</option>
             </Select>
           </Field>
-          <Field label="From">
-            <Select value={form.originHubId} onChange={(e) => setForm({ ...form, originHubId: e.target.value })}>
+          <Field label="From" htmlFor="route-from">
+            <Select id="route-from" value={form.originHubId} onChange={(e) => setForm({ ...form, originHubId: e.target.value })}>
               <option value="">Choose…</option>
               {usable.map((h) => (
                 <option key={h.id} value={h.id}>{h.code} · {h.name}</option>
               ))}
             </Select>
           </Field>
-          <Field label="To">
-            <Select value={form.destinationHubId} onChange={(e) => setForm({ ...form, destinationHubId: e.target.value })}>
+          <Field label="To" htmlFor="route-to">
+            <Select id="route-to" value={form.destinationHubId} onChange={(e) => setForm({ ...form, destinationHubId: e.target.value })}>
               <option value="">Choose…</option>
               {usable.filter((h) => h.id !== form.originHubId).map((h) => (
                 <option key={h.id} value={h.id}>{h.code} · {h.name}</option>
               ))}
             </Select>
           </Field>
-          <Field label="Carrier" hint="Who actually operates it.">
-            <Input value={form.carrierName} onChange={(e) => setForm({ ...form, carrierName: e.target.value })} placeholder="Tropic Air" />
+          <Field label="Carrier" htmlFor="route-carrier" hint="Who actually operates it.">
+            <Input id="route-carrier" value={form.carrierName} onChange={(e) => setForm({ ...form, carrierName: e.target.value })} placeholder="Tropic Air" />
           </Field>
-          <Field label="Carrier phone">
-            <Input value={form.carrierPhone} onChange={(e) => setForm({ ...form, carrierPhone: e.target.value })} />
+          <Field label="Carrier phone" htmlFor="route-carrier-phone">
+            <Input id="route-carrier-phone" value={form.carrierPhone} onChange={(e) => setForm({ ...form, carrierPhone: e.target.value })} />
           </Field>
-          <Field label="Duration (minutes)">
-            <Input value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })} inputMode="numeric" />
+          <Field label="Duration (minutes)" htmlFor="route-duration">
+            <Input id="route-duration" value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })} inputMode="numeric" />
           </Field>
-          <Field label="Price (BZ$)">
-            <Input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} inputMode="decimal" placeholder="80.00" />
+          <Field label="Price (BZ$)" htmlFor="route-price">
+            <Input id="route-price" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} inputMode="decimal" placeholder="80.00" />
           </Field>
-          <Field label="Schedule note" hint="Free text. The planner reports it; it does not parse it.">
-            <Input value={form.scheduleNote} onChange={(e) => setForm({ ...form, scheduleNote: e.target.value })} placeholder="Mon/Wed/Fri 09:00" />
+          <Field label="Schedule note" htmlFor="route-schedule" hint="Free text. The planner reports it; it does not parse it.">
+            <Input id="route-schedule" value={form.scheduleNote} onChange={(e) => setForm({ ...form, scheduleNote: e.target.value })} placeholder="Mon/Wed/Fri 09:00" />
           </Field>
         </div>
         <Button
