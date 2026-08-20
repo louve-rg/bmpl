@@ -85,6 +85,22 @@ export class LogisticsNetworkService {
     }));
   }
 
+  /**
+   * Which ways a parcel can actually travel right now.
+   *
+   * Derived from ACTIVE routes, not from the enum. Offering "Flight" when no
+   * flight is configured produces a quote that always fails, and a customer who
+   * concludes the site is broken rather than that the service does not exist.
+   */
+  async availableModes(): Promise<Array<'LAND' | 'AIR' | 'SEA'>> {
+    const rows = await this.prisma.logisticsRoute.groupBy({
+      by: ['mode'],
+      where: { isActive: true, originHub: { isActive: true }, destinationHub: { isActive: true } },
+    });
+    const order = ['LAND', 'AIR', 'SEA'] as const;
+    return order.filter((m) => rows.some((r) => r.mode === m));
+  }
+
   async listHubs() {
     const hubs = await this.prisma.logisticsHub.findMany({ orderBy: [{ isActive: 'desc' }, { code: 'asc' }] });
     return hubs.map((h) => this.hubOut(h));

@@ -5,16 +5,14 @@ import { useRouter } from 'next/navigation';
 import {
   needsFirstMile,
   needsLastMile,
-  SHIPPING_SERVICES,
-  SHIPPING_SERVICE_DESCRIPTIONS,
   SHIPPING_SERVICE_LABELS,
-  TRANSPORT_MODES,
   TRANSPORT_MODE_LABELS,
   type ShippingService,
   type TransportMode,
 } from '@bmpl/shared';
 import { formatTransitTime, shippingApi, shippingMoney, type ShipmentQuote, type ShippingHub } from '../../../../lib/shipping';
 import { EndpointPicker, emptyEndpoint, type EndpointValue } from '../../../../components/shipping/EndpointPicker';
+import { ServiceTypeField } from '../../../../components/shipping/ServiceTypeField';
 import { Alert, Button, PageHeader, Spinner } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
 
@@ -70,6 +68,7 @@ export default function NewShipmentPage() {
   const router = useRouter();
 
   const [hubs, setHubs] = useState<ShippingHub[]>([]);
+  const [modes, setModes] = useState<TransportMode[]>([]);
   const [service, setService] = useState<ShippingService>('DOOR_TO_DOOR');
   const [mode, setMode] = useState<Mode>('ANY');
   const [origin, setOrigin] = useState<EndpointValue>(emptyEndpoint());
@@ -83,6 +82,10 @@ export default function NewShipmentPage() {
 
   useEffect(() => {
     shippingApi.hubs().then(setHubs).catch(() => setHubs([]));
+    // Only offer ways of travelling the network can actually provide. Offering
+    // "Flight" with no flight configured produces a quote that always fails and
+    // a customer who concludes the site is broken.
+    shippingApi.modes().then(setModes).catch(() => setModes([]));
   }, []);
 
   // The service type decides which end is a door and which is a terminal, so
@@ -91,6 +94,10 @@ export default function NewShipmentPage() {
     setOrigin((o) => ({ ...o, mode: needsFirstMile(service) ? 'DOOR' : 'HUB' }));
     setDestination((d) => ({ ...d, mode: needsLastMile(service) ? 'DOOR' : 'HUB' }));
   }, [service]);
+
+  useEffect(() => {
+    if (mode !== 'ANY' && modes.length > 0 && !modes.includes(mode)) setMode('ANY');
+  }, [mode, modes]);
 
   const request = useMemo(
     () => toRequest(service, mode, origin, destination, parcel),
@@ -141,27 +148,11 @@ export default function NewShipmentPage() {
     <div className="mx-auto max-w-2xl pb-28">
       <PageHeader title="Ship a package" description="Send a parcel anywhere in Belize — by road, air or boat." />
 
-      {/* 1. What kind of service. Chosen first because it decides what the rest
-             of the form asks for. */}
-      <fieldset className="mt-6 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
-        <legend className="px-1 text-sm font-semibold text-belize-navy">How far should we take it?</legend>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {SHIPPING_SERVICES.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setService(s)}
-              aria-pressed={service === s}
-              className={`min-h-[72px] rounded-bmpl-md border p-3 text-left transition ${
-                service === s ? 'border-belize-blue bg-belize-blue/5 ring-1 ring-belize-blue' : 'border-slate-300 hover:border-slate-400'
-              }`}
-            >
-              <span className="block text-sm font-semibold text-belize-navy">{SHIPPING_SERVICE_LABELS[s]}</span>
-              <span className="mt-0.5 block text-xs leading-snug text-slate-500">{SHIPPING_SERVICE_DESCRIPTIONS[s]}</span>
-            </button>
-          ))}
-        </div>
-      </fieldset>
+      {/* 1. What kind of service. Chosen first because it decides which fields
+             the rest of the form even shows. */}
+      <div className="mt-6 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
+        <ServiceTypeField value={service} onChange={setService} />
+      </div>
 
       <div className="mt-4 space-y-4">
         <EndpointPicker
@@ -187,7 +178,7 @@ export default function NewShipmentPage() {
       <fieldset className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
         <legend className="px-1 text-sm font-semibold text-belize-navy">How should it travel?</legend>
         <div className="mt-2 flex flex-wrap gap-2">
-          {(['ANY', ...TRANSPORT_MODES] as Mode[]).map((m) => (
+          {(['ANY', ...modes] as Mode[]).map((m) => (
             <button
               key={m}
               type="button"
@@ -204,7 +195,9 @@ export default function NewShipmentPage() {
         {/* Honest about what this is: a preference the network may not be able to
             honour, not a promise. The quote below says which. */}
         <p className="mt-2 text-xs text-slate-500">
-          We will use the cheapest service that can actually make the trip. Choosing a mode restricts it to that mode.
+          {modes.length === 0
+            ? 'No transport services are configured yet, so we cannot price a journey.'
+            : 'We will use the cheapest service that can actually make the trip. Choosing a mode restricts it to that mode.'}
         </p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-3">

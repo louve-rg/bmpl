@@ -329,6 +329,9 @@ enum AuditAction {
   SHIPMENT_LEG_IN_TRANSIT
   SHIPMENT_LEG_ARRIVING
   SHIPMENT_LEG_DRIVER_ASSIGNED
+  WALLET_TOPUP_POSTED
+  WALLET_TEST_FUNDING_GRANTED
+  USER_TEST_FLAG_CHANGED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -425,6 +428,10 @@ enum Currency {
 
 model User {
   id                   String       @id @default(cuid())
+  /// A simulation account. Admin-set only, exactly like VendorProfile.isTest and
+  /// DriverProfile.isTest. It is what gates TEST wallet funding: a user cannot
+  /// set this on themselves, so they cannot mint themselves money.
+  isTest               Boolean      @default(false)
   email                String       @unique
   passwordHash         String
   firstName            String
@@ -961,6 +968,11 @@ model WalletTransaction {
   id          String                  @id @default(cuid())
   type        WalletTransactionType
   status      WalletTransactionStatus @default(PENDING)
+  /// Rehearsal money. Inherited from the account owner at posting time, never
+  /// passed in by a caller. Real financial reporting and settlement filter it
+  /// out; the ledger still balances with it, because it is real double-entry
+  /// bookkeeping over money that simply does not represent anything.
+  isTest      Boolean                 @default(false)
   currency    Currency                @default(BZD)
   reference   String? // external/idempotency reference
   description String?
@@ -972,6 +984,7 @@ model WalletTransaction {
 
   @@unique([reference])
   @@index([type, status])
+  @@index([isTest, createdAt])
   @@map("wallet_transactions")
 }
 

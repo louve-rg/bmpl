@@ -41,6 +41,7 @@ export const BASE_NAV: NavItem[] = [
   { label: 'Shipments', href: '/dashboard/shipments', icon: 'M3 8h11v8H3zM14 11h4l3 3v2h-7zM6.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm11 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z' },
   { label: 'Wishlist', href: '/wishlist', icon: HEART_ICON },
   { label: 'My Reviews', href: '/dashboard/reviews', icon: 'M12 3l2.9 5.88 6.49.94-4.7 4.58 1.11 6.46L12 17.3l-5.8 3.06 1.1-6.46-4.69-4.58 6.49-.94L12 3Z' },
+  { label: 'Wallet', href: '/wallet', icon: 'M3 7h18v12H3zM17 12h2M3 10h14a2 2 0 0 1 2 2' },
   { label: 'Payments', href: '/payments', icon: CARD_ICON },
   { label: 'My Roles', href: '/dashboard/roles', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6 8a6 6 0 0 1 12 0' },
   { label: 'Profile', href: '/dashboard/profile', icon: PERSON_ICON },

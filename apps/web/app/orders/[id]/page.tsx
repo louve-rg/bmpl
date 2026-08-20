@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '../../../components/landing/Header';
 import { Footer } from '../../../components/landing/Footer';
 import { ordersApi, money, type OrderView } from '../../../lib/orders';
+import { paymentExplanation } from '../../../lib/wallet';
 import { OrderStatusBadge, DeliveryBadge } from '../../../components/orders/OrderStatusBadge';
 import { paymentsApi, type PaymentDetail } from '../../../lib/payments';
 import { PaymentStatusBadge, HoldStatusBadge } from '../../../components/payments/PaymentStatusBadge';
@@ -98,7 +99,16 @@ export default function OrderDetailPage() {
                   {payment.holds[0] && <HoldStatusBadge status={payment.holds[0].status} />}
                 </div>
               )}
-              <p className="mt-2 text-xs text-sky-700">Payment processing coming next — no funds have moved.</p>
+              {/* The real state, in the customer's words. This used to say
+                  "payment processing coming next — no funds have moved", which
+                  stopped being true the moment the wallet went live and would
+                  have told somebody their money was untouched while it sat in
+                  escrow. */}
+              {payment ? (
+                <p className="mt-2 text-xs text-slate-600">{paymentExplanation(payment.status, payment.amountMinor)}</p>
+              ) : (
+                <p className="mt-2 text-xs text-slate-500">No payment record for this order.</p>
+              )}
             </Card>
 
             <div className="mt-6 space-y-4">

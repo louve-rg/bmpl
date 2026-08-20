@@ -21,5 +21,5 @@ export const config = {
   // Order-placement and account routes require a session. This is a UX guard
   // (immediate bounce to /login); the API still independently enforces auth on
   // every request, so a guest can never create an order regardless.
-  matcher: ['/dashboard/:path*', '/cart', '/checkout', '/orders/:path*', '/payments/:path*'],
+  matcher: ['/dashboard/:path*', '/cart', '/checkout', '/orders/:path*', '/payments/:path*', '/wallet'],
 };

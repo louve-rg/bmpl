@@ -10,7 +10,9 @@ import {
   revokeRoleSchema,
   setAdminPermissionsSchema,
   suspendRoleSchema,
+  setUserTestFlagSchema,
   suspendUserSchema,
+  type SetUserTestFlagInput,
   userSearchSchema,
 } from '@bmpl/validation';
 import type { Permission, RoleCode } from '@bmpl/shared';
@@ -132,6 +134,17 @@ export class AdminController {
     @Body(ZodBody(revokeRoleSchema)) body: { userId: string; roleCode: RoleCode; reason: string },
   ) {
     return this.admin.revokeRole(this.actor(user, req), body.userId, body.roleCode, body.reason);
+  }
+
+  /** Designate (or undesignate) a simulation account. Unlocks test wallet funding. */
+  @Post('users/test-flag')
+  @RequirePermission('users.suspend')
+  setTestFlag(
+    @CurrentUser() user: AuthContext,
+    @Req() req: Request,
+    @Body(ZodBody(setUserTestFlagSchema)) body: SetUserTestFlagInput,
+  ) {
+    return this.admin.setTestFlag(this.actor(user, req), body.userId, body.isTest, body.reason);
   }
 
   @Post('users/suspend')

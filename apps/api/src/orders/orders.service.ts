@@ -370,12 +370,24 @@ export class OrdersService {
         );
       }
 
-      // ---- Payment & wallet-hold foundation (M11) — NO money moves ----
+      // ---- Payment ----
+      // Without `payWithWallet` this is the original behaviour: a PENDING
+      // payment and a SOFT hold, no money moved, settled later.
       const payment = await this.payments.createForOrder(
         tx,
         { id: order.id, userId: actor.userId, totalMinor, currency: 'BZD' },
         actor,
       );
+
+      // With it, the escrow debit happens HERE, inside the same transaction that
+      // created the order. That is deliberate: if the customer cannot pay, this
+      // throws, the whole transaction rolls back, and there is no order, no
+      // reservation, no vendor notification and no cancelled row to explain. An
+      // order that exists only to be cancelled a moment later is a worse
+      // experience than never creating one.
+      if (dto.payWithWallet) {
+        await this.payments.escrowInTx(tx, payment.id, actor);
+      }
       if (idemRow) {
         await tx.idempotencyKey.update({ where: { id: idemRow.id }, data: { status: 'COMPLETED', resultOrderId: order.id, resultPaymentId: payment.id } });
         await tx.payment.update({ where: { id: payment.id }, data: { idempotencyKeyId: idemRow.id } });

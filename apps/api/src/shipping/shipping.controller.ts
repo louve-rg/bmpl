@@ -53,6 +53,23 @@ export class ShippingHubsController {
 }
 
 /**
+ * Which transport modes the network can actually offer.
+ *
+ * Public and separate from the hub list because the booking form needs it
+ * before a customer has chosen anything.
+ */
+@Public()
+@Controller('shipping/modes')
+export class ShippingModesController {
+  constructor(private readonly network: LogisticsNetworkService) {}
+
+  @Get()
+  list() {
+    return this.network.availableModes();
+  }
+}
+
+/**
  * Customer-facing shipping.
  *
  * Quoting is deliberately a POST rather than a GET: the body carries two

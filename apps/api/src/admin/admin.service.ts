@@ -526,4 +526,31 @@ export class AdminService {
   bundle(name: keyof typeof PERMISSION_BUNDLES): Permission[] {
     return PERMISSION_BUNDLES[name] ?? [];
   }
+  /**
+   * Mark (or unmark) a user as a simulation account.
+   *
+   * This is the switch that lets an account fund its wallet with test money, so
+   * it is admin-only, audited with a reason, and never settable by the user
+   * themselves. Everything downstream — wallet funding, order isTest, ledger
+   * isTest — reads it rather than trusting a request.
+   */
+  async setTestFlag(actor: Actor, userId: string, isTest: boolean, reason: string) {
+    const before = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, isTest: true } });
+    if (!before) throw new NotFoundException('User not found.');
+    if (before.isTest === isTest) return { userId, isTest, changed: false };
+
+    const user = await this.prisma.user.update({ where: { id: userId }, data: { isTest }, select: { id: true, email: true, isTest: true } });
+    await this.audit.record({
+      action: 'USER_TEST_FLAG_CHANGED',
+      actorId: actor.userId,
+      targetUserId: userId,
+      ipAddress: actor.ipAddress ?? null,
+      sessionId: actor.sessionId ?? null,
+      reason,
+      previousValue: { isTest: before.isTest },
+      newValue: { isTest: user.isTest },
+    });
+    return { userId: user.id, email: user.email, isTest: user.isTest, changed: true };
+  }
+
 }

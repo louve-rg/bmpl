@@ -131,6 +131,8 @@ export type ShipmentQuote =
 
 export const shippingApi = {
   hubs: () => api.get<ShippingHub[]>('/shipping/hubs'),
+  /** The modes the configured network can actually offer right now. */
+  modes: () => api.get<Array<'LAND' | 'AIR' | 'SEA'>>('/shipping/modes'),
   quote: (body: unknown) => api.post<ShipmentQuote>('/shipping/quote', body),
   create: (body: unknown) => api.post<ShipmentView>('/shipping', body),
   mine: () => api.get<ShipmentView[]>('/shipping'),

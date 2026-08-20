@@ -183,50 +183,7 @@ export class PaymentsService {
     // ---- Success: escrow authorization (one transaction) ----
     try {
       await this.prisma.$transaction(async (tx) => {
-        const fresh = await tx.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { holds: { where: { status: 'HELD' } } } });
-        if (fresh.status === 'AUTHORIZED') return; // concurrent replay
-        if (fresh.status !== 'CREATED' && fresh.status !== 'PENDING') throw new ConflictException(`Cannot authorize a ${fresh.status} payment.`);
-
-        const escrow = await this.wallet.ensureSystemAccount('SYSTEM_ESCROW', payment.currency, tx);
-        const balance = await this.wallet.balanceMinor(wallet.id, tx); // authoritative, in-tx
-        if (balance < payment.amountMinor) throw new ConflictException('Insufficient wallet balance.');
-
-        const txn = await this.wallet.postTransaction(
-          tx,
-          {
-            type: 'ESCROW_HOLD',
-            currency: payment.currency,
-            reference: `payment:${payment.id}:auth`, // unique → ledger-level idempotency
-            description: `Escrow authorization for payment ${payment.paymentNumber}`,
-            lines: [
-              { accountId: wallet.id, direction: 'DEBIT', amountMinor: payment.amountMinor },
-              { accountId: escrow.id, direction: 'CREDIT', amountMinor: payment.amountMinor },
-            ],
-          },
-          true,
-        );
-        const customerEntry = txn.entries.find((e) => e.accountId === wallet.id);
-        for (const hold of fresh.holds) {
-          await tx.walletHold.update({ where: { id: hold.id }, data: { status: 'AUTHORIZED', authorizedAt: new Date(), walletTransactionId: txn.id } });
-        }
-        await tx.ledgerReference.updateMany({ where: { paymentId: payment.id, status: 'PENDING' }, data: { status: 'POSTED', walletTransactionId: txn.id, walletLedgerEntryId: customerEntry?.id ?? null, postedAt: new Date() } });
-        await this.transition(tx, { id: payment.id, status: fresh.status }, 'AUTHORIZED', actor.userId, { walletTransactionId: txn.id });
-        await this.audit.record({ action: 'ESCROW_FUNDS_HELD', actorId: actor.userId, newValue: { paymentId: payment.id, amountMinor: money(payment.amountMinor), walletTransactionId: txn.id, from: 'customer', to: 'escrow' } }, tx);
-        await this.audit.record({ action: 'WALLET_TRANSACTION_POSTED', actorId: actor.userId, newValue: { walletTransactionId: txn.id, type: 'ESCROW_HOLD' } }, tx);
-        await this.audit.record({ action: 'PAYMENT_AUTHORIZED', actorId: actor.userId, newValue: { paymentId: payment.id, paymentNumber: payment.paymentNumber, amountMinor: money(payment.amountMinor) } }, tx);
-        // Customer payment-authorized notification (M16).
-        await this.notifications.createInApp(
-          {
-            userId: payment.userId,
-            type: 'MARKETPLACE',
-            category: 'PAYMENT',
-            event: 'PAYMENT_AUTHORIZED',
-            title: 'Payment authorized',
-            body: `Your payment ${payment.paymentNumber} was authorized.`,
-            data: { paymentId: payment.id, orderId: payment.orderId },
-          },
-          tx,
-        );
+        await this.escrowInTx(tx, payment.id, actor);
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
@@ -235,6 +192,71 @@ export class PaymentsService {
       throw e;
     }
     return this.getOwn(actor.userId, paymentId);
+  }
+
+  /**
+   * Move the money, inside the caller's transaction.
+   *
+   * Extracted so the standalone authorize endpoint and wallet checkout run the
+   * SAME code. Two implementations of "debit the customer, credit escrow, mark
+   * the holds authorized" is two things that can disagree about somebody's
+   * money.
+   *
+   * The balance is re-read here, in-transaction, rather than trusted from a
+   * pre-flight check: between a check and a write, another order can spend the
+   * same funds.
+   */
+  async escrowInTx(tx: Tx, paymentId: string, actor: ActorContext): Promise<void> {
+    const fresh = await tx.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { holds: { where: { status: 'HELD' } } } });
+    const payment = fresh;
+    const wallet = await tx.walletAccount.findFirstOrThrow({ where: { userId: payment.userId, type: 'USER', currency: payment.currency } });
+    if (fresh.status === 'AUTHORIZED') return; // concurrent replay
+    if (fresh.status !== 'CREATED' && fresh.status !== 'PENDING') throw new ConflictException(`Cannot authorize a ${fresh.status} payment.`);
+
+    const escrow = await this.wallet.ensureSystemAccount('SYSTEM_ESCROW', payment.currency, tx);
+    const balance = await this.wallet.balanceMinor(wallet.id, tx); // authoritative, in-tx
+    if (balance < payment.amountMinor) throw new ConflictException('Insufficient wallet balance.');
+
+    // The escrow movement inherits the customer's test flag, so a rehearsal
+    // order's money stays marked as rehearsal money all the way through.
+    const owner = await tx.user.findUniqueOrThrow({ where: { id: payment.userId }, select: { isTest: true } });
+    const txn = await this.wallet.postTransaction(
+      tx,
+      {
+        type: 'ESCROW_HOLD',
+        currency: payment.currency,
+        reference: `payment:${payment.id}:auth`, // unique → ledger-level idempotency
+        description: `Escrow authorization for payment ${payment.paymentNumber}`,
+        lines: [
+          { accountId: wallet.id, direction: 'DEBIT', amountMinor: payment.amountMinor },
+          { accountId: escrow.id, direction: 'CREDIT', amountMinor: payment.amountMinor },
+        ],
+      },
+      true,
+      owner.isTest,
+    );
+    const customerEntry = txn.entries.find((e) => e.accountId === wallet.id);
+    for (const hold of fresh.holds) {
+      await tx.walletHold.update({ where: { id: hold.id }, data: { status: 'AUTHORIZED', authorizedAt: new Date(), walletTransactionId: txn.id } });
+    }
+    await tx.ledgerReference.updateMany({ where: { paymentId: payment.id, status: 'PENDING' }, data: { status: 'POSTED', walletTransactionId: txn.id, walletLedgerEntryId: customerEntry?.id ?? null, postedAt: new Date() } });
+    await this.transition(tx, { id: payment.id, status: fresh.status }, 'AUTHORIZED', actor.userId, { walletTransactionId: txn.id });
+    await this.audit.record({ action: 'ESCROW_FUNDS_HELD', actorId: actor.userId, newValue: { paymentId: payment.id, amountMinor: money(payment.amountMinor), walletTransactionId: txn.id, from: 'customer', to: 'escrow' } }, tx);
+    await this.audit.record({ action: 'WALLET_TRANSACTION_POSTED', actorId: actor.userId, newValue: { walletTransactionId: txn.id, type: 'ESCROW_HOLD' } }, tx);
+    await this.audit.record({ action: 'PAYMENT_AUTHORIZED', actorId: actor.userId, newValue: { paymentId: payment.id, paymentNumber: payment.paymentNumber, amountMinor: money(payment.amountMinor) } }, tx);
+    // Customer payment-authorized notification (M16).
+    await this.notifications.createInApp(
+      {
+        userId: payment.userId,
+        type: 'MARKETPLACE',
+        category: 'PAYMENT',
+        event: 'PAYMENT_AUTHORIZED',
+        title: 'Payment authorized',
+        body: `Your payment ${payment.paymentNumber} was authorized.`,
+        data: { paymentId: payment.id, orderId: payment.orderId },
+      },
+      tx,
+    );
   }
 
   /** Returns a rejection reason if the wallet fails validation, else null. */

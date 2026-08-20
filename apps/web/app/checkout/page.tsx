@@ -11,6 +11,7 @@ import { DISTRICTS, type OrderView } from '../../lib/orders';
 import dynamic from 'next/dynamic';
 import type { Coordinates } from '@bmpl/shared';
 import { api, type ApiError } from '../../lib/api';
+import { affordability, bzd, walletApi, type WalletSummary } from '../../lib/wallet';
 
 /**
  * Browser-only: Leaflet touches `window` at import time, and the map is
@@ -149,9 +150,17 @@ export default function CheckoutPage() {
   const quoteByVendor = new Map((quote?.vendors ?? []).map((q) => [q.vendorProfileId, q]));
   const deliveryFeeMinor = anyDelivery ? quote?.deliveryFeeMinor ?? null : 0;
   const totalMinor = cart ? (deliveryFeeMinor != null ? cart.subtotalMinor + deliveryFeeMinor : null) : null;
+
+  // The balance is fetched alongside the cart so the customer learns they cannot
+  // afford this BEFORE they commit, rather than from a cancelled order after.
+  const [wallet, setWallet] = useState<WalletSummary | null>(null);
+  useEffect(() => {
+    walletApi.summary().then(setWallet).catch(() => setWallet(null));
+  }, []);
+  const canAfford = affordability(totalMinor ?? cart?.subtotalMinor ?? 0, wallet);
   const undeliverable = (quote?.vendors ?? []).filter((q) => q.deliveryMethod === 'DELIVERY' && !q.deliverable);
 
-  async function placeOrder() {
+  async function placeOrder(payWithWallet: boolean) {
     if (!cart) return;
     setError(null);
     if (anyDelivery && (!address.fullName.trim() || !address.addressLine1.trim() || !address.city.trim())) {
@@ -182,7 +191,7 @@ export default function CheckoutPage() {
         : undefined,
     };
     try {
-      const order = await api.post<OrderView>('/checkout', body);
+      const order = await api.post<OrderView>('/checkout', { ...body, payWithWallet });
       router.push(`/orders/${order.id}?placed=1`);
     } catch (e) {
       const err = e as ApiError;
@@ -190,6 +199,10 @@ export default function CheckoutPage() {
       else {
         setError(err.message || 'Checkout failed. Please review your cart and try again.');
         setPlacing(false);
+        // A payment refusal is worth re-reading the balance for: it may have
+        // changed under another tab, and the customer is about to be told what
+        // they can do about it.
+        if (payWithWallet) walletApi.summary().then(setWallet).catch(() => {});
       }
     }
   }
@@ -383,20 +396,50 @@ export default function CheckoutPage() {
                 )}
                 {error && <p role="alert" className="mt-3 text-sm font-medium text-red-600">{error}</p>}
 
+                {/* What the wallet holds, next to what the order costs. Two
+                    numbers a customer can compare at a glance. */}
+                {wallet && (
+                  <div className="mt-4 flex items-baseline justify-between rounded-bmpl-md bg-slate-50 px-3 py-2 text-sm">
+                    <span className="text-slate-500">Wallet available</span>
+                    <span className="font-semibold tabular-nums text-belize-navy">{bzd(wallet.availableMinor)}</span>
+                  </div>
+                )}
+
+                {canAfford.known && !canAfford.sufficient && (
+                  <Alert tone="warning" className="mt-3">
+                    {canAfford.message}
+                    <Link href="/wallet" className="mt-1 block font-semibold text-belize-blue hover:underline">
+                      Add money to your wallet
+                    </Link>
+                  </Alert>
+                )}
+
+                {/* Paying is the primary action now that the wallet is live. */}
                 <Button
                   type="button"
-                  onClick={placeOrder}
-                  disabled={placing || cart.hasUnavailableItems || undeliverable.length > 0}
-                  className="mt-4 w-full"
+                  onClick={() => placeOrder(true)}
+                  disabled={
+                    placing ||
+                    cart.hasUnavailableItems ||
+                    undeliverable.length > 0 ||
+                    (canAfford.known && !canAfford.sufficient)
+                  }
+                  className="mt-4 min-h-[48px] w-full"
                 >
-                  {placing ? 'Placing order…' : 'Place order'}
+                  {placing ? 'Paying…' : `Pay ${totalMinor == null ? money(cart.subtotalMinor) : money(totalMinor)} with wallet`}
                 </Button>
 
-                {/* Payment is a later milestone — button intentionally disabled. */}
-                <Button type="button" variant="outline" disabled title="Payment integration coming next." className="mt-2 w-full">
-                  Pay now
+                {/* Placing without paying still exists — a vendor may agree to
+                    settle another way — but it is no longer the default. */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => placeOrder(false)}
+                  disabled={placing || cart.hasUnavailableItems || undeliverable.length > 0}
+                  className="mt-2 min-h-[44px] w-full"
+                >
+                  Place order without paying now
                 </Button>
-                <p className="mt-1 text-center text-xs text-slate-400">Payment integration coming next.</p>
 
                 <Link href="/cart" className="mt-3 block text-center text-sm text-belize-blue hover:underline">Back to cart</Link>
               </Card>

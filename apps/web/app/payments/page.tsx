@@ -34,7 +34,7 @@ export default function PaymentsPage() {
       <main className="container-bmpl py-10">
         <PageHeader
           title="Payments"
-          description="Payment processing is coming next — these records are created with your orders."
+          description="Every payment on your account, and what happened to the money."
         />
 
         {state === 'loading' && (

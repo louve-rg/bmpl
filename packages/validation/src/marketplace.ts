@@ -530,6 +530,16 @@ export const checkoutVendorSchema = z.object({
 export const checkoutSchema = z.object({
   vendors: z.array(checkoutVendorSchema).max(100).optional().default([]),
   deliveryAddress: orderAddressSchema.optional(),
+  /**
+   * Pay for this order from the BMPL wallet as part of placing it.
+   *
+   * Defaults to FALSE so the existing behaviour — an order placed with a pending
+   * payment and a soft hold, no money moved — is exactly what it was. Opting in
+   * makes checkout atomic: the escrow debit happens inside the same transaction
+   * that creates the order, so there is no window in which an order exists
+   * unpaid, and an insufficient balance leaves no order behind at all.
+   */
+  payWithWallet: z.boolean().optional().default(false),
 });
 export type CheckoutInput = z.infer<typeof checkoutSchema>;
 
@@ -569,3 +579,15 @@ export const deliveryQuoteSchema = z.object({
     .default([]),
 });
 export type DeliveryQuoteInput = z.infer<typeof deliveryQuoteSchema>;
+
+/**
+ * Adding money to a wallet.
+ *
+ * Capped at BZD 5,000 per request. Not a policy about how rich anyone may be —
+ * a bound that keeps a mistyped amount from creating an absurd ledger entry that
+ * somebody then has to explain.
+ */
+export const walletTopUpSchema = z.object({
+  amountMinor: z.coerce.number().int().min(100, 'Enter at least BZD 1.00.').max(500_000, 'That is more than a single top-up allows.'),
+});
+export type WalletTopUpInput = z.infer<typeof walletTopUpSchema>;

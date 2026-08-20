@@ -62,11 +62,13 @@ export default function ShippingAndDeliveryPage() {
               driver, with verified handover and tracking from the shop counter to your door.
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
-              {/* The primary action on a shipping page is to ship something.
-                  `next=` carries an unauthenticated visitor straight into the
-                  booking form after signing in, rather than dumping them on a
-                  dashboard to find it again. */}
-              <ButtonLink href="/login?next=/dashboard/shipments/new">Ship a package</ButtonLink>
+              {/* Straight to the booking form. It must NOT point at /login: a
+                  signed-in customer clicking "Ship a package" was being asked to
+                  sign in again, which reads as the session having been lost. The
+                  route is already covered by the middleware, so a signed-OUT
+                  visitor still gets /login?next=… automatically — the difference
+                  is that a signed-in one simply arrives. */}
+              <ButtonLink href="/dashboard/shipments/new">Ship a package</ButtonLink>
               {/* Public browsing needs no account. */}
               <ButtonLink href="/products" variant="outline">
                 Browse the marketplace
