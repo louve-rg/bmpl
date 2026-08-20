@@ -352,6 +352,26 @@ describe('delivery queue + route recommendation', () => {
     expect(['EXACT', 'DISTRICT', 'UNKNOWN']).toContain(res.body.route.precision);
   });
 
+  it('tells the UI whether the driver is already following the recommendation', async () => {
+    // This field is what shows or hides the "use recommended order" action. It
+    // was silently dropped when the queue was rewritten to merge marketplace and
+    // shipping work, which left a driver who reordered by hand with no way back
+    // to the suggested route. No other assertion in this file touches it.
+    const driver = await makeDriver(['BELIZE', 'CAYO']);
+    const a = await acceptedBy(driver);
+    const b = await acceptedBy(driver, 'CAYO');
+
+    const fresh = await get(driver.cookies, 'driver/jobs/queue');
+    expect(fresh.body.followsRecommendation).toBe(true);
+
+    // Put the driver's own order out of step with the recommendation.
+    const reversed = [...fresh.body.items].map((i: { id: string }) => i.id).reverse();
+    await put(driver.cookies, 'driver/jobs/queue', { deliveryIds: reversed });
+    const after = await get(driver.cookies, 'driver/jobs/queue');
+    expect(after.body.followsRecommendation).toBe(false);
+    expect([a, b]).toContain(after.body.items[0].id);
+  });
+
   it('excludes completed and cancelled deliveries from the queue', async () => {
     const driver = await makeDriver();
     const open = await acceptedBy(driver);

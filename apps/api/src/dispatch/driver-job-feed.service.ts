@@ -198,8 +198,7 @@ export class DriverJobFeedService {
     );
     const legByJob = new Map(route.legs.map((l) => [l.id, l]));
 
-    return {
-      items: items.map((i, index) => {
+    const projected = items.map((i, index) => {
         const leg = legByJob.get(i.job.id);
         const stop = stopKindFor(i.job);
         return {
@@ -221,7 +220,18 @@ export class DriverJobFeedService {
           canReorder: canReorderQueueItem(i.job.status, i.job.acceptedAt ? new Date(i.job.acceptedAt) : null),
           reorderBlockedReason: reorderBlockedReason(i.job.status, i.job.acceptedAt ? new Date(i.job.acceptedAt) : null),
         };
-      }),
+    });
+
+    return {
+      items: projected,
+      // True when the driver's own order already matches the recommendation. The
+      // UI hides the "use recommended order" action on it, so DROPPING this field
+      // silently removed the driver's way back to the suggested route after any
+      // manual reorder — which is exactly what happened when this queue replaced
+      // the delivery-only one.
+      followsRecommendation: projected
+        .filter((i) => i.recommendedPosition != null)
+        .every((i, index) => i.recommendedPosition === index + 1),
       route: {
         // Existing contract: the ids in recommended order. Kept exactly.
         recommendedOrder: [...route.legs].sort((a, b) => a.position - b.position).map((l) => l.id),
