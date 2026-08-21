@@ -413,6 +413,19 @@ export class DriverService {
       select: { userId: true, status: true },
     });
     const roleBy = new Map(roles.map((r) => [r.userId, r.status]));
+    // How many jobs each candidate is already carrying. An admin choosing a
+    // driver by hand needs the same workload number the automatic ranker uses,
+    // otherwise manual mode quietly piles every job onto the first name in the
+    // list. Same live-status set as DispatchEngineService's workload query.
+    const workload = await this.prisma.orderDelivery.groupBy({
+      by: ['assignedDriverProfileId'],
+      where: {
+        assignedDriverProfileId: { in: candidates.map((c) => c.id) },
+        status: { in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'] },
+      },
+      _count: { _all: true },
+    });
+    const activeBy = new Map(workload.map((w) => [w.assignedDriverProfileId, w._count._all]));
     return candidates
       .map((p) => {
         const usable = p.vehicles.filter(
@@ -427,6 +440,7 @@ export class DriverService {
           roleStatus: roleBy.get(p.userId) ?? null,
           licenceExpired: isExpiredOrMissing(p.licenceExpiry),
           completedDeliveries: p.completedDeliveries,
+          activeJobs: activeBy.get(p.id) ?? 0,
           ratingAverage: p.ratingAverage,
           vehicles: usable.map((v) => ({ id: v.id, type: v.type, make: v.make, model: v.model, licencePlate: v.licencePlate, isPrimary: v.isPrimary })),
         };

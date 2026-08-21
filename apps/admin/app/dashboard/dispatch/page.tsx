@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
-import { EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
+import { Alert, Card, EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface DeliveryRow {
@@ -43,6 +43,31 @@ export default function DispatchPage() {
   const [status, setStatus] = useState('');
   const [district, setDistrict] = useState('');
   const [unassigned, setUnassigned] = useState(false);
+  // Assignment mode lives in platform settings and is read by the dispatch
+  // engine on every tick, so flipping it takes effect without a deploy.
+  const [autoDispatch, setAutoDispatch] = useState<boolean | null>(null);
+  const [modeBusy, setModeBusy] = useState(false);
+  const [modeErr, setModeErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .get<{ dispatchAutomatic: boolean }>('/admin/ops/settings')
+      .then((s) => setAutoDispatch(s.dispatchAutomatic))
+      .catch(() => setAutoDispatch(null));
+  }, []);
+
+  async function setMode(automatic: boolean) {
+    setModeBusy(true);
+    setModeErr(null);
+    try {
+      await api.patch('/admin/ops/settings', { dispatchAutomatic: automatic });
+      setAutoDispatch(automatic);
+    } catch (e) {
+      setModeErr((e as ApiError).message ?? 'Could not change the assignment mode.');
+    } finally {
+      setModeBusy(false);
+    }
+  }
   const [rows, setRows] = useState<DeliveryRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +99,46 @@ export default function DispatchPage() {
   return (
     <div>
       <PageHeader breadcrumbs={adminCrumbs('Dispatch')} eyebrow="Logistics" title="Dispatch" description="Assign, track and manage delivery execution." />
+
+      {/* One switch, two modes, and a plain description of what each does. There
+          is only ever ONE assignment engine underneath — automatic lets it choose
+          the driver, manual leaves the choice to an operator on the delivery. */}
+      <Card className="mb-4 p-4">
+        <h2 className="text-sm font-semibold text-slate-900">Assignment mode</h2>
+        {modeErr && <Alert tone="warning" className="mt-2">{modeErr}</Alert>}
+        {autoDispatch == null ? (
+          <p className="mt-1 text-sm text-slate-400">Loading…</p>
+        ) : (
+          <>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {[
+                { on: true, label: 'Automatic', hint: 'The dispatch engine offers each delivery to the best eligible driver.' },
+                { on: false, label: 'Manual', hint: 'Deliveries wait for an operator to choose a driver.' },
+              ].map((opt) => (
+                <button
+                  key={opt.label}
+                  type="button"
+                  disabled={modeBusy}
+                  aria-pressed={autoDispatch === opt.on}
+                  onClick={() => void setMode(opt.on)}
+                  className={`min-h-[44px] rounded-bmpl-md border px-4 text-sm font-medium transition ${
+                    autoDispatch === opt.on
+                      ? 'border-belize-blue bg-belize-blue text-white'
+                      : 'border-slate-300 text-slate-700 hover:border-slate-400'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-sm text-slate-500">
+              {autoDispatch
+                ? 'The dispatch engine offers each ready delivery to the best eligible driver, one at a time.'
+                : 'Deliveries stay unassigned until an operator picks a driver from the eligible list.'}
+            </p>
+          </>
+        )}
+      </Card>
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Status">

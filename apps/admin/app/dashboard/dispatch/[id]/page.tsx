@@ -24,13 +24,39 @@ interface DetailVehicle {
 
 interface DetailDriver {
   displayName: string | null;
-  vehicleSummary?: string | null;
+  ratingAverage: number | null;
+  completedDeliveries: number | null;
+}
+
+/** The vehicle actually on the job, which the API sends alongside the driver. */
+interface AssignedVehicle {
+  type: string | null;
+  make: string | null;
+  model: string | null;
+  color: string | null;
+  licencePlate: string | null;
 }
 
 interface DeliveryItem {
-  name: string;
+  productTitle: string;
+  variantTitle: string | null;
   quantity: number;
-  priceMinor?: number | null;
+}
+
+interface PostalAddress {
+  fullName: string | null;
+  phone: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  district: string | null;
+}
+
+interface PickupLocation {
+  label: string | null;
+  addressLine1: string | null;
+  city: string | null;
+  district: string | null;
 }
 
 interface TimelineEntry {
@@ -59,16 +85,16 @@ interface DeliveryDetail {
   statusLabel: string;
   orderNumber: string;
   vendorOrderNumber: string | null;
-  vendor: string | null;
+  vendor: { businessName: string; slug: string } | null;
   orderStatus: string | null;
-  district: string | null;
-  city: string | null;
-  deliveryAddress: string | null;
+  deliveryAddress: PostalAddress | null;
+  pickupLocation: PickupLocation | null;
   recipientName: string | null;
-  deliveredAt: string | null;
+  timestamps: Record<string, string | null> | null;
   feeMinor: number | null;
   items: DeliveryItem[];
   driver: DetailDriver | null;
+  vehicle: AssignedVehicle | null;
   currentDriverEligibility: Eligibility | null;
   payment: { status: string; amountMinor: number; currency: string } | null;
   timeline: TimelineEntry[];
@@ -82,7 +108,10 @@ interface EligibleDriver {
   displayName: string | null;
   name: string;
   homeDistrict: string | null;
+  availability: string | null;
   completedDeliveries: number | null;
+  activeJobs: number | null;
+  ratingAverage: number | null;
   vehicles: DetailVehicle[];
 }
 
@@ -97,6 +126,20 @@ const ASSIGNED_STATUSES = new Set(['ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_DECLIN
 
 function money(n: number | null | undefined): string {
   return n == null ? '—' : `$${(n / 100).toFixed(2)}`;
+}
+
+/** Street lines only — city and district get their own rows. */
+function addressLines(a: PostalAddress | null): string {
+  if (!a) return '—';
+  const parts = [a.addressLine1, a.addressLine2].filter(Boolean);
+  return parts.length > 0 ? parts.join(', ') : '—';
+}
+
+function vehicleSummary(v: AssignedVehicle | null): string {
+  if (!v) return '—';
+  const parts = [v.color, v.make, v.model].filter(Boolean).join(' ');
+  const plate = v.licencePlate ? ` · ${v.licencePlate}` : '';
+  return `${parts || v.type || 'Vehicle'}${plate}`;
 }
 
 export default function DispatchDetailPage() {
@@ -163,17 +206,25 @@ function DetailView({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: 
         <InfoCard title="Order & vendor">
           <Row label="Order number">{d.orderNumber}</Row>
           <Row label="Vendor order">{d.vendorOrderNumber ?? '—'}</Row>
-          <Row label="Vendor">{d.vendor ?? '—'}</Row>
+          <Row label="Vendor">{d.vendor?.businessName ?? '—'}</Row>
           <Row label="Order status">{d.orderStatus ? <StatusBadge status={d.orderStatus} /> : '—'}</Row>
           <Row label="Fee">{money(d.feeMinor)}</Row>
           <Row label="Created">{new Date(d.createdAt).toLocaleString()}</Row>
         </InfoCard>
 
         <InfoCard title="Delivery address">
-          <Row label="Recipient">{d.recipientName ?? '—'}</Row>
-          <Row label="Address">{d.deliveryAddress ?? '—'}</Row>
-          <Row label="District">{d.district ? d.district.replace(/_/g, ' ') : '—'}</Row>
-          <Row label="City">{d.city ?? '—'}</Row>
+          <Row label="Recipient">{d.deliveryAddress?.fullName ?? d.recipientName ?? '—'}</Row>
+          <Row label="Contact">{d.deliveryAddress?.phone ?? '—'}</Row>
+          <Row label="Address">{addressLines(d.deliveryAddress)}</Row>
+          <Row label="District">{d.deliveryAddress?.district ? d.deliveryAddress.district.replace(/_/g, ' ') : '—'}</Row>
+          <Row label="City">{d.deliveryAddress?.city ?? '—'}</Row>
+        </InfoCard>
+
+        <InfoCard title="Collect from">
+          <Row label="Location">{d.pickupLocation?.label ?? '—'}</Row>
+          <Row label="Address">{d.pickupLocation?.addressLine1 ?? '—'}</Row>
+          <Row label="City">{d.pickupLocation?.city ?? '—'}</Row>
+          <Row label="District">{d.pickupLocation?.district ? d.pickupLocation.district.replace(/_/g, ' ') : '—'}</Row>
         </InfoCard>
 
         <InfoCard title="Payment (read-only)">
@@ -199,9 +250,9 @@ function DetailView({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: 
               {d.items.map((it, i) => (
                 <li key={i} className="flex justify-between text-sm text-slate-600">
                   <span>
-                    {it.quantity}× {it.name}
+                    {it.quantity}× {it.productTitle}
+                    {it.variantTitle ? ` · ${it.variantTitle}` : ''}
                   </span>
-                  {it.priceMinor != null && <span className="text-slate-500">{money(it.priceMinor)}</span>}
                 </li>
               ))}
             </ul>
@@ -213,7 +264,8 @@ function DetailView({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: 
         {d.driver ? (
           <>
             <Row label="Driver">{d.driver.displayName ?? '—'}</Row>
-            <Row label="Vehicle">{d.driver.vehicleSummary ?? '—'}</Row>
+            <Row label="Vehicle">{vehicleSummary(d.vehicle)}</Row>
+            <Row label="Completed deliveries">{d.driver.completedDeliveries ?? 0}</Row>
           </>
         ) : (
           <p className="text-sm text-slate-400">No driver assigned.</p>
@@ -237,7 +289,7 @@ function DetailView({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: 
         {d.podPhotoUrls && d.podPhotoUrls.length > 0 ? (
           <>
             <Row label="Recipient">{d.recipientName ?? '—'}</Row>
-            <Row label="Delivered at">{d.deliveredAt ? new Date(d.deliveredAt).toLocaleString() : '—'}</Row>
+            <Row label="Delivered at">{d.timestamps?.deliveredAt ? new Date(d.timestamps.deliveredAt).toLocaleString() : '—'}</Row>
             <div className="mt-3 flex flex-wrap gap-2">
               {d.podPhotoUrls.map((url, i) => (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -441,15 +493,27 @@ function AssignModal({
               }}
             >
               <option value="">Select a driver…</option>
-              {drivers.map((dr) => (
-                <option key={dr.driverProfileId} value={dr.driverProfileId}>
-                  {dr.displayName || dr.name}
-                  {dr.homeDistrict ? ` · ${dr.homeDistrict.replace(/_/g, ' ')}` : ''}
-                  {dr.completedDeliveries != null ? ` · ${dr.completedDeliveries} done` : ''}
-                </option>
-              ))}
+              {/* Least busy first. Everyone in this list is already online,
+                  approved, licensed, in-district and driving an approved vehicle
+                  with valid documents — the API filters on all of that — so the
+                  only thing left for the operator to weigh is current load. */}
+              {[...drivers]
+                .sort((a, b) => (a.activeJobs ?? 0) - (b.activeJobs ?? 0))
+                .map((dr) => (
+                  <option key={dr.driverProfileId} value={dr.driverProfileId}>
+                    {dr.displayName || dr.name}
+                    {` · ${dr.activeJobs ?? 0} live job${(dr.activeJobs ?? 0) === 1 ? '' : 's'}`}
+                    {dr.homeDistrict ? ` · ${dr.homeDistrict.replace(/_/g, ' ')}` : ''}
+                    {dr.completedDeliveries != null ? ` · ${dr.completedDeliveries} done` : ''}
+                  </option>
+                ))}
             </Select>
           </Field>
+
+          <p className="text-xs text-slate-500">
+            Only drivers who are online, approved, in this district and holding an approved vehicle with
+            valid registration and insurance are listed.
+          </p>
 
           {selectedDriver && (
             <Field label="Vehicle">

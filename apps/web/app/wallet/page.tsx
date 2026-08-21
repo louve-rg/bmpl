@@ -145,7 +145,7 @@ export default function WalletPage() {
                             key={a}
                             type="button"
                             onClick={() => setAmount((a / 100).toFixed(2))}
-                            className="min-h-[40px] rounded-full border border-slate-300 px-4 text-sm font-medium text-slate-700"
+                            className="min-h-[44px] rounded-full border border-slate-300 px-4 text-sm font-medium text-slate-700"
                           >
                             {bzd(a)}
                           </button>
