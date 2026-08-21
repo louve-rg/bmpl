@@ -14,7 +14,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, seedLimitedAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let admin: string[];
@@ -417,5 +417,77 @@ describe('the ledger stays honest', () => {
     expect(testMoney).toBeGreaterThan(0);
     // Real reporting filters on this flag; nothing in this suite created real money.
     expect(realMoney).toBe(0);
+  });
+});
+
+describe('the boundaries around other people\u2019s money', () => {
+  it('will not hand one customer another customer\u2019s transaction by id', async () => {
+    // The list endpoint is scoped by query. The single-transaction endpoint is
+    // scoped by a check, which is the kind of thing that gets refactored away.
+    const owner = await makeTestCustomer();
+    await post(owner.cookies, 'wallet/top-up', { amountMinor: 5000 });
+    const mine = await get(owner.cookies, 'wallet/transactions');
+    const id = mine.body[0].id;
+
+    const stranger = await registerCustomer(`stranger_${uniq()}@example.com`);
+    const peek = await get(stranger.cookies, `wallet/transactions/${id}`);
+    expect(peek.status).toBe(404);
+
+    const own = await get(owner.cookies, `wallet/transactions/${id}`);
+    expect(own.status).toBe(200);
+  });
+
+  it('will not let an administrator without the permission designate test accounts', async () => {
+    // Designating a test account is what unlocks funding. If a weaker admin role
+    // could set it, the funding gate would be decorative.
+    const weak = await seedLimitedAdmin(ctx.prisma, `weakadmin_${uniq()}@example.com`, ['users.read']);
+    const login = await request(ctx.server).post('/api/auth/login').send({ email: weak.email, password: weak.password });
+    const cookies = cookiesOf(login);
+
+    const victim = await registerCustomer(`victim_${uniq()}@example.com`);
+    const res = await post(cookies, 'admin/users/test-flag', { userId: victim.userId, isTest: true, reason: 'nope' });
+    expect(res.status).toBe(403);
+
+    const after = await ctx.prisma.user.findUniqueOrThrow({ where: { id: victim.userId }, select: { isTest: true } });
+    expect(after.isTest).toBe(false);
+  });
+
+  it('never alters the balance of a real customer who was not part of any of this', async () => {
+    // The plain-language version of the rule: a real person's financial records
+    // are not touched to make a simulation work.
+    const real = await registerCustomer(`real_${uniq()}@example.com`);
+    const before = await walletOf(real.userId);
+
+    // A full funded run by somebody else, start to finish.
+    const tester = await makeTestCustomer();
+    const v = await makeVendor();
+    await post(tester.cookies, 'wallet/top-up', { amountMinor: 50_000 });
+    await addToCart(tester.cookies, v.productId, 1);
+    await checkout(tester.cookies, v.vendorProfileId, true);
+
+    const after = await walletOf(real.userId);
+    expect(after.balanceMinor).toBe(before.balanceMinor);
+
+    const touched = await ctx.prisma.walletLedgerEntry.count({ where: { account: { userId: real.userId } } });
+    expect(touched).toBe(0);
+
+    const summary = await get(real.cookies, 'wallet');
+    expect(summary.body.availableMinor).toBe(0);
+    expect(summary.body.onHoldMinor).toBe(0);
+  });
+
+  it('refuses to fund a real customer even through the administrator path', async () => {
+    // There is no admin "credit this wallet" route, and the only funding route
+    // checks the flag on the CALLER, not on a target. Both halves matter.
+    const real = await registerCustomer(`realtwo_${uniq()}@example.com`);
+    const denied = await post(real.cookies, 'wallet/top-up', { amountMinor: 10_000 });
+    expect(denied.status).toBe(403);
+
+    const adminAttempt = await post(admin, 'wallet/top-up', { amountMinor: 10_000 });
+    // An administrator is not a test account either; the gate is not a role check.
+    expect(adminAttempt.status).toBe(403);
+
+    const entries = await ctx.prisma.walletLedgerEntry.count({ where: { account: { userId: real.userId } } });
+    expect(entries).toBe(0);
   });
 });

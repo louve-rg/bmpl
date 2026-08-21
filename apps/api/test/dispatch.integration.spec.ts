@@ -215,6 +215,81 @@ describe('admin assignment + eligibility', () => {
     expect(res.body.some((d: { driverProfileId: string }) => d.driverProfileId === driver.driverProfileId)).toBe(true);
   });
 
+  it('reports how many live jobs each eligible driver is already carrying', async () => {
+    // Without this number an operator assigning by hand has no way to spread
+    // work, and every job lands on whoever sorts first.
+    const vendor = await makeVendor();
+    const busy = await makeDriver({ displayName: 'Already Busy' });
+
+    const first = await makeDeliveryOrder(vendor);
+    const assigned = await post(adminCookies, `admin/deliveries/${first.deliveryId}/assign`, {
+      driverProfileId: busy.driverProfileId,
+      vehicleId: busy.vehicleId,
+    });
+    expect(assigned.status).toBe(201);
+
+    const next = await makeDeliveryOrder(vendor);
+    const res = await get(adminCookies, `admin/deliveries/${next.deliveryId}/eligible-drivers`);
+    expect(res.status).toBe(200);
+
+    const row = res.body.find((d: { driverProfileId: string }) => d.driverProfileId === busy.driverProfileId);
+    expect(row).toBeDefined();
+    expect(row.activeJobs).toBe(1);
+
+    // A driver holding nothing reports zero rather than omitting the field.
+    const idle = await makeDriver({ displayName: 'Idle One' });
+    const after = await get(adminCookies, `admin/deliveries/${next.deliveryId}/eligible-drivers`);
+    const idleRow = after.body.find((d: { driverProfileId: string }) => d.driverProfileId === idle.driverProfileId);
+    expect(idleRow.activeJobs).toBe(0);
+  });
+
+  it('a delivered job stops counting against the driver', async () => {
+    // Workload has to mean "carrying right now". Counting finished work would
+    // push the busiest-ever driver to the bottom of the list forever.
+    const vendor = await makeVendor();
+    const driver = await makeDriver({ displayName: 'Finisher' });
+    const done = await makeDeliveryOrder(vendor);
+    await post(adminCookies, `admin/deliveries/${done.deliveryId}/assign`, {
+      driverProfileId: driver.driverProfileId,
+      vehicleId: driver.vehicleId,
+    });
+    await ctx.prisma.orderDelivery.update({ where: { id: done.deliveryId }, data: { status: 'DELIVERED' } });
+
+    const next = await makeDeliveryOrder(vendor);
+    const res = await get(adminCookies, `admin/deliveries/${next.deliveryId}/eligible-drivers`);
+    const row = res.body.find((d: { driverProfileId: string }) => d.driverProfileId === driver.driverProfileId);
+    expect(row.activeJobs).toBe(0);
+  });
+
+  it('the assignment mode is a platform setting an operator can flip both ways', async () => {
+    // MANUAL is only useful if it can be turned back off. `?? undefined` in the
+    // settings update is easy to get wrong in a way that makes `false` unwritable.
+    const off = await request(ctx.server).patch('/api/admin/ops/settings').set('Cookie', adminCookies).send({ dispatchAutomatic: false });
+    expect(off.status).toBe(200);
+    expect(off.body.dispatchAutomatic).toBe(false);
+
+    const read = await get(adminCookies, 'admin/ops/settings');
+    expect(read.body.dispatchAutomatic).toBe(false);
+
+    const on = await request(ctx.server).patch('/api/admin/ops/settings').set('Cookie', adminCookies).send({ dispatchAutomatic: true });
+    expect(on.body.dispatchAutomatic).toBe(true);
+  });
+
+  it('changing the assignment mode leaves the rest of the settings alone', async () => {
+    // The settings endpoint is a partial update shared with the announcement
+    // banner; flipping dispatch must not reset a live maintenance notice.
+    await request(ctx.server)
+      .patch('/api/admin/ops/settings')
+      .set('Cookie', adminCookies)
+      .send({ announcementActive: true, announcementMessage: 'Scheduled maintenance Sunday.' });
+
+    const after = await request(ctx.server).patch('/api/admin/ops/settings').set('Cookie', adminCookies).send({ dispatchAutomatic: false });
+    expect(after.body.announcementActive).toBe(true);
+    expect(after.body.announcementMessage).toBe('Scheduled maintenance Sunday.');
+
+    await request(ctx.server).patch('/api/admin/ops/settings').set('Cookie', adminCookies).send({ dispatchAutomatic: true, announcementActive: false });
+  });
+
   it('rejects an OFFLINE driver', async () => {
     const vendor = await makeVendor();
     const order = await makeDeliveryOrder(vendor);

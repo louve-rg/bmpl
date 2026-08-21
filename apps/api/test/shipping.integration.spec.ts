@@ -236,6 +236,63 @@ describe('the four service types', () => {
   });
 });
 
+describe('the service-type field', () => {
+  // The booking form used to hard-code its mode options, so it could offer a
+  // customer a mode the network cannot actually fly or drive.
+  it('publishes the modes the live network can actually carry, without a login', async () => {
+    const r = await request(ctx.server).get('/api/shipping/modes');
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body)).toBe(true);
+    expect(r.body.length).toBeGreaterThan(0);
+    // A flat list of mode names, in the order the form should offer them.
+    for (const m of r.body) expect(['LAND', 'AIR', 'SEA']).toContain(m);
+  });
+
+  it('drops a mode as soon as its last active route is switched off', async () => {
+    const before: string[] = (await request(ctx.server).get('/api/shipping/modes')).body;
+    expect(before).toContain('AIR');
+
+    await ctx.prisma.logisticsRoute.updateMany({ where: { mode: 'AIR' }, data: { isActive: false } });
+
+    const after: string[] = (await request(ctx.server).get('/api/shipping/modes')).body;
+    expect(after).not.toContain('AIR');
+
+    await ctx.prisma.logisticsRoute.updateMany({ where: { mode: 'AIR' }, data: { isActive: true } });
+  });
+
+  it('refuses a quote for a mode the network does not run', async () => {
+    const r = await post(customer, 'shipping/quote', {
+      service: 'HUB_TO_HUB',
+      origin: { hubId: hub.PLA },
+      destination: { hubId: hub.SPA },
+      preferredMode: 'SUBMARINE',
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('DOOR_TO_HUB needs a hub on the destination, not a district', async () => {
+    // The form lets a customer switch service type after filling the address in;
+    // the leftover district must not be accepted as a terminal.
+    const r = await post(customer, 'shipping/quote', {
+      service: 'DOOR_TO_HUB',
+      origin: { district: 'STANN_CREEK', city: 'Placencia' },
+      destination: { district: 'BELIZE', city: 'San Pedro' },
+      preferredMode: 'AIR',
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('HUB_TO_DOOR needs a hub on the origin, not a district', async () => {
+    const r = await post(customer, 'shipping/quote', {
+      service: 'HUB_TO_DOOR',
+      origin: { district: 'STANN_CREEK', city: 'Placencia' },
+      destination: { district: 'BELIZE', city: 'San Pedro' },
+      preferredMode: 'AIR',
+    });
+    expect(r.status).toBe(400);
+  });
+});
+
 describe('the network is data', () => {
   it('stops quoting a route the moment an operator deactivates it', async () => {
     const routes = await get(admin, 'admin/logistics/routes');

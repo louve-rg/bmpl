@@ -157,3 +157,51 @@ reassignment so send rights follow the current driver.
 - Client-supplied storage keys are validated against the caller's namespace
   before being stored or signed (see `resolveProfilePhotoKey`, and
   `assertKeyInNamespace` across every upload surface).
+
+## Assignment mode
+
+`PlatformSetting.dispatchAutomatic` decides who picks the driver. It is read on
+every dispatch tick, so an operator can change it from ADMIN → Dispatch without a
+deploy.
+
+- **AUTOMATIC** — `DispatchEngineService` offers each ready delivery to the
+  highest-ranked eligible driver, one at a time, and the sweeper retries when an
+  offer lapses.
+- **MANUAL** — the engine leaves deliveries in `PENDING_ASSIGNMENT` and an
+  operator chooses from the eligible list on the delivery page.
+
+Both paths call the same `assignInternal`, so a delivery assigned by hand is
+indistinguishable in state from one the engine placed: same eligibility re-check,
+same fresh PINs, same assignment history, timeline, audit row and notifications.
+The audit trail is what tells them apart — `assignedByUserId` is null for the
+engine, and the action is `DELIVERY_AUTO_ASSIGNED` rather than
+`DELIVERY_ASSIGNED`. There is deliberately no second assignment engine.
+
+The eligible list is `DriverService.eligibleDriversForDistrict`, which already
+filters to drivers who are online, active, role-approved, hold an unexpired
+licence, serve the delivery's district, and have at least one approved active
+vehicle whose registration and insurance are current — and which stays on the
+matching side of the `isTest` boundary. The console shows each candidate's
+current live-job count and sorts by it; without that, manual mode reliably piles
+every job onto whoever happens to sort first.
+
+## Driver job preferences — not built
+
+Drivers can set service areas (districts) and go online or offline. That is the
+whole of it, and it is the only driver-side input to assignment today.
+
+A richer preference model — parcel size or weight limits, preferred vendors,
+shift windows, maximum travel distance — is a plausible future option and is
+recorded here only so it is not mistaken for something that already works.
+
+Two constraints on any future version, from the platform owner:
+
+- **No paid priority.** Preferences must never become a product a driver buys.
+  No bidding on jobs, no job auctions, no paid queue position, no subscription
+  tier that changes who gets offered work. Introducing money into assignment is
+  a policy decision for the owner, not an implementation detail.
+- **No silent starvation.** A preference that quietly removes a driver from
+  consideration must say so to the driver, or it becomes an invisible reason
+  their earnings dropped.
+
+Nothing in the schema or the engine anticipates this yet; it would be new work.
