@@ -280,7 +280,18 @@ export class PaymentsService {
    * orders, void the ledger references, and mark the payment FAILED. Idempotent
    * (a terminal payment is skipped). No money moved (holds were never authorized).
    */
-  private async failAuthorization(actor: ActorContext, paymentId: string, reason: string) {
+  private async failAuthorization(
+    actor: { userId: string | null; ipAddress?: string | null; sessionId?: string | null },
+    paymentId: string,
+    reason: string,
+    // Expiry walks the same path as a failed authorization — release the hold,
+    // put the stock back, cancel the order — and differs only in what the
+    // payment is finally called and why the hold was let go. Giving expiry its
+    // own copy of this method is how the two would drift.
+    opts: { terminalStatus?: PaymentStatus; releaseReason?: string } = {},
+  ) {
+    const terminalStatus = opts.terminalStatus ?? 'FAILED';
+    const releaseReason = opts.releaseReason ?? 'authorization_failed';
     await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findUnique({
         where: { id: paymentId },
@@ -292,7 +303,7 @@ export class PaymentsService {
       await this.audit.record({ action: 'WALLET_VALIDATION_FAILED', actorId: actor.userId, newValue: { paymentId, reason } }, tx);
 
       for (const hold of payment.holds) {
-        await tx.walletHold.update({ where: { id: hold.id }, data: { status: 'RELEASED', releasedAt: new Date(), releaseReason: 'authorization_failed' } });
+        await tx.walletHold.update({ where: { id: hold.id }, data: { status: 'RELEASED', releasedAt: new Date(), releaseReason } });
         await tx.paymentEvent.create({ data: { paymentId, type: 'HOLD_RELEASED', data: { holdId: hold.id } } });
         await this.audit.record({ action: 'WALLET_HOLD_RELEASED', actorId: actor.userId, newValue: { holdId: hold.id, paymentId } }, tx);
       }
@@ -334,13 +345,60 @@ export class PaymentsService {
             assignedVehicleId: null,
           },
         });
-        await this.audit.record({ action: 'ORDER_RESERVATION_RELEASED', actorId: actor.userId, newValue: { orderId: payment.orderId, reason: 'authorization_failed' } }, tx);
+        await this.audit.record({ action: 'ORDER_RESERVATION_RELEASED', actorId: actor.userId, newValue: { orderId: payment.orderId, reason: releaseReason } }, tx);
       }
 
       await tx.ledgerReference.updateMany({ where: { paymentId, status: 'PENDING' }, data: { status: 'VOID' } });
-      await this.transition(tx, { id: paymentId, status: payment.status }, 'FAILED', actor.userId, { reason });
+      await this.transition(tx, { id: paymentId, status: payment.status }, terminalStatus, actor.userId, { reason });
       await this.audit.record({ action: 'PAYMENT_AUTHORIZATION_FAILED', actorId: actor.userId, newValue: { paymentId, reason } }, tx);
     });
+  }
+
+  /**
+   * Release soft holds whose payment never went anywhere.
+   *
+   * A soft hold is created at checkout as a statement of intent, before the
+   * customer has authorized anything. If authorization then never happens — the
+   * customer walked away, or, as happened in production, there was no funded way
+   * to authorize at all — nothing ever released it. The reservation stayed on the
+   * wallet permanently, and because the summary counted it, the customer was
+   * shown money on hold that they did not have and could never get back.
+   *
+   * Sweeping them is not a cosmetic tidy-up. An unreleasable hold is a customer
+   * looking at their own money and being told it is spoken for.
+   *
+   * Idempotent by construction: it only selects payments that are still in a
+   * non-terminal state, and `failAuthorization` re-checks that inside the
+   * transaction, so two sweeps racing cannot release the same hold twice.
+   */
+  async expireStaleHolds(
+    // Null actor means the scheduler did it. `AuditLog.actorId` is a foreign key
+    // to users, so a made-up "system" string would violate it, fail the audit
+    // write, roll the transaction back and quietly break the sweep every hour.
+    actor: { userId: string | null },
+    olderThanHours = 24,
+  ): Promise<{ examined: number; expired: string[] }> {
+    const cutoff = new Date(Date.now() - olderThanHours * 60 * 60 * 1000);
+    const stale = await this.prisma.payment.findMany({
+      where: {
+        status: { in: ['CREATED', 'PENDING'] },
+        createdAt: { lt: cutoff },
+        holds: { some: { status: 'HELD' } },
+      },
+      select: { id: true },
+      take: 500,
+    });
+
+    const expired: string[] = [];
+    for (const p of stale) {
+      await this.failAuthorization(actor, p.id, 'payment_expired_unpaid', {
+        terminalStatus: 'EXPIRED',
+        releaseReason: 'expired_unpaid',
+      });
+      const after = await this.prisma.payment.findUnique({ where: { id: p.id }, select: { status: true } });
+      if (after?.status === 'EXPIRED') expired.push(p.id);
+    }
+    return { examined: stale.length, expired };
   }
 
   /** Guarded payment state transition + event + audit. */

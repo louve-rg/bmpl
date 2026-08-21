@@ -92,6 +92,9 @@ export interface PlannerPricing {
   lastMileMinor: number;
   firstMileMinutes: number;
   lastMileMinutes: number;
+  /** One courier, door to door, when the journey needs no terminal at all. */
+  directMinor?: number;
+  directMinutes?: number;
 }
 
 const NO_COURIER: PlannerPricing = {
@@ -99,6 +102,8 @@ const NO_COURIER: PlannerPricing = {
   lastMileMinor: 0,
   firstMileMinutes: 0,
   lastMileMinutes: 0,
+  directMinor: 0,
+  directMinutes: 0,
 };
 
 /* -------------------------------------------------------------- planner */
@@ -124,6 +129,39 @@ export function planRoute(
 ): PlanResult {
   const activeHubs = hubs.filter((h) => h.isActive);
   const byId = new Map(activeHubs.map((h) => [h.id, h]));
+
+  // A local door-to-door journey has no terminal in it. Ask that question BEFORE
+  // looking for hubs, because the old order of operations demanded a terminal
+  // for a trip that never needed one and then refused the booking when the
+  // district had no hub configured — which is not a routing answer, it is the
+  // planner failing to recognise the simplest journey it can be asked for.
+  if (isLocalDoorToDoor(req)) {
+    if (req.preferredMode && req.preferredMode !== 'LAND') {
+      return {
+        ok: false,
+        reason: 'MODE_UNAVAILABLE',
+        explanation: `This is a local journey, so it travels by road. There is no ${req.preferredMode.toLowerCase()} leg to book.`,
+      };
+    }
+    const leg: PlannedLeg = {
+      sequence: 1,
+      kind: 'DIRECT',
+      mode: 'LAND',
+      originHubId: null,
+      destinationHubId: null,
+      routeId: null,
+      durationMinutes: pricing.directMinutes ?? 0,
+      priceMinor: pricing.directMinor ?? 0,
+      description: 'Collection from the sender and delivery to the recipient',
+    };
+    return {
+      ok: true,
+      legs: [leg],
+      totalMinutes: leg.durationMinutes,
+      totalMinor: leg.priceMinor,
+      explanation: leg.description,
+    };
+  }
 
   const originHub = resolveHub(req.origin, activeHubs, req.preferredMode);
   if (!originHub) {
@@ -222,6 +260,20 @@ export function planRoute(
 }
 
 /* ------------------------------------------------------------ internals */
+
+/**
+ * Both ends are addresses in the same district, and the customer asked us to
+ * collect and deliver. One courier can do the whole job.
+ *
+ * District is the unit the network is configured in, so it is also the honest
+ * unit for "close enough that no terminal is involved". Anything wider would be
+ * the planner guessing.
+ */
+function isLocalDoorToDoor(req: PlanRequest): boolean {
+  if (req.service !== 'DOOR_TO_DOOR') return false;
+  if (req.origin.kind !== 'DOOR' || req.destination.kind !== 'DOOR') return false;
+  return req.origin.district === req.destination.district;
+}
 
 /** A door attaches to a hub in its own district; a hub endpoint is itself. */
 function resolveHub(

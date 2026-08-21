@@ -23,7 +23,7 @@ import type { DeliveryStatus } from './dispatch';
 
 /* ------------------------------------------------------------- job kinds */
 
-export const DRIVER_JOB_KINDS = ['MARKETPLACE', 'FIRST_MILE', 'LAST_MILE'] as const;
+export const DRIVER_JOB_KINDS = ['MARKETPLACE', 'DIRECT', 'FIRST_MILE', 'LAST_MILE'] as const;
 export type DriverJobKind = (typeof DRIVER_JOB_KINDS)[number];
 
 /**
@@ -33,6 +33,7 @@ export type DriverJobKind = (typeof DRIVER_JOB_KINDS)[number];
  */
 export const DRIVER_JOB_KIND_LABELS: Record<DriverJobKind, string> = {
   MARKETPLACE: 'Marketplace delivery',
+  DIRECT: 'Shipping job',
   FIRST_MILE: 'Shipping pickup',
   LAST_MILE: 'Shipping delivery',
 };
@@ -40,6 +41,7 @@ export const DRIVER_JOB_KIND_LABELS: Record<DriverJobKind, string> = {
 /** A one-line description of the trip, for the job card's subtitle. */
 export const DRIVER_JOB_KIND_SHAPE: Record<DriverJobKind, string> = {
   MARKETPLACE: 'Store to customer',
+  DIRECT: 'Sender to recipient',
   FIRST_MILE: 'Sender to terminal',
   LAST_MILE: 'Terminal to recipient',
 };

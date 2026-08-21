@@ -95,14 +95,26 @@ export const needsLastMile = (s: ShippingService): boolean => s === 'DOOR_TO_DOO
 /* ------------------------------------------------------------ leg kinds */
 
 /** A leg's role in the journey. */
-export const LEG_KINDS = ['FIRST_MILE', 'LINE_HAUL', 'LAST_MILE'] as const;
+/**
+ * DIRECT is one courier taking a parcel from the sender's door straight to the
+ * recipient's door. It exists because a local door-to-door journey genuinely has
+ * no terminal in it, and the alternative — inventing a hub transfer for a parcel
+ * that never goes near a terminal — would both mis-price the job and send the
+ * driver somewhere nobody needs them to go.
+ */
+export const LEG_KINDS = ['DIRECT', 'FIRST_MILE', 'LINE_HAUL', 'LAST_MILE'] as const;
 export type LegKind = (typeof LEG_KINDS)[number];
 
 export const LEG_KIND_LABELS: Record<LegKind, string> = {
+  DIRECT: 'Collection and delivery',
   FIRST_MILE: 'Collection',
   LINE_HAUL: 'Transport',
   LAST_MILE: 'Final delivery',
 };
+
+/** Legs a BML courier drives, as opposed to a carrier's line-haul. */
+export const COURIER_LEG_KINDS: readonly LegKind[] = ['DIRECT', 'FIRST_MILE', 'LAST_MILE'];
+export const isCourierLeg = (k: LegKind): boolean => COURIER_LEG_KINDS.includes(k);
 
 /* --------------------------------------------------------- leg statuses */
 
@@ -191,6 +203,13 @@ export function deriveShipmentStatus(legs: readonly LegView[], endsAtHub: boolea
   const current = live.find((l) => l.status !== 'COMPLETED')!;
   const priorDone = live.filter((l) => l.sequence < current.sequence).every((l) => l.status === 'COMPLETED');
 
+  // One courier, door to door. Before they set off the parcel is still with the
+  // sender; once they have it, it is on its way to the recipient. Falling through
+  // to the LAST_MILE branch below would report "at the destination terminal" for
+  // a journey that has no terminal and has not even been collected yet.
+  if (current.kind === 'DIRECT') {
+    return current.status === 'IN_PROGRESS' ? 'OUT_FOR_DELIVERY' : 'AWAITING_PICKUP';
+  }
   if (current.kind === 'FIRST_MILE') {
     return current.status === 'IN_PROGRESS' ? 'FIRST_MILE' : 'AWAITING_PICKUP';
   }

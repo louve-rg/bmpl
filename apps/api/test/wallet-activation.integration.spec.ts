@@ -492,3 +492,184 @@ describe('the boundaries around other people\u2019s money', () => {
     expect(entries).toBe(0);
   });
 });
+
+describe('holds that were never authorized', () => {
+  /** A checkout that creates the order, the payment and the soft hold, and stops. */
+  async function unpaidOrderWithHold() {
+    const c = await registerCustomer(`stale_${uniq()}@example.com`);
+    const v = await makeVendor();
+    await addToCart(c.cookies, v.productId, 1);
+    const res = await checkout(c.cookies, v.vendorProfileId, false);
+    expect(res.status).toBe(201);
+    const hold = await ctx.prisma.walletHold.findFirstOrThrow({
+      where: { walletAccount: { userId: c.userId }, status: 'HELD' },
+    });
+    return { ...c, hold };
+  }
+
+  it('does not report a hold the wallet has no money to back', async () => {
+    // Production showed a customer with an empty wallet "On hold BZ$55.00,
+    // Total BZ$55.00" — money he did not have, could not spend, and could not
+    // get back. A reservation can only reserve funds that exist.
+    const c = await unpaidOrderWithHold();
+    const s = await get(c.cookies, 'wallet');
+    expect(s.status).toBe(200);
+    expect(s.body.availableMinor).toBe(0);
+    expect(s.body.onHoldMinor).toBe(0);
+    expect(s.body.totalMinor).toBe(0);
+  });
+
+  it('reports the hold once there is a balance behind it', async () => {
+    const c = await makeTestCustomer();
+    const v = await makeVendor();
+    await post(c.cookies, 'wallet/top-up', { amountMinor: 50_000 });
+    await addToCart(c.cookies, v.productId, 1);
+    await checkout(c.cookies, v.vendorProfileId, false);
+
+    const held = await ctx.prisma.walletHold.findFirstOrThrow({ where: { walletAccount: { userId: c.userId }, status: 'HELD' } });
+    const s = await get(c.cookies, 'wallet');
+    expect(s.body.onHoldMinor).toBe(Number(held.amountMinor));
+    expect(s.body.availableMinor).toBe(50_000 - Number(held.amountMinor));
+    expect(s.body.totalMinor).toBe(50_000);
+  });
+
+  it('leaves a fresh hold alone', async () => {
+    // The sweep must not cancel an order the customer placed a minute ago.
+    const c = await unpaidOrderWithHold();
+    const res = await post(admin, 'admin/payments/expire-stale-holds', { olderThanHours: 24 });
+    expect(res.status).toBe(201);
+    const after = await ctx.prisma.walletHold.findUniqueOrThrow({ where: { id: c.hold.id } });
+    expect(after.status).toBe('HELD');
+  });
+
+  it('releases a stale hold, cancels its order, and puts the stock back', async () => {
+    const c = await unpaidOrderWithHold();
+    const payment = await ctx.prisma.payment.findUniqueOrThrow({ where: { id: c.hold.paymentId } });
+    // Age the payment past the window rather than waiting a day for it.
+    await ctx.prisma.payment.update({
+      where: { id: payment.id },
+      data: { createdAt: new Date(Date.now() - 48 * 60 * 60 * 1000) },
+    });
+
+    const res = await post(admin, 'admin/payments/expire-stale-holds', { olderThanHours: 24 });
+    expect(res.status).toBe(201);
+    expect(res.body.expired).toContain(payment.id);
+
+    const hold = await ctx.prisma.walletHold.findUniqueOrThrow({ where: { id: c.hold.id } });
+    expect(hold.status).toBe('RELEASED');
+    expect(hold.releaseReason).toBe('expired_unpaid');
+
+    const after = await ctx.prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
+    expect(after.status).toBe('EXPIRED');
+
+    const order = await ctx.prisma.order.findUniqueOrThrow({ where: { id: payment.orderId } });
+    expect(order.status).toBe('CANCELLED');
+    expect(order.reservationsReleasedAt).not.toBeNull();
+  });
+
+  it('releases a hold exactly once, however many times it is swept', async () => {
+    const c = await unpaidOrderWithHold();
+    await ctx.prisma.payment.update({
+      where: { id: c.hold.paymentId },
+      data: { createdAt: new Date(Date.now() - 48 * 60 * 60 * 1000) },
+    });
+
+    const first = await post(admin, 'admin/payments/expire-stale-holds', { olderThanHours: 24 });
+    const second = await post(admin, 'admin/payments/expire-stale-holds', { olderThanHours: 24 });
+    expect(first.body.expired).toContain(c.hold.paymentId);
+    expect(second.body.expired).not.toContain(c.hold.paymentId);
+
+    const events = await ctx.prisma.paymentEvent.count({ where: { paymentId: c.hold.paymentId, type: 'HOLD_RELEASED' } });
+    expect(events).toBe(1);
+  });
+
+  it('moves no money — a released hold was never a debit', async () => {
+    const c = await unpaidOrderWithHold();
+    await ctx.prisma.payment.update({
+      where: { id: c.hold.paymentId },
+      data: { createdAt: new Date(Date.now() - 48 * 60 * 60 * 1000) },
+    });
+    await post(admin, 'admin/payments/expire-stale-holds', { olderThanHours: 24 });
+    const entries = await ctx.prisma.walletLedgerEntry.count({ where: { account: { userId: c.userId } } });
+    expect(entries).toBe(0);
+  });
+});
+
+describe('administrative test credit', () => {
+  it('credits a real customer through the ledger, marked as simulation money', async () => {
+    // Edward is a real user. He may be given test credit to exercise checkout,
+    // but the CREDIT is simulated even though he is not — otherwise it would be
+    // filed as real money in a real customer's records.
+    const real = await registerCustomer(`realcredit_${uniq()}@example.com`);
+    const res = await post(admin, 'admin/wallet/test-credit', {
+      userId: real.userId,
+      amountMinor: 8000,
+      reason: 'Production workflow testing.',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.availableMinor).toBe(8000);
+
+    const txn = await ctx.prisma.walletTransaction.findFirstOrThrow({
+      where: { entries: { some: { account: { userId: real.userId } } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(txn.type).toBe('TOPUP');
+    expect(txn.isTest).toBe(true);
+    expect(txn.description).toBe('Administrative Test Credit');
+
+    // The recipient is NOT reclassified as a test account.
+    const after = await ctx.prisma.user.findUniqueOrThrow({ where: { id: real.userId }, select: { isTest: true } });
+    expect(after.isTest).toBe(false);
+
+    // Balanced, like every other posting.
+    const lines = await ctx.prisma.walletLedgerEntry.findMany({ where: { transactionId: txn.id } });
+    const net = lines.reduce((s, l) => s + (l.direction === 'CREDIT' ? l.amountMinor : -l.amountMinor), 0n);
+    expect(net).toBe(0n);
+  });
+
+  it('records who granted it and why', async () => {
+    const real = await registerCustomer(`auditcredit_${uniq()}@example.com`);
+    await post(admin, 'admin/wallet/test-credit', { userId: real.userId, amountMinor: 8000, reason: 'Edward workflow test.' });
+    const row = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'WALLET_TEST_FUNDING_GRANTED', targetUserId: real.userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(JSON.stringify(row.newValue)).toContain('Edward workflow test.');
+    expect(JSON.stringify(row.newValue)).toContain('Administrative Test Credit');
+  });
+
+  it('is refused to an administrator without the permission', async () => {
+    const weak = await seedLimitedAdmin(ctx.prisma, `nocredit_${uniq()}@example.com`, ['wallet.read']);
+    const login = await request(ctx.server).post('/api/auth/login').send({ email: weak.email, password: weak.password });
+    const victim = await registerCustomer(`nocreditvictim_${uniq()}@example.com`);
+    const res = await post(cookiesOf(login), 'admin/wallet/test-credit', {
+      userId: victim.userId,
+      amountMinor: 8000,
+      reason: 'should not work',
+    });
+    expect(res.status).toBe(403);
+    expect(await ctx.prisma.walletLedgerEntry.count({ where: { account: { userId: victim.userId } } })).toBe(0);
+  });
+
+  it('is refused to a customer entirely', async () => {
+    const c = await registerCustomer(`selfcredit_${uniq()}@example.com`);
+    const res = await post(c.cookies, 'admin/wallet/test-credit', { userId: c.userId, amountMinor: 8000, reason: 'nope' });
+    expect(res.status).toBe(403);
+  });
+
+  it('the credit is spendable at checkout', async () => {
+    // The point of the whole exercise: a real customer with test credit can
+    // complete a real checkout.
+    const real = await registerCustomer(`spendcredit_${uniq()}@example.com`);
+    const v = await makeVendor();
+    await post(admin, 'admin/wallet/test-credit', { userId: real.userId, amountMinor: 8000, reason: 'Workflow test.' });
+    await addToCart(real.cookies, v.productId, 1);
+    const res = await checkout(real.cookies, v.vendorProfileId, true);
+    expect(res.status).toBe(201);
+
+    const order = await ctx.prisma.order.findFirstOrThrow({ where: { userId: real.userId }, orderBy: { createdAt: 'desc' } });
+    expect(order.status).not.toBe('CANCELLED');
+    const payment = await ctx.prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(payment.status).toBe('AUTHORIZED');
+  });
+});

@@ -128,7 +128,10 @@ export class ShipmentDriverService {
     // accumulate strangers in a customer's conversation. Accepting is the point
     // this driver becomes the person the customer needs to reach.
     await this.messaging.ensureShipmentLegThread(legId, actor.userId);
-    await this.notifyCustomer(leg, leg.kind === 'FIRST_MILE' ? 'A driver is on the way to collect your parcel.' : 'A driver is collecting your parcel for the final delivery.');
+    await this.notifyCustomer(
+      leg,
+      leg.kind === 'LAST_MILE' ? 'A driver is collecting your parcel for the final delivery.' : 'A driver is on the way to collect your parcel.',
+    );
     return this.getJob(actor.userId, legId);
   }
 
@@ -187,7 +190,10 @@ export class ShipmentDriverService {
     // Records custody, moves the leg to IN_PROGRESS and recomputes the shipment.
     await this.shipments.startLeg(legId, { userId: actor.userId, label: 'Driver' });
     await this.audit.record({ action: 'SHIPMENT_LEG_PICKED_UP', actorId: actor.userId, newValue: { legId, reference: leg.shipment.reference } });
-    await this.notifyCustomer(leg, leg.kind === 'FIRST_MILE' ? 'Your parcel has been collected.' : 'Your parcel is out for delivery.');
+    await this.notifyCustomer(
+      leg,
+      leg.kind === 'FIRST_MILE' ? 'Your parcel has been collected.' : 'Your parcel is out for delivery.',
+    );
     return this.getJob(actor.userId, legId);
   }
 
@@ -211,7 +217,7 @@ export class ShipmentDriverService {
     this.assertAction(action, leg.courierStatus);
     await this.prisma.shipmentLeg.update({ where: { id: legId }, data: { courierStatus: to, [stamp]: new Date() } });
     await this.audit.record({ action: auditAction, actorId: actor.userId, newValue: { legId, reference: leg.shipment.reference } });
-    if (to === 'ARRIVING' && leg.kind === 'LAST_MILE') {
+    if (to === 'ARRIVING' && (leg.kind === 'LAST_MILE' || leg.kind === 'DIRECT')) {
       await this.notifyCustomer(leg, 'Your driver is arriving.');
     }
     return this.getJob(actor.userId, legId);
@@ -248,7 +254,7 @@ export class ShipmentDriverService {
     const next = await this.prisma.shipmentLeg.findFirst({
       where: {
         shipmentId,
-        kind: { in: ['FIRST_MILE', 'LAST_MILE'] },
+        kind: { in: ['DIRECT', 'FIRST_MILE', 'LAST_MILE'] },
         status: 'READY',
         assignedDriverProfileId: null,
       },
@@ -283,25 +289,30 @@ export class ShipmentDriverService {
     const committed = leg.acceptedAt != null;
     const status = (leg.courierStatus ?? 'PENDING_ASSIGNMENT') as DeliveryStatus;
 
-    // A first mile collects from the sender's door and delivers to a terminal.
-    // A last mile is the mirror image. Everything below is that one difference.
-    const doorEnd = kind === 'FIRST_MILE'
-      ? { name: s.originName, phone: s.originPhone, address: s.originAddress, city: s.originCity, district: s.originDistrict, latitude: s.originLatitude, longitude: s.originLongitude, instructions: s.originInstructions }
-      : { name: s.destinationName, phone: s.destinationPhone, address: s.destinationAddress, city: s.destinationCity, district: s.destinationDistrict, latitude: s.destinationLatitude, longitude: s.destinationLongitude, instructions: s.destinationInstructions };
-    const hubEnd = kind === 'FIRST_MILE' ? leg.destinationHub : leg.originHub;
+    // Three shapes, one difference between them: which end is a door.
+    //   FIRST_MILE  sender's door  -> terminal
+    //   LAST_MILE   terminal       -> recipient's door
+    //   DIRECT      sender's door  -> recipient's door   (no terminal at all)
+    const senderEnd = { name: s.originName, phone: s.originPhone, address: s.originAddress, city: s.originCity, district: s.originDistrict, latitude: s.originLatitude, longitude: s.originLongitude, instructions: s.originInstructions };
+    const recipientEnd = { name: s.destinationName, phone: s.destinationPhone, address: s.destinationAddress, city: s.destinationCity, district: s.destinationDistrict, latitude: s.destinationLatitude, longitude: s.destinationLongitude, instructions: s.destinationInstructions };
+    const collectsFromDoor = kind === 'FIRST_MILE' || kind === 'DIRECT';
+    const doorEnd = collectsFromDoor ? senderEnd : recipientEnd;
+    const hubEnd = kind === 'DIRECT' ? null : kind === 'FIRST_MILE' ? leg.destinationHub : leg.originHub;
 
-    const doorPlace = {
+    // Contact details stay sealed until the driver has actually taken the job.
+    const addressPlace = (end: typeof senderEnd) => ({
       kind: 'ADDRESS' as const,
-      name: committed ? doorEnd.name : null,
-      phone: committed ? doorEnd.phone : null,
-      address: committed ? doorEnd.address : null,
-      area: [doorEnd.city, doorEnd.district?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
-      instructions: committed ? doorEnd.instructions : null,
-      pinnedLocation: committed && doorEnd.latitude != null && doorEnd.longitude != null
-        ? { latitude: doorEnd.latitude, longitude: doorEnd.longitude }
+      name: committed ? end.name : null,
+      phone: committed ? end.phone : null,
+      address: committed ? end.address : null,
+      area: [end.city, end.district?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
+      instructions: committed ? end.instructions : null,
+      pinnedLocation: committed && end.latitude != null && end.longitude != null
+        ? { latitude: end.latitude, longitude: end.longitude }
         : null,
-      navigationUrl: committed ? navUrl(doorEnd.latitude, doorEnd.longitude, doorEnd.address) : null,
-    };
+      navigationUrl: committed ? navUrl(end.latitude, end.longitude, end.address) : null,
+    });
+    const doorPlace = addressPlace(doorEnd);
     const hubPlace = hubEnd
       ? {
           // A terminal is a public place — there is nothing to protect, and a
@@ -332,8 +343,8 @@ export class ShipmentDriverService {
       mode: leg.mode,
       modeLabel: TRANSPORT_MODE_LABELS[leg.mode],
       addressUnlocked: committed,
-      pickup: kind === 'FIRST_MILE' ? doorPlace : hubPlace,
-      dropoff: kind === 'FIRST_MILE' ? hubPlace : doorPlace,
+      pickup: kind === 'LAST_MILE' ? hubPlace : doorPlace,
+      dropoff: kind === 'DIRECT' ? addressPlace(recipientEnd) : kind === 'FIRST_MILE' ? hubPlace : doorPlace,
       parcel: {
         description: s.description,
         pieces: s.pieces,

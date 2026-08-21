@@ -42,3 +42,23 @@ export const setUserTestFlagSchema = z.object({
   reason: z.string().trim().min(4, 'Say why.').max(300),
 });
 export type SetUserTestFlagInput = z.infer<typeof setUserTestFlagSchema>;
+
+/**
+ * Administrative test credit.
+ *
+ * Capped well below anything that could be mistaken for a real settlement, and
+ * a reason is mandatory: an unexplained credit in the audit log is only half a
+ * record.
+ */
+export const adminTestCreditSchema = z.object({
+  userId: z.string().min(1),
+  amountMinor: z.number().int().min(100).max(100_000),
+  reason: z.string().trim().min(3).max(500),
+});
+export type AdminTestCreditInput = z.infer<typeof adminTestCreditSchema>;
+
+/** How stale a never-authorized hold must be before the sweep releases it. */
+export const expireHoldsSchema = z.object({
+  olderThanHours: z.number().int().min(1).max(24 * 90).optional().default(24),
+});
+export type ExpireHoldsInput = z.infer<typeof expireHoldsSchema>;

@@ -150,29 +150,85 @@ beforeEach(async () => {
 
 /* ------------------------------------------------------------------------- */
 
-describe('local delivery is left alone', () => {
-  it('refuses a same-town journey and points back at the ordinary courier flow', async () => {
-    // THE milestone constraint. A Belize City vendor delivering to a Belize City
-    // customer must never be dragged through hubs and legs.
-    const r = await post(customer, 'shipping/quote', {
-      service: 'DOOR_TO_DOOR',
-      origin: { district: 'BELIZE', city: 'Belize City' },
-      destination: { district: 'BELIZE', city: 'Belize City' },
-    });
+describe('a local door-to-door parcel', () => {
+  // The rule this block used to encode was "refuse a same-town journey". That
+  // was right about marketplace delivery and wrong about shipping: a customer
+  // who opens Shipping & Delivery and asks us to take a parcel across Belize
+  // City is asking for a real service, and refusing it with "there is no
+  // terminal serving Belize City" describes a terminal they never wanted.
+  //
+  // The genuine constraint — an ordinary marketplace delivery must never become
+  // a shipment — is asserted separately below, and still holds.
+  const localDoorToDoor = {
+    service: 'DOOR_TO_DOOR',
+    origin: { district: 'BELIZE', city: 'Belize City' },
+    destination: { district: 'BELIZE', city: 'Belize City' },
+  };
+
+  /** The settings singleton is created lazily, so a bare update matches nothing. */
+  async function setLocalCourierFee(feeMinor: bigint, minutes = 60) {
+    const existing = await ctx.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
+    if (existing) {
+      await ctx.prisma.platformSetting.update({
+        where: { id: existing.id },
+        data: { localCourierFeeMinor: feeMinor, localCourierMinutes: minutes },
+      });
+    } else {
+      await ctx.prisma.platformSetting.create({ data: { localCourierFeeMinor: feeMinor, localCourierMinutes: minutes } });
+    }
+  }
+
+  it('is quoted as a single courier run with no terminal in it', async () => {
+    await setLocalCourierFee(1500n);
+    const r = await post(customer, 'shipping/quote', localDoorToDoor);
     expect(r.status).toBe(201);
-    expect(r.body.available).toBe(false);
-    expect(r.body.reason).toBe('LOCAL_DELIVERY');
-    expect(r.body.useLocalDelivery).toBe(true);
+    expect(r.body.available).toBe(true);
+    expect(r.body.legs.map((l: { kind: string }) => l.kind)).toEqual(['DIRECT']);
+    expect(r.body.totalMinor).toBe(1500);
+    expect(r.body.pricingIncomplete).toBe(false);
   });
 
-  it('will not book one either', async () => {
+  it('says the price is not set rather than quoting a local run as free', async () => {
+    await setLocalCourierFee(0n);
+    const r = await post(customer, 'shipping/quote', localDoorToDoor);
+    expect(r.body.available).toBe(true);
+    expect(r.body.pricingIncomplete).toBe(true);
+    expect(r.body.pricingNote).toMatch(/local door-to-door/i);
+    await setLocalCourierFee(1500n);
+  });
+
+  it('books, and creates exactly one leg that is ready immediately', async () => {
+    await setLocalCourierFee(1500n);
     const r = await post(customer, 'shipping', {
       service: 'DOOR_TO_DOOR',
       origin: { district: 'BELIZE', city: 'Belize City', address: '1 Front St', name: 'S', phone: '501-2223333' },
       destination: { district: 'BELIZE', city: 'Belize City', address: '2 Front St', name: 'R', phone: '501-4445555' },
     });
-    expect(r.status).toBe(400);
-    expect(await ctx.prisma.shipment.count()).toBe(0);
+    expect(r.status).toBe(201);
+
+    const legs = await ctx.prisma.shipmentLeg.findMany({ where: { shipmentId: r.body.id }, orderBy: { sequence: 'asc' } });
+    expect(legs).toHaveLength(1);
+    expect(legs[0]!.kind).toBe('DIRECT');
+    expect(legs[0]!.status).toBe('READY');
+    // No terminal at either end — the parcel never goes near one.
+    expect(legs[0]!.originHubId).toBeNull();
+    expect(legs[0]!.destinationHubId).toBeNull();
+
+    const shipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: r.body.id } });
+    expect(shipment.status).toBe('AWAITING_PICKUP');
+    expect(shipment.originHubId).toBeNull();
+    expect(shipment.destinationHubId).toBeNull();
+
+    await ctx.prisma.shipmentLeg.deleteMany({ where: { shipmentId: r.body.id } });
+    await ctx.prisma.custodyEvent.deleteMany({ where: { shipmentId: r.body.id } });
+    await ctx.prisma.shipment.delete({ where: { id: r.body.id } });
+  });
+
+  it('refuses to fly a parcel across one town', async () => {
+    const r = await post(customer, 'shipping/quote', { ...localDoorToDoor, preferredMode: 'AIR' });
+    expect(r.body.available).toBe(false);
+    expect(r.body.reason).toBe('MODE_UNAVAILABLE');
+    expect(r.body.message).toMatch(/local journey/i);
   });
 
   it('creates no shipment rows for an ordinary delivery', async () => {
@@ -346,7 +402,7 @@ describe('the network is data', () => {
 describe('booking freezes the plan', () => {
   it('creates the legs, the first one ready and the rest waiting', async () => {
     const s = await book();
-    expect(s.reference).toMatch(/^BMPL-[A-Z2-9]{8}$/);
+    expect(s.reference).toMatch(/^BML-[A-Z2-9]{8}$/);
     expect(s.legs.map((l: { status: string }) => l.status)).toEqual(['READY', 'PENDING', 'PENDING', 'PENDING']);
     expect(s.status).toBe('AWAITING_PICKUP');
   });

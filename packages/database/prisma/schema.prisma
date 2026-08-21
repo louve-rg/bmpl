@@ -2014,6 +2014,15 @@ model PlatformSetting {
   dispatchWeightLocality         Int     @default(10)
   dispatchWeightExperience       Int     @default(5)
 
+  // ---- Local courier pricing ----
+  // What BML charges for a same-district door-to-door run, where one courier
+  // does the whole job and no terminal is involved. Hub courier fees price a
+  // run between a terminal and an address; this prices a run between two
+  // addresses, which the hub fee cannot describe. Zero means "not priced yet",
+  // and the quote says so rather than quietly quoting free.
+  localCourierFeeMinor  BigInt @default(0)
+  localCourierMinutes   Int    @default(0)
+
   updatedById String?
   updatedAt   DateTime @updatedAt
   createdAt   DateTime @default(now())
@@ -4125,6 +4134,7 @@ enum ShippingService {
 
 /// A leg's role in the journey.
 enum LegKind {
+  DIRECT
   FIRST_MILE
   LINE_HAUL
   LAST_MILE

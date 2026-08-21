@@ -4,6 +4,7 @@ import { WalletModule } from '../wallet/wallet.module';
 import { PaymentsController } from './payments.controller';
 import { AdminPaymentsController } from './admin-payments.controller';
 import { PaymentsService } from './payments.service';
+import { PaymentsReconciliationScheduler } from './payments-reconciliation.scheduler';
 
 // Reuses InventoryService (release on authorization failure) from ProductsModule
 // and WalletService (post/reverse escrow) from WalletModule. Prisma + Audit come
@@ -11,7 +12,7 @@ import { PaymentsService } from './payments.service';
 @Module({
   imports: [ProductsModule, WalletModule],
   controllers: [PaymentsController, AdminPaymentsController],
-  providers: [PaymentsService],
+  providers: [PaymentsService, PaymentsReconciliationScheduler],
   exports: [PaymentsService],
 })
 export class PaymentsModule {}

@@ -86,7 +86,7 @@ export class WalletService {
     userId: string,
     amountMinor: bigint,
     currency: Currency,
-    opts: { reference: string; description: string; actorId?: string | null },
+    opts: { reference: string; description: string; actorId?: string | null; forceIsTest?: boolean },
   ) {
     if (amountMinor <= 0n) throw new BadRequestException('Enter an amount greater than zero.');
 
@@ -112,7 +112,10 @@ export class WalletService {
           ],
         },
         true,
-        user.isTest,
+        // Simulation money is a property of the CREDIT, not of the recipient. An
+        // administrative test credit to a real customer is still test money, and
+        // marking it from the recipient's flag would file it as real.
+        opts.forceIsTest ?? user.isTest,
       );
       return { txn, walletId: wallet.id };
     });
@@ -121,9 +124,45 @@ export class WalletService {
       action: 'WALLET_TOPUP_POSTED',
       actorId: opts.actorId ?? userId,
       targetUserId: userId,
-      newValue: { walletTransactionId: result.txn.id, amountMinor: money(amountMinor), currency, isTest: user.isTest },
+      newValue: { walletTransactionId: result.txn.id, amountMinor: money(amountMinor), currency, isTest: opts.forceIsTest ?? user.isTest },
     });
     return this.summary(userId, currency);
+  }
+
+  /**
+   * Credit a wallet with clearly-labelled simulation money, on an
+   * administrator's authority.
+   *
+   * This exists so a real person can exercise a real checkout without a real
+   * payment rail. Everything about it is deliberately visible: it posts a
+   * balanced TOPUP through the ordinary ledger (no balance is written
+   * directly), the transaction is marked as test money regardless of who
+   * receives it, the description says what it is in words, and the audit row
+   * names the administrator and their reason.
+   *
+   * The recipient's own `isTest` flag is untouched — a real customer stays a
+   * real customer; only this credit is simulated.
+   */
+  async adminTestCredit(
+    actorId: string,
+    userId: string,
+    amountMinor: bigint,
+    reason: string,
+    currency: Currency = 'BZD',
+  ) {
+    const summary = await this.topUp(userId, amountMinor, currency, {
+      reference: `admin-test-credit:${userId}:${Date.now()}`,
+      description: 'Administrative Test Credit',
+      actorId,
+      forceIsTest: true,
+    });
+    await this.audit.record({
+      action: 'WALLET_TEST_FUNDING_GRANTED',
+      actorId,
+      targetUserId: userId,
+      newValue: { amountMinor: money(amountMinor), currency, reason, label: 'Administrative Test Credit' },
+    });
+    return summary;
   }
 
   // ---- Reads ----
@@ -160,14 +199,24 @@ export class WalletService {
     const soft = sum('HELD');
     const escrowed = sum('AUTHORIZED');
 
-    const available = ledgerBalance - soft;
+    const raw = ledgerBalance - soft;
+    const available = raw > 0n ? raw : 0n;
+
+    // A soft hold reserves money the customer HAS. It cannot reserve money that
+    // was never there, and reporting it as though it could is how a customer
+    // with an empty wallet came to be shown "On hold BZ$55.00 · Total BZ$55.00"
+    // — money that did not exist, could not be spent, and could not be got back.
+    // Holds are therefore reported only up to the balance that backs them; any
+    // excess is an unbacked reservation, which `expireStaleHolds` clears.
+    const backedSoft = soft < ledgerBalance ? soft : ledgerBalance > 0n ? ledgerBalance : 0n;
+
     return {
       currency,
-      // Never show a negative available balance: it would be alarming and, given
-      // authorization checks the ledger in-transaction, it should be impossible.
-      availableMinor: money(available > 0n ? available : 0n),
-      onHoldMinor: money(soft + escrowed),
-      totalMinor: money((available > 0n ? available : 0n) + soft + escrowed),
+      availableMinor: money(available),
+      onHoldMinor: money(backedSoft + escrowed),
+      // What the customer actually has: their ledger balance plus anything
+      // already moved into escrow on their behalf.
+      totalMinor: money((ledgerBalance > 0n ? ledgerBalance : 0n) + escrowed),
       status: wallet.status,
       exists: true,
     };

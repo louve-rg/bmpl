@@ -97,7 +97,14 @@ export class ShipmentService {
       { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null },
       hubs,
       routes,
-      { firstMileMinor: fees.firstMileMinor, lastMileMinor: fees.lastMileMinor, firstMileMinutes: 0, lastMileMinutes: 0 },
+      {
+        firstMileMinor: fees.firstMileMinor,
+        lastMileMinor: fees.lastMileMinor,
+        firstMileMinutes: 0,
+        lastMileMinutes: 0,
+        directMinor: fees.directMinor,
+        directMinutes: fees.directMinutes,
+      },
     );
 
     if (!plan.ok) {
@@ -170,13 +177,30 @@ export class ShipmentService {
   ) {
     const wantsFirst = needsFirstMile(input.service);
     const wantsLast = needsLastMile(input.service);
-    if (!wantsFirst && !wantsLast) return { firstMileMinor: 0, lastMileMinor: 0, unpricedHubs: [] as string[] };
+    if (!wantsFirst && !wantsLast) {
+      return { firstMileMinor: 0, lastMileMinor: 0, directMinor: 0, directMinutes: 0, unpricedHubs: [] as string[] };
+    }
+
+    // A same-district door-to-door run has no terminal, so no hub fee describes
+    // it. It is priced by its own platform setting, and an unset price is
+    // reported rather than quoted as free.
+    if (input.service === 'DOOR_TO_DOOR' && origin.kind === 'DOOR' && destination.kind === 'DOOR' && origin.district === destination.district) {
+      const settings = await this.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
+      const directMinor = Number(settings?.localCourierFeeMinor ?? 0n);
+      return {
+        firstMileMinor: 0,
+        lastMileMinor: 0,
+        directMinor,
+        directMinutes: settings?.localCourierMinutes ?? 0,
+        unpricedHubs: directMinor === 0 ? ['local door-to-door delivery'] : [],
+      };
+    }
 
     // Ask the planner where each door attaches by planning with zero fees first;
     // that keeps hub-attachment logic in exactly one place.
     const { routes } = await this.network.plannerInputs();
     const dry = planRoute({ origin, destination, service: input.service, preferredMode: input.preferredMode ?? null }, hubs, routes);
-    if (!dry.ok) return { firstMileMinor: 0, lastMileMinor: 0, unpricedHubs: [] as string[] };
+    if (!dry.ok) return { firstMileMinor: 0, lastMileMinor: 0, directMinor: 0, directMinutes: 0, unpricedHubs: [] as string[] };
 
     const firstHubId = dry.legs.find((l) => l.kind === 'FIRST_MILE')?.destinationHubId ?? null;
     const lastHubId = dry.legs.find((l) => l.kind === 'LAST_MILE')?.originHubId ?? null;
@@ -187,7 +211,7 @@ export class ShipmentService {
     const feeOf = (id: string | null) => (id ? Number(rows.find((r) => r.id === id)?.courierFeeMinor ?? 0n) : 0);
 
     const unpricedHubs = rows.filter((r) => r.courierFeeMinor === 0n).map((r) => r.name);
-    return { firstMileMinor: feeOf(firstHubId), lastMileMinor: feeOf(lastHubId), unpricedHubs };
+    return { firstMileMinor: feeOf(firstHubId), lastMileMinor: feeOf(lastHubId), directMinor: 0, directMinutes: 0, unpricedHubs };
   }
 
   /* -------------------------------------------------------------- booking */
@@ -215,6 +239,8 @@ export class ShipmentService {
       lastMileMinor: fees.lastMileMinor,
       firstMileMinutes: 0,
       lastMileMinutes: 0,
+      directMinor: fees.directMinor,
+      directMinutes: fees.directMinutes,
     });
     if (!plan.ok) throw new BadRequestException(plan.explanation);
 
@@ -287,7 +313,7 @@ export class ShipmentService {
     // that leg now rather than waiting up to twenty seconds for the sweeper —
     // the customer has just pressed Book and is watching the screen.
     const firstLeg = shipment.legs.find((l) => l.sequence === 1);
-    if (firstLeg?.kind === 'FIRST_MILE') await this.dispatch.dispatchLeg(firstLeg.id);
+    if (firstLeg?.kind === 'FIRST_MILE' || firstLeg?.kind === 'DIRECT') await this.dispatch.dispatchLeg(firstLeg.id);
 
     return this.serialize(shipment, { audience: 'CUSTOMER' });
   }
@@ -318,7 +344,9 @@ export class ShipmentService {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1
     for (let attempt = 0; attempt < 8; attempt++) {
       const body = Array.from({ length: 8 }, () => alphabet[randomInt(0, alphabet.length)]).join('');
-      const reference = `BMPL-${body}`;
+      // New references use the current abbreviation. Existing BMPL- references
+      // stay valid: tracking looks a reference up, it never parses the prefix.
+      const reference = `BML-${body}`;
       if (!(await tx.shipment.findUnique({ where: { reference }, select: { id: true } }))) return reference;
     }
     throw new BadRequestException('Could not allocate a tracking reference. Please try again.');

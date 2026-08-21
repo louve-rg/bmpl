@@ -31,6 +31,14 @@ export const PERMISSIONS = [
   'payments.read', // read-only payment / wallet-hold / payment-event visibility (no actions)
   // ---- Wallet (Phase 3 · M12) ----
   'wallet.read', // read-only wallet transactions / escrow balances / ledger visibility (no adjustments)
+  // HIGHLY RESTRICTED. Post clearly-labelled simulation credit to a wallet so a
+  // real person can exercise checkout without a real payment rail. Not in any
+  // bundle, so only SUPER_ADMIN holds it: creating credit is not an everyday
+  // moderation action, and it should require the account that can do anything.
+  'wallet.credit_test',
+  // Release soft holds whose payment never authorized. Operational cleanup, not
+  // a way to move money — the sweep can only ever give a reservation back.
+  'wallet.reconcile',
   // ---- Logistics: Driver Management (Phase 4 · M14) ----
   'drivers.read', // view driver profiles / vehicles / service areas / availability (read-only)
   'drivers.moderate', // approve/reject driver vehicles (driver role approval reuses role_applications.review)

@@ -177,16 +177,63 @@ describe('choosing the transport', () => {
 });
 
 describe('when there is nothing to plan', () => {
-  it('sends a same-town job back to the ordinary courier flow', () => {
-    // This is the guard that keeps local single-courier delivery out of the
-    // shipment engine entirely.
+  it('plans a local door-to-door job as one courier run, with no terminal', () => {
+    // This used to be refused with LOCAL_DELIVERY, which is what produced
+    // "There is no terminal serving Belize City for collection" on a journey
+    // that never goes near a terminal. A door-to-door booking inside one
+    // district is a real shipment and gets a real plan.
     const r = plan({
       origin: door('Belize City', 'BELIZE'),
       destination: door('Belize City', 'BELIZE'),
       service: 'DOOR_TO_DOOR',
     });
+    if (!r.ok) throw new Error(`expected a plan, got ${r.reason}: ${r.explanation}`);
+    expect(r.legs).toHaveLength(1);
+    expect(r.legs[0]!.kind).toBe('DIRECT');
+    expect(r.legs[0]!.mode).toBe('LAND');
+    expect(r.legs[0]!.originHubId).toBeNull();
+    expect(r.legs[0]!.destinationHubId).toBeNull();
+  });
+
+  it('plans the local run even when the district has no terminal at all', () => {
+    // Edward's exact case: production had no hubs configured, and the planner
+    // demanded one before it would consider a journey that needs none.
+    const r = planRoute(
+      { origin: door('Belize City', 'BELIZE'), destination: door('Belize City', 'BELIZE'), service: 'DOOR_TO_DOOR' },
+      [],
+      [],
+      { firstMileMinor: 0, lastMileMinor: 0, firstMileMinutes: 0, lastMileMinutes: 0, directMinor: 1500, directMinutes: 45 },
+    );
+    if (!r.ok) throw new Error(`expected a plan, got ${r.reason}: ${r.explanation}`);
+    expect(r.legs[0]!.kind).toBe('DIRECT');
+    expect(r.totalMinor).toBe(1500);
+    expect(r.totalMinutes).toBe(45);
+  });
+
+  it('still refuses a local job that asks for a mode it cannot use', () => {
+    // Asking to fly a parcel across one town is not a routing answer we can
+    // give, and quietly downgrading it to a road run would misrepresent it.
+    const r = plan({
+      origin: door('Belize City', 'BELIZE'),
+      destination: door('Belize City', 'BELIZE'),
+      service: 'DOOR_TO_DOOR',
+      preferredMode: 'AIR',
+    });
     if (r.ok) throw new Error('expected no plan');
-    expect(r.reason).toBe('LOCAL_DELIVERY');
+    expect(r.reason).toBe('MODE_UNAVAILABLE');
+    expect(r.explanation).toMatch(/local journey/i);
+  });
+
+  it('a cross-district door-to-door still uses the terminal network', () => {
+    // The local rule must not swallow journeys that genuinely need transport.
+    const r = plan({
+      origin: door('Placencia', 'STANN_CREEK'),
+      destination: door('San Pedro', 'BELIZE'),
+      service: 'DOOR_TO_DOOR',
+    });
+    if (!r.ok) throw new Error(`expected a plan, got ${r.reason}`);
+    expect(r.legs.map((l) => l.kind)).toContain('LINE_HAUL');
+    expect(r.legs.map((l) => l.kind)).not.toContain('DIRECT');
   });
 
   it('explains an unserved district in words a customer can act on', () => {

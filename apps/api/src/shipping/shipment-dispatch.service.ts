@@ -93,9 +93,11 @@ export class ShipmentDispatchService {
       return { result: 'EXHAUSTED' };
     }
 
-    // Where the driver has to BE to start: a first mile collects from the
-    // sender's district, a last mile collects from the arrival terminal.
-    const district = leg.kind === 'FIRST_MILE' ? leg.shipment.originDistrict : leg.originHub?.district;
+    // Where the driver has to BE to start: a first mile and a door-to-door run
+    // both collect from the sender's district; a last mile collects from the
+    // arrival terminal.
+    const district =
+      leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originDistrict : leg.originHub?.district;
     if (!district) return { result: 'SKIPPED', reason: 'no district to search for drivers in' };
 
     const ranked = await this.rankFor(leg.id, district, cfg.maxConcurrentPerDriver, leg.shipment.isTest);
@@ -269,7 +271,7 @@ export class ShipmentDispatchService {
   async sweepUndispatched(): Promise<number> {
     const waiting = await this.prisma.shipmentLeg.findMany({
       where: {
-        kind: { in: ['FIRST_MILE', 'LAST_MILE'] },
+        kind: { in: ['DIRECT', 'FIRST_MILE', 'LAST_MILE'] },
         status: 'READY',
         assignedDriverProfileId: null,
         dispatchExhaustedAt: null,
@@ -338,14 +340,17 @@ export class ShipmentDispatchService {
     const profile = await this.prisma.driverProfile.findUnique({ where: { id: driverProfileId }, select: { userId: true } });
     if (!profile) return;
     const collecting = kind === 'FIRST_MILE';
+    const direct = kind === 'DIRECT';
     await this.notifications.notifyUsers([profile.userId], {
       type: 'MARKETPLACE',
       category: 'DELIVERY',
       event: 'SHIPMENT_LEG_OFFERED',
-      title: collecting ? 'New shipping pickup' : 'New shipping delivery',
-      body: collecting
-        ? `Collect a parcel and take it to the terminal. Shipment ${reference}.`
-        : `Collect a parcel from the terminal and deliver it. Shipment ${reference}.`,
+      title: direct ? 'New shipping job' : collecting ? 'New shipping pickup' : 'New shipping delivery',
+      body: direct
+        ? `Collect a parcel and deliver it to the recipient. Shipment ${reference}.`
+        : collecting
+          ? `Collect a parcel and take it to the terminal. Shipment ${reference}.`
+          : `Collect a parcel from the terminal and deliver it. Shipment ${reference}.`,
       data: { driverJobId: legId, jobKind: kind, reference },
     });
   }

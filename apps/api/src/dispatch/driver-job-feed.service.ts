@@ -291,10 +291,10 @@ export class DriverJobFeedService {
     const s = l.shipment;
 
     // First mile: sender's door to a terminal. Last mile: the mirror image.
-    const doorArea = kind === 'FIRST_MILE'
-      ? area({ city: s.originCity, district: s.originDistrict })
-      : area({ city: s.destinationCity, district: s.destinationDistrict });
-    const door = { name: null, area: doorArea };
+    // Direct: sender's door straight to the recipient's door, no terminal.
+    const senderArea = { name: null, area: area({ city: s.originCity, district: s.originDistrict }) };
+    const recipientArea = { name: null, area: area({ city: s.destinationCity, district: s.destinationDistrict }) };
+    const door = kind === 'LAST_MILE' ? recipientArea : senderArea;
     const hub = kind === 'FIRST_MILE'
       ? { name: l.destinationHub?.name ?? null, area: area(l.destinationHub) }
       : { name: l.originHub?.name ?? null, area: area(l.originHub) };
@@ -308,8 +308,8 @@ export class DriverJobFeedService {
       status,
       statusLabel: DELIVERY_STATUS_LABELS[status],
       reference: s.reference,
-      pickup: kind === 'FIRST_MILE' ? door : hub,
-      dropoff: kind === 'FIRST_MILE' ? hub : door,
+      pickup: kind === 'LAST_MILE' ? hub : door,
+      dropoff: kind === 'DIRECT' ? recipientArea : kind === 'FIRST_MILE' ? hub : door,
       load: s.description || `${pieces} ${pieces === 1 ? 'parcel' : 'parcels'}`,
       feeMinor: Number(l.priceMinor),
       assignedAt: l.assignedAt,
@@ -331,6 +331,13 @@ export class DriverJobFeedService {
   private legStop(l: LegRow): LocationInput {
     const collecting = queueStopKind((l.courierStatus ?? 'PENDING_ASSIGNMENT') as DeliveryStatus) === 'PICKUP';
     const s = l.shipment;
+    // A door-to-door run starts and ends at an address; there is no hub either
+    // side of it, so routing the driver via one would be actively wrong.
+    if (l.kind === 'DIRECT') {
+      return collecting
+        ? { latitude: s.originLatitude, longitude: s.originLongitude, district: s.originDistrict }
+        : { latitude: s.destinationLatitude, longitude: s.destinationLongitude, district: s.destinationDistrict };
+    }
     if (l.kind === 'FIRST_MILE') {
       return collecting
         ? { latitude: s.originLatitude, longitude: s.originLongitude, district: s.originDistrict }
