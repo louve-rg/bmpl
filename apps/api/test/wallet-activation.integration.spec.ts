@@ -466,8 +466,9 @@ describe('the boundaries around other people\u2019s money', () => {
     await checkout(tester.cookies, v.vendorProfileId, true);
 
     const after = await walletOf(real.userId);
-    expect(after.balanceMinor).toBe(before.balanceMinor);
+    expect(after.cachedBalanceMinor).toBe(before.cachedBalanceMinor);
 
+    // The cache is a convenience; the ledger is the record. Check both.
     const touched = await ctx.prisma.walletLedgerEntry.count({ where: { account: { userId: real.userId } } });
     expect(touched).toBe(0);
 
