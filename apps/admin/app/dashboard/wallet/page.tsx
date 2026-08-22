@@ -5,6 +5,7 @@ import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Card, EmptyState, PageHeader, Spinner } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
+import { WalletOperations } from '../../../components/WalletOperations';
 
 interface Account { id: string; type: string; currency: string; status: string; cachedBalanceMinor: number }
 interface Entry { direction: string; amountMinor: number; accountType: string; isCustomer: boolean }
@@ -31,8 +32,10 @@ export default function AdminWalletPage() {
         breadcrumbs={adminCrumbs('Wallet')}
         eyebrow="Finance"
         title="Wallet & Escrow"
-        description="Read-only double-entry ledger. Money moves only between customer wallets and escrow (M12)."
+        description="Double-entry ledger. The only writes available here are a labelled test credit and releasing holds that were never authorized — no balance can be set."
       />
+
+      <WalletOperations onChanged={() => window.location.reload()} />
 
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-slate-500">

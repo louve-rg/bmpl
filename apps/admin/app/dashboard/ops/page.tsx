@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
 import { Alert, Button, Card, Field, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
+import { CourierPricing } from '../../../components/CourierPricing';
 
 /* --------------------------------------------------------------- types */
 
@@ -27,6 +28,8 @@ type AnnouncementLevel = 'INFO' | 'WARNING' | 'CRITICAL';
 
 interface PlatformSetting {
   id: string;
+  localCourierFeeMinor: number;
+  localCourierFeeTestMinor: number;
   announcementActive: boolean;
   announcementLevel: AnnouncementLevel;
   announcementMessage: string | null;
@@ -133,6 +136,12 @@ export default function OpsPage() {
         <>
           <QueuesSection queues={overview.queues} totalActionable={overview.totalActionable} />
           <SettingsSection initial={overview.settings} />
+          <div className="mt-6">
+            <CourierPricing
+              productionMinor={overview.settings.localCourierFeeMinor ?? 0}
+              simulationMinor={overview.settings.localCourierFeeTestMinor ?? 0}
+            />
+          </div>
         </>
       )}
     </div>
