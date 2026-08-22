@@ -197,9 +197,13 @@ export default function NewShipmentPage() {
         </div>
         {/* Honest about what this is: a preference the network may not be able to
             honour, not a promise. The quote below says which. */}
+        {/* With no routes configured we can still carry a parcel across one
+            district by road — that journey has no terminal in it. Saying "we
+            cannot price a journey" would be wrong for exactly the trip most
+            customers are trying to book. */}
         <p className="mt-2 text-xs text-slate-500">
           {modes.length === 0
-            ? 'No transport services are configured yet, so we cannot price a journey.'
+            ? 'Long-distance transport between terminals is not running yet. Deliveries within one district still go by road.'
             : 'We will use the cheapest service that can actually make the trip. Choosing a mode restricts it to that mode.'}
         </p>
 

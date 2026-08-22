@@ -224,7 +224,17 @@ export class ShipmentService {
    * somebody edited a saved address afterwards, and the driver working leg 3 has
    * to see what was agreed at booking.
    */
-  async create(userId: string, input: CreateShipmentInput, isTest = false) {
+  async create(userId: string, input: CreateShipmentInput, isTest?: boolean) {
+    // DERIVED from the account, never taken from the request — the same rule
+    // checkout already applies to orders. Left as a hard-coded `false`, a
+    // shipment booked by a designated test account was filed as real work: it
+    // could never be offered to a test driver (the dispatch boundary correctly
+    // refuses to mix them), so the parcel simply sat there, and it counted as
+    // real volume in reporting.
+    const simulated =
+      isTest ??
+      (await this.prisma.user.findUnique({ where: { id: userId }, select: { isTest: true } }))?.isTest ??
+      false;
     const quote = await this.quote(input);
     if (!quote.available) {
       throw new BadRequestException(quote.message ?? 'We cannot ship that route at the moment.');
@@ -253,7 +263,7 @@ export class ShipmentService {
         data: {
           reference: await this.uniqueReference(tx),
           service: input.service,
-          isTest,
+          isTest: simulated,
           customerUserId: userId,
           originHubId,
           destinationHubId,
@@ -312,7 +322,7 @@ export class ShipmentService {
     await this.audit.record({
       action: 'SHIPMENT_CREATED',
       actorId: userId,
-      newValue: { shipmentId: shipment.id, reference: shipment.reference, service: shipment.service, legs: shipment.legs.length, isTest },
+      newValue: { shipmentId: shipment.id, reference: shipment.reference, service: shipment.service, legs: shipment.legs.length, isTest: simulated },
     });
 
     // If the journey starts at a door, a driver has to go and collect it. Offer
