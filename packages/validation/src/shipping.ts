@@ -127,6 +127,9 @@ const quoteBase = z.object({
   weightGrams: z.coerce.number().int().min(1).max(2_000_000).optional(),
   pieces: z.coerce.number().int().min(1).max(500).default(1),
   description: z.string().trim().max(500).optional(),
+  // Booking only. Quoting ignores it, which is the point: asking the price must
+  // never move money.
+  payWithWallet: z.boolean().optional().default(false),
 });
 
 type QuoteShape = z.infer<typeof quoteBase>;

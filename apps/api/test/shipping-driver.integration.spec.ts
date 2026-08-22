@@ -122,8 +122,15 @@ const doorToDoor = () => ({
   description: 'One box',
 });
 
+/**
+ * Book and pay, which is what the customer-facing form does.
+ *
+ * A shipment that has not been paid for is never dispatched, so a booking
+ * helper that skipped payment would be testing a journey no real customer can
+ * take.
+ */
 async function book(body: object = doorToDoor()) {
-  const r = await post(customer, 'shipping', body);
+  const r = await post(customer, 'shipping', { ...body, payWithWallet: true });
   expect(r.status).toBe(201);
   return r.body;
 }
@@ -174,6 +181,10 @@ afterAll(async () => {
 beforeEach(async () => {
   await ctx.prisma.shipmentLegOffer.deleteMany();
   await ctx.prisma.custodyEvent.deleteMany();
+  // Settled legs carry driver earnings, and the earning holds the leg with an
+  // onDelete: Restrict — you should not be able to delete work somebody was
+  // paid for. Clear the earnings first.
+  await ctx.prisma.driverEarning.deleteMany();
   await ctx.prisma.shipmentLeg.deleteMany();
   await ctx.prisma.shipment.deleteMany();
   await ctx.prisma.logisticsRoute.deleteMany();
@@ -184,7 +195,14 @@ beforeEach(async () => {
   await ctx.prisma.driverServiceArea.deleteMany();
   await ctx.prisma.driverVehicle.deleteMany();
   await ctx.prisma.driverProfile.deleteMany();
-  customer = (await registerUser(`shipcust_${uniq()}@example.com`)).cookies;
+  const c = await registerUser(`shipcust_${uniq()}@example.com`);
+  customer = c.cookies;
+  // Shipping now takes payment, so the customer needs a balance. Funded by the
+  // administrative test credit rather than by flagging the account as a test
+  // account: flagging it would make every shipment they book a TEST shipment,
+  // which the dispatch boundary then correctly refuses to offer to the ordinary
+  // drivers this suite creates.
+  await post(admin, 'admin/wallet/test-credit', { userId: c.userId, amountMinor: 100_000, reason: 'Shipping test fixture.' });
   await enableDispatch(true);
   await seedNetwork();
 });

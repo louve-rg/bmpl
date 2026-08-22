@@ -308,7 +308,11 @@ export class PaymentsService {
         await this.audit.record({ action: 'WALLET_HOLD_RELEASED', actorId: actor.userId, newValue: { holdId: hold.id, paymentId } }, tx);
       }
 
-      if (payment.order && !payment.order.reservationsReleasedAt) {
+      // Only an order payment unwinds stock and vendor orders. A shipment
+      // payment has no inventory behind it; its own cancellation path deals
+      // with the shipment.
+      if (payment.orderId && payment.order && !payment.order.reservationsReleasedAt) {
+        const orderId = payment.orderId;
         for (const vo of payment.order.vendorOrders) {
           for (const item of vo.items) {
             if (!item.productId) continue;
@@ -316,8 +320,8 @@ export class PaymentsService {
             if (inv) await this.inventory.release(inv.id, item.quantity, tx);
           }
         }
-        await tx.order.update({ where: { id: payment.orderId }, data: { status: 'CANCELLED', reservationsReleasedAt: new Date() } });
-        await tx.vendorOrder.updateMany({ where: { orderId: payment.orderId }, data: { status: 'CANCELLED' } });
+        await tx.order.update({ where: { id: orderId }, data: { status: 'CANCELLED', reservationsReleasedAt: new Date() } });
+        await tx.vendorOrder.updateMany({ where: { orderId }, data: { status: 'CANCELLED' } });
         // Cancel the DELIVERIES too. Cancelling the order and its vendor orders
         // used to leave any attached delivery sitting in PENDING_ASSIGNMENT
         // forever: an order nobody would ever fulfil, still presenting itself as
@@ -331,7 +335,7 @@ export class PaymentsService {
         // this path to erase a delivery already in progress.
         await tx.orderDelivery.updateMany({
           where: {
-            vendorOrder: { orderId: payment.orderId },
+            vendorOrder: { orderId },
             status: { in: ['PENDING_ASSIGNMENT', 'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_DECLINED'] },
           },
           data: {
@@ -345,13 +349,70 @@ export class PaymentsService {
             assignedVehicleId: null,
           },
         });
-        await this.audit.record({ action: 'ORDER_RESERVATION_RELEASED', actorId: actor.userId, newValue: { orderId: payment.orderId, reason: releaseReason } }, tx);
+        await this.audit.record({ action: 'ORDER_RESERVATION_RELEASED', actorId: actor.userId, newValue: { orderId, reason: releaseReason } }, tx);
       }
 
       await tx.ledgerReference.updateMany({ where: { paymentId, status: 'PENDING' }, data: { status: 'VOID' } });
       await this.transition(tx, { id: paymentId, status: payment.status }, terminalStatus, actor.userId, { reason });
       await this.audit.record({ action: 'PAYMENT_AUTHORIZATION_FAILED', actorId: actor.userId, newValue: { paymentId, reason } }, tx);
     });
+  }
+
+  /**
+   * The same thing as `createForOrder`, for a shipment.
+   *
+   * Deliberately the same shape: one Payment row, one soft hold, one planned
+   * ledger reference, CREATED → PENDING. Everything downstream — authorization,
+   * escrow, expiry, release, the audit trail — then works on a shipment payment
+   * without knowing it is one, because there is only one payment machine.
+   */
+  async createForShipment(
+    tx: Tx,
+    shipment: { id: string; reference: string; userId: string; totalMinor: bigint; currency: Currency },
+    actor: ActorContext,
+  ) {
+    const wallet = await this.ensureUserWallet(tx, shipment.userId, shipment.currency);
+    const method = await tx.paymentMethod.upsert({
+      where: { userId_type: { userId: shipment.userId, type: 'WALLET' } },
+      update: {},
+      create: { userId: shipment.userId, type: 'WALLET', label: 'Platform wallet', isDefault: true },
+    });
+
+    const payment = await tx.payment.create({
+      data: {
+        paymentNumber: genPaymentNumber(),
+        shipmentId: shipment.id,
+        userId: shipment.userId,
+        amountMinor: shipment.totalMinor,
+        currency: shipment.currency,
+        status: 'CREATED',
+        methodType: 'WALLET',
+        paymentMethodId: method.id,
+      },
+    });
+    await tx.paymentEvent.create({ data: { paymentId: payment.id, type: 'CREATED', toStatus: 'CREATED' } });
+    await this.audit.record(
+      { action: 'PAYMENT_CREATED', actorId: actor.userId, newValue: { paymentId: payment.id, shipmentId: shipment.id, reference: shipment.reference, amountMinor: money(shipment.totalMinor) } },
+      tx,
+    );
+
+    const hold = await tx.walletHold.create({
+      data: { paymentId: payment.id, walletAccountId: wallet.id, amountMinor: shipment.totalMinor, currency: shipment.currency, status: 'HELD' },
+    });
+    await tx.paymentEvent.create({
+      data: { paymentId: payment.id, type: 'HOLD_CREATED', data: { holdId: hold.id, amountMinor: money(shipment.totalMinor) } },
+    });
+    await this.audit.record(
+      { action: 'WALLET_HOLD_CREATED', actorId: actor.userId, newValue: { holdId: hold.id, paymentId: payment.id, amountMinor: money(shipment.totalMinor) } },
+      tx,
+    );
+
+    await tx.ledgerReference.create({
+      data: { paymentId: payment.id, walletAccountId: wallet.id, purpose: 'CUSTOMER_PAYMENT', direction: 'DEBIT', amountMinor: shipment.totalMinor, currency: shipment.currency, status: 'PENDING' },
+    });
+
+    await this.transition(tx, { id: payment.id, status: 'CREATED' }, 'PENDING', actor.userId, { reason: 'awaiting_processing' });
+    return payment;
   }
 
   /**
@@ -438,7 +499,11 @@ export class PaymentsService {
     const rows = await this.prisma.payment.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
-      include: { order: { select: { orderNumber: true, itemCount: true } }, holds: true },
+      include: {
+        order: { select: { orderNumber: true, itemCount: true } },
+        shipment: { select: { reference: true, service: true } },
+        holds: true,
+      },
     });
     return rows.map((p) => this.cardShape(p));
   }
@@ -469,12 +534,21 @@ export class PaymentsService {
     const rows = await this.prisma.payment.findMany({
       orderBy: { createdAt: 'desc' },
       take: 200,
-      include: { order: { select: { orderNumber: true } }, user: { select: { firstName: true, lastName: true, email: true } }, holds: true },
+      include: {
+        order: { select: { orderNumber: true } },
+        shipment: { select: { reference: true } },
+        user: { select: { firstName: true, lastName: true, email: true } },
+        holds: true,
+      },
     });
     return rows.map((p) => ({
       id: p.id,
       paymentNumber: p.paymentNumber,
-      orderNumber: p.order.orderNumber,
+      // Exactly one of these is set; the CHECK constraint guarantees it.
+      resourceType: p.orderId ? ('ORDER' as const) : ('SHIPMENT' as const),
+      resourceRef: p.order?.orderNumber ?? p.shipment?.reference ?? null,
+      orderNumber: p.order?.orderNumber ?? null,
+      shipmentReference: p.shipment?.reference ?? null,
       status: p.status,
       methodType: p.methodType,
       amountMinor: money(p.amountMinor),
@@ -499,12 +573,27 @@ export class PaymentsService {
   // Serialization
   // ===========================================================================
 
-  private cardShape(p: { id: string; paymentNumber: string; status: string; methodType: string; amountMinor: bigint; currency: string; createdAt: Date; order: { orderNumber: string; itemCount: number }; holds: Array<{ status: string; amountMinor: bigint }> }) {
+  private cardShape(p: {
+    id: string;
+    paymentNumber: string;
+    status: string;
+    methodType: string;
+    amountMinor: bigint;
+    currency: string;
+    createdAt: Date;
+    order: { orderNumber: string; itemCount: number } | null;
+    shipment?: { reference: string; service: string } | null;
+    holds: Array<{ status: string; amountMinor: bigint }>;
+  }) {
     return {
       id: p.id,
       paymentNumber: p.paymentNumber,
-      orderNumber: p.order.orderNumber,
-      itemCount: p.order.itemCount,
+      // A payment belongs to an order or a shipment, never both.
+      resourceType: p.order ? ('ORDER' as const) : ('SHIPMENT' as const),
+      resourceRef: p.order?.orderNumber ?? p.shipment?.reference ?? null,
+      orderNumber: p.order?.orderNumber ?? null,
+      shipmentReference: p.shipment?.reference ?? null,
+      itemCount: p.order?.itemCount ?? null,
       status: p.status,
       methodType: p.methodType,
       amountMinor: money(p.amountMinor),
@@ -524,7 +613,13 @@ export class PaymentsService {
       currency: p.currency,
       authorizedAt: p.authorizedAt,
       createdAt: p.createdAt,
-      order: { id: p.order.id, orderNumber: p.order.orderNumber, itemCount: p.order.itemCount, totalMinor: money(p.order.totalMinor), vendorOrders: p.order.vendorOrders.map((vo) => ({ id: vo.id, orderNumber: vo.orderNumber, businessName: vo.vendorProfile.businessName, subtotalMinor: money(vo.subtotalMinor) })) },
+      resourceType: p.orderId ? ('ORDER' as const) : ('SHIPMENT' as const),
+      order: p.order
+        ? { id: p.order.id, orderNumber: p.order.orderNumber, itemCount: p.order.itemCount, totalMinor: money(p.order.totalMinor), vendorOrders: p.order.vendorOrders.map((vo) => ({ id: vo.id, orderNumber: vo.orderNumber, businessName: vo.vendorProfile.businessName, subtotalMinor: money(vo.subtotalMinor) })) }
+        : null,
+      shipment: p.shipment
+        ? { id: p.shipment.id, reference: p.shipment.reference, service: p.shipment.service, status: p.shipment.status, totalMinor: money(p.shipment.quotedTotalMinor) }
+        : null,
       holds: p.holds.map((h) => ({ id: h.id, status: h.status, amountMinor: money(h.amountMinor), currency: h.currency, heldAt: h.heldAt, authorizedAt: h.authorizedAt, releasedAt: h.releasedAt, releaseReason: h.releaseReason, walletTransactionId: h.walletTransactionId })),
       ledgerReferences: p.ledgerRefs.map((l) => ({ id: l.id, purpose: l.purpose, direction: l.direction, amountMinor: money(l.amountMinor), status: l.status, walletTransactionId: l.walletTransactionId })),
       events: p.events.map((e) => ({ type: e.type, fromStatus: e.fromStatus, toStatus: e.toStatus, createdAt: e.createdAt })),
@@ -535,6 +630,7 @@ export class PaymentsService {
 const PAYMENT_DETAIL_INCLUDE = {
   include: {
     order: { select: { id: true, orderNumber: true, itemCount: true, totalMinor: true, vendorOrders: { select: { id: true, orderNumber: true, subtotalMinor: true, vendorProfile: { select: { businessName: true } } } } } },
+    shipment: { select: { id: true, reference: true, service: true, status: true, quotedTotalMinor: true } },
     holds: { orderBy: { createdAt: 'asc' as const } },
     ledgerRefs: true,
     events: { orderBy: { createdAt: 'asc' as const } },

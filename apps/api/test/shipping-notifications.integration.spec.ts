@@ -172,6 +172,10 @@ beforeEach(async () => {
   await ctx.prisma.conversation.deleteMany();
   await ctx.prisma.shipmentLegOffer.deleteMany();
   await ctx.prisma.custodyEvent.deleteMany();
+  // Settled legs carry driver earnings, and the earning holds the leg with an
+  // onDelete: Restrict — you should not be able to delete work somebody was
+  // paid for. Clear the earnings first.
+  await ctx.prisma.driverEarning.deleteMany();
   await ctx.prisma.shipmentLeg.deleteMany();
   await ctx.prisma.shipment.deleteMany();
   await ctx.prisma.logisticsRoute.deleteMany();
@@ -181,6 +185,11 @@ beforeEach(async () => {
   await ctx.prisma.driverProfile.deleteMany();
   const c = await registerUser(`ncust_${uniq()}@example.com`);
   customer = c.cookies;
+  // Shipping takes payment before it dispatches, so the customer needs a
+  // balance. Administrative test credit, not a test-account flag: flagging the
+  // account would make every shipment a TEST shipment, which the dispatch
+  // boundary correctly refuses to offer to the ordinary drivers here.
+  await post(admin, 'admin/wallet/test-credit', { userId: c.userId, amountMinor: 100_000, reason: 'Shipping test fixture.' });
   customerId = c.userId;
   await enableDispatch(true);
   await seedNetwork();
@@ -193,7 +202,7 @@ describe('the driver offer', () => {
     const driver = await makeDriver();
     const bystander = await makeDriver();
 
-    const fired = await capture(() => post(customer, 'shipping', doorToDoor()));
+    const fired = await capture(() => post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true }));
     const offers = fired.filter((n) => n.event === 'SHIPMENT_LEG_OFFERED');
     expect(offers).toHaveLength(1);
     expect(offers[0]!.userId).toBe(driver.userId);
@@ -207,7 +216,7 @@ describe('the driver offer', () => {
 
   it('words a pickup offer differently from a delivery offer, and deep-links to the job', async () => {
     const driver = await makeDriver();
-    const fired = await capture(() => post(customer, 'shipping', doorToDoor()));
+    const fired = await capture(() => post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true }));
     const offer = fired.find((n) => n.event === 'SHIPMENT_LEG_OFFERED')!;
     expect(offer.title).toBe('New shipping pickup');
     expect(offer.category).toBe('DELIVERY');
@@ -220,7 +229,7 @@ describe('the driver offer', () => {
   it('re-offers to the next driver on a decline, telling only them', async () => {
     const a = await makeDriver();
     const b = await makeDriver();
-    const s = (await post(customer, 'shipping', doorToDoor())).body;
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     const holderId = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId;
     const holder = holderId === a.driverProfileId ? a : b;
@@ -238,7 +247,7 @@ describe('the driver offer', () => {
 describe('the customer follows one journey', () => {
   async function bookWithDriver() {
     const driver = await makeDriver();
-    const s = (await post(customer, 'shipping', doorToDoor())).body;
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     return { driver, s, legs: await legsOf(s.id) };
   }
 
@@ -287,6 +296,7 @@ describe('the customer follows one journey', () => {
   it('says "ready to collect" for a hub-ending shipment, to the customer only', async () => {
     const driver = await makeDriver();
     const s = (await post(customer, 'shipping', {
+      payWithWallet: true,
       service: 'DOOR_TO_HUB',
       origin: { district: 'STANN_CREEK', city: 'Placencia', address: '1 Sidewalk', name: 'S', phone: '501-2223333' },
       destination: { hubId: hub.SPA, name: 'R', phone: '501-4445555' },
@@ -317,6 +327,7 @@ describe('the customer follows one journey', () => {
 
   it('tells the customer when the collection is recorded', async () => {
     const s = (await post(customer, 'shipping', {
+      payWithWallet: true,
       service: 'HUB_TO_HUB',
       origin: { hubId: hub.PLA, name: 'S', phone: '501-2223333' },
       destination: { hubId: hub.SPA, name: 'R', phone: '501-4445555' },
@@ -338,7 +349,7 @@ describe('the customer follows one journey', () => {
 describe('a driver hears only about their own leg', () => {
   it('does not tell the first-mile driver about the last mile', async () => {
     const firstDriver = await makeDriver();
-    const s = (await post(customer, 'shipping', doorToDoor())).body;
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     const rows = await legsOf(s.id);
     const first = rows.find((l) => l.kind === 'FIRST_MILE')!;
     await ctx.prisma.shipmentLeg.update({
@@ -386,7 +397,7 @@ describe('a driver hears only about their own leg', () => {
 describe('operations are told when a human is needed', () => {
   it('alerts an administrator on a leg exception, and tells the customer nothing misleading', async () => {
     const driver = await makeDriver();
-    const s = (await post(customer, 'shipping', doorToDoor())).body;
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
@@ -406,7 +417,7 @@ describe('operations are told when a human is needed', () => {
 
   it('alerts an administrator when dispatch runs out of drivers', async () => {
     const driver = await makeDriver();
-    const s = (await post(customer, 'shipping', doorToDoor())).body;
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await ctx.prisma.shipmentLeg.update({
       where: { id: first.id },
@@ -432,14 +443,14 @@ describe('nothing crosses between real and rehearsal', () => {
     // The test driver is the only driver online. A real shipment must go
     // unoffered rather than page them.
     const testDriver = await makeDriver({ isTest: true });
-    const fired = await capture(() => post(customer, 'shipping', doorToDoor()));
+    const fired = await capture(() => post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true }));
     expect(to(fired, testDriver.userId)).toHaveLength(0);
     expect(fired.filter((n) => n.event === 'SHIPMENT_LEG_OFFERED')).toHaveLength(0);
   });
 
   it('never notifies a real driver about a test shipment', async () => {
     const realDriver = await makeDriver({ isTest: false });
-    const s = (await post(customer, 'shipping', doorToDoor())).body;
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     await ctx.prisma.shipment.update({ where: { id: s.id }, data: { isTest: true } });
     const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await ctx.prisma.shipmentLeg.update({
@@ -458,14 +469,14 @@ describe('unread counting and read state', () => {
   it('increments the driver\'s unread count by exactly the offer', async () => {
     const driver = await makeDriver();
     const before = (await get(driver.cookies, 'notifications/unread-count')).body;
-    await post(customer, 'shipping', doorToDoor());
+    await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true });
     const after = (await get(driver.cookies, 'notifications/unread-count')).body;
     expect(Number(after.count ?? after.unread ?? after)).toBe(Number(before.count ?? before.unread ?? before) + 1);
   });
 
   it('marks read without deleting, and the count follows', async () => {
     const driver = await makeDriver();
-    await post(customer, 'shipping', doorToDoor());
+    await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true });
     const list = await get(driver.cookies, 'notifications');
     const rows = Array.isArray(list.body) ? list.body : list.body.items;
     expect(rows.length).toBeGreaterThan(0);
@@ -486,7 +497,7 @@ describe('replaying a transition does not double-notify', () => {
     // Accept is idempotent by design; the notification must be too, or a driver
     // with a flaky connection spams their customer.
     const driver = await makeDriver();
-    const s = (await post(customer, 'shipping', doorToDoor())).body;
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
 
@@ -496,6 +507,7 @@ describe('replaying a transition does not double-notify', () => {
 
   it('refuses a repeated collection rather than notifying again', async () => {
     const s = (await post(customer, 'shipping', {
+      payWithWallet: true,
       service: 'HUB_TO_HUB',
       origin: { hubId: hub.PLA, name: 'S', phone: '501-2223333' },
       destination: { hubId: hub.SPA, name: 'R', phone: '501-4445555' },

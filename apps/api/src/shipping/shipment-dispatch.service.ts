@@ -71,6 +71,8 @@ export class ShipmentDispatchService {
             reference: true,
             isTest: true,
             originDistrict: true,
+            quotedTotalMinor: true,
+            payment: { select: { status: true } },
             legs: { select: { sequence: true, kind: true, mode: true, status: true } },
           },
         },
@@ -78,6 +80,14 @@ export class ShipmentDispatchService {
     });
     if (!leg) return { result: 'SKIPPED', reason: 'leg not found' };
     if (leg.kind === 'LINE_HAUL') return { result: 'SKIPPED', reason: 'a transport leg is operated by a carrier, not a driver' };
+
+    // THE payment invariant. An unpaid shipment must never become a driver's
+    // job. Leg statuses already encode this — an unpaid booking leaves them all
+    // PENDING — but this is the check that makes it true regardless of how the
+    // leg got here, including a future caller that sets a status directly.
+    if (!(await this.isPaidFor(leg.shipment))) {
+      return { result: 'SKIPPED', reason: 'the shipment has not been paid for' };
+    }
     if (leg.courierStatus != null && leg.courierStatus !== 'PENDING_ASSIGNMENT' && leg.courierStatus !== 'DRIVER_DECLINED') {
       return { result: 'SKIPPED', reason: `leg is ${leg.courierStatus}` };
     }
@@ -334,6 +344,19 @@ export class ShipmentDispatchService {
       body: 'Automatic dispatch ran out of drivers for a courier leg. Assign one by hand.',
       data: { legId, reference },
     });
+  }
+
+  /**
+   * Has this shipment been paid for?
+   *
+   * A free shipment is payable-by-definition: nothing was owed, so nothing can
+   * be outstanding. That also keeps journeys booked before shipment payments
+   * existed dispatchable, rather than stranding them.
+   */
+  private async isPaidFor(shipment: { quotedTotalMinor: bigint; payment: { status: string } | null }): Promise<boolean> {
+    if (shipment.quotedTotalMinor <= 0n) return true;
+    const status = shipment.payment?.status;
+    return status === 'AUTHORIZED' || status === 'SETTLING' || status === 'SETTLED';
   }
 
   private async notifyDriver(driverProfileId: string, legId: string, kind: string, reference: string) {

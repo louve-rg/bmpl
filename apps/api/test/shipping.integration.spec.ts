@@ -89,9 +89,13 @@ const doorToDoor = () => ({
   description: 'One box',
 });
 
-/** Book a shipment and return its serialized body. */
+/**
+ * Book AND PAY, which is what the customer-facing form does. A shipment nobody
+ * has paid for is deliberately never dispatched, so booking without paying
+ * would test a journey no real customer can take.
+ */
 async function book(body: object = doorToDoor()) {
-  const r = await post(customer, 'shipping', body);
+  const r = await post(customer, 'shipping', { ...body, payWithWallet: true });
   expect(r.status).toBe(201);
   return r.body;
 }
@@ -138,6 +142,10 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await ctx.prisma.custodyEvent.deleteMany();
+  // Settled legs carry driver earnings, and the earning holds the leg with an
+  // onDelete: Restrict — you should not be able to delete work somebody was
+  // paid for. Clear the earnings first.
+  await ctx.prisma.driverEarning.deleteMany();
   await ctx.prisma.shipmentLeg.deleteMany();
   await ctx.prisma.shipment.deleteMany();
   await ctx.prisma.logisticsRoute.deleteMany();
@@ -145,6 +153,11 @@ beforeEach(async () => {
   const c = await registerCustomer(`ship_${uniq()}@example.com`);
   customer = c.cookies;
   customerId = c.userId;
+  // Shipping takes payment before it dispatches. Administrative test credit,
+  // not a test-account flag — flagging would make every shipment a TEST
+  // shipment and the dispatch boundary would refuse the ordinary drivers here.
+  const credit = await post(admin, 'admin/wallet/test-credit', { userId: c.userId, amountMinor: 100_000, reason: 'Shipping test fixture.' });
+  if (credit.status !== 201) throw new Error(`test credit failed: ${credit.status} ${JSON.stringify(credit.body)}`);
   await seedNetwork();
 });
 
@@ -200,6 +213,7 @@ describe('a local door-to-door parcel', () => {
   it('books, and creates exactly one leg that is ready immediately', async () => {
     await setLocalCourierFee(1500n);
     const r = await post(customer, 'shipping', {
+      payWithWallet: true,
       service: 'DOOR_TO_DOOR',
       origin: { district: 'BELIZE', city: 'Belize City', address: '1 Front St', name: 'S', phone: '501-2223333' },
       destination: { district: 'BELIZE', city: 'Belize City', address: '2 Front St', name: 'R', phone: '501-4445555' },
@@ -219,6 +233,7 @@ describe('a local door-to-door parcel', () => {
     expect(shipment.originHubId).toBeNull();
     expect(shipment.destinationHubId).toBeNull();
 
+    await ctx.prisma.driverEarning.deleteMany({ where: { shipmentLeg: { shipmentId: r.body.id } } });
     await ctx.prisma.shipmentLeg.deleteMany({ where: { shipmentId: r.body.id } });
     await ctx.prisma.custodyEvent.deleteMany({ where: { shipmentId: r.body.id } });
     await ctx.prisma.shipment.delete({ where: { id: r.body.id } });
@@ -427,6 +442,7 @@ describe('booking freezes the plan', () => {
 
   it('rejects a pin outside Belize', async () => {
     const r = await post(customer, 'shipping', {
+      payWithWallet: true,
       ...doorToDoor(),
       origin: { ...doorToDoor().origin, latitude: 51.5074, longitude: -0.1278 },
     });
@@ -435,6 +451,7 @@ describe('booking freezes the plan', () => {
 
   it('rejects half a pin', async () => {
     const r = await post(customer, 'shipping', {
+      payWithWallet: true,
       ...doorToDoor(),
       origin: { ...doorToDoor().origin, latitude: 16.5 },
     });

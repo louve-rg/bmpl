@@ -562,7 +562,9 @@ describe('holds that were never authorized', () => {
     const after = await ctx.prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
     expect(after.status).toBe('EXPIRED');
 
-    const order = await ctx.prisma.order.findUniqueOrThrow({ where: { id: payment.orderId } });
+    // This payment belongs to an order; `orderId` is nullable now that a payment
+    // can belong to a shipment instead.
+    const order = await ctx.prisma.order.findUniqueOrThrow({ where: { id: payment.orderId! } });
     expect(order.status).toBe('CANCELLED');
     expect(order.reservationsReleasedAt).not.toBeNull();
   });

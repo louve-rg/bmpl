@@ -82,6 +82,133 @@ export class SettlementService {
    * calculation/ledger failure records a FAILED settlement + alerts admins and
    * leaves escrow untouched.
    */
+
+  /**
+   * Settle a delivered shipment.
+   *
+   * A shipment has no vendor: the whole price is BML's own service revenue,
+   * split between the drivers who actually carried the parcel and the platform.
+   * The split is NOT invented here — it uses the same `PlatformFeeConfig` the
+   * marketplace already settles by, so changing the driver share changes both.
+   *
+   * One balanced ESCROW_RELEASE moves everything at once, keyed by a reference
+   * unique to the shipment, so the ledger itself makes a second settlement
+   * impossible rather than relying on a status check winning a race.
+   */
+  async settleShipment(shipmentId: string, actorId?: string | null): Promise<{ settled: boolean; reason?: string }> {
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      include: {
+        payment: true,
+        legs: { select: { id: true, kind: true, status: true, priceMinor: true, assignedDriverProfileId: true } },
+      },
+    });
+    if (!shipment) return { settled: false, reason: 'shipment not found' };
+    if (shipment.status !== 'DELIVERED' && shipment.status !== 'AWAITING_COLLECTION') {
+      return { settled: false, reason: `shipment is ${shipment.status}` };
+    }
+
+    const payment = shipment.payment;
+    // Nothing was owed, so there is nothing to settle. A free shipment is not a
+    // failure — it is a shipment the network could not price.
+    if (!payment) return { settled: false, reason: 'shipment has no payment' };
+    if (payment.status === 'SETTLED') return { settled: true };
+    if (payment.status !== 'AUTHORIZED') return { settled: false, reason: `payment is ${payment.status}` };
+
+    const currency = payment.currency;
+    const { config } = await this.ensureConfigRow();
+
+    return this.prisma.$transaction(async (tx) => {
+      const escrow = await this.wallet.ensureSystemAccount('SYSTEM_ESCROW', currency, tx);
+      const platform = await this.wallet.ensureSystemAccount('SYSTEM_PLATFORM_FEES', currency, tx);
+
+      const gross = payment.amountMinor;
+      const lines: Array<{ accountId: string; direction: 'DEBIT' | 'CREDIT'; amountMinor: bigint }> = [
+        { accountId: escrow.id, direction: 'DEBIT', amountMinor: gross },
+      ];
+
+      // One earning per courier leg that a driver actually completed. A leg
+      // nobody drove — a line-haul the carrier flew, or a cancelled leg — earns
+      // nobody anything.
+      let driverTotal = 0n;
+      const earnings: Array<{ id: string }> = [];
+      for (const leg of shipment.legs) {
+        if (leg.kind === 'LINE_HAUL' || leg.status !== 'COMPLETED' || !leg.assignedDriverProfileId) continue;
+
+        const share = (leg.priceMinor * BigInt(config.driverDeliveryFeeBps)) / 10_000n;
+        if (share <= 0n) continue;
+
+        const profile = await tx.driverProfile.findUnique({
+          where: { id: leg.assignedDriverProfileId },
+          select: { userId: true },
+        });
+        if (!profile) continue;
+        const driverAcct = await this.wallet.ensureUserAccount(profile.userId, currency, tx);
+
+        const earning = await tx.driverEarning.create({
+          data: {
+            driverProfileId: leg.assignedDriverProfileId,
+            shipmentLegId: leg.id,
+            currency,
+            method: config.driverEarningMethod,
+            grossMinor: share,
+            adjustmentsMinor: 0n,
+            netMinor: share,
+            status: 'PENDING',
+            snapshot: {
+              legPriceMinor: money(leg.priceMinor),
+              driverDeliveryFeeBps: config.driverDeliveryFeeBps,
+              method: config.driverEarningMethod,
+            } as Prisma.InputJsonValue,
+            calculatedAt: new Date(),
+          },
+          select: { id: true },
+        });
+        earnings.push(earning);
+        lines.push({ accountId: driverAcct.id, direction: 'CREDIT', amountMinor: share });
+        driverTotal += share;
+      }
+
+      // Whatever the drivers did not take is the platform's. Computed as a
+      // remainder rather than as its own percentage, so the transaction balances
+      // exactly and no rounding dust is stranded in escrow.
+      const platformRevenue = gross - driverTotal;
+      if (platformRevenue > 0n) lines.push({ accountId: platform.id, direction: 'CREDIT', amountMinor: platformRevenue });
+
+      const txn = await this.wallet.postTransaction(
+        tx,
+        {
+          type: 'ESCROW_RELEASE',
+          currency,
+          reference: `shipment:${shipment.id}:settle`, // unique → ledger idempotency
+          description: `Settlement for shipment ${shipment.reference}`,
+          lines,
+        },
+        true,
+        shipment.isTest,
+      );
+
+      for (const e of earnings) {
+        await tx.driverEarning.update({ where: { id: e.id }, data: { status: 'POSTED', walletTransactionId: txn.id, postedAt: new Date() } });
+      }
+      await tx.walletHold.updateMany({
+        where: { paymentId: payment.id, status: 'AUTHORIZED' },
+        data: { status: 'RELEASED', releasedAt: new Date(), releaseReason: 'settled' },
+      });
+      await tx.payment.update({ where: { id: payment.id }, data: { status: 'SETTLED' } });
+      await tx.paymentEvent.create({
+        data: { paymentId: payment.id, type: 'STATE_CHANGED', fromStatus: 'AUTHORIZED', toStatus: 'SETTLED' },
+      });
+
+      await this.audit.record({ action: 'ESCROW_RELEASED_SETTLEMENT', actorId: actorId ?? null, newValue: { shipmentId: shipment.id, grossMinor: money(gross), walletTransactionId: txn.id } }, tx);
+      await this.audit.record({ action: 'PLATFORM_FEE_POSTED', actorId: actorId ?? null, newValue: { shipmentId: shipment.id, amountMinor: money(platformRevenue) } }, tx);
+      await this.audit.record({ action: 'PAYMENT_SETTLED', actorId: actorId ?? null, newValue: { paymentId: payment.id, shipmentId: shipment.id } }, tx);
+      await this.audit.record({ action: 'WALLET_TRANSACTION_POSTED', actorId: actorId ?? null, newValue: { walletTransactionId: txn.id, type: 'ESCROW_RELEASE' } }, tx);
+
+      return { settled: true };
+    });
+  }
+
   async settleVendorOrder(vendorOrderId: string, actorId?: string | null): Promise<{ settled: boolean; reason?: string; settlementId?: string }> {
     // Idempotent short-circuit: already POSTED.
     const prior = await this.prisma.vendorSettlement.findUnique({ where: { vendorOrderId } });
@@ -402,7 +529,7 @@ export class SettlementService {
     };
   }
 
-  private shapeEarning(r: { id: string; orderDeliveryId: string; vendorOrderId: string; currency: string; method: string; grossMinor: bigint; adjustmentsMinor: bigint; netMinor: bigint; status: string; calculatedAt: Date; postedAt: Date | null }) {
+  private shapeEarning(r: { id: string; orderDeliveryId: string | null; vendorOrderId: string | null; shipmentLegId?: string | null; currency: string; method: string; grossMinor: bigint; adjustmentsMinor: bigint; netMinor: bigint; status: string; calculatedAt: Date; postedAt: Date | null }) {
     return {
       id: r.id,
       orderDeliveryId: r.orderDeliveryId,

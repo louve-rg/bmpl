@@ -29,6 +29,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { LogisticsNetworkService } from './logistics-network.service';
+import { PaymentsService } from '../payments/payments.service';
+import { SettlementService } from '../settlement/settlement.service';
 import { ShipmentDispatchService } from './shipment-dispatch.service';
 
 /** Minor units go out as numbers; see the note in logistics-network.service.ts. */
@@ -72,6 +74,8 @@ export class ShipmentService {
     private readonly notifications: NotificationsService,
     private readonly network: LogisticsNetworkService,
     private readonly dispatch: ShipmentDispatchService,
+    private readonly payments: PaymentsService,
+    private readonly settlement: SettlementService,
   ) {}
 
   /* -------------------------------------------------------------- quoting */
@@ -225,6 +229,10 @@ export class ShipmentService {
    * to see what was agreed at booking.
    */
   async create(userId: string, input: CreateShipmentInput, isTest?: boolean) {
+    // Booking without paying exists only for the paths that predate shipment
+    // payments; the customer-facing form always pays. An unpaid shipment is
+    // created but never dispatched, so it cannot become work for a driver.
+    const payNow = input.payWithWallet === true;
     // DERIVED from the account, never taken from the request — the same rule
     // checkout already applies to orders. Left as a hard-coded `false`, a
     // shipment booked by a designated test account was filed as real work: it
@@ -297,7 +305,7 @@ export class ShipmentService {
           weightGrams: input.weightGrams ?? null,
           pieces: input.pieces,
           bookedAt: new Date(),
-          legs: { create: plan.legs.map((l) => this.legData(l)) },
+          legs: { create: plan.legs.map((l) => this.legData(l, payNow)) },
         },
         include: SHIPMENT_INCLUDE,
       });
@@ -315,6 +323,27 @@ export class ShipmentService {
         },
       });
 
+      // Money, in the same transaction that created the shipment.
+      //
+      // If the customer cannot afford it the whole thing rolls back and NO
+      // shipment exists — the same guarantee marketplace checkout gives. A
+      // half-booked parcel with an unpayable price is worse than a refusal,
+      // because somebody eventually has to work out what to do with it.
+      if (payNow) {
+        const payment = await this.payments.createForShipment(
+          tx,
+          {
+            id: created.id,
+            reference: created.reference,
+            userId,
+            totalMinor: BigInt(plan.totalMinor),
+            currency: 'BZD',
+          },
+          { userId },
+        );
+        await this.payments.escrowInTx(tx, payment.id, { userId });
+      }
+
       const status = this.statusFrom(created.legs, endsAtHub);
       return tx.shipment.update({ where: { id: created.id }, data: { status }, include: SHIPMENT_INCLUDE });
     });
@@ -328,19 +357,29 @@ export class ShipmentService {
     // If the journey starts at a door, a driver has to go and collect it. Offer
     // that leg now rather than waiting up to twenty seconds for the sweeper —
     // the customer has just pressed Book and is watching the screen.
+    //
+    // Only once it is paid for. An unpaid shipment's legs are left PENDING, so
+    // neither this call nor the sweeper can turn one into a driver's job.
     const firstLeg = shipment.legs.find((l) => l.sequence === 1);
-    if (firstLeg?.kind === 'FIRST_MILE' || firstLeg?.kind === 'DIRECT') await this.dispatch.dispatchLeg(firstLeg.id);
+    if (payNow && (firstLeg?.kind === 'FIRST_MILE' || firstLeg?.kind === 'DIRECT')) {
+      await this.dispatch.dispatchLeg(firstLeg.id);
+    }
 
     return this.serialize(shipment, { audience: 'CUSTOMER' });
   }
 
-  /** The first leg is immediately workable; the rest wait their turn. */
-  private legData(l: PlannedLeg) {
+  /**
+   * The first leg is immediately workable; the rest wait their turn.
+   *
+   * Unless the shipment has not been paid for, in which case nothing is workable
+   * — a driver must never be sent for a parcel nobody has committed money to.
+   */
+  private legData(l: PlannedLeg, paid: boolean) {
     return {
       sequence: l.sequence,
       kind: l.kind,
       mode: l.mode,
-      status: (l.sequence === 1 ? 'READY' : 'PENDING') as LegStatus,
+      status: (l.sequence === 1 && paid ? 'READY' : 'PENDING') as LegStatus,
       originHubId: l.originHubId,
       destinationHubId: l.destinationHubId,
       routeId: l.routeId,
@@ -734,6 +773,16 @@ export class ShipmentService {
     });
 
     await this.notifyCustomer(result);
+
+    // The journey finished, so the money can stop being held. Outside the
+    // transaction above deliberately: settlement posts its own balanced
+    // transaction keyed by a reference unique to the shipment, so a retry is
+    // absorbed by the ledger rather than needing this one to succeed or fail
+    // as a unit with the leg transition.
+    if (result.status === 'DELIVERED' || result.status === 'AWAITING_COLLECTION') {
+      await this.settlement.settleShipment(result.shipmentId, actor.userId);
+    }
+
     const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id: result.shipmentId }, include: SHIPMENT_INCLUDE });
     return this.serialize(fresh, { audience: 'STAFF' });
   }

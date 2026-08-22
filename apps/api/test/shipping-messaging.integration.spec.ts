@@ -104,7 +104,7 @@ const doorToDoor = () => ({
 });
 
 async function book(cookies = customer, body: object = doorToDoor()) {
-  const r = await post(cookies, 'shipping', body);
+  const r = await post(cookies, 'shipping', { ...body, payWithWallet: true });
   expect(r.status).toBe(201);
   return r.body;
 }
@@ -155,6 +155,10 @@ beforeEach(async () => {
   await ctx.prisma.conversation.deleteMany();
   await ctx.prisma.shipmentLegOffer.deleteMany();
   await ctx.prisma.custodyEvent.deleteMany();
+  // Settled legs carry driver earnings, and the earning holds the leg with an
+  // onDelete: Restrict — you should not be able to delete work somebody was
+  // paid for. Clear the earnings first.
+  await ctx.prisma.driverEarning.deleteMany();
   await ctx.prisma.shipmentLeg.deleteMany();
   await ctx.prisma.shipment.deleteMany();
   await ctx.prisma.logisticsRoute.deleteMany();
@@ -164,6 +168,11 @@ beforeEach(async () => {
   await ctx.prisma.driverProfile.deleteMany();
   const c = await registerUser(`msgcust_${uniq()}@example.com`);
   customer = c.cookies;
+  // Shipping takes payment before it dispatches, so the customer needs a
+  // balance. Administrative test credit, not a test-account flag: flagging the
+  // account would make every shipment a TEST shipment, which the dispatch
+  // boundary correctly refuses to offer to the ordinary drivers here.
+  await post(admin, 'admin/wallet/test-credit', { userId: c.userId, amountMinor: 100_000, reason: 'Shipping test fixture.' });
   customerId = c.userId;
   await enableDispatch(true);
   await seedNetwork();
@@ -355,6 +364,8 @@ describe('strangers stay out', () => {
     // Being a driver on the platform is not membership of every parcel's thread.
     const { thread } = await acceptedFirstLeg();
     const otherCustomer = await registerUser(`other_${uniq()}@example.com`);
+    // They book too, so they need a balance like anybody else.
+    await post(admin, 'admin/wallet/test-credit', { userId: otherCustomer.userId, amountMinor: 100_000, reason: 'Shipping test fixture.' });
     const otherDriver = await makeDriver();
     const otherShipment = await book(otherCustomer.cookies);
     const otherFirst = (await legsOf(otherShipment.id)).find((l) => l.kind === 'FIRST_MILE')!;

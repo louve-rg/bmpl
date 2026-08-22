@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
+import { PaymentsModule } from '../payments/payments.module';
+import { SettlementModule } from '../settlement/settlement.module';
 import { DriverModule } from '../driver/driver.module';
 import { DispatchModule } from '../dispatch/dispatch.module';
 import { MessagingModule } from '../messaging/messaging.module';
@@ -20,7 +22,7 @@ import { AdminLogisticsController, ShippingController, ShippingHubsController, S
  * works.
  */
 @Module({
-  imports: [PrismaModule, DriverModule, DispatchModule, MessagingModule],
+  imports: [PrismaModule, DriverModule, DispatchModule, MessagingModule, PaymentsModule, SettlementModule],
   controllers: [ShippingHubsController, ShippingModesController, ShippingController, AdminLogisticsController, DriverShippingController],
   providers: [LogisticsNetworkService, ShipmentService, ShipmentDispatchService, ShipmentDriverService, ShipmentDispatchScheduler],
   exports: [ShipmentService, LogisticsNetworkService, ShipmentDispatchService],

@@ -2070,9 +2070,14 @@ model DriverEarning {
   id                  String              @id @default(cuid())
   driverProfileId     String
   driverProfile       DriverProfile       @relation(fields: [driverProfileId], references: [id], onDelete: Restrict)
-  orderDeliveryId     String              @unique
-  orderDelivery       OrderDelivery       @relation(fields: [orderDeliveryId], references: [id], onDelete: Restrict)
-  vendorOrderId       String
+  // Earned on a marketplace delivery OR on a shipment courier leg. Both are
+  // nullable and unique with a CHECK enforcing exactly one, the same shape
+  // Payment uses, so an earning always points at the work that produced it.
+  orderDeliveryId     String?             @unique
+  orderDelivery       OrderDelivery?      @relation(fields: [orderDeliveryId], references: [id], onDelete: Restrict)
+  shipmentLegId       String?             @unique
+  shipmentLeg         ShipmentLeg?        @relation(fields: [shipmentLegId], references: [id], onDelete: Restrict)
+  vendorOrderId       String?
   settlementId        String?
   settlement          VendorSettlement?   @relation(fields: [settlementId], references: [id], onDelete: SetNull)
   currency            Currency            @default(BZD)
@@ -2493,11 +2498,21 @@ model PaymentMethod {
 
 // One payment per Order (the customer pays for an order). Connected to the wallet
 // via WalletHold + LedgerReference; to vendor orders transitively via Order.
+// A payment for ONE payable thing.
+//
+// `orderId` and `shipmentId` are both nullable and both unique, and a database
+// CHECK enforces that exactly one is set. That keeps a single payment table, a
+// single state machine and a single set of holds and ledger references, while
+// every payment still points at its resource through a real foreign key — a
+// type discriminator plus a loose id string would have thrown away referential
+// integrity to save a column.
 model Payment {
   id               String            @id @default(cuid())
   paymentNumber    String            @unique
-  orderId          String            @unique
-  order            Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId          String?           @unique
+  order            Order?            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shipmentId       String?           @unique
+  shipment         Shipment?         @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
   userId           String
   user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   amountMinor      BigInt // == order.totalMinor
@@ -4381,6 +4396,7 @@ model Shipment {
   @@index([customerUserId, createdAt])
   @@index([status, isTest])
   @@map("shipments")
+  payment Payment?
 }
 
 /// One step of a journey.
@@ -4489,6 +4505,7 @@ model ShipmentLeg {
   // Finding courier work to dispatch: legs whose turn has come and nobody holds.
   @@index([status, kind, courierStatus])
   @@map("shipment_legs")
+  driverEarning DriverEarning?
 }
 
 /// Append-only offer history for a courier leg. The CURRENT offer is
