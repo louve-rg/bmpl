@@ -10,7 +10,11 @@ import { adminCrumbs } from '../../../lib/admin-nav';
 interface PaymentRow {
   id: string;
   paymentNumber: string;
-  orderNumber: string;
+  // A payment belongs to an order OR a shipment; the API says which.
+  resourceType: 'ORDER' | 'SHIPMENT';
+  resourceRef: string | null;
+  orderNumber: string | null;
+  shipmentReference: string | null;
   status: string;
   methodType: string;
   amountMinor: number;
@@ -34,7 +38,7 @@ export default function AdminPaymentsPage() {
 
   return (
     <div>
-      <PageHeader breadcrumbs={adminCrumbs('Payments')} eyebrow="Finance" title="Payments" description="Read-only. Foundation only — no funds move yet (wallet holds are reservations)." />
+      <PageHeader breadcrumbs={adminCrumbs('Payments')} eyebrow="Finance" title="Payments" description="Read-only. Covers marketplace orders and shipments alike — a payment belongs to exactly one of them." />
 
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-slate-500">
@@ -61,7 +65,9 @@ export default function AdminPaymentsPage() {
                 <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-3">
                     <p className="font-medium text-belize-navy">{p.paymentNumber}</p>
-                    <p className="text-xs text-slate-500">Order {p.orderNumber}</p>
+                    <p className="text-xs text-slate-500">
+                      {p.resourceType === 'SHIPMENT' ? 'Shipment' : 'Order'} {p.resourceRef ?? '—'}
+                    </p>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{p.customer}<div className="text-xs text-slate-400">{p.customerEmail}</div></td>
                   <td className="px-4 py-3 text-slate-600">{p.methodType === 'WALLET' ? 'Wallet' : p.methodType}</td>

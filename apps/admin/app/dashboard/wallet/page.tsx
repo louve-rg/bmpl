@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Card, EmptyState, PageHeader, Spinner } from '../../../components/ui';
@@ -20,11 +20,15 @@ export default function AdminWalletPage() {
   const [txns, setTxns] = useState<Txn[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    Promise.all([api.get<Account[]>('/admin/wallet/accounts'), api.get<Txn[]>('/admin/wallet/transactions')])
+  const load = useCallback(() => {
+    return Promise.all([api.get<Account[]>('/admin/wallet/accounts'), api.get<Txn[]>('/admin/wallet/transactions')])
       .then(([a, t]) => { setAccounts(a); setTxns(t); })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
     <div>
@@ -35,7 +39,10 @@ export default function AdminWalletPage() {
         description="Double-entry ledger. The only writes available here are a labelled test credit and releasing holds that were never authorized — no balance can be set."
       />
 
-      <WalletOperations onChanged={() => window.location.reload()} />
+      {/* Refresh the tables, do NOT reload the page: a reload threw away the
+          confirmation the operator had just been given, so a posted credit
+          looked like it had done nothing. */}
+      <WalletOperations onChanged={() => void load()} />
 
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-slate-500">
