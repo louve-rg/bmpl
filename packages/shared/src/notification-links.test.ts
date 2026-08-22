@@ -136,15 +136,15 @@ describe('multi-leg shipping', () => {
     // ready-to-collect all open the same page, not a page per leg.
     for (const event of ['SHIPMENT_STATUS', 'SHIPMENT_COURIER']) {
       expect(
-        notificationHref({ category: 'DELIVERY', event, data: { shipmentId: 's1', reference: 'BMPL-ABCD2345' } }, 'CUSTOMER'),
-      ).toBe('/dashboard/shipments/BMPL-ABCD2345');
+        notificationHref({ category: 'DELIVERY', event, data: { shipmentId: 's1', reference: 'BML-ABCD2345' } }, 'CUSTOMER'),
+      ).toBe('/dashboard/shipments/BML-ABCD2345');
     }
   });
 
   it('opens the driver on their own leg, not the shipment', () => {
     expect(
       notificationHref(
-        { category: 'DELIVERY', event: 'SHIPMENT_LEG_OFFERED', data: { driverJobId: 'leg1', jobKind: 'FIRST_MILE', reference: 'BMPL-ABCD2345' } },
+        { category: 'DELIVERY', event: 'SHIPMENT_LEG_OFFERED', data: { driverJobId: 'leg1', jobKind: 'FIRST_MILE', reference: 'BML-ABCD2345' } },
         'DRIVER',
       ),
     ).toBe('/dashboard/driver/shipping/leg1');
@@ -159,8 +159,8 @@ describe('multi-leg shipping', () => {
   });
 
   it('escapes a reference rather than trusting it into a URL', () => {
-    expect(notificationHref({ data: { reference: 'BMPL /../x' } }, 'CUSTOMER')).toBe(
-      '/dashboard/shipments/BMPL%20%2F..%2Fx',
+    expect(notificationHref({ data: { reference: 'BML /../x' } }, 'CUSTOMER')).toBe(
+      '/dashboard/shipments/BML%20%2F..%2Fx',
     );
   });
 });

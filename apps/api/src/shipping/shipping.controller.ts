@@ -116,7 +116,7 @@ export class ShippingController {
 /**
  * Operating the network.
  *
- * Line-haul legs are flown and sailed by carriers BMPL does not employ, so there
+ * Line-haul legs are flown and sailed by carriers BML does not employ, so there
  * is no driver app to transition them — an operator confirms what the carrier
  * did. Everything here is permission-gated and audited.
  */

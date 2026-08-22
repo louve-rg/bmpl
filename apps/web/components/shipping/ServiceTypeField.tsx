@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { SHIPPING_SERVICES, SHIPPING_SERVICE_LABELS, type ShippingService } from '@bmpl/shared';
 
 /**
- * Choosing how far BMPL carries the parcel.
+ * Choosing how far BML carries the parcel.
  *
  * A select rather than four cards: the four options are one decision with one
  * answer, and four large tiles push the rest of the form — the addresses, the
@@ -22,13 +22,13 @@ import { SHIPPING_SERVICES, SHIPPING_SERVICE_LABELS, type ShippingService } from
  */
 const EXPLANATIONS: Record<ShippingService, string> = {
   DOOR_TO_DOOR:
-    'We collect the shipment from the pickup address and deliver it to the final destination. If air, sea or hub transfers are required, BMPL coordinates those steps as part of the same shipment.',
+    'We collect the shipment from the pickup address and deliver it to the final destination. If air, sea or hub transfers are required, BML coordinates those steps as part of the same shipment.',
   DOOR_TO_HUB:
     'We collect the shipment from the pickup address and transport it to the selected destination hub, where the recipient can collect it.',
   HUB_TO_HUB:
-    'Drop the shipment at the origin hub. BMPL transports it to the destination hub for collection.',
+    'Drop the shipment at the origin hub. BML transports it to the destination hub for collection.',
   HUB_TO_DOOR:
-    'Drop the shipment at the origin hub. BMPL transports it to the destination area and completes delivery to the recipient’s address.',
+    'Drop the shipment at the origin hub. BML transports it to the destination area and completes delivery to the recipient’s address.',
 };
 
 /** The order a customer thinks about them, not the order the enum declares. */

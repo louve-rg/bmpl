@@ -28,7 +28,7 @@ const leg = (over: Partial<ShipmentLegView> = {}): ShipmentLegView => ({
 
 const shipment = (over: Partial<ShipmentView> = {}): ShipmentView => ({
   id: 's1',
-  reference: 'BMPL-ABCD2345',
+  reference: 'BML-ABCD2345',
   service: 'DOOR_TO_DOOR',
   serviceLabel: 'Door to door',
   status: 'IN_TRANSIT',

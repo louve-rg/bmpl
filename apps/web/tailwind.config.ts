@@ -29,14 +29,14 @@ const config: Config = {
         'belize-hero': 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #3b82f6 100%)',
         'belize-accent': 'linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%)',
       },
-      // BMPL radius scale (source of truth: landing cards use 16–24px).
+      // BML radius scale (source of truth: landing cards use 16–24px).
       borderRadius: {
         'bmpl-sm': '8px',
         'bmpl-md': '12px',
         'bmpl-lg': '16px',
         'bmpl-xl': '24px',
       },
-      // BMPL elevation scale — soft, premium, low-spread shadows.
+      // BML elevation scale — soft, premium, low-spread shadows.
       boxShadow: {
         glow: '0 0 24px rgba(96, 165, 250, 0.35)',
         'bmpl-sm': '0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06)',

@@ -56,7 +56,7 @@ export function EnquiryForm({ listingId, slug }: { listingId: string; slug: stri
 
   if (enquiryId) {
     return (
-      <Alert tone="success" title="Enquiry sent">
+      <Alert tone="success" title="Inquiry sent">
         <p>The lister has been notified. Continue the conversation in your inbox.</p>
         <Button size="sm" variant="outline" className="mt-2" onClick={openConversation}>
           Open conversation
@@ -68,7 +68,7 @@ export function EnquiryForm({ listingId, slug }: { listingId: string; slug: stri
   return (
     <form onSubmit={submit} className="space-y-3">
       {error && <Alert tone="error">{error}</Alert>}
-      <Field label="Enquiry type">
+      <Field label="Inquiry type">
         <Select value={type} onChange={(e) => setType(e.target.value as PropertyEnquiryType)}>
           {PROPERTY_ENQUIRY_TYPES.map((t) => (
             <option key={t} value={t}>

@@ -143,10 +143,10 @@ export class MessagingService {
         where: { id: contextId },
         include: { listing: { include: { ownerProfile: { select: { userId: true } }, agentProfile: { select: { userId: true } } } } },
       });
-      if (!enq) throw new NotFoundException('Enquiry not found.');
+      if (!enq) throw new NotFoundException('Inquiry not found.');
       // The lister is the assigned agent when present, otherwise the owner.
       const listerUserId = enq.listing.agentProfile?.userId ?? enq.listing.ownerProfile.userId;
-      return { enquirerUserId: enq.enquirerId, listerUserId, label: `Enquiry · ${enq.listing.title}` };
+      return { enquirerUserId: enq.enquirerId, listerUserId, label: `Inquiry · ${enq.listing.title}` };
     }
     // SUPPORT_CASE / ORDER — parties are recorded as participants directly.
     return { label: 'Support' };
@@ -246,7 +246,7 @@ export class MessagingService {
   async openPropertyEnquiry(actor: Actor, enquiryId: string) {
     if (actor.status && actor.status !== 'ACTIVE') throw new ForbiddenException('Your account cannot start conversations.');
     const p = await this.resolveParties('PROPERTY_ENQUIRY', enquiryId);
-    if (actor.userId !== p.enquirerUserId && actor.userId !== p.listerUserId) throw new NotFoundException('Enquiry not found.');
+    if (actor.userId !== p.enquirerUserId && actor.userId !== p.listerUserId) throw new NotFoundException('Inquiry not found.');
     const conv = await this.ensureConversation('PROPERTY_ENQUIRY', enquiryId, 'LISTER_ENQUIRER', actor.userId, p.label, [
       { userId: p.enquirerUserId!, role: 'ENQUIRER' },
       { userId: p.listerUserId!, role: 'LISTER' },

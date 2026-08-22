@@ -93,14 +93,14 @@ const EMPLOYER_NAV: NavItem[] = [
 
 const REALESTATE_NAV: NavItem[] = [
   { label: 'Saved Properties', href: '/dashboard/properties/saved', icon: HEART_ICON },
-  { label: 'My Enquiries', href: '/dashboard/properties/enquiries', icon: CHAT_ICON },
+  { label: 'My Inquiries', href: '/dashboard/properties/enquiries', icon: CHAT_ICON },
   { label: 'My Viewings', href: '/dashboard/properties/viewings', icon: CALENDAR_ICON },
 ];
 
 const PROPERTY_OWNER_NAV: NavItem[] = [
   { label: 'Owner Profile', href: '/dashboard/property-owner/profile', icon: PERSON_ICON },
   { label: 'My Listings', href: '/dashboard/property-owner/listings', icon: HOME_ICON },
-  { label: 'Enquiries', href: '/dashboard/property-owner/enquiries', icon: CHAT_ICON },
+  { label: 'Inquiries', href: '/dashboard/property-owner/enquiries', icon: CHAT_ICON },
   { label: 'Viewings', href: '/dashboard/property-owner/viewings', icon: CALENDAR_ICON },
   { label: 'Analytics', href: '/dashboard/property-owner/analytics', icon: CHART_ICON },
 ];
@@ -110,7 +110,7 @@ const AGENT_NAV: NavItem[] = [
   { label: 'Agency', href: '/dashboard/real-estate-agent/agency', icon: BUILDING_ICON },
   { label: 'Assignments', href: '/dashboard/real-estate-agent/assignments', icon: DOC_ICON },
   { label: 'Listings', href: '/dashboard/real-estate-agent/listings', icon: HOME_ICON },
-  { label: 'Enquiries', href: '/dashboard/real-estate-agent/enquiries', icon: CHAT_ICON },
+  { label: 'Inquiries', href: '/dashboard/real-estate-agent/enquiries', icon: CHAT_ICON },
   { label: 'Viewings', href: '/dashboard/real-estate-agent/viewings', icon: CALENDAR_ICON },
   { label: 'Analytics', href: '/dashboard/real-estate-agent/analytics', icon: CHART_ICON },
 ];

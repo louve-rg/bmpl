@@ -49,7 +49,7 @@ export class PropertyEnquiriesService {
   async createEnquiry(actor: Actor, dto: CreateEnquiryInput) {
     if (actor.status && actor.status !== 'ACTIVE') throw new ForbiddenException('Your account cannot send enquiries.');
     const { listing, listerUserId } = await this.liveListing(dto.listingId);
-    if (listerUserId === actor.userId) throw new BadRequestException('You cannot enquire about your own listing.');
+    if (listerUserId === actor.userId) throw new BadRequestException('You cannot inquire about your own listing.');
     const enquiry = await this.prisma.propertyEnquiry.create({
       data: {
         listingId: dto.listingId,
@@ -62,8 +62,8 @@ export class PropertyEnquiriesService {
       },
     });
     await this.audit.record({ action: 'PROPERTY_ENQUIRY_CREATED', actorId: actor.userId, newValue: { enquiryId: enquiry.id, listingId: dto.listingId } });
-    await this.notifications.createInApp({ userId: listerUserId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'New enquiry', body: `New enquiry about "${listing.title}".`, data: { enquiryId: enquiry.id, listingId: dto.listingId } });
-    await this.messaging.postPropertyEnquirySystem(enquiry.id, listerUserId, actor.userId, `Enquiry about "${listing.title}": ${dto.message.slice(0, 200)}`);
+    await this.notifications.createInApp({ userId: listerUserId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'New enquiry', body: `New inquiry about "${listing.title}".`, data: { enquiryId: enquiry.id, listingId: dto.listingId } });
+    await this.messaging.postPropertyEnquirySystem(enquiry.id, listerUserId, actor.userId, `Inquiry about "${listing.title}": ${dto.message.slice(0, 200)}`);
     return this.getMineEnquiry(actor.userId, enquiry.id);
   }
 
@@ -79,7 +79,7 @@ export class PropertyEnquiriesService {
 
   async getMineEnquiry(userId: string, enquiryId: string) {
     const e = await this.prisma.propertyEnquiry.findFirst({ where: { id: enquiryId, enquirerId: userId }, include: { listing: { select: { title: true, slug: true, reference: true, status: true } } } });
-    if (!e) throw new NotFoundException('Enquiry not found.');
+    if (!e) throw new NotFoundException('Inquiry not found.');
     return this.enquiryDetail(e);
   }
 
@@ -93,7 +93,7 @@ export class PropertyEnquiriesService {
   // ===========================================================================
   private async requireListerEnquiry(actor: Actor, enquiryId: string) {
     const e = await this.prisma.propertyEnquiry.findUnique({ where: { id: enquiryId }, include: { listing: { select: { id: true, title: true } } } });
-    if (!e) throw new NotFoundException('Enquiry not found.');
+    if (!e) throw new NotFoundException('Inquiry not found.');
     await this.properties.requireManageable(actor, e.listingId); // throws 404 unless owner/accepted-agent
     return e;
   }
@@ -133,7 +133,7 @@ export class PropertyEnquiriesService {
     const e = await this.requireListerEnquiry(actor, enquiryId);
     await this.prisma.propertyEnquiry.update({ where: { id: enquiryId }, data: { status: 'CLOSED', closedAt: new Date() } });
     await this.audit.record({ action: 'PROPERTY_ENQUIRY_UPDATED', actorId: actor.userId, newValue: { enquiryId, action: 'CLOSE' } });
-    await this.notifications.createInApp({ userId: e.enquirerId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'Enquiry closed', body: `Your enquiry about "${e.listing.title}" was closed.`, data: { enquiryId } });
+    await this.notifications.createInApp({ userId: e.enquirerId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'Inquiry closed', body: `Your inquiry about "${e.listing.title}" was closed.`, data: { enquiryId } });
     return this.listerGetEnquiry(actor, enquiryId);
   }
 

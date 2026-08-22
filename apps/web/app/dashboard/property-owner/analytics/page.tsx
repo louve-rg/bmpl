@@ -47,7 +47,7 @@ export default function OwnerAnalyticsPage() {
           { label: 'Active listings', value: data.activeListings },
           { label: 'Total views', value: data.totalViews },
           { label: 'Saves', value: data.saves },
-          { label: 'Enquiries', value: data.enquiries },
+          { label: 'Inquiries', value: data.enquiries },
           { label: 'Viewing requests', value: data.viewingRequests },
         ]}
         byStatus={data.byStatus}

@@ -1706,7 +1706,7 @@ function AnalyticsTab() {
     { label: 'Open reports', value: num(data.reported) },
     { label: 'For sale', value: num(data.forSale) },
     { label: 'For rent', value: num(data.forRent) },
-    { label: 'Enquiries', value: num(data.enquiries) },
+    { label: 'Inquiries', value: num(data.enquiries) },
     { label: 'Viewings', value: num(data.viewingRequests) },
     { label: 'Active owners', value: num(data.activeOwners) },
     { label: 'Active agents', value: num(data.activeAgents) },

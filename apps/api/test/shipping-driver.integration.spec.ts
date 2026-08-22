@@ -361,9 +361,14 @@ describe('every service type, end to end', () => {
     expect(done.status).toBe('DELIVERED');
   });
 
-  it('local marketplace delivery is not routed through any of this', async () => {
-    // The regression that matters most, asserted from the shipping side too:
-    // nothing here writes a shipment for an ordinary delivery.
+  it('quoting a local door-to-door parcel writes nothing', async () => {
+    // A local door-to-door booking is now a real shipment with a single courier
+    // leg — it used to be refused outright, which is what produced "there is no
+    // terminal serving Belize City" for a journey that has no terminal in it.
+    //
+    // The invariant this test actually protects is unchanged and still worth
+    // asserting: asking for a PRICE must not create anything. An ordinary
+    // marketplace delivery still never becomes a shipment.
     await makeDriver();
     const before = await ctx.prisma.shipment.count();
     const r = await post(customer, 'shipping/quote', {
@@ -371,7 +376,8 @@ describe('every service type, end to end', () => {
       origin: { district: 'BELIZE', city: 'Belize City' },
       destination: { district: 'BELIZE', city: 'Belize City' },
     });
-    expect(r.body.reason).toBe('LOCAL_DELIVERY');
+    expect(r.body.available).toBe(true);
+    expect(r.body.legs.map((l: { kind: string }) => l.kind)).toEqual(['DIRECT']);
     expect(await ctx.prisma.shipment.count()).toBe(before);
   });
 });

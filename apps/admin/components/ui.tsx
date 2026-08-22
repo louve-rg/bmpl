@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { ComponentProps, ReactNode } from 'react';
 
 /**
- * BMPL shared UI primitives (admin). Kept token-identical to
+ * BML shared UI primitives (admin). Kept token-identical to
  * apps/web/components/ui.tsx so both surfaces render one brand. Consolidating
  * these into a single @bmpl/ui React package is the recommended follow-up (see
  * docs/design/BMPL-THEME-AUDIT.md — deferred to avoid changing the live build

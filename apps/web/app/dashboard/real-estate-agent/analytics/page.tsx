@@ -46,7 +46,7 @@ export default function AgentAnalyticsPage() {
           { label: 'Assigned listings', value: data.assignedListings },
           { label: 'Active listings', value: data.activeListings },
           { label: 'Total views', value: data.totalViews },
-          { label: 'Enquiries', value: data.enquiries },
+          { label: 'Inquiries', value: data.enquiries },
           { label: 'Viewing requests', value: data.viewingRequests },
           { label: 'Pending assignments', value: data.pendingAssignments },
         ]}

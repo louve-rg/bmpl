@@ -8,7 +8,7 @@ export function BusinessMarketingGate() {
     <div className="mx-auto max-w-2xl">
       <EmptyState
         title="Business access required"
-        description="Marketing tools are for businesses on BMPL. Become a vendor, employer, agency/agent, or property owner to promote your store, products, jobs, or listings. Once approved, your marketing tools appear here."
+        description="Marketing tools are for businesses on BML. Become a vendor, employer, agency/agent, or property owner to promote your store, products, jobs, or listings. Once approved, your marketing tools appear here."
         action={<ButtonLink href="/dashboard/roles">Apply to become a business</ButtonLink>}
       />
     </div>

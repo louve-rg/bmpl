@@ -270,7 +270,7 @@ function ExpandedDetail({ earning: e }: { earning: Earning }) {
               <Row label="Flat component">{money(detail.snapshot.driverFlatMinor, e.currency)}</Row>
             )}
             <p className="pt-2 text-xs text-slate-400">
-              Driver-earning rates are configurable platform fee rates set by BMPL.
+              Driver-earning rates are configurable platform fee rates set by BML.
             </p>
           </dl>
         ) : (

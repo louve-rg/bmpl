@@ -129,7 +129,7 @@ export default function ShippingAndDeliveryPage() {
               </p>
             </Card>
             <Card className="p-6">
-              <h3 className="font-semibold text-belize-navy">Selling on BMPL?</h3>
+              <h3 className="font-semibold text-belize-navy">Selling on BML?</h3>
               <p className="mt-1.5 text-sm text-slate-600">
                 Stores set their own delivery area and fee, mark orders ready when packed, and a
                 driver is found automatically.

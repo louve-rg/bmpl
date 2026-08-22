@@ -1,7 +1,7 @@
 import { api } from './api';
 
 /**
- * The BMPL wallet, from the customer's side.
+ * The BML wallet, from the customer's side.
  *
  * Three numbers that have to add up and mean what they say — available is what
  * can be spent now, on hold is committed to orders in flight, total is the two

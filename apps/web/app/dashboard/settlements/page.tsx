@@ -289,7 +289,7 @@ function ExpandedDetail({ settlement: s }: { settlement: Settlement }) {
               <BreakdownRow label="Driver delivery share">{(detail.snapshot.config.driverDeliveryFeeBps / 100).toFixed(2)}%</BreakdownRow>
             )}
             <p className="pt-2 text-xs text-slate-400">
-              Commission and driver-share rates are configurable platform fee rates set by BMPL.
+              Commission and driver-share rates are configurable platform fee rates set by BML.
             </p>
           </dl>
         ) : (

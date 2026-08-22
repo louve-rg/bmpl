@@ -93,6 +93,7 @@ export function LocationPicker({
   district,
   heading,
   hint,
+  autoLocateAddress,
 }: {
   value: Coordinates | null;
   onChange: (next: Coordinates | null) => void;
@@ -105,6 +106,15 @@ export function LocationPicker({
   heading?: string;
   /** Explanatory line under the heading. Defaults to the customer wording. */
   hint?: string;
+  /**
+   * Look the typed address up automatically and drop a provisional pin.
+   *
+   * For forms where seeing the address on a map IS the point, rather than an
+   * optional extra. The pin is still provisional and still draggable — this only
+   * removes the step of asking the customer to press a button to see something
+   * we could have shown them.
+   */
+  autoLocateAddress?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletNS.Map | null>(null);
@@ -326,6 +336,22 @@ export function LocationPicker({
       });
     }
   }, [address, district, place]);
+
+  /**
+   * Put the typed address on the map without being asked.
+   *
+   * Debounced, and only while the customer has not placed a pin of their own —
+   * re-geocoding after somebody has dragged the pin where they want it would
+   * throw their answer away and replace it with a guess.
+   */
+  useEffect(() => {
+    if (!autoLocateAddress) return;
+    if (value) return;
+    const q = (address ?? '').trim();
+    if (q.length < 4) return;
+    const t = setTimeout(() => void findAddress(), 700);
+    return () => clearTimeout(t);
+  }, [autoLocateAddress, address, district, value, findAddress]);
 
   /** GPS. Every failure path ends with the customer still able to continue. */
   const useCurrentLocation = useCallback(() => {

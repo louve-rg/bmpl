@@ -76,7 +76,7 @@ export default function WalletPage() {
     <>
       <Header />
       <main className="container-bmpl py-10">
-        <PageHeader title="Wallet" description="Your BMPL balance, what is committed to orders, and everything that has moved." />
+        <PageHeader title="Wallet" description="Your BML balance, what is committed to orders, and everything that has moved." />
 
         {state === 'loading' && (
           <div className="mt-8 flex items-center gap-2 text-sm text-slate-500">

@@ -57,7 +57,7 @@ export default function PromotionsListPage() {
       {items.length === 0 ? (
         <EmptyState
           title="No promotions yet"
-          description="Create a promotion to feature your store, products, jobs, or listings across BMPL."
+          description="Create a promotion to feature your store, products, jobs, or listings across BML."
           action={<ButtonLink href="/dashboard/business/marketing/promotions/new">New promotion</ButtonLink>}
         />
       ) : (

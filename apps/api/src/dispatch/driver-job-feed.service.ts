@@ -192,7 +192,7 @@ export class DriverJobFeedService {
     const routable = items.filter((i) => i.routable);
     const route = recommendRoute(
       routable.map((i) => ({ id: i.job.id, location: i.stop, manualPosition: i.job.queuePosition })),
-      // BMPL has no live driver GPS. The home district is the best legitimate
+      // BML has no live driver GPS. The home district is the best legitimate
       // proxy for a starting point, and it is the driver's own data.
       profile?.homeDistrict ? { district: profile.homeDistrict } : null,
     );

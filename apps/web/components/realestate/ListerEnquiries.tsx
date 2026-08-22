@@ -54,7 +54,7 @@ export function EnquiriesInbox({
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <PageHeader eyebrow={eyebrow} title="Enquiries" description="Enquiries received on your listings." />
+      <PageHeader eyebrow={eyebrow} title="Inquiries" description="Inquiries received on your listings." />
       {error && <Alert tone="error">{error}</Alert>}
 
       {items === null && !error ? (
@@ -62,7 +62,7 @@ export function EnquiriesInbox({
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       ) : items && items.length === 0 ? (
-        <EmptyState title="No enquiries yet" description="Enquiries about your listings will appear here." />
+        <EmptyState title="No inquiries yet" description="Inquiries about your listings will appear here." />
       ) : (
         <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
           <table className="w-full min-w-[40rem] text-left text-sm">
@@ -129,7 +129,7 @@ export function EnquiryThread({
     } catch (e) {
       const err = e as ApiError;
       if (err.status === 403) onForbidden();
-      else setError(err.status === 404 ? 'Enquiry not found.' : err.message ?? 'Failed to load.');
+      else setError(err.status === 404 ? 'Inquiry not found.' : err.message ?? 'Failed to load.');
     } finally {
       setLoading(false);
     }
@@ -166,7 +166,7 @@ export function EnquiryThread({
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <Link href={listPath} className="text-sm font-medium text-belize-blue hover:underline">
-        ← Enquiries
+        ← Inquiries
       </Link>
 
       {loading ? (
@@ -191,7 +191,7 @@ export function EnquiryThread({
             <Badge tone={ENQUIRY_STATUS_TONE[enquiry.status]}>{enquiryStatusLabel(enquiry.status)}</Badge>
             {enquiry.status !== 'CLOSED' && (
               <Button size="sm" variant="ghost" onClick={close}>
-                Close enquiry
+                Close inquiry
               </Button>
             )}
           </div>

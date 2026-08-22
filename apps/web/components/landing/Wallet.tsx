@@ -94,7 +94,7 @@ function WalletDashboard() {
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-belize-navy via-[#123a7a] to-belize-blue p-5 text-white">
         <div className="pointer-events-none absolute -right-10 -top-12 h-36 w-36 rounded-full bg-white/15 blur-2xl" aria-hidden />
         <div className="relative flex items-center justify-between">
-          <span className="text-xs font-medium uppercase tracking-wide text-white/70">BMPL Wallet</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-white/70">BML Wallet</span>
           <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-white/70" aria-hidden><path d="M6 8a8 8 0 0 1 0 8M9.5 6a12 12 0 0 1 0 12M13 4a16 16 0 0 1 0 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
         </div>
         <p className="relative mt-4 text-[11px] text-white/60">Available balance</p>

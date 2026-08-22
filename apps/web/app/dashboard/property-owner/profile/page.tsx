@@ -65,7 +65,7 @@ export default function OwnerProfilePage() {
       <PageHeader
         eyebrow="Property owner"
         title="Owner profile"
-        description="Your contact details as they appear to enquirers and assigned agents."
+        description="Your contact details as they appear to inquirers and assigned agents."
         actions={
           <ButtonLink href="/dashboard/property-owner/listings" size="sm" variant="outline">
             My listings

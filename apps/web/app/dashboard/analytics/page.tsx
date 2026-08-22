@@ -119,7 +119,7 @@ export default function VendorAnalyticsPage() {
 
       {!loading && forbidden && (
         <Alert tone="warning" title="Vendor access required">
-          Analytics are only available to approved vendor accounts. Want to sell on BMPL?{' '}
+          Analytics are only available to approved vendor accounts. Want to sell on BML?{' '}
           <a href="/sell" className="font-semibold text-belize-blue hover:underline">
             Become a vendor
           </a>

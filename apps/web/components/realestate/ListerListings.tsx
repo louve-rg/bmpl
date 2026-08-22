@@ -94,7 +94,7 @@ export function ListerListings({
                 <th className="px-4 py-3">Listing</th>
                 <th className="px-4 py-3">Price</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Enquiries</th>
+                <th className="px-4 py-3">Inquiries</th>
                 <th className="px-4 py-3">Viewings</th>
                 <th className="px-4 py-3">Updated</th>
               </tr>

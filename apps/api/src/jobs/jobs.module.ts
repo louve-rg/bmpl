@@ -15,7 +15,7 @@ import { EmployerController } from './employer.controller';
 import { AdminJobsController } from './admin-jobs.controller';
 
 /**
- * Belize Connect — Jobs & Employment (Phase 5 · M24). Reuses the BMPL account,
+ * Belize Connect — Jobs & Employment (Phase 5 · M24). Reuses the BML account,
  * JOB_SEEKER/EMPLOYER roles + role-application approval, private R2 storage, M16
  * notifications, M17 messaging (JOB_APPLICATION context), moderation, and analytics.
  * Storage/Audit/Notifications are @Global(); MessagingModule is imported for the

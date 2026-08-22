@@ -1,5 +1,5 @@
 /**
- * Canonical role catalog for BMPL.
+ * Canonical role catalog for BML.
  *
  * A single user account can hold MANY of these roles simultaneously, each as an
  * independent `UserRole` record with its own status. These string codes are the

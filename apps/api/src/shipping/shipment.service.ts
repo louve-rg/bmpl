@@ -165,8 +165,8 @@ export class ShipmentService {
   /**
    * What the door legs cost, read from the hub the door attaches to.
    *
-   * A door leg is a BMPL courier run between a terminal and an address in its
-   * town, and what BMPL charges for that is the owner's decision, configured per
+   * A door leg is a BML courier run between a terminal and an address in its
+   * town, and what BML charges for that is the owner's decision, configured per
    * hub. This code reads the number; it does not decide it.
    */
   private async courierFees(
@@ -259,7 +259,10 @@ export class ShipmentService {
           destinationHubId,
           originName: input.origin.name ?? null,
           originPhone: input.origin.phone ?? null,
+          originEmail: input.origin.email ?? null,
+          originCompany: input.origin.company ?? null,
           originAddress: input.origin.address ?? null,
+          originAddress2: input.origin.address2 ?? null,
           originCity: input.origin.city ?? null,
           originDistrict: input.origin.district ?? null,
           originLatitude: input.origin.latitude ?? null,
@@ -267,7 +270,10 @@ export class ShipmentService {
           originInstructions: input.origin.instructions ?? null,
           destinationName: input.destination.name ?? null,
           destinationPhone: input.destination.phone ?? null,
+          destinationEmail: input.destination.email ?? null,
+          destinationCompany: input.destination.company ?? null,
           destinationAddress: input.destination.address ?? null,
+          destinationAddress2: input.destination.address2 ?? null,
           destinationCity: input.destination.city ?? null,
           destinationDistrict: input.destination.district ?? null,
           destinationLatitude: input.destination.latitude ?? null,
@@ -344,7 +350,7 @@ export class ShipmentService {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1
     for (let attempt = 0; attempt < 8; attempt++) {
       const body = Array.from({ length: 8 }, () => alphabet[randomInt(0, alphabet.length)]).join('');
-      // New references use the current abbreviation. Existing BMPL- references
+      // New references use the current abbreviation. Existing BML- references
       // stay valid: tracking looks a reference up, it never parses the prefix.
       const reference = `BML-${body}`;
       if (!(await tx.shipment.findUnique({ where: { reference }, select: { id: true } }))) return reference;
@@ -471,7 +477,7 @@ export class ShipmentService {
       legId: l.id,
       reference: l.shipment.reference,
       kind: l.kind,
-      // Who is bringing it: a BMPL driver on a first mile, a carrier on a flight.
+      // Who is bringing it: a BML driver on a first mile, a carrier on a flight.
       broughtBy: l.assignedDriver?.displayName ?? l.carrierName ?? 'Carrier',
       contactPhone: l.assignedDriver?.phone ?? null,
       from: l.originHub?.name ?? 'Door collection',

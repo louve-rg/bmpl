@@ -28,7 +28,7 @@ export default function EnquiryDetailPage() {
       setError(null);
     } catch (e) {
       const err = e as ApiError;
-      setError(err.status === 404 ? 'Enquiry not found.' : err.message ?? 'Failed to load.');
+      setError(err.status === 404 ? 'Inquiry not found.' : err.message ?? 'Failed to load.');
     } finally {
       setLoading(false);
     }
@@ -50,7 +50,7 @@ export default function EnquiryDetailPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <Link href="/dashboard/properties/enquiries" className="text-sm font-medium text-belize-blue hover:underline">
-        ← My enquiries
+        ← My inquiries
       </Link>
 
       {loading ? (

@@ -38,14 +38,14 @@ export function PropertyContactPanel({ listingId, slug }: { listingId: string; s
       <Card className="space-y-3 p-5">
         <p className="bmpl-eyebrow">Interested?</p>
         <p className="text-sm text-slate-600">
-          Sign in to enquire about this property or request a viewing.
+          Sign in to inquire about this property or request a viewing.
         </p>
         <ButtonLink
           href={`/login?next=${encodeURIComponent(`/properties/${slug}`)}`}
           size="lg"
           className="w-full"
         >
-          Sign in to enquire
+          Sign in to inquire
         </ButtonLink>
       </Card>
     );
@@ -54,7 +54,7 @@ export function PropertyContactPanel({ listingId, slug }: { listingId: string; s
   return (
     <>
       <Card className="space-y-3 p-5">
-        <p className="bmpl-eyebrow">Enquire</p>
+        <p className="bmpl-eyebrow">Inquire</p>
         <EnquiryForm listingId={listingId} slug={slug} />
       </Card>
       <Card className="space-y-3 p-5">

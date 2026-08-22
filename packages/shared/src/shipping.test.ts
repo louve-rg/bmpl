@@ -35,7 +35,7 @@ describe('service types', () => {
     }
   });
 
-  it('knows which ends BMPL is responsible for', () => {
+  it('knows which ends BML is responsible for', () => {
     expect([needsFirstMile('DOOR_TO_DOOR'), needsLastMile('DOOR_TO_DOOR')]).toEqual([true, true]);
     expect([needsFirstMile('DOOR_TO_HUB'), needsLastMile('DOOR_TO_HUB')]).toEqual([true, false]);
     expect([needsFirstMile('HUB_TO_DOOR'), needsLastMile('HUB_TO_DOOR')]).toEqual([false, true]);

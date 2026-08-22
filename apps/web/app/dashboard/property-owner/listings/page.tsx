@@ -16,7 +16,7 @@ export default function OwnerListingsPage() {
       description="Create, submit, and manage your property listings."
       detailBase="/dashboard/property-owner/listings"
       newHref="/dashboard/property-owner/listings/new"
-      emptyDescription="Create a listing to start receiving enquiries and viewing requests."
+      emptyDescription="Create a listing to start receiving inquiries and viewing requests."
       onForbidden={() => setForbidden(true)}
     />
   );

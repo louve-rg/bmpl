@@ -19,7 +19,7 @@ import { AdminPropertiesController } from './admin-properties.controller';
 /**
  * Real Estate (Phase 6 · M25). Owner/agent/agency listings, moderation before public,
  * discovery, saved/recently-viewed, enquiries + viewing requests (with the M17
- * PROPERTY_ENQUIRY messaging context), reporting, and analytics. Reuses the BMPL
+ * PROPERTY_ENQUIRY messaging context), reporting, and analytics. Reuses the BML
  * account, PROPERTY_OWNER/REAL_ESTATE_AGENT roles + role-application approval, public +
  * private R2 storage, M16 notifications, and moderation. Storage/Audit/Notifications are
  * @Global(); MessagingModule is imported for the lister↔enquirer thread.

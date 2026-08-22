@@ -50,7 +50,7 @@ export default function MarketingOverviewPage() {
       <PageHeader
         eyebrow="Marketing"
         title="Marketing overview"
-        description="Promote your business across BMPL and track how your promotions perform."
+        description="Promote your business across BML and track how your promotions perform."
       />
 
       <div className="grid gap-4 sm:grid-cols-3">

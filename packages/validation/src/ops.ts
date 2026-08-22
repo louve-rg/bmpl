@@ -22,6 +22,10 @@ export const updatePlatformSettingsSchema = z
     // without waiting for a deploy. Bounds are deliberately narrow: a 1-second
     // offer timeout or a 500-deep retry budget would be an outage, not a setting.
     dispatchAutomatic: z.boolean().optional(),
+  // What a same-district door-to-door courier run costs. Zero means "not
+  // priced", and the quote says so rather than quoting the journey as free.
+  localCourierFeeMinor: z.number().int().min(0).max(1_000_000).optional(),
+  localCourierMinutes: z.number().int().min(0).max(24 * 60).optional(),
     dispatchOfferTimeoutSeconds: z.number().int().min(30).max(600).optional(),
     dispatchMaxOffers: z.number().int().min(1).max(20).optional(),
     dispatchMaxConcurrentPerDriver: z.number().int().min(1).max(10).optional(),

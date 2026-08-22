@@ -106,13 +106,20 @@ export class OpsService {
   /** Get (or lazily create) the singleton platform-settings row. */
   async getSettings() {
     const existing = await this.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
-    if (existing) return existing;
-    return this.prisma.platformSetting.create({ data: {} });
+    return this.serializeSettings(existing ?? (await this.prisma.platformSetting.create({ data: {} })));
+  }
+
+  /**
+   * Money columns are BigInt, and BigInt has no JSON representation — returning
+   * the row untouched makes the endpoint throw a 500 rather than answer.
+   */
+  private serializeSettings<T extends { localCourierFeeMinor: bigint }>(row: T) {
+    return { ...row, localCourierFeeMinor: Number(row.localCourierFeeMinor) };
   }
 
   async updateSettings(actor: Actor, dto: UpdatePlatformSettingsInput) {
     const current = await this.getSettings();
-    const updated = await this.prisma.platformSetting.update({
+    const updatedRow = await this.prisma.platformSetting.update({
       where: { id: current.id },
       data: {
         announcementActive: dto.announcementActive ?? undefined,
@@ -133,6 +140,8 @@ export class OpsService {
         dispatchWeightRating: dto.dispatchWeightRating ?? undefined,
         dispatchWeightLocality: dto.dispatchWeightLocality ?? undefined,
         dispatchWeightExperience: dto.dispatchWeightExperience ?? undefined,
+        localCourierFeeMinor: dto.localCourierFeeMinor === undefined ? undefined : BigInt(dto.localCourierFeeMinor),
+        localCourierMinutes: dto.localCourierMinutes ?? undefined,
         updatedById: actor.userId,
       },
     });
@@ -143,9 +152,9 @@ export class OpsService {
       // on or off changes how every delivery on the platform is assigned, and the
       // audit trail should say who did it and when.
       previousValue: { announcementActive: current.announcementActive, announcementLevel: current.announcementLevel, maintenanceMode: current.maintenanceMode, dispatchAutomatic: current.dispatchAutomatic },
-      newValue: { announcementActive: updated.announcementActive, announcementLevel: updated.announcementLevel, maintenanceMode: updated.maintenanceMode, dispatchAutomatic: updated.dispatchAutomatic },
+      newValue: { announcementActive: updatedRow.announcementActive, announcementLevel: updatedRow.announcementLevel, maintenanceMode: updatedRow.maintenanceMode, dispatchAutomatic: updatedRow.dispatchAutomatic },
     });
-    return updated;
+    return this.serializeSettings(updatedRow);
   }
 
   /** Public banner payload — only ACTIVE notices, no internal metadata. */

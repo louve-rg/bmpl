@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'BMPL Admin Console',
+  title: 'BML Admin Console',
   robots: { index: false, follow: false },
 };
 

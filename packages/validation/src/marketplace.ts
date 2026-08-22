@@ -531,7 +531,7 @@ export const checkoutSchema = z.object({
   vendors: z.array(checkoutVendorSchema).max(100).optional().default([]),
   deliveryAddress: orderAddressSchema.optional(),
   /**
-   * Pay for this order from the BMPL wallet as part of placing it.
+   * Pay for this order from the BML wallet as part of placing it.
    *
    * Defaults to FALSE so the existing behaviour — an order placed with a pending
    * payment and a soft hold, no money moved — is exactly what it was. Opting in
@@ -591,3 +591,33 @@ export const walletTopUpSchema = z.object({
   amountMinor: z.coerce.number().int().min(100, 'Enter at least BZD 1.00.').max(500_000, 'That is more than a single top-up allows.'),
 });
 export type WalletTopUpInput = z.infer<typeof walletTopUpSchema>;
+
+/* ---------------------------------------------------------------- addresses */
+
+/**
+ * A saved address.
+ *
+ * Coordinates are optional but strongly wanted: the customer can always type an
+ * address and skip the pin, and a form that refuses to save without one would
+ * simply stop people saving addresses. Where a pin IS given it is validated to
+ * be a real coordinate, because a driver is going to be sent to it.
+ */
+export const savedAddressSchema = z.object({
+  label: z.string().trim().min(1).max(60),
+  fullName: z.string().trim().min(1).max(120),
+  phone: z.string().trim().min(5).max(40),
+  email: z.string().trim().email().max(160).optional().nullable(),
+  company: z.string().trim().max(120).optional().nullable(),
+  addressLine1: z.string().trim().min(1).max(200),
+  addressLine2: z.string().trim().max(200).optional().nullable(),
+  city: z.string().trim().min(1).max(120),
+  district: z.enum(DISTRICTS),
+  instructions: z.string().trim().max(500).optional().nullable(),
+  latitude: z.number().min(-90).max(90).optional().nullable(),
+  longitude: z.number().min(-180).max(180).optional().nullable(),
+  isDefault: z.boolean().optional().default(false),
+});
+export type SavedAddressInput = z.infer<typeof savedAddressSchema>;
+
+export const savedAddressUpdateSchema = savedAddressSchema.partial();
+export type SavedAddressUpdateInput = z.infer<typeof savedAddressUpdateSchema>;

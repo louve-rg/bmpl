@@ -8,7 +8,7 @@ import { GeocodingService } from './geocoding.service';
  *
  * Signed-in only (`CUSTOMER` is the baseline role every account holds) and
  * strictly throttled. Both matter: this endpoint spends a shared, unpaid
- * OpenStreetMap quota on BMPL's behalf, so it must not be an open relay.
+ * OpenStreetMap quota on BML's behalf, so it must not be an open relay.
  */
 @Roles('CUSTOMER')
 @Controller('geocode')

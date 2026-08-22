@@ -9,7 +9,7 @@
  * deterministic — the same queue always yields the same recommendation.
  *
  * WHAT THIS IS NOT: there is no live traffic feed, no road network and no routing
- * API in BMPL, so nothing here claims a real driving time. Distances are
+ * API in BML, so nothing here claims a real driving time. Distances are
  * great-circle, inflated by a fixed road factor, and every result carries the
  * `precision` of the worst input that fed it so the UI can say "estimated" and
  * mean it.
@@ -32,7 +32,7 @@ export interface GeoPoint {
   longitude: number;
 }
 
-/** A location as BMPL actually stores it: coordinates if we have them, district if not. */
+/** A location as BML actually stores it: coordinates if we have them, district if not. */
 export interface LocationInput {
   latitude?: number | null;
   longitude?: number | null;
@@ -131,7 +131,7 @@ const weakest = (a: GeoPrecision, b: GeoPrecision): GeoPrecision =>
 /**
  * Recommend the order to work through `stops`.
  *
- * `origin` is where the driver is starting from. BMPL has no live GPS, so callers
+ * `origin` is where the driver is starting from. BML has no live GPS, so callers
  * pass the best legitimate proxy they have — typically the driver's home district
  * — or null, in which case the first stop is chosen by the caller's existing
  * order and the rest are chained from it.
@@ -276,7 +276,7 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 /**
  * Human label for an estimated duration.
  *
- * Distances are NOT formatted here: BMPL shows users imperial units, and
+ * Distances are NOT formatted here: BML shows users imperial units, and
  * `formatDistanceKm` in `units.ts` is the one place that conversion happens.
  * Every km figure this module produces goes through it before it is displayed.
  */

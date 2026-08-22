@@ -87,7 +87,7 @@ export default function PaymentDetailPage() {
             {/* Authorization panel — status-aware (M12) */}
             {p.status === 'AUTHORIZED' ? (
               <Alert tone="success" title="✓ Payment authorized">
-                Your funds ({money(p.amountMinor)}) are held in <strong>escrow</strong> under BMPL until fulfilment. No vendor has been paid.
+                Your funds ({money(p.amountMinor)}) are held in <strong>escrow</strong> under BML until fulfilment. No vendor has been paid.
               </Alert>
             ) : p.status === 'FAILED' ? (
               <Alert tone="error" title="Authorization failed">
@@ -97,7 +97,7 @@ export default function PaymentDetailPage() {
               <Alert tone="neutral">This payment was cancelled. No funds moved.</Alert>
             ) : (
               <Alert tone="warning" title="Pending authorization">
-                <p>Authorize {money(p.amountMinor)} from your wallet — the funds move into escrow (held by BMPL, not paid to the vendor).</p>
+                <p>Authorize {money(p.amountMinor)} from your wallet — the funds move into escrow (held by BML, not paid to the vendor).</p>
                 <Button type="button" onClick={authorize} disabled={busy} className="mt-3">
                   {busy ? 'Authorizing…' : 'Authorize with wallet'}
                 </Button>

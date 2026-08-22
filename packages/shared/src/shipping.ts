@@ -9,7 +9,7 @@
  * would add legs, hubs and handoffs to a journey that has none of them.
  *
  * Placencia to San Pedro is a different shape: several custody transfers, a
- * carrier BMPL does not employ, and a parcel that sits at a terminal in between.
+ * carrier BML does not employ, and a parcel that sits at a terminal in between.
  * That needs orchestration ABOVE the courier layer, and each courier leg is
  * still an ordinary OrderDelivery underneath, dispatched by the existing engine
  * to the existing drivers.
@@ -36,7 +36,7 @@ export const TRANSPORT_MODE_LABELS: Record<TransportMode, string> = {
 /* ----------------------------------------------------------------- hubs */
 
 /**
- * Somewhere a parcel can be handed over. Deliberately broad: BMPL does not own
+ * Somewhere a parcel can be handed over. Deliberately broad: BML does not own
  * airports or water-taxi terminals, it hands parcels to whoever does.
  */
 export const HUB_TYPES = [
@@ -59,13 +59,13 @@ export const HUB_TYPE_LABELS: Record<HubType, string> = {
   BUS_TERMINAL: 'Bus terminal',
   WAREHOUSE: 'Warehouse',
   DISTRIBUTION_CENTER: 'Distribution centre',
-  BMPL_HUB: 'BMPL hub',
+  BMPL_HUB: 'BML hub',
 };
 
 /* -------------------------------------------------------- service level */
 
 /**
- * What the customer is buying, expressed as which ends BMPL is responsible for.
+ * What the customer is buying, expressed as which ends BML is responsible for.
  * "Door" means we collect from / deliver to an address; "Hub" means the customer
  * or recipient handles that end at a terminal themselves.
  */

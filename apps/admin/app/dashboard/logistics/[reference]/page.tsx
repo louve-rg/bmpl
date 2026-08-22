@@ -72,7 +72,7 @@ const when = (iso: string | null) =>
 /**
  * Which controls this leg's state allows.
  *
- * A line-haul is operated by hand because no BMPL driver is on it. A courier leg
+ * A line-haul is operated by hand because no BML driver is on it. A courier leg
  * is worked in the driver app, so an operator only sees it — with the exception
  * of flagging a problem, which anyone in operations may need to do at any time.
  */

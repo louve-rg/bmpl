@@ -74,7 +74,7 @@ async function bootstrap() {
   const port = listenPort(env);
   await app.listen(port, '0.0.0.0');
   const log = new Logger('Bootstrap');
-  log.log(`BMPL API listening on :${port} (prefix /api, env=${env.NODE_ENV})`);
+  log.log(`BML API listening on :${port} (prefix /api, env=${env.NODE_ENV})`);
   log.log(`Sentry: ${sentryEnabled ? 'enabled' : 'disabled'} · logs: ${logFormat}`);
 }
 

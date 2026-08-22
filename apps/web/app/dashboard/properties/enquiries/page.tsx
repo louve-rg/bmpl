@@ -30,7 +30,7 @@ export default function MyEnquiriesPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <PageHeader eyebrow="Real Estate" title="My enquiries" description="Every property you've enquired about." />
+      <PageHeader eyebrow="Real Estate" title="My enquiries" description="Every property you've inquired about." />
 
       {error && <Alert tone="error">{error}</Alert>}
 
@@ -40,8 +40,8 @@ export default function MyEnquiriesPage() {
         </div>
       ) : items && items.length === 0 ? (
         <EmptyState
-          title="No enquiries yet"
-          description="When you enquire about a property it'll appear here."
+          title="No inquiries yet"
+          description="When you inquire about a property it'll appear here."
           action={<ButtonLink href="/properties">Browse properties</ButtonLink>}
         />
       ) : (

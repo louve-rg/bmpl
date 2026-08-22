@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 /**
  * Mobile app showcase — copy + store badges (left) and an angled phone mockup
- * running the BMPL app UI, ringed by subtle floating activity cards (right).
+ * running the BML app UI, ringed by subtle floating activity cards (right).
  * Everything is markup/SVG; floating cards are hidden on small screens to avoid
  * awkward overlap.
  */
@@ -87,7 +87,7 @@ export function MobilePromo() {
 
         {/* Phone */}
         <div className="relative flex justify-center py-6 lg:justify-end lg:py-10">
-          <FloatCard className="-left-2 top-6 xl:-left-6" tone="bg-emerald-500/15 text-emerald-600" title="Order Delivered" sub="Order #BMPL-7821" icon={<path d="m5 12 4 4 10-10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />} />
+          <FloatCard className="-left-2 top-6 xl:-left-6" tone="bg-emerald-500/15 text-emerald-600" title="Order Delivered" sub="Order #BML-7821" icon={<path d="m5 12 4 4 10-10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />} />
           <FloatCard className="-right-2 top-28 xl:-right-4" tone="bg-teal-500/15 text-teal-600" title="Wallet Payment" sub="+BZ$450.00" icon={<><rect x="3" y="6" width="18" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.6" /><circle cx="16.5" cy="12.5" r="1.2" fill="currentColor" /></>} />
           <FloatCard className="-left-4 bottom-24" tone="bg-sky-500/15 text-sky-600" title="Driver Assigned" sub="Arriving in 15 min" icon={<><path d="M3 7h11v9H3z" stroke="currentColor" strokeWidth="1.6" /><path d="M14 10h4l3 3v3h-7" stroke="currentColor" strokeWidth="1.6" /></>} />
           <FloatCard className="-right-3 bottom-10" tone="bg-violet-500/15 text-violet-600" title="New Customer" sub="Just placed an order" icon={<><circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.6" /><path d="M5 20a7 7 0 0 1 14 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></>} />
@@ -139,7 +139,7 @@ function PhoneMock() {
                 <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5"><path d="M4 8h16l-1 3H5L4 8Z" stroke="currentColor" strokeWidth="1.6" /><path d="M5 11v8h14v-8" stroke="currentColor" strokeWidth="1.6" /></svg>
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[10px] font-semibold text-belize-navy">Order #BMPL-7821</p>
+                <p className="truncate text-[10px] font-semibold text-belize-navy">Order #BML-7821</p>
                 <p className="text-[8px] text-slate-400">Today · 9:41 AM</p>
               </div>
               <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[8px] font-semibold text-emerald-700">Delivered</span>

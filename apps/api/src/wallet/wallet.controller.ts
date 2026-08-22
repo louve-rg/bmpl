@@ -44,7 +44,7 @@ export class WalletController {
   /**
    * Put money into a SIMULATION wallet.
    *
-   * BMPL has no external payment rail configured — no card processor, no bank
+   * BML has no external payment rail configured — no card processor, no bank
    * transfer, nothing that could move a real Belize dollar. So there is exactly
    * one honest way to exercise the wallet engine end to end, and this is it:
    * funding that is real bookkeeping over money that does not represent
@@ -73,7 +73,7 @@ export class WalletController {
       // Said plainly rather than as a generic forbidden: a real customer asking
       // to add money is asking a reasonable question, and deserves a real answer.
       throw new ForbiddenException(
-        'Adding money to your wallet is not available yet. BMPL does not have a card or bank payment method connected.',
+        'Adding money to your wallet is not available yet. BML does not have a card or bank payment method connected.',
       );
     }
 

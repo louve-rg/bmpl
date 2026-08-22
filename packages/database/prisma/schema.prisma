@@ -541,6 +541,7 @@ model User {
   // Drives the admin moderation queue (PENDING first, oldest submission first).
   @@index([avatarStatus, avatarSubmittedAt])
   @@map("users")
+  savedAddresses SavedAddress[]
 }
 
 // Server-side, revocable session. Access token is a short-lived JWT; the refresh
@@ -2326,6 +2327,45 @@ model OrderItem {
   @@index([vendorOrderId])
   @@index([productId])
   @@map("order_items")
+}
+
+// An address the customer has chosen to keep.
+//
+// Stores BOTH the human-readable address and the coordinate, because in Belize
+// they carry different information: the text is what a person recognises, and
+// the pin is what a driver can actually navigate to. Neither substitutes for
+// the other, so neither is derived from the other.
+//
+// Snapshots taken at checkout or booking are separate rows (OrderAddress, and
+// the origin/destination columns on Shipment). Editing a saved address must
+// never reshape an order that has already been placed.
+model SavedAddress {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // What the customer calls it: "Home", "The shop", "Mum's place".
+  label     String
+  fullName  String
+  phone     String
+  email     String?
+  company   String?
+
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  district     District
+  country      String   @default("BZ")
+  instructions String?
+
+  latitude  Float?
+  longitude Float?
+
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, isDefault])
+  @@map("saved_addresses")
 }
 
 model OrderAddress {
@@ -4284,7 +4324,10 @@ model Shipment {
   originHub          LogisticsHub? @relation("ShipmentOriginHub", fields: [originHubId], references: [id], onDelete: Restrict)
   originName         String?
   originPhone        String?
+  originEmail        String?
+  originCompany      String?
   originAddress      String?
+  originAddress2     String?
   originCity         String?
   originDistrict     District?
   originLatitude     Float?
@@ -4296,7 +4339,10 @@ model Shipment {
   destinationHub          LogisticsHub? @relation("ShipmentDestinationHub", fields: [destinationHubId], references: [id], onDelete: Restrict)
   destinationName         String?
   destinationPhone        String?
+  destinationEmail        String?
+  destinationCompany      String?
   destinationAddress      String?
+  destinationAddress2     String?
   destinationCity         String?
   destinationDistrict     District?
   destinationLatitude     Float?

@@ -32,6 +32,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { RealEstateModule } from './realestate/realestate.module';
 import { MarketingModule } from './marketing/marketing.module';
 import { PaymentsModule } from './payments/payments.module';
+import { AddressesModule } from './addresses/addresses.module';
 import { WalletModule } from './wallet/wallet.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
@@ -78,6 +79,7 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     JobsModule,
     RealEstateModule,
     MarketingModule,
+    AddressesModule,
     WalletModule,
     PaymentsModule,
     MaintenanceModule,
