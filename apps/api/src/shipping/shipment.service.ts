@@ -5,6 +5,7 @@ import {
   isLegActionable,
   needsFirstMile,
   needsLastMile,
+  isLocalDoorToDoor,
   planRoute,
   SHIPMENT_STATUS_LABELS,
   SHIPPING_SERVICE_DESCRIPTIONS,
@@ -187,10 +188,16 @@ export class ShipmentService {
       return { firstMileMinor: 0, lastMileMinor: 0, directMinor: 0, directMinutes: 0, unpricedHubs: [] as string[] };
     }
 
-    // A same-district door-to-door run has no terminal, so no hub fee describes
-    // it. It is priced by its own platform setting, and an unset price is
-    // reported rather than quoted as free.
-    if (input.service === 'DOOR_TO_DOOR' && origin.kind === 'DOOR' && destination.kind === 'DOOR' && origin.district === destination.district) {
+    // A local door-to-door run has no terminal, so no hub fee describes it. It
+    // is priced by its own platform setting, and an unset price is reported
+    // rather than quoted as free.
+    //
+    // The SAME predicate the planner uses, imported rather than restated. When
+    // this was a separate district check and the planner had moved on to towns,
+    // the two disagreed: the planner produced first-mile and last-mile legs
+    // while pricing insisted the journey was a single local run, and the courier
+    // legs came out free.
+    if (isLocalDoorToDoor({ origin, destination, service: input.service, preferredMode: input.preferredMode ?? null })) {
       const settings = await this.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
       // A simulation booking is priced by the simulation rate, so a number set
       // to exercise the workflow never becomes what a real customer is charged.
@@ -254,7 +261,7 @@ export class ShipmentService {
       throw new BadRequestException(quote.message ?? 'We cannot ship that route at the moment.');
     }
 
-    const { hubs, routes } = await this.network.plannerInputs();
+    const { hubs, routes } = await this.network.plannerInputs({ isTest: simulated });
     const origin = this.toEndpoint(input, 'origin');
     const destination = this.toEndpoint(input, 'destination');
     const fees = await this.courierFees(input, origin, destination, hubs, simulated);

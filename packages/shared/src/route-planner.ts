@@ -262,17 +262,34 @@ export function planRoute(
 /* ------------------------------------------------------------ internals */
 
 /**
- * Both ends are addresses in the same district, and the customer asked us to
- * collect and deliver. One courier can do the whole job.
+ * Both ends are addresses in the same TOWN, and the customer asked us to collect
+ * and deliver. One courier can do the whole job.
  *
- * District is the unit the network is configured in, so it is also the honest
- * unit for "close enough that no terminal is involved". Anything wider would be
- * the planner guessing.
+ * Same town, not same district, and the difference matters in Belize: Belize
+ * City and San Pedro are both in the Belize District, and San Pedro is on
+ * Ambergris Caye. A district-wide rule would have planned a road courier for a
+ * parcel that has to cross water — the driver would accept a job they could not
+ * possibly finish, and the parcel would never arrive.
+ *
+ * The cost of being conservative is that two mainland towns in one district
+ * (Belize City and Ladyville, say) are sent to the terminal network rather than
+ * given a courier, and will be refused until a lane exists between them. That
+ * is a worse quote, not a wrong delivery, and it is the right way round: the
+ * planner can only tell towns apart, it cannot tell which ones share a road.
+ * Making that distinction properly needs road-reachability in the data, not a
+ * guess here.
  */
-function isLocalDoorToDoor(req: PlanRequest): boolean {
+export function isLocalDoorToDoor(req: PlanRequest): boolean {
   if (req.service !== 'DOOR_TO_DOOR') return false;
   if (req.origin.kind !== 'DOOR' || req.destination.kind !== 'DOOR') return false;
-  return req.origin.district === req.destination.district;
+  if (req.origin.district !== req.destination.district) return false;
+
+  const from = req.origin.city?.trim().toLowerCase();
+  const to = req.destination.city?.trim().toLowerCase();
+  // No town on either end is a district-level enquiry, which is as local as the
+  // caller has told us it is.
+  if (!from && !to) return true;
+  return !!from && !!to && from === to;
 }
 
 /** A door attaches to a hub in its own district; a hub endpoint is itself. */
@@ -283,13 +300,26 @@ function resolveHub(
 ): PlannerHub | null {
   if (endpoint.kind === 'HUB') return hubs.find((h) => h.id === endpoint.hubId) ?? null;
   const inDistrict = hubs.filter((h) => h.district === endpoint.district);
-  const usable = mode ? inDistrict.filter((h) => h.modes.includes(mode)) : inDistrict;
+
+  // A town that has its own terminal uses it, full stop.
+  //
+  // The fallback used to be "any hub in the district", which quietly attached a
+  // San Pedro address to the Belize City terminal whenever San Pedro's own
+  // terminal could not take the requested mode. Both are in the Belize
+  // District, and one of them is on an island — so the plan looked reasonable
+  // and described a journey that does not exist. If the town's own terminal
+  // cannot do the job, that is a refusal to explain, not a different town to
+  // substitute.
+  const inCity = endpoint.city
+    ? inDistrict.filter((h) => h.city.toLowerCase() === endpoint.city!.toLowerCase())
+    : [];
+  const candidates = inCity.length > 0 ? inCity : inDistrict;
+
+  const usable = mode ? candidates.filter((h) => h.modes.includes(mode)) : candidates;
   if (usable.length === 0) return null;
-  // Deterministic when a district has several: prefer a hub in the same town,
-  // then fall back to hub code so the same inputs always give the same plan.
-  const sameCity = endpoint.city ? usable.filter((h) => h.city.toLowerCase() === endpoint.city!.toLowerCase()) : [];
-  const pool = sameCity.length > 0 ? sameCity : usable;
-  return [...pool].sort((a, b) => a.code.localeCompare(b.code))[0]!;
+  // Deterministic when a town has several: hub code, so the same inputs always
+  // give the same plan.
+  return [...usable].sort((a, b) => a.code.localeCompare(b.code))[0]!;
 }
 
 function describeMissingHub(endpoint: Endpoint, mode: TransportMode | null | undefined, role: string): string {

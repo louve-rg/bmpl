@@ -210,6 +210,20 @@ describe('when there is nothing to plan', () => {
     expect(r.totalMinutes).toBe(45);
   });
 
+  it('does NOT treat two towns in one district as a local courier run', () => {
+    // Belize City and San Pedro share the Belize District, and San Pedro is on
+    // an island. A road courier cannot make that trip, so it has to go to the
+    // network even though the district matches.
+    const r = plan({
+      origin: door('Belize City', 'BELIZE'),
+      destination: door('San Pedro', 'BELIZE'),
+      service: 'DOOR_TO_DOOR',
+    });
+    if (!r.ok) throw new Error(`expected a plan, got ${r.reason}`);
+    expect(r.legs.map((l) => l.kind)).not.toContain('DIRECT');
+    expect(r.legs.map((l) => l.kind)).toContain('LINE_HAUL');
+  });
+
   it('still refuses a local job that asks for a mode it cannot use', () => {
     // Asking to fly a parcel across one town is not a routing answer we can
     // give, and quietly downgrading it to a road run would misrepresent it.
