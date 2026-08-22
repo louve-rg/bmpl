@@ -110,8 +110,26 @@ export class PaymentsService {
    * while HELD/AUTHORIZED; the release reference is unique).
    */
   async releaseForOrder(tx: Tx, orderId: string, actorId: string | null) {
+    return this.releaseFor(tx, { orderId }, actorId, 'order_reservation_released');
+  }
+
+  /**
+   * The same release, for a shipment the customer cancelled before anybody
+   * started work on it. Same holds, same escrow reversal, same idempotency —
+   * only the reason recorded on the hold differs.
+   */
+  async releaseForShipment(tx: Tx, shipmentId: string, actorId: string | null) {
+    return this.releaseFor(tx, { shipmentId }, actorId, 'shipment_cancelled');
+  }
+
+  private async releaseFor(
+    tx: Tx,
+    where: { orderId: string } | { shipmentId: string },
+    actorId: string | null,
+    releaseReason: string,
+  ) {
     const payment = await tx.payment.findUnique({
-      where: { orderId },
+      where: where as never,
       include: { holds: { where: { status: { in: ['HELD', 'AUTHORIZED'] } } } },
     });
     if (!payment) return { released: false, holdsReleased: 0, escrowReturnedMinor: 0 };
@@ -139,14 +157,14 @@ export class PaymentsService {
         await this.audit.record({ action: 'ESCROW_FUNDS_RELEASED', actorId, newValue: { paymentId: payment.id, amountMinor: money(hold.amountMinor), walletTransactionId: txn.id, from: 'escrow', to: 'customer' } }, tx);
         await this.audit.record({ action: 'WALLET_TRANSACTION_POSTED', actorId, newValue: { walletTransactionId: txn.id, type: 'ESCROW_RELEASE' } }, tx);
       }
-      await tx.walletHold.update({ where: { id: hold.id }, data: { status: 'RELEASED', releasedAt: new Date(), releaseReason: 'order_reservation_released' } });
+      await tx.walletHold.update({ where: { id: hold.id }, data: { status: 'RELEASED', releasedAt: new Date(), releaseReason } });
       await tx.paymentEvent.create({ data: { paymentId: payment.id, type: 'HOLD_RELEASED', data: { holdId: hold.id } } });
       await this.audit.record({ action: 'WALLET_HOLD_RELEASED', actorId, newValue: { holdId: hold.id, paymentId: payment.id } }, tx);
     }
     await tx.ledgerReference.updateMany({ where: { paymentId: payment.id, status: 'PENDING' }, data: { status: 'VOID' } });
 
     if (canTransitionPayment(payment.status, 'CANCELLED')) {
-      await this.transition(tx, { id: payment.id, status: payment.status }, 'CANCELLED', actorId, { reason: 'order_reservation_released' });
+      await this.transition(tx, { id: payment.id, status: payment.status }, 'CANCELLED', actorId, { reason: releaseReason });
     }
     return { released: true, holdsReleased: payment.holds.length, escrowReturnedMinor: money(escrowReturnedMinor) };
   }
@@ -214,7 +232,20 @@ export class PaymentsService {
     if (fresh.status !== 'CREATED' && fresh.status !== 'PENDING') throw new ConflictException(`Cannot authorize a ${fresh.status} payment.`);
 
     const escrow = await this.wallet.ensureSystemAccount('SYSTEM_ESCROW', payment.currency, tx);
-    const balance = await this.wallet.balanceMinor(wallet.id, tx); // authoritative, in-tx
+
+    // Take a row lock on the wallet BEFORE reading its balance.
+    //
+    // Reading the ledger inside a transaction is not enough on its own: under
+    // READ COMMITTED two concurrent authorizations both see the balance as it
+    // was before either of them debited it, both decide there is enough, and
+    // both post. A wallet holding BZ$30 paid for three BZ$15 parcels that way.
+    //
+    // Locking the account row serialises authorizations per wallet, so the
+    // second one reads a balance the first has already reduced. Per wallet, not
+    // globally: two different customers still authorize in parallel.
+    await tx.$queryRaw`SELECT id FROM wallet_accounts WHERE id = ${wallet.id} FOR UPDATE`;
+
+    const balance = await this.wallet.balanceMinor(wallet.id, tx); // authoritative, in-tx, now serialised
     if (balance < payment.amountMinor) throw new ConflictException('Insufficient wallet balance.');
 
     // The escrow movement inherits the customer's test flag, so a rehearsal

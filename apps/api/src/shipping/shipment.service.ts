@@ -935,6 +935,12 @@ export class ShipmentService {
         where: { shipmentId: id, status: { in: ['PENDING', 'READY', 'IN_PROGRESS'] } },
         data: { status: 'CANCELLED', cancelledAt: new Date() },
       });
+
+      // Give the money back. Nobody has started work — the guard above refuses a
+      // customer cancellation once a leg is IN_PROGRESS — so the whole amount is
+      // returned. The release is idempotent: it only picks up holds that are
+      // still live, and its ledger reference is unique per payment.
+      await this.payments.releaseForShipment(tx, id, actor.userId);
       return tx.shipment.update({
         where: { id },
         data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: input.reason },
