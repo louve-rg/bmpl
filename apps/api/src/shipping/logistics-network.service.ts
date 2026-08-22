@@ -35,10 +35,19 @@ export class LogisticsNetworkService {
    * operator who has just grounded a flight must not have it quoted to the next
    * customer because a cache had not expired.
    */
-  async plannerInputs(): Promise<{ hubs: PlannerHub[]; routes: PlannerRoute[] }> {
+  /**
+   * The network the planner may route over.
+   *
+   * Scoped to one side of the simulation boundary. A real customer is never
+   * routed through a TEST terminal, and a simulated shipment never consumes a
+   * real lane — which is what makes it safe to configure a fake air route
+   * between two invented terminals in order to prove the multimodal engine.
+   */
+  async plannerInputs(opts: { isTest?: boolean } = {}): Promise<{ hubs: PlannerHub[]; routes: PlannerRoute[] }> {
+    const isTest = opts.isTest ?? false;
     const [hubs, routes] = await Promise.all([
-      this.prisma.logisticsHub.findMany({ orderBy: { code: 'asc' } }),
-      this.prisma.logisticsRoute.findMany({ orderBy: { id: 'asc' } }),
+      this.prisma.logisticsHub.findMany({ where: { isTest }, orderBy: { code: 'asc' } }),
+      this.prisma.logisticsRoute.findMany({ where: { isTest }, orderBy: { id: 'asc' } }),
     ]);
     return {
       hubs: hubs.map((h) => ({
@@ -92,10 +101,15 @@ export class LogisticsNetworkService {
    * flight is configured produces a quote that always fails, and a customer who
    * concludes the site is broken rather than that the service does not exist.
    */
-  async availableModes(): Promise<Array<'LAND' | 'AIR' | 'SEA'>> {
+  async availableModes(opts: { isTest?: boolean } = {}): Promise<Array<'LAND' | 'AIR' | 'SEA'>> {
     const rows = await this.prisma.logisticsRoute.groupBy({
       by: ['mode'],
-      where: { isActive: true, originHub: { isActive: true }, destinationHub: { isActive: true } },
+      where: {
+        isActive: true,
+        isTest: opts.isTest ?? false,
+        originHub: { isActive: true },
+        destinationHub: { isActive: true },
+      },
     });
     const order = ['LAND', 'AIR', 'SEA'] as const;
     return order.filter((m) => rows.some((r) => r.mode === m));

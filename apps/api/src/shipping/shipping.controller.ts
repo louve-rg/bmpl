@@ -32,6 +32,7 @@ import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { LogisticsNetworkService } from './logistics-network.service';
 import { ShipmentService } from './shipment.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * The public terminal list.
@@ -81,13 +82,18 @@ export class ShippingController {
   constructor(
     private readonly shipments: ShipmentService,
     private readonly network: LogisticsNetworkService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /** What the whole journey would cost and how it would go. Nothing is created. */
   @StrictThrottle()
   @Post('quote')
-  quote(@Body(ZodBody(shipmentQuoteSchema)) dto: ShipmentQuoteInput) {
-    return this.shipments.quote(dto);
+  async quote(@CurrentUser() u: AuthContext, @Body(ZodBody(shipmentQuoteSchema)) dto: ShipmentQuoteInput) {
+    // Quoting uses the same simulation boundary booking does, so a test account
+    // is quoted over the simulation network and priced by the simulation rate —
+    // and a real customer never sees either.
+    const me = await this.prisma.user.findUnique({ where: { id: u.userId }, select: { isTest: true } });
+    return this.shipments.quote(dto, { isTest: me?.isTest ?? false });
   }
 
   @StrictThrottle()

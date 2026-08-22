@@ -48,9 +48,16 @@ async function fund(userId: string, amountMinor: number) {
 async function setLocalCourierFee(feeMinor: bigint) {
   const existing = await ctx.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
   if (existing) {
-    await ctx.prisma.platformSetting.update({ where: { id: existing.id }, data: { localCourierFeeMinor: feeMinor, localCourierMinutes: 60 } });
+    // Both rates: a real customer is priced by the first, a designated test
+    // account by the second, and this suite exercises both kinds of customer.
+    await ctx.prisma.platformSetting.update({
+      where: { id: existing.id },
+      data: { localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 },
+    });
   } else {
-    await ctx.prisma.platformSetting.create({ data: { localCourierFeeMinor: feeMinor, localCourierMinutes: 60 } });
+    await ctx.prisma.platformSetting.create({
+      data: { localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 },
+    });
   }
 }
 

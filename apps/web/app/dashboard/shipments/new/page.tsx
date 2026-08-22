@@ -15,6 +15,7 @@ import { EndpointPicker, emptyEndpoint, type EndpointValue } from '../../../../c
 import { ServiceTypeField } from '../../../../components/shipping/ServiceTypeField';
 import { Alert, Button, PageHeader, Spinner } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
+import { bzd, walletApi, type WalletSummary } from '../../../../lib/wallet';
 
 /**
  * Booking a shipment.
@@ -79,6 +80,11 @@ export default function NewShipmentPage() {
   const [parcel, setParcel] = useState({ description: '', pieces: '1' });
 
   const [quote, setQuote] = useState<ShipmentQuote | null>(null);
+  const [wallet, setWallet] = useState<WalletSummary | null>(null);
+
+  useEffect(() => {
+    walletApi.summary().then(setWallet).catch(() => setWallet(null));
+  }, []);
   const [quoting, setQuoting] = useState(false);
   const [booking, setBooking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -136,7 +142,7 @@ export default function NewShipmentPage() {
     setBooking(true);
     setErr(null);
     try {
-      const created = await shippingApi.create(request);
+      const created = await shippingApi.create({ ...request, payWithWallet: true });
       router.push(`/dashboard/shipments/${encodeURIComponent(created.reference)}`);
     } catch (e) {
       const api = e as ApiError;
@@ -145,7 +151,11 @@ export default function NewShipmentPage() {
     }
   }
 
-  const canBook = quote?.available === true && !quote.pricingIncomplete && !booking;
+  // Only a priced quote has a total to compare against; an unavailable one is
+  // blocked for its own reason further up.
+  const priced = quote?.available === true ? quote : null;
+  const affordable = wallet == null || priced == null || wallet.availableMinor >= priced.totalMinor;
+  const canBook = priced != null && !priced.pricingIncomplete && !booking && affordable;
 
   return (
     <div className="mx-auto max-w-2xl pb-28">
@@ -292,6 +302,51 @@ export default function NewShipmentPage() {
         )}
       </div>
 
+      {/* 3. Review and pay. The customer should know money is about to move, how
+             much, and what they will have left — before they commit. */}
+      {quote?.available && !quote.pricingIncomplete && (
+        <div className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
+          <h2 className="text-sm font-semibold text-belize-navy">Review and pay</h2>
+
+          <dl className="mt-3 space-y-1.5 text-sm">
+            <Line label="Service" value={quote.serviceLabel} />
+            <Line label="From" value={[origin.city, origin.district.replace(/_/g, ' ')].filter(Boolean).join(', ') || '—'} />
+            <Line label="To" value={[destination.city, destination.district.replace(/_/g, ' ')].filter(Boolean).join(', ') || '—'} />
+            <Line label="Parcel" value={`${parcel.pieces || 1} × ${parcel.description || 'parcel'}`} />
+            <Line label="Transport" value={mode === 'ANY' ? 'Best available' : TRANSPORT_MODE_LABELS[mode as TransportMode]} />
+          </dl>
+
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm font-semibold text-belize-navy">Total</span>
+              <span className="text-xl font-bold tabular-nums text-belize-navy">{shippingMoney(quote.totalMinor)}</span>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-bmpl-md bg-slate-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Paying with</p>
+            <p className="mt-0.5 text-sm font-semibold text-belize-navy">BML Wallet</p>
+            {wallet && (
+              <dl className="mt-2 space-y-1 text-sm">
+                <Line label="Available now" value={bzd(wallet.availableMinor)} />
+                <Line label="To be charged" value={shippingMoney(quote.totalMinor)} />
+                <Line
+                  label="Left afterwards"
+                  value={bzd(Math.max(0, wallet.availableMinor - quote.totalMinor))}
+                />
+              </dl>
+            )}
+            {wallet && wallet.availableMinor < quote.totalMinor && (
+              <Alert tone="warning" className="mt-3">
+                <span className="font-semibold">Insufficient wallet balance.</span> This shipment costs{' '}
+                {shippingMoney(quote.totalMinor)}, your available balance is {bzd(wallet.availableMinor)}, so you are{' '}
+                {bzd(quote.totalMinor - wallet.availableMinor)} short.
+              </Alert>
+            )}
+          </div>
+        </div>
+      )}
+
       {err && (
         <Alert tone="warning" className="mt-4">
           {err}
@@ -307,11 +362,27 @@ export default function NewShipmentPage() {
               {shippingMoney(quote.totalMinor)}
             </span>
           )}
+          {/* Never "Book" — booking now takes the money, and the button should
+              say so before it is pressed. */}
           <Button onClick={book} disabled={!canBook} className="min-h-[48px] w-full text-base">
-            {booking ? 'Booking…' : 'Book this shipment'}
+            {booking
+              ? 'Paying…'
+              : quote?.available
+                ? `Pay ${shippingMoney(quote.totalMinor)} & book shipment`
+                : 'Pay & book shipment'}
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One label/value row in the review panel. */
+function Line({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="text-right font-medium text-slate-900">{value}</dd>
     </div>
   );
 }

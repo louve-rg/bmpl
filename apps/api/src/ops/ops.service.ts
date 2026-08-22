@@ -113,8 +113,12 @@ export class OpsService {
    * Money columns are BigInt, and BigInt has no JSON representation — returning
    * the row untouched makes the endpoint throw a 500 rather than answer.
    */
-  private serializeSettings<T extends { localCourierFeeMinor: bigint }>(row: T) {
-    return { ...row, localCourierFeeMinor: Number(row.localCourierFeeMinor) };
+  private serializeSettings<T extends { localCourierFeeMinor: bigint; localCourierFeeTestMinor: bigint }>(row: T) {
+    return {
+      ...row,
+      localCourierFeeMinor: Number(row.localCourierFeeMinor),
+      localCourierFeeTestMinor: Number(row.localCourierFeeTestMinor),
+    };
   }
 
   async updateSettings(actor: Actor, dto: UpdatePlatformSettingsInput) {
@@ -141,6 +145,7 @@ export class OpsService {
         dispatchWeightLocality: dto.dispatchWeightLocality ?? undefined,
         dispatchWeightExperience: dto.dispatchWeightExperience ?? undefined,
         localCourierFeeMinor: dto.localCourierFeeMinor === undefined ? undefined : BigInt(dto.localCourierFeeMinor),
+        localCourierFeeTestMinor: dto.localCourierFeeTestMinor === undefined ? undefined : BigInt(dto.localCourierFeeTestMinor),
         localCourierMinutes: dto.localCourierMinutes ?? undefined,
         updatedById: actor.userId,
       },

@@ -87,8 +87,9 @@ export class ShipmentService {
    * hub's configured courier fee. Nothing here invents money: if a hub's courier
    * fee has not been set, the quote says so rather than quietly shipping for free.
    */
-  async quote(input: ShipmentQuoteInput) {
-    const { hubs, routes } = await this.network.plannerInputs();
+  async quote(input: ShipmentQuoteInput, opts: { isTest?: boolean } = {}) {
+    const simulated = opts.isTest ?? false;
+    const { hubs, routes } = await this.network.plannerInputs({ isTest: simulated });
     const hubById = new Map(hubs.map((h) => [h.id, h]));
 
     const origin = this.toEndpoint(input, 'origin');
@@ -96,7 +97,7 @@ export class ShipmentService {
 
     // Price the door legs BEFORE planning, because the planner sums what it is
     // given rather than working out what a courier costs.
-    const fees = await this.courierFees(input, origin, destination, hubs);
+    const fees = await this.courierFees(input, origin, destination, hubs, simulated);
     const plan = planRoute(
       { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null },
       hubs,
@@ -178,6 +179,7 @@ export class ShipmentService {
     origin: Endpoint,
     destination: Endpoint,
     hubs: readonly PlannerHub[],
+    simulated = false,
   ) {
     const wantsFirst = needsFirstMile(input.service);
     const wantsLast = needsLastMile(input.service);
@@ -190,7 +192,11 @@ export class ShipmentService {
     // reported rather than quoted as free.
     if (input.service === 'DOOR_TO_DOOR' && origin.kind === 'DOOR' && destination.kind === 'DOOR' && origin.district === destination.district) {
       const settings = await this.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
-      const directMinor = Number(settings?.localCourierFeeMinor ?? 0n);
+      // A simulation booking is priced by the simulation rate, so a number set
+      // to exercise the workflow never becomes what a real customer is charged.
+      const directMinor = Number(
+        (simulated ? settings?.localCourierFeeTestMinor : settings?.localCourierFeeMinor) ?? 0n,
+      );
       return {
         firstMileMinor: 0,
         lastMileMinor: 0,
@@ -202,7 +208,7 @@ export class ShipmentService {
 
     // Ask the planner where each door attaches by planning with zero fees first;
     // that keeps hub-attachment logic in exactly one place.
-    const { routes } = await this.network.plannerInputs();
+    const { routes } = await this.network.plannerInputs({ isTest: simulated });
     const dry = planRoute({ origin, destination, service: input.service, preferredMode: input.preferredMode ?? null }, hubs, routes);
     if (!dry.ok) return { firstMileMinor: 0, lastMileMinor: 0, directMinor: 0, directMinutes: 0, unpricedHubs: [] as string[] };
 
@@ -243,7 +249,7 @@ export class ShipmentService {
       isTest ??
       (await this.prisma.user.findUnique({ where: { id: userId }, select: { isTest: true } }))?.isTest ??
       false;
-    const quote = await this.quote(input);
+    const quote = await this.quote(input, { isTest: simulated });
     if (!quote.available) {
       throw new BadRequestException(quote.message ?? 'We cannot ship that route at the moment.');
     }
@@ -251,7 +257,7 @@ export class ShipmentService {
     const { hubs, routes } = await this.network.plannerInputs();
     const origin = this.toEndpoint(input, 'origin');
     const destination = this.toEndpoint(input, 'destination');
-    const fees = await this.courierFees(input, origin, destination, hubs);
+    const fees = await this.courierFees(input, origin, destination, hubs, simulated);
     const plan = planRoute({ origin, destination, service: input.service, preferredMode: input.preferredMode ?? null }, hubs, routes, {
       firstMileMinor: fees.firstMileMinor,
       lastMileMinor: fees.lastMileMinor,

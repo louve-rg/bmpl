@@ -2023,6 +2023,10 @@ model PlatformSetting {
   // and the quote says so rather than quietly quoting free.
   localCourierFeeMinor  BigInt @default(0)
   localCourierMinutes   Int    @default(0)
+  // What a SIMULATION local run costs. Separate from the production rate above
+  // so a rate set to exercise the workflow can never quietly become the real
+  // nationwide price a customer is charged.
+  localCourierFeeTestMinor BigInt @default(0)
 
   updatedById String?
   updatedAt   DateTime @updatedAt
@@ -4260,6 +4264,10 @@ model LogisticsHub {
   /// Deactivating a hub removes it from planning without deleting the history of
   /// everything that ever moved through it.
   isActive        Boolean         @default(true)
+  // Simulation infrastructure. A TEST hub or route exists only to exercise
+  // the multimodal engine end to end; it is never offered to a real
+  // customer and never carries a real parcel.
+  isTest          Boolean         @default(false)
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
@@ -4299,6 +4307,8 @@ model LogisticsRoute {
   /// priced by the existing delivery rules, not here.
   priceMinor       BigInt        @default(0)
   isActive         Boolean       @default(true)
+  // Simulation infrastructure — see LogisticsHub.isTest.
+  isTest           Boolean       @default(false)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 

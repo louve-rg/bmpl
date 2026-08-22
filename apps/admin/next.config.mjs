@@ -1,4 +1,14 @@
+// Non-secret build identifier, matching the one the web app already emits. A
+// deployment audit could confirm which commit web and API were serving but not
+// admin, which meant the admin console had to be verified by inference.
+const COMMIT = (
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.NEXT_PUBLIC_COMMIT_SHA ||
+  'dev'
+).slice(0, 12);
+
 const securityHeaders = [
+  { key: 'X-BMPL-Commit', value: COMMIT },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
