@@ -180,4 +180,108 @@ describe('password reset', () => {
     const newLogin = await request(ctx.server).post('/api/auth/login').send({ email, password: newPassword });
     expect(newLogin.status).toBe(201);
   });
+
+  /** Register a user and get back a live reset token for them. */
+  async function issueResetToken(email: string, password = 'StartPass12345') {
+    await request(ctx.server)
+      .post('/api/auth/register')
+      .send({ email, password, firstName: 'R', lastName: 'P', acceptedTerms: true });
+    await request(ctx.server).post('/api/auth/forgot-password').send({ email });
+    const inbox = await request(ctx.server).get('/api/dev/emails/latest').query({ email });
+    const token = tokenFromBody(inbox.body.body);
+    expect(token).toBeTruthy();
+    return token as string;
+  }
+
+  it('will not spend the same reset link twice', async () => {
+    const email = 'reset-once@example.bz';
+    const token = await issueResetToken(email);
+
+    const first = await request(ctx.server)
+      .post('/api/auth/reset-password')
+      .send({ token, password: 'FirstNew12345' });
+    expect(first.status).toBe(201);
+
+    // The same link again, as it would be if the mail were forwarded, the page
+    // refreshed, or the link found later in an inbox.
+    const second = await request(ctx.server)
+      .post('/api/auth/reset-password')
+      .send({ token, password: 'AttackerPass12345' });
+    expect(second.status).toBe(400);
+
+    // The second attempt must not have moved the password.
+    const stillFirst = await request(ctx.server)
+      .post('/api/auth/login')
+      .send({ email, password: 'FirstNew12345' });
+    expect(stillFirst.status).toBe(201);
+    const attacker = await request(ctx.server)
+      .post('/api/auth/login')
+      .send({ email, password: 'AttackerPass12345' });
+    expect(attacker.status).toBe(401);
+  });
+
+  // Honest scope: this guards the invariant, it does not demonstrate the race.
+  // It passes against the pre-fix code too — two supertest requests fired
+  // together did not reliably interleave their pre-transaction reads here, so
+  // the window this asserts against is one the harness could not open on
+  // demand. Treat a failure as a real regression; do not treat the pass as
+  // evidence that concurrent reset is exercised.
+  it('lets only one of two simultaneous uses of a link win', async () => {
+    const email = 'reset-race@example.bz';
+    const token = await issueResetToken(email);
+
+    const [a, b] = await Promise.all([
+      request(ctx.server).post('/api/auth/reset-password').send({ token, password: 'RacerAAA12345' }),
+      request(ctx.server).post('/api/auth/reset-password').send({ token, password: 'RacerBBB12345' }),
+    ]);
+
+    const codes = [a.status, b.status].sort();
+    expect(codes).toEqual([201, 400]);
+
+    // Exactly one password works, and it is the one whose request succeeded.
+    const winner = a.status === 201 ? 'RacerAAA12345' : 'RacerBBB12345';
+    const loser = a.status === 201 ? 'RacerBBB12345' : 'RacerAAA12345';
+    expect((await request(ctx.server).post('/api/auth/login').send({ email, password: winner })).status).toBe(201);
+    expect((await request(ctx.server).post('/api/auth/login').send({ email, password: loser })).status).toBe(401);
+  });
+
+  it('rejects a reset link that has expired', async () => {
+    const email = 'reset-stale@example.bz';
+    const token = await issueResetToken(email, 'StalePass12345');
+
+    // Age the token rather than waiting out the real TTL.
+    await ctx.prisma.passwordResetToken.updateMany({
+      where: { user: { email } },
+      data: { expiresAt: new Date(Date.now() - 60_000) },
+    });
+
+    const res = await request(ctx.server)
+      .post('/api/auth/reset-password')
+      .send({ token, password: 'TooLate12345' });
+    expect(res.status).toBe(400);
+    expect((await request(ctx.server).post('/api/auth/login').send({ email, password: 'StalePass12345' })).status).toBe(201);
+  });
+
+  it('signs out everywhere when the password is reset', async () => {
+    const email = 'reset-sessions@example.bz';
+    const password = 'SessionPass12345';
+    const reg = await request(ctx.server)
+      .post('/api/auth/register')
+      .send({ email, password, firstName: 'S', lastName: 'R', acceptedTerms: true });
+    const access = cookieValue(cookiesOf(reg), 'access_token')!;
+    expect((await request(ctx.server).get('/api/me').set('Cookie', [`access_token=${access}`])).status).toBe(200);
+
+    await request(ctx.server).post('/api/auth/forgot-password').send({ email });
+    const inbox = await request(ctx.server).get('/api/dev/emails/latest').query({ email });
+    const token = tokenFromBody(inbox.body.body);
+    const reset = await request(ctx.server)
+      .post('/api/auth/reset-password')
+      .send({ token, password: 'RotatedPass12345' });
+    expect(reset.status).toBe(201);
+
+    // A still time-valid access token must stop working, because the reset
+    // revoked every session behind it.
+    const after = await request(ctx.server).get('/api/me').set('Cookie', [`access_token=${access}`]);
+    expect(after.status).toBe(401);
+  });
 });

@@ -211,10 +211,20 @@ export class AuthService {
     }
     const passwordHash = await hashPassword(input.password);
     await this.prisma.$transaction(async (tx) => {
-      await tx.passwordResetToken.update({
-        where: { id: record.id },
+      // Consume conditionally, not unconditionally. The check above is a read
+      // taken before this transaction opened, so on its own it cannot promise
+      // single use: two requests carrying the same token can both observe
+      // `consumedAt: null` and both proceed, and the later one silently decides
+      // the account's password. Making the claim itself the write — update only
+      // the row that is still unconsumed, and require that it matched — means
+      // exactly one racing request can win.
+      const claimed = await tx.passwordResetToken.updateMany({
+        where: { id: record.id, consumedAt: null },
         data: { consumedAt: new Date() },
       });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('This reset link is invalid or has expired.');
+      }
       await tx.user.update({
         where: { id: record.userId },
         data: { passwordHash },

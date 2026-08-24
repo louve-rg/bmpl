@@ -59,7 +59,13 @@ export class EmailService {
         }),
       });
       if (!res.ok) {
-        this.logger.error(`Resend send failed: HTTP ${res.status}`);
+        // Resend explains the refusal in the body — most often an unverified
+        // sending domain, which the status code alone does not distinguish from
+        // a bad key. The body carries no credential (the key is only ever sent
+        // in the request header), so it is safe to log and it is the difference
+        // between a diagnosable misconfiguration and a silent one.
+        const detail = await res.text().catch(() => '');
+        this.logger.error(`Resend send failed: HTTP ${res.status}${detail ? ` ${detail.slice(0, 300)}` : ''}`);
         return false;
       }
       return true;
