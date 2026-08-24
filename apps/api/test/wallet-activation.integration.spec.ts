@@ -113,6 +113,11 @@ afterAll(async () => {
 beforeEach(async () => {
   // Counts are load-bearing in this suite ("no order was created", "exactly one
   // escrow transaction"), so each test starts from an empty financial world.
+  // Settlement records hold their delivery and their payment with onDelete:
+  // Restrict — you should not be able to delete work somebody was paid for — so
+  // they have to go first.
+  await ctx.prisma.driverEarning.deleteMany();
+  await ctx.prisma.vendorSettlement.deleteMany();
   await ctx.prisma.walletLedgerEntry.deleteMany();
   await ctx.prisma.walletHold.deleteMany();
   await ctx.prisma.ledgerReference.deleteMany();
@@ -673,5 +678,82 @@ describe('administrative test credit', () => {
     expect(order.status).not.toBe('CANCELLED');
     const payment = await ctx.prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
     expect(payment.status).toBe('AUTHORIZED');
+  });
+});
+
+describe('settlement keeps simulation money separate', () => {
+  it('a test order settles as test money, not as revenue', async () => {
+    // The escrow release is the LAST posting on an order's journey, and it was
+    // the one place the simulation flag was not carried through: a rehearsal
+    // order's driver earning and platform share both landed in real revenue.
+    const { SettlementService } = await import('../src/settlement/settlement.service');
+    const settlement = ctx.app.get(SettlementService);
+
+    const c = await makeTestCustomer();
+    const v = await makeVendor();
+    // An order's simulation flag is DERIVED FROM THE STOREFRONT, not from who is
+    // buying — so a test order needs a test vendor, not just a test customer.
+    await ctx.prisma.vendorProfile.update({ where: { id: v.vendorProfileId }, data: { isTest: true } });
+
+    await post(c.cookies, 'wallet/top-up', { amountMinor: 50_000 });
+    await addToCart(c.cookies, v.productId, 1);
+    await checkout(c.cookies, v.vendorProfileId, true);
+
+    const order = await ctx.prisma.order.findFirstOrThrow({ where: { userId: c.userId }, orderBy: { createdAt: 'desc' } });
+    expect(order.isTest).toBe(true);
+
+    const vendorOrder = await ctx.prisma.vendorOrder.findFirstOrThrow({ where: { orderId: order.id } });
+    const delivery = await ctx.prisma.orderDelivery.findFirst({ where: { vendorOrderId: vendorOrder.id } });
+    if (delivery) {
+      await ctx.prisma.orderDelivery.update({ where: { id: delivery.id }, data: { status: 'DELIVERED' } });
+    }
+    // Settlement gates on the DELIVERY reaching DELIVERED; the vendor-order
+    // status is not part of that guard.
+    const result = await settlement.settleVendorOrder(vendorOrder.id, null);
+    expect(result.settled, `settlement did not run: ${result.reason}`).toBe(true);
+
+    // Scoped to THIS settlement's own reference, so it cannot accidentally
+    // inspect a release from another test in the file.
+    const release = await ctx.prisma.walletTransaction.findFirstOrThrow({
+      where: { type: 'ESCROW_RELEASE', reference: { contains: vendorOrder.id } },
+    });
+    expect(release.isTest).toBe(true);
+
+    // And the blunt version of the same claim.
+    expect(await ctx.prisma.walletTransaction.count({ where: { isTest: false } })).toBe(0);
+  });
+});
+
+describe('a settled order stops showing as money on hold', () => {
+  it('releases the authorization hold once the order has fully settled', async () => {
+    // Delivered goods, money gone from escrow, and the customer still being told
+    // it is "on hold" is the stale-hold complaint arriving from the other end.
+    const { SettlementService } = await import('../src/settlement/settlement.service');
+    const settlement = ctx.app.get(SettlementService);
+
+    const c = await makeTestCustomer();
+    const v = await makeVendor();
+    await ctx.prisma.vendorProfile.update({ where: { id: v.vendorProfileId }, data: { isTest: true } });
+    await post(c.cookies, 'wallet/top-up', { amountMinor: 50_000 });
+    await addToCart(c.cookies, v.productId, 1);
+    await checkout(c.cookies, v.vendorProfileId, true);
+
+    const order = await ctx.prisma.order.findFirstOrThrow({ where: { userId: c.userId }, orderBy: { createdAt: 'desc' } });
+    const vendorOrder = await ctx.prisma.vendorOrder.findFirstOrThrow({ where: { orderId: order.id } });
+    const delivery = await ctx.prisma.orderDelivery.findFirst({ where: { vendorOrderId: vendorOrder.id } });
+    if (delivery) await ctx.prisma.orderDelivery.update({ where: { id: delivery.id }, data: { status: 'DELIVERED' } });
+
+    const held = await get(c.cookies, 'wallet');
+    expect(held.body.onHoldMinor).toBeGreaterThan(0);
+
+    const result = await settlement.settleVendorOrder(vendorOrder.id, null);
+    expect(result.settled, result.reason).toBe(true);
+
+    const after = await get(c.cookies, 'wallet');
+    expect(after.body.onHoldMinor).toBe(0);
+
+    const holds = await ctx.prisma.walletHold.findMany({ where: { payment: { orderId: order.id } } });
+    expect(holds.every((h) => h.status === 'RELEASED')).toBe(true);
+    expect(holds.every((h) => h.releaseReason === 'settled')).toBe(true);
   });
 });

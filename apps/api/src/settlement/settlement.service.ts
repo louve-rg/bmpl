@@ -218,7 +218,7 @@ export class SettlementService {
       where: { id: vendorOrderId },
       include: {
         vendorProfile: { select: { id: true, userId: true, businessName: true } },
-        order: { select: { id: true, orderNumber: true, userId: true, payment: { select: { id: true, status: true, currency: true } } } },
+        order: { select: { id: true, orderNumber: true, userId: true, isTest: true, payment: { select: { id: true, status: true, currency: true } } } },
         delivery: { select: { id: true, feeMinor: true, status: true, assignedDriverProfileId: true, assignedDriver: { select: { userId: true } } } },
       },
     });
@@ -334,6 +334,11 @@ export class SettlementService {
             lines,
           },
           true, // sanctioned internal money movement
+          // Inherited from the order, like every other posting on its journey.
+          // Left off, a simulation order settled as REAL money: the driver's
+          // earning and the platform's share both landed in real revenue, and a
+          // rehearsal showed up in production reporting.
+          vo.order.isTest,
         );
 
         // Flip records to POSTED.
@@ -344,6 +349,19 @@ export class SettlementService {
         const settleable = await tx.vendorOrder.count({ where: { orderId: vo.order.id, delivery: { isNot: null } } });
         const settled = await tx.vendorSettlement.count({ where: { vendorOrder: { orderId: vo.order.id }, status: 'POSTED' } });
         const nextStatus: PaymentStatus = settled >= settleable ? 'SETTLED' : 'SETTLING';
+
+        // Once the last vendor-order has settled the escrow is gone, so the hold
+        // that reserved it has nothing left to reserve. Leaving it AUTHORIZED
+        // meant a customer who had received their goods still saw that money as
+        // "on hold" on their wallet, permanently — the same complaint the stale
+        // pre-authorization holds produced, arriving from the other end.
+        if (nextStatus === 'SETTLED') {
+          await tx.walletHold.updateMany({
+            where: { paymentId: payment.id, status: 'AUTHORIZED' },
+            data: { status: 'RELEASED', releasedAt: new Date(), releaseReason: 'settled' },
+          });
+        }
+
         if (payment.status !== nextStatus && canTransitionPayment(payment.status as PaymentStatus, nextStatus)) {
           await tx.payment.update({ where: { id: payment.id }, data: { status: nextStatus } });
           await tx.paymentEvent.create({ data: { paymentId: payment.id, type: 'STATE_CHANGED', fromStatus: payment.status as PaymentStatus, toStatus: nextStatus } });
