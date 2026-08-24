@@ -457,7 +457,7 @@ export function LocationPicker({
           <p className="mt-0.5 break-words text-xs text-slate-500">{lookup.results[0]!.label}</p>
           {lookup.results.length > 1 && (
             <details className="mt-1.5">
-              <summary className="cursor-pointer text-xs font-medium text-belize-blue">
+              <summary className="flex min-h-11 cursor-pointer items-center text-xs font-medium text-belize-blue">
                 Not right? {lookup.results.length - 1} other match{lookup.results.length > 2 ? 'es' : ''}
               </summary>
               <ul className="mt-1 space-y-1">
@@ -527,7 +527,7 @@ export function LocationPicker({
       </div>
       {value && (
         <details className="mt-1">
-          <summary className="cursor-pointer text-xs text-slate-400">Coordinates</summary>
+          <summary className="flex min-h-11 cursor-pointer items-center text-xs text-slate-400">Coordinates</summary>
           <p className="mt-1 font-mono text-xs text-slate-500">
             {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)}
           </p>
