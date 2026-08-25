@@ -122,7 +122,12 @@ export class WalletService {
 
     await this.audit.record({
       action: 'WALLET_TOPUP_POSTED',
-      actorId: opts.actorId ?? userId,
+      // Absent and explicitly-none are different claims. Omitting the actor
+      // means "the account holder did this themselves", which is right for a
+      // self-service top-up. Passing null means "no signed-in person did this",
+      // and collapsing that to the recipient would put Edward's name on a
+      // movement he did not make.
+      actorId: opts.actorId === null ? null : (opts.actorId ?? userId),
       targetUserId: userId,
       newValue: { walletTransactionId: result.txn.id, amountMinor: money(amountMinor), currency, isTest: opts.forceIsTest ?? user.isTest },
     });
@@ -143,8 +148,17 @@ export class WalletService {
    * The recipient's own `isTest` flag is untouched — a real customer stays a
    * real customer; only this credit is simulated.
    */
+  /**
+   * `actorId` is the administrator who authorised this. It may be null in
+   * exactly one situation: an owner-authorised maintenance operation carried
+   * out while the Admin console is unreachable, where there genuinely is no
+   * signed-in administrator to name. Null records that honestly rather than
+   * crediting the action to someone who did not perform it — it does not
+   * relax the HTTP route, which still requires `wallet.credit_test` and always
+   * passes the authenticated caller.
+   */
   async adminTestCredit(
-    actorId: string,
+    actorId: string | null,
     userId: string,
     amountMinor: bigint,
     reason: string,
@@ -160,7 +174,16 @@ export class WalletService {
       action: 'WALLET_TEST_FUNDING_GRANTED',
       actorId,
       targetUserId: userId,
-      newValue: { amountMinor: money(amountMinor), currency, reason, label: 'Administrative Test Credit' },
+      reason,
+      newValue: {
+        amountMinor: money(amountMinor),
+        currency,
+        reason,
+        label: 'Administrative Test Credit',
+        // Says which door this came through, so a null actor reads as a
+        // recorded fact rather than missing data.
+        source: actorId ? 'ADMIN_CONSOLE' : 'OWNER_AUTHORIZED_MAINTENANCE',
+      },
     });
     return summary;
   }
