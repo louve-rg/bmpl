@@ -103,6 +103,29 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
   SMTP_URL: z.string().optional(),
 
+  // ---- TEMPORARY UAT FEATURE — MUST BE DISABLED BEFORE COMMERCIAL LAUNCH ----
+  //
+  // Lets a signed-in person put simulation money into their OWN wallet, once,
+  // so that Marketplace and Shipping can be exercised without a payment rail,
+  // an administrator, or working email.
+  //
+  // The kill switch is this flag and it defaults to OFF, including when the
+  // variable is absent entirely. Deploying without setting it therefore turns
+  // the feature off by itself — nobody has to remember to remove code. Deliberately
+  // NOT keyed on NODE_ENV: this runs on the live stack during UAT, so the
+  // environment cannot be what decides.
+  ENABLE_SELF_SERVICE_TEST_FUNDING: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // The server owns the amount; the client never sends one. Capped at the
+  // authorised BZ$250.00 whatever the variable says, so a fat-fingered
+  // deployment cannot mint more than the policy allows.
+  SELF_SERVICE_TEST_FUNDING_AMOUNT_MINOR: z.coerce.number().int().positive().max(25_000).default(25_000),
+  // Optional belt-and-braces: an ISO timestamp after which the feature turns
+  // itself off even if somebody forgets the flag. Absent means no expiry.
+  SELF_SERVICE_TEST_FUNDING_EXPIRES_AT: z.string().datetime().optional(),
+
   // ---- Error monitoring (Sentry) ----
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().optional(),

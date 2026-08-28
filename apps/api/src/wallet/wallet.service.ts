@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { assertBalanced, assertMoneyMovementEnabled, signedAmount, type DraftTransaction } from '@bmpl/wallet';
 import type { Currency, Prisma, WalletAccount, WalletAccountType } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,6 +7,13 @@ import { AuditService } from '../audit/audit.service';
 type Tx = Prisma.TransactionClient;
 type Db = Tx | PrismaService;
 const money = (v: bigint) => Number(v);
+
+/**
+ * The description that identifies a self-issued UAT credit, and therefore what
+ * counts against a person's own allowance. Distinct from "Administrative Test
+ * Credit", which an administrator grants and which does NOT consume it.
+ */
+export const SELF_SERVICE_TEST_CREDIT = 'Self-Service Test Credit';
 
 /**
  * Persistence layer for the double-entry ledger — the FIRST real money movement
@@ -186,6 +193,164 @@ export class WalletService {
       },
     });
     return summary;
+  }
+
+  /**
+   * TEMPORARY UAT FEATURE — MUST BE DISABLED BEFORE COMMERCIAL LAUNCH.
+   *
+   * Simulation money a person puts into their OWN wallet so they can exercise
+   * Marketplace and Shipping without a payment rail, an administrator, or
+   * working email. The recipient is always the caller: this method takes a user
+   * id from the session and nothing from the request body, so there is no field
+   * to tamper with to fund somebody else.
+   *
+   * The cap is CUMULATIVE and per person — spending does not restore headroom.
+   * Getting that right under concurrency is the whole difficulty, because a
+   * plain "read the total, then post" is the same check-then-act shape that let
+   * a BZ$30 wallet buy three BZ$15 parcels earlier in this project. Two
+   * defences, either of which is sufficient:
+   *
+   *   1. The wallet row is locked FOR UPDATE before the total is read, so two
+   *      simultaneous claims serialise and the second sees the first's credit.
+   *   2. The transaction reference is derived from how much has already been
+   *      granted, and references are unique. Two racers that somehow computed
+   *      the same figure would collide on the index rather than both post.
+   *
+   * Everything else is the ordinary engine: a balanced TOPUP through
+   * `postTransaction`, marked test money, no balance column written anywhere.
+   */
+  async selfServiceTestCredit(userId: string, amountMinor: bigint, capMinor: bigint, currency: Currency = 'BZD') {
+    if (amountMinor <= 0n) throw new BadRequestException('Enter an amount greater than zero.');
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const wallet = await this.ensureUserAccount(userId, currency, tx);
+      if (wallet.status !== 'ACTIVE') throw new BadRequestException('This wallet is not active.');
+      // Serialises concurrent claims on this wallet. Taken BEFORE the total is
+      // read, which is the only ordering that makes the read trustworthy.
+      await tx.$queryRaw`SELECT id FROM wallet_accounts WHERE id = ${wallet.id} FOR UPDATE`;
+
+      const granted = await this.selfServiceGrantedMinor(userId, wallet.id, tx);
+      const remaining = capMinor - granted;
+      if (remaining <= 0n) {
+        throw new ConflictException('Your test credit has already been issued.');
+      }
+      const credit = amountMinor < remaining ? amountMinor : remaining;
+
+      const clearing = await this.ensureSystemAccount('SYSTEM_TOPUP_CLEARING', currency, tx);
+      const txn = await this.postTransaction(
+        tx,
+        {
+          type: 'TOPUP',
+          currency,
+          // Derived from what has already been granted, so a replayed request
+          // lands on a reference that already exists and collides.
+          reference: `self-service-test-credit:${userId}:${granted}`,
+          description: SELF_SERVICE_TEST_CREDIT,
+          lines: [
+            { accountId: wallet.id, direction: 'CREDIT', amountMinor: credit },
+            { accountId: clearing.id, direction: 'DEBIT', amountMinor: credit },
+          ],
+        },
+        true,
+        // Always simulation money, whoever receives it. The recipient's own
+        // account classification is NOT read here and NOT changed: a real
+        // person stays a real person and only this credit is simulated.
+        true,
+      );
+      return { txn, walletId: wallet.id, credit, grantedAfter: granted + credit };
+    }).catch((err: unknown) => {
+      // The unique reference is the second line of defence, and it has to fail
+      // in a way the caller can read. A racer that got past the lock — a second
+      // API instance, say — collides on the index, and without this that
+      // surfaces as a 500 rather than "you already have your credit". Same
+      // outcome as the lock, said properly.
+      if (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002') {
+        throw new ConflictException('Your test credit has already been issued.');
+      }
+      throw err;
+    });
+
+    await this.audit.record({
+      action: 'WALLET_SELF_SERVICE_TEST_FUNDING_GRANTED',
+      // The person asked for their own test credit, so they are honestly the
+      // actor. No administrator was involved and none is named.
+      actorId: userId,
+      targetUserId: userId,
+      reason: 'Temporary UAT wallet funding',
+      newValue: {
+        walletId: result.walletId,
+        walletTransactionId: result.txn.id,
+        amountMinor: money(result.credit),
+        currency,
+        source: 'SELF_SERVICE_UAT',
+        cumulativeMinor: money(result.grantedAfter),
+      },
+    });
+
+    return {
+      transactionId: result.txn.id,
+      creditedMinor: money(result.credit),
+      cumulativeMinor: money(result.grantedAfter),
+      remainingMinor: money(capMinor - result.grantedAfter),
+      wallet: await this.summary(userId, currency),
+    };
+  }
+
+  /**
+   * How much self-service test credit this person has already been issued.
+   *
+   * Counts only SELF-SERVICE credits, identified by description. An
+   * administrator's grant is a different thing with a different audit action,
+   * and must not eat into somebody's UAT allowance — Edward's BZ$80 stays his.
+   */
+  async selfServiceGrantedMinor(userId: string, walletId?: string, db: Db = this.prisma): Promise<bigint> {
+    const accountId = walletId ?? (await db.walletAccount.findFirst({ where: { userId, type: 'USER', currency: 'BZD' }, select: { id: true } }))?.id;
+    if (!accountId) return 0n;
+    const entries = await db.walletLedgerEntry.findMany({
+      where: {
+        accountId,
+        direction: 'CREDIT',
+        transaction: { type: 'TOPUP', description: SELF_SERVICE_TEST_CREDIT },
+      },
+      select: { amountMinor: true },
+    });
+    return entries.reduce((sum, e) => sum + e.amountMinor, 0n);
+  }
+
+  /**
+   * Is this wallet holding simulation money?
+   *
+   * True when every credit it has ever received was test money. That is the
+   * honest way to classify what leaves it: simulation money is a property of
+   * the MONEY, not of the person holding it. A real customer who was given
+   * BZ$250 of UAT credit is still a real customer, but the BZ$250 they spend is
+   * still simulated, and recording its escrow movement as real revenue is how
+   * a rehearsal contaminates the books.
+   *
+   * A single real credit makes this false, so it turns itself off the day a
+   * genuine funding rail is connected — no flag to remember to flip.
+   */
+  async isTestFunded(accountId: string, db: Db = this.prisma): Promise<boolean> {
+    const [testCredits, realCredits] = await Promise.all([
+      db.walletLedgerEntry.count({ where: { accountId, direction: 'CREDIT', transaction: { isTest: true } } }),
+      db.walletLedgerEntry.count({ where: { accountId, direction: 'CREDIT', transaction: { isTest: false } } }),
+    ]);
+    return testCredits > 0 && realCredits === 0;
+  }
+
+  /**
+   * How the money for this payment was classified when it went into escrow.
+   *
+   * Every later movement of the same money — releasing it, settling it, paying
+   * the driver out of it — mirrors this rather than re-deriving it, so one
+   * decision is made once and the whole chain agrees with itself.
+   */
+  async escrowIsTest(paymentId: string, db: Db = this.prisma): Promise<boolean> {
+    const hold = await db.walletTransaction.findFirst({
+      where: { reference: `payment:${paymentId}:auth` },
+      select: { isTest: true },
+    });
+    return hold?.isTest ?? false;
   }
 
   // ---- Reads ----

@@ -1,13 +1,24 @@
-import { Body, Controller, ForbiddenException, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Post } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { walletTopUpSchema, type WalletTopUpInput } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
+import { ENV } from '../config/config.module';
+import type { Env } from '../config/env';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { WalletService } from './wallet.service';
+
+/**
+ * The hard ceiling on self-issued UAT credit, per person, cumulative.
+ *
+ * A constant rather than a setting: the environment can lower the per-click
+ * amount but nothing outside this file can raise the total anybody may mint for
+ * themselves. Spending does not restore headroom.
+ */
+const SELF_SERVICE_CAP_MINOR = 25_000; // BZ$250.00
 
 /**
  * The customer's own wallet.
@@ -23,6 +34,7 @@ export class WalletController {
     private readonly wallet: WalletService,
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    @Inject(ENV) private readonly env: Env,
   ) {}
 
   /** Available, on hold, and the two together. */
@@ -90,5 +102,72 @@ export class WalletController {
       description: 'Simulation funds added for testing',
       actorId: user.userId,
     });
+  }
+
+  // ==========================================================================
+  // TEMPORARY UAT FEATURE — MUST BE DISABLED BEFORE COMMERCIAL LAUNCH.
+  //
+  // Disable by clearing ENABLE_SELF_SERVICE_TEST_FUNDING (or setting it to
+  // "false") and redeploying. The flag defaults to OFF and is not derived from
+  // NODE_ENV, so an environment that simply does not set it has the feature
+  // off — no code has to be remembered and removed for that to be true.
+  // ==========================================================================
+
+  /**
+   * Whether this person can still issue themselves test funds, and for how
+   * much. Drives the wallet page: a button nobody can use, with no explanation,
+   * is worse than no button.
+   */
+  @Get('test-funding')
+  async testFundingStatus(@CurrentUser() user: AuthContext) {
+    const available = this.selfServiceAvailable();
+    if (!available.enabled) return { enabled: false as const };
+    const granted = await this.wallet.selfServiceGrantedMinor(user.userId);
+    const cap = BigInt(SELF_SERVICE_CAP_MINOR);
+    return {
+      enabled: true as const,
+      amountMinor: Math.min(this.env.SELF_SERVICE_TEST_FUNDING_AMOUNT_MINOR, SELF_SERVICE_CAP_MINOR),
+      capMinor: SELF_SERVICE_CAP_MINOR,
+      grantedMinor: Number(granted),
+      remainingMinor: Number(cap > granted ? cap - granted : 0n),
+      claimed: granted >= cap,
+    };
+  }
+
+  /**
+   * Issue simulation funds to YOUR OWN wallet.
+   *
+   * Takes no body at all, deliberately. There is no recipient to redirect, no
+   * amount to inflate and no wallet id to substitute: the person comes from the
+   * session and the amount from server configuration, capped in the environment
+   * schema itself. Anything a client sends is ignored because nothing is read.
+   *
+   * Sits behind the same session, role and CSRF protection as every other
+   * wallet mutation. Test money is still money moving through the ledger, and
+   * exempting it because "it is only simulated" is how a simulated hole becomes
+   * a real one.
+   */
+  @StrictThrottle()
+  @Post('test-fund')
+  async selfFund(@CurrentUser() user: AuthContext) {
+    const available = this.selfServiceAvailable();
+    if (!available.enabled) {
+      throw new NotFoundException('Not found.');
+    }
+    const amount = BigInt(Math.min(this.env.SELF_SERVICE_TEST_FUNDING_AMOUNT_MINOR, SELF_SERVICE_CAP_MINOR));
+    return this.wallet.selfServiceTestCredit(user.userId, amount, BigInt(SELF_SERVICE_CAP_MINOR));
+  }
+
+  /**
+   * The kill switch, plus an optional self-disarming expiry.
+   *
+   * Both are evaluated per request rather than cached at boot, so turning the
+   * flag off takes effect on the next call rather than the next restart.
+   */
+  private selfServiceAvailable(): { enabled: boolean } {
+    if (!this.env.ENABLE_SELF_SERVICE_TEST_FUNDING) return { enabled: false };
+    const expiry = this.env.SELF_SERVICE_TEST_FUNDING_EXPIRES_AT;
+    if (expiry && Date.now() > Date.parse(expiry)) return { enabled: false };
+    return { enabled: true };
   }
 }

@@ -185,7 +185,11 @@ export class SettlementService {
           lines,
         },
         true,
-        shipment.isTest,
+        // Mirrors what went INTO escrow rather than re-deriving from the
+        // shipment. A real sender paying with UAT credit escrowed simulation
+        // money, and the vendor/courier settlement of it is simulation money
+        // too — otherwise test funds turn into real earnings on the way out.
+        shipment.payment ? await this.wallet.escrowIsTest(shipment.payment.id, tx) : shipment.isTest,
       );
 
       for (const e of earnings) {
@@ -338,7 +342,9 @@ export class SettlementService {
           // Left off, a simulation order settled as REAL money: the driver's
           // earning and the platform's share both landed in real revenue, and a
           // rehearsal showed up in production reporting.
-          vo.order.isTest,
+          // Same rule as the escrow it settles: follow the money, not the
+          // account. See ShipmentService settlement for the reasoning.
+          vo.order.payment ? await this.wallet.escrowIsTest(vo.order.payment.id, tx) : vo.order.isTest,
         );
 
         // Flip records to POSTED.

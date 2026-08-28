@@ -31,10 +31,37 @@ export interface WalletTransactionRow {
   createdAt: string;
 }
 
+/**
+ * TEMPORARY UAT FEATURE — self-issued simulation funds.
+ *
+ * `enabled: false` is what the server says when the feature is switched off,
+ * and the page renders nothing at all in that case. Note there is no argument
+ * to `claimTestFunds` — the amount and the recipient are both the server's to
+ * decide, and there is deliberately nothing here for a client to influence.
+ */
+export interface TestFundingStatus {
+  enabled: boolean;
+  amountMinor?: number;
+  capMinor?: number;
+  grantedMinor?: number;
+  remainingMinor?: number;
+  claimed?: boolean;
+}
+
+export interface TestFundingResult {
+  transactionId: string;
+  creditedMinor: number;
+  cumulativeMinor: number;
+  remainingMinor: number;
+  wallet: WalletSummary;
+}
+
 export const walletApi = {
   summary: () => api.get<WalletSummary>('/wallet'),
   transactions: () => api.get<WalletTransactionRow[]>('/wallet/transactions'),
   topUp: (amountMinor: number) => api.post<WalletSummary>('/wallet/top-up', { amountMinor }),
+  testFundingStatus: () => api.get<TestFundingStatus>('/wallet/test-funding'),
+  claimTestFunds: () => api.post<TestFundingResult>('/wallet/test-fund', {}),
 };
 
 /** Minor units as Belize dollars. */
@@ -52,7 +79,11 @@ export function bzd(minor: number): string {
 export function describeTransaction(t: WalletTransactionRow): string {
   switch (t.type) {
     case 'TOPUP':
-      return 'Money added';
+      // The server's own words when it has them: "Self-Service Test Credit"
+      // and "Administrative Test Credit" say what the money actually is, and
+      // flattening both to "Money added" is how a tester ends up believing BML
+      // gave them real Belize dollars.
+      return t.description ?? 'Money added';
     case 'ESCROW_HOLD':
       return 'Held for an order';
     case 'ESCROW_RELEASE':

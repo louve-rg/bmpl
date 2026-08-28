@@ -198,6 +198,10 @@ export const AUDIT_ACTIONS = [
   // ---- Wallet activation ----
   'WALLET_TOPUP_POSTED',
   'WALLET_TEST_FUNDING_GRANTED',
+  // Simulation money a person issued to their own wallet during UAT. Kept
+  // distinct from WALLET_TEST_FUNDING_GRANTED (an administrator granting it to
+  // somebody) so the two are never confused when reading the trail back.
+  'WALLET_SELF_SERVICE_TEST_FUNDING_GRANTED',
   'USER_TEST_FLAG_CHANGED',
   // ---- Profile pictures ----
   'AVATAR_SUBMITTED',

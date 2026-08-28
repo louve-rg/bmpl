@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
 import { Alert, Button, Card, EmptyState, PageHeader, Spinner } from '../../components/ui';
-import { bzd, describeTransaction, walletApi, type WalletSummary, type WalletTransactionRow } from '../../lib/wallet';
+import { bzd, describeTransaction, walletApi, type TestFundingStatus, type WalletSummary, type WalletTransactionRow } from '../../lib/wallet';
 import type { ApiError } from '../../lib/api';
 
 /**
@@ -31,6 +31,9 @@ export default function WalletPage() {
   const [err, setErr] = useState<string | null>(null);
   /** Whether this account may add simulation funds. Discovered by trying. */
   const [fundingBlocked, setFundingBlocked] = useState<string | null>(null);
+  /** TEMPORARY UAT FEATURE. Null until the server has been asked. */
+  const [testFunding, setTestFunding] = useState<TestFundingStatus | null>(null);
+  const [claiming, setClaiming] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -38,11 +41,32 @@ export default function WalletPage() {
       setSummary(s);
       setRows(t);
       setState('ready');
+      // Separately and best-effort: the wallet must still render if this
+      // temporary endpoint is gone, which is exactly what happens the moment
+      // the feature is switched off.
+      walletApi.testFundingStatus().then(setTestFunding).catch(() => setTestFunding({ enabled: false }));
     } catch (e) {
       if ((e as ApiError).status === 401) router.push(`/login?next=${encodeURIComponent('/wallet')}`);
       else setState('error');
     }
   }, [router]);
+
+  /** TEMPORARY UAT FEATURE — see the panel below. */
+  async function claimTestFunds() {
+    setClaiming(true);
+    setErr(null);
+    setNote(null);
+    try {
+      const res = await walletApi.claimTestFunds();
+      setNote(`Test credit added — ${bzd(res.creditedMinor)}. These funds are simulated and have no cash value.`);
+      await load();
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'That did not work. Try again in a moment.');
+      await load();
+    } finally {
+      setClaiming(false);
+    }
+  }
 
   useEffect(() => {
     void load();
@@ -90,6 +114,36 @@ export default function WalletPage() {
         )}
         {note && <Alert tone="success" className="mt-6">{note}</Alert>}
         {err && <Alert tone="warning" className="mt-6">{err}</Alert>}
+
+        {/* TEMPORARY UAT FEATURE — MUST BE DISABLED BEFORE COMMERCIAL LAUNCH.
+            Renders only while the server reports the feature switched on, so
+            turning the flag off removes it without a web deploy. */}
+        {testFunding?.enabled && (
+          <Card className="mt-6 border-amber-300 bg-amber-50/60 p-5 sm:p-6">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Testing mode</p>
+            <h2 className="mt-1 text-lg font-semibold text-belize-navy">Test wallet funding</h2>
+            <p className="mt-2 max-w-prose text-sm text-slate-700">
+              These wallet funds are simulated and have no cash value. They cannot be
+              withdrawn or transferred, and exist so you can try Marketplace and Shipping
+              without a card or bank account.
+            </p>
+            {testFunding.claimed ? (
+              <p className="mt-4 text-sm font-medium text-slate-600">
+                Your {bzd(testFunding.capMinor ?? 0)} test credit has already been issued.
+              </p>
+            ) : (
+              <div className="mt-4">
+                <Button type="button" onClick={() => void claimTestFunds()} disabled={claiming} className="min-h-[48px]">
+                  {claiming ? <Spinner className="h-4 w-4" /> : `Add ${bzd(testFunding.amountMinor ?? 0)} test funds`}
+                </Button>
+                <p className="mt-2 text-xs text-slate-500">
+                  One-off, up to {bzd(testFunding.capMinor ?? 0)} per account. Spending does not
+                  renew it.
+                </p>
+              </div>
+            )}
+          </Card>
+        )}
 
         {summary && (
           <>

@@ -152,6 +152,10 @@ export class PaymentsService {
             ],
           },
           true,
+          // Money does not change kind on the way back. Mirroring the hold
+          // keeps a refund of simulation funds out of real reporting, which
+          // deriving it again here would eventually get wrong.
+          await this.wallet.escrowIsTest(payment.id, tx),
         );
         escrowReturnedMinor += hold.amountMinor;
         await this.audit.record({ action: 'ESCROW_FUNDS_RELEASED', actorId, newValue: { paymentId: payment.id, amountMinor: money(hold.amountMinor), walletTransactionId: txn.id, from: 'escrow', to: 'customer' } }, tx);
@@ -248,9 +252,16 @@ export class PaymentsService {
     const balance = await this.wallet.balanceMinor(wallet.id, tx); // authoritative, in-tx, now serialised
     if (balance < payment.amountMinor) throw new ConflictException('Insufficient wallet balance.');
 
-    // The escrow movement inherits the customer's test flag, so a rehearsal
-    // order's money stays marked as rehearsal money all the way through.
+    // What kind of money is this?
+    //
+    // Two ways it can be simulated, and either is enough. The account may be a
+    // designated test account — a rehearsal, where everything it does is
+    // pretend. Or the account may be a real person spending simulation funds
+    // they were given for UAT, which is the ordinary case now that anyone can
+    // credit themselves BZ$250. Reading only the person's flag marked that
+    // second case as real revenue moving into escrow.
     const owner = await tx.user.findUniqueOrThrow({ where: { id: payment.userId }, select: { isTest: true } });
+    const isTestMoney = owner.isTest || (await this.wallet.isTestFunded(wallet.id, tx));
     const txn = await this.wallet.postTransaction(
       tx,
       {
@@ -264,7 +275,7 @@ export class PaymentsService {
         ],
       },
       true,
-      owner.isTest,
+      isTestMoney,
     );
     const customerEntry = txn.entries.find((e) => e.accountId === wallet.id);
     for (const hold of fresh.holds) {
