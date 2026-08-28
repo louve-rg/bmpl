@@ -82,6 +82,26 @@ interface Routable {
  * guards intact. The seam stays exactly where it should be — in the backend,
  * invisible from the cab.
  */
+/**
+ * Keep a driver's own work out of their driver feed.
+ *
+ * This is the list the driver app actually reads — both halves of it — so the
+ * exclusion has to live here and not only on the per-job ownership check. In the
+ * query rather than after it, so a self-assigned row cannot be counted in a tab
+ * badge, ordered into the queue, or paged past.
+ *
+ * A row like that should not exist at all: assignment refuses to create one. The
+ * filter is what makes a row left behind by an older bug or a bad backfill
+ * harmless rather than workable.
+ */
+function notOwnDelivery(userId: string): Prisma.OrderDeliveryWhereInput {
+  return { vendorOrder: { order: { userId: { not: userId } } } };
+}
+
+function notOwnLeg(userId: string): Prisma.ShipmentLegWhereInput {
+  return { shipment: { customerUserId: { not: userId } } };
+}
+
 @Injectable()
 export class DriverJobFeedService {
   constructor(private readonly prisma: PrismaService) {}
@@ -97,12 +117,12 @@ export class DriverJobFeedService {
     const profileId = await this.myProfileId(userId);
     const [deliveries, legs] = await Promise.all([
       this.prisma.orderDelivery.findMany({
-        where: { assignedDriverProfileId: profileId, ...deliveryScope(scope) },
+        where: { assignedDriverProfileId: profileId, ...notOwnDelivery(userId), ...deliveryScope(scope) },
         take: 200,
         include: DELIVERY_ROWS,
       }),
       this.prisma.shipmentLeg.findMany({
-        where: { assignedDriverProfileId: profileId, ...legScope(scope) },
+        where: { assignedDriverProfileId: profileId, ...notOwnLeg(userId), ...legScope(scope) },
         take: 200,
         include: LEG_ROWS,
       }),
@@ -122,12 +142,12 @@ export class DriverJobFeedService {
     const [deliveries, legs] = await Promise.all([
       this.prisma.orderDelivery.groupBy({
         by: ['status', 'acceptedAt'],
-        where: { assignedDriverProfileId: profileId, status: { in: [...OPEN, 'DELIVERED'] as never } },
+        where: { assignedDriverProfileId: profileId, ...notOwnDelivery(userId), status: { in: [...OPEN, 'DELIVERED'] as never } },
         _count: { _all: true },
       }),
       this.prisma.shipmentLeg.groupBy({
         by: ['courierStatus', 'acceptedAt'],
-        where: { assignedDriverProfileId: profileId, courierStatus: { in: [...OPEN, 'DELIVERED'] as never } },
+        where: { assignedDriverProfileId: profileId, ...notOwnLeg(userId), courierStatus: { in: [...OPEN, 'DELIVERED'] as never } },
         _count: { _all: true },
       }),
     ]);
@@ -162,12 +182,12 @@ export class DriverJobFeedService {
     const profileId = await this.myProfileId(userId);
     const [deliveries, legs, profile] = await Promise.all([
       this.prisma.orderDelivery.findMany({
-        where: { assignedDriverProfileId: profileId, status: { in: OPEN as never } },
+        where: { assignedDriverProfileId: profileId, ...notOwnDelivery(userId), status: { in: OPEN as never } },
         take: 50,
         include: DELIVERY_ROWS,
       }),
       this.prisma.shipmentLeg.findMany({
-        where: { assignedDriverProfileId: profileId, courierStatus: { in: OPEN as never } },
+        where: { assignedDriverProfileId: profileId, ...notOwnLeg(userId), courierStatus: { in: OPEN as never } },
         take: 50,
         include: LEG_ROWS,
       }),

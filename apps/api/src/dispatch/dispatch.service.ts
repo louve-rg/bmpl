@@ -119,9 +119,13 @@ export class DispatchService {
   async eligibleDrivers(deliveryId: string) {
     const d = await this.core.loadOrThrow(deliveryId);
     const district = this.districtOrThrow(d);
-    // Only the matching side of the simulation boundary — an admin should not be
-    // offered a choice the assignment would then refuse.
-    return this.drivers.eligibleDriversForDistrict(district, { isTest: d.vendorOrder.order.isTest });
+    // Only the matching side of the simulation boundary, and never the customer
+    // themselves — an admin should not be offered a choice the assignment would
+    // then refuse.
+    return this.drivers.eligibleDriversForDistrict(district, {
+      isTest: d.vendorOrder.order.isTest,
+      excludeUserId: d.vendorOrder.order.userId,
+    });
   }
 
   /**
@@ -204,6 +208,26 @@ export class DispatchService {
     // rule on the ADMIN path too, not just in the dispatch engine — an
     // administrator cannot hand a rehearsal to a real driver by mistake, nor a
     // real customer's delivery to a test account.
+    // Nobody delivers their own order. This is the rule, not the filter: the
+    // candidate search already leaves the customer out of the running, but every
+    // assignment — automatic, administrator, or reassignment after a decline —
+    // arrives here, so this is the line that has to hold when something upstream
+    // is wrong or an administrator submits a driver id by hand.
+    //
+    // The comparison is on the USER, never the active role. A person may hold
+    // both CUSTOMER and DELIVERY_DRIVER legitimately and drive for other people
+    // all day; switching roles does not make them a different human being, and
+    // it must not turn their own order into a job they can take, mark delivered
+    // on their own say-so, and collect the fee for.
+    const assignee = await this.prisma.driverProfile.findUnique({
+      where: { id: driverProfileId },
+      select: { userId: true },
+    });
+    if (!assignee) throw new BadRequestException('That driver profile does not exist.');
+    if (assignee.userId === current.vendorOrder.order.userId) {
+      throw new BadRequestException('Customer cannot be assigned as the driver for their own delivery.');
+    }
+
     const e = await this.drivers.assignmentEligibility(driverProfileId, district, vehicleId, {
       isTestDelivery: current.vendorOrder.order.isTest,
     });

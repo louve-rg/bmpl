@@ -107,6 +107,15 @@ export class DriverJobService {
     const d = await this.core.loadOrThrow(deliveryId);
     // 404 (not 403) so a driver cannot probe the existence of others' jobs.
     if (d.assignedDriverProfileId !== profileId) throw new NotFoundException('Job not found.');
+    // Nobody works their own order. Every driver-side action — reading the job,
+    // accepting it, the pickup and delivery PINs, marking it delivered — comes
+    // through here, so one check covers all of them rather than each transition
+    // having to remember. Assignment should already make this unreachable; this
+    // is the second lock, on the other side of the door.
+    //
+    // 404 again, matching the line above: to this account, as a driver, their
+    // own delivery simply does not exist.
+    if (d.vendorOrder.order.userId === userId) throw new NotFoundException('Job not found.');
     return { d, profileId };
   }
 
@@ -129,7 +138,7 @@ export class DriverJobService {
   async listJobs(userId: string, scope: DriverDeliveryView | 'open' | 'all' = 'open') {
     const profileId = await this.myProfileId(userId);
     const rows = await this.prisma.orderDelivery.findMany({
-      where: { assignedDriverProfileId: profileId, ...scopeFilter(scope) },
+      where: { assignedDriverProfileId: profileId, ...notOwnOrder(userId), ...scopeFilter(scope) },
       // Open work reads best oldest-first (the thing waiting longest is the thing
       // to do); history reads best newest-first.
       orderBy: scope === 'completed' ? { deliveredAt: 'desc' } : [{ driverQueuePosition: 'asc' }, { assignedAt: 'asc' }],
@@ -146,6 +155,7 @@ export class DriverJobService {
       by: ['status', 'acceptedAt'],
       where: {
         assignedDriverProfileId: profileId,
+        ...notOwnOrder(userId),
         status: { in: [...DRIVER_OPEN_STATUSES, 'DELIVERED'] as DeliveryStatus[] as never },
       },
       _count: { _all: true },
@@ -185,7 +195,11 @@ export class DriverJobService {
     const profileId = await this.myProfileId(userId);
     const [rows, profile] = await Promise.all([
       this.prisma.orderDelivery.findMany({
-        where: { assignedDriverProfileId: profileId, status: { in: DRIVER_OPEN_STATUSES as DeliveryStatus[] as never } },
+        where: {
+          assignedDriverProfileId: profileId,
+          ...notOwnOrder(userId),
+          status: { in: DRIVER_OPEN_STATUSES as DeliveryStatus[] as never },
+        },
         orderBy: [{ driverQueuePosition: 'asc' }, { assignedAt: 'asc' }],
         take: 50,
         include: LIST_INCLUDE,
@@ -632,6 +646,17 @@ export class DriverJobService {
  * split in SQL rather than in a post-filter is what guarantees a driver's
  * "Assigned" tab can never contain an offer they have not taken.
  */
+/**
+ * Keep a driver's own orders out of their driver views.
+ *
+ * Applied in the query, not after it, so a self-assigned row cannot be counted
+ * in a tab badge or paged past — and so that a legacy row predating the
+ * assignment rule stays invisible rather than becoming a job somebody can work.
+ */
+function notOwnOrder(userId: string): Prisma.OrderDeliveryWhereInput {
+  return { vendorOrder: { order: { userId: { not: userId } } } };
+}
+
 function scopeFilter(scope: DriverDeliveryView | 'open' | 'all'): Prisma.OrderDeliveryWhereInput {
   switch (scope) {
     case 'available':

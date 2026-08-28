@@ -88,6 +88,11 @@ export class ShipmentDriverService {
     const profileId = await this.myProfileId(userId);
     const leg = await this.prisma.shipmentLeg.findUnique({ where: { id: legId }, include: LEG_INCLUDE });
     if (!leg || leg.assignedDriverProfileId !== profileId) throw new NotFoundException('Job not found.');
+    // The sender never carries their own parcel. Every driver-side action on a
+    // leg — reading it, accepting it, the handoff PIN, completing it — comes
+    // through here, so the rule is enforced once rather than per transition.
+    // Assignment already makes this unreachable; this is the second lock.
+    if (leg.shipment.customerUserId === userId) throw new NotFoundException('Job not found.');
     return { leg, profileId };
   }
 

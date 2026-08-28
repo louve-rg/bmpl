@@ -70,6 +70,9 @@ export class ShipmentDispatchService {
             id: true,
             reference: true,
             isTest: true,
+            // Who booked the shipment — kept out of the courier pool for their
+            // own parcel, on both the first mile and the last.
+            customerUserId: true,
             originDistrict: true,
             quotedTotalMinor: true,
             payment: { select: { status: true } },
@@ -110,13 +113,35 @@ export class ShipmentDispatchService {
       leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originDistrict : leg.originHub?.district;
     if (!district) return { result: 'SKIPPED', reason: 'no district to search for drivers in' };
 
-    const ranked = await this.rankFor(leg.id, district, cfg.maxConcurrentPerDriver, leg.shipment.isTest);
+    const ranked = await this.rankFor(
+      leg.id,
+      district,
+      cfg.maxConcurrentPerDriver,
+      leg.shipment.isTest,
+      leg.shipment.customerUserId,
+    );
     if (ranked.length === 0) {
       // Not exhausted — nobody is online right now. The sweeper will try again.
       return { result: 'SKIPPED', reason: 'no eligible driver is available' };
     }
 
     const chosen = ranked[0]!;
+
+    // The pool query already excluded the sender, so reaching this with the
+    // sender selected means something upstream is wrong. Refuse rather than
+    // offer: a courier leg exists so that somebody other than the sender carries
+    // the parcel, and a sender who is also the courier can confirm their own
+    // collection and their own delivery with nobody independent in the chain.
+    const chosenUserId = await this.prisma.driverProfile
+      .findUnique({ where: { id: chosen.driverProfileId }, select: { userId: true } })
+      .then((p) => p?.userId ?? null);
+    if (chosenUserId && chosenUserId === leg.shipment.customerUserId) {
+      this.logger.error(
+        `refusing to offer leg ${leg.id} to the sender's own driver profile ${chosen.driverProfileId}`,
+      );
+      return { result: 'SKIPPED', reason: 'the only candidate was the sender, who cannot courier their own parcel' };
+    }
+
     const vehicleId = await this.pickVehicle(chosen.driverProfileId, district, leg.shipment.isTest);
     const expiresAt = new Date(Date.now() + cfg.offerTimeoutSeconds * 1000);
 
@@ -169,8 +194,14 @@ export class ShipmentDispatchService {
    * three marketplace deliveries is not free to take a shipment leg as well, and
    * counting only one table would quietly hand them a fourth job.
    */
-  private async rankFor(legId: string, district: string, maxConcurrent: number, isTest: boolean) {
-    const pool = await this.drivers.eligibleDriversForDistrict(district, { isTest });
+  private async rankFor(
+    legId: string,
+    district: string,
+    maxConcurrent: number,
+    isTest: boolean,
+    requesterUserId?: string | null,
+  ) {
+    const pool = await this.drivers.eligibleDriversForDistrict(district, { isTest, excludeUserId: requesterUserId });
     if (pool.length === 0) return [];
     const ids = pool.map((d) => d.driverProfileId);
 

@@ -21,7 +21,9 @@ export interface DispatchSettings {
 
 export type DispatchOutcome =
   | { result: 'ASSIGNED'; driverProfileId: string; offerCount: number }
-  | { result: 'NO_CANDIDATES' }
+  // `reason` says which kind of empty this was — nobody online, nobody in the
+  // district, or the only driver in range being the customer themselves.
+  | { result: 'NO_CANDIDATES'; reason?: string }
   | { result: 'EXHAUSTED' }
   | { result: 'SKIPPED'; reason: string };
 
@@ -91,7 +93,9 @@ export class DispatchEngineService {
           select: {
             status: true,
             order: {
-              select: { orderNumber: true, isTest: true, addresses: { select: { district: true } } },
+              // userId is the requesting customer — needed so the candidate
+              // search can leave them out of their own delivery.
+              select: { orderNumber: true, isTest: true, userId: true, addresses: { select: { district: true } } },
             },
           },
         },
@@ -131,17 +135,28 @@ export class DispatchEngineService {
     // pool is real drivers. Narrowed in the candidate query AND re-asserted by
     // assignmentEligibility at assignment time.
     const isTest = delivery.vendorOrder.order.isTest;
-    const ranked = await this.rankFor(deliveryId, district, cfg, isTest);
+    const requesterUserId = delivery.vendorOrder.order.userId;
+    const ranked = await this.rankFor(deliveryId, district, cfg, isTest, requesterUserId);
     if (ranked.length === 0) {
       // Not exhausted — nobody is online right now. The sweeper retries, so a
       // quiet hour resolves itself once a driver comes online.
+      //
+      // Say WHY in the log. "No candidates" on its own sent us reading the
+      // database by hand to find out whether the district was wrong, everyone
+      // was offline, or the only driver in range was the customer. The counts
+      // below answer that without naming anybody or touching an address.
+      const why = await this.explainEmptyPool(district, isTest, requesterUserId);
+      this.logger.warn(
+        `dispatch: no candidate for delivery ${deliveryId} — district=${district} isTest=${isTest} ` +
+          `online=${why.online} inDistrict=${why.inDistrict} selfExcluded=${why.selfExcluded} eligible=0`,
+      );
       await this.core.notifyAdmins('deliveries.assign', {
         title: 'No driver available',
         body: `Order ${delivery.vendorOrder.order.orderNumber} is packed but no eligible driver is online.`,
-        data: { deliveryId },
+        data: { deliveryId, ...why },
         category: 'ADMIN_ALERT',
       });
-      return { result: 'NO_CANDIDATES' };
+      return { result: 'NO_CANDIDATES', reason: why.summary };
     }
 
     // Re-check eligibility for the chosen driver at assignment time — the pool
@@ -251,8 +266,48 @@ export class DispatchEngineService {
    * per driver — the pool is up to 200 rows, and a per-driver round trip here
    * would be an N+1 on the hottest path in the system.
    */
-  private async rankFor(deliveryId: string, district: string, cfg: DispatchSettings, isTest = false) {
-    const pool = await this.drivers.eligibleDriversForDistrict(district, { isTest });
+  /**
+   * Why did the candidate search come back empty?
+   *
+   * Counts only — no names, no addresses, no coordinates. Enough for an
+   * administrator (or a log) to tell "nobody is working right now" apart from
+   * "the only driver in range was the customer", which look identical from the
+   * outside and need completely different responses.
+   */
+  private async explainEmptyPool(district: string, isTest: boolean, requesterUserId?: string) {
+    const base = { availability: 'ONLINE', isActive: true, isTest } as const;
+    const [online, inDistrict, selfExcluded] = await Promise.all([
+      this.prisma.driverProfile.count({ where: base }),
+      this.prisma.driverProfile.count({
+        where: { ...base, serviceAreas: { some: { district: district as never, isActive: true } } },
+      }),
+      requesterUserId
+        ? this.prisma.driverProfile.count({
+            where: {
+              ...base,
+              userId: requesterUserId,
+              serviceAreas: { some: { district: district as never, isActive: true } },
+            },
+          })
+        : Promise.resolve(0),
+    ]);
+    const summary =
+      inDistrict === 0
+        ? 'no driver is online in this district'
+        : selfExcluded > 0 && inDistrict === selfExcluded
+          ? 'the only driver in range is the customer, who cannot deliver their own order'
+          : 'no driver in this district currently has a usable vehicle';
+    return { online, inDistrict, selfExcluded, summary };
+  }
+
+  private async rankFor(
+    deliveryId: string,
+    district: string,
+    cfg: DispatchSettings,
+    isTest = false,
+    requesterUserId?: string,
+  ) {
+    const pool = await this.drivers.eligibleDriversForDistrict(district, { isTest, excludeUserId: requesterUserId });
     if (pool.length === 0) return [];
     const ids = pool.map((d) => d.driverProfileId);
 

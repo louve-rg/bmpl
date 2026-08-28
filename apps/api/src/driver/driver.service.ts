@@ -393,13 +393,31 @@ export class DriverService {
    *  in the QUERY rather than in a post-filter, so a test driver is never even a
    *  candidate for a real delivery (nor the reverse). `assignmentEligibility`
    *  re-checks it at assignment time regardless; this keeps the ranking honest. */
-  async eligibleDriversForDistrict(district: string, opts: { isTest?: boolean } = {}) {
+  /**
+   * The drivers who could take a job in this district right now.
+   *
+   * `excludeUserId` is the person who asked for the job — the customer whose
+   * order this is, or the sender who booked the shipment. They are removed here,
+   * before ranking, so that they are never scored, never offered the job, never
+   * notified about it and never listed to an administrator as a choice. A
+   * multi-role account is perfectly legitimate: the same person may drive for
+   * other people's orders all day. They may not drive their own, because the
+   * whole point of the courier is that somebody else handles the goods, and
+   * because a customer who is also the driver can mark their own parcel
+   * delivered and pay themselves the fee.
+   *
+   * Filtering here is the courtesy; `DispatchService.assignInternal` is the
+   * rule. Both exist deliberately — this one keeps the requester out of sight,
+   * that one refuses the write no matter who asks.
+   */
+  async eligibleDriversForDistrict(district: string, opts: { isTest?: boolean; excludeUserId?: string | null } = {}) {
     const candidates = await this.prisma.driverProfile.findMany({
       where: {
         availability: 'ONLINE',
         isActive: true,
         isTest: opts.isTest ?? false,
         serviceAreas: { some: { district: district as never, isActive: true } },
+        ...(opts.excludeUserId ? { userId: { not: opts.excludeUserId } } : {}),
       },
       include: {
         user: { select: { firstName: true, lastName: true } },
