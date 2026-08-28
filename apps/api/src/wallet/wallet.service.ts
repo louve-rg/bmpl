@@ -466,7 +466,7 @@ export class WalletService {
   }
 
   private shape(t: {
-    id: string; type: string; status: string; currency: string; reference: string | null; description: string | null; postedAt: Date | null; createdAt: Date;
+    id: string; type: string; status: string; currency: string; isTest: boolean; reference: string | null; description: string | null; postedAt: Date | null; createdAt: Date;
     entries: Array<{ id: string; direction: string; amountMinor: bigint; account: { type: string; userId: string | null } }>;
   }) {
     return {
@@ -474,6 +474,10 @@ export class WalletService {
       type: t.type,
       status: t.status,
       currency: t.currency,
+      // Whether this is simulation money. Operations has to be able to tell a
+      // UAT credit from a real movement at a glance, and the description alone
+      // ("Self-Service Test Credit") relies on reading the words carefully.
+      isTest: t.isTest,
       reference: t.reference,
       description: t.description,
       postedAt: t.postedAt,
