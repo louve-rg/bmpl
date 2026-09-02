@@ -124,7 +124,16 @@ const envSchema = z.object({
   SELF_SERVICE_TEST_FUNDING_AMOUNT_MINOR: z.coerce.number().int().positive().max(25_000).default(25_000),
   // Optional belt-and-braces: an ISO timestamp after which the feature turns
   // itself off even if somebody forgets the flag. Absent means no expiry.
-  SELF_SERVICE_TEST_FUNDING_EXPIRES_AT: z.string().datetime().optional(),
+  //
+  // Blank is read as absent. Clearing a value by emptying it is what an operator
+  // naturally does, and refusing to boot the whole API over it would punish the
+  // safe direction of the change — the expiry is a belt to the flag's braces, not a
+  // secret we cannot run without.
+  SELF_SERVICE_TEST_FUNDING_EXPIRES_AT: z
+    .string()
+    .optional()
+    .transform((v) => (v?.trim() ? v.trim() : undefined))
+    .pipe(z.string().datetime().optional()),
 
   // ---- Error monitoring (Sentry) ----
   SENTRY_DSN: z.string().optional(),
