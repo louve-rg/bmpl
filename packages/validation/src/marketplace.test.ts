@@ -19,7 +19,9 @@ import {
   inventoryAdjustSchema,
   inventorySettingsSchema,
   vendorQuerySchema,
+  orderAddressSchema,
 } from './marketplace';
+import { UNLOCATABLE_ADDRESS_MESSAGE } from '@bmpl/shared';
 
 describe('slugSchema', () => {
   it('accepts valid slugs', () => {
@@ -176,5 +178,59 @@ describe('variant + inventory schemas (M6)', () => {
     expect(vendorQuerySchema.parse({})).toEqual({});
     expect(vendorQuerySchema.parse({ q: 'shop', district: 'CAYO' })).toMatchObject({ q: 'shop', district: 'CAYO' });
     expect(vendorQuerySchema.safeParse({ district: 'ATLANTIS' }).success).toBe(false);
+  });
+});
+
+/**
+ * A delivery address is written down OR pinned. Either one alone is complete.
+ *
+ * These tests exist because checkout used to demand both. A customer who
+ * dropped a pin on their own doorstep — the most precise thing they can
+ * possibly give us — was told the address was missing and could not check out.
+ *
+ * The town stays required either way. It is not location detail: it prices the
+ * delivery and matches the driver, and a pin is not allowed to imply it.
+ */
+describe('orderAddressSchema — an address is written OR pinned (M10)', () => {
+  const BELIZE_CITY = { latitude: 17.4995, longitude: -88.1976 };
+  const base = { fullName: 'Edward Flowers', phone: '501-600-1234', city: 'Belize City', district: 'BELIZE' };
+
+  it('accepts a pin with no street address at all', () => {
+    const r = orderAddressSchema.safeParse({ ...base, ...BELIZE_CITY });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.addressLine1).toBeUndefined();
+      expect(r.data.latitude).toBe(BELIZE_CITY.latitude);
+    }
+  });
+
+  it('accepts a written address with no pin', () => {
+    expect(orderAddressSchema.safeParse({ ...base, addressLine1: '12 Queen Street' }).success).toBe(true);
+  });
+
+  it('rejects an address that is neither written nor pinned, and names both ways out', () => {
+    const r = orderAddressSchema.safeParse(base);
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues[0]!.message).toBe(UNLOCATABLE_ADDRESS_MESSAGE);
+      // Never "address required" at someone who supplied a pin — the message has
+      // to say what is actually missing.
+      expect(r.error.issues[0]!.message).toContain('drop a pin');
+    }
+  });
+
+  it('still wants the town, because a pin does not price a delivery', () => {
+    expect(orderAddressSchema.safeParse({ ...base, city: '', ...BELIZE_CITY }).success).toBe(false);
+  });
+
+  it('still refuses half a pin and a pin outside Belize', () => {
+    expect(orderAddressSchema.safeParse({ ...base, latitude: BELIZE_CITY.latitude }).success).toBe(false);
+    expect(orderAddressSchema.safeParse({ ...base, latitude: 40.7, longitude: -74 }).success).toBe(false);
+  });
+
+  it('still requires a name and a district — a pin does not say who to hand it to', () => {
+    expect(orderAddressSchema.safeParse({ ...base, fullName: '', ...BELIZE_CITY }).success).toBe(false);
+    const { district: _omitted, ...noDistrict } = base;
+    expect(orderAddressSchema.safeParse({ ...noDistrict, ...BELIZE_CITY }).success).toBe(false);
   });
 });

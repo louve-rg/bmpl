@@ -18,7 +18,8 @@ export interface OrderItemView {
 export interface Address {
   fullName: string;
   phone: string | null;
-  addressLine1: string;
+  /** Null when the customer pinned the location instead of writing it down. */
+  addressLine1: string | null;
   addressLine2: string | null;
   city: string;
   district: string;
@@ -113,10 +114,13 @@ export interface CheckoutBody {
   deliveryAddress?: {
     fullName: string;
     phone?: string;
-    addressLine1: string;
+    /** Omitted when the customer pinned the location instead of writing it down. */
+    addressLine1?: string;
     addressLine2?: string;
     city: string;
     district: string;
+    latitude?: number;
+    longitude?: number;
   };
 }
 

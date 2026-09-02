@@ -15,7 +15,7 @@
  * database, because "the hubs are data an admin configures" is itself a claim
  * worth testing.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 
@@ -254,6 +254,203 @@ describe('a local door-to-door parcel', () => {
   });
 });
 
+/**
+ * Belize City → Ladyville, which the business asked for by name.
+ *
+ * Two mainland towns fifteen minutes apart on the Northern Highway. The
+ * planner could not tell that journey apart from Belize City → San Pedro,
+ * which crosses open water, so it sent both to the terminal network and
+ * refused both. Being conservative was the right way round to be wrong — a bad
+ * quote beats a parcel handed to a driver who cannot reach it — but it made
+ * the commonest inter-town courier run impossible to book.
+ *
+ * The missing piece was never logic. It is a fact about the road, and facts
+ * about Belize are configured rows.
+ */
+describe('a direct courier lane between two towns', () => {
+  const bzToLadyville = {
+    service: 'DOOR_TO_DOOR',
+    origin: { district: 'BELIZE', city: 'Belize City' },
+    destination: { district: 'BELIZE', city: 'Ladyville' },
+  };
+
+  let laneId: string | null = null;
+
+  afterEach(async () => {
+    if (laneId) await ctx.prisma.courierLane.deleteMany({ where: { id: laneId } });
+    laneId = null;
+  });
+
+  const addLane = async (body: Record<string, unknown> = {}) => {
+    const r = await post(admin, 'admin/logistics/courier-lanes', {
+      originDistrict: 'BELIZE',
+      originCity: 'Belize City',
+      destinationDistrict: 'BELIZE',
+      destinationCity: 'Ladyville',
+      priceMinor: 2500,
+      durationMinutes: 40,
+      ...body,
+    });
+    expect(r.status).toBe(201);
+    laneId = r.body.id;
+    return r.body;
+  };
+
+  it('is refused as a terminal journey until a lane says a courier can drive it', async () => {
+    // Belize District has no terminal in this fixture that serves Ladyville, so
+    // without a lane the planner has nothing to offer — which is exactly the
+    // refusal the business reported.
+    const r = await post(customer, 'shipping/quote', bzToLadyville);
+    expect(r.body.available).toBe(false);
+  });
+
+  it('plans one courier and no terminal once the lane is configured', async () => {
+    await addLane();
+    const r = await post(customer, 'shipping/quote', bzToLadyville);
+    expect(r.status).toBe(201);
+    expect(r.body.available).toBe(true);
+    expect(r.body.legs.map((l: { kind: string }) => l.kind)).toEqual(['DIRECT']);
+    expect(r.body.legs[0].originHub).toBeNull();
+    expect(r.body.legs[0].destinationHub).toBeNull();
+  });
+
+  it('prices the lane from its own row, not from the local-run rate', async () => {
+    await addLane({ priceMinor: 2500 });
+    const r = await post(customer, 'shipping/quote', bzToLadyville);
+    expect(r.body.totalMinor).toBe(2500);
+    expect(r.body.pricingIncomplete).toBe(false);
+  });
+
+  it('says the lane is unpriced rather than quoting it as free', async () => {
+    await addLane({ priceMinor: 0 });
+    const r = await post(customer, 'shipping/quote', bzToLadyville);
+    expect(r.body.available).toBe(true);
+    expect(r.body.pricingIncomplete).toBe(true);
+    expect(r.body.pricingNote).toMatch(/Ladyville/);
+  });
+
+  it('reads the lane in both directions, because a road goes both ways', async () => {
+    await addLane();
+    const r = await post(customer, 'shipping/quote', {
+      ...bzToLadyville,
+      origin: bzToLadyville.destination,
+      destination: bzToLadyville.origin,
+    });
+    expect(r.body.available).toBe(true);
+    expect(r.body.legs.map((l: { kind: string }) => l.kind)).toEqual(['DIRECT']);
+  });
+
+  it('does not extend to San Pedro, which is still across water', async () => {
+    // The whole point of configuring lanes one at a time. A Ladyville lane must
+    // not license a road courier to the island.
+    await addLane();
+    const r = await post(customer, 'shipping/quote', {
+      ...bzToLadyville,
+      destination: { district: 'BELIZE', city: 'San Pedro' },
+    });
+    const kinds = (r.body.legs ?? []).map((l: { kind: string }) => l.kind);
+    expect(kinds).not.toContain('DIRECT');
+  });
+
+  it('books as a single ready leg with no terminal at either end', async () => {
+    await addLane();
+    const r = await post(customer, 'shipping', {
+      payWithWallet: true,
+      ...bzToLadyville,
+      origin: { ...bzToLadyville.origin, address: '1 Front St', name: 'S', phone: '501-2223333' },
+      destination: { ...bzToLadyville.destination, address: '2 Airport Rd', name: 'R', phone: '501-4445555' },
+    });
+    expect(r.status).toBe(201);
+
+    const legs = await ctx.prisma.shipmentLeg.findMany({ where: { shipmentId: r.body.id } });
+    expect(legs).toHaveLength(1);
+    expect(legs[0]!.kind).toBe('DIRECT');
+    expect(legs[0]!.originHubId).toBeNull();
+    expect(legs[0]!.destinationHubId).toBeNull();
+
+    await ctx.prisma.driverEarning.deleteMany({ where: { shipmentLeg: { shipmentId: r.body.id } } });
+    await ctx.prisma.shipmentLeg.deleteMany({ where: { shipmentId: r.body.id } });
+    await ctx.prisma.custodyEvent.deleteMany({ where: { shipmentId: r.body.id } });
+    await ctx.prisma.shipment.delete({ where: { id: r.body.id } });
+  });
+
+  it('is ignored once operations close it', async () => {
+    const lane = await addLane();
+    await patch(admin, `admin/logistics/courier-lanes/${lane.id}`, { isActive: false });
+    const r = await post(customer, 'shipping/quote', bzToLadyville);
+    const kinds = (r.body.legs ?? []).map((l: { kind: string }) => l.kind);
+    expect(kinds).not.toContain('DIRECT');
+  });
+
+  it('refuses a lane from a town to itself, which would change no answer', async () => {
+    const r = await post(admin, 'admin/logistics/courier-lanes', {
+      originDistrict: 'BELIZE',
+      originCity: 'Belize City',
+      destinationDistrict: 'BELIZE',
+      destinationCity: 'belize city',
+      priceMinor: 1000,
+    });
+    expect(r.status).toBe(400);
+  });
+});
+
+/**
+ * The pin is one complete answer to "where".
+ *
+ * The booking form already let a customer choose "drop a pin" and hid the
+ * street field when they did — and then the booking schema demanded an address
+ * anyway, so the pin they had placed produced "We need the address to collect
+ * from" at the last step. The same defect as the marketplace checkout, one
+ * layer further down.
+ */
+describe('a door end given as a pin', () => {
+  const pinned = {
+    service: 'DOOR_TO_DOOR',
+    origin: { district: 'BELIZE', city: 'Belize City', latitude: 17.4995, longitude: -88.1976, name: 'S', phone: '501-2223333' },
+    destination: { district: 'BELIZE', city: 'Belize City', latitude: 17.5045, longitude: -88.1901, name: 'R', phone: '501-4445555' },
+  };
+
+  it('books with no typed address at either end', async () => {
+    const existing = await ctx.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
+    if (existing) {
+      await ctx.prisma.platformSetting.update({ where: { id: existing.id }, data: { localCourierFeeMinor: 1500n } });
+    } else {
+      await ctx.prisma.platformSetting.create({ data: { localCourierFeeMinor: 1500n } });
+    }
+
+    const r = await post(customer, 'shipping', { ...pinned, payWithWallet: true });
+    expect(r.status).toBe(201);
+
+    const shipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: r.body.id } });
+    expect(shipment.originAddress).toBeNull();
+    expect(shipment.originLatitude).toBeCloseTo(17.4995, 4);
+
+    await ctx.prisma.driverEarning.deleteMany({ where: { shipmentLeg: { shipmentId: r.body.id } } });
+    await ctx.prisma.shipmentLeg.deleteMany({ where: { shipmentId: r.body.id } });
+    await ctx.prisma.custodyEvent.deleteMany({ where: { shipmentId: r.body.id } });
+    await ctx.prisma.shipment.delete({ where: { id: r.body.id } });
+  });
+
+  it('still refuses a door end that is neither written nor pinned', async () => {
+    const r = await post(customer, 'shipping', {
+      ...pinned,
+      payWithWallet: true,
+      origin: { district: 'BELIZE', city: 'Belize City', name: 'S', phone: '501-2223333' },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('still refuses a door end with no town', async () => {
+    // The town prices the run and tells the planner whether one courier can make
+    // the trip. A pin does not imply it.
+    const r = await post(customer, 'shipping', {
+      ...pinned,
+      payWithWallet: true,
+      destination: { ...pinned.destination, city: undefined },
+    });
+    expect(r.status).toBe(400);
+  });
+});
 describe('the four service types', () => {
   it('DOOR_TO_DOOR plans collection, transport and delivery', async () => {
     const r = await post(customer, 'shipping/quote', doorToDoor());

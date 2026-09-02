@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ordersApi, money, type VendorOrderView } from '../../../../lib/orders';
@@ -10,6 +10,7 @@ import { Card, Alert, EmptyState, Spinner, StatusBadge } from '../../../../compo
 import { VendorDeliveryPanel } from '../../../../components/VendorDeliveryPanel';
 import { VendorPickupPanel } from '../../../../components/VendorPickupPanel';
 import { VendorFulfilmentPanel } from '../../../../components/VendorFulfilmentPanel';
+import { addressLines } from '@bmpl/shared';
 
 export default function VendorOrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -76,8 +77,12 @@ export default function VendorOrderDetailPage() {
                 <p className="bmpl-label">Deliver to</p>
                 <p className="mt-1 text-slate-700">
                   {vo.deliveryAddress.fullName}{vo.deliveryAddress.phone ? ` · ${vo.deliveryAddress.phone}` : ''}<br />
-                  {vo.deliveryAddress.addressLine1}{vo.deliveryAddress.addressLine2 ? `, ${vo.deliveryAddress.addressLine2}` : ''}<br />
-                  {vo.deliveryAddress.city}, {vo.deliveryAddress.district.replace('_', ' ')}
+                  {addressLines(vo.deliveryAddress).map((line) => (
+                    <Fragment key={line}>
+                      {line}
+                      <br />
+                    </Fragment>
+                  ))}
                 </p>
               </Card>
             )}

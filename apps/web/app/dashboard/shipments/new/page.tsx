@@ -33,10 +33,20 @@ import { bzd, walletApi, type WalletSummary } from '../../../../lib/wallet';
 
 type Mode = TransportMode | 'ANY';
 
-/** Enough filled in to be worth asking the server for a price. */
+/**
+ * Enough filled in to be worth asking the server for a price.
+ *
+ * A door end needs its TOWN, not just its district. The planner compares towns
+ * to decide whether one courier can do the whole job — Belize City and San
+ * Pedro are both the Belize District and one of them is on an island — so a
+ * district-only enquiry cannot be priced correctly. Asking anyway produced a
+ * quote for a journey nobody had described yet, and the customer read the
+ * resulting "there is no terminal serving Belize District" as the site being
+ * broken rather than as the form being half-filled.
+ */
 function quotable(service: ShippingService, origin: EndpointValue, destination: EndpointValue): boolean {
-  const originOk = needsFirstMile(service) ? !!origin.district : !!origin.hubId;
-  const destOk = needsLastMile(service) ? !!destination.district : !!destination.hubId;
+  const originOk = needsFirstMile(service) ? !!origin.district && !!origin.city.trim() : !!origin.hubId;
+  const destOk = needsLastMile(service) ? !!destination.district && !!destination.city.trim() : !!destination.hubId;
   return originOk && destOk;
 }
 
@@ -243,7 +253,7 @@ export default function NewShipmentPage() {
       <div className="mt-4">
         {!ready && (
           <p className="rounded-bmpl-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-            Tell us where it is going and we will price the whole journey.
+            Tell us the town at each end and we will price the whole journey.
           </p>
         )}
 

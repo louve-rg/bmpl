@@ -138,6 +138,69 @@ describe('multi-vendor split + delivery', () => {
     expect(await reservedFor(pb)).toBe(2);
   });
 
+  /**
+   * Edward's report, end to end.
+   *
+   * He chose "use my current location" at checkout, the pin dropped correctly,
+   * and the order was then refused because Address Line 1 was blank. The pin IS
+   * the address — in Belize it is frequently the better half of it — so an
+   * order that carries one is complete.
+   */
+  it('accepts a delivery order located by a dropped pin and no street address', async () => {
+    const customer = await registerCustomer('ord_pin@example.bz');
+    const v = await makeVendor('ord_v_pin@example.bz', 'Pinned');
+    await request(ctx.server).patch('/api/vendor/settings').set('Cookie', v.cookies).send({ deliveryEnabled: true, baseDeliveryFeeMinor: 500 });
+    const prod = await createProduct(v.cookies, { title: 'Prod P', sku: 'P1', priceMinor: 1000 });
+    await setStock(v.cookies, prod, 5);
+    await addToCart(customer, { productId: prod, quantity: 1 }).expect(201);
+
+    const res = await checkout(customer, {
+      vendors: [{ vendorProfileId: v.vpId, deliveryMethod: 'DELIVERY' }],
+      deliveryAddress: {
+        fullName: 'C U',
+        city: 'Belize City',
+        district: 'BELIZE',
+        latitude: 17.4995,
+        longitude: -88.1976,
+      },
+    });
+    expect(res.status).toBe(201);
+
+    // Stored as ABSENT, not as an empty string. A blank street line would be
+    // read by a driver as an address somebody wrote.
+    const stored = await ctx.prisma.orderAddress.findFirstOrThrow({ where: { orderId: res.body.id } });
+    expect(stored.addressLine1).toBeNull();
+    expect(stored.city).toBe('Belize City');
+    expect(stored.latitude).toBeCloseTo(17.4995, 4);
+  });
+
+  /**
+   * The other half of the same rule. A pin is one complete answer and a written
+   * address is the other; neither being present is still a refusal, and the town
+   * is required whichever way the address arrived because it prices the delivery.
+   */
+  it('still refuses an address that is neither written nor pinned', async () => {
+    const customer = await registerCustomer('ord_nowhere@example.bz');
+    const v = await makeVendor('ord_v_nowhere@example.bz', 'Nowhere');
+    await request(ctx.server).patch('/api/vendor/settings').set('Cookie', v.cookies).send({ deliveryEnabled: true, baseDeliveryFeeMinor: 500 });
+    const prod = await createProduct(v.cookies, { title: 'Prod N', sku: 'N1', priceMinor: 1000 });
+    await setStock(v.cookies, prod, 5);
+    await addToCart(customer, { productId: prod, quantity: 1 }).expect(201);
+
+    const res = await checkout(customer, {
+      vendors: [{ vendorProfileId: v.vpId, deliveryMethod: 'DELIVERY' }],
+      deliveryAddress: { fullName: 'C U', city: 'Belize City', district: 'BELIZE' },
+    });
+    expect(res.status).toBe(400);
+
+    // And a pin without a town is refused too: the town is what the delivery is
+    // priced against and what dispatch matches drivers on.
+    const noTown = await checkout(customer, {
+      vendors: [{ vendorProfileId: v.vpId, deliveryMethod: 'DELIVERY' }],
+      deliveryAddress: { fullName: 'C U', district: 'BELIZE', latitude: 17.4995, longitude: -88.1976 },
+    });
+    expect(noTown.status).toBe(400);
+  });
   it('rejects a delivery order without an address', async () => {
     const customer = await registerCustomer('ord_c2b@example.bz');
     const v = await makeVendor('ord_v2c@example.bz', 'Gamma');

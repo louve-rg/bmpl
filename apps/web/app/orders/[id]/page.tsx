@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '../../../components/landing/Header';
@@ -15,6 +15,7 @@ import { Alert, Card, PageHeader, Spinner, StatusBadge } from '../../../componen
 import { DeliveryTracker } from '../../../components/DeliveryTracker';
 import { CustomerPickupCode } from '../../../components/CustomerPickupCode';
 import { MessageButton } from '../../../components/messaging/MessageButton';
+import { addressLines } from '@bmpl/shared';
 
 export default function OrderDetailPage() {
   const router = useRouter();
@@ -80,8 +81,12 @@ export default function OrderDetailPage() {
                 <p className="bmpl-label">Delivery address</p>
                 <p className="mt-1 text-slate-700">
                   {order.deliveryAddress.fullName}{order.deliveryAddress.phone ? ` · ${order.deliveryAddress.phone}` : ''}<br />
-                  {order.deliveryAddress.addressLine1}{order.deliveryAddress.addressLine2 ? `, ${order.deliveryAddress.addressLine2}` : ''}<br />
-                  {order.deliveryAddress.city}, {order.deliveryAddress.district.replace('_', ' ')}, {order.deliveryAddress.country}
+                  {addressLines(order.deliveryAddress).map((line) => (
+                    <Fragment key={line}>
+                      {line}
+                      <br />
+                    </Fragment>
+                  ))}
                 </p>
               </Card>
             )}

@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import {
   cancelShipmentSchema,
   collectShipmentSchema,
+  createCourierLaneSchema,
   createHubSchema,
   createRouteSchema,
   createShipmentSchema,
@@ -11,10 +12,12 @@ import {
   legHandoffSchema,
   shipmentListSchema,
   shipmentQuoteSchema,
+  updateCourierLaneSchema,
   updateHubSchema,
   updateRouteSchema,
   type CancelShipmentInput,
   type CollectShipmentInput,
+  type CreateCourierLaneInput,
   type CreateHubInput,
   type CreateRouteInput,
   type CreateShipmentInput,
@@ -23,6 +26,7 @@ import {
   type LegHandoffInput,
   type ShipmentListInput,
   type ShipmentQuoteInput,
+  type UpdateCourierLaneInput,
   type UpdateHubInput,
   type UpdateRouteInput,
 } from '@bmpl/validation';
@@ -169,6 +173,40 @@ export class AdminLogisticsController {
   @Patch('routes/:id')
   updateRoute(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(updateRouteSchema)) dto: UpdateRouteInput) {
     return this.network.updateRoute(id, dto, u.userId);
+  }
+
+  /**
+   * Courier lanes: two towns one courier can drive between.
+   *
+   * Under logistics.manage with hubs and routes, because it is the same job —
+   * describing what the network can actually do — and the same person does it.
+   * Deliberately NOT exposed publicly: a lane is not somewhere a customer goes,
+   * it is a fact the planner uses, and listing lanes to customers would read as
+   * a timetable we are not offering.
+   */
+  @RequirePermission('logistics.read')
+  @Get('courier-lanes')
+  listCourierLanes() {
+    return this.network.listCourierLanes();
+  }
+
+  @RequirePermission('logistics.manage')
+  @Post('courier-lanes')
+  createCourierLane(
+    @CurrentUser() u: AuthContext,
+    @Body(ZodBody(createCourierLaneSchema)) dto: CreateCourierLaneInput,
+  ) {
+    return this.network.createCourierLane(dto, u.userId);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Patch('courier-lanes/:id')
+  updateCourierLane(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(updateCourierLaneSchema)) dto: UpdateCourierLaneInput,
+  ) {
+    return this.network.updateCourierLane(id, dto, u.userId);
   }
 
   /* ---- shipments ---- */

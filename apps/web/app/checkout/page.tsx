@@ -7,27 +7,16 @@ import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
 import { cartApi, money, type CartLine, type CartView } from '../../lib/cart';
 import { variantDisplay } from '../../lib/variant-display';
-import { DISTRICTS, type OrderView } from '../../lib/orders';
-import dynamic from 'next/dynamic';
-import type { Coordinates } from '@bmpl/shared';
+import { type OrderView } from '../../lib/orders';
+import {
+  AddressField,
+  addressGap,
+  emptyAddress,
+  type AddressValue,
+} from '../../components/address/AddressField';
 import { api, type ApiError } from '../../lib/api';
 import { affordability, bzd, walletApi, type WalletSummary } from '../../lib/wallet';
-
-/**
- * Browser-only: Leaflet touches `window` at import time, and the map is
- * meaningless server-rendered. Loading it dynamically also keeps Leaflet and its
- * CSS out of every bundle except this route's.
- */
-const LocationPicker = dynamic(
-  () => import('../../components/maps/LocationPicker').then((m) => m.LocationPicker),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="h-64 w-full animate-pulse rounded-bmpl-md border border-slate-200 bg-slate-100" aria-hidden />
-    ),
-  },
-);
-import { Alert, Button, Card, EmptyState, ButtonLink, Field, Input, PageHeader, Select, Spinner } from '../../components/ui';
+import { Alert, Button, Card, EmptyState, ButtonLink, Input, PageHeader, Spinner } from '../../components/ui';
 
 type Method = 'PICKUP' | 'DELIVERY';
 
@@ -105,10 +94,20 @@ export default function CheckoutPage() {
   const [methods, setMethods] = useState<Record<string, Method>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [instructions, setInstructions] = useState<Record<string, string>>({});
-  const [address, setAddress] = useState({ fullName: '', phone: '', addressLine1: '', addressLine2: '', city: '', district: 'BELIZE' });
-  // The customer's map pin. Held separately from `address` so a delivery-quote
-  // refresh (which re-runs on district/method changes) can never drop it.
-  const [pin, setPin] = useState<Coordinates | null>(null);
+  /**
+   * ONE address value, in the same shape Shipping already uses.
+   *
+   * This page used to keep its own hand-rolled address form: no way to choose
+   * HOW you give the address, the street fields always on screen, and a submit
+   * guard that demanded a street line even from a customer who had dropped a pin
+   * on their own doorstep. Shipping had already grown the right component; the
+   * marketplace simply never adopted it, so the two halves of one product asked
+   * for a delivery address in two different ways and only one of them worked.
+   *
+   * The pin lives INSIDE the value rather than beside it. Held separately it was
+   * one careless setAddress away from being silently dropped.
+   */
+  const [address, setAddress] = useState<AddressValue>(() => ({ ...emptyAddress('TYPED'), district: 'BELIZE' }));
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -163,8 +162,18 @@ export default function CheckoutPage() {
   async function placeOrder(payWithWallet: boolean) {
     if (!cart) return;
     setError(null);
-    if (anyDelivery && (!address.fullName.trim() || !address.addressLine1.trim() || !address.city.trim())) {
-      setError('Please complete the delivery address.');
+    /**
+     * Say what is actually missing.
+     *
+     * The old guard demanded a street line unconditionally and then reported
+     * 'Please complete the delivery address.' — wrong for a pinned address
+     * (nothing was incomplete) and useless for every other case (it never said
+     * what to fix). addressGap applies the SAME rule the server does and
+     * finishes the sentence.
+     */
+    const gap = anyDelivery ? addressGap(address, { contact: 'ESSENTIAL' }) : null;
+    if (gap) {
+      setError(gap);
       return;
     }
     setPlacing(true);
@@ -179,14 +188,17 @@ export default function CheckoutPage() {
         ? {
             fullName: address.fullName.trim(),
             phone: address.phone.trim() || undefined,
-            addressLine1: address.addressLine1.trim(),
+            // Omitted, not empty, when the customer pinned the location instead
+            // of typing it. An empty string would be stored as an address nobody
+            // wrote, and a driver would read it as one.
+            addressLine1: address.addressLine1.trim() || undefined,
             addressLine2: address.addressLine2.trim() || undefined,
             city: address.city.trim(),
             district: address.district,
             // Optional. The server re-validates the bounds — this is convenience,
             // not trust.
-            latitude: pin?.latitude,
-            longitude: pin?.longitude,
+            latitude: address.latitude ?? undefined,
+            longitude: address.longitude ?? undefined,
           }
         : undefined,
     };
@@ -319,50 +331,20 @@ export default function CheckoutPage() {
               })}
 
               {anyDelivery && (
-                <Card className="p-4">
-                  <h2 className="mb-3 font-semibold text-belize-navy">Delivery address &amp; contact</h2>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Full name">
-                      <Input placeholder="Full name" value={address.fullName} onChange={(e) => setAddress({ ...address, fullName: e.target.value })} />
-                    </Field>
-                    <Field label="Contact number">
-                      <Input placeholder="Phone" value={address.phone} onChange={(e) => setAddress({ ...address, phone: e.target.value })} />
-                    </Field>
-                    <div className="sm:col-span-2">
-                      <Field label="Address line 1">
-                        <Input placeholder="Address line 1" value={address.addressLine1} onChange={(e) => setAddress({ ...address, addressLine1: e.target.value })} />
-                      </Field>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <Field label="Address line 2">
-                        <Input placeholder="Address line 2 (optional)" value={address.addressLine2} onChange={(e) => setAddress({ ...address, addressLine2: e.target.value })} />
-                      </Field>
-                    </div>
-                    <Field label="City / town">
-                      <Input placeholder="City / town" value={address.city} onChange={(e) => setAddress({ ...address, city: e.target.value })} />
-                    </Field>
-                    <Field label="District">
-                      <Select value={address.district} onChange={(e) => setAddress({ ...address, district: e.target.value })}>
-                        {DISTRICTS.map((d) => (
-                          <option key={d} value={d}>{d.replace('_', ' ')}</option>
-                        ))}
-                      </Select>
-                    </Field>
-                  </div>
-
-                  {/* Written address + exact pin, together. The address gives the
-                      driver human context ("Ladyville"), the pin gives them a
-                      navigable point. Neither replaces the other. */}
-                  <div className="mt-4">
-                    <LocationPicker
-                      value={pin}
-                      onChange={setPin}
-                      disabled={placing}
-                      address={[address.addressLine1, address.addressLine2, address.city].filter(Boolean).join(', ')}
-                      district={address.district}
-                    />
-                  </div>
-                </Card>
+                <AddressField
+                  heading="Delivery address & contact"
+                  description="Where the driver is taking it, and who to ask for."
+                  value={address}
+                  onChange={setAddress}
+                  disabled={placing}
+                  /* An order stores a name and a phone and nothing else, so the
+                     email and company boxes Shipping shows would be filled in
+                     here and then silently thrown away. */
+                  contact="ESSENTIAL"
+                  /* Instructions are collected per store above: two vendors in
+                     one order are two separate drops to two different drivers. */
+                  showInstructions={false}
+                />
               )}
             </div>
 

@@ -264,7 +264,7 @@ export class OrdersService {
             type: 'SHIPPING',
             fullName: dto.deliveryAddress.fullName,
             phone: dto.deliveryAddress.phone ?? null,
-            addressLine1: dto.deliveryAddress.addressLine1,
+            addressLine1: dto.deliveryAddress.addressLine1 ?? null,
             addressLine2: dto.deliveryAddress.addressLine2 ?? null,
             city: dto.deliveryAddress.city,
             district: dto.deliveryAddress.district,

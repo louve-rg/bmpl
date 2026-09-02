@@ -61,6 +61,18 @@ export function isWithinBelize(latitude: unknown, longitude: unknown): boolean {
   );
 }
 
+/**
+ * The message shown when an address can be neither read nor navigated to.
+ *
+ * A delivery endpoint has to be findable ONE of two ways: written down, or
+ * pinned. Requiring both is what made "drop a pin" pointless — the customer
+ * showed us the exact doorstep and was then told the address was missing. Either
+ * one alone is a complete answer, and this sentence names both ways out rather
+ * than saying "address required" at someone who has already supplied a pin.
+ */
+export const UNLOCATABLE_ADDRESS_MESSAGE =
+  'Tell us where to go: type the street address, or drop a pin on the map.';
+
 /** The message shown when a pin lands outside Belize. Shared so both surfaces agree. */
 export const OUT_OF_BOUNDS_MESSAGE = 'That location is outside Belize. Move the pin to your delivery address.';
 
@@ -88,4 +100,29 @@ export function mapsNavigationUrl({ latitude, longitude }: Coordinates, label?: 
 /** Turn-by-turn directions to the coordinate from wherever the device is now. */
 export function mapsDirectionsUrl({ latitude, longitude }: Coordinates): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${latitude},${longitude}`)}`;
+}
+
+/**
+ * A snapshotted delivery address as the lines you would read out loud.
+ *
+ * One helper because a delivery address is now allowed to have NO street line —
+ * the customer dropped a pin instead of typing one — and three separate screens
+ * rendering `{address.addressLine1}` would each print an empty line, or the word
+ * "null", on exactly the orders that are hardest to deliver.
+ *
+ * A missing street is stated rather than hidden. An operator reading an order
+ * with a blank first line cannot tell whether the address is pinned or the data
+ * is broken, and those want very different responses. The schema guarantees the
+ * pin is there when the street is not, so saying so is a fact and not a guess.
+ */
+export function addressLines(a: {
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city: string;
+  district: string;
+  country?: string | null;
+}): string[] {
+  const street = [a.addressLine1, a.addressLine2].filter((x) => !!x?.trim()).join(', ');
+  const locality = [a.city, a.district.replace(/_/g, ' '), a.country].filter(Boolean).join(', ');
+  return [street || 'Pinned on the map — no street address given', locality];
 }

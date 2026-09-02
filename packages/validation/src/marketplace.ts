@@ -8,9 +8,11 @@ import {
   PRODUCT_SORTS,
   PRODUCT_STATUSES,
   STORE_STATUSES,
+  UNLOCATABLE_ADDRESS_MESSAGE,
   VENDOR_APPROVAL_STATUSES,
   isWithinBelize,
 } from '@bmpl/shared';
+import { isLocatable } from './common';
 
 /**
  * Phase 2 marketplace validation building blocks.
@@ -477,9 +479,25 @@ const deliveryMethodSchema = z.enum(DELIVERY_METHODS);
 /**
  * A snapshotted delivery address (required when any vendor uses DELIVERY).
  *
- * The optional coordinate pair is the customer's map pin. Two rules beyond the
- * obvious range check, both of which have to hold on the SERVER because a
- * request body can claim anything:
+ * WHAT MAKES AN ADDRESS VALID. A driver has to be able to FIND the place, and
+ * there are exactly two ways to tell them where it is:
+ *
+ *   - written down — a street they can read and ask after; or
+ *   - pinned — a coordinate their phone can navigate to.
+ *
+ * EITHER ONE ALONE IS COMPLETE. This schema used to demand both, which made
+ * "drop a pin" pointless: a customer who had shown us their exact doorstep was
+ * told the address was missing and could not check out. In Belize the pin is
+ * frequently the BETTER of the two — "behind the old bridge" is a real address
+ * and a useless navigation target — so refusing it refused the good answer.
+ *
+ * Still unconditional: who to hand the parcel to, the town, and the district.
+ * The last two are not location detail here — they are what price the delivery
+ * and what dispatch matches drivers on — and no pin is allowed to imply them,
+ * because a mis-dropped pin would then silently re-price the order.
+ *
+ * The coordinate rules are unchanged, and both have to hold on the SERVER
+ * because a request body can claim anything:
  *
  *  - both or neither. A lone latitude is not a location, and storing half a
  *    pin would leave the route optimizer reading a null as "unknown" while the
@@ -494,8 +512,12 @@ export const orderAddressSchema = z
   .object({
     fullName: z.string().trim().min(1, 'Full name is required.').max(160),
     phone: z.string().trim().max(40).optional(),
-    addressLine1: z.string().trim().min(1, 'Address is required.').max(200),
+    // Optional individually. The locatability rule below is what actually
+    // decides whether enough of the address is present.
+    addressLine1: z.string().trim().min(1).max(200).optional(),
     addressLine2: z.string().trim().max(200).optional(),
+    // Required in its own right, pin or no pin: the town is what a driver
+    // recognises on arrival and what the delivery quote is priced against.
     city: z.string().trim().min(1, 'City is required.').max(120),
     district: z.enum(DISTRICTS),
     latitude: z.coerce.number().min(-90).max(90).optional(),
@@ -508,7 +530,15 @@ export const orderAddressSchema = z
   .refine((v) => v.latitude == null || isWithinBelize(v.latitude, v.longitude), {
     message: OUT_OF_BOUNDS_MESSAGE,
     path: ['latitude'],
+  })
+  .refine((v) => isLocatable({ street: v.addressLine1, latitude: v.latitude, longitude: v.longitude }), {
+    message: UNLOCATABLE_ADDRESS_MESSAGE,
+    // Reported against the street field because that is the one a customer who
+    // has given us neither is most likely to reach for. The message names the
+    // pin as the other way out.
+    path: ['addressLine1'],
   });
+
 export type OrderAddressInput = z.infer<typeof orderAddressSchema>;
 
 /** Per-vendor fulfilment choice at checkout. */

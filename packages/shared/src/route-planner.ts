@@ -42,6 +42,31 @@ export interface PlannerRoute {
   isActive: boolean;
 }
 
+/**
+ * Two towns one courier can drive between.
+ *
+ * The planner can recognise one journey that obviously needs no terminal — both
+ * ends in the same town — and nothing beyond it. Belize City and Ladyville are
+ * fifteen minutes apart on the Northern Highway; Belize City and San Pedro are
+ * in the same district and one of them is on an island. Nothing in a district
+ * column separates those two cases, so guessing meant either refusing the first
+ * or despatching a road courier across water for the second.
+ *
+ * Which towns share a road is a fact about Belize, so it arrives here as data.
+ * Like hubs and routes, no place name appears in this file.
+ */
+export interface PlannerLane {
+  id: string;
+  originDistrict: string;
+  originCity: string;
+  destinationDistrict: string;
+  destinationCity: string;
+  /** Minor units. What BML charges for the run; 0 means "not priced yet". */
+  priceMinor: number;
+  durationMinutes: number;
+  isActive: boolean;
+}
+
 /** Where a shipment starts or ends. A door has a district; a hub has an id. */
 export type Endpoint = { kind: 'DOOR'; district: string; city?: string | null } | { kind: 'HUB'; hubId: string };
 
@@ -126,6 +151,12 @@ export function planRoute(
   hubs: readonly PlannerHub[],
   routes: readonly PlannerRoute[],
   pricing: PlannerPricing = NO_COURIER,
+  /**
+   * Configured direct-courier lanes. Empty by default, and an empty list means
+   * the planner behaves exactly as it did before lanes existed: same town is
+   * local, everything else goes to the network.
+   */
+  lanes: readonly PlannerLane[] = [],
 ): PlanResult {
   const activeHubs = hubs.filter((h) => h.isActive);
   const byId = new Map(activeHubs.map((h) => [h.id, h]));
@@ -135,7 +166,8 @@ export function planRoute(
   // for a trip that never needed one and then refused the booking when the
   // district had no hub configured — which is not a routing answer, it is the
   // planner failing to recognise the simplest journey it can be asked for.
-  if (isLocalDoorToDoor(req)) {
+  const lane = findCourierLane(req, lanes);
+  if (isLocalDoorToDoor(req) || lane) {
     if (req.preferredMode && req.preferredMode !== 'LAND') {
       return {
         ok: false,
@@ -143,6 +175,9 @@ export function planRoute(
         explanation: `This is a local journey, so it travels by road. There is no ${req.preferredMode.toLowerCase()} leg to book.`,
       };
     }
+    // A lane carries its own price and duration: a run up the highway is not
+    // the same job as a run across town, and quoting it at the local rate
+    // would undercharge for every mile of it.
     const leg: PlannedLeg = {
       sequence: 1,
       kind: 'DIRECT',
@@ -150,9 +185,11 @@ export function planRoute(
       originHubId: null,
       destinationHubId: null,
       routeId: null,
-      durationMinutes: pricing.directMinutes ?? 0,
-      priceMinor: pricing.directMinor ?? 0,
-      description: 'Collection from the sender and delivery to the recipient',
+      durationMinutes: lane ? lane.durationMinutes : pricing.directMinutes ?? 0,
+      priceMinor: lane ? lane.priceMinor : pricing.directMinor ?? 0,
+      description: lane
+        ? `Direct courier from ${townOf(req.origin)} to ${townOf(req.destination)}`
+        : 'Collection from the sender and delivery to the recipient',
     };
     return {
       ok: true,
@@ -286,10 +323,67 @@ export function isLocalDoorToDoor(req: PlanRequest): boolean {
 
   const from = req.origin.city?.trim().toLowerCase();
   const to = req.destination.city?.trim().toLowerCase();
-  // No town on either end is a district-level enquiry, which is as local as the
-  // caller has told us it is.
-  if (!from && !to) return true;
+  // A town we do not have is a QUESTION, not a permission.
+  //
+  // This used to read "no town on either end" as a district-level enquiry and
+  // answer local. That was survivable while every booking typed an address, and
+  // stopped being survivable the moment a customer could hand us a pin instead:
+  // a pin in Belize City and a pin in San Pedro are both the Belize District
+  // with no town on either end, and one road courier would have been sent to
+  // drive a parcel across open water.
+  //
+  // Both towns, or it is not local. The booking schema asks for a town at every
+  // door end, so this costs a correctly-filled booking nothing.
   return !!from && !!to && from === to;
+}
+
+/**
+ * The configured lane that covers this journey, if there is one.
+ *
+ * BOTH DIRECTIONS. A road that carries a parcel one way carries it back, and
+ * requiring operations to enter each lane twice only creates the chance for the
+ * two rows to disagree about the price.
+ *
+ * DOOR_TO_DOOR ONLY, like same-town. The other three services mean the customer
+ * is handling one end at a terminal themselves, and "one courier does the whole
+ * job" is not a description of that journey.
+ *
+ * Town names are compared trimmed and case-folded, because they are typed by
+ * customers. "ladyville " and "Ladyville" are the same place and a parcel should
+ * not be routed differently for a trailing space.
+ */
+export function findCourierLane(req: PlanRequest, lanes: readonly PlannerLane[]): PlannerLane | null {
+  if (req.service !== 'DOOR_TO_DOOR') return null;
+  if (req.origin.kind !== 'DOOR' || req.destination.kind !== 'DOOR') return null;
+  // Same town is already local, and it needs no lane to be configured.
+  if (isLocalDoorToDoor(req)) return null;
+  // A road lane cannot honour a request to fly or sail. Saying so is the
+  // caller's job, further down; here we simply do not offer one.
+  if (req.preferredMode && req.preferredMode !== 'LAND') return null;
+
+  const from = place(req.origin.district, req.origin.city);
+  const to = place(req.destination.district, req.destination.city);
+  if (!from || !to) return null;
+
+  return (
+    lanes.find((l) => {
+      if (!l.isActive) return null;
+      const a = place(l.originDistrict, l.originCity);
+      const b = place(l.destinationDistrict, l.destinationCity);
+      return (a === from && b === to) || (a === to && b === from);
+    }) ?? null
+  );
+}
+
+/** A comparable "district/town" key, or null when the town is unknown. */
+function place(district: string, city?: string | null): string | null {
+  const town = city?.trim().toLowerCase();
+  return town ? `${district}/${town}` : null;
+}
+
+/** The town name to show a customer, for a leg description. */
+function townOf(e: Endpoint): string {
+  return e.kind === 'DOOR' ? e.city?.trim() || e.district.replace(/_/g, ' ') : 'the terminal';
 }
 
 /** A door attaches to a hub in its own district; a hub endpoint is itself. */

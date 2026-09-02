@@ -5,6 +5,7 @@ import {
   isLegActionable,
   needsFirstMile,
   needsLastMile,
+  findCourierLane,
   isLocalDoorToDoor,
   planRoute,
   SHIPMENT_STATUS_LABELS,
@@ -12,6 +13,7 @@ import {
   SHIPPING_SERVICE_LABELS,
   TRANSPORT_MODE_LABELS,
   type Endpoint,
+  type PlannerLane,
   type LegView,
   type PlannedLeg,
   type PlannerHub,
@@ -90,7 +92,7 @@ export class ShipmentService {
    */
   async quote(input: ShipmentQuoteInput, opts: { isTest?: boolean } = {}) {
     const simulated = opts.isTest ?? false;
-    const { hubs, routes } = await this.network.plannerInputs({ isTest: simulated });
+    const { hubs, routes, lanes } = await this.network.plannerInputs({ isTest: simulated });
     const hubById = new Map(hubs.map((h) => [h.id, h]));
 
     const origin = this.toEndpoint(input, 'origin');
@@ -98,7 +100,7 @@ export class ShipmentService {
 
     // Price the door legs BEFORE planning, because the planner sums what it is
     // given rather than working out what a courier costs.
-    const fees = await this.courierFees(input, origin, destination, hubs, simulated);
+    const fees = await this.courierFees(input, origin, destination, hubs, lanes, simulated);
     const plan = planRoute(
       { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null },
       hubs,
@@ -111,6 +113,7 @@ export class ShipmentService {
         directMinor: fees.directMinor,
         directMinutes: fees.directMinutes,
       },
+      lanes,
     );
 
     if (!plan.ok) {
@@ -180,6 +183,7 @@ export class ShipmentService {
     origin: Endpoint,
     destination: Endpoint,
     hubs: readonly PlannerHub[],
+    lanes: readonly PlannerLane[],
     simulated = false,
   ) {
     const wantsFirst = needsFirstMile(input.service);
@@ -188,16 +192,41 @@ export class ShipmentService {
       return { firstMileMinor: 0, lastMileMinor: 0, directMinor: 0, directMinutes: 0, unpricedHubs: [] as string[] };
     }
 
-    // A local door-to-door run has no terminal, so no hub fee describes it. It
-    // is priced by its own platform setting, and an unset price is reported
-    // rather than quoted as free.
-    //
     // The SAME predicate the planner uses, imported rather than restated. When
     // this was a separate district check and the planner had moved on to towns,
     // the two disagreed: the planner produced first-mile and last-mile legs
     // while pricing insisted the journey was a single local run, and the courier
     // legs came out free.
-    if (isLocalDoorToDoor({ origin, destination, service: input.service, preferredMode: input.preferredMode ?? null })) {
+    const journey = {
+      origin,
+      destination,
+      service: input.service,
+      preferredMode: input.preferredMode ?? null,
+    };
+
+    /**
+     * A configured lane carries its own price and duration.
+     *
+     * A run up the Northern Highway is not the same job as a run across town,
+     * so it must not be quoted at the local rate. Like a hub courier fee, an
+     * unset price is REPORTED rather than quoted as free — an operator has to
+     * decide what the lane costs before it is sellable.
+     */
+    const lane = findCourierLane(journey, lanes);
+    if (lane) {
+      return {
+        firstMileMinor: 0,
+        lastMileMinor: 0,
+        directMinor: lane.priceMinor,
+        directMinutes: lane.durationMinutes,
+        unpricedHubs: lane.priceMinor === 0 ? [`the ${lane.originCity} to ${lane.destinationCity} courier run`] : [],
+      };
+    }
+
+    // A local door-to-door run has no terminal, so no hub fee describes it. It
+    // is priced by its own platform setting, and an unset price is reported
+    // rather than quoted as free.
+    if (isLocalDoorToDoor(journey)) {
       const settings = await this.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
       // A simulation booking is priced by the simulation rate, so a number set
       // to exercise the workflow never becomes what a real customer is charged.
@@ -216,7 +245,10 @@ export class ShipmentService {
     // Ask the planner where each door attaches by planning with zero fees first;
     // that keeps hub-attachment logic in exactly one place.
     const { routes } = await this.network.plannerInputs({ isTest: simulated });
-    const dry = planRoute({ origin, destination, service: input.service, preferredMode: input.preferredMode ?? null }, hubs, routes);
+    // No lanes passed: this branch is only reached when no lane covers the
+    // journey, and re-offering them here would send it back down the direct
+    // path it has already been ruled out of.
+    const dry = planRoute(journey, hubs, routes);
     if (!dry.ok) return { firstMileMinor: 0, lastMileMinor: 0, directMinor: 0, directMinutes: 0, unpricedHubs: [] as string[] };
 
     const firstHubId = dry.legs.find((l) => l.kind === 'FIRST_MILE')?.destinationHubId ?? null;
@@ -261,18 +293,24 @@ export class ShipmentService {
       throw new BadRequestException(quote.message ?? 'We cannot ship that route at the moment.');
     }
 
-    const { hubs, routes } = await this.network.plannerInputs({ isTest: simulated });
+    const { hubs, routes, lanes } = await this.network.plannerInputs({ isTest: simulated });
     const origin = this.toEndpoint(input, 'origin');
     const destination = this.toEndpoint(input, 'destination');
-    const fees = await this.courierFees(input, origin, destination, hubs, simulated);
-    const plan = planRoute({ origin, destination, service: input.service, preferredMode: input.preferredMode ?? null }, hubs, routes, {
-      firstMileMinor: fees.firstMileMinor,
-      lastMileMinor: fees.lastMileMinor,
-      firstMileMinutes: 0,
-      lastMileMinutes: 0,
-      directMinor: fees.directMinor,
-      directMinutes: fees.directMinutes,
-    });
+    const fees = await this.courierFees(input, origin, destination, hubs, lanes, simulated);
+    const plan = planRoute(
+      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null },
+      hubs,
+      routes,
+      {
+        firstMileMinor: fees.firstMileMinor,
+        lastMileMinor: fees.lastMileMinor,
+        firstMileMinutes: 0,
+        lastMileMinutes: 0,
+        directMinor: fees.directMinor,
+        directMinutes: fees.directMinutes,
+      },
+      lanes,
+    );
     if (!plan.ok) throw new BadRequestException(plan.explanation);
 
     const endsAtHub = !needsLastMile(input.service);

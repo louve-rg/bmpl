@@ -1,6 +1,13 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { PlannerHub, PlannerRoute } from '@bmpl/shared';
-import type { CreateHubInput, CreateRouteInput, UpdateHubInput, UpdateRouteInput } from '@bmpl/validation';
+import type { PlannerHub, PlannerLane, PlannerRoute } from '@bmpl/shared';
+import type {
+  CreateCourierLaneInput,
+  CreateHubInput,
+  CreateRouteInput,
+  UpdateCourierLaneInput,
+  UpdateHubInput,
+  UpdateRouteInput,
+} from '@bmpl/validation';
 import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -43,11 +50,14 @@ export class LogisticsNetworkService {
    * real lane — which is what makes it safe to configure a fake air route
    * between two invented terminals in order to prove the multimodal engine.
    */
-  async plannerInputs(opts: { isTest?: boolean } = {}): Promise<{ hubs: PlannerHub[]; routes: PlannerRoute[] }> {
+  async plannerInputs(
+    opts: { isTest?: boolean } = {},
+  ): Promise<{ hubs: PlannerHub[]; routes: PlannerRoute[]; lanes: PlannerLane[] }> {
     const isTest = opts.isTest ?? false;
-    const [hubs, routes] = await Promise.all([
+    const [hubs, routes, lanes] = await Promise.all([
       this.prisma.logisticsHub.findMany({ where: { isTest }, orderBy: { code: 'asc' } }),
       this.prisma.logisticsRoute.findMany({ where: { isTest }, orderBy: { id: 'asc' } }),
+      this.prisma.courierLane.findMany({ where: { isTest }, orderBy: { id: 'asc' } }),
     ]);
     return {
       hubs: hubs.map((h) => ({
@@ -67,6 +77,16 @@ export class LogisticsNetworkService {
         durationMinutes: r.durationMinutes,
         priceMinor: Number(r.priceMinor),
         isActive: r.isActive,
+      })),
+      lanes: lanes.map((l) => ({
+        id: l.id,
+        originDistrict: l.originDistrict,
+        originCity: l.originCity,
+        destinationDistrict: l.destinationDistrict,
+        destinationCity: l.destinationCity,
+        priceMinor: Number(l.priceMinor),
+        durationMinutes: l.durationMinutes,
+        isActive: l.isActive,
       })),
     };
   }
@@ -227,5 +247,115 @@ export class LogisticsNetworkService {
         throw new BadRequestException(`${hub.name} does not handle ${mode.toLowerCase()} transport.`);
       }
     }
+  }
+  /* -------------------------------------------------------- courier lanes */
+
+  /**
+   * Two towns one courier can drive between.
+   *
+   * A lane is NOT a terminal and never appears in the hub list a customer picks
+   * from. It exists so the planner can be told something true about the road —
+   * that Belize City and Ladyville are connected by one — without inventing a
+   * bus station at each end in order to say it.
+   */
+  async listCourierLanes() {
+    const lanes = await this.prisma.courierLane.findMany({
+      orderBy: [{ isActive: 'desc' }, { originDistrict: 'asc' }, { originCity: 'asc' }],
+    });
+    return lanes.map((l) => this.laneOut(l));
+  }
+
+  private laneOut<T extends { priceMinor: bigint }>(l: T) {
+    return { ...l, priceMinor: money(l.priceMinor) };
+  }
+
+  async createCourierLane(input: CreateCourierLaneInput, actorId: string) {
+    this.assertLaneGoesSomewhere(
+      input.originDistrict,
+      input.originCity,
+      input.destinationDistrict,
+      input.destinationCity,
+    );
+    const lane = await this.prisma.courierLane
+      .create({
+        data: { ...input, priceMinor: BigInt(input.priceMinor ?? 0), isActive: input.isActive ?? true },
+      })
+      .catch((e: unknown) => {
+        throw this.laneConflict(e);
+      });
+    await this.audit.record({
+      action: 'COURIER_LANE_CREATED',
+      actorId,
+      newValue: {
+        laneId: lane.id,
+        origin: [lane.originCity, lane.originDistrict].join(", "),
+        destination: [lane.destinationCity, lane.destinationDistrict].join(", "),
+        priceMinor: lane.priceMinor.toString(),
+      },
+    });
+    return this.laneOut(lane);
+  }
+
+  async updateCourierLane(id: string, input: UpdateCourierLaneInput, actorId: string) {
+    const before = await this.prisma.courierLane.findUnique({ where: { id } });
+    if (!before) throw new NotFoundException('Courier lane not found.');
+    this.assertLaneGoesSomewhere(
+      input.originDistrict ?? before.originDistrict,
+      input.originCity ?? before.originCity,
+      input.destinationDistrict ?? before.destinationDistrict,
+      input.destinationCity ?? before.destinationCity,
+    );
+    const lane = await this.prisma.courierLane
+      .update({
+        where: { id },
+        data: { ...input, ...(input.priceMinor != null ? { priceMinor: BigInt(input.priceMinor) } : {}) },
+      })
+      .catch((e: unknown) => {
+        throw this.laneConflict(e);
+      });
+    await this.audit.record({
+      action: 'COURIER_LANE_UPDATED',
+      actorId,
+      previousValue: {
+        isActive: before.isActive,
+        priceMinor: before.priceMinor.toString(),
+        durationMinutes: before.durationMinutes,
+      },
+      newValue: {
+        laneId: lane.id,
+        isActive: lane.isActive,
+        priceMinor: lane.priceMinor.toString(),
+        durationMinutes: lane.durationMinutes,
+      },
+    });
+    return this.laneOut(lane);
+  }
+
+  /**
+   * A lane from a town to itself says nothing. Same-town journeys are already
+   * direct with no configuration at all, so such a row could only ever be a
+   * line in the table that changes no answer.
+   */
+  private assertLaneGoesSomewhere(
+    originDistrict: string,
+    originCity: string,
+    destinationDistrict: string,
+    destinationCity: string,
+  ) {
+    if (
+      originDistrict === destinationDistrict &&
+      originCity.trim().toLowerCase() === destinationCity.trim().toLowerCase()
+    ) {
+      throw new BadRequestException(
+        'A lane has to connect two different towns — a town is already local to itself.',
+      );
+    }
+  }
+
+  private laneConflict(e: unknown): Error {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      return new ConflictException('That lane is already configured.');
+    }
+    return e as Error;
   }
 }
