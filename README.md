@@ -188,6 +188,14 @@ Node 22 or 24 LTS), pnpm 9.
 See [`SECURITY.md`](./SECURITY.md) for how each stated security rule is enforced,
 and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the data model.
 
+## Where the project stands
+
+Start at [`docs/PROJECT_STATUS.md`](./docs/PROJECT_STATUS.md). It is the single
+handoff document: what is built, the invariants that must not regress, which
+feature flags are live, what is simulation data and what is real, and what is
+deliberately out of scope. It is kept current as work lands, so a new session on
+a new machine can read it plus the repository and know where things are.
+
 ## Cloud deployment (Phase 1.5B — preparation only, nothing deployed)
 
 Target: GitHub Actions CI → **Vercel** (web + admin) · **Railway** (API + Postgres
