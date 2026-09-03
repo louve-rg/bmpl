@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planRoute, type PlannerHub, type PlannerRoute, type PlanRequest } from './route-planner';
+import { planRoute, type PlannerHub, type PlannerLane, type PlannerRoute, type PlanRequest } from './route-planner';
 import type { TransportMode } from './shipping';
 
 /**
@@ -224,6 +224,47 @@ describe('when there is nothing to plan', () => {
     expect(r.legs.map((l) => l.kind)).toContain('LINE_HAUL');
   });
 
+  it('does NOT treat a townless door end as local, however local it might be', () => {
+    // Now that a customer can give us a pin instead of a typed address, ends
+    // with no town are possible. The old rule read "no town on either end" as a
+    // district-level enquiry and answered LOCAL — so a pin in Belize City and a
+    // pin in San Pedro, both in the Belize District, would have been handed to
+    // one road courier and a parcel would have been sent across open water by
+    // car.
+    //
+    // A town we do not have is a QUESTION, not a permission. What the planner
+    // does instead — route it through the network, or refuse and say why — is a
+    // separate decision; what it must never do is invent a direct courier run.
+    const nowhere = { kind: 'DOOR' as const, district: 'BELIZE', city: null };
+    const r = plan({ origin: nowhere, destination: nowhere, service: 'DOOR_TO_DOOR' });
+    expect(r.ok ? r.legs.map((l) => l.kind) : []).not.toContain('DIRECT');
+  });
+
+  it('does not call a journey local when only one end names its town', () => {
+    const r = plan({
+      origin: door('Belize City', 'BELIZE'),
+      destination: { kind: 'DOOR' as const, district: 'BELIZE', city: null },
+      service: 'DOOR_TO_DOOR',
+    });
+    expect(r.ok ? r.legs.map((l) => l.kind) : []).not.toContain('DIRECT');
+  });
+
+  it('a townless pair with no network at all is refused, not guessed at', () => {
+    // Production has no hubs configured, so this is the shape the refusal
+    // actually takes today. It has to be a refusal the customer can act on
+    // ("tell us the town") rather than a courier despatched on a hunch.
+    const r = planRoute(
+      {
+        origin: { kind: 'DOOR', district: 'BELIZE', city: null },
+        destination: { kind: 'DOOR', district: 'BELIZE', city: null },
+        service: 'DOOR_TO_DOOR',
+      },
+      [],
+      [],
+    );
+    expect(r.ok).toBe(false);
+  });
+
   it('still refuses a local job that asks for a mode it cannot use', () => {
     // Asking to fly a parcel across one town is not a routing answer we can
     // give, and quietly downgrading it to a road run would misrepresent it.
@@ -321,5 +362,154 @@ describe('explaining itself', () => {
     if (!sea.ok || !land.ok) throw new Error('expected plans');
     expect(sea.legs[0]!.description).toContain('Boat from');
     expect(land.legs[0]!.description).toContain('Road transport from');
+  });
+});
+
+/**
+ * Belize City → Ladyville, which the business asked for by name.
+ *
+ * Two mainland towns fifteen minutes apart on the Northern Highway, in one
+ * district. The planner could not tell them apart from Belize City → San Pedro,
+ * which crosses open water, so it conservatively sent both to the terminal
+ * network and refused both. That was the right way round to be wrong — a bad
+ * quote beats a parcel handed to a driver who cannot reach it — but it made the
+ * commonest inter-town courier run impossible to book.
+ *
+ * The missing piece was never logic. It was a fact about the road, and facts
+ * about Belize are configured rows, not code.
+ */
+describe('direct courier lanes', () => {
+  const lane = (
+    originCity: string,
+    destinationCity: string,
+    over: Partial<PlannerLane> = {},
+  ): PlannerLane => ({
+    id: `lane_${originCity}_${destinationCity}`.replace(/\s+/g, '_'),
+    originDistrict: 'BELIZE',
+    originCity,
+    destinationDistrict: 'BELIZE',
+    destinationCity,
+    priceMinor: 2000,
+    durationMinutes: 40,
+    isActive: true,
+    ...over,
+  });
+
+  const bzToLadyville = [lane('Belize City', 'Ladyville')];
+
+  const doorToDoor = (from: string, to: string, fromDistrict = 'BELIZE', toDistrict = 'BELIZE') => ({
+    origin: { kind: 'DOOR' as const, city: from, district: fromDistrict },
+    destination: { kind: 'DOOR' as const, city: to, district: toDistrict },
+    service: 'DOOR_TO_DOOR' as const,
+  });
+
+  it('plans one courier and no terminal when a lane is configured', () => {
+    const r = planRoute(doorToDoor('Belize City', 'Ladyville'), HUBS, ROUTES, COURIER, bzToLadyville);
+    if (!r.ok) throw new Error(`expected a plan, got ${r.reason}: ${r.explanation}`);
+    expect(r.legs).toHaveLength(1);
+    expect(r.legs[0]!.kind).toBe('DIRECT');
+    expect(r.legs[0]!.originHubId).toBeNull();
+    expect(r.legs[0]!.destinationHubId).toBeNull();
+  });
+
+  it('reads a lane in both directions, because a road goes both ways', () => {
+    const r = planRoute(doorToDoor('Ladyville', 'Belize City'), HUBS, ROUTES, COURIER, bzToLadyville);
+    if (!r.ok) throw new Error(`expected a plan, got ${r.reason}`);
+    expect(r.legs[0]!.kind).toBe('DIRECT');
+  });
+
+  it('prices and times the lane from its own row, not from the local-run default', () => {
+    const r = planRoute(doorToDoor('Belize City', 'Ladyville'), HUBS, ROUTES, COURIER, bzToLadyville);
+    if (!r.ok) throw new Error('expected a plan');
+    expect(r.totalMinor).toBe(2000);
+    expect(r.totalMinutes).toBe(40);
+  });
+
+  it('names both towns, so the customer can see what was planned', () => {
+    const r = planRoute(doorToDoor('Belize City', 'Ladyville'), HUBS, ROUTES, COURIER, bzToLadyville);
+    if (!r.ok) throw new Error('expected a plan');
+    expect(r.legs[0]!.description).toContain('Belize City');
+    expect(r.legs[0]!.description).toContain('Ladyville');
+  });
+
+  it('does NOT extend to a town with no lane — San Pedro still crosses water', () => {
+    // The whole point. Configuring Belize City ↔ Ladyville must not quietly
+    // license every other pair of towns in the district.
+    const r = planRoute(doorToDoor('Belize City', 'San Pedro'), HUBS, ROUTES, COURIER, bzToLadyville);
+    if (!r.ok) throw new Error(`expected a plan, got ${r.reason}`);
+    expect(r.legs.map((l) => l.kind)).not.toContain('DIRECT');
+    expect(r.legs.map((l) => l.kind)).toContain('LINE_HAUL');
+  });
+
+  it('ignores a lane operations have closed', () => {
+    // A flooded road is a closed lane. Refused, or routed through the network —
+    // either is a fine answer. What must never happen is a courier being sent
+    // down a lane operations have taken out of service.
+    const r = planRoute(
+      doorToDoor('Belize City', 'Ladyville'),
+      HUBS,
+      ROUTES,
+      COURIER,
+      [lane('Belize City', 'Ladyville', { isActive: false })],
+    );
+    expect(r.ok ? r.legs.map((l) => l.kind) : []).not.toContain('DIRECT');
+  });
+
+  it('carries a lane across district lines when one is configured', () => {
+    // Nothing about a lane is district-bound. Corozal Town → Orange Walk Town is
+    // one road, and the planner should say so if operations have said so.
+    const crossDistrict = lane('Corozal Town', 'Orange Walk Town', {
+      originDistrict: 'COROZAL',
+      destinationDistrict: 'ORANGE_WALK',
+    });
+    const r = planRoute(
+      doorToDoor('Corozal Town', 'Orange Walk Town', 'COROZAL', 'ORANGE_WALK'),
+      HUBS,
+      ROUTES,
+      COURIER,
+      [crossDistrict],
+    );
+    if (!r.ok) throw new Error(`expected a plan, got ${r.reason}`);
+    expect(r.legs[0]!.kind).toBe('DIRECT');
+  });
+
+  it('matches town names regardless of case and stray spacing', () => {
+    const r = planRoute(doorToDoor('  belize city ', 'LADYVILLE'), HUBS, ROUTES, COURIER, bzToLadyville);
+    if (!r.ok) throw new Error(`expected a plan, got ${r.reason}`);
+    expect(r.legs[0]!.kind).toBe('DIRECT');
+  });
+
+  it('will not fly a parcel down a road lane', () => {
+    const r = planRoute(
+      { ...doorToDoor('Belize City', 'Ladyville'), preferredMode: 'AIR' },
+      HUBS,
+      ROUTES,
+      COURIER,
+      bzToLadyville,
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it('a lane is only a courier answer when we are doing BOTH ends', () => {
+    // DOOR_TO_HUB means the customer is handing the parcel to a terminal at the
+    // far end. A direct courier run does not describe that journey.
+    const r = planRoute(
+      { ...doorToDoor('Belize City', 'Ladyville'), service: 'DOOR_TO_HUB', destination: at('SPA') },
+      HUBS,
+      ROUTES,
+      COURIER,
+      bzToLadyville,
+    );
+    if (!r.ok) throw new Error(`expected a plan, got ${r.reason}`);
+    expect(r.legs.map((l) => l.kind)).not.toContain('DIRECT');
+  });
+
+  it('changes nothing at all when no lanes are configured', () => {
+    // Production ships with an empty table. Same-town still works; everything
+    // else behaves exactly as it did before lanes existed.
+    const sameTown = planRoute(doorToDoor('Belize City', 'Belize City'), HUBS, ROUTES, COURIER, []);
+    expect(sameTown.ok && sameTown.legs[0]!.kind).toBe('DIRECT');
+    const twoTowns = planRoute(doorToDoor('Belize City', 'Ladyville'), HUBS, ROUTES, COURIER, []);
+    expect(twoTowns.ok && twoTowns.legs.map((l) => l.kind)).not.toContain('DIRECT');
   });
 });

@@ -7,6 +7,7 @@ import { api } from '../../../../lib/api';
 import { StatusBadge } from '../../../../components/StatusBadge';
 import { Badge, Breadcrumbs, Card, Spinner } from '../../../../components/ui';
 import { adminCrumbs } from '../../../../lib/admin-nav';
+import { addressLines } from '@bmpl/shared';
 
 interface Item {
   productTitle: string;
@@ -51,7 +52,8 @@ interface AdminOrder {
   currency: string;
   placedAt: string;
   customer: { name: string; email: string };
-  deliveryAddress: { fullName: string; phone: string; addressLine1: string; addressLine2: string | null; city: string; district: string; country: string } | null;
+  // addressLine1 is nullable: an address may be pinned rather than written.
+  deliveryAddress: { fullName: string; phone: string; addressLine1: string | null; addressLine2: string | null; city: string; district: string; country: string } | null;
   vendorOrders: VendorOrder[];
 }
 
@@ -105,8 +107,7 @@ export default function AdminOrderDetailPage() {
         <Card className="mt-4 p-4 text-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Delivery address</p>
           <p className="mt-1 text-slate-700">
-            {order.deliveryAddress.fullName} — {order.deliveryAddress.addressLine1}
-            {order.deliveryAddress.addressLine2 ? `, ${order.deliveryAddress.addressLine2}` : ''}, {order.deliveryAddress.city}, {order.deliveryAddress.district.replace('_', ' ')}, {order.deliveryAddress.country}
+            {order.deliveryAddress.fullName} — {addressLines(order.deliveryAddress).join(', ')}
           </p>
           <p className="mt-1 text-slate-500">{order.deliveryAddress.phone}</p>
         </Card>

@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { DISTRICTS, DISTRICT_LABELS, type Coordinates } from '@bmpl/shared';
+import {
+  switchMethod,
+  type AddressMethod,
+  type AddressValue,
+  type ContactLevel,
+  type SavedAddress,
+} from '../../lib/address';
 import { api } from '../../lib/api';
 import { Alert, Spinner } from '../ui';
 
@@ -13,57 +20,15 @@ const LocationPicker = dynamic(() => import('../maps/LocationPicker').then((m) =
   loading: () => <div className="h-[252px] animate-pulse rounded-bmpl-md bg-slate-100" />,
 });
 
-export type AddressMethod = 'PIN' | 'TYPED' | 'SAVED';
-
-export interface AddressValue {
-  method: AddressMethod;
-  /** Set when the customer picked one of their saved addresses. */
-  savedAddressId: string | null;
-  fullName: string;
-  phone: string;
-  email: string;
-  company: string;
-  addressLine1: string;
-  addressLine2: string;
-  city: string;
-  district: string;
-  instructions: string;
-  latitude: number | null;
-  longitude: number | null;
-}
-
-export interface SavedAddress {
-  id: string;
-  label: string;
-  fullName: string;
-  phone: string;
-  email: string | null;
-  company: string | null;
-  addressLine1: string;
-  addressLine2: string | null;
-  city: string;
-  district: string;
-  instructions: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  isDefault: boolean;
-}
-
-export const emptyAddress = (method: AddressMethod = 'TYPED'): AddressValue => ({
-  method,
-  savedAddressId: null,
-  fullName: '',
-  phone: '',
-  email: '',
-  company: '',
-  addressLine1: '',
-  addressLine2: '',
-  city: '',
-  district: '',
-  instructions: '',
-  latitude: null,
-  longitude: null,
-});
+export {
+  addressGap,
+  emptyAddress,
+  switchMethod,
+  type AddressMethod,
+  type AddressValue,
+  type ContactLevel,
+  type SavedAddress,
+} from '../../lib/address';
 
 const METHODS: Array<{ value: AddressMethod; label: string; hint: string }> = [
   { value: 'PIN', label: 'Drop a pin', hint: 'Show us on the map. Best when the address is hard to describe.' },
@@ -93,15 +58,22 @@ export function AddressField({
   heading,
   description,
   disabled,
-  requireContact = true,
+  contact = 'FULL',
+  showInstructions = true,
 }: {
   value: AddressValue;
   onChange: (next: AddressValue) => void;
   heading: string;
   description?: string;
   disabled?: boolean;
-  /** Sender/recipient forms need contact details; a delivery address may not. */
-  requireContact?: boolean;
+  /** How much of the contact block to ask for. See ContactLevel. */
+  contact?: ContactLevel;
+  /**
+   * Marketplace checkout collects instructions PER STORE, because two vendors
+   * in one order are two separate drops. Two instruction boxes on one page,
+   * one of which quietly wins, is how a customer's gate code gets lost.
+   */
+  showInstructions?: boolean;
 }) {
   const uid = useId();
   const [saved, setSaved] = useState<SavedAddress[] | null>(null);
@@ -163,7 +135,7 @@ export function AddressField({
       {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
 
       {/* ---------------------------------------------------- contact */}
-      {requireContact && (
+      {contact !== 'NONE' && (
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <Labelled id={`${uid}-name`} label="Full name" required>
             <input
@@ -184,25 +156,29 @@ export function AddressField({
               className={inputClass}
             />
           </Labelled>
-          <Labelled id={`${uid}-email`} label="Email" optional>
-            <input
-              id={`${uid}-email`}
-              value={value.email}
-              onChange={(e) => set({ email: e.target.value })}
-              inputMode="email"
-              autoComplete="email"
-              className={inputClass}
-            />
-          </Labelled>
-          <Labelled id={`${uid}-company`} label="Company" optional>
-            <input
-              id={`${uid}-company`}
-              value={value.company}
-              onChange={(e) => set({ company: e.target.value })}
-              autoComplete="organization"
-              className={inputClass}
-            />
-          </Labelled>
+          {contact === 'FULL' && (
+            <>
+            <Labelled id={`${uid}-email`} label="Email" optional>
+              <input
+                id={`${uid}-email`}
+                value={value.email}
+                onChange={(e) => set({ email: e.target.value })}
+                inputMode="email"
+                autoComplete="email"
+                className={inputClass}
+              />
+            </Labelled>
+            <Labelled id={`${uid}-company`} label="Company" optional>
+              <input
+                id={`${uid}-company`}
+                value={value.company}
+                onChange={(e) => set({ company: e.target.value })}
+                autoComplete="organization"
+                className={inputClass}
+              />
+            </Labelled>
+            </>
+          )}
         </div>
       )}
 
@@ -214,7 +190,7 @@ export function AddressField({
         <select
           id={`${uid}-method`}
           value={value.method}
-          onChange={(e) => set({ method: e.target.value as AddressMethod, savedAddressId: null })}
+          onChange={(e) => onChange(switchMethod(value, e.target.value as AddressMethod))}
           className={`${inputClass} mt-1`}
         >
           {METHODS.map((m) => (
@@ -316,9 +292,24 @@ export function AddressField({
         </div>
       )}
 
-      {/* PIN mode still needs a district so the map knows where to open. */}
+      {/* PIN mode still asks for the town and the district.
+          NOT a fake street address — the pin is the location, and asking for one
+          again is exactly what made dropping a pin pointless. But the town and
+          district are not location detail: they price the delivery, they decide
+          which drivers are matched, and for a shipment the town is what says
+          whether one courier can do the whole job or the parcel has to cross
+          water. A pin is not allowed to imply them. */}
       {value.method === 'PIN' && (
-        <div className="mt-4 sm:max-w-xs">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Labelled id={`${uid}-city-pin`} label="City, town or village" required>
+            <input
+              id={`${uid}-city-pin`}
+              value={value.city}
+              onChange={(e) => set({ city: e.target.value })}
+              autoComplete="address-level2"
+              className={inputClass}
+            />
+          </Labelled>
           <Labelled id={`${uid}-district-pin`} label="District or island" required>
             <select
               id={`${uid}-district-pin`}
@@ -353,10 +344,16 @@ export function AddressField({
           autoLocateAddress={value.method !== 'PIN'}
         />
 
+        {/* In PIN mode the pin IS the address, so its absence is the one thing
+            standing between the customer and submitting. Everywhere else it is a
+            strong suggestion. Saying the same sentence in both cases would either
+            nag people who have already given us a usable address, or fail to warn
+            the one person whose form will not submit. */}
         {!coords && (
-          <p className="mt-2 text-sm text-amber-700">
-            No pin yet. Belize addresses are often hard to find from the text alone, so a pin makes a real difference to
-            whether your driver arrives at the right door.
+          <p className="mt-2 text-sm text-amber-700" role={value.method === 'PIN' ? 'status' : undefined}>
+            {value.method === 'PIN'
+              ? 'No pin yet. Tap the map, or use your current location, to place one — it is what your driver will follow.'
+              : 'No pin yet. Belize addresses are often hard to find from the text alone, so a pin makes a real difference to whether your driver arrives at the right door.'}
           </p>
         )}
 
@@ -367,17 +364,20 @@ export function AddressField({
         )}
       </div>
 
-      <div className="mt-4">
-        <Labelled id={`${uid}-instructions`} label="Instructions for the driver" optional>
-          <input
-            id={`${uid}-instructions`}
-            value={value.instructions}
-            onChange={(e) => set({ instructions: e.target.value })}
-            placeholder="Gate code, landmark, who to ask for"
-            className={inputClass}
-          />
-        </Labelled>
-      </div>
+      {showInstructions && (
+        <div className="mt-4">
+          <Labelled id={`${uid}-instructions`} label="Instructions for the driver" optional>
+            <input
+              id={`${uid}-instructions`}
+              value={value.instructions}
+              onChange={(e) => set({ instructions: e.target.value })}
+              placeholder="Gate code, landmark, who to ask for"
+              className={inputClass}
+            />
+          </Labelled>
+        </div>
+      )}
+
     </fieldset>
   );
 }

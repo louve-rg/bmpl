@@ -311,6 +311,8 @@ enum AuditAction {
   LOGISTICS_HUB_UPDATED
   LOGISTICS_ROUTE_CREATED
   LOGISTICS_ROUTE_UPDATED
+  COURIER_LANE_CREATED
+  COURIER_LANE_UPDATED
   SHIPMENT_CREATED
   SHIPMENT_CANCELLED
   SHIPMENT_LEG_STARTED
@@ -2385,7 +2387,8 @@ model OrderAddress {
   type         OrderAddressType @default(SHIPPING)
   fullName     String
   phone        String?
-  addressLine1 String
+  /// Optional: an address is written down OR pinned (see orderAddressSchema).
+  addressLine1 String?
   addressLine2 String?
   city         String
   district     District
@@ -4318,6 +4321,60 @@ model LogisticsRoute {
   @@index([originHubId, isActive])
   @@index([destinationHubId, isActive])
   @@map("logistics_routes")
+}
+
+/// Two towns one courier can drive between.
+///
+/// WHY THIS EXISTS. The planner can recognise exactly one journey that needs no
+/// terminal: both ends in the same town. Anything else went to the hub network,
+/// so Belize City → Ladyville — fifteen minutes up the Northern Highway — was
+/// refused unless somebody invented a bus terminal at each end. That refusal is
+/// not a routing answer, it is the planner not being told something true about
+/// the road.
+///
+/// It could not simply guess. Belize City and San Pedro are both in the Belize
+/// District and one of them is on an island; a district-wide rule would have
+/// despatched a road courier to drive a parcel across open water. Which towns
+/// share a road is a FACT ABOUT BELIZE, not something derivable from a district
+/// column, so it is configured here rather than inferred anywhere.
+///
+/// A lane is deliberately NOT a hub. Nothing is handed over, nothing is stored,
+/// no counter opens or closes. Modelling one as a pair of terminals would put
+/// fictional bus stations into the network a customer picks from.
+///
+/// Lanes are read in BOTH directions. A road that carries a parcel one way
+/// carries it back, and a one-way courier lane is not a thing that exists; two
+/// rows to say one fact is just an opportunity for them to disagree.
+model CourierLane {
+  id                  String   @id @default(cuid())
+  originDistrict      District
+  originCity          String
+  destinationDistrict District
+  destinationCity     String
+  /// What BML charges for the run, in minor units. Owner-configured DATA, like
+  /// a hub's courier fee: 0 means "not priced yet" and a quote says so out loud
+  /// rather than quietly shipping for free.
+  priceMinor          BigInt   @default(0)
+  durationMinutes     Int      @default(0)
+  /// Notes for operations — "Northern Highway, no ferry". Never shown as a
+  /// promise to a customer.
+  note                String?
+  /// Closing a lane (flooding, a bridge out) stops it being planned without
+  /// deleting the record of everything that ever travelled it.
+  isActive            Boolean  @default(true)
+  /// Simulation infrastructure, exactly as for hubs and routes: a TEST lane
+  /// exists only to exercise the planner and never carries a real parcel.
+  isTest              Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  /// One row per pair of towns, as written. Note this index alone is NOT the
+  /// whole rule: the planner reads a lane in both directions and folds case, so
+  /// the reverse and re-cased duplicates it cannot see are refused in
+  /// LogisticsNetworkService.assertPairIsFree. This is the backstop.
+  @@unique([originDistrict, originCity, destinationDistrict, destinationCity])
+  @@index([isTest, isActive])
+  @@map("courier_lanes")
 }
 
 /// One parcel's journey, however many legs it takes.

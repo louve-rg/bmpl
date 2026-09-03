@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { shipmentListSchema, createHubSchema, createRouteSchema, shipmentQuoteSchema } from './shipping';
+import { UNLOCATABLE_ADDRESS_MESSAGE } from '@bmpl/shared';
+import {
+  createHubSchema,
+  createRouteSchema,
+  createShipmentSchema,
+  shipmentListSchema,
+  shipmentQuoteSchema,
+} from './shipping';
 
 describe('shipmentListSchema', () => {
   it('treats the WORD "false" as false', () => {
@@ -76,5 +83,65 @@ describe('shipmentQuoteSchema', () => {
     };
     expect(shipmentQuoteSchema.safeParse(hubToHub).success).toBe(true);
     expect(shipmentQuoteSchema.safeParse({ ...hubToHub, destination: { district: 'BELIZE' } }).success).toBe(false);
+  });
+});
+
+/**
+ * Booking, not just quoting.
+ *
+ * The form already lets a customer choose "drop a pin" and hides the street
+ * field when they do — but this schema demanded an address anyway, so the pin
+ * they dropped produced "We need the address to collect from" at the last step.
+ * The same defect as the marketplace checkout, one layer further down.
+ *
+ * The TOWN is a separate matter and is now required at every door end. It is not
+ * decoration: the planner compares towns to decide whether one courier can do
+ * the whole job, and a door end with no town would be read as "as local as the
+ * customer has told us", which is how a road courier gets planned for a parcel
+ * that has to cross water.
+ */
+describe('createShipmentSchema — a door end is written OR pinned', () => {
+  const pin = { latitude: 17.4995, longitude: -88.1976 };
+  const street = { address: '5 Front Street' };
+  const here = { city: 'Belize City', district: 'BELIZE' };
+  const recipient = { name: 'Marisol Cano', phone: '501-600-1234' };
+
+  const doorToDoor = (origin: object, destination: object) => ({
+    service: 'DOOR_TO_DOOR',
+    origin: { ...here, ...origin },
+    destination: { ...here, ...recipient, ...destination },
+  });
+
+  it('accepts a pinned collection with no typed address', () => {
+    expect(createShipmentSchema.safeParse(doorToDoor(pin, street)).success).toBe(true);
+  });
+
+  it('accepts a pinned delivery with no typed address', () => {
+    expect(createShipmentSchema.safeParse(doorToDoor(street, pin)).success).toBe(true);
+  });
+
+  it('still refuses a door end that is neither written nor pinned', () => {
+    const r = createShipmentSchema.safeParse(doorToDoor({}, pin));
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0]!.message).toBe(UNLOCATABLE_ADDRESS_MESSAGE);
+  });
+
+  it('refuses a door end with no town, pin or no pin', () => {
+    expect(createShipmentSchema.safeParse(doorToDoor({ ...pin, city: undefined }, pin)).success).toBe(false);
+    expect(createShipmentSchema.safeParse(doorToDoor(pin, { ...pin, city: undefined })).success).toBe(false);
+  });
+
+  it('still needs somebody reachable at the far end', () => {
+    expect(createShipmentSchema.safeParse(doorToDoor(pin, { ...pin, phone: undefined })).success).toBe(false);
+  });
+
+  it('asks for neither town nor address at an end the customer handles at a terminal', () => {
+    expect(
+      createShipmentSchema.safeParse({
+        service: 'HUB_TO_HUB',
+        origin: { hubId: 'clh0000000000000000000000' },
+        destination: { hubId: 'clh1111111111111111111111', ...recipient },
+      }).success,
+    ).toBe(true);
   });
 });

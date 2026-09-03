@@ -4,10 +4,13 @@ import {
   isWithinBelize,
   LEG_KINDS,
   OUT_OF_BOUNDS_MESSAGE,
+  needsFirstMile,
+  needsLastMile,
   SHIPPING_SERVICES,
   TRANSPORT_MODES,
+  UNLOCATABLE_ADDRESS_MESSAGE,
 } from '@bmpl/shared';
-import { cuidSchema, districtSchema, phoneSchema } from './common';
+import { cuidSchema, districtSchema, isLocatable, phoneSchema } from './common';
 
 /**
  * Multi-leg shipping input.
@@ -96,6 +99,59 @@ export const updateRouteSchema = notSelfReferential(
 export type CreateRouteInput = z.infer<typeof createRouteSchema>;
 export type UpdateRouteInput = z.infer<typeof updateRouteSchema>;
 
+/* -------------------------------------------------------- courier lanes */
+
+/**
+ * Two towns one courier can drive between.
+ *
+ * Operator-facing and strict, like the rest of the network. The one rule that
+ * is not obvious is that a lane must connect two DIFFERENT towns: a town is
+ * already local to itself, so a self-lane is a row that changes no answer.
+ * That check needs both ends, so it lives on the object rather than a field.
+ */
+const courierLaneBase = z.object({
+  originDistrict: districtSchema,
+  originCity: z.string().trim().min(2, 'Name the town we collect from.').max(80),
+  destinationDistrict: districtSchema,
+  destinationCity: z.string().trim().min(2, 'Name the town we deliver to.').max(80),
+  // Minor units. 0 is allowed and MEANS "not priced yet" — a quote says so
+  // out loud rather than quietly shipping for free.
+  priceMinor: z.coerce.number().int().min(0).max(100_000_000).optional(),
+  durationMinutes: z.coerce.number().int().min(0).max(60 * 24).optional(),
+  note: z.string().trim().max(200).optional(),
+  isActive: z.boolean().optional(),
+  isTest: z.boolean().optional(),
+});
+
+/**
+ * Typed on the PARSED value, the same way the endpoint refinements above are:
+ * the base schema has optional fields, so create and update parse to different
+ * shapes and a bound on one would not fit the other.
+ */
+type CourierLaneShape = Partial<z.infer<typeof courierLaneBase>>;
+
+const sameTown = (a?: string | null, b?: string | null) =>
+  (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+
+const laneConnectsTwoTowns = <T extends z.ZodTypeAny>(schema: T) =>
+  schema.refine(
+    (v: CourierLaneShape) =>
+      v.originDistrict == null ||
+      v.destinationDistrict == null ||
+      v.originDistrict !== v.destinationDistrict ||
+      !sameTown(v.originCity, v.destinationCity),
+    {
+      message: 'A lane has to connect two different towns — a town is already local to itself.',
+      path: ['destinationCity'],
+    },
+  );
+export const createCourierLaneSchema = laneConnectsTwoTowns(courierLaneBase);
+export const updateCourierLaneSchema = laneConnectsTwoTowns(
+  courierLaneBase.partial().refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update.' }),
+);
+export type CreateCourierLaneInput = z.infer<typeof courierLaneBase>;
+export type UpdateCourierLaneInput = Partial<CreateCourierLaneInput>;
+
 /* --------------------------------------------------------------- quoting */
 
 /**
@@ -165,15 +221,45 @@ export const shipmentQuoteSchema = endpointsMatchService(quoteBase);
 // change the parsed shape, so the base schema's type IS the type.
 export type ShipmentQuoteInput = QuoteShape;
 
-/** Booking is a quote plus the contact details we only need once it is real. */
+/**
+ * Booking is a quote plus the details we only need once it is real.
+ *
+ * A DOOR end has to answer two separate questions, and conflating them is what
+ * broke "drop a pin":
+ *
+ *   WHERE IS IT — written down or pinned, either one alone. This used to demand
+ *   a typed address unconditionally, so a customer who chose "drop a pin", was
+ *   shown no street field, and placed their pin was refused at the last step
+ *   with "We need the address to collect from". The form and the schema
+ *   disagreed about what a complete answer is; the form was right.
+ *
+ *   WHICH TOWN — always, pin or no pin. The town is not location detail here:
+ *   the planner compares towns to decide whether one courier can do the whole
+ *   job, and an end with no town reads as "as local as the customer has told
+ *   us" — which is how a road courier gets planned for a parcel that has to
+ *   cross water. Quoting does not ask for it, because a customer comparing
+ *   prices has not filled the form in yet; booking does, because by then the
+ *   answer decides the route.
+ *
+ * A HUB end is asked for neither. The customer is walking into a terminal we
+ * already have on file.
+ */
 export const createShipmentSchema = endpointsMatchService(quoteBase)
-  .refine((v: QuoteShape) => v.service === 'HUB_TO_HUB' || v.service === 'HUB_TO_DOOR' || !!v.origin.address, {
-    message: 'We need the address to collect from.',
+  .refine((v: QuoteShape) => !needsFirstMile(v.service) || isLocatable({ street: v.origin.address, latitude: v.origin.latitude, longitude: v.origin.longitude }), {
+    message: UNLOCATABLE_ADDRESS_MESSAGE,
     path: ['origin', 'address'],
   })
-  .refine((v: QuoteShape) => v.service === 'HUB_TO_HUB' || v.service === 'DOOR_TO_HUB' || !!v.destination.address, {
-    message: 'We need the address to deliver to.',
+  .refine((v: QuoteShape) => !needsLastMile(v.service) || isLocatable({ street: v.destination.address, latitude: v.destination.latitude, longitude: v.destination.longitude }), {
+    message: UNLOCATABLE_ADDRESS_MESSAGE,
     path: ['destination', 'address'],
+  })
+  .refine((v: QuoteShape) => !needsFirstMile(v.service) || !!v.origin.city, {
+    message: 'Which town are we collecting from?',
+    path: ['origin', 'city'],
+  })
+  .refine((v: QuoteShape) => !needsLastMile(v.service) || !!v.destination.city, {
+    message: 'Which town is it going to?',
+    path: ['destination', 'city'],
   })
   .refine((v: QuoteShape) => !!v.destination.name && !!v.destination.phone, {
     // Somebody has to be reachable at the far end, whether a driver is knocking

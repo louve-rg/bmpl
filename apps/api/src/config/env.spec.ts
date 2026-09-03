@@ -104,3 +104,45 @@ describe('storageEnabled — storage is optional', () => {
     expect(storageEnabled(env)).toBe(true);
   });
 });
+
+/**
+ * The temporary UAT funding switch.
+ *
+ * Its whole safety story is "absent means off", so absence, blankness and the
+ * literal word "false" all have to reach the same answer. A flag that is only
+ * off when set correctly is not a kill switch.
+ */
+describe('loadEnv — self-service test funding is off unless switched on', () => {
+  it('is off when the variable is absent entirely', () => {
+    expect(loadEnv(base as NodeJS.ProcessEnv).ENABLE_SELF_SERVICE_TEST_FUNDING).toBe(false);
+  });
+
+  it('is off for the word "false", and on only for "true"', () => {
+    const read = (v: string) =>
+      loadEnv({ ...base, ENABLE_SELF_SERVICE_TEST_FUNDING: v } as NodeJS.ProcessEnv)
+        .ENABLE_SELF_SERVICE_TEST_FUNDING;
+    expect(read('false')).toBe(false);
+    expect(read('true')).toBe(true);
+  });
+
+  it('caps the grant at BZ$250 however large the variable says', () => {
+    // A fat-fingered deployment must not be able to mint more than the policy.
+    expect(() =>
+      loadEnv({ ...base, SELF_SERVICE_TEST_FUNDING_AMOUNT_MINOR: '1000000' } as NodeJS.ProcessEnv),
+    ).toThrow(/SELF_SERVICE_TEST_FUNDING_AMOUNT_MINOR/);
+    expect(loadEnv(base as NodeJS.ProcessEnv).SELF_SERVICE_TEST_FUNDING_AMOUNT_MINOR).toBe(25_000);
+  });
+
+  it('reads a blank expiry as no expiry rather than refusing to boot', () => {
+    // Clearing a value by emptying it is what an operator naturally does, and
+    // the API refusing to start over it would punish the safe direction.
+    const env = loadEnv({ ...base, SELF_SERVICE_TEST_FUNDING_EXPIRES_AT: '  ' } as NodeJS.ProcessEnv);
+    expect(env.SELF_SERVICE_TEST_FUNDING_EXPIRES_AT).toBeUndefined();
+  });
+
+  it('still rejects an expiry that is not a timestamp', () => {
+    expect(() =>
+      loadEnv({ ...base, SELF_SERVICE_TEST_FUNDING_EXPIRES_AT: 'next Tuesday' } as NodeJS.ProcessEnv),
+    ).toThrow(/SELF_SERVICE_TEST_FUNDING_EXPIRES_AT/);
+  });
+});
