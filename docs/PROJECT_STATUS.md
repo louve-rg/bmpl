@@ -4,9 +4,9 @@
 project up from the repository alone. It carries no secrets, no credentials and
 no customer data — only what is true about the code and how it is run.
 
-Last reviewed: 2026-09-02, against `main` at `87b0566` plus four commits on
-`fix/marketplace-address-and-courier-lanes` — **written, locally verified, and
-NOT YET DEPLOYED**. See §11 and §12 for exactly how far it got and why.
+Last reviewed: 2026-09-03, against `main` at **`a2bab27`** — the marketplace
+address and courier-lane work, **merged and deployed**. API, Web and Admin are
+all serving that commit. What is still unverified is listed in §12.
 
 When this document and the code disagree, **the code wins** — and then this
 document is wrong and should be fixed in the same change.
@@ -63,13 +63,19 @@ several of the defects fixed in this repo were exactly that.
 | Web | Vercel | `apps/web/vercel.json`. |
 | Admin | Vercel | `apps/admin/vercel.json`. |
 
-Production API health reports the deployed commit:
+Every service reports the commit it is serving, so a deploy can be confirmed
+rather than assumed:
 
 ```
 curl -s https://www.bzemarketplace.com/api/health
-# {"status":"ok","commit":"87b0566", ...}
+# {"status":"ok","commit":"a2bab27", ...}
 curl -s https://www.bzemarketplace.com/api/health/ready
 # {"status":"ready","checks":{"database":true,"redis":true,"storage":"ok"}}
+
+# Web and Admin carry it as a header, from VERCEL_GIT_COMMIT_SHA.
+curl -sI https://www.bzemarketplace.com/ | grep -i x-bmpl-commit
+curl -sI https://bmpl-admin.vercel.app/ | grep -i x-bmpl-commit
+# X-Bmpl-Commit: a2bab27e703c
 ```
 
 `/api/health/live` does not exist — do not look for it.
@@ -312,113 +318,136 @@ Read the live value; do not assume.
 
 ---
 
-## 11. Current active work
+## 11. Last milestone: shipped 2026-09-03
 
-Four commits on `fix/marketplace-address-and-courier-lanes`, based on `87b0566`:
+PR [#1](https://github.com/louve-rg/bmpl/pull/1), merged as **`a2bab27`**.
 
-| Commit | What it does |
+| | |
 | --- | --- |
-| `c54c63c` | A dropped pin is an address; a courier can be planned between two towns on one road. |
-| `9f6697a` | A blank test-funding expiry no longer stops the API booting. |
-| `7710516` | This document. |
-| `3521d0e` | One road could be configured as three lanes at three prices. |
+| Merge commit | `a2bab27` |
+| API (Railway) | `a2bab27` · ready · database, redis, storage all ok |
+| Web (Vercel) | `a2bab27e703c` |
+| Admin (Vercel) | `a2bab27e703c` |
+| CI on the PR | green — build/typecheck/unit, integration, secret scan |
+| CI on `main` after merge | green |
 
-### What is finished in code
+### What shipped
 
 1. **Marketplace address-method parity.** Checkout uses the shared
-   `AddressField`; drop-pin / type-address / saved-address; a pin with no street
-   line is accepted by the browser, the API schema and the database.
-2. **Shipping pin-only booking.** `createShipmentSchema` had accepted a pin in
-   the form and then demanded a typed address at booking. Same rule both sides
-   now, with the town required at every door end.
-3. **Direct-vs-terminal routing.** `CourierLane` lets operations state that two
-   towns are connected by road. Ships with an empty table: with no lanes,
-   routing behaviour is exactly what it is today.
-4. **Recipient-meets-transport / optional last mile** — assessed, already
-   supported (`AWAITING_COLLECTION`, `collectShipmentSchema`, `needsLastMile`).
-   No model change made or needed.
-5. **Self-service BZ$250 UAT funding** — verified, not rebuilt. `.env.example`
-   now documents the kill switch.
+   `AddressField` — drop a pin / type the address / use a saved one. A pin with
+   no street line is now accepted by the browser, the API schema and the
+   database. This is Edward's report.
+2. **Shipping pin-only booking.** The form had accepted a pin and the booking
+   schema had then demanded a typed address. One rule both sides now, with the
+   town required at every door end.
+3. **`CourierLane`.** Operations can state that two towns are connected by road,
+   which is what Belize City ↔ Ladyville needed. **The table is deployed and
+   empty**, so routing is unchanged until a lane is entered.
+4. **Recipient-meets-transport and optional last mile** — already supported, no
+   model change made.
+5. **Self-service BZ$250 UAT funding** — verified, not rebuilt; its kill switch
+   is now documented in `.env.example`.
 
-### Verified locally (2026-09-02)
+### Migrations, applied
 
-- Typecheck: 19/19 tasks, including the API test project.
-- Unit tests: **442 passing** — 58 api, 209 shared, 43 validation, 127 web,
-  7 wallet, 5 authorization.
-- Builds: all 8 packages, plus API, Web and Admin.
-- Self-delivery protections: `apps/api/src/dispatch` and both self-delivery /
-  self-courier specs are **byte-identical to `main`** on this branch. Untouched,
-  so unregressed by construction.
+Railway runs `prisma migrate deploy` as `preDeployCommand`, so the container
+only takes traffic if both applied. It did, and readiness reports
+`database: true`.
+
+- `20261102090000_pin_only_delivery_address` — `DROP NOT NULL` on
+  `order_addresses.addressLine1`. Loosening only; every existing row keeps its
+  value, and the town stays `NOT NULL`.
+- `20261102093000_courier_lanes` — an empty `courier_lanes` table with no
+  foreign key to anything existing, plus two `AuditAction` values added with
+  `IF NOT EXISTS`.
+
+Corroborated from outside: `/api/admin/logistics/courier-lanes` answered `404`
+before the deploy and `401` after, so the new route is live; and the same
+migrations were applied by CI against real Postgres before the merge.
+
+### Test evidence
+
+- **691 integration tests across 55 spec files**, green — the first time they
+  had ever run. Includes `orders` (18 → 20 tests, the two new pin-only checkout
+  cases) and `shipping` (56 → 70, pin-only booking, courier-lane routing in both
+  directions, lane pricing, and refusal of reversed and re-cased duplicates).
+- **442 unit tests**, green. Typecheck 19/19. All builds.
+- **Self-delivery regression green in CI**: `self-delivery` (6) and
+  `self-courier` (5). `apps/api/src/dispatch` and both specs are byte-identical
+  to the pre-merge `main`, so the invariant is unregressed by construction.
+- **Money paths green in CI**: `shipment-payments` (16), `wallet-authorization`
+  (11), `wallet-activation` (37), `settlement` (9), `self-service-funding` (10).
 
 ## 12. Known gaps and what still needs a person
 
-- **NOT DEPLOYED, and blocked on a credential — not on the code.** Two sessions
-  have now tried to push `fix/marketplace-address-and-courier-lanes` and failed
-  for the same reason: this is a private repository and the machine has no
-  usable GitHub credential in a non-interactive session. `git ls-remote` ends in
-  `fatal: could not read Username for 'https://github.com'`; the credential
-  helper is `manager`, which needs a GUI prompt nothing can answer. The network
-  itself is fine — the git endpoint answers `401`, not a timeout.
+### The one thing blocking sign-off
 
-  **To unblock it, run this once from an interactive terminal on this machine:**
+**Deployed browser and mobile QA of marketplace checkout has not been done.**
+Everything about the fix is proven in CI against real Postgres, and it is live
+on production — but nobody has yet opened it in a phone browser and watched the
+pin drop. Edward reported the bug from a phone, so that is the test that
+settles it, and no session so far has had browser automation available.
 
-  ```
-  git push -u origin fix/marketplace-address-and-courier-lanes
-  ```
+At 320 / 375 / 390 / 430 px and desktop, signed in, with a deliverable vendor
+in the cart:
 
-  Authenticate when the credential manager prompts. Everything downstream —
-  CI, the integration tests, the merge, the deploy, the migrations — then runs
-  through the normal pipeline. Nothing else is waiting on engineering.
+1. **Drop a pin → Use my current location.** Grant location. The pin appears and
+   can be dragged. **Leave the street address blank.** Checkout must go through.
+   This is the exact complaint.
+2. **Type the address.** Street fields appear and are required; town and
+   district required; the map geocodes and pins. Checkout goes through.
+3. **Saved address.** The selector appears, choosing one fills the fields and
+   shows its stored pin, checkout goes through — and moving the pin for this
+   order must not rewrite the saved entry (a notice says so when it differs).
+4. **Switch between all three** and back. No stale validation, no required field
+   you cannot see, no horizontal overflow, map controls reachable with a thumb.
 
-- **Integration tests have still never been run.** Neither machine had Docker or
-  Postgres (5432 and 6379 closed, no `psql`), and pointing them at any real
-  database is not an option because the suite calls `resetDb`. They are written
-  — including pin-only checkout, pin-only booking, courier-lane routing and
-  duplicate-lane refusal — and CI runs them against real Postgres/Redis/MinIO on
-  the first push. **Do not treat this milestone as verified until that run is
-  green.**
-- **Browser and mobile-width verification has not been done, and it is the gate
-  on this milestone.** Neither session had browser automation, and the fix is
-  not on production to test against anyway. Edward reported the bug from a
-  phone, so desktop-only checking would not settle it. After deploying, walk
-  marketplace checkout at 320 / 375 / 390 / 430 / 768 px and desktop:
-  drop-pin with "use my current location" and no street address, type-address,
-  saved-address, and switching between all three without stale validation. Then
-  the same three methods on shipment booking, through to an actual booking.
-- **The live `dispatchAutomatic` value was not read** — it needs admin access.
-  Check it at admin → Dispatch, or
-  `GET /api/admin/ops/settings`.
-- **The live `ENABLE_SELF_SERVICE_TEST_FUNDING` value is still unknown.**
-  `GET /api/wallet/test-funding` answers `401` to an unauthenticated caller
-  whether the flag is on or off, so its state cannot be inferred from outside —
-  and it should not be guessed. Signed in, that endpoint returns
-  `{"enabled": false}` when off, or the amount, cap and remaining allowance when
-  on. Read it there.
-- **Production has no shipping network configured.** Re-probed 2026-09-02:
-  `/api/shipping/hubs` → `[]` and `/api/shipping/modes` → `[]`, so zero hubs and
-  zero active routes (modes are derived from active routes). Courier lanes do
-  not exist there yet at all — `/api/admin/logistics/courier-lanes` returns 404,
-  which is the branch not being deployed. Today production Shipping can quote a
-  same-town direct courier and nothing else. **This is business configuration,
-  not a defect**, and the table is expected to stay empty until a real lane with
-  a real approved rate exists. Do not invent one — the Belize City to Ladyville
-  price is a business decision, not an engineering default.
-- **Things BML does not do, and must not be described as doing.** No timetables
-  or scheduled departures — `scheduleNote` is a label an operator types. **No
-  live GPS tracking of any bus, boat or aircraft**, because no data source
-  exists; the leg state machine can carry departed/arrived/ready-for-collection
-  when a real integration arrives. No transport network is fabricated anywhere:
-  real hubs and routes require carrier onboarding, and real courier lanes
-  require a rate the business has approved.
-- **No reverse geocoding.** A pin cannot fill in its own town, which is one
-  reason the town is asked for directly.
+Then the same three methods on `/dashboard/shipments/new`, through to a real
+booking, to confirm the pin-only path end to end in the browser.
+
+### Needs a signed-in session to read
+
+- **The live `ENABLE_SELF_SERVICE_TEST_FUNDING` value.**
+  `GET /api/wallet/test-funding` answers `401` to an anonymous caller whether
+  the flag is on or off, so it cannot be read from outside and must not be
+  guessed. Signed in it returns `{"enabled": false}` when off, or the amount,
+  cap and remaining allowance when on.
+- **The live `dispatchAutomatic` value.** Admin → Dispatch, or
+  `GET /api/admin/ops/settings`. It shipped off by migration; whether it is on
+  today is a live value, not something to infer.
+
+### Business configuration, not defects
+
+- **Production has no transport network.** Re-checked after the deploy:
+  `/api/shipping/hubs` → `[]`, `/api/shipping/modes` → `[]` (modes derive from
+  active routes), and `courier_lanes` is deployed **empty**. Production Shipping
+  can therefore quote a same-town direct courier and nothing else. That is the
+  expected state and it should stay that way until real providers are onboarded.
+- **No Belize City ↔ Ladyville lane exists, and no rate has been chosen.** The
+  model supports it; the price is a business decision. Do not invent one to make
+  a demo work. Create it at admin → Logistics → Courier lanes when there is a
+  confirmed origin, destination, rate and authorisation.
+
+### Standing limitations — do not describe these as working
+
+- No timetables or scheduled departures. `scheduleNote` is a label an operator
+  types, not a calendar.
+- **No live GPS tracking of any bus, boat or aircraft.** No data source exists.
+  The leg state machine can carry departed / arrived / ready-for-collection when
+  a real integration arrives.
+- No reverse geocoding: a pin cannot fill in its own town, which is part of why
+  the town is asked for directly.
+- No transport network is fabricated anywhere. Real hubs and routes need carrier
+  onboarding; real courier lanes need an approved rate.
+
+### Repository housekeeping
+
 - `format:check` fails repo-wide (~490 files). Pre-existing; informational in CI.
 - `@bmpl/authentication`, `@bmpl/notifications` and `@bmpl/database` declare a
   `test` script but have no test files, so `turbo run test` reports them as
-  failures. Pre-existing; CI runs `pnpm test:unit`, which does not include them.
+  failures. Pre-existing; CI runs `pnpm test:unit`, which excludes them.
 
 ---
-
 ## 13. Working on this repo
 
 ```bash
@@ -439,8 +468,15 @@ pnpm --filter @bmpl/api test:integration    # needs TEST_DATABASE_URL
 pnpm --filter @bmpl/api build && pnpm --filter @bmpl/web build && pnpm --filter @bmpl/admin build
 ```
 
-Pushing `main` deploys API (Railway) and Web/Admin (Vercel). Confirm afterwards
-that `/api/health` reports the commit you pushed.
+**CI runs on pull requests into `main`, and on pushes to `main` — not on feature
+branches.** Pushing a branch on its own runs nothing and tests nothing; open the
+PR, which is what starts the integration job. That job is the only place the
+integration suite runs at all unless you have local Postgres.
+
+Merging deploys API (Railway) and Web/Admin (Vercel). Railway applies migrations
+as `preDeployCommand`, so a failed migration fails the deploy rather than
+half-applying. Afterwards confirm all three are actually serving your commit —
+`/api/health` for the API, the `X-BMPL-Commit` header for Web and Admin.
 
 **Never** delete legitimate wallet history, reset real accounts, remove audit
 records, rewrite settled payments, mass-modify drivers, or create production
