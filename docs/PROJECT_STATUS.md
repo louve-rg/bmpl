@@ -4,8 +4,9 @@
 project up from the repository alone. It carries no secrets, no credentials and
 no customer data — only what is true about the code and how it is run.
 
-Last reviewed: 2026-09-02, against `main` at `87b0566` plus the marketplace
-address / courier-lane work described under "Current active work".
+Last reviewed: 2026-09-02, against `main` at `87b0566` plus four commits on
+`fix/marketplace-address-and-courier-lanes` — **written, locally verified, and
+NOT YET DEPLOYED**. See §11 and §12 for exactly how far it got and why.
 
 When this document and the code disagree, **the code wins** — and then this
 document is wrong and should be fixed in the same change.
@@ -313,50 +314,102 @@ Read the live value; do not assume.
 
 ## 11. Current active work
 
-1. **Marketplace address-method parity with Shipping** — *done*. Checkout now
-   uses the shared `AddressField`; a dropped pin with no street address is
-   accepted by the browser, the API schema and the database.
-2. **Shipping pin-only booking** — *done*. `createShipmentSchema` accepted a
-   pin in the form but demanded a typed address at booking; it now applies the
-   same written-or-pinned rule, and requires the town at every door end.
-3. **Direct-vs-terminal routing** — *done*. `CourierLane` lets operations state
-   that two towns are connected by road, so Belize City → Ladyville can be one
-   courier. Ships with an empty table: with no lanes, behaviour is unchanged.
-4. **Recipient-meets-transport / optional last mile** — *assessed, already
-   supported*. No model change needed.
-5. **Self-service BZ$250 UAT funding** — *already complete*; verified, not
-   rebuilt. `.env.example` now documents the kill switch.
-6. **Verification** — unit and integration tests written; see §12 for what
-   still needs a human.
+Four commits on `fix/marketplace-address-and-courier-lanes`, based on `87b0566`:
 
----
+| Commit | What it does |
+| --- | --- |
+| `c54c63c` | A dropped pin is an address; a courier can be planned between two towns on one road. |
+| `9f6697a` | A blank test-funding expiry no longer stops the API booting. |
+| `7710516` | This document. |
+| `3521d0e` | One road could be configured as three lanes at three prices. |
+
+### What is finished in code
+
+1. **Marketplace address-method parity.** Checkout uses the shared
+   `AddressField`; drop-pin / type-address / saved-address; a pin with no street
+   line is accepted by the browser, the API schema and the database.
+2. **Shipping pin-only booking.** `createShipmentSchema` had accepted a pin in
+   the form and then demanded a typed address at booking. Same rule both sides
+   now, with the town required at every door end.
+3. **Direct-vs-terminal routing.** `CourierLane` lets operations state that two
+   towns are connected by road. Ships with an empty table: with no lanes,
+   routing behaviour is exactly what it is today.
+4. **Recipient-meets-transport / optional last mile** — assessed, already
+   supported (`AWAITING_COLLECTION`, `collectShipmentSchema`, `needsLastMile`).
+   No model change made or needed.
+5. **Self-service BZ$250 UAT funding** — verified, not rebuilt. `.env.example`
+   now documents the kill switch.
+
+### Verified locally (2026-09-02)
+
+- Typecheck: 19/19 tasks, including the API test project.
+- Unit tests: **442 passing** — 58 api, 209 shared, 43 validation, 127 web,
+  7 wallet, 5 authorization.
+- Builds: all 8 packages, plus API, Web and Admin.
+- Self-delivery protections: `apps/api/src/dispatch` and both self-delivery /
+  self-courier specs are **byte-identical to `main`** on this branch. Untouched,
+  so unregressed by construction.
 
 ## 12. Known gaps and what still needs a person
 
-- **The address / courier-lane work is committed but NOT deployed.** It is on the
-  branch `fix/marketplace-address-and-courier-lanes`, which could not be pushed
-  from the machine it was written on (git network access to GitHub hangs there).
-  Push the branch, let CI run the integration tests, then merge to `main` —
-  merging deploys the API, and its `preDeployCommand` applies two migrations:
-  `20261102090000_pin_only_delivery_address` (drops NOT NULL on one column) and
-  `20261102093000_courier_lanes` (creates an empty table, adds two audit enum
-  values). Both are additive; the new table ships empty and changes no routing
-  answer until a lane is entered.
-- **Browser and mobile-width verification** of marketplace checkout (320 / 375 /
-  390 / 430 px) has **not** been done — no browser automation is available in
-  the session that made these changes, and the report came from a phone.
-- **Integration tests were not run locally** (no Docker/Postgres on that
-  machine). They are written and run in CI.
+- **NOT DEPLOYED, and blocked on a credential — not on the code.** Two sessions
+  have now tried to push `fix/marketplace-address-and-courier-lanes` and failed
+  for the same reason: this is a private repository and the machine has no
+  usable GitHub credential in a non-interactive session. `git ls-remote` ends in
+  `fatal: could not read Username for 'https://github.com'`; the credential
+  helper is `manager`, which needs a GUI prompt nothing can answer. The network
+  itself is fine — the git endpoint answers `401`, not a timeout.
+
+  **To unblock it, run this once from an interactive terminal on this machine:**
+
+  ```
+  git push -u origin fix/marketplace-address-and-courier-lanes
+  ```
+
+  Authenticate when the credential manager prompts. Everything downstream —
+  CI, the integration tests, the merge, the deploy, the migrations — then runs
+  through the normal pipeline. Nothing else is waiting on engineering.
+
+- **Integration tests have still never been run.** Neither machine had Docker or
+  Postgres (5432 and 6379 closed, no `psql`), and pointing them at any real
+  database is not an option because the suite calls `resetDb`. They are written
+  — including pin-only checkout, pin-only booking, courier-lane routing and
+  duplicate-lane refusal — and CI runs them against real Postgres/Redis/MinIO on
+  the first push. **Do not treat this milestone as verified until that run is
+  green.**
+- **Browser and mobile-width verification has not been done, and it is the gate
+  on this milestone.** Neither session had browser automation, and the fix is
+  not on production to test against anyway. Edward reported the bug from a
+  phone, so desktop-only checking would not settle it. After deploying, walk
+  marketplace checkout at 320 / 375 / 390 / 430 / 768 px and desktop:
+  drop-pin with "use my current location" and no street address, type-address,
+  saved-address, and switching between all three without stale validation. Then
+  the same three methods on shipment booking, through to an actual booking.
 - **The live `dispatchAutomatic` value was not read** — it needs admin access.
   Check it at admin → Dispatch, or
   `GET /api/admin/ops/settings`.
-- **The live `ENABLE_SELF_SERVICE_TEST_FUNDING` value was not read** — it needs
-  a signed-in session. `GET /api/wallet/test-funding` returns
-  `{"enabled": false}` when it is off.
-- **Production has no shipping network configured.** `/api/shipping/hubs` and
-  `/api/shipping/modes` both return `[]`. Today production Shipping can quote a
-  same-town direct courier and nothing else, until hubs, routes or courier lanes
-  are entered. This is business configuration, not a defect.
+- **The live `ENABLE_SELF_SERVICE_TEST_FUNDING` value is still unknown.**
+  `GET /api/wallet/test-funding` answers `401` to an unauthenticated caller
+  whether the flag is on or off, so its state cannot be inferred from outside —
+  and it should not be guessed. Signed in, that endpoint returns
+  `{"enabled": false}` when off, or the amount, cap and remaining allowance when
+  on. Read it there.
+- **Production has no shipping network configured.** Re-probed 2026-09-02:
+  `/api/shipping/hubs` → `[]` and `/api/shipping/modes` → `[]`, so zero hubs and
+  zero active routes (modes are derived from active routes). Courier lanes do
+  not exist there yet at all — `/api/admin/logistics/courier-lanes` returns 404,
+  which is the branch not being deployed. Today production Shipping can quote a
+  same-town direct courier and nothing else. **This is business configuration,
+  not a defect**, and the table is expected to stay empty until a real lane with
+  a real approved rate exists. Do not invent one — the Belize City to Ladyville
+  price is a business decision, not an engineering default.
+- **Things BML does not do, and must not be described as doing.** No timetables
+  or scheduled departures — `scheduleNote` is a label an operator types. **No
+  live GPS tracking of any bus, boat or aircraft**, because no data source
+  exists; the leg state machine can carry departed/arrived/ready-for-collection
+  when a real integration arrives. No transport network is fabricated anywhere:
+  real hubs and routes require carrier onboarding, and real courier lanes
+  require a rate the business has approved.
 - **No reverse geocoding.** A pin cannot fill in its own town, which is one
   reason the town is asked for directly.
 - `format:check` fails repo-wide (~490 files). Pre-existing; informational in CI.
