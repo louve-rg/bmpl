@@ -5,12 +5,21 @@ A modern, multi-role commerce & logistics platform for Belize — built from scr
 bzemarketplace.com site;** that site was used only as visual reference for the
 public landing page.
 
-> **Status: Phase 1 — Foundation.** Authentication, multi-role accounts, role
-> applications & admin approvals, audit logging, notifications foundation, the
-> public landing page, a customer dashboard shell, an admin console, and the
-> mobile app foundation. Domain features (marketplace, deliveries, rides, jobs,
-> real estate, ads) and real-money wallet transactions are **intentionally not
-> built yet** — see [`REMAINING_WORK.md`](./REMAINING_WORK.md).
+> **Status: live in production, in UAT before commercial launch.** Marketplace,
+> shipping & delivery, dispatch, the wallet ledger, Belize Connect (jobs), real
+> estate and marketing are all built and deployed. The API runs on Railway; web
+> and admin on Vercel.
+>
+> **Real-money movement is deliberately not built.** The wallet is a complete,
+> closed, double-entry ledger with escrow and settlement, but there is no
+> payment provider, card rail, bank rail, top-up, payout or withdrawal — and
+> adding one is a product decision, not an engineering one. Passenger transport
+> is out of scope.
+>
+> For the authoritative current state — live feature flags, what is simulation
+> data, what is real, and what still needs a person — read
+> [`docs/PROJECT_STATUS.md`](./docs/PROJECT_STATUS.md).
+> Before changing anything, read [`CLAUDE.md`](./CLAUDE.md).
 
 ---
 
@@ -196,7 +205,7 @@ feature flags are live, what is simulation data and what is real, and what is
 deliberately out of scope. It is kept current as work lands, so a new session on
 a new machine can read it plus the repository and know where things are.
 
-## Cloud deployment (Phase 1.5B — preparation only, nothing deployed)
+## Cloud deployment
 
 Target: GitHub Actions CI → **Vercel** (web + admin) · **Railway** (API + Postgres
 + Redis) · **Cloudflare R2** (storage) · **Expo EAS** (mobile) · Resend/Postmark
