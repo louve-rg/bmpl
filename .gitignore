@@ -65,3 +65,4 @@ redisdata/
 tmp/
 uploads/
 *.tmp
+.gstack/
