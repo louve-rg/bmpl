@@ -149,8 +149,12 @@ Already built and shipped (`fdf3e82`). Do not build a second mechanism.
 Administrative UAT credits are a **separate** mechanism with a separate audit
 action, and do not consume anyone's self-service allowance.
 
+**It is currently ON in production** (checked 2026-09-03). That is correct for
+UAT and wrong for launch.
+
 **Before commercial launch:** unset `ENABLE_SELF_SERVICE_TEST_FUNDING` on the
-API service and redeploy. Nothing else has to be remembered.
+API service and redeploy. Nothing else has to be remembered — the flag is off
+when absent, so removing it is enough, and no code has to be deleted.
 
 ---
 
@@ -388,33 +392,32 @@ on production — but nobody has yet opened it in a phone browser and watched th
 pin drop. Edward reported the bug from a phone, so that is the test that
 settles it, and no session so far has had browser automation available.
 
-At 320 / 375 / 390 / 430 px and desktop, signed in, with a deliverable vendor
-in the cart:
+**The script to run is [`docs/quality/MARKETPLACE-ADDRESS-QA.md`](quality/MARKETPLACE-ADDRESS-QA.md)**
+— step by step, with what a pass looks like at each width, and a UAT account
+that already holds BZ$250 of test money.
 
-1. **Drop a pin → Use my current location.** Grant location. The pin appears and
-   can be dragged. **Leave the street address blank.** Checkout must go through.
-   This is the exact complaint.
-2. **Type the address.** Street fields appear and are required; town and
-   district required; the map geocodes and pins. Checkout goes through.
-3. **Saved address.** The selector appears, choosing one fills the fields and
-   shows its stored pin, checkout goes through — and moving the pin for this
-   order must not rewrite the saved entry (a notice says so when it differs).
-4. **Switch between all three** and back. No stale validation, no required field
-   you cannot see, no horizontal overflow, map controls reachable with a thumb.
+The server half is already verified against deployed production. A pin-only
+address passes validation and reaches the business layer; an address that is
+neither written nor pinned is refused with "Tell us where to go: type the street
+address, or drop a pin on the map."; a pin with no town is refused; and a pin
+outside Belize is still rejected. What remains is the browser half — that the
+form no longer asks for a street, and the pay button is not blocked.
 
-Then the same three methods on `/dashboard/shipments/new`, through to a real
-booking, to confirm the pin-only path end to end in the browser.
+### Live configuration
 
-### Needs a signed-in session to read
-
-- **The live `ENABLE_SELF_SERVICE_TEST_FUNDING` value.**
-  `GET /api/wallet/test-funding` answers `401` to an anonymous caller whether
-  the flag is on or off, so it cannot be read from outside and must not be
-  guessed. Signed in it returns `{"enabled": false}` when off, or the amount,
-  cap and remaining allowance when on.
-- **The live `dispatchAutomatic` value.** Admin → Dispatch, or
-  `GET /api/admin/ops/settings`. It shipped off by migration; whether it is on
-  today is a live value, not something to infer.
+- **`ENABLE_SELF_SERVICE_TEST_FUNDING` is ON in production** (read 2026-09-03
+  from a signed-in session). `GET /api/wallet/test-funding` returns
+  `{"enabled": true, "amountMinor": 25000, "capMinor": 25000}`. Verified end to
+  end on production: a fresh account claimed BZ$250, the wallet showed
+  available 25000 / on hold 0 / total 25000, the ledger entry is described
+  `Self-Service Test Credit` and carries `isTest: true`, the state survived a
+  refresh, and a second claim was refused `409 Your test credit has already
+  been issued.` — a cumulative grant, not a balance topped back up.
+  **This must be switched off before commercial launch** (see §4).
+- **The live `dispatchAutomatic` value is still unread.** It needs an admin
+  session: Admin → Dispatch, or `GET /api/admin/ops/settings`. It shipped off
+  by migration; whether it is on today is a live value, not something to infer.
+  It was deliberately not changed by this milestone.
 
 ### Business configuration, not defects
 
@@ -439,6 +442,14 @@ booking, to confirm the pin-only path end to end in the browser.
   the town is asked for directly.
 - No transport network is fabricated anywhere. Real hubs and routes need carrier
   onboarding; real courier lanes need an approved rate.
+
+### Leftover from verification
+
+- A production account **bml-uat-pinfix-20260903@example.com** was created on
+  2026-09-03 to read the funding flag and exercise the deployed address rules.
+  It holds BZ50 of correctly-marked test money. It is a real user row and is
+  **not** flagged `isTest`, so flag or delete it (Admin -> Users) once the
+  mobile QA in docs/quality/MARKETPLACE-ADDRESS-QA.md has been run with it.
 
 ### Repository housekeeping
 
