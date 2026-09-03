@@ -382,6 +382,40 @@ describe('a direct courier lane between two towns', () => {
     expect(kinds).not.toContain('DIRECT');
   });
 
+  it('refuses a second lane down the same road, whichever way round it is typed', async () => {
+    // The planner reads a lane in both directions, so two rows for one road
+    // would be two prices for one journey and the planner would pick one of
+    // them by row order. Case is not a difference either: the planner folds it.
+    await addLane();
+
+    const reversed = await post(admin, 'admin/logistics/courier-lanes', {
+      originDistrict: 'BELIZE',
+      originCity: 'Ladyville',
+      destinationDistrict: 'BELIZE',
+      destinationCity: 'Belize City',
+      priceMinor: 9900,
+    });
+    expect(reversed.status).toBe(409);
+
+    const recased = await post(admin, 'admin/logistics/courier-lanes', {
+      originDistrict: 'BELIZE',
+      originCity: '  belize city ',
+      destinationDistrict: 'BELIZE',
+      destinationCity: 'LADYVILLE',
+      priceMinor: 100,
+    });
+    expect(recased.status).toBe(409);
+
+    // And only one lane exists to be quoted from.
+    expect(await ctx.prisma.courierLane.count()).toBe(1);
+  });
+
+  it('lets a lane be edited without colliding with itself', async () => {
+    const lane = await addLane();
+    const r = await patch(admin, `admin/logistics/courier-lanes/${lane.id}`, { priceMinor: 3000 });
+    expect(r.status).toBe(200);
+    expect(r.body.priceMinor).toBe(3000);
+  });
   it('refuses a lane from a town to itself, which would change no answer', async () => {
     const r = await post(admin, 'admin/logistics/courier-lanes', {
       originDistrict: 'BELIZE',

@@ -4368,8 +4368,10 @@ model CourierLane {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  /// One row per pair of towns. Stored lower-cased comparisons happen in code;
-  /// this stops the same lane being configured twice by accident.
+  /// One row per pair of towns, as written. Note this index alone is NOT the
+  /// whole rule: the planner reads a lane in both directions and folds case, so
+  /// the reverse and re-cased duplicates it cannot see are refused in
+  /// LogisticsNetworkService.assertPairIsFree. This is the backstop.
   @@unique([originDistrict, originCity, destinationDistrict, destinationCity])
   @@index([isTest, isActive])
   @@map("courier_lanes")

@@ -8,7 +8,7 @@ import type {
   UpdateHubInput,
   UpdateRouteInput,
 } from '@bmpl/validation';
-import { Prisma } from '@bmpl/database';
+import { Prisma, type District } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 
@@ -276,6 +276,7 @@ export class LogisticsNetworkService {
       input.destinationDistrict,
       input.destinationCity,
     );
+    await this.assertPairIsFree(input);
     const lane = await this.prisma.courierLane
       .create({
         data: { ...input, priceMinor: BigInt(input.priceMinor ?? 0), isActive: input.isActive ?? true },
@@ -304,6 +305,15 @@ export class LogisticsNetworkService {
       input.originCity ?? before.originCity,
       input.destinationDistrict ?? before.destinationDistrict,
       input.destinationCity ?? before.destinationCity,
+    );
+    await this.assertPairIsFree(
+      {
+        originDistrict: input.originDistrict ?? before.originDistrict,
+        originCity: input.originCity ?? before.originCity,
+        destinationDistrict: input.destinationDistrict ?? before.destinationDistrict,
+        destinationCity: input.destinationCity ?? before.destinationCity,
+      },
+      id,
     );
     const lane = await this.prisma.courierLane
       .update({
@@ -348,6 +358,63 @@ export class LogisticsNetworkService {
     ) {
       throw new BadRequestException(
         'A lane has to connect two different towns — a town is already local to itself.',
+      );
+    }
+  }
+
+  /**
+   * One road, one row.
+   *
+   * The planner reads a lane in BOTH directions — a road that carries a parcel
+   * one way carries it back — but a unique index can only see the columns as
+   * they were written. Without this an operator could configure "Belize City to
+   * Ladyville" at one rate, "Ladyville to Belize City" at another, and
+   * "belize city to Ladyville" at a third: three rows describing one road, with
+   * the planner taking whichever sorted first. A customer would be quoted an
+   * arbitrary one of three prices for the same journey.
+   *
+   * Matched unordered and case-insensitively, because that is exactly how the
+   * planner matches. A rule enforced differently from the way it is read is not
+   * enforced at all.
+   *
+   * The index stays as the backstop for the same-direction case. This is an
+   * admin configuration table written by one person at a time, so check-then-
+   * write is proportionate here in a way it would not be on a customer path.
+   */
+  private async assertPairIsFree(
+    pair: {
+      originDistrict: District;
+      originCity: string;
+      destinationDistrict: District;
+      destinationCity: string;
+    },
+    excludeId?: string,
+  ) {
+    const sameTown = (v: string) => ({ equals: v.trim(), mode: Prisma.QueryMode.insensitive });
+    const existing = await this.prisma.courierLane.findFirst({
+      where: {
+        ...(excludeId ? { NOT: { id: excludeId } } : {}),
+        OR: [
+          {
+            originDistrict: pair.originDistrict,
+            originCity: sameTown(pair.originCity),
+            destinationDistrict: pair.destinationDistrict,
+            destinationCity: sameTown(pair.destinationCity),
+          },
+          // The same road, entered the other way round.
+          {
+            originDistrict: pair.destinationDistrict,
+            originCity: sameTown(pair.destinationCity),
+            destinationDistrict: pair.originDistrict,
+            destinationCity: sameTown(pair.originCity),
+          },
+        ],
+      },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `${existing.originCity} and ${existing.destinationCity} are already connected by a lane. ` +
+          "Edit that one rather than adding a second — a lane already works in both directions.",
       );
     }
   }
