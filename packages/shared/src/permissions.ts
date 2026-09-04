@@ -98,8 +98,8 @@ export const PERMISSIONS = [
   // Same shape as the delivery side's drivers.read / drivers.moderate: one pair
   // covers the vertical's supply (driver + provider profiles, vehicles,
   // availability, test flags). Role approval reuses role_applications.review.
-  'passengers.read', // view passenger driver/provider profiles + vehicles (read-only)
-  'passengers.moderate', // approve/reject passenger vehicles; set driver/provider test mode
+  'passengers.read', // view passenger driver/provider profiles, vehicles, routes + departures (read-only)
+  'passengers.moderate', // approve/reject passenger vehicles; set driver/provider test mode; manage any operator's routes + departures
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

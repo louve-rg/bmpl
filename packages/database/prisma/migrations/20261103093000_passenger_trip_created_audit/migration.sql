@@ -1,0 +1,12 @@
+-- Passenger S2 review finding (A8/F3): publishing a departure was the one
+-- passenger-network mutation with no audit code. Because a trip's
+-- providerProfileId comes from the route, an ADMIN-published departure was
+-- indistinguishable from one the operator published themselves — cancel
+-- records the acting party, create recorded nobody. This adds the one code
+-- the seven-value passenger block was missing so trip creation can name its
+-- actor, exactly as route creation already does.
+--
+-- Additive only: one enum value, appended, idempotent. No table is touched,
+-- no existing row changes, and removing an enum value is never done here
+-- because persisted rows may hold it.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'PASSENGER_TRIP_CREATED';
