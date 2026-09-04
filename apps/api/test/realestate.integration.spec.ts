@@ -168,6 +168,156 @@ describe('seeker: save / enquiry / viewing + guest denial', () => {
   });
 });
 
+/**
+ * Lifecycle depth (QA-A11). The six tests above cover the spine; these cover
+ * the states a listing spends its life in. Every fixture takes the product
+ * path — the one standing exception, as everywhere in this suite, is the
+ * auth-role upsert in makeOwner/makeAgent; the only raw reads are lookups of
+ * ids/slugs the API deliberately does not echo (profile ids, history counts).
+ * Each "from" state is REACHED through the API, never written to the row —
+ * a transition proven from a hand-planted state proves the transition and
+ * nothing about whether the state is reachable.
+ */
+describe('listing lifecycle depth', () => {
+  it('walks a sale to SOLD and a rental to RENTED, refusing the crossed purposes', async () => {
+    const owner = await makeOwner();
+    const sale = await publishListing(owner); // FOR_SALE by default
+    // A sale cannot be "rented out".
+    expect((await post(owner.cookies, `property-owner/listings/${sale.id}/status`, { action: 'RENTED' })).status).toBe(400);
+    expect((await post(owner.cookies, `property-owner/listings/${sale.id}/status`, { action: 'UNDER_OFFER' })).body.status).toBe('UNDER_OFFER');
+    const sold = await post(owner.cookies, `property-owner/listings/${sale.id}/status`, { action: 'SOLD' });
+    expect(sold.body.status).toBe('SOLD');
+    // SOLD is the end of the road for owner actions.
+    expect((await post(owner.cookies, `property-owner/listings/${sale.id}/status`, { action: 'UNDER_OFFER' })).status).toBe(400);
+
+    const rental = await publishListing(owner, { purpose: 'FOR_RENT', rentalPeriod: 'MONTH', priceMinor: 150000, title: `Rental ${uniq()}` });
+    // A rental cannot be "sold".
+    expect((await post(owner.cookies, `property-owner/listings/${rental.id}/status`, { action: 'SOLD' })).status).toBe(400);
+    expect((await post(owner.cookies, `property-owner/listings/${rental.id}/status`, { action: 'RENTED' })).body.status).toBe('RENTED');
+  });
+
+  it('withdraws a live listing off the public site, archives it, and refuses archiving live stock', async () => {
+    const owner = await makeOwner();
+    const { id, slug } = await publishListing(owner);
+    // Live stock cannot be archived directly.
+    expect((await post(owner.cookies, `property-owner/listings/${id}/status`, { action: 'ARCHIVE' })).status).toBe(400);
+    expect((await post(owner.cookies, `property-owner/listings/${id}/status`, { action: 'WITHDRAW' })).body.status).toBe('WITHDRAWN');
+    // Gone from the public site, detail and search both.
+    expect((await guest(`properties/${slug}`)).status).toBe(404);
+    expect((await guest('properties')).body.items.some((p: { id: string }) => p.id === id)).toBe(false);
+    // A withdrawn listing can be archived; owner relisting does not exist —
+    // the way back to PUBLISHED is the admin RESTORE action, by design.
+    expect((await post(owner.cookies, `property-owner/listings/${id}/status`, { action: 'ARCHIVE' })).body.status).toBe('ARCHIVED');
+  });
+
+  it('proves MORE_INFO_REQUIRED is a loop, not a dead end: edit, resubmit, approve', async () => {
+    const owner = await makeOwner();
+    const c = await post(owner.cookies, 'property-owner/listings', {
+      purpose: 'FOR_SALE', propertyType: 'HOUSE', title: `Info Loop ${uniq()}`,
+      description: 'A home whose first submission is missing some information.',
+      priceMinor: 18000000, district: 'CAYO',
+    });
+    const id = c.body.id;
+    await post(owner.cookies, `property-owner/listings/${id}/submit`);
+    const back = await post(admin, `admin/properties/${id}/moderate`, { action: 'REQUEST_INFO', reason: 'Add the land size.' });
+    expect(back.body.status).toBe('MORE_INFO_REQUIRED');
+    // Editable in that state...
+    expect((await patch(owner.cookies, `property-owner/listings/${id}`, { description: 'A home, now with the requested land size of two acres stated.' })).status).toBe(200);
+    // ...and resubmittable, and approvable on the second pass.
+    expect((await post(owner.cookies, `property-owner/listings/${id}/submit`)).body.status).toBe('SUBMITTED');
+    expect((await post(admin, `admin/properties/${id}/moderate`, { action: 'APPROVE' })).body.status).toBe('PUBLISHED');
+    // Published means no longer editable — the loop is closed at both ends.
+    expect((await patch(owner.cookies, `property-owner/listings/${id}`, { description: 'Rewriting a live listing without review must not be possible now.' })).status).toBe(400);
+  });
+
+  it('suspending an owner takes their live listings offline; restoring the owner does NOT republish them', async () => {
+    const owner = await makeOwner();
+    const { id, slug } = await publishListing(owner);
+    const ownerProfileId = (await ctx.prisma.propertyOwnerProfile.findFirstOrThrow({ where: { userId: owner.userId } })).id;
+
+    expect((await post(admin, `admin/properties/owners/${ownerProfileId}/suspend`, { reason: 'Verification failed.' })).status).toBe(201);
+    // The cascade: live listings go SUSPENDED and vanish from the public site.
+    const suspended = await ctx.prisma.propertyListing.findUniqueOrThrow({ where: { id } });
+    expect(suspended.status).toBe('SUSPENDED');
+    expect((await guest(`properties/${slug}`)).status).toBe(404);
+    expect((await guest('properties')).body.items.some((p: { id: string }) => p.id === id)).toBe(false);
+
+    // Restoring the OWNER restores the account only. The listing stays
+    // SUSPENDED until an admin restores it individually — deliberate (each
+    // listing gets its own look), and recorded here so a change to it is a
+    // decision rather than an accident.
+    expect((await post(admin, `admin/properties/owners/${ownerProfileId}/restore`, {})).status).toBe(201);
+    expect((await ctx.prisma.propertyListing.findUniqueOrThrow({ where: { id } })).status).toBe('SUSPENDED');
+    // The individual restore brings it back to the public site.
+    expect((await post(admin, `admin/properties/${id}/moderate`, { action: 'RESTORE' })).body.status).toBe('PUBLISHED');
+    expect((await guest(`properties/${slug}`)).status).toBe(200);
+  });
+
+  it('resolves a report and files it under its outcome', async () => {
+    const owner = await makeOwner();
+    const { id } = await publishListing(owner);
+    const reporter = await register(`rep_${uniq()}@ex.bz`);
+    expect((await post(reporter.cookies, `property-seeker/report/${id}`, { reason: 'INCORRECT_INFO', note: 'The photos show a different house.' })).status).toBe(201);
+
+    const open = (await get(admin, 'admin/properties/reports?status=OPEN')).body;
+    const report = open.find((r: { listingId: string }) => r.listingId === id);
+    expect(report).toBeTruthy();
+
+    expect((await post(admin, `admin/properties/reports/${report.id}/resolve`, { status: 'ACTIONED', note: 'Owner asked to correct the photos.' })).status).toBe(201);
+    // Filed under its outcome, and no longer open.
+    expect((await get(admin, 'admin/properties/reports?status=ACTIONED')).body.some((r: { id: string }) => r.id === report.id)).toBe(true);
+    expect((await get(admin, 'admin/properties/reports?status=OPEN')).body.some((r: { id: string }) => r.id === report.id)).toBe(false);
+  });
+
+  it('appends price history on a real price change and only then', async () => {
+    const owner = await makeOwner();
+    const c = await post(owner.cookies, 'property-owner/listings', {
+      purpose: 'FOR_SALE', propertyType: 'LAND', title: `Priced ${uniq()}`,
+      description: 'A parcel of land whose asking price will move before it is listed.',
+      priceMinor: 5000000, district: 'TOLEDO',
+    });
+    const id = c.body.id;
+    const history = () => ctx.prisma.propertyPriceHistory.count({ where: { listingId: id } });
+    expect(await history()).toBe(1); // the creation price is history's first entry
+    expect((await patch(owner.cookies, `property-owner/listings/${id}`, { priceMinor: 4500000 })).status).toBe(200);
+    expect(await history()).toBe(2);
+    // A non-price edit must not fabricate a price event.
+    expect((await patch(owner.cookies, `property-owner/listings/${id}`, { title: `Priced Again ${uniq()}` })).status).toBe(200);
+    expect(await history()).toBe(2);
+    // Re-stating the SAME price is not a change either.
+    expect((await patch(owner.cookies, `property-owner/listings/${id}`, { priceMinor: 4500000 })).status).toBe(200);
+    expect(await history()).toBe(2);
+  });
+
+  it('walks the viewing machine through its legal spine and slams every terminal door', async () => {
+    const owner = await makeOwner();
+    const { id } = await publishListing(owner);
+    const seeker = await register(`vw_${uniq()}@ex.bz`);
+    const future = () => new Date(Date.now() + 3 * 86400000).toISOString();
+
+    // REQUESTED → PROPOSED → RESCHEDULED → CONFIRMED → COMPLETED.
+    const a = (await post(seeker.cookies, 'property-seeker/viewing-requests', { listingId: id, requestedDate: future(), requestedTime: '09:00' })).body;
+    for (const step of [
+      { status: 'PROPOSED', note: 'Could we do the afternoon instead?' },
+      { status: 'RESCHEDULED' },
+      { status: 'CONFIRMED', confirmedDate: future(), confirmedTime: '15:00' },
+      { status: 'COMPLETED' },
+    ]) {
+      const r = await post(owner.cookies, `property-owner/viewings/${a.id}/transition`, step);
+      expect(r.body.status).toBe(step.status);
+    }
+    // COMPLETED is terminal.
+    expect((await post(owner.cookies, `property-owner/viewings/${a.id}/transition`, { status: 'CANCELLED' })).status).toBe(400);
+
+    // DECLINED is terminal too — and skipping straight to COMPLETED from
+    // REQUESTED is not a legal move.
+    const b = (await post(seeker.cookies, 'property-seeker/viewing-requests', { listingId: id, requestedDate: future(), requestedTime: '11:00' })).body;
+    expect((await post(owner.cookies, `property-owner/viewings/${b.id}/transition`, { status: 'COMPLETED' })).status).toBe(400);
+    expect((await post(owner.cookies, `property-owner/viewings/${b.id}/transition`, { status: 'DECLINED' })).body.status).toBe('DECLINED');
+    expect((await post(owner.cookies, `property-owner/viewings/${b.id}/transition`, { status: 'CONFIRMED', confirmedDate: future(), confirmedTime: '10:00' })).status).toBe(400);
+  });
+});
+
 describe('agent assignment + admin gating', () => {
   it('owner assigns an agent who accepts and can then manage the listing', async () => {
     const owner = await makeOwner();
