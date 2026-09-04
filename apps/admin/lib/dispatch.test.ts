@@ -137,12 +137,16 @@ describe('byFewestActiveJobs', () => {
     expect([...drivers].sort(byFewestActiveJobs).map((d) => d.activeJobs)).toEqual([0, 1, 3]);
   });
 
-  it('sorts a driver whose load is unknown as if they were idle', () => {
-    // NOTE, today's behaviour: null sorts as 0, so a driver whose load the API
-    // could not report is offered FIRST, ahead of a driver known to be free.
-    // Recorded, not corrected.
+  it('sorts a driver whose load is unknown LAST, never ahead of a known load', () => {
+    // This was once a characterization of the opposite: null sorted as 0, so a
+    // driver whose load the API could not report was offered FIRST, ahead of a
+    // driver known to be free. Unknown must not beat known-zero.
     const drivers = [{ activeJobs: 2 }, { activeJobs: null }, { activeJobs: 0 }];
-    expect([...drivers].sort(byFewestActiveJobs).map((d) => d.activeJobs)).toEqual([null, 0, 2]);
+    expect([...drivers].sort(byFewestActiveJobs).map((d) => d.activeJobs)).toEqual([0, 2, null]);
+  });
+
+  it('treats two unknown loads as equal rather than reordering them', () => {
+    expect(byFewestActiveJobs({ activeJobs: null }, { activeJobs: null })).toBe(0);
   });
 
   it('is a pure comparator that does not mutate its inputs', () => {

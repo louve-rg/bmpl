@@ -52,7 +52,12 @@ export function canReassign(status: string): boolean {
   return ASSIGNED_STATUSES.has(status);
 }
 
-/** Least busy first; a driver whose load is unknown sorts as if idle. */
+/** Least busy first; a driver whose load is UNKNOWN sorts last. An unreported
+ *  load once sorted as zero, which offered the one driver nobody could vouch
+ *  for ahead of a driver known to be free — exactly backwards. */
 export function byFewestActiveJobs(a: { activeJobs: number | null }, b: { activeJobs: number | null }): number {
-  return (a.activeJobs ?? 0) - (b.activeJobs ?? 0);
+  if (a.activeJobs == null && b.activeJobs == null) return 0;
+  if (a.activeJobs == null) return 1;
+  if (b.activeJobs == null) return -1;
+  return a.activeJobs - b.activeJobs;
 }

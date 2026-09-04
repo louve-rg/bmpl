@@ -4,19 +4,30 @@
 project up from the repository alone. It carries no secrets, no credentials and
 no customer data — only what is true about the code and how it is run.
 
-Last reviewed: 2026-09-04, against `main` at **`6b2e0d1`** — manual courier-leg
-assignment (PR #11) and handoff-PIN access (PR #12), both merged. Deployment
-state of that commit is a live value; check `/api/health`. What is still
-unverified is listed in §12.
+Last reviewed: 2026-09-04, against `main` at **`111cd4b`**. Landed since the
+previous review: manual courier-leg assignment (#11), handoff-PIN access
+(#12), cancellation releasing the driver (#15), Passenger supply/moderation
+(#16), the leg-assign UI (#17), the handoff-desk screen (#18), and hub
+pricing through the admin console (#19). Deployment state of any commit is a
+live value; check `/api/health`. What is still unverified is listed in §12.
 
-**One distinction to hold onto before reading anything else: production has NO
-shipping network configuration at all** — no hubs, no routes, no courier fees
-(`/api/shipping/hubs` → `[]`, `/api/shipping/modes` → `[]`, `courier_lanes`
-empty). Several things that read like "gaps" are therefore **unconfigured
-operations, not missing code**: the software to run a multi-leg network exists
-and is tested, and what is absent is the business data — carriers, rates,
-lanes — that only operations may enter (§12, "Business configuration, not
-defects"). Who fixes a gap depends on which side of that line it sits.
+**One distinction to hold onto before reading anything else — carrying a
+correction this document owes its readers.** An earlier revision of this
+paragraph claimed production's missing shipping network was entirely
+"unconfigured operations, not missing code". **That was wrong for hub
+pricing**: `courierFeeMinor` appeared nowhere in the hub schemas in
+`packages/validation`, so the admin console's "Courier rate" field was
+stripped from every request and the update 400'd — an operator who tried to
+price a terminal **could not have succeeded**. That was a code defect,
+unreachable through the product until PR #19 fixed it (which also made the
+`isTest` practice network buildable through the console). The distinction
+itself still holds and still matters: production has NO shipping network
+configured — no hubs, no routes, no courier fees (`/api/shipping/hubs` →
+`[]`, `/api/shipping/modes` → `[]`, `courier_lanes` empty) — and entering
+carriers, rates and lanes is operations' work the code cannot do for them
+(§12, "Business configuration, not defects"). But "the configuration is
+missing" and "the configuration could be entered" are separate claims, and
+this document now verifies the second before asserting the first.
 
 When this document and the code disagree, **the code wins** — and then this
 document is wrong and should be fixed in the same change.
@@ -47,9 +58,11 @@ Active business areas, in the order they matter right now:
 2. **Shipping & Delivery** — sending a parcel, possibly across several legs.
 3. **Delivery driver** — the courier who actually moves it.
 4. **Passenger Transportation** — moving people rather than parcels. Formally
-   authorized by the product owner, in foundation stage: the schema foundation
-   is merged and live (eight `passenger_*` tables), and **no services,
-   controllers or UI exist yet** — the tables are the whole vertical so far.
+   authorized by the product owner, in foundation stage: the schema (eight
+   `passenger_*` tables) plus the supply side merged by #16 — provider/driver
+   vetting and moderation in `apps/api/src/passenger`, with its own
+   integration spec. **No rider-facing product exists**: no trip search, no
+   booking, no fares, no passenger UI.
 5. **Wallet & payments** — a ledger, escrow and settlement behind all of it.
 
 Also present, and **not** the current focus: Belize Connect (jobs), real estate,
@@ -463,18 +476,20 @@ form no longer asks for a street, and the pay button is not blocked.
 
 The full gap register lives in
 [`DELIVERY-LIFECYCLE.md`](./DELIVERY-LIFECYCLE.md) §6 — one place, so the two
-documents cannot drift. Status summary as of `6b2e0d1`:
+documents cannot drift. Status summary as of `111cd4b`:
 
-- **Closed on `main`**: manual courier-leg assignment
-  (`POST /admin/logistics/legs/:id/assign` + `/reassign` +
-  `GET legs/:id/eligible-drivers`, PR #11) and handoff-PIN access (DIRECT legs
-  are last-mile-equivalent for the customer; audited staff reveal under
-  `logistics.verify`, refused to the leg's own assigned driver, PR #12).
-- **Open**: cancellation orphans an accepted courier job in the driver's queue;
-  leg EXCEPTION has no recovery path; the recipient has no notification or
-  tracking channel; the handoff-desk feed has no screen; and **booking a
-  shipment whose total is zero crashes with a 500 instead of refusing** (a fix
-  exists on an unmerged branch — it is open until merged).
+- **Closed on `main`**: manual courier-leg assignment (PR #11) and its admin
+  UI (#17); handoff-PIN access (DIRECT legs last-mile-equivalent for the
+  customer; audited staff reveal under `logistics.verify`, refused to the
+  leg's own assigned driver, #12) and its handoff-desk screen (#18, which
+  also consumes the expected-parcels feed); cancellation now releases the
+  driver instead of stranding them with a phantom job (#15); and hub courier
+  fees are enterable through the admin console (#19 — a code defect until
+  then, see the header of this document).
+- **Open**: leg EXCEPTION has no recovery path; the recipient has no
+  notification or tracking channel; and **booking a shipment whose total is
+  zero crashes with a 500 instead of refusing** (a fix exists on an unmerged
+  branch — it is open until merged).
 - **Awaiting a product decision, not code**: what a driver who completed a leg
   is owed when staff cancel the rest of the journey. The full escrow currently
   returns to the customer. Do not write or imply a refund/earnings policy —

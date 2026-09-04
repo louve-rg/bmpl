@@ -387,12 +387,18 @@ recorded so nobody promises a flow that cannot complete; the money-adjacent
 ones need a product decision, not just code. Numbering is stable — closed
 items keep their number so references elsewhere stay valid.
 
-**Read this before the list: several remaining gaps are OPERATIONS, not
-code.** Production has no shipping network configured at all — no hubs, no
-routes, no courier fees (`PROJECT_STATUS.md` §12, "Business configuration,
-not defects"). The code below either works or is broken as stated; whether a
-parcel can actually be quoted across Belize today is a question of
-configuration that only operations may enter, and no code change fixes it.
+**Read this before the list — including the correction.** An earlier
+revision of this paragraph said the missing production configuration was
+entirely "operations, not code". **For hub pricing that was wrong**: the hub
+schemas in `packages/validation` dropped `courierFeeMinor`, so the admin
+console's "Courier rate" update was stripped to nothing and refused — an
+operator who tried to price a terminal could not have succeeded. A code
+defect, fixed by PR #19 (item 9 below). The distinction itself still holds:
+production has no shipping network configured — no hubs, no routes, no
+courier fees (`PROJECT_STATUS.md` §12, "Business configuration, not
+defects") — and entering that data is operations' work no code change does
+for them. But whether the data COULD be entered is a code question, and it is
+now checked rather than assumed.
 
 **1. CLOSED on `main` (PR #11) — a shipment courier leg can now be assigned
 by hand.** `GET /admin/logistics/legs/:id/eligible-drivers`,
@@ -411,19 +417,13 @@ a handoff locked by five failed attempts**, though the lockout message
 promises one; the permission is chosen (`logistics.verify`), and whether to
 build a PIN bypass at all is human-gated.
 
-**3. Cancelling a shipment orphans an accepted courier job in the driver's
-queue.** `ShipmentService.cancel` (`shipment.service.ts:985`) sets leg
-`status` to CANCELLED but never clears `courierStatus` or
-`assignedDriverProfileId`, never closes the `ShipmentLegOffer`, and never
-notifies the driver. The driver feed filters legs on `courierStatus` alone
-(`legScope`, `driver-job-feed.service.ts:413`), so a leg at `DRIVER_ACCEPTED`
-on a cancelled shipment stays in the queue indefinitely: decline requires
-`courierStatus ASSIGNED` (`shipment-driver.service.ts:149`) and pickup fails
-`isLegActionable` because the leg is CANCELLED. The window is real — a
-customer cancel is only blocked once a leg is `IN_PROGRESS`, and an accepted
-leg is still `READY` until pickup. The marketplace side handles this
-correctly (`DispatchService.cancel` closes the assignment and notifies the
-driver). Untested: the cancellation specs never involve an assigned driver.
+**3. CLOSED on `main` (PR #15) — cancelling a shipment now releases the
+driver.** `ShipmentService.cancel` closes the driver's half of every live
+courier job the way the marketplace side always did: `courierStatus` goes
+terminal, the assignment and vehicle are cleared, the ACTIVE or ACCEPTED
+`ShipmentLegOffer` is ended, and every released driver — offered or accepted
+— is notified after the commit. Covered by regression tests for both entry
+states, including the notification.
 
 **4. A leg EXCEPTION is one-way.** `flagException`
 (`shipment.service.ts:763`) sets the leg to EXCEPTION and stamps
@@ -455,20 +455,34 @@ guard blocks cancellation once a leg is IN_PROGRESS, and false on the staff
 path. **Money-adjacent: what the driver should be paid, and what the customer
 should be refunded, is a product-owner decision. Do not invent a policy.**
 
-**7. The handoff-desk feed has no screen.** `GET /admin/logistics/hubs/:id/expected`
-(`ShipmentService.expectedAtHub`, `shipment.service.ts:562`) answers "what
-should this terminal be expecting", and no admin UI calls it (verified by
-grep across `apps/admin`).
+**7. CLOSED on `main` (PR #18) — the handoff desk has its screen.**
+`apps/admin/app/dashboard/logistics/handoff-desk/page.tsx` consumes
+`GET /admin/logistics/hubs/:id/expected` and surfaces the audited PIN reveal
+(#12) beside each first-mile and line-haul row, so desk staff see what is
+coming and can produce the code the courier must be told.
 
 **8. Booking a shipment whose total is zero crashes with a 500 instead of
 refusing.** Confirmed reachable in production. A fix exists on an **unmerged**
 branch (`fix/zero-total-shipment-booking`) — this stays OPEN until that
 merges; do not describe it as fixed.
 
+**9. CLOSED on `main` (PR #19) — hub courier fees were unreachable through
+the product.** Found by walking the admin flow, not by reading the API:
+`courierFeeMinor` appeared nowhere in `packages/validation`'s hub schemas
+(`hubBase` never carried it, and `updateHubSchema` is `hubBase.partial()`),
+so the Terminals screen's "Courier rate" PATCH was stripped to `{}` and
+refused. Operations could not have priced a hub even by doing everything
+right — which also falsified this register's earlier claim that the missing
+production network was purely an operations matter. #19 carries the field
+end to end and makes the `isTest` practice network buildable through the
+console.
+
 ---
 
-*Written against `main` at `c73a2ed`, updated against `6b2e0d1`
-(2026-09-04): gaps 1 and 2 closed by PRs #11 and #12, gap 8 added.
+*Written against `main` at `c73a2ed`; updated against `6b2e0d1`
+(gaps 1–2 closed by #11/#12, gap 8 added); updated against `111cd4b`
+(gaps 3 and 7 closed by #15/#18, item 9 added closed by #19, and the
+operations-vs-code framing corrected above).
 Sources: the controllers
 and services cited inline — every endpoint named here was read in its
 controller. Cross-references: `docs/PROJECT_STATUS.md` §6–7 for shipping and
