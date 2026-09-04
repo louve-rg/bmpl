@@ -38,6 +38,17 @@ interface ExpectedLeg {
   forRecipient: string | null;
 }
 
+/**
+ * A deliberately revealed handoff code. Held only in component state, only
+ * after an explicit click, and dropped on every reload — each reveal is
+ * audited server-side, so one action means one reveal, never a prefetch.
+ */
+interface RevealedPin {
+  handoffPin: string | null;
+  handoffPinAttempts: number;
+  handoffVerificationStatus: string | null;
+}
+
 const when = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' }) : null;
 
@@ -47,6 +58,9 @@ export default function HandoffDeskPage() {
   const [rows, setRows] = useState<ExpectedLeg[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [pins, setPins] = useState<Record<string, RevealedPin>>({});
+  const [pinErr, setPinErr] = useState<Record<string, string>>({});
+  const [pinBusy, setPinBusy] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +84,9 @@ export default function HandoffDeskPage() {
   const load = useCallback(async () => {
     if (!hubId) return;
     setLoading(true);
+    // Revealed codes never survive a reload or a change of terminal.
+    setPins({});
+    setPinErr({});
     try {
       setRows(await api.get<ExpectedLeg[]>(`/admin/logistics/hubs/${hubId}/expected`));
       setErr(null);
@@ -79,6 +96,31 @@ export default function HandoffDeskPage() {
       setLoading(false);
     }
   }, [hubId]);
+
+  async function revealPin(legId: string) {
+    setPinBusy(legId);
+    setPinErr((prev) => {
+      const { [legId]: _drop, ...rest } = prev;
+      return rest;
+    });
+    try {
+      const pin = await api.get<RevealedPin>(`/admin/logistics/legs/${legId}/handoff-pin`);
+      setPins((prev) => ({ ...prev, [legId]: pin }));
+    } catch (e) {
+      // The refusals are deliberate (permission split, assigned driver,
+      // door-held code, finished leg) — show the server's own words.
+      setPinErr((prev) => ({ ...prev, [legId]: (e as ApiError).message ?? 'Could not reveal the code.' }));
+    } finally {
+      setPinBusy(null);
+    }
+  }
+
+  function hidePin(legId: string) {
+    setPins((prev) => {
+      const { [legId]: _drop, ...rest } = prev;
+      return rest;
+    });
+  }
 
   useEffect(() => {
     setRows(null);
@@ -182,6 +224,51 @@ export default function HandoffDeskPage() {
                       {when(r.arrivedAt) && <p>Arrived {when(r.arrivedAt)}</p>}
                     </div>
                   </div>
+
+                  {/* The code a desk verifies is revealed one deliberate click at
+                      a time — every reveal is audited. A last-mile code belongs
+                      to the recipient, not the desk, so those rows offer none. */}
+                  {(r.kind === 'FIRST_MILE' || r.kind === 'LINE_HAUL') && (
+                    <div className="mt-3 border-t border-slate-100 pt-2">
+                      {pins[r.legId] ? (
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                          <span className="text-slate-600">Handoff code</span>
+                          <span className="font-mono text-base font-bold tracking-widest text-slate-900">
+                            {pins[r.legId]?.handoffPin ?? '—'}
+                          </span>
+                          {pins[r.legId]?.handoffVerificationStatus && (
+                            <span className="text-xs text-slate-500">
+                              {pins[r.legId]?.handoffVerificationStatus?.toLowerCase()}
+                            </span>
+                          )}
+                          {(pins[r.legId]?.handoffPinAttempts ?? 0) > 0 && (
+                            <span className="text-xs font-medium text-amber-700">
+                              {pins[r.legId]?.handoffPinAttempts} failed attempt{pins[r.legId]?.handoffPinAttempts === 1 ? '' : 's'}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => hidePin(r.legId)}
+                            className="text-xs font-medium text-slate-500 hover:underline"
+                          >
+                            Hide
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void revealPin(r.legId)}
+                          disabled={pinBusy === r.legId}
+                          className="text-xs font-medium text-belize-blue hover:underline disabled:opacity-50"
+                        >
+                          {pinBusy === r.legId ? 'Revealing…' : 'Reveal handoff code'}
+                        </button>
+                      )}
+                      {pinErr[r.legId] && (
+                        <p className="mt-1 break-words text-xs font-medium text-amber-800">{pinErr[r.legId]}</p>
+                      )}
+                    </div>
+                  )}
                 </Card>
               ))}
             </div>
