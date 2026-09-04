@@ -91,3 +91,73 @@ export const passengerAvailabilitySchema = z.object({
   availability: z.enum(DRIVER_SETTABLE_AVAILABILITY),
 });
 export type PassengerAvailabilityInput = z.infer<typeof passengerAvailabilitySchema>;
+
+/**
+ * Passenger transportation — network structure (S2).
+ *
+ * A route is an operator-entered fact about Belize: which towns their service
+ * connects, in what order. Nothing here is derived or defaulted from
+ * geography. Two fields are deliberately ABSENT from every schema below:
+ * `isTest` (derived from the owning operator's profile — a route can never sit
+ * on the other side of the simulation boundary from the operator who runs it)
+ * and `baseFareMinor` (no fare policy exists; the column stays null until the
+ * product owner rules on pricing, and no request may set it).
+ */
+
+/** An intermediate stop. Order comes from array position — a client never numbers stops itself. */
+export const passengerRouteStopSchema = z.object({
+  district,
+  city: z.string().trim().min(1, 'Every stop names its town.').max(120),
+  name: z.string().trim().max(120).optional(),
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
+});
+export type PassengerRouteStopInput = z.infer<typeof passengerRouteStopSchema>;
+
+export const passengerRouteStopsSchema = z.array(passengerRouteStopSchema).max(50);
+export type PassengerRouteStopsInput = z.infer<typeof passengerRouteStopsSchema>;
+
+export const passengerRouteSchema = z.object({
+  name: z.string().trim().min(1, 'Name the service.').max(120),
+  description: z.string().trim().max(2000).optional(),
+  originDistrict: district,
+  originCity: z.string().trim().min(1, 'The origin town is required.').max(120),
+  destinationDistrict: district,
+  destinationCity: z.string().trim().min(1, 'The destination town is required.').max(120),
+  /** A label the operator writes ("Mon–Sat 06:30"), reported verbatim — not a calendar. */
+  scheduleNote: z.string().trim().max(200).optional(),
+  durationMinutes: z.coerce.number().int().min(1).max(10080).optional(),
+  stops: passengerRouteStopsSchema.optional(),
+});
+export type PassengerRouteInput = z.infer<typeof passengerRouteSchema>;
+
+export const passengerRouteUpdateSchema = passengerRouteSchema
+  .omit({ stops: true })
+  .extend({ isActive: z.boolean() })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+export type PassengerRouteUpdateInput = z.infer<typeof passengerRouteUpdateSchema>;
+
+/** Admin-side creation names the operator the route belongs to; everything else is identical. */
+export const adminPassengerRouteSchema = passengerRouteSchema.extend({
+  providerProfileId: z.string().trim().min(1),
+});
+export type AdminPassengerRouteInput = z.infer<typeof adminPassengerRouteSchema>;
+
+/** One departure of a configured route. Assignment of a driver/vehicle is a later phase. */
+export const passengerTripCreateSchema = z
+  .object({
+    routeId: z.string().trim().min(1),
+    scheduledDepartureAt: z.coerce.date(),
+    scheduledArrivalAt: z.coerce.date().optional(),
+  })
+  .refine((v) => !v.scheduledArrivalAt || v.scheduledArrivalAt > v.scheduledDepartureAt, {
+    message: 'Arrival must be after departure.',
+    path: ['scheduledArrivalAt'],
+  });
+export type PassengerTripCreateInput = z.infer<typeof passengerTripCreateSchema>;
+
+export const passengerTripCancelSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+export type PassengerTripCancelInput = z.infer<typeof passengerTripCancelSchema>;
