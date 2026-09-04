@@ -1,5 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { isLegActionable, rankDrivers, type DriverCandidate, type LegView } from '@bmpl/shared';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  canPerform,
+  DELIVERY_STATUS_LABELS,
+  isLegActionable,
+  rankDrivers,
+  type DriverCandidate,
+  type LegView,
+} from '@bmpl/shared';
+import type { AssignShipmentLegInput, ReassignShipmentLegInput } from '@bmpl/validation';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -276,6 +284,212 @@ export class ShipmentDispatchService {
     const e = await this.drivers.assignmentEligibility(driverProfileId, district, undefined, { isTestDelivery: isTest });
     if (!e.eligible || e.usableVehicles.length === 0) return null;
     return (e.usableVehicles.find((v) => v.isPrimary) ?? e.usableVehicles[0])!.id;
+  }
+
+  /* ------------------------------------------------ admin manual assignment */
+
+  /**
+   * The eligible pool for one courier leg, for the admin console to choose from.
+   * Same filters the assignment itself will apply — the matching side of the
+   * simulation boundary, never the sender — so an administrator is not offered
+   * a choice the assignment would then refuse.
+   */
+  async eligibleDriversForLeg(legId: string) {
+    const leg = await this.loadForAssignment(legId);
+    const district = this.districtFor(leg);
+    return this.drivers.eligibleDriversForDistrict(district, {
+      isTest: leg.shipment.isTest,
+      excludeUserId: leg.shipment.customerUserId,
+    });
+  }
+
+  async adminAssign(actor: { userId: string }, legId: string, dto: AssignShipmentLegInput) {
+    return this.assignManual(actor, legId, dto.driverProfileId, dto.vehicleId, null, 'ASSIGN');
+  }
+
+  async adminReassign(actor: { userId: string }, legId: string, dto: ReassignShipmentLegInput) {
+    return this.assignManual(actor, legId, dto.driverProfileId, dto.vehicleId, dto.reason, 'REASSIGN');
+  }
+
+  /**
+   * An administrator assigns a courier leg by hand.
+   *
+   * This is THE production path: `dispatchAutomatic` is deliberately OFF in
+   * production, so `dispatchLeg` always skips and the dispatch-exhausted alert's
+   * "Assign one by hand" was, until this method, an instruction with no endpoint
+   * behind it. Mirrors DispatchService.assignInternal for deliveries: the same
+   * state-machine vocabulary (courierStatus reuses DeliveryStatus, so
+   * DELIVERY_ACTIONS.ASSIGN/REASSIGN apply unchanged), the same assignment-time
+   * eligibility re-check, the same append-only offer history, the same
+   * conditional-claim concurrency, one audit row.
+   *
+   * Every refusal the automatic path enforces holds here too — an administrator
+   * is not an exemption from an invariant:
+   *  - an unpaid shipment is never dispatched;
+   *  - a leg is only assigned when the parcel is physically there;
+   *  - the simulation boundary is symmetric (via assignmentEligibility);
+   *  - the sender never couriers their own parcel, matched on USER id.
+   */
+  private async assignManual(
+    actor: { userId: string },
+    legId: string,
+    driverProfileId: string,
+    vehicleId: string,
+    reason: string | null,
+    action: 'ASSIGN' | 'REASSIGN',
+  ) {
+    const leg = await this.loadForAssignment(legId);
+    if (leg.kind === 'LINE_HAUL') {
+      throw new BadRequestException('A transport leg is operated by a carrier, not a driver.');
+    }
+
+    // The payment invariant, exactly as dispatchLeg states it: an unpaid
+    // shipment must never become a driver's job, whoever is asking.
+    if (!(await this.isPaidFor(leg.shipment))) {
+      throw new BadRequestException('This shipment has not been paid for; it cannot be given to a driver.');
+    }
+
+    // Same state machine as every driver action on a leg. A never-offered leg
+    // has courierStatus null, which means PENDING_ASSIGNMENT.
+    const current = leg.courierStatus ?? 'PENDING_ASSIGNMENT';
+    if (!canPerform(action, current)) {
+      throw new BadRequestException(
+        `Cannot ${action.toLowerCase()} a leg that is "${DELIVERY_STATUS_LABELS[current]}".`,
+      );
+    }
+
+    // THE dispatch invariant: no driver is sent where the parcel is not.
+    if (!isLegActionable(leg.shipment.legs as LegView[], leg.sequence)) {
+      throw new BadRequestException('The parcel has not reached this leg yet; it cannot be assigned.');
+    }
+
+    // Nobody couriers their own parcel. The pool the console showed already left
+    // the sender out, but every assignment arrives here, so this is the line
+    // that has to hold when an id is submitted by hand. Matched on the USER,
+    // never the active role — switching roles does not make the sender a
+    // different human being.
+    const assignee = await this.prisma.driverProfile.findUnique({
+      where: { id: driverProfileId },
+      select: { userId: true },
+    });
+    if (!assignee) throw new BadRequestException('That driver profile does not exist.');
+    if (leg.shipment.customerUserId && assignee.userId === leg.shipment.customerUserId) {
+      throw new BadRequestException('The sender cannot be assigned to courier their own parcel.');
+    }
+
+    // Eligibility AT ASSIGNMENT TIME, simulation boundary included — the one
+    // authority every assignment path funnels through.
+    const district = this.districtFor(leg);
+    const e = await this.drivers.assignmentEligibility(driverProfileId, district, vehicleId, {
+      isTestDelivery: leg.shipment.isTest,
+    });
+    if (!e.eligible) throw new BadRequestException(`Driver is not eligible: ${e.reasons.join('; ')}.`);
+
+    const won = await this.prisma.$transaction(async (tx) => {
+      // Append-only history: a superseded offer is marked REASSIGNED, never
+      // deleted — same rule as DeliveryAssignment.
+      if (action === 'REASSIGN') {
+        await tx.shipmentLegOffer.updateMany({
+          where: { shipmentLegId: leg.id, status: { in: ['ACTIVE', 'ACCEPTED'] } },
+          data: { status: 'REASSIGNED', endedAt: new Date(), declineReason: reason },
+        });
+      }
+      // Conditional claim, not an update by id: the sweeper, a completing
+      // previous leg and a second administrator can all reach this line.
+      // Exactly one write may land; anyone else sees the state moved on.
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: {
+          id: leg.id,
+          courierStatus: leg.courierStatus ?? null,
+          ...(action === 'ASSIGN' ? { assignedDriverProfileId: null } : {}),
+        },
+        data: {
+          courierStatus: 'ASSIGNED',
+          assignedDriverProfileId: driverProfileId,
+          assignedVehicleId: vehicleId,
+          assignedAt: new Date(),
+          // A human's assignment does not lapse: the offer sweeper only expires
+          // rows with an offerExpiresAt, exactly as admin-assigned deliveries
+          // never time out.
+          offerExpiresAt: null,
+          // Human intervention answers the exhausted alarm; clearing it lets
+          // decline → automatic re-offer resume if dispatch is ever re-enabled.
+          dispatchExhaustedAt: null,
+          acceptedAt: null,
+          declinedAt: null,
+          declineReason: null,
+        },
+      });
+      if (claimed.count === 0) return false;
+      await tx.shipmentLegOffer.create({
+        data: { shipmentLegId: leg.id, driverProfileId, vehicleId, status: 'ACTIVE' },
+      });
+      await this.audit.record(
+        {
+          action: 'SHIPMENT_LEG_DRIVER_ASSIGNED',
+          actorId: actor.userId,
+          newValue: {
+            legId: leg.id,
+            shipmentId: leg.shipment.id,
+            reference: leg.shipment.reference,
+            driverProfileId,
+            vehicleId,
+            manner: action,
+            reason,
+          },
+        },
+        tx,
+      );
+      return true;
+    });
+    if (!won) {
+      throw new BadRequestException('This leg changed while assigning (someone else got there first). Reload and try again.');
+    }
+    await this.notifyDriver(driverProfileId, leg.id, leg.kind, leg.shipment.reference);
+    return {
+      legId: leg.id,
+      shipmentReference: leg.shipment.reference,
+      courierStatus: 'ASSIGNED' as const,
+      assignedDriverProfileId: driverProfileId,
+      assignedVehicleId: vehicleId,
+    };
+  }
+
+  /** The same picture of a leg dispatchLeg reads, for the manual path. */
+  private async loadForAssignment(legId: string) {
+    const leg = await this.prisma.shipmentLeg.findUnique({
+      where: { id: legId },
+      select: {
+        id: true,
+        kind: true,
+        status: true,
+        courierStatus: true,
+        sequence: true,
+        originHub: { select: { district: true } },
+        shipment: {
+          select: {
+            id: true,
+            reference: true,
+            isTest: true,
+            customerUserId: true,
+            originDistrict: true,
+            quotedTotalMinor: true,
+            payment: { select: { status: true } },
+            legs: { select: { sequence: true, kind: true, mode: true, status: true } },
+          },
+        },
+      },
+    });
+    if (!leg) throw new NotFoundException('Shipment leg not found.');
+    return leg;
+  }
+
+  /** Where the driver has to BE to start — same rule as dispatchLeg. */
+  private districtFor(leg: { kind: string; originHub: { district: string } | null; shipment: { originDistrict: string | null } }): string {
+    const district =
+      leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originDistrict : leg.originHub?.district;
+    if (!district) throw new BadRequestException('This leg has no district to find a driver in.');
+    return district;
   }
 
   /* ---------------------------------------------------------- the sweeper */

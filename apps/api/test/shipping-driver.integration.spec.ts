@@ -735,3 +735,147 @@ describe('test and real stay apart', () => {
     expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId).toBeNull();
   });
 });
+
+/**
+ * Manual assignment — the PRODUCTION dispatch path.
+ *
+ * `dispatchAutomatic` is deliberately OFF in production, so every test here
+ * switches it off first: these legs sit unoffered exactly as they do live, and
+ * an administrator hands them to a driver. Every invariant the automatic
+ * engine enforces must hold on this path too, because an administrator typing
+ * an id by hand is precisely when the checks upstream have NOT already run.
+ */
+describe('admin manual assignment of a courier leg', () => {
+  const vehicleOf = (driverProfileId: string) =>
+    ctx.prisma.driverVehicle.findFirstOrThrow({ where: { driverProfileId }, select: { id: true } });
+
+  it('assigns an unoffered leg by hand, and the driver can accept and work it', async () => {
+    await enableDispatch(false);
+    const driver = await makeDriver();
+    const vehicle = await vehicleOf(driver.driverProfileId);
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    // With automatic dispatch off, nothing has been offered — the live state.
+    expect(first.courierStatus).toBeNull();
+    expect(first.assignedDriverProfileId).toBeNull();
+
+    const r = await post(admin, `admin/logistics/legs/${first.id}/assign`, {
+      driverProfileId: driver.driverProfileId,
+      vehicleId: vehicle.id,
+    });
+    expect(r.status).toBe(201);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(after.courierStatus).toBe('ASSIGNED');
+    expect(after.assignedDriverProfileId).toBe(driver.driverProfileId);
+    expect(after.assignedVehicleId).toBe(vehicle.id);
+    // A human's assignment does not lapse — nothing for the sweeper to expire.
+    expect(after.offerExpiresAt).toBeNull();
+    // Append-only history got its row.
+    const offers = await ctx.prisma.shipmentLegOffer.findMany({ where: { shipmentLegId: first.id } });
+    expect(offers).toHaveLength(1);
+    expect(offers[0]!.status).toBe('ACTIVE');
+    // And it is a real job: the driver can accept it through the ordinary app.
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`)).status).toBe(201);
+  });
+
+  it('reassigns to a second driver, keeping the first assignment as history', async () => {
+    await enableDispatch(false);
+    const first_driver = await makeDriver();
+    const second_driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect(
+      (await post(admin, `admin/logistics/legs/${first.id}/assign`, {
+        driverProfileId: first_driver.driverProfileId,
+        vehicleId: (await vehicleOf(first_driver.driverProfileId)).id,
+      })).status,
+    ).toBe(201);
+
+    const r = await post(admin, `admin/logistics/legs/${first.id}/reassign`, {
+      driverProfileId: second_driver.driverProfileId,
+      vehicleId: (await vehicleOf(second_driver.driverProfileId)).id,
+      reason: 'First driver called in unavailable.',
+    });
+    expect(r.status).toBe(201);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(after.assignedDriverProfileId).toBe(second_driver.driverProfileId);
+    const offers = await ctx.prisma.shipmentLegOffer.findMany({
+      where: { shipmentLegId: first.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(offers.map((o) => o.status)).toEqual(['REASSIGNED', 'ACTIVE']);
+  });
+
+  it('refuses to assign the sender to courier their own parcel', async () => {
+    await enableDispatch(false);
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    // Promote THIS shipment's sender to a fully approved, online driver — the
+    // same human, wearing another role. The refusal must match on the user.
+    const senderId = (await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).customerUserId!;
+    await ctx.prisma.userRole.upsert({
+      where: { userId_roleCode: { userId: senderId, roleCode: 'DELIVERY_DRIVER' } },
+      create: { userId: senderId, roleCode: 'DELIVERY_DRIVER', status: 'APPROVED', approvedAt: new Date() },
+      update: { status: 'APPROVED', approvedAt: new Date() },
+    });
+    const senderProfile = await ctx.prisma.driverProfile.create({
+      data: {
+        userId: senderId, legalName: 'Sender Moonlighting', displayName: 'SenderDrv', phone: '+5016000001',
+        homeDistrict: 'STANN_CREEK', licenceNumber: `SELF-${uniq()}`, licenceExpiry: FUTURE,
+        vehicleOwnership: 'OWNED', availability: 'ONLINE', isActive: true,
+      },
+    });
+    const senderVehicle = await ctx.prisma.driverVehicle.create({
+      data: {
+        driverProfileId: senderProfile.id, type: 'CAR', make: 'Honda', model: 'Fit',
+        licencePlate: `SELF-${uniq()}`.slice(0, 18), registrationExpiry: FUTURE, insuranceExpiry: FUTURE,
+        isActive: true, isPrimary: true, approvalStatus: 'APPROVED',
+      },
+    });
+    await ctx.prisma.driverServiceArea.create({ data: { driverProfileId: senderProfile.id, district: 'STANN_CREEK', isActive: true } });
+
+    const r = await post(admin, `admin/logistics/legs/${first.id}/assign`, {
+      driverProfileId: senderProfile.id,
+      vehicleId: senderVehicle.id,
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/own parcel/i);
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId).toBeNull();
+  });
+
+  it('refuses a test driver for a real shipment, even from an administrator', async () => {
+    await enableDispatch(false);
+    const testDriver = await makeDriver({ isTest: true });
+    const vehicle = await vehicleOf(testDriver.driverProfileId);
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+
+    const r = await post(admin, `admin/logistics/legs/${first.id}/assign`, {
+      driverProfileId: testDriver.driverProfileId,
+      vehicleId: vehicle.id,
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/test driver/i);
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId).toBeNull();
+  });
+
+  it('refuses to assign an unpaid shipment to anybody', async () => {
+    await enableDispatch(false);
+    const driver = await makeDriver();
+    const vehicle = await vehicleOf(driver.driverProfileId);
+    // Booked WITHOUT payWithWallet: a real booking a customer abandoned unpaid.
+    const r0 = await post(customer, 'shipping', doorToDoor());
+    expect(r0.status).toBe(201);
+    const first = (await legs(r0.body.id)).find((l) => l.kind === 'FIRST_MILE')!;
+
+    const r = await post(admin, `admin/logistics/legs/${first.id}/assign`, {
+      driverProfileId: driver.driverProfileId,
+      vehicleId: vehicle.id,
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/paid/i);
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId).toBeNull();
+  });
+});
