@@ -127,6 +127,15 @@ export const passengerRouteSchema = z.object({
   /** A label the operator writes ("Mon–Sat 06:30"), reported verbatim — not a calendar. */
   scheduleNote: z.string().trim().max(200).optional(),
   durationMinutes: z.coerce.number().int().min(1).max(10080).optional(),
+  /**
+   * The operator's configured fare, BZD minor units, stored VERBATIM (S3, per
+   * the product owner's fare ruling: booking requires a configured fare).
+   * Zero means "not priced yet" and keeps the booking gate closed, exactly as
+   * a zero hub fee keeps a journey unbookable. Nothing anywhere computes,
+   * multiplies or charges with this number — whether it is per seat or per
+   * booking is commercial policy nobody has set.
+   */
+  baseFareMinor: z.coerce.number().int().min(0).max(100_000_000).optional(),
   stops: passengerRouteStopsSchema.optional(),
 });
 export type PassengerRouteInput = z.infer<typeof passengerRouteSchema>;
@@ -161,3 +170,32 @@ export const passengerTripCancelSchema = z.object({
   reason: z.string().trim().max(500).optional(),
 });
 export type PassengerTripCancelInput = z.infer<typeof passengerTripCancelSchema>;
+
+/**
+ * Passenger transportation — booking & movement (S3).
+ *
+ * Note what is absent, again: no isTest (derived from the rider's account),
+ * no fare fields of any kind (the fare GATE checks a configured fare exists;
+ * nothing computes, quotes or charges an amount — fareQuotedMinor stays null
+ * until a pricing policy exists), and no NO_SHOW / on-demand shapes (their
+ * product questions are unanswered).
+ */
+
+/** Book seats on a published SCHEDULED departure. */
+export const passengerBookingCreateSchema = z.object({
+  tripId: z.string().trim().min(1),
+  seats: z.coerce.number().int().min(1, 'At least one seat.').max(MAX_PASSENGER_SEATS),
+});
+export type PassengerBookingCreateInput = z.infer<typeof passengerBookingCreateSchema>;
+
+export const passengerBookingCancelSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+export type PassengerBookingCancelInput = z.infer<typeof passengerBookingCancelSchema>;
+
+/** Manual staffing of a departure: a named driver and a named vehicle, always. */
+export const passengerTripAssignSchema = z.object({
+  driverProfileId: z.string().trim().min(1),
+  vehicleId: z.string().trim().min(1),
+});
+export type PassengerTripAssignInput = z.infer<typeof passengerTripAssignSchema>;

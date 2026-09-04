@@ -539,6 +539,20 @@ export class AdminService {
     if (!before) throw new NotFoundException('User not found.');
     if (before.isTest === isTest) return { userId, isTest, changed: false };
 
+    // The S2 lesson, applied to riders: a booking snapshots the rider's side of
+    // the simulation boundary at creation, so flipping the rider while they
+    // hold live bookings would leave a real person booked on a rehearsal
+    // departure (or the reverse). Settled history keeps its flag; live
+    // reservations block the flip.
+    const openBookings = await this.prisma.passengerBooking.count({
+      where: { passengerUserId: userId, status: { in: ['REQUESTED', 'CONFIRMED'] } },
+    });
+    if (openBookings > 0) {
+      throw new BadRequestException(
+        `This person has ${openBookings} open passenger booking(s). Cancel or complete them before changing test mode.`,
+      );
+    }
+
     const user = await this.prisma.user.update({ where: { id: userId }, data: { isTest }, select: { id: true, email: true, isTest: true } });
     await this.audit.record({
       action: 'USER_TEST_FLAG_CHANGED',
