@@ -103,6 +103,72 @@ describe('email verification', () => {
   });
 });
 
+describe('resending a verification email', () => {
+  // Until now this endpoint had no consumer and no tests — the weakest kind of
+  // surface. The web app is gaining a "resend" button; these are the properties
+  // that button depends on, pinned before it ships.
+  const resend = (email: string) => request(ctx.server).post('/api/auth/resend-verification').send({ email });
+
+  it('issues a fresh token, and the fresh token verifies the account', async () => {
+    const email = 'resend_fresh@example.bz';
+    await request(ctx.server)
+      .post('/api/auth/register')
+      .send({ email, password: 'CustomerPass123', firstName: 'R', lastName: 'F', acceptedTerms: true });
+    const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
+
+    const r = await resend(email);
+    expect(r.status).toBe(201);
+    expect(r.body).toEqual({ ok: true });
+    // Registration's token plus the resent one — each single-use, both live.
+    expect(await ctx.prisma.emailVerificationToken.count({ where: { userId: user.id } })).toBe(2);
+
+    // The email the user would actually receive carries a working link.
+    const inbox = await request(ctx.server).get('/api/dev/emails/latest').query({ email });
+    expect(inbox.status).toBe(200);
+    const token = tokenFromBody(inbox.body.body);
+    expect(token).toBeTruthy();
+    expect((await request(ctx.server).post('/api/auth/verify-email').send({ token })).status).toBe(201);
+    expect((await ctx.prisma.user.findUniqueOrThrow({ where: { email } })).emailVerifiedAt).not.toBeNull();
+  });
+
+  it('answers identically for unknown, unverified and already-verified addresses — the enumeration shape', async () => {
+    // The SECURITY PROPERTY, not just the status code: from the outside, an
+    // address that exists must be indistinguishable from one that does not.
+    // A future refactor that returns a helpful "no such account" — or even a
+    // different body for the already-verified case — breaks this silently.
+    const unverified = 'resend_shape_a@example.bz';
+    await request(ctx.server)
+      .post('/api/auth/register')
+      .send({ email: unverified, password: 'CustomerPass123', firstName: 'S', lastName: 'A', acceptedTerms: true });
+
+    const verifiedEmail = 'resend_shape_b@example.bz';
+    await request(ctx.server)
+      .post('/api/auth/register')
+      .send({ email: verifiedEmail, password: 'CustomerPass123', firstName: 'S', lastName: 'B', acceptedTerms: true });
+    const inbox = await request(ctx.server).get('/api/dev/emails/latest').query({ email: verifiedEmail });
+    await request(ctx.server).post('/api/auth/verify-email').send({ token: tokenFromBody(inbox.body.body) });
+
+    // Unknown address: same answer, and NOTHING created.
+    const tokensBefore = await ctx.prisma.emailVerificationToken.count();
+    const unknown = await resend('resend_shape_nobody@example.bz');
+    expect(await ctx.prisma.emailVerificationToken.count()).toBe(tokensBefore);
+
+    // Real unverified address: same answer, one token quietly issued.
+    const known = await resend(unverified);
+    expect(await ctx.prisma.emailVerificationToken.count()).toBe(tokensBefore + 1);
+
+    // Already-verified address: same answer, nothing issued.
+    const done = await resend(verifiedEmail);
+    expect(await ctx.prisma.emailVerificationToken.count()).toBe(tokensBefore + 1);
+
+    // The three responses are indistinguishable — status AND body.
+    expect(unknown.status).toBe(known.status);
+    expect(done.status).toBe(known.status);
+    expect(unknown.body).toEqual(known.body);
+    expect(done.body).toEqual(known.body);
+  });
+});
+
 describe('login, refresh rotation, reuse rejection, logout', () => {
   const email = 'session@example.bz';
   const password = 'CustomerPass123';

@@ -56,4 +56,22 @@ describe('rate limiting (auth routes)', () => {
     expect(statuses.slice(0, 3).every((s) => s === 201)).toBe(true);
     expect(statuses.slice(3)).toContain(429);
   });
+
+  it('throttles resend-verification — the anti-enumeration endpoint must also resist hammering', async () => {
+    // The endpoint answers identically for every address (see auth spec), so
+    // the ONLY thing stopping bulk probing or email-bombing through it is this
+    // limit. Assertions are deliberately tolerant of the throttle key's scope
+    // (per-route or per-IP-global): no more than the limit may succeed, a 429
+    // must appear, and a throttled call must never surface a server error.
+    const statuses: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const res = await request(ctx.server)
+        .post('/api/auth/resend-verification')
+        .send({ email: `resend_limit_${i}@example.bz` });
+      statuses.push(res.status);
+    }
+    expect(statuses.filter((s) => s === 201).length).toBeLessThanOrEqual(3);
+    expect(statuses).toContain(429);
+    expect(statuses.every((s) => s === 201 || s === 429)).toBe(true);
+  });
 });
