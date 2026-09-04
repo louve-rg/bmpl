@@ -612,74 +612,99 @@ describe('the offer lifecycle', () => {
   });
 });
 
-describe('cancellation while a driver holds the job — characterization of a KNOWN DEFECT', () => {
+describe('cancellation releases the driver from the job', () => {
   /**
-   * This test records what happens TODAY, on purpose, so the fix has a test to
-   * turn around. It is not an endorsement of the behaviour.
-   *
-   * ShipmentService.cancel marks the leg CANCELLED for the SHIPMENT but never
-   * touches the DRIVER's half of the same row: `courierStatus` and
-   * `assignedDriverProfileId` survive, the accepted ShipmentLegOffer stays
-   * open, and nothing tells the driver the job is gone. Because the unified
-   * driver feed and queue filter on `courierStatus` alone, the cancelled job
-   * stays in the driver's list with no action that can remove it — decline is
-   * only legal from ASSIGNED, and pickup fails isLegActionable against the
-   * CANCELLED leg. The driver is left holding a phantom job forever.
-   *
-   * The window is real and ordinary: a leg is READY (not IN_PROGRESS) from
-   * acceptance until pickup, and the customer-cancellation guard only bites at
-   * IN_PROGRESS — so a customer cancelling minutes after a driver accepted is
-   * exactly how this happens in production.
-   *
-   * NOTE — what SHOULD happen instead, when the fix lands in ShipmentService.cancel:
-   *   - the driver's half of the leg is closed out: courierStatus cleared (or
-   *     set terminally), assignedDriverProfileId / assignedVehicleId nulled;
-   *   - the ACTIVE/ACCEPTED ShipmentLegOffer is ended (CANCELLED, endedAt set);
-   *   - the assigned driver is notified the job no longer exists;
-   *   - the job disappears from the driver's feed and queue.
-   * Every assertion below marked "DEFECT:" must then be inverted — this test
-   * failing is the proof the fix works.
+   * A leg row carries two views of one fact: `status` for the shipment,
+   * `courierStatus` for the driver. Cancelling a shipment must close BOTH —
+   * this suite once characterized the defect where only the first closed and
+   * the driver was left holding a phantom job they could neither decline
+   * (only legal from ASSIGNED) nor work (pickup fails the sequencing rule
+   * against a CANCELLED leg). Now it proves the release: assignment cleared,
+   * offer history ended, job gone from the feed, and the driver told.
    */
-  it('strands the accepted courier leg in the driver queue with no way out', async () => {
+  it('closes the accepted courier leg, ends the offer, and tells the driver', async () => {
     const driver = await makeDriver();
     const s = await book();
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`)).status).toBe(201);
 
-    // The customer cancels in the accepted-but-not-picked-up window. Allowed:
-    // no leg is IN_PROGRESS yet, so the "already moving" guard does not apply.
+    // The customer cancels in the accepted-but-not-picked-up window — the
+    // ordinary case: no leg is IN_PROGRESS yet, so the "already moving" guard
+    // does not apply.
     const cancelled = await post(customer, `shipping/${s.id}/cancel`, { reason: 'Changed my mind.' });
     expect(cancelled.status).toBe(201);
     expect(cancelled.body.status).toBe('CANCELLED');
 
-    // The shipment's half of the row is closed...
+    // Both halves of the leg are closed.
     const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
     expect(leg.status).toBe('CANCELLED');
+    expect(leg.courierStatus).toBe('CANCELLED');
+    expect(leg.assignedDriverProfileId).toBeNull();
+    expect(leg.assignedVehicleId).toBeNull();
 
-    // DEFECT: ...but the driver's half still says they hold a live job.
-    expect(leg.courierStatus).toBe('DRIVER_ACCEPTED');
-    expect(leg.assignedDriverProfileId).toBe(driver.driverProfileId);
-
-    // DEFECT: the accepted offer is never ended.
+    // The offer history closes with it.
     const offer = await ctx.prisma.shipmentLegOffer.findFirstOrThrow({
       where: { shipmentLegId: first.id, driverProfileId: driver.driverProfileId },
     });
-    expect(offer.status).toBe('ACCEPTED');
-    expect(offer.endedAt).toBeNull();
+    expect(offer.status).toBe('CANCELLED');
+    expect(offer.endedAt).not.toBeNull();
 
-    // DEFECT: the phantom job is still in the driver's feed and queue.
+    // The job is gone from the driver's feed and queue.
     const list = await get(driver.cookies, 'driver/jobs?scope=assigned');
     expect(list.status).toBe(200);
-    expect(list.body.some((j: { id: string }) => j.id === first.id)).toBe(true);
+    expect(list.body.some((j: { id: string }) => j.id === first.id)).toBe(false);
     const queue = await get(driver.cookies, 'driver/jobs/queue');
-    expect(queue.body.items.some((i: { id: string }) => i.id === first.id)).toBe(true);
+    expect(queue.body.items.some((i: { id: string }) => i.id === first.id)).toBe(false);
 
-    // And there is no way out of it. Pickup is refused, because the leg the
-    // shipment sees is cancelled...
-    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`)).status).toBe(400);
-    // ...and decline is refused, because the state machine only declines an
-    // un-accepted offer. Nothing the driver can press removes this job.
-    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/decline`, { reason: 'It was cancelled.' })).status).toBe(400);
+    // The driver was told the job no longer exists — the release is only real
+    // if the person driving towards the pickup finds out about it.
+    expect(
+      await ctx.prisma.notificationRecipient.count({
+        where: { userId: driver.userId, notification: { event: 'SHIPMENT_LEG_CANCELLED' } },
+      }),
+    ).toBe(1);
+
+    // And the record no longer resolves for this driver at all: 404, not 400 —
+    // once the assignment is cleared the ownership check fails before any
+    // state-machine guard is reached.
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`)).status).toBe(404);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/decline`, { reason: 'It was cancelled.' })).status).toBe(404);
+  });
+
+  it('releases a driver who merely held the offer, not yet accepted', async () => {
+    // Booking auto-offers the first mile: courierStatus ASSIGNED, offer ACTIVE.
+    // Cancelling in THAT window must catch the ACTIVE offer too — an offered
+    // job sits in the driver's available tab and must leave it the same way an
+    // accepted one leaves the queue.
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect(first.courierStatus).toBe('ASSIGNED');
+
+    expect((await post(customer, `shipping/${s.id}/cancel`, { reason: 'Booked by mistake.' })).status).toBe(201);
+
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(leg.status).toBe('CANCELLED');
+    expect(leg.courierStatus).toBe('CANCELLED');
+    expect(leg.assignedDriverProfileId).toBeNull();
+    expect(leg.offerExpiresAt).toBeNull();
+
+    const offer = await ctx.prisma.shipmentLegOffer.findFirstOrThrow({
+      where: { shipmentLegId: first.id, driverProfileId: driver.driverProfileId },
+    });
+    expect(offer.status).toBe('CANCELLED');
+    expect(offer.endedAt).not.toBeNull();
+
+    const available = await get(driver.cookies, 'driver/jobs?scope=available');
+    expect(available.body.some((j: { id: string }) => j.id === first.id)).toBe(false);
+
+    // The offered driver is told too: the offer was in front of them, and it
+    // vanishing silently is how a driver ends up accepting a ghost.
+    expect(
+      await ctx.prisma.notificationRecipient.count({
+        where: { userId: driver.userId, notification: { event: 'SHIPMENT_LEG_CANCELLED' } },
+      }),
+    ).toBe(1);
   });
 });
 

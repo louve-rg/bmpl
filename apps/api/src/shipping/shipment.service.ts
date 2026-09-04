@@ -988,9 +988,19 @@ export class ShipmentService {
    * Cancel what has not happened yet. Completed legs stay completed — a parcel
    * that genuinely flew to San Pedro did fly to San Pedro, and rewriting that to
    * tidy up a cancellation would put a lie in the custody chain.
+   *
+   * The DRIVER's half of every live courier job closes with the shipment's
+   * half. A leg row carries two views of one fact — `status` for the shipment,
+   * `courierStatus` for the driver — and cancelling only the first left a
+   * phantom job in the driver's queue: still listed (the feed filters on
+   * `courierStatus` alone), impossible to decline (only legal from ASSIGNED)
+   * and impossible to work (pickup fails the sequencing rule against a
+   * CANCELLED leg). So the assignment is cleared, the offer history is closed,
+   * and the driver is told — exactly what DispatchService.cancel already does
+   * for a marketplace delivery.
    */
   async cancel(id: string, input: CancelShipmentInput, actor: { userId: string; isStaff: boolean }) {
-    const shipment = await this.prisma.$transaction(async (tx) => {
+    const { shipment, releasedDriverProfileIds } = await this.prisma.$transaction(async (tx) => {
       const s = await tx.shipment.findUnique({ where: { id }, include: { legs: true } });
       if (!s) throw new NotFoundException('Shipment not found.');
       if (!actor.isStaff && s.customerUserId !== actor.userId) throw new NotFoundException('Shipment not found.');
@@ -999,9 +1009,43 @@ export class ShipmentService {
         throw new BadRequestException('This shipment is already moving. Contact support to stop it.');
       }
 
+      // Who is being released. Read BEFORE the rows are rewritten — afterwards
+      // there is nobody left on the leg to notify. Covers a driver who merely
+      // holds the offer (ASSIGNED) as well as one who accepted: both have the
+      // job in their feed, so both must see it leave.
+      const released = s.legs.filter(
+        (l) => l.assignedDriverProfileId != null && l.status !== 'COMPLETED' && l.status !== 'CANCELLED',
+      );
+
+      // Close the driver's half of any leg a driver has ever seen: the courier
+      // view goes terminal, the assignment and the offer window are cleared.
+      await tx.shipmentLeg.updateMany({
+        where: {
+          shipmentId: id,
+          status: { in: ['PENDING', 'READY', 'IN_PROGRESS'] },
+          OR: [{ assignedDriverProfileId: { not: null } }, { courierStatus: { not: null } }],
+        },
+        data: {
+          courierStatus: 'CANCELLED',
+          assignedDriverProfileId: null,
+          assignedVehicleId: null,
+          offerExpiresAt: null,
+          driverQueuePosition: null,
+        },
+      });
+
       await tx.shipmentLeg.updateMany({
         where: { shipmentId: id, status: { in: ['PENDING', 'READY', 'IN_PROGRESS'] } },
         data: { status: 'CANCELLED', cancelledAt: new Date() },
+      });
+
+      // History closes with the leg, as the delivery side already does for its
+      // DeliveryAssignment rows. `endedAt` says when; the audit row below says
+      // why. (ShipmentLegOffer has no endReason column; declineReason is left
+      // alone because a cancellation is not a decline.)
+      await tx.shipmentLegOffer.updateMany({
+        where: { shipmentLeg: { shipmentId: id }, status: { in: ['ACTIVE', 'ACCEPTED'] } },
+        data: { status: 'CANCELLED', endedAt: new Date() },
       });
 
       // Give the money back. Nobody has started work — the guard above refuses a
@@ -1009,19 +1053,46 @@ export class ShipmentService {
       // returned. The release is idempotent: it only picks up holds that are
       // still live, and its ledger reference is unique per payment.
       await this.payments.releaseForShipment(tx, id, actor.userId);
-      return tx.shipment.update({
+      const updated = await tx.shipment.update({
         where: { id },
         data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: input.reason },
         include: SHIPMENT_INCLUDE,
       });
+      return {
+        shipment: updated,
+        releasedDriverProfileIds: [...new Set(released.map((l) => l.assignedDriverProfileId!))],
+      };
     });
 
     await this.audit.record({
       action: 'SHIPMENT_CANCELLED',
       actorId: actor.userId,
       reason: input.reason,
-      newValue: { shipmentId: shipment.id, reference: shipment.reference },
+      newValue: { shipmentId: shipment.id, reference: shipment.reference, releasedDriverProfileIds },
     });
+
+    // Tell the released drivers, after the commit — a notification for a
+    // cancellation that rolled back would be a lie. The payload deliberately
+    // carries no driverJobId and no reference: the job no longer resolves for
+    // this driver, and a notification that deep-links to a 404 is worse than
+    // one that links nowhere. The reference lives in the words instead.
+    if (releasedDriverProfileIds.length > 0) {
+      const profiles = await this.prisma.driverProfile.findMany({
+        where: { id: { in: releasedDriverProfileIds } },
+        select: { userId: true },
+      });
+      await this.notifications.notifyUsers(
+        profiles.map((p) => p.userId),
+        {
+          type: 'MARKETPLACE',
+          category: 'DELIVERY',
+          event: 'SHIPMENT_LEG_CANCELLED',
+          title: 'Job cancelled',
+          body: `Shipment ${shipment.reference} was cancelled. The job has been removed from your queue.`,
+          data: { shipmentId: shipment.id },
+        },
+      );
+    }
     return this.serialize(shipment, { audience: actor.isStaff ? 'STAFF' : 'CUSTOMER' });
   }
 
