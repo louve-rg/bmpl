@@ -93,10 +93,19 @@ export class LogisticsNetworkService {
 
   /* --------------------------------------------------------------- hubs */
 
-  /** The terminals a customer can pick, with nothing operational in the payload. */
+  /**
+   * The terminals a customer can pick, with nothing operational in the payload.
+   *
+   * REAL side only, matching how availableModes and the planner already decide
+   * (isTest defaults false on every public surface): this endpoint is @Public
+   * and carries no caller identity, and a rehearsal terminal must never be
+   * offered to a real customer as a place to send a parcel. A designated test
+   * account exercises the simulation network through quote/booking, which
+   * derive the side from the USER — not through this anonymous picker.
+   */
   async publicHubs() {
     const hubs = await this.prisma.logisticsHub.findMany({
-      where: { isActive: true },
+      where: { isActive: true, isTest: false },
       orderBy: [{ district: 'asc' }, { name: 'asc' }],
     });
     return hubs.map((h) => ({

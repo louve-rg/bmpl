@@ -69,12 +69,12 @@ const SERVE_INCLUDE = {
   campaign: { select: { id: true, name: true, status: true } },
   targets: {
     include: {
-      vendorProfile: { select: { id: true, userId: true, businessName: true, slug: true, logoKey: true, approvalStatus: true } },
+      vendorProfile: { select: { id: true, userId: true, businessName: true, slug: true, logoKey: true, approvalStatus: true, isTest: true } },
       employerProfile: { select: { id: true, userId: true, companyName: true, slug: true, logoKey: true, approvalStatus: true } },
       agencyProfile: { select: { id: true, managerUserId: true, name: true, slug: true, logoKey: true, approvalStatus: true } },
       agentProfile: { select: { id: true, userId: true, displayName: true, slug: true, photoKey: true, approvalStatus: true, isActive: true } },
       propertyOwnerProfile: { select: { id: true, userId: true, displayName: true, legalName: true, approvalStatus: true } },
-      product: { select: { id: true, title: true, slug: true, status: true, priceMinor: true, currency: true, vendorProfile: { select: { userId: true, approvalStatus: true } }, images: { where: { isPrimary: true }, take: 1, select: { storageKey: true } } } },
+      product: { select: { id: true, title: true, slug: true, status: true, priceMinor: true, currency: true, vendorProfile: { select: { userId: true, approvalStatus: true, isTest: true } }, images: { where: { isPrimary: true }, take: 1, select: { storageKey: true } } } },
       jobListing: { select: { id: true, title: true, slug: true, status: true, employerProfile: { select: { userId: true, approvalStatus: true, companyName: true } } } },
       propertyListing: { select: { id: true, title: true, slug: true, status: true, priceMinor: true, currency: true, ownerProfile: { select: { userId: true, approvalStatus: true } }, agentProfile: { select: { userId: true, approvalStatus: true } }, images: { where: { isPrimary: true }, take: 1, select: { storageKey: true } } } },
     },
@@ -561,7 +561,9 @@ export class PromotionsService {
       case 'EXTERNAL_LINK':
         return true;
       case 'VENDOR':
-        return t.vendorProfile?.approvalStatus === 'APPROVED';
+        // isTest: a simulation storefront's promotion must never serve on a
+        // real customer's page, however legitimately it was approved.
+        return t.vendorProfile?.approvalStatus === 'APPROVED' && !t.vendorProfile.isTest;
       case 'EMPLOYER':
         return t.employerProfile?.approvalStatus === 'APPROVED';
       case 'AGENCY':
@@ -571,7 +573,7 @@ export class PromotionsService {
       case 'PROPERTY_OWNER':
         return t.propertyOwnerProfile?.approvalStatus === 'APPROVED';
       case 'PRODUCT':
-        return t.product?.status === 'PUBLISHED' && t.product.vendorProfile.approvalStatus === 'APPROVED';
+        return t.product?.status === 'PUBLISHED' && t.product.vendorProfile.approvalStatus === 'APPROVED' && !t.product.vendorProfile.isTest;
       case 'JOB':
         return t.jobListing?.status === 'PUBLISHED' && t.jobListing.employerProfile.approvalStatus === 'APPROVED';
       case 'PROPERTY':

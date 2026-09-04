@@ -115,6 +115,24 @@ describe('promotion lifecycle + moderation + public serving', () => {
     expect((await post(admin, `admin/marketing/promotions/${id}/moderate`, { action: 'EXPIRE' })).body.status).toBe('EXPIRED');
     expect(await served()).toBe(false);
   });
+
+  it('a simulation storefront’s promotion never serves on a real page', async () => {
+    // Sibling of the public-hubs leak: serve-time eligibility checked
+    // approvalStatus but never isTest, so a rehearsal store's legitimately
+    // approved promotion would appear on every real customer's homepage the
+    // moment a tester ran the campaign flow. The flip goes through the
+    // console endpoint — no raw write.
+    const vendor = await makeApprovedVendor();
+    const productId = await makeProduct(vendor);
+    const id = await publishPromotion(vendor, productId);
+    const served = () => guest('marketing/placements/HOMEPAGE_FEATURED_PRODUCTS').then((r) => r.body.some((p: { id: string }) => p.id === id));
+    expect(await served()).toBe(true);
+
+    expect((await patch(admin, `admin/vendors/${vendor.vpId}/test-mode`, { isTest: true, reason: 'Rehearsal store.' })).status).toBe(200);
+    expect(await served()).toBe(false); // its own promotion row is untouched — suppressed at serve time
+    expect((await patch(admin, `admin/vendors/${vendor.vpId}/test-mode`, { isTest: false, reason: 'Back to trading.' })).status).toBe(200);
+    expect(await served()).toBe(true);
+  });
 });
 
 describe('security: target ownership + cross-owner isolation', () => {
