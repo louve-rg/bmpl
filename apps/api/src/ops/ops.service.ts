@@ -155,9 +155,28 @@ export class OpsService {
       actorId: actor.userId,
       // dispatchAutomatic is included on both sides: switching automatic dispatch
       // on or off changes how every delivery on the platform is assigned, and the
-      // audit trail should say who did it and when.
-      previousValue: { announcementActive: current.announcementActive, announcementLevel: current.announcementLevel, maintenanceMode: current.maintenanceMode, dispatchAutomatic: current.dispatchAutomatic },
-      newValue: { announcementActive: updatedRow.announcementActive, announcementLevel: updatedRow.announcementLevel, maintenanceMode: updatedRow.maintenanceMode, dispatchAutomatic: updatedRow.dispatchAutomatic },
+      // audit trail should say who did it and when. The courier fees likewise —
+      // they are money configuration priced into every local door-to-door
+      // booking, and a change to them must never be audit-invisible (the same
+      // gap once existed for hub fees).
+      previousValue: {
+        announcementActive: current.announcementActive,
+        announcementLevel: current.announcementLevel,
+        maintenanceMode: current.maintenanceMode,
+        dispatchAutomatic: current.dispatchAutomatic,
+        localCourierFeeMinor: current.localCourierFeeMinor,
+        localCourierFeeTestMinor: current.localCourierFeeTestMinor,
+        localCourierMinutes: current.localCourierMinutes,
+      },
+      newValue: {
+        announcementActive: updatedRow.announcementActive,
+        announcementLevel: updatedRow.announcementLevel,
+        maintenanceMode: updatedRow.maintenanceMode,
+        dispatchAutomatic: updatedRow.dispatchAutomatic,
+        localCourierFeeMinor: Number(updatedRow.localCourierFeeMinor),
+        localCourierFeeTestMinor: Number(updatedRow.localCourierFeeTestMinor),
+        localCourierMinutes: updatedRow.localCourierMinutes,
+      },
     });
     return this.serializeSettings(updatedRow);
   }

@@ -24,6 +24,7 @@ const uniq = () => `${Date.now()}_${(seq += 1)}`;
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
 const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+const patch = (c: string[], p: string, b: object = {}) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
 
 async function registerCustomer(email: string) {
   const reg = await request(ctx.server)
@@ -693,7 +694,11 @@ describe('settlement keeps simulation money separate', () => {
     const v = await makeVendor();
     // An order's simulation flag is DERIVED FROM THE STOREFRONT, not from who is
     // buying — so a test order needs a test vendor, not just a test customer.
-    await ctx.prisma.vendorProfile.update({ where: { id: v.vendorProfileId }, data: { isTest: true } });
+    // Flagged the way operations flags a rehearsal store — through the console
+    // endpoint (audit finding H2: the raw write this replaces left the vendor
+    // half of the simulation boundary resting on a path nothing exercised).
+    const flip = await patch(admin, `admin/vendors/${v.vendorProfileId}/test-mode`, { isTest: true, reason: 'Simulation storefront (fixture).' });
+    expect(flip.status).toBe(200);
 
     await post(c.cookies, 'wallet/top-up', { amountMinor: 50_000 });
     await addToCart(c.cookies, v.productId, 1);
@@ -733,7 +738,11 @@ describe('a settled order stops showing as money on hold', () => {
 
     const c = await makeTestCustomer();
     const v = await makeVendor();
-    await ctx.prisma.vendorProfile.update({ where: { id: v.vendorProfileId }, data: { isTest: true } });
+    // Flagged the way operations flags a rehearsal store — through the console
+    // endpoint (audit finding H2: the raw write this replaces left the vendor
+    // half of the simulation boundary resting on a path nothing exercised).
+    const flip = await patch(admin, `admin/vendors/${v.vendorProfileId}/test-mode`, { isTest: true, reason: 'Simulation storefront (fixture).' });
+    expect(flip.status).toBe(200);
     await post(c.cookies, 'wallet/top-up', { amountMinor: 50_000 });
     await addToCart(c.cookies, v.productId, 1);
     await checkout(c.cookies, v.vendorProfileId, true);
@@ -755,5 +764,47 @@ describe('a settled order stops showing as money on hold', () => {
     const holds = await ctx.prisma.walletHold.findMany({ where: { payment: { orderId: order.id } } });
     expect(holds.every((h) => h.status === 'RELEASED')).toBe(true);
     expect(holds.every((h) => h.releaseReason === 'settled')).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+
+describe('the storefront simulation flag comes from the console', () => {
+  // Audit finding H2: admin/vendors/:id/test-mode existed, guarded, and was
+  // exercised by nothing — while checkout derives every order's isTest from
+  // exactly this flag. An endpoint with a real guard that nothing exercises is
+  // indistinguishable from one that does not work.
+
+  it('flips a storefront both directions through the endpoint, audited each time', async () => {
+    const v = await makeVendor();
+
+    const on = await patch(admin, `admin/vendors/${v.vendorProfileId}/test-mode`, { isTest: true, reason: 'Rehearsal store.' });
+    expect(on.status).toBe(200);
+    expect(on.body.isTest).toBe(true);
+    expect((await ctx.prisma.vendorProfile.findUniqueOrThrow({ where: { id: v.vendorProfileId } })).isTest).toBe(true);
+
+    const off = await patch(admin, `admin/vendors/${v.vendorProfileId}/test-mode`, { isTest: false, reason: 'Back to trading.' });
+    expect(off.status).toBe(200);
+    expect((await ctx.prisma.vendorProfile.findUniqueOrThrow({ where: { id: v.vendorProfileId } })).isTest).toBe(false);
+
+    const audits = (
+      await ctx.prisma.auditLog.findMany({ where: { action: 'VENDOR_TEST_MODE_CHANGED' } })
+    ).filter((a) => (a.newValue as { vendorProfileId?: string }).vendorProfileId === v.vendorProfileId);
+    expect(audits).toHaveLength(2);
+  });
+
+  it('refuses to strand order history on the other side of the boundary', async () => {
+    const v = await makeVendor();
+    const c = await registerCustomer(`vflip_${uniq()}@example.com`);
+    // An unpaid checkout still creates the order rows: this store now has a
+    // REAL order behind it, so flipping it to a rehearsal store would make
+    // that history invisible to revenue. The guard must say no.
+    await addToCart(c.cookies, v.productId, 1);
+    expect((await checkout(c.cookies, v.vendorProfileId, false)).status).toBe(201);
+
+    const flip = await patch(admin, `admin/vendors/${v.vendorProfileId}/test-mode`, { isTest: true, reason: 'Too late.' });
+    expect(flip.status).toBe(400);
+    expect(flip.body.message).toMatch(/other side of the test boundary/i);
+    expect((await ctx.prisma.vendorProfile.findUniqueOrThrow({ where: { id: v.vendorProfileId } })).isTest).toBe(false);
   });
 });
