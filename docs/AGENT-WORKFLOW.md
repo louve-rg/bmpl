@@ -116,21 +116,26 @@ MinIO (`pnpm infra:up`). **If you cannot run it, say so explicitly in your
 report** — do not silently omit it, and do not present unit tests as though they
 covered the same ground.
 
-> **On the current development machine, Docker is not installed**, so
-> `pnpm infra:up` cannot start Postgres/Redis/MinIO and **the 691-test
-> integration suite cannot be run locally by anyone.** Until Docker (or a remote
-> test database) is available, **the CI job on the pull request is the only place
-> the integration suite runs at all.**
+> **Docker is installed and the suite runs on this machine** — 691 tests across
+> 55 spec files, about 8 minutes, against real Postgres, Redis and MinIO.
+> Verified 2026-09-03.
 >
-> Two consequences, and they are not optional:
-> 1. Any change to `apps/api/src`, the Prisma schema, money, dispatch or routing
->    is **unverified until its PR is open and CI is green.** Never describe such
->    a change as verified before that.
-> 2. Opening that PR is therefore part of verification, not the end of it — but
->    **merging it still requires human approval** (§7).
+> ```bash
+> pnpm infra:up
+> # One-time only: compose provisions the `bmpl` dev database but not the
+> # disposable test database that TEST_DATABASE_URL names.
+> docker exec bmpl-postgres psql -U bmpl -d postgres -c "CREATE DATABASE bmpl_test OWNER bmpl;"
+> pnpm --filter @bmpl/api test:integration
+> ```
 >
-> Getting Docker installed, or a remote test database provisioned, is the single
-> highest-value change to this workflow.
+> So there is no excuse for an unverified API change. **Run it before you hand
+> the work back**, and paste the tail of the output. A change to `apps/api/src`,
+> the Prisma schema, money, dispatch or routing that has not been through this
+> suite is not verified, however green the unit tests are.
+>
+> It is still not the whole story: CI additionally runs it on a clean database
+> from scratch, which catches migration and ordering problems a warm local
+> database can hide. Local green is necessary, not sufficient.
 
 ### Checks that are already red — not your regression
 

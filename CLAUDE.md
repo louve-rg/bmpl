@@ -305,9 +305,8 @@ Verification (see §11 for what to run when):
 pnpm turbo run typecheck                  # 19/19 expected
 pnpm test:unit                            # wallet + authorization + api
 pnpm turbo run test --filter=@bmpl/shared --filter=@bmpl/validation --filter=@bmpl/web
-pnpm --filter @bmpl/api test:integration  # needs TEST_DATABASE_URL + live Postgres
-                                          # NOT RUNNABLE on the current machine —
-                                          # Docker is not installed. See below.
+pnpm --filter @bmpl/api test:integration  # needs TEST_DATABASE_URL + pnpm infra:up
+                                          # 691 tests / 55 spec files, ~8 min
 pnpm --filter @bmpl/api build && pnpm --filter @bmpl/web build && pnpm --filter @bmpl/admin build
 ```
 
@@ -323,15 +322,27 @@ pnpm --filter @bmpl/api build && pnpm --filter @bmpl/web build && pnpm --filter 
 Do not "fix" any of these as a side effect of unrelated work. Each is tracked
 and each needs its own scoped change.
 
-### The integration suite cannot run on this machine
+### Running the integration suite locally
 
-**Docker is not installed here**, so `pnpm infra:up` cannot start Postgres,
-Redis or MinIO, and the 691-test integration suite cannot be run locally by
-anyone. **CI on the pull request is the only place it runs.**
+Docker is available on this machine and the suite runs here — **691 tests across
+55 spec files, ~8 minutes**, against real Postgres, Redis and MinIO.
 
-So: a change to `apps/api/src`, the Prisma schema, money, dispatch or routing is
-**not verified** until its PR is open and CI is green. Do not call it verified
-before then, and do not offer unit tests as if they covered the same ground.
+```bash
+pnpm infra:up            # postgres 5432, redis 6379, minio 9000/9001
+# One-time: docker-compose creates only the `bmpl` dev database, so the
+# disposable test database TEST_DATABASE_URL points at must be created once.
+docker exec bmpl-postgres psql -U bmpl -d postgres -c "CREATE DATABASE bmpl_test OWNER bmpl;"
+pnpm --filter @bmpl/api test:integration
+```
+
+`TEST_DATABASE_URL` is read from the root `.env` by `test/integration.global.ts`,
+which then runs `prisma migrate deploy` against it. It **must** name a different
+database from `DATABASE_URL` — the suite truncates between tests.
+
+**A change to `apps/api/src`, the Prisma schema, money, dispatch or routing is
+not verified until this suite has been run.** Unit tests do not cover the same
+ground. If you genuinely cannot run it, say so explicitly rather than omitting
+it.
 
 ---
 

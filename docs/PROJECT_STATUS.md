@@ -472,10 +472,19 @@ form no longer asks for a street, and the pay button is not blocked.
 - **No ESLint configuration exists anywhere in the repository**, so `pnpm lint`
   cannot pass and is `continue-on-error` in CI. The 84 `eslint-disable` comments
   in the tree are inert. Configuring it is tracked work, not a side task.
-- **Docker is not installed on the current development machine**, so
-  `pnpm infra:up` cannot run and the 691-test integration suite **cannot be run
-  locally at all**. CI on a pull request is the only place it executes. Any API,
-  schema, money, dispatch or routing change is unverified until its PR is green.
+- **The integration suite runs locally.** Docker Desktop was installed on
+  2026-09-03 and the full suite was executed on this machine for the first time:
+  **691 tests across 55 spec files, all passing**, against real Postgres 16,
+  Redis 7 and MinIO from the repository's own `docker-compose.yml` (~8 min).
+  One local-setup gap worth knowing: compose provisions the `bmpl` dev database
+  but **not** the disposable test database `TEST_DATABASE_URL` names, so
+  `CREATE DATABASE bmpl_test OWNER bmpl;` is a one-time step. See
+  [`AGENT-WORKFLOW.md`](./AGENT-WORKFLOW.md) §4.
+- **One flaky assertion was found and fixed** by that first full run:
+  `variant-workflow.integration.spec.ts` compared two presigned URLs whole, so
+  it failed whenever the two signing calls straddled a second boundary. It now
+  compares the object path. No product behaviour changed. Branch
+  `fix/flaky-presigned-url-assertion`.
 - **There is no browser or end-to-end test** (no Playwright, no Cypress).
   `apps/admin` has no test suite at all. Every UI behaviour is verified either by
   a pure-function unit test of the logic behind it, or by a person.

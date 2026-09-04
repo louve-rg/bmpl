@@ -151,13 +151,21 @@ where Docker is available.
 | `pnpm db:reset`       | Drop + recreate + re-seed the dev database      |
 | `pnpm infra:up/down`  | Start/stop Postgres + Redis + MinIO             |
 
-The **integration suite** (auth, role application + storage, admin approval,
-role switching, account suspension, authorization/abuse — 36 tests) runs against
-real PostgreSQL + MinIO. It **fails loudly** if `TEST_DATABASE_URL` is not set —
-it is never silently skipped:
+The **integration suite** — **691 tests across 55 spec files**, covering auth,
+marketplace, checkout, wallet and settlement, dispatch, shipping, jobs, real
+estate and marketing — runs against real PostgreSQL, Redis and MinIO. It **fails
+loudly** if `TEST_DATABASE_URL` is not set; it is never silently skipped. Expect
+about 8 minutes.
 
 ```bash
-# TEST_DATABASE_URL is read from .env; ensure infra is up (pnpm infra:up), then:
+pnpm infra:up
+
+# One-time: docker-compose provisions the `bmpl` dev database but NOT the
+# disposable test database that TEST_DATABASE_URL names. It must differ from
+# DATABASE_URL — the suite truncates data between tests.
+docker exec bmpl-postgres psql -U bmpl -d postgres -c "CREATE DATABASE bmpl_test OWNER bmpl;"
+
+# TEST_DATABASE_URL is read from .env, then migrations are applied to it.
 pnpm --filter @bmpl/api test:integration
 ```
 
