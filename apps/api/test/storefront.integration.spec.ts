@@ -88,6 +88,65 @@ describe('public storefront visibility', () => {
     await request(ctx.server).get('/api/marketplace/vendors/does-not-exist').expect(404);
   });
 
+  it('never serves a simulation storefront to a real shopper — directory, slug, or product page', async () => {
+    // The harm path this closes: a real shopper finds a test store in the public
+    // directory (or holds a direct link), browses it, checks out — and the order
+    // silently derives isTest and is serviced by simulation drivers/settlement.
+    // An all-test cart is ACCEPTED by design (only mixed carts refuse), so the
+    // public surfaces are the only gate. Product SEARCH was already filtered;
+    // these three surfaces were not.
+    const live = await makeApprovedVendor('sf_live@example.bz', 'Front Street Grocery');
+    const sim = await makeApprovedVendor('sf_sim@example.bz', 'Rehearsal Outfitters');
+
+    const cat = await request(ctx.server)
+      .post('/api/admin/categories')
+      .set('Cookie', adminCookies)
+      .send({ name: 'Provisions' });
+    const liveProduct = await request(ctx.server)
+      .post('/api/vendor/products')
+      .set('Cookie', live.cookies)
+      .send({ title: 'Red Beans 1lb', sku: 'LIVE-001', categoryId: cat.body.id, priceMinor: 350 });
+    expect(liveProduct.status).toBe(201);
+    const simProduct = await request(ctx.server)
+      .post('/api/vendor/products')
+      .set('Cookie', sim.cookies)
+      .send({ title: 'Practice Beans 1lb', sku: 'SIM-001', categoryId: cat.body.id, priceMinor: 350 });
+    expect(simProduct.status).toBe(201);
+
+    await request(ctx.server)
+      .patch(`/api/admin/vendors/${sim.id}/test-mode`)
+      .set('Cookie', adminCookies)
+      .send({ isTest: true })
+      .expect(200);
+
+    // Directory: the live store only.
+    const list = await request(ctx.server).get('/api/marketplace/vendors');
+    const names = list.body.map((v: { businessName: string }) => v.businessName);
+    expect(names).toContain('Front Street Grocery');
+    expect(names).not.toContain('Rehearsal Outfitters');
+
+    // Harm path: the exact slug — a shared link — answers exactly like a store
+    // that does not exist, while the live control stays reachable.
+    const bySlug = await request(ctx.server).get(`/api/marketplace/vendors/${sim.slug}`);
+    const unknown = await request(ctx.server).get('/api/marketplace/vendors/no-such-store');
+    expect(bySlug.status).toBe(404);
+    expect(bySlug.body).toEqual(unknown.body);
+    await request(ctx.server).get(`/api/marketplace/vendors/${live.slug}`).expect(200);
+
+    // Product page by direct slug: same story.
+    await request(ctx.server).get(`/api/marketplace/products/${simProduct.body.slug}`).expect(404);
+    await request(ctx.server).get(`/api/marketplace/products/${liveProduct.body.slug}`).expect(200);
+
+    // The filter reads live state: flipping the vendor back restores every surface.
+    await request(ctx.server)
+      .patch(`/api/admin/vendors/${sim.id}/test-mode`)
+      .set('Cookie', adminCookies)
+      .send({ isTest: false })
+      .expect(200);
+    await request(ctx.server).get(`/api/marketplace/vendors/${sim.slug}`).expect(200);
+    await request(ctx.server).get(`/api/marketplace/products/${simProduct.body.slug}`).expect(200);
+  });
+
   it('hides vacation-mode vendors from the directory but keeps the storefront reachable', async () => {
     await request(ctx.server)
       .patch('/api/vendor/settings')

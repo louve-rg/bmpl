@@ -428,7 +428,9 @@ export class ProductsService {
 
   async publicDetail(slug: string) {
     const p = await this.prisma.product.findFirst({
-      where: { slug, status: 'PUBLISHED', vendorProfile: { approvalStatus: 'APPROVED' } },
+      // vendorProfile.isTest mirrors the raw-SQL search filter above — a test
+      // vendor's product page must not be reachable by direct slug either.
+      where: { slug, status: 'PUBLISHED', vendorProfile: { approvalStatus: 'APPROVED', isTest: false } },
       include: {
         category: { select: { name: true, slug: true } },
         vendorProfile: { select: { businessName: true, slug: true } },
