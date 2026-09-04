@@ -46,53 +46,131 @@ const userAcct = async (userId: string) => {
   return ctx.prisma.walletAccount.findFirst({ where: { userId, type: 'USER', currency: 'BZD' } });
 };
 
-/** Fund escrow with a balanced TOPUP_CLEARING → ESCROW transfer (simulates an
- *  authorized order's escrowed funds; keeps the global ledger at net zero). */
-async function fundEscrow(amountMinor: number) {
-  const escrow = await systemAcct('SYSTEM_ESCROW');
-  const clearing = await systemAcct('SYSTEM_TOPUP_CLEARING');
-  await ctx.prisma.walletTransaction.create({
-    data: { type: 'TOPUP', status: 'POSTED', currency: 'BZD', reference: `test-escrow-fund-${uniq()}`, postedAt: new Date(), entries: { create: [{ accountId: escrow.id, direction: 'CREDIT', amountMinor: BigInt(amountMinor) }, { accountId: clearing.id, direction: 'DEBIT', amountMinor: BigInt(amountMinor) }] } },
+const ADDRESS = {
+  fullName: 'Settlement Customer', phone: '501-222-3333', addressLine1: '5 Barrack Road',
+  city: 'Belize City', district: 'BELIZE', latitude: 17.4995, longitude: -88.1976,
+};
+
+/**
+ * A vendor whose checkout numbers are the product's numbers: the product price
+ * IS the subtotal and the store's base delivery fee IS the delivery fee, so
+ * the totals every assertion checks come out of the pricing engine, not out of
+ * a hand-typed order row. Profile creation itself is role/bootstrap machinery
+ * (vendor onboarding is exercised by its own suite).
+ */
+async function makeVendor(s: string, priceMinor: number, deliveryFeeMinor: number) {
+  const vend = await register(`vend_${s}@example.bz`);
+  await ctx.prisma.userRole.create({ data: { userId: vend.userId, roleCode: 'VENDOR', status: 'APPROVED', approvedAt: new Date() } });
+  const vp = await ctx.prisma.vendorProfile.create({
+    data: {
+      userId: vend.userId, businessName: `Store ${s}`, slug: `store-${s}`, contactEmail: `v${s}@x.bz`,
+      approvalStatus: 'APPROVED', storeStatus: 'OPEN',
+      settings: { create: { deliveryEnabled: true, pickupEnabled: true, baseDeliveryFeeMinor: BigInt(deliveryFeeMinor) } },
+      locations: { create: { label: 'Main', addressLine1: '12 Freetown Road', city: 'Belize City', district: 'BELIZE', latitude: 17.4995, longitude: -88.1976, isPrimary: true } },
+    },
   });
-  await ctx.prisma.walletAccount.update({ where: { id: escrow.id }, data: { cachedBalanceMinor: { increment: BigInt(amountMinor) } } });
+  const product = await ctx.prisma.product.create({
+    data: {
+      vendorProfileId: vp.id, categoryId, title: `P ${s}`, slug: `p-${s}`, sku: `SKU-${s}`, status: 'PUBLISHED',
+      priceMinor: BigInt(priceMinor), currency: 'BZD', inventory: { create: { quantity: 10, reserved: 0 } },
+    },
+  });
+  return { vendorUserId: vend.userId, vendorCookies: vend.cookies, vendorProfileId: vp.id, productId: product.id };
+}
+
+/** An approved, online, vehicled driver who can actually be assigned and drive the job. */
+async function makeApprovedDriver(s: string) {
+  const drv = await register(`drv_${s}@example.bz`);
+  await ctx.prisma.userRole.create({ data: { userId: drv.userId, roleCode: 'DELIVERY_DRIVER', status: 'APPROVED', approvedAt: new Date() } });
+  const dp = await ctx.prisma.driverProfile.create({
+    data: { userId: drv.userId, legalName: 'D', displayName: `Drv${s}`, phone: '+501', homeDistrict: 'BELIZE', licenceNumber: `DL-${s}`, licenceExpiry: FUTURE, vehicleOwnership: 'OWNED', availability: 'ONLINE', isActive: true },
+  });
+  const vehicle = await ctx.prisma.driverVehicle.create({
+    data: { driverProfileId: dp.id, type: 'CAR', make: 'Toyota', model: 'Corolla', licencePlate: `SZ-${s}`.slice(0, 18), registrationExpiry: FUTURE, insuranceExpiry: FUTURE, isActive: true, isPrimary: true, approvalStatus: 'APPROVED' },
+  });
+  await ctx.prisma.driverServiceArea.create({ data: { driverProfileId: dp.id, district: 'BELIZE', isActive: true } });
+  return { cookies: drv.cookies, driverUserId: drv.userId, driverProfileId: dp.id, vehicleId: vehicle.id };
+}
+
+/**
+ * Drive one delivery through the product to the far edge of the driver flow:
+ * admin manual assignment, then accept → pickup PIN → in-transit (→ arriving).
+ * Every transition is the real endpoint; the PINs are read from the row the
+ * way the driver reads them off the vendor's counter slip.
+ */
+async function driveTo(driver: { cookies: string[]; driverProfileId: string; vehicleId: string }, deliveryId: string, upTo: 'IN_TRANSIT' | 'ARRIVING') {
+  const assigned = await post(adminCookies, `admin/deliveries/${deliveryId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId: driver.vehicleId });
+  expect(assigned.status).toBe(201);
+  expect((await post(driver.cookies, `driver/jobs/${deliveryId}/accept`)).status).toBe(201);
+  const pins = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: deliveryId }, select: { pickupPin: true } });
+  expect((await post(driver.cookies, `driver/jobs/${deliveryId}/confirm-pickup`, { pin: pins.pickupPin })).status).toBe(201);
+  expect((await post(driver.cookies, `driver/jobs/${deliveryId}/in-transit`)).status).toBe(201);
+  if (upTo === 'ARRIVING') expect((await post(driver.cookies, `driver/jobs/${deliveryId}/arriving`)).status).toBe(201);
+}
+
+/**
+ * The product cannot produce a DELIVERED-but-unsettled delivery on purpose:
+ * the driver's confirm-delivery endpoint settles synchronously in the same
+ * request (driver-jobs.service, "delivery completion triggers internal
+ * settlement"). In production that pristine state exists only when the
+ * auto-settlement FAILS — which is exactly the state the admin retry endpoint
+ * under test here exists to recover. This one raw write simulates that
+ * failure honestly; taking the last step through the API instead would settle
+ * the order inside the fixture and turn every assertion below into a no-op
+ * replay against an already-settled ledger.
+ */
+async function markDeliveredUnsettled(deliveryId: string) {
+  await ctx.prisma.orderDelivery.update({ where: { id: deliveryId }, data: { status: 'DELIVERED', deliveredAt: new Date() } });
 }
 
 interface Settleable { vendorOrderId: string; vendorUserId: string; driverUserId: string; driverProfileId: string; orderId: string; customerId: string; customerCookies: string[]; productId: string; inventoryId: string; deliveryId: string }
 
-/** Seed an AUTHORIZED, escrow-funded, DELIVERED single-vendor delivery order. */
-async function seedDelivered(opts: { subtotal: number; deliveryFee: number; withDriver?: boolean } = { subtotal: 10000, deliveryFee: 500 }): Promise<Settleable> {
+/**
+ * An AUTHORIZED, escrow-funded, DELIVERED single-vendor delivery order that
+ * the product actually made. The customer's wallet is funded by administrative
+ * test credit (the sanctioned funding path, as the shipping suites use for
+ * real-side orders); checkout builds the order graph, reserves stock and
+ * AUTHORIZES payment — which is what funds escrow, with the customer's own
+ * wallet money, through the wallet service; the driver is admin-assigned and
+ * drives the job to ARRIVING over the driver API. Escrow is therefore never
+ * fabricated: the fundEscrow fixture that used to post a raw TOPUP and
+ * directly increment the escrow account's cached balance is gone — the real
+ * authorization path produces the exact escrow state these tests need.
+ * The final DELIVERED-unsettled step is simulated; see markDeliveredUnsettled.
+ */
+async function seedDelivered(opts: { subtotal: number; deliveryFee: number } = { subtotal: 10000, deliveryFee: 500 }): Promise<Settleable> {
   const s = uniq();
-  const withDriver = opts.withDriver ?? true;
-  // vendor
-  const vend = await register(`vend_${s}@example.bz`);
-  await ctx.prisma.userRole.create({ data: { userId: vend.userId, roleCode: 'VENDOR', status: 'APPROVED', approvedAt: new Date() } });
-  const vp = await ctx.prisma.vendorProfile.create({ data: { userId: vend.userId, businessName: `Store ${s}`, slug: `store-${s}`, contactEmail: `v${s}@x.bz`, approvalStatus: 'APPROVED', storeStatus: 'OPEN' } });
-  const product = await ctx.prisma.product.create({ data: { vendorProfileId: vp.id, categoryId, title: `P ${s}`, slug: `p-${s}`, sku: `SKU-${s}`, status: 'PUBLISHED', priceMinor: BigInt(opts.subtotal), currency: 'BZD', inventory: { create: { quantity: 10, reserved: 1 } } } });
-  const inv = await ctx.prisma.inventory.findFirstOrThrow({ where: { productId: product.id } });
-  // driver
-  let driverUserId = '', driverProfileId = '';
-  if (withDriver) {
-    const drv = await register(`drv_${s}@example.bz`);
-    driverUserId = drv.userId;
-    const dp = await ctx.prisma.driverProfile.create({ data: { userId: drv.userId, legalName: 'D', displayName: `Drv${s}`, phone: '+501', homeDistrict: 'BELIZE', licenceNumber: `DL-${s}`, licenceExpiry: FUTURE, vehicleOwnership: 'OWNED', availability: 'ONLINE', isActive: true } });
-    driverProfileId = dp.id;
-  }
-  // customer + order graph
-  const cust = await register(`cust_${s}@example.bz`);
-  const num = `ORD-${s}`;
   const total = opts.subtotal + opts.deliveryFee;
-  const order = await ctx.prisma.order.create({
-    data: {
-      orderNumber: num, userId: cust.userId, status: 'PENDING', itemCount: 1, subtotalMinor: BigInt(opts.subtotal), deliveryFeeMinor: BigInt(opts.deliveryFee), totalMinor: BigInt(total),
-      addresses: { create: { type: 'SHIPPING', fullName: 'C', addressLine1: '1 St', city: 'Belize City', district: 'BELIZE' } },
-      vendorOrders: { create: { orderNumber: `${num}-1`, vendorProfileId: vp.id, status: 'PENDING', deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: BigInt(opts.subtotal), items: { create: { productId: product.id, productTitle: 'P', unitPriceMinor: BigInt(opts.subtotal), quantity: 1, subtotalMinor: BigInt(opts.subtotal) } }, delivery: { create: { status: 'DELIVERED', feeMinor: BigInt(opts.deliveryFee), deliveredAt: new Date(), ...(withDriver ? { assignedDriverProfileId: driverProfileId } : {}) } } } },
-      payment: { create: { paymentNumber: `PAY-${s}`, userId: cust.userId, amountMinor: BigInt(total), currency: 'BZD', status: 'AUTHORIZED', authorizedAt: new Date() } },
-    },
-    include: { vendorOrders: { include: { delivery: true } } },
-  });
-  await fundEscrow(total);
-  const vo = order.vendorOrders[0]!;
-  return { vendorOrderId: vo.id, vendorUserId: vend.userId, driverUserId, driverProfileId, orderId: order.id, customerId: cust.userId, customerCookies: cust.cookies, productId: product.id, inventoryId: inv.id, deliveryId: vo.delivery!.id };
+  const vendor = await makeVendor(s, opts.subtotal, opts.deliveryFee);
+  const driver = await makeApprovedDriver(s);
+
+  const cust = await register(`cust_${s}@example.bz`);
+  expect((await post(adminCookies, 'admin/wallet/test-credit', { userId: cust.userId, amountMinor: total, reason: 'Settlement fixture funding.' })).status).toBe(201);
+  expect((await post(cust.cookies, 'cart/items', { productId: vendor.productId, quantity: 1 })).status).toBeLessThan(400);
+  const co = await post(cust.cookies, 'checkout', { vendors: [{ vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'DELIVERY' }], deliveryAddress: ADDRESS, payWithWallet: true });
+  expect(co.status).toBe(201);
+
+  const order = await ctx.prisma.order.findFirstOrThrow({ where: { userId: cust.userId }, orderBy: { createdAt: 'desc' } });
+  const vo = await ctx.prisma.vendorOrder.findFirstOrThrow({ where: { orderId: order.id }, include: { delivery: true } });
+  const payment = await ctx.prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+  const inv = await ctx.prisma.inventory.findFirstOrThrow({ where: { productId: vendor.productId } });
+  // The product must have produced exactly the numbers the assertions rely on.
+  // If any of these ever fail, that is a finding about checkout or pricing —
+  // not a reason to adjust what the settlement tests expect.
+  expect(Number(order.subtotalMinor)).toBe(opts.subtotal);
+  expect(Number(vo.delivery!.feeMinor)).toBe(opts.deliveryFee);
+  expect(Number(payment.amountMinor)).toBe(total);
+  expect(payment.status).toBe('AUTHORIZED');
+
+  // The vendor packs and readies the order before anyone is sent to collect it
+  // — the product's own sequence. (Automatic dispatch is off by default in a
+  // fresh database, so the manual assignment below stays deterministic.)
+  expect((await post(vendor.vendorCookies, `vendor/orders/${vo.id}/ready`)).status).toBe(201);
+
+  await driveTo(driver, vo.delivery!.id, 'ARRIVING');
+  await markDeliveredUnsettled(vo.delivery!.id);
+
+  return { vendorOrderId: vo.id, vendorUserId: vendor.vendorUserId, driverUserId: driver.driverUserId, driverProfileId: driver.driverProfileId, orderId: order.id, customerId: cust.userId, customerCookies: cust.cookies, productId: vendor.productId, inventoryId: inv.id, deliveryId: vo.delivery!.id };
 }
 /** Settle via the admin path (mirrors the delivery-completion auto-trigger). */
 const settle = (voId: string) => post(adminCookies, `admin/settlements/vendor-order/${voId}/retry`);
@@ -196,37 +274,44 @@ describe('rejections + exceptions', () => {
 
 describe('multi-vendor independence', () => {
   it('settles one vendor-order without releasing another incomplete one', async () => {
-    // Build a 2-vendor order manually: one delivered, one still in transit.
+    // A real 2-vendor checkout: ONE payment authorizes 16000 into escrow with
+    // the customer's own money, split across two vendor-orders. Vendor A's
+    // delivery is driven to ARRIVING through the driver API and then marked
+    // delivered-unsettled (see markDeliveredUnsettled); vendor B's is driven
+    // to IN_TRANSIT and simply STOPS there — a genuinely product-made
+    // incomplete delivery, no fabrication at all on that side.
     const s = uniq();
+    const a = { ...(await makeVendor(`mva${s}`, 10000, 500)), ...(await makeApprovedDriver(`mva${s}`)) };
+    const b = { ...(await makeVendor(`mvb${s}`, 5000, 500)), ...(await makeApprovedDriver(`mvb${s}`)) };
+
     const cust = await register(`mv_cust_${s}@example.bz`);
-    const mk = async (tag: string) => {
-      const v = await register(`mv_${tag}_${s}@example.bz`);
-      await ctx.prisma.userRole.create({ data: { userId: v.userId, roleCode: 'VENDOR', status: 'APPROVED', approvedAt: new Date() } });
-      const vp = await ctx.prisma.vendorProfile.create({ data: { userId: v.userId, businessName: `MV${tag}${s}`, slug: `mv-${tag}-${s}`, contactEmail: `mv${tag}${s}@x.bz`, approvalStatus: 'APPROVED', storeStatus: 'OPEN' } });
-      const drv = await register(`mv_drv_${tag}_${s}@example.bz`);
-      const dp = await ctx.prisma.driverProfile.create({ data: { userId: drv.userId, legalName: 'D', displayName: `d${tag}${s}`, phone: '+501', homeDistrict: 'BELIZE', licenceNumber: `DL${tag}${s}`, licenceExpiry: FUTURE, vehicleOwnership: 'OWNED' } });
-      return { vpId: vp.id, vendorUserId: v.userId, driverProfileId: dp.id, driverUserId: drv.userId };
-    };
-    const a = await mk('a');
-    const b = await mk('b');
-    const num = `ORD-MV-${s}`;
-    const order = await ctx.prisma.order.create({
-      data: {
-        orderNumber: num, userId: cust.userId, status: 'PENDING', itemCount: 2, subtotalMinor: 15000n, deliveryFeeMinor: 1000n, totalMinor: 16000n,
-        addresses: { create: { type: 'SHIPPING', fullName: 'C', addressLine1: '1', city: 'BZ', district: 'BELIZE' } },
-        payment: { create: { paymentNumber: `PAY-MV-${s}`, userId: cust.userId, amountMinor: 16000n, currency: 'BZD', status: 'AUTHORIZED', authorizedAt: new Date() } },
-        vendorOrders: {
-          create: [
-            { orderNumber: `${num}-1`, vendorProfileId: a.vpId, status: 'PENDING', deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 10000n, delivery: { create: { status: 'DELIVERED', feeMinor: 500n, deliveredAt: new Date(), assignedDriverProfileId: a.driverProfileId } } },
-            { orderNumber: `${num}-2`, vendorProfileId: b.vpId, status: 'PENDING', deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 5000n, delivery: { create: { status: 'IN_TRANSIT', feeMinor: 500n, assignedDriverProfileId: b.driverProfileId } } },
-          ],
-        },
-      },
-      include: { vendorOrders: { include: { delivery: true } } },
+    expect((await post(adminCookies, 'admin/wallet/test-credit', { userId: cust.userId, amountMinor: 16000, reason: 'Multi-vendor settlement fixture.' })).status).toBe(201);
+    expect((await post(cust.cookies, 'cart/items', { productId: a.productId, quantity: 1 })).status).toBeLessThan(400);
+    expect((await post(cust.cookies, 'cart/items', { productId: b.productId, quantity: 1 })).status).toBeLessThan(400);
+    const co = await post(cust.cookies, 'checkout', {
+      vendors: [
+        { vendorProfileId: a.vendorProfileId, deliveryMethod: 'DELIVERY' },
+        { vendorProfileId: b.vendorProfileId, deliveryMethod: 'DELIVERY' },
+      ],
+      deliveryAddress: ADDRESS,
+      payWithWallet: true,
     });
-    await fundEscrow(16000);
-    const voA = order.vendorOrders.find((v) => v.subtotalMinor === 10000n)!;
-    const voB = order.vendorOrders.find((v) => v.subtotalMinor === 5000n)!;
+    expect(co.status).toBe(201);
+
+    const order = await ctx.prisma.order.findFirstOrThrow({ where: { userId: cust.userId }, orderBy: { createdAt: 'desc' } });
+    // One authorization for the whole order — the product's number, checked.
+    const payment = await ctx.prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(Number(payment.amountMinor)).toBe(16000);
+    expect(payment.status).toBe('AUTHORIZED');
+
+    const voA = await ctx.prisma.vendorOrder.findFirstOrThrow({ where: { orderId: order.id, vendorProfileId: a.vendorProfileId }, include: { delivery: true } });
+    const voB = await ctx.prisma.vendorOrder.findFirstOrThrow({ where: { orderId: order.id, vendorProfileId: b.vendorProfileId }, include: { delivery: true } });
+
+    expect((await post(a.vendorCookies, `vendor/orders/${voA.id}/ready`)).status).toBe(201);
+    expect((await post(b.vendorCookies, `vendor/orders/${voB.id}/ready`)).status).toBe(201);
+    await driveTo(a, voA.delivery!.id, 'ARRIVING');
+    await markDeliveredUnsettled(voA.delivery!.id);
+    await driveTo(b, voB.delivery!.id, 'IN_TRANSIT');
 
     // settle A only
     await settle(voA.id).expect(201);
