@@ -8,7 +8,8 @@
  *    request — including when an admin does the typing — and flipping the
  *    operator re-derives everything they already own, so the order of
  *    operations cannot leak a row across the boundary;
- *  - no fare exists: baseFareMinor is born null and no request can set it;
+ *  - a route is born UNPRICED: baseFareMinor is null unless the operator
+ *    explicitly configures one (S3) — no default, no zero, nothing invented;
  *  - a route's endpoints freeze once departures exist, because a scheduled
  *    trip carries its geography on the route;
  *  - the tables ship empty — every network row (route, stop, trip) is created
@@ -100,8 +101,14 @@ beforeEach(async () => {
 describe('an operator describes their service', () => {
   it('creates a route with ordered stops, no fare, and an audit row naming them', async () => {
     const p = await makeProvider('Test Southern Shuttles');
-    // Smuggled fields prove the two deliberate absences: both are stripped.
-    const r = await post(p.cookies, 'passenger/provider/routes', { ...routeBody(), isTest: true, baseFareMinor: 5000 });
+    // Two different absences, proven two different ways. isTest is smuggled
+    // and must be STRIPPED — the flag is never a client's claim. The fare is
+    // simply NOT SENT: since S3 it is a legitimate operator control, so the
+    // hard bar this test pins is the unpriced DEFAULT — when nobody
+    // configures a fare, the route is born with null, not a default, not a
+    // zero, not an invented number. (S3's own suite proves the configured
+    // path and the gate it opens.)
+    const r = await post(p.cookies, 'passenger/provider/routes', { ...routeBody(), isTest: true });
     expect(r.status).toBe(201);
     expect(r.body.stops.map((s: { sequence: number; city: string }) => [s.sequence, s.city])).toEqual([
       [1, 'Test Midway One'],
