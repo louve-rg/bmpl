@@ -4,9 +4,19 @@
 project up from the repository alone. It carries no secrets, no credentials and
 no customer data — only what is true about the code and how it is run.
 
-Last reviewed: 2026-09-03, against `main` at **`a2bab27`** — the marketplace
-address and courier-lane work, **merged and deployed**. API, Web and Admin are
-all serving that commit. What is still unverified is listed in §12.
+Last reviewed: 2026-09-04, against `main` at **`6b2e0d1`** — manual courier-leg
+assignment (PR #11) and handoff-PIN access (PR #12), both merged. Deployment
+state of that commit is a live value; check `/api/health`. What is still
+unverified is listed in §12.
+
+**One distinction to hold onto before reading anything else: production has NO
+shipping network configuration at all** — no hubs, no routes, no courier fees
+(`/api/shipping/hubs` → `[]`, `/api/shipping/modes` → `[]`, `courier_lanes`
+empty). Several things that read like "gaps" are therefore **unconfigured
+operations, not missing code**: the software to run a multi-leg network exists
+and is tested, and what is absent is the business data — carriers, rates,
+lanes — that only operations may enter (§12, "Business configuration, not
+defects"). Who fixes a gap depends on which side of that line it sits.
 
 When this document and the code disagree, **the code wins** — and then this
 document is wrong and should be fixed in the same change.
@@ -37,7 +47,9 @@ Active business areas, in the order they matter right now:
 2. **Shipping & Delivery** — sending a parcel, possibly across several legs.
 3. **Delivery driver** — the courier who actually moves it.
 4. **Passenger Transportation** — moving people rather than parcels. Formally
-   authorized by the product owner, in foundation stage.
+   authorized by the product owner, in foundation stage: the schema foundation
+   is merged and live (eight `passenger_*` tables), and **no services,
+   controllers or UI exist yet** — the tables are the whole vertical so far.
 5. **Wallet & payments** — a ledger, escrow and settlement behind all of it.
 
 Also present, and **not** the current focus: Belize Connect (jobs), real estate,
@@ -447,6 +459,31 @@ form no longer asks for a street, and the pay button is not blocked.
   by migration; whether it is on today is a live value, not something to infer.
   It was deliberately not changed by this milestone.
 
+### Delivery & courier lifecycle
+
+The full gap register lives in
+[`DELIVERY-LIFECYCLE.md`](./DELIVERY-LIFECYCLE.md) §6 — one place, so the two
+documents cannot drift. Status summary as of `6b2e0d1`:
+
+- **Closed on `main`**: manual courier-leg assignment
+  (`POST /admin/logistics/legs/:id/assign` + `/reassign` +
+  `GET legs/:id/eligible-drivers`, PR #11) and handoff-PIN access (DIRECT legs
+  are last-mile-equivalent for the customer; audited staff reveal under
+  `logistics.verify`, refused to the leg's own assigned driver, PR #12).
+- **Open**: cancellation orphans an accepted courier job in the driver's queue;
+  leg EXCEPTION has no recovery path; the recipient has no notification or
+  tracking channel; the handoff-desk feed has no screen; and **booking a
+  shipment whose total is zero crashes with a 500 instead of refusing** (a fix
+  exists on an unmerged branch — it is open until merged).
+- **Awaiting a product decision, not code**: what a driver who completed a leg
+  is owed when staff cancel the rest of the journey. The full escrow currently
+  returns to the customer. Do not write or imply a refund/earnings policy —
+  none exists.
+- **Belize Connect**, for calibration: the frontend is substantially complete
+  and the one known role-gating issue is low severity, reachable only when an
+  admin suspends a user's CUSTOMER role. Any document implying Belize Connect
+  is broadly broken or unbuilt is wrong.
+
 ### Business configuration, not defects
 
 - **Production has no transport network.** Re-checked after the deploy:
@@ -485,9 +522,13 @@ form no longer asks for a street, and the pay button is not blocked.
 - `@bmpl/authentication`, `@bmpl/notifications` and `@bmpl/database` declare a
   `test` script but have no test files, so `turbo run test` reports them as
   failures. Pre-existing; CI runs `pnpm test:unit`, which excludes them.
-- **No ESLint configuration exists anywhere in the repository**, so `pnpm lint`
-  cannot pass and is `continue-on-error` in CI. The 84 `eslint-disable` comments
-  in the tree are inert. Configuring it is tracked work, not a side task.
+- **ESLint has a foundation, deliberately inert** (PR #10): a root
+  `eslint.config.mjs` (eslint 10 + typescript-eslint 8, type-aware via
+  `projectService`) with `packages/wallet` as the working pilot. No package's
+  `lint` script is wired to it yet, so `pnpm lint` still fails repo-wide and
+  stays `continue-on-error` in CI — that is the documented current state, not a
+  regression. Packages are onboarded **one at a time** so existing debt stays
+  visible; do not mass-fix or blanket-disable violations.
 - **The integration suite runs locally.** Docker Desktop was installed on
   2026-09-03 and the full suite was executed on this machine for the first time:
   **691 tests across 55 spec files, all passing**, against real Postgres 16,

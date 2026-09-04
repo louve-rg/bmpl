@@ -245,22 +245,40 @@ dispatch is off, `dispatchLeg` always returns SKIPPED**
 tables so a driver holding three marketplace deliveries is not handed a fourth
 job. Its own sweeper (`shipment-dispatch.scheduler.ts`, ~20s, separate Redis
 lock so one engine cannot take the other down) expires offers and re-offers;
-exhaustion stamps `dispatchExhaustedAt` and alerts admins.
+exhaustion stamps `dispatchExhaustedAt` and alerts admins. Beside the engine,
+an operator can assign or reassign a courier leg **by hand** —
+`GET /admin/logistics/legs/:id/eligible-drivers`, `POST legs/:id/assign`,
+`POST legs/:id/reassign` (`logistics.operate`) — which is the production path
+while automatic dispatch is off (closed gap 1).
 
 ### Handoff PINs: held by the receiver
 
 The PIN proves the handoff: whoever **receives** the parcel holds the code,
 and the person handing it over must produce it. Five failed attempts lock the
 leg with an admin alert (`shipment.service.ts:734-760`). Who can see which
-PIN (`pinFor`, `shipment.service.ts:1105`):
+PIN:
 
-- The **customer (sender)** sees the PIN only for a `LAST_MILE` leg on a
-  journey ending at their recipient's door — the code they pass to the
-  recipient.
-- **Staff serialization always returns null** — there is no listing of PINs.
+- The **customer (sender)** sees the PIN for a `LAST_MILE` **or `DIRECT`** leg
+  on a journey ending at their recipient's door — the code they pass to the
+  recipient (`pinFor`, `shipment.service.ts:1111`; a DIRECT leg is
+  last-mile-equivalent because it ends at the recipient's door, not a counter).
+  The sender is the channel because the recipient has no account — see gap 5.
+- **Desk-held codes** (a first mile or line-haul ending at a terminal) are
+  revealed to staff deliberately, never by listing:
+  `GET /admin/logistics/legs/:id/handoff-pin` under `logistics.verify` — a
+  **different** permission from `logistics.operate`, mirroring how deliveries
+  separate operating from code-holding (`deliveries.verify`). Every reveal
+  writes an audit row (never containing the code), and the endpoint refuses
+  the leg's **own assigned driver** (`shipment.service.ts:1160`) — the person
+  producing the code must not be its source.
+- **Staff serialization still returns null** — the reveal endpoint is the only
+  staff path to a code.
 
-What that leaves uncovered is a real gap — see
-[Known gaps](#6-known-gaps-as-of-2026-09-04), item 2.
+This closed what was gap 2 (PR #12). Still absent in this area: an admin
+**override** for a handoff locked by five failed attempts — the lockout
+message promises one, the permission for it is chosen (`logistics.verify`'s
+charter includes "override a handoff verification"), and whether to build a
+PIN bypass at all is a human-gated decision.
 
 ### Ending at a terminal: AWAITING_COLLECTION
 
@@ -318,7 +336,7 @@ controller prefix tells you the audience (`apps/api/CLAUDE.md` §3):
 | `/vendor/delivery`, `/vendor/deliveries` | `@Roles('VENDOR')`, own store only |
 | `/driver/jobs/*`, `/driver/shipping-jobs/*` | `@Roles('DELIVERY_DRIVER')`, own assignments only, 404 on anything else |
 | `/admin/deliveries/*` | `deliveries.read` / `.assign` / `.manage` / `.verify`, `proof_of_delivery.read` |
-| `/admin/logistics/*` | `logistics.read` / `.manage` / `.operate` |
+| `/admin/logistics/*` | `logistics.read` / `.manage` / `.operate` / `.verify` (PIN reveal only) |
 
 **A requester never fulfils their own delivery, matched on the underlying user
 id, not the active role.** The same person may legitimately be a customer and
@@ -356,45 +374,42 @@ Covered by `apps/api/test/self-delivery.integration.spec.ts` (6 tests) and
 - **Automatic dispatch is off in production**, by deliberate decision
   (migration `20261009120000_dispatch_default_off`), and the engine treats a
   missing settings row as off. Turning it on is a human product decision
-  (`AGENT-WORKFLOW.md` §7). What that means for shipping while it is off is
-  gap 1 below.
+  (`AGENT-WORKFLOW.md` §7). While it is off, **manual assignment is the
+  production dispatch path** for both marketplace deliveries and shipment
+  courier legs (closed gap 1 below).
 
 ---
 
 ## 6. Known gaps as of 2026-09-04
 
 Each of these was verified in the code on 2026-09-04 (paths cited). They are
-recorded so nobody promises a flow that cannot complete; **none of them is
-fixed by this document**, and the money-adjacent ones need a product decision,
-not just code.
+recorded so nobody promises a flow that cannot complete; the money-adjacent
+ones need a product decision, not just code. Numbering is stable — closed
+items keep their number so references elsewhere stay valid.
 
-**1. A shipment courier leg has no manual assignment path — so with automatic
-dispatch off, production shipping cannot reach a driver.** Marketplace
-deliveries have `POST /admin/deliveries/:id/assign` and `/reassign`;
-`AdminLogisticsController` exposes start / depart / arrive / handoff /
-exception / collect / cancel and **no assign** (verified across
-`apps/api/src/shipping/*.controller.ts`). With `dispatchAutomatic` off —
-deliberate in production — `ShipmentDispatchService.dispatchLeg` always
-returns SKIPPED (`shipment-dispatch.service.ts:55`), and when a leg's offers
-are exhausted the admin alert literally says "Assign one by hand"
-(`shipment-dispatch.service.ts:375`) — an instruction no API endpoint can
-carry out. Operators *can* move a parcel via `legs/:id/start` + `handoff`,
-but that bypasses the driver flow and driver earnings entirely.
+**Read this before the list: several remaining gaps are OPERATIONS, not
+code.** Production has no shipping network configured at all — no hubs, no
+routes, no courier fees (`PROJECT_STATUS.md` §12, "Business configuration,
+not defects"). The code below either works or is broken as stated; whether a
+parcel can actually be quoted across Belize today is a question of
+configuration that only operations may enter, and no code change fixes it.
 
-**2. DIRECT and FIRST_MILE handoff PINs are unobtainable through the API, so
-those handoffs cannot legitimately complete.** Every leg completion requires
-the receiver's PIN (`verifyHandoffPin`, `shipment.service.ts:734`). But
-`pinFor` (`shipment.service.ts:1105`) reveals a PIN only to the customer, only
-for a `LAST_MILE` leg; staff serialization always returns null, and unlike
-deliveries (`GET /admin/deliveries/:id/pins`) **no reveal endpoint exists for
-shipment leg PINs** (verified by grep for `handoffPin` across
-`apps/api/src`). So on a `DIRECT` leg the recipient is told to expect a code
-nobody ever showed them, and on a `FIRST_MILE` the driver is told "terminal
-staff hold the code" (`shipment-driver.service.ts:360`) while nothing shows
-terminal staff that code. The integration specs pass because they read
-`handoffPin` straight from the database. After five failed attempts the error
-says an administrator has to confirm the handoff — and no override endpoint
-exists for that either.
+**1. CLOSED on `main` (PR #11) — a shipment courier leg can now be assigned
+by hand.** `GET /admin/logistics/legs/:id/eligible-drivers`,
+`POST legs/:id/assign` and `POST legs/:id/reassign` (all `logistics.operate`)
+give operators the manual dispatch path the exhaustion alert always promised.
+With `dispatchAutomatic` off — still deliberate in production — this is the
+production dispatch path for courier legs.
+
+**2. CLOSED on `main` (PR #12) — every handoff code can reach the hand that
+must type it.** `pinFor` treats a `DIRECT` leg as last-mile-equivalent, so the
+customer sees the code for a door-to-door run; desk-held codes are revealed by
+`GET /admin/logistics/legs/:id/handoff-pin` under `logistics.verify` —
+scope-limited, refused to the leg's own assigned driver, and audited on every
+reveal. Residual, still open within this area: **no admin override exists for
+a handoff locked by five failed attempts**, though the lockout message
+promises one; the permission is chosen (`logistics.verify`), and whether to
+build a PIN bypass at all is human-gated.
 
 **3. Cancelling a shipment orphans an accepted courier job in the driver's
 queue.** `ShipmentService.cancel` (`shipment.service.ts:985`) sets leg
@@ -445,9 +460,16 @@ should be refunded, is a product-owner decision. Do not invent a policy.**
 should this terminal be expecting", and no admin UI calls it (verified by
 grep across `apps/admin`).
 
+**8. Booking a shipment whose total is zero crashes with a 500 instead of
+refusing.** Confirmed reachable in production. A fix exists on an **unmerged**
+branch (`fix/zero-total-shipment-booking`) — this stays OPEN until that
+merges; do not describe it as fixed.
+
 ---
 
-*Written against `main` at `c73a2ed` (2026-09-04). Sources: the controllers
+*Written against `main` at `c73a2ed`, updated against `6b2e0d1`
+(2026-09-04): gaps 1 and 2 closed by PRs #11 and #12, gap 8 added.
+Sources: the controllers
 and services cited inline — every endpoint named here was read in its
 controller. Cross-references: `docs/PROJECT_STATUS.md` §6–7 for shipping and
 routing, `CLAUDE.md` §5–6 for the invariants, `docs/AGENT-WORKFLOW.md` §7 for
