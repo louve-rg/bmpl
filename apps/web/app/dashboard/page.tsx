@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { ROLE_DEFINITIONS, type RoleCode } from '@bmpl/shared';
 import { serverGet } from '../../lib/server-api';
 import type { MeView } from '../../lib/types';
-import { Alert, Card, PageHeader, StatusBadge } from '../../components/ui';
+import { Card, PageHeader, StatusBadge } from '../../components/ui';
 import { ForYou } from '../../components/discovery/ForYou';
+import { VerifyEmailBanner } from '../../components/VerifyEmailBanner';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,11 +16,7 @@ export default async function DashboardHome() {
     <div className="mx-auto max-w-4xl">
       <PageHeader eyebrow={`Signed in as ${activeLabel}`} title={`Welcome, ${me.firstName}`} />
 
-      {!me.emailVerified && (
-        <Alert tone="warning" className="mb-6">
-          Please verify your email to unlock provider features. Check your inbox for the link.
-        </Alert>
-      )}
+      {!me.emailVerified && <VerifyEmailBanner email={me.email} />}
 
       <section className="mb-8 grid gap-4 sm:grid-cols-3">
         <StatCard label="Active role" value={activeLabel} />
