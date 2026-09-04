@@ -431,19 +431,37 @@ export class DriverService {
       select: { userId: true, status: true },
     });
     const roleBy = new Map(roles.map((r) => [r.userId, r.status]));
-    // How many jobs each candidate is already carrying. An admin choosing a
-    // driver by hand needs the same workload number the automatic ranker uses,
-    // otherwise manual mode quietly piles every job onto the first name in the
-    // list. Same live-status set as DispatchEngineService's workload query.
-    const workload = await this.prisma.orderDelivery.groupBy({
-      by: ['assignedDriverProfileId'],
-      where: {
-        assignedDriverProfileId: { in: candidates.map((c) => c.id) },
-        status: { in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'] },
-      },
-      _count: { _all: true },
-    });
-    const activeBy = new Map(workload.map((w) => [w.assignedDriverProfileId, w._count._all]));
+    // How many jobs each candidate is already carrying — across BOTH job
+    // tables, the same rule ShipmentDispatchService.rankFor applies. A driver
+    // holds one queue: marketplace deliveries AND shipment courier legs. When
+    // this counted deliveries alone, a driver already carrying courier legs
+    // showed "0 live jobs" to the operator, and manual shipping dispatch could
+    // stack job after job onto them while the list swore they were free.
+    const ids = candidates.map((c) => c.id);
+    const liveStatuses = ['ASSIGNED', 'DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'] as const;
+    const [deliveryLoad, legLoad] = await Promise.all([
+      this.prisma.orderDelivery.groupBy({
+        by: ['assignedDriverProfileId'],
+        where: {
+          assignedDriverProfileId: { in: ids },
+          status: { in: [...liveStatuses] },
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.shipmentLeg.groupBy({
+        by: ['assignedDriverProfileId'],
+        where: {
+          assignedDriverProfileId: { in: ids },
+          courierStatus: { in: [...liveStatuses] },
+        },
+        _count: { _all: true },
+      }),
+    ]);
+    const activeBy = new Map<string, number>();
+    for (const row of [...deliveryLoad, ...legLoad]) {
+      if (!row.assignedDriverProfileId) continue;
+      activeBy.set(row.assignedDriverProfileId, (activeBy.get(row.assignedDriverProfileId) ?? 0) + row._count._all);
+    }
     return candidates
       .map((p) => {
         const usable = p.vehicles.filter(

@@ -964,6 +964,37 @@ describe('admin manual assignment of a courier leg', () => {
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`)).status).toBe(201);
   });
 
+  it("counts a driver's shipment courier legs in the load figure the operator sees", async () => {
+    // The eligible-driver pool once counted orderDelivery rows only, so a
+    // driver already carrying courier legs showed "0 live jobs" and manual
+    // shipping dispatch could stack job after job onto them. Load is one
+    // number across BOTH job tables — the rule the automatic ranker
+    // (ShipmentDispatchService.rankFor) already applies.
+    await enableDispatch(false);
+    const driver = await makeDriver();
+    const vehicle = await vehicleOf(driver.driverProfileId);
+
+    const sA = await book();
+    const firstA = (await legs(sA.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect(
+      (await post(admin, `admin/logistics/legs/${firstA.id}/assign`, {
+        driverProfileId: driver.driverProfileId,
+        vehicleId: vehicle.id,
+      })).status,
+    ).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${firstA.id}/accept`)).status).toBe(201);
+
+    // A second shipment needs a driver. The operator's list must show the
+    // courier leg this driver is already holding.
+    const sB = await book();
+    const firstB = (await legs(sB.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const pool = await get(admin, `admin/logistics/legs/${firstB.id}/eligible-drivers`);
+    expect(pool.status).toBe(200);
+    const row = pool.body.find((d: { driverProfileId: string }) => d.driverProfileId === driver.driverProfileId);
+    expect(row).toBeTruthy();
+    expect(row.activeJobs).toBe(1);
+  });
+
   it('reassigns to a second driver, keeping the first assignment as history', async () => {
     await enableDispatch(false);
     const first_driver = await makeDriver();
