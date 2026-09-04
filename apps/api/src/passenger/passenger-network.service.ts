@@ -53,9 +53,13 @@ export class PassengerNetworkService {
   /* ------------------------------------------------------------ scoping */
 
   private async providerOf(userId: string) {
+    // isActive is selected so PUBLISH paths can honour suspension (S3 review
+    // F2 — S2 and S3 must tell the same suspension story). Reads, edits and
+    // cancellations deliberately still work for a suspended operator:
+    // cleanup survives suspension.
     const p = await this.prisma.passengerProviderProfile.findUnique({
       where: { userId },
-      select: { id: true, userId: true, isTest: true, businessName: true },
+      select: { id: true, userId: true, isTest: true, isActive: true, businessName: true },
     });
     if (!p) throw new NotFoundException('Start your transport-operator application first.');
     return p;
@@ -67,7 +71,7 @@ export class PassengerNetworkService {
       where: { id: routeId },
       include: {
         stops: { orderBy: { sequence: 'asc' } },
-        providerProfile: { select: { id: true, userId: true, businessName: true } },
+        providerProfile: { select: { id: true, userId: true, isActive: true, businessName: true } },
       },
     });
     if (!r || (providerProfileId && r.providerProfileId !== providerProfileId)) {
@@ -140,7 +144,7 @@ export class PassengerNetworkService {
   async createRouteAdmin(actor: Actor, dto: AdminPassengerRouteInput) {
     const p = await this.prisma.passengerProviderProfile.findUnique({
       where: { id: dto.providerProfileId },
-      select: { id: true, userId: true, isTest: true, businessName: true },
+      select: { id: true, userId: true, isTest: true, isActive: true, businessName: true },
     });
     if (!p) throw new NotFoundException('Transport operator not found.');
     const { providerProfileId: _ignored, ...route } = dto;
@@ -157,9 +161,13 @@ export class PassengerNetworkService {
 
   private async createRoute(
     actor: Actor,
-    provider: { id: string; userId: string; isTest: boolean },
+    provider: { id: string; userId: string; isTest: boolean; isActive: boolean },
     dto: PassengerRouteInput,
   ) {
+    // Publishing is gated on suspension; whoever is typing (S3 review F2).
+    if (!provider.isActive) {
+      throw new BadRequestException('This operator account is suspended.');
+    }
     const route = await this.prisma.$transaction(async (tx) => {
       const r = await tx.passengerRoute.create({
         data: {
@@ -364,11 +372,16 @@ export class PassengerNetworkService {
    */
   private async createTrip(
     actor: Actor,
-    route: PassengerRoute & { providerProfile: { userId: string } },
+    route: PassengerRoute & { providerProfile: { userId: string; isActive?: boolean } },
     dto: PassengerTripCreateInput,
   ) {
     if (!route.isActive) {
       throw new BadRequestException('This route is inactive. Reactivate it before publishing departures.');
+    }
+    // Suspension gates publishing here too (S3 review F2) — a suspended
+    // operator's routes stay readable and cancellable, but publish nothing.
+    if (route.providerProfile?.isActive === false) {
+      throw new BadRequestException('This operator account is suspended.');
     }
     if (dto.scheduledDepartureAt.getTime() <= Date.now()) {
       throw new BadRequestException('That departure time has already passed.');

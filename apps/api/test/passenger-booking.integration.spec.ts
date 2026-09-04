@@ -348,6 +348,17 @@ describe('movement', () => {
     expect((await ctx.prisma.passengerBooking.findUniqueOrThrow({ where: { id: unanswered.body.id } })).status).toBe('REQUESTED');
     expect((await ctx.prisma.passengerTripAssignment.findFirstOrThrow({ where: { tripId } })).status).toBe('COMPLETED');
     expect((await ctx.prisma.passengerDriverProfile.findUniqueOrThrow({ where: { id: driver.driverProfileId } })).completedTrips).toBe(1);
+
+    // …but the rider is never trapped with it (QA finding F1): withdrawing
+    // your own unanswered request works even AFTER the departure completed —
+    // the state that previously had no exit at all. This decides nothing
+    // about automatic expiry; it is a person tidying their own list.
+    const withdrawal = await post(unansweredRider.cookies, `passenger/bookings/${unanswered.body.id}/cancel`, { reason: 'Never confirmed.' });
+    expect(withdrawal.status).toBe(201);
+    expect(withdrawal.body.status).toBe('CANCELLED');
+    expect(withdrawal.body.cancelledBy).toBe('PASSENGER');
+    // The COMPLETED booking stays settled history — no exit reopens for it.
+    expect((await post(confirmedRider.cookies, `passenger/bookings/${confirmed.body.id}/cancel`)).status).toBe(400);
   });
 
   it('cancelling a staffed departure cancels its riders with it, attributed to the canceller', async () => {
@@ -453,5 +464,24 @@ describe('oversight and suspension', () => {
     const staffed = await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId });
     expect(staffed.status).toBe(400);
     expect(staffed.body.message).toMatch(/suspended/i);
+  });
+
+  it('a suspended operator publishes nothing either — S2 and S3 tell one suspension story', async () => {
+    // QA finding F2: booking and staffing already honoured the flag; route and
+    // departure PUBLISHING did not, because S2 predated the check. Same raw
+    // isActive write as above — still the only way to suspend (F5, open).
+    const op = await makeProvider('Test Silenced Lines');
+    const { routeId } = await makeDeparture(op, 2000);
+    await ctx.prisma.passengerProviderProfile.update({ where: { id: op.profileId }, data: { isActive: false } });
+
+    const newRoute = await post(op.cookies, 'passenger/provider/routes', routeBody(2000));
+    expect(newRoute.status).toBe(400);
+    expect(newRoute.body.message).toMatch(/suspended/i);
+    const newTrip = await post(op.cookies, 'passenger/provider/trips', { routeId, scheduledDepartureAt: TOMORROW().toISOString() });
+    expect(newTrip.status).toBe(400);
+    expect(newTrip.body.message).toMatch(/suspended/i);
+    // Cleanup survives suspension: the existing departure can still be cancelled.
+    const trips = await ctx.prisma.passengerTrip.findMany({ where: { routeId } });
+    expect((await post(op.cookies, `passenger/provider/trips/${trips[0]!.id}/cancel`, { reason: 'Winding down.' })).status).toBe(201);
   });
 });

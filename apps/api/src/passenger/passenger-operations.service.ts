@@ -445,7 +445,14 @@ export class PassengerOperationsService {
     if (b.status !== 'REQUESTED' && b.status !== 'CONFIRMED') {
       throw new BadRequestException('This booking is already settled.');
     }
-    if (b.trip && !['SCHEDULED', 'ASSIGNED'].includes(b.trip.status)) {
+    // A rider may always withdraw their own UNANSWERED request, even after the
+    // departure has left or been cancelled — completion deliberately leaves
+    // REQUESTED bookings untouched (the EXPIRED question is open), and without
+    // this exit the request would sit in their list forever. Withdrawing holds
+    // no seat and harms nobody; it decides nothing about what an unanswered
+    // request BECOMES automatically, which stays an open product question.
+    const ownWithdrawal = party === 'PASSENGER' && b.status === 'REQUESTED';
+    if (!ownWithdrawal && b.trip && !['SCHEDULED', 'ASSIGNED'].includes(b.trip.status)) {
       throw new BadRequestException('This departure has already begun; the booking can no longer be cancelled.');
     }
     const updated = await this.prisma.$transaction(async (tx) => {
