@@ -8,19 +8,23 @@ import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select, Spinner } 
 import { adminCrumbs } from '../../../lib/admin-nav';
 
 /**
- * Passenger transportation oversight — the supply side only.
+ * Passenger transportation oversight.
  *
- * S1/S2 scope: vetting people and vehicles, and SEEING the network operators
- * have declared. There is deliberately no booking, no trip creation and no
- * fare anywhere on this screen: pricing and rider-facing behaviour are S3,
- * gated on a product decision that has not been made. The API returns
- * baseFareMinor as null by design and this console does not mention price
- * at all rather than showing an empty column.
+ * S1/S2: vetting people and vehicles, and seeing the network operators have
+ * declared. S3 adds the booking lifecycle: seat requests, confirmation,
+ * staffing a departure with a driver and vehicle, and movement states.
+ *
+ * Fares are rendered only as the API returns them, and the fail-closed rule
+ * is surfaced, never softened: a route without a configured fare says so and
+ * cannot produce a booking — the server refuses, and this console shows the
+ * refusal state up front rather than offering a control that pretends
+ * otherwise. Whether a fare is per seat or per booking is undecided
+ * commercial policy, so no label here claims either.
  *
  * passengers.read looks; passengers.moderate acts. /me does not expose the
- * caller's permissions, so — like the marketing console — action controls
- * show until the first 403 proves the viewer is read-only, then hide for
- * the rest of the visit.
+ * caller's permissions (BMPL-47), so — like the marketing console — action
+ * controls show until the first 403 proves the viewer is read-only, then
+ * hide for the rest of the visit.
  */
 
 interface DriverRow {
@@ -81,11 +85,34 @@ interface RouteRow {
   destinationCity: string;
   scheduleNote: string | null;
   durationMinutes: number | null;
+  baseFareMinor: number | null;
   isActive: boolean;
   isTest: boolean;
   stops?: RouteStop[];
   provider?: { id: string; businessName: string };
   tripCount?: number;
+}
+
+interface BookingRow {
+  id: string;
+  reference: string;
+  status: 'REQUESTED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW' | 'EXPIRED';
+  seats: number;
+  isTest: boolean;
+  tripId: string | null;
+  tripReference: string | null;
+  tripStatus: string | null;
+  scheduledDepartureAt: string | null;
+  routeName: string | null;
+  from: string | null;
+  to: string | null;
+  passengerName: string | null;
+  confirmedAt: string | null;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+  cancellationReason: string | null;
+  createdAt: string;
 }
 
 interface TripRow {
@@ -126,12 +153,13 @@ const EXPIRY_TONE: Record<string, 'success' | 'warning' | 'error'> = {
 const when = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
-type Tab = 'drivers' | 'providers' | 'routes' | 'departures';
+type Tab = 'drivers' | 'providers' | 'routes' | 'departures' | 'bookings';
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'drivers', label: 'Drivers' },
   { key: 'providers', label: 'Providers' },
   { key: 'routes', label: 'Routes' },
   { key: 'departures', label: 'Departures' },
+  { key: 'bookings', label: 'Bookings' },
 ];
 
 export default function PassengersPage() {
@@ -142,7 +170,7 @@ export default function PassengersPage() {
       <PageHeader
         breadcrumbs={adminCrumbs('Passengers')}
         title="Passengers"
-        description="Vetting the people and vehicles that will carry passengers, and the routes operators have declared. No booking exists yet."
+        description="Vetting the people and vehicles that carry passengers, and overseeing the routes, departures and seat bookings operators run."
       />
 
       <div className="mb-5 flex flex-wrap gap-1 rounded-bmpl-lg border border-slate-200 bg-white p-1">
@@ -164,6 +192,7 @@ export default function PassengersPage() {
       {tab === 'providers' && <ProvidersTab />}
       {tab === 'routes' && <RoutesTab />}
       {tab === 'departures' && <DeparturesTab />}
+      {tab === 'bookings' && <BookingsTab />}
     </div>
   );
 }
@@ -455,6 +484,18 @@ function RoutesTab() {
                 {r.durationMinutes != null ? ` · ~${r.durationMinutes} min` : ''}
                 {r.tripCount != null ? ` · ${r.tripCount} departure${r.tripCount === 1 ? '' : 's'}` : ''}
               </p>
+              {/* The fail-closed rule, surfaced: a booking on an unpriced route is
+                  refused server-side, so the console says so here instead of
+                  letting an operator discover it through rider complaints. The
+                  fare deliberately carries no per-seat/per-booking unit — that
+                  policy is undecided, and the label must not decide it. */}
+              {r.baseFareMinor != null && r.baseFareMinor > 0 ? (
+                <p className="mt-0.5 text-xs text-slate-600">Fare BZ${(r.baseFareMinor / 100).toFixed(2)}</p>
+              ) : (
+                <p className="mt-0.5 text-xs font-medium text-amber-700">
+                  No fare configured — departures on this route cannot be booked until one is set.
+                </p>
+              )}
               {r.scheduleNote && <p className="mt-0.5 text-xs text-slate-500">{r.scheduleNote}</p>}
               {r.stops && r.stops.length > 0 && (
                 <ol className="mt-2 flex flex-wrap gap-1.5 text-xs text-slate-600">
@@ -480,28 +521,24 @@ function DeparturesTab() {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [canModerate, setCanModerate] = useState(true);
+  const [assigning, setAssigning] = useState<TripRow | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setRows(await api.get<TripRow[]>(`/admin/passengers/trips${status ? `?status=${status}` : ''}`));
+      setErr(null);
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Could not load departures.');
+    } finally {
+      setLoading(false);
+    }
+  }, [status]);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    api
-      .get<TripRow[]>(`/admin/passengers/trips${status ? `?status=${status}` : ''}`)
-      .then((list) => {
-        if (!cancelled) {
-          setRows(list);
-          setErr(null);
-        }
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setErr((e as ApiError).message ?? 'Could not load departures.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [status]);
+    void load();
+  }, [load]);
 
   return (
     <div>
@@ -521,7 +558,7 @@ function DeparturesTab() {
       ) : rows.length === 0 && !err ? (
         <EmptyState
           title="No departures"
-          description="No published departures match. Departures are published by providers; nothing here is bookable yet."
+          description="No published departures match. Departures are published by providers."
         />
       ) : (
         <div className="space-y-3">
@@ -534,6 +571,18 @@ function DeparturesTab() {
                 </Badge>
                 <Badge tone="neutral">{t.kind.replace(/_/g, ' ').toLowerCase()}</Badge>
                 {t.isTest && <Badge tone="neutral">Simulation</Badge>}
+                {/* Assignment moves a departure SCHEDULED → ASSIGNED, so a
+                    SCHEDULED one is by definition still unstaffed — the same
+                    rule assignTripAsAdmin enforces. */}
+                {canModerate && t.status === 'SCHEDULED' && (
+                  <button
+                    type="button"
+                    onClick={() => setAssigning(t)}
+                    className="text-xs font-medium text-belize-blue hover:underline"
+                  >
+                    Assign driver &amp; vehicle
+                  </button>
+                )}
               </div>
               <p className="mt-1 text-sm text-slate-600">
                 {t.routeName ?? '—'}
@@ -548,6 +597,312 @@ function DeparturesTab() {
                   Cancelled{t.cancelledAt ? ` ${when(t.cancelledAt)}` : ''}: {t.cancellationReason}
                 </p>
               )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {assigning && (
+        <AssignTripModal
+          trip={assigning}
+          onClose={() => setAssigning(null)}
+          onDone={() => {
+            setAssigning(null);
+            void load();
+          }}
+          onForbidden={() => {
+            setAssigning(null);
+            setCanModerate(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Staff a departure. There is no eligibility endpoint for passenger trips, so
+ * the picker offers the whole driver directory and the SERVER is the
+ * authority on every rule (own-fleet-only, approval, the test boundary, the
+ * rider-cannot-drive check) — its refusals are shown verbatim. Vehicles are
+ * limited to APPROVED and active ones, which is reading the same row fields
+ * the server checks, not a second statement of the rule.
+ */
+function AssignTripModal({
+  trip,
+  onClose,
+  onDone,
+  onForbidden,
+}: {
+  trip: TripRow;
+  onClose: () => void;
+  onDone: () => void;
+  onForbidden: () => void;
+}) {
+  const [drivers, setDrivers] = useState<DriverRow[] | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [driverId, setDriverId] = useState('');
+  const [vehicles, setVehicles] = useState<Array<{ id: string; make: string; model: string; licencePlate: string; approvalStatus: string; isActive: boolean }> | null>(null);
+  const [vehicleId, setVehicleId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<DriverRow[]>('/admin/passengers/drivers')
+      .then((list) => {
+        if (!cancelled) setDrivers(list);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setLoadErr((e as ApiError).message ?? 'Could not load drivers.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!driverId) {
+      setVehicles(null);
+      return;
+    }
+    let cancelled = false;
+    setVehicles(null);
+    setVehicleId('');
+    api
+      .get<{ vehicles: Array<{ id: string; make: string; model: string; licencePlate: string; approvalStatus: string; isActive: boolean }> }>(
+        `/admin/passengers/drivers/${driverId}`,
+      )
+      .then((d) => {
+        if (!cancelled) setVehicles(d.vehicles.filter((v) => v.approvalStatus === 'APPROVED' && v.isActive));
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setErr((e as ApiError).message ?? 'Could not load that driver.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [driverId]);
+
+  async function submit() {
+    if (!driverId || !vehicleId) {
+      setErr('Choose a driver and a vehicle.');
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.post(`/admin/passengers/trips/${trip.id}/assign`, { driverProfileId: driverId, vehicleId });
+      onDone();
+    } catch (e) {
+      const ex = e as ApiError;
+      if (ex.status === 403) onForbidden();
+      else {
+        setErr(ex.message ?? 'Could not assign.');
+        setBusy(false);
+      }
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Assign driver and vehicle">
+      <div className="w-full max-w-md rounded-bmpl-xl border border-slate-200 bg-white p-5 shadow-bmpl-lg">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-belize-navy">Assign {trip.reference}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" className="h-5 w-5">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+
+        {trip.providerName && (
+          <p className="mb-3 text-sm text-slate-600">
+            Operated by <span className="font-medium text-slate-800">{trip.providerName}</span> — only that operator&apos;s
+            own fleet drivers can staff it; anyone else is refused when you submit.
+          </p>
+        )}
+
+        {loadErr ? (
+          <p className="rounded-bmpl-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadErr}</p>
+        ) : drivers === null ? (
+          <Loading />
+        ) : drivers.length === 0 ? (
+          <p className="text-sm text-slate-500">No passenger drivers are registered yet.</p>
+        ) : (
+          <div className="space-y-4">
+            <Field label="Driver">
+              <Select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
+                <option value="">Select a driver…</option>
+                {drivers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.displayName || d.name}
+                    {d.roleStatus ? ` · ${d.roleStatus.toLowerCase()}` : ''}
+                    {d.homeDistrict ? ` · ${d.homeDistrict.replace(/_/g, ' ')}` : ''}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            {driverId && (
+              <Field label="Vehicle" hint="Approved, active vehicles only.">
+                {vehicles === null ? (
+                  <Loading />
+                ) : vehicles.length === 0 ? (
+                  <p className="text-sm text-slate-500">This driver has no approved active vehicle.</p>
+                ) : (
+                  <Select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
+                    <option value="">Select a vehicle…</option>
+                    {vehicles.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.make} {v.model} · {v.licencePlate}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+            )}
+
+            {err && <p className="text-sm font-medium text-red-600">{err}</p>}
+
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={onClose} disabled={busy}>
+                Cancel
+              </Button>
+              <Button size="sm" variant="primary" onClick={() => void submit()} disabled={busy}>
+                {busy ? 'Assigning…' : 'Assign'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ bookings */
+
+const BOOKING_STATUSES = ['REQUESTED', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'NO_SHOW', 'EXPIRED'];
+
+const BOOKING_TONE: Record<BookingRow['status'], 'info' | 'success' | 'neutral' | 'warning'> = {
+  REQUESTED: 'info',
+  CONFIRMED: 'success',
+  COMPLETED: 'success',
+  CANCELLED: 'neutral',
+  NO_SHOW: 'warning',
+  EXPIRED: 'neutral',
+};
+
+function BookingsTab() {
+  const [rows, setRows] = useState<BookingRow[]>([]);
+  const [status, setStatus] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [canModerate, setCanModerate] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setRows(await api.get<BookingRow[]>(`/admin/passengers/bookings${status ? `?status=${status}` : ''}`));
+      setErr(null);
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Could not load bookings.');
+    } finally {
+      setLoading(false);
+    }
+  }, [status]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function act(b: BookingRow, action: 'confirm' | 'cancel') {
+    let body: { reason?: string } | undefined;
+    if (action === 'cancel') {
+      const reason = window.prompt('Why is this booking being cancelled? The rider sees this.')?.trim();
+      if (!reason) return;
+      body = { reason };
+    }
+    setBusy(b.id);
+    setNote(null);
+    try {
+      await api.post(`/admin/passengers/bookings/${b.id}/${action}`, body ?? {});
+      setNote(`${b.reference} ${action === 'confirm' ? 'confirmed' : 'cancelled'}.`);
+      await load();
+    } catch (e) {
+      const ex = e as ApiError;
+      if (ex.status === 403) setCanModerate(false);
+      else setErr(ex.message ?? 'Action failed.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div>
+      <div className="mb-4 max-w-xs">
+        <Field label="Status">
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="">All</option>
+            {BOOKING_STATUSES.map((s) => (
+              <option key={s} value={s}>{s.replace(/_/g, ' ').toLowerCase()}</option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+      {err && <Alert tone="warning" className="mb-4">{err}</Alert>}
+      {note && <Alert tone="success" className="mb-4">{note}</Alert>}
+      {loading ? (
+        <Loading />
+      ) : rows.length === 0 && !err ? (
+        <EmptyState
+          title="No bookings"
+          description="No seat bookings match. Riders book onto published departures; requests appear here for oversight."
+        />
+      ) : (
+        <div className="space-y-3">
+          {rows.map((b) => (
+            <div key={b.id} className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-sm font-semibold text-belize-navy">{b.reference}</span>
+                    <Badge tone={BOOKING_TONE[b.status]}>{b.status.replace(/_/g, ' ').toLowerCase()}</Badge>
+                    <Badge tone="neutral">{b.seats} seat{b.seats === 1 ? '' : 's'}</Badge>
+                    {b.isTest && <Badge tone="neutral">Simulation</Badge>}
+                  </div>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {b.passengerName ?? '—'}
+                    {b.routeName ? ` · ${b.routeName}` : ''}
+                    {b.from && b.to ? ` · ${b.from} → ${b.to}` : ''}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {b.tripReference ? `Departure ${b.tripReference}` : 'No departure attached'}
+                    {b.tripStatus ? ` (${b.tripStatus.replace(/_/g, ' ').toLowerCase()})` : ''}
+                    {b.scheduledDepartureAt ? ` · departs ${when(b.scheduledDepartureAt)}` : ''}
+                  </p>
+                  {b.cancellationReason && (
+                    <p className="mt-1 text-xs font-medium text-amber-800">
+                      Cancelled{b.cancelledBy ? ` by ${b.cancelledBy.toLowerCase()}` : ''}: {b.cancellationReason}
+                    </p>
+                  )}
+                </div>
+                {canModerate && (b.status === 'REQUESTED' || b.status === 'CONFIRMED') && (
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {b.status === 'REQUESTED' && (
+                      <Button size="sm" variant="primary" disabled={busy === b.id} onClick={() => void act(b, 'confirm')}>
+                        Confirm
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" disabled={busy === b.id} onClick={() => void act(b, 'cancel')}>
+                      Cancel booking
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           ))}
         </div>
