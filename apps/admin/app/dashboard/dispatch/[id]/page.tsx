@@ -7,6 +7,16 @@ import { api, type ApiError } from '../../../../lib/api';
 import { StatusBadge } from '../../../../components/StatusBadge';
 import { Alert, Badge, Button, Field, PageHeader, Select, Spinner, Textarea } from '../../../../components/ui';
 import { adminCrumbs } from '../../../../lib/admin-nav';
+import {
+  addressLines,
+  byFewestActiveJobs,
+  canAssign,
+  canReassign,
+  money,
+  vehicleSummary,
+  type AssignedVehicle,
+  type PostalAddress,
+} from '../../../../lib/dispatch';
 
 interface Eligibility {
   eligible: boolean;
@@ -28,28 +38,10 @@ interface DetailDriver {
   completedDeliveries: number | null;
 }
 
-/** The vehicle actually on the job, which the API sends alongside the driver. */
-interface AssignedVehicle {
-  type: string | null;
-  make: string | null;
-  model: string | null;
-  color: string | null;
-  licencePlate: string | null;
-}
-
 interface DeliveryItem {
   productTitle: string;
   variantTitle: string | null;
   quantity: number;
-}
-
-interface PostalAddress {
-  fullName: string | null;
-  phone: string | null;
-  addressLine1: string | null;
-  addressLine2: string | null;
-  city: string | null;
-  district: string | null;
 }
 
 interface PickupLocation {
@@ -120,26 +112,6 @@ interface Pins {
   deliveryPin: string;
   pickupVerificationStatus: string | null;
   deliveryVerificationStatus: string | null;
-}
-
-const ASSIGNED_STATUSES = new Set(['ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_DECLINED']);
-
-function money(n: number | null | undefined): string {
-  return n == null ? '—' : `$${(n / 100).toFixed(2)}`;
-}
-
-/** Street lines only — city and district get their own rows. */
-function addressLines(a: PostalAddress | null): string {
-  if (!a) return '—';
-  const parts = [a.addressLine1, a.addressLine2].filter(Boolean);
-  return parts.length > 0 ? parts.join(', ') : '—';
-}
-
-function vehicleSummary(v: AssignedVehicle | null): string {
-  if (!v) return '—';
-  const parts = [v.color, v.make, v.model].filter(Boolean).join(' ');
-  const plate = v.licencePlate ? ` · ${v.licencePlate}` : '';
-  return `${parts || v.type || 'Vehicle'}${plate}`;
 }
 
 export default function DispatchDetailPage() {
@@ -376,20 +348,20 @@ function DetailView({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: 
 function AssignmentPanel({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: string; onChanged: () => void }) {
   const [mode, setMode] = useState<'assign' | 'reassign' | 'cancel' | null>(null);
 
-  const canAssign = d.status === 'PENDING_ASSIGNMENT';
-  const canReassign = ASSIGNED_STATUSES.has(d.status);
+  const assignAllowed = canAssign(d.status);
+  const reassignAllowed = canReassign(d.status);
 
-  if (!canAssign && !canReassign) return null;
+  if (!assignAllowed && !reassignAllowed) return null;
 
   return (
     <InfoCard title="Assignment" className="mt-6">
       <div className="flex flex-wrap gap-2">
-        {canAssign && (
+        {assignAllowed && (
           <Button size="sm" variant="primary" onClick={() => setMode('assign')}>
             Assign driver
           </Button>
         )}
-        {canReassign && (
+        {reassignAllowed && (
           <>
             <Button size="sm" variant="outline" onClick={() => setMode('reassign')}>
               Reassign
@@ -498,7 +470,7 @@ function AssignModal({
                   with valid documents — the API filters on all of that — so the
                   only thing left for the operator to weigh is current load. */}
               {[...drivers]
-                .sort((a, b) => (a.activeJobs ?? 0) - (b.activeJobs ?? 0))
+                .sort(byFewestActiveJobs)
                 .map((dr) => (
                   <option key={dr.driverProfileId} value={dr.driverProfileId}>
                     {dr.displayName || dr.name}
