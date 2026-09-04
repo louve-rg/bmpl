@@ -49,6 +49,15 @@ export interface MeView {
     status: string;
     isSelectable: boolean;
   }>;
+  /**
+   * The admin permissions this user actually holds — the same grant rows the
+   * PermissionsGuard evaluates (AuthContextService.build), so what a console
+   * renders and what the API enforces can never disagree. Empty for everyone
+   * who is not staff. Read-only knowledge of one's OWN permissions is not a
+   * privilege: the first 403 reveals it anyway, just after the wrong button
+   * was drawn.
+   */
+  adminPermissions: string[];
 }
 
 /** The outcome of an avatar upload, as the uploader sees it. */
@@ -85,7 +94,7 @@ export class UsersService {
   async getMe(userId: string): Promise<MeView> {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      include: { roles: true },
+      include: { roles: true, adminPermissions: { select: { permission: true } } },
     });
 
     // The owner is the one person who may see a picture that isn't approved yet,
@@ -127,6 +136,7 @@ export class UsersService {
         status: r.status,
         isSelectable: r.status === 'APPROVED',
       })),
+      adminPermissions: user.adminPermissions.map((p) => p.permission).sort(),
     };
   }
 
