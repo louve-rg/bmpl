@@ -210,6 +210,53 @@ describe('a local door-to-door parcel', () => {
     await setLocalCourierFee(1500n);
   });
 
+  it('refuses to BOOK an unpriced local run — cleanly, not with a 500', async () => {
+    // The operator forgot to set the local courier fee. The quote flags it;
+    // booking used to sail past the flag into a zero-total shipment, whose
+    // zero-amount escrow the wallet ledger rightly refused — and the customer
+    // got a bare 500 ("Ledger amounts must be positive") for an operator's
+    // missing configuration. Now the booking is refused in words a customer
+    // can act on, and NOTHING is created — paid or unpaid: the unpaid path
+    // would otherwise have created a zero-total shipment that isPaidFor treats
+    // as paid-by-definition, i.e. dispatchable free work.
+    await setLocalCourierFee(0n);
+    const body = {
+      service: 'DOOR_TO_DOOR',
+      origin: { district: 'BELIZE', city: 'Belize City', address: '1 Front St', name: 'S', phone: '501-2223333' },
+      destination: { district: 'BELIZE', city: 'Belize City', address: '2 Front St', name: 'R', phone: '501-4445555' },
+    };
+    const before = await ctx.prisma.shipment.count();
+
+    const paid = await post(customer, 'shipping', { ...body, payWithWallet: true });
+    expect(paid.status).toBe(400);
+    expect(paid.body.message).toMatch(/not been priced/i);
+
+    const unpaid = await post(customer, 'shipping', body);
+    expect(unpaid.status).toBe(400);
+    expect(unpaid.body.message).toMatch(/not been priced/i);
+
+    expect(await ctx.prisma.shipment.count()).toBe(before);
+    await setLocalCourierFee(1500n);
+  });
+
+  it('still books a journey through a zero-fee hub when the total is not zero', async () => {
+    // THE REGRESSION GUARD for the refusal above. pricingIncomplete is also
+    // true for a hub whose courier fee is unset on a journey whose transport
+    // IS priced — those totals are non-zero and those bookings work in
+    // production today. The refusal is keyed on the TOTAL being zero, never on
+    // the pricingIncomplete flag, and this test is what keeps it that way.
+    await ctx.prisma.logisticsHub.update({ where: { id: hub.PLA }, data: { courierFeeMinor: 0n } });
+    const q = await post(customer, 'shipping/quote', doorToDoor());
+    expect(q.body.available).toBe(true);
+    expect(q.body.pricingIncomplete).toBe(true); // the flag IS up…
+    expect(q.body.totalMinor).toBeGreaterThan(0); // …and the total is real money
+
+    const r = await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true });
+    expect(r.status).toBe(201); // …so the booking still goes through
+    const shipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: r.body.id } });
+    expect(Number(shipment.quotedTotalMinor)).toBeGreaterThan(0);
+  });
+
   it('books, and creates exactly one leg that is ready immediately', async () => {
     await setLocalCourierFee(1500n);
     const r = await post(customer, 'shipping', {

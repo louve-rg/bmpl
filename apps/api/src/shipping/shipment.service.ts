@@ -313,6 +313,23 @@ export class ShipmentService {
     );
     if (!plan.ok) throw new BadRequestException(plan.explanation);
 
+    // ZERO IS NOT A PRICE — it is the absence of one. The quote already says
+    // this out loud ("an operator has to set these before this is sellable"),
+    // but nothing stopped the booking: a zero total sailed on into the wallet,
+    // whose ledger rightly refuses a zero-amount escrow, and the customer got a
+    // bare 500 for an operator's missing configuration. Refuse cleanly instead.
+    // Keyed on the TOTAL, deliberately not on pricingIncomplete: a zero-fee hub
+    // on a journey with priced transport books fine today and must keep doing
+    // so, while an unpriced local run and a zero-priced courier lane are both
+    // caught here by the same rule. Booking a deliberate free shipment, if the
+    // product ever wants one, is an explicit opt-in on top of this — not a
+    // loosening of it.
+    if (plan.totalMinor <= 0) {
+      throw new BadRequestException(
+        'This journey has not been priced yet, so it cannot be booked. Please try again later or contact support.',
+      );
+    }
+
     const endsAtHub = !needsLastMile(input.service);
     const originHubId = plan.legs.find((l) => l.kind === 'LINE_HAUL')?.originHubId ?? null;
     const destinationHubId = [...plan.legs].reverse().find((l) => l.kind === 'LINE_HAUL')?.destinationHubId ?? null;

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { LedgerErrorFilter } from './common/ledger-error.filter';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
@@ -96,6 +97,9 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    // A ledger refusal must never reach a customer as a bare 500 carrying
+    // double-entry internals. See the filter's comment for the mapping.
+    { provide: APP_FILTER, useClass: LedgerErrorFilter },
   ],
 })
 export class AppModule {}
