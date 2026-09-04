@@ -612,6 +612,77 @@ describe('the offer lifecycle', () => {
   });
 });
 
+describe('cancellation while a driver holds the job — characterization of a KNOWN DEFECT', () => {
+  /**
+   * This test records what happens TODAY, on purpose, so the fix has a test to
+   * turn around. It is not an endorsement of the behaviour.
+   *
+   * ShipmentService.cancel marks the leg CANCELLED for the SHIPMENT but never
+   * touches the DRIVER's half of the same row: `courierStatus` and
+   * `assignedDriverProfileId` survive, the accepted ShipmentLegOffer stays
+   * open, and nothing tells the driver the job is gone. Because the unified
+   * driver feed and queue filter on `courierStatus` alone, the cancelled job
+   * stays in the driver's list with no action that can remove it — decline is
+   * only legal from ASSIGNED, and pickup fails isLegActionable against the
+   * CANCELLED leg. The driver is left holding a phantom job forever.
+   *
+   * The window is real and ordinary: a leg is READY (not IN_PROGRESS) from
+   * acceptance until pickup, and the customer-cancellation guard only bites at
+   * IN_PROGRESS — so a customer cancelling minutes after a driver accepted is
+   * exactly how this happens in production.
+   *
+   * NOTE — what SHOULD happen instead, when the fix lands in ShipmentService.cancel:
+   *   - the driver's half of the leg is closed out: courierStatus cleared (or
+   *     set terminally), assignedDriverProfileId / assignedVehicleId nulled;
+   *   - the ACTIVE/ACCEPTED ShipmentLegOffer is ended (CANCELLED, endedAt set);
+   *   - the assigned driver is notified the job no longer exists;
+   *   - the job disappears from the driver's feed and queue.
+   * Every assertion below marked "DEFECT:" must then be inverted — this test
+   * failing is the proof the fix works.
+   */
+  it('strands the accepted courier leg in the driver queue with no way out', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`)).status).toBe(201);
+
+    // The customer cancels in the accepted-but-not-picked-up window. Allowed:
+    // no leg is IN_PROGRESS yet, so the "already moving" guard does not apply.
+    const cancelled = await post(customer, `shipping/${s.id}/cancel`, { reason: 'Changed my mind.' });
+    expect(cancelled.status).toBe(201);
+    expect(cancelled.body.status).toBe('CANCELLED');
+
+    // The shipment's half of the row is closed...
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(leg.status).toBe('CANCELLED');
+
+    // DEFECT: ...but the driver's half still says they hold a live job.
+    expect(leg.courierStatus).toBe('DRIVER_ACCEPTED');
+    expect(leg.assignedDriverProfileId).toBe(driver.driverProfileId);
+
+    // DEFECT: the accepted offer is never ended.
+    const offer = await ctx.prisma.shipmentLegOffer.findFirstOrThrow({
+      where: { shipmentLegId: first.id, driverProfileId: driver.driverProfileId },
+    });
+    expect(offer.status).toBe('ACCEPTED');
+    expect(offer.endedAt).toBeNull();
+
+    // DEFECT: the phantom job is still in the driver's feed and queue.
+    const list = await get(driver.cookies, 'driver/jobs?scope=assigned');
+    expect(list.status).toBe(200);
+    expect(list.body.some((j: { id: string }) => j.id === first.id)).toBe(true);
+    const queue = await get(driver.cookies, 'driver/jobs/queue');
+    expect(queue.body.items.some((i: { id: string }) => i.id === first.id)).toBe(true);
+
+    // And there is no way out of it. Pickup is refused, because the leg the
+    // shipment sees is cancelled...
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`)).status).toBe(400);
+    // ...and decline is refused, because the state machine only declines an
+    // un-accepted offer. Nothing the driver can press removes this job.
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/decline`, { reason: 'It was cancelled.' })).status).toBe(400);
+  });
+});
+
 describe('authorization', () => {
   it("does not let one driver work another driver's leg", async () => {
     const mine = await makeDriver();
