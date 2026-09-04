@@ -100,6 +100,9 @@ export default function LogisticsOpsPage() {
         description="Multi-leg shipments across Belize. Local marketplace deliveries live under Dispatch."
         actions={
           <div className="flex flex-wrap gap-2">
+            <Link href="/dashboard/logistics/handoff-desk" className="rounded-bmpl-md border border-slate-300 px-3 py-2 text-sm font-medium">
+              Handoff desk
+            </Link>
             <Link href="/dashboard/logistics/hubs" className="rounded-bmpl-md border border-slate-300 px-3 py-2 text-sm font-medium">
               Terminals
             </Link>
