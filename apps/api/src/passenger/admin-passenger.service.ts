@@ -170,6 +170,12 @@ export class AdminPassengerService {
    * real one. Refused while they hold live trips — flipping mid-trip would
    * leave work assigned across the boundary the flag exists to keep closed.
    * (Trips cannot exist before S3; the guard is here so S3 cannot forget it.)
+   *
+   * Everything the profile OWNS is re-derived in the same transaction. isTest
+   * on an owned row is derived at write time from a source that stays mutable
+   * — so the flip must carry the derivation forward, or a vehicle registered
+   * before the flip would sit on the opposite side of the boundary from its
+   * owner forever.
    */
   async setDriverTestMode(actor: Actor, profileId: string, isTest: boolean, reason?: string) {
     const p = await this.prisma.passengerDriverProfile.findUnique({
@@ -184,19 +190,41 @@ export class AdminPassengerService {
     if (openTrips > 0) {
       throw new BadRequestException(`This driver has ${openTrips} trip(s) in progress. Let them finish before changing test mode.`);
     }
-    const updated = await this.prisma.passengerDriverProfile.update({ where: { id: profileId }, data: { isTest } });
-    await this.audit.record({
-      action: 'PASSENGER_DRIVER_TEST_MODE_CHANGED',
-      actorId: actor.userId,
-      targetUserId: p.userId,
-      ipAddress: actor.ipAddress ?? null,
-      sessionId: actor.sessionId ?? null,
-      newValue: { passengerDriverProfileId: profileId, isTest, reason: reason ?? null },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.passengerDriverProfile.update({ where: { id: profileId }, data: { isTest } });
+      const vehicles = await tx.passengerVehicle.updateMany({
+        where: { ownerDriverProfileId: profileId, isTest: !isTest },
+        data: { isTest },
+      });
+      await this.audit.record(
+        {
+          action: 'PASSENGER_DRIVER_TEST_MODE_CHANGED',
+          actorId: actor.userId,
+          targetUserId: p.userId,
+          ipAddress: actor.ipAddress ?? null,
+          sessionId: actor.sessionId ?? null,
+          newValue: { passengerDriverProfileId: profileId, isTest, vehiclesRederived: vehicles.count, reason: reason ?? null },
+        },
+        tx,
+      );
+      return u;
     });
     return { id: updated.id, displayName: updated.displayName, isTest: updated.isTest };
   }
 
-  /** The fleet-side flag, same rules: everything a test operator runs is test. */
+  /**
+   * The fleet-side flag, same rules: everything a test operator runs is test.
+   *
+   * The flip re-derives every route and fleet vehicle the operator owns, in
+   * the same transaction. Routes made this necessary (S2): a route created
+   * while the operator was real would otherwise keep isTest false after the
+   * flip, and every later departure inherits from the ROUTE — a real-side
+   * trip published by a simulation operator. Open trips are still refused;
+   * CLOSED trips keep their flag deliberately, as a record of which side
+   * they actually ran on. Refusing while routes exist was rejected because
+   * routes cannot be hard-deleted — the flag would freeze permanently the
+   * first time an operator described a service.
+   */
   async setProviderTestMode(actor: Actor, profileId: string, isTest: boolean, reason?: string) {
     const p = await this.prisma.passengerProviderProfile.findUnique({
       where: { id: profileId },
@@ -210,14 +238,34 @@ export class AdminPassengerService {
     if (openTrips > 0) {
       throw new BadRequestException(`This operator has ${openTrips} trip(s) open. Close them before changing test mode.`);
     }
-    const updated = await this.prisma.passengerProviderProfile.update({ where: { id: profileId }, data: { isTest } });
-    await this.audit.record({
-      action: 'PASSENGER_PROVIDER_TEST_MODE_CHANGED',
-      actorId: actor.userId,
-      targetUserId: p.userId,
-      ipAddress: actor.ipAddress ?? null,
-      sessionId: actor.sessionId ?? null,
-      newValue: { passengerProviderProfileId: profileId, isTest, reason: reason ?? null },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.passengerProviderProfile.update({ where: { id: profileId }, data: { isTest } });
+      const routes = await tx.passengerRoute.updateMany({
+        where: { providerProfileId: profileId, isTest: !isTest },
+        data: { isTest },
+      });
+      const vehicles = await tx.passengerVehicle.updateMany({
+        where: { providerProfileId: profileId, isTest: !isTest },
+        data: { isTest },
+      });
+      await this.audit.record(
+        {
+          action: 'PASSENGER_PROVIDER_TEST_MODE_CHANGED',
+          actorId: actor.userId,
+          targetUserId: p.userId,
+          ipAddress: actor.ipAddress ?? null,
+          sessionId: actor.sessionId ?? null,
+          newValue: {
+            passengerProviderProfileId: profileId,
+            isTest,
+            routesRederived: routes.count,
+            vehiclesRederived: vehicles.count,
+            reason: reason ?? null,
+          },
+        },
+        tx,
+      );
+      return u;
     });
     return { id: updated.id, businessName: updated.businessName, isTest: updated.isTest };
   }

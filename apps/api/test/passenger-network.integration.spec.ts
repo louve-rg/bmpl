@@ -5,12 +5,16 @@
  *  - a provider reaches ONLY their own routes and departures; admin reaches
  *    all of them, split read/moderate;
  *  - route and trip isTest are DERIVED from the owning operator, never from a
- *    request — including when an admin does the typing;
+ *    request — including when an admin does the typing — and flipping the
+ *    operator re-derives everything they already own, so the order of
+ *    operations cannot leak a row across the boundary;
  *  - no fare exists: baseFareMinor is born null and no request can set it;
  *  - a route's endpoints freeze once departures exist, because a scheduled
  *    trip carries its geography on the route;
- *  - the tables ship empty — every row here is created THROUGH the product,
- *    never by a raw database write.
+ *  - the tables ship empty — every network row (route, stop, trip) is created
+ *    THROUGH the product, never by a raw database write. The one raw write in
+ *    this file is the PASSENGER_PROVIDER role approval in makeProvider, which
+ *    belongs to the role machinery, not to the surface under test.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -175,6 +179,13 @@ describe('published departures', () => {
 
     const mine = await get(p.cookies, 'passenger/provider/trips');
     expect(mine.body.map((x: { id: string }) => x.id)).toContain(t.body.id);
+
+    // Publishing names who typed it in — here, the operator themselves.
+    const audits = (
+      await ctx.prisma.auditLog.findMany({ where: { action: 'PASSENGER_TRIP_CREATED' } })
+    ).filter((a) => (a.newValue as { tripId?: string }).tripId === t.body.id);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.actorId).toBe(p.userId);
   });
 
   it('refuses a departure in the past, and any departure of an inactive route', async () => {
@@ -223,12 +234,28 @@ describe('a route with departures cannot quietly move', () => {
     // Before any departure, endpoints may still be corrected.
     expect((await patch(p.cookies, `passenger/provider/routes/${r.body.id}`, { originCity: 'Test Landing West' })).status).toBe(200);
 
-    await post(p.cookies, 'passenger/provider/trips', { routeId: r.body.id, scheduledDepartureAt: TOMORROW().toISOString() });
+    const t = await post(p.cookies, 'passenger/provider/trips', { routeId: r.body.id, scheduledDepartureAt: TOMORROW().toISOString() });
     const moved = await patch(p.cookies, `passenger/provider/routes/${r.body.id}`, { destinationCity: 'Test Landing East' });
     expect(moved.status).toBe(400);
-    expect(moved.body.message).toMatch(/already has departures/i);
+    expect(moved.body.message).toMatch(/have been published/i);
     // The schedule label is not geography.
     expect((await patch(p.cookies, `passenger/provider/routes/${r.body.id}`, { scheduleNote: 'Daily 05:00' })).status).toBe(200);
+
+    // The ordered stop list is frozen by the same rule — it is equally part of
+    // what riders were promised, and the replace endpoint must not be a
+    // side door around the endpoint freeze.
+    const stopsMoved = await put(p.cookies, `passenger/provider/routes/${r.body.id}/stops`, [
+      { district: 'TOLEDO', city: 'Test Midway Rewritten' },
+    ]);
+    expect(stopsMoved.status).toBe(400);
+    expect(stopsMoved.body.message).toMatch(/have been published/i);
+
+    // And a CANCELLED departure still freezes — it is history, not absence.
+    // The message stays true for an operator with nothing outstanding.
+    await post(p.cookies, `passenger/provider/trips/${t.body.id}/cancel`);
+    const afterCancel = await patch(p.cookies, `passenger/provider/routes/${r.body.id}`, { destinationCity: 'Test Landing East' });
+    expect(afterCancel.status).toBe(400);
+    expect(afterCancel.body.message).toMatch(/since cancelled/i);
   });
 });
 
@@ -278,6 +305,24 @@ describe('admin oversight', () => {
     expect(cancelled.body.cancelledBy).toBe('ADMIN');
   });
 
+  it('an admin-published departure is distinguishable from the operator’s own', async () => {
+    const p = await makeProvider('Test Ghostwritten Lines');
+    const r = await post(p.cookies, 'passenger/provider/routes', routeBody());
+    const moderator = await limitedAdmin(['passengers.moderate']);
+    const t = await post(moderator.cookies, 'admin/passengers/trips', {
+      routeId: r.body.id,
+      scheduledDepartureAt: TOMORROW().toISOString(),
+    });
+    expect(t.status).toBe(201);
+    // The row alone cannot say who published — the audit trail can, and does.
+    const audits = (
+      await ctx.prisma.auditLog.findMany({ where: { action: 'PASSENGER_TRIP_CREATED' } })
+    ).filter((a) => (a.newValue as { tripId?: string }).tripId === t.body.id);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.actorId).toBe(moderator.id);
+    expect(audits[0]!.targetUserId).toBe(p.userId);
+  });
+
   it('refuses a plain customer everywhere', async () => {
     const u = await registerUser(`pnetadm_${uniq()}@example.com`);
     expect((await get(u.cookies, 'admin/passengers/routes')).status).toBe(403);
@@ -302,5 +347,49 @@ describe('the simulation boundary', () => {
     // And a departure inherits through the route.
     const t = await post(p.cookies, 'passenger/provider/trips', { routeId: own.body.id, scheduledDepartureAt: TOMORROW().toISOString() });
     expect(t.body.isTest).toBe(true);
+  });
+
+  it('flipping the operator re-derives what they already own — the reverse order cannot leak', async () => {
+    // The A8/F1 trace, closed: the route and vehicle exist BEFORE the flip.
+    // Write-time derivation alone would leave them real-side forever, and
+    // every later departure would inherit the stale flag from the ROUTE.
+    const p = await makeProvider('Test Latecomer Lines');
+    const preRoute = await post(p.cookies, 'passenger/provider/routes', routeBody());
+    const preVehicle = await post(p.cookies, 'passenger/provider/vehicles', {
+      type: 'VAN',
+      make: 'Toyota',
+      model: 'Hiace',
+      licencePlate: `PNV-${uniq()}`.slice(0, 18),
+      seatCapacity: 12,
+    });
+    expect(preRoute.body.isTest).toBe(false);
+    expect(preVehicle.status).toBe(201);
+
+    const moderator = await limitedAdmin(['passengers.moderate']);
+    const flip = await patch(moderator.cookies, `admin/passengers/providers/${p.profileId}/test-mode`, { isTest: true });
+    expect(flip.status).toBe(200);
+
+    // Everything owned crossed the boundary with its owner, atomically.
+    const routeRow = await ctx.prisma.passengerRoute.findUniqueOrThrow({ where: { id: preRoute.body.id } });
+    expect(routeRow.isTest).toBe(true);
+    const vehicleRow = await ctx.prisma.passengerVehicle.findUniqueOrThrow({ where: { id: preVehicle.body.id } });
+    expect(vehicleRow.isTest).toBe(true);
+
+    // And a departure published AFTER the flip on the pre-flip route is
+    // test-side — the exact request that used to leak a real-side trip.
+    const t = await post(p.cookies, 'passenger/provider/trips', {
+      routeId: preRoute.body.id,
+      scheduledDepartureAt: TOMORROW().toISOString(),
+    });
+    expect(t.status).toBe(201);
+    expect(t.body.isTest).toBe(true);
+
+    // The audit rows record how much the flip carried across.
+    const audits = (
+      await ctx.prisma.auditLog.findMany({ where: { action: 'PASSENGER_PROVIDER_TEST_MODE_CHANGED' } })
+    ).filter((a) => (a.newValue as { passengerProviderProfileId?: string }).passengerProviderProfileId === p.profileId);
+    expect(audits).toHaveLength(1);
+    expect((audits[0]!.newValue as { routesRederived?: number }).routesRederived).toBe(1);
+    expect((audits[0]!.newValue as { vehiclesRederived?: number }).vehiclesRederived).toBe(1);
   });
 });

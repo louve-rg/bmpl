@@ -222,6 +222,9 @@ export const AUDIT_ACTIONS = [
   // vendor and delivery-driver equivalents above.
   'PASSENGER_DRIVER_TEST_MODE_CHANGED',
   'PASSENGER_PROVIDER_TEST_MODE_CHANGED',
+  // Publishing a departure names who typed it in — an admin acting for an
+  // operator must be distinguishable from the operator themselves.
+  'PASSENGER_TRIP_CREATED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

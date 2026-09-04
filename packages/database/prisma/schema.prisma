@@ -343,6 +343,7 @@ enum AuditAction {
   PASSENGER_TRIP_CANCELLED
   PASSENGER_DRIVER_TEST_MODE_CHANGED
   PASSENGER_PROVIDER_TEST_MODE_CHANGED
+  PASSENGER_TRIP_CREATED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------

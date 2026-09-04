@@ -35,6 +35,10 @@ const money = (v: bigint | null) => (v == null ? null : Number(v));
  * admin-asserted because a hub has no owner to derive from). A route always
  * has an owner, and deriving makes it impossible for a rehearsal service to
  * sit on the real side of the boundary. Trips inherit from the route.
+ * Derivation happens at WRITE time from a source that stays mutable, so it is
+ * only half the invariant: the other half is setProviderTestMode
+ * (admin-passenger.service), which re-derives every owned route and vehicle
+ * in the same transaction when the operator's flag flips.
  *
  * Fares do not exist in this phase: baseFareMinor is never written and stays
  * null. No request can set it and nothing here defaults it.
@@ -211,14 +215,7 @@ export class PassengerNetworkService {
     // route instead.
     const endpointKeys = ['originDistrict', 'originCity', 'destinationDistrict', 'destinationCity'] as const;
     const movesEndpoints = endpointKeys.some((k) => dto[k] !== undefined && dto[k] !== route[k]);
-    if (movesEndpoints) {
-      const departures = await this.prisma.passengerTrip.count({ where: { routeId: route.id } });
-      if (departures > 0) {
-        throw new BadRequestException(
-          'This route already has departures, so where it runs cannot change. Deactivate it and create a new route instead.',
-        );
-      }
-    }
+    if (movesEndpoints) await this.refuseIfDeparturesPublished(route.id);
     const data: Prisma.PassengerRouteUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
@@ -252,11 +249,31 @@ export class PassengerNetworkService {
     return this.serializeRoute(updated);
   }
 
+  /**
+   * The freeze deliberately counts CANCELLED departures too: a trip row —
+   * even a retracted one — is history that reconstructs against the route's
+   * geography (the schema Restricts route deletion for the same reason).
+   * The message says "published" rather than "has", because an operator who
+   * cancelled their only departure sees none outstanding — and the refusal
+   * must still be telling them the truth.
+   */
+  private async refuseIfDeparturesPublished(routeId: string) {
+    const departures = await this.prisma.passengerTrip.count({ where: { routeId } });
+    if (departures > 0) {
+      throw new BadRequestException(
+        'Departures have been published on this route (including any since cancelled), so where and how it runs cannot change. Deactivate it and create a new route instead.',
+      );
+    }
+  }
+
   private async replaceStops(
     actor: Actor,
     route: PassengerRoute & { stops: PassengerRouteStop[]; providerProfile: { userId: string } },
     stops: PassengerRouteStopsInput,
   ) {
+    // The ordered stop list is as much "what riders were promised" as the
+    // endpoints are — the same freeze applies once departures exist.
+    await this.refuseIfDeparturesPublished(route.id);
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.passengerRouteStop.deleteMany({ where: { routeId: route.id } });
       if (stops.length) {
@@ -315,11 +332,11 @@ export class PassengerNetworkService {
 
   async createTripForProvider(actor: Actor, dto: PassengerTripCreateInput) {
     const p = await this.providerOf(actor.userId);
-    return this.createTrip(await this.routeOrThrow(dto.routeId, p.id), dto);
+    return this.createTrip(actor, await this.routeOrThrow(dto.routeId, p.id), dto);
   }
 
-  async createTripAdmin(_actor: Actor, dto: PassengerTripCreateInput) {
-    return this.createTrip(await this.routeOrThrow(dto.routeId), dto);
+  async createTripAdmin(actor: Actor, dto: PassengerTripCreateInput) {
+    return this.createTrip(actor, await this.routeOrThrow(dto.routeId), dto);
   }
 
   async cancelTripForProvider(actor: Actor, tripId: string, reason?: string) {
@@ -333,11 +350,13 @@ export class PassengerNetworkService {
 
   /**
    * Publish one departure of a route. Driver, vehicle and seat snapshot belong
-   * to the assignment phase, not here. Creation is not audited — no
-   * PASSENGER_TRIP_CREATED code is provisioned, and the row itself (route,
-   * provider, timestamps) is the complete record of what was published.
+   * to the assignment phase, not here. Audited: the trip row alone cannot say
+   * WHO published it — providerProfileId comes from the route, so without the
+   * audit an admin publishing on an operator's behalf would be
+   * indistinguishable from the operator themselves.
    */
   private async createTrip(
+    actor: Actor,
     route: PassengerRoute & { providerProfile: { userId: string } },
     dto: PassengerTripCreateInput,
   ) {
@@ -348,7 +367,7 @@ export class PassengerNetworkService {
       throw new BadRequestException('That departure time has already passed.');
     }
     const trip = await this.prisma.$transaction(async (tx) => {
-      return tx.passengerTrip.create({
+      const t = await tx.passengerTrip.create({
         data: {
           reference: await this.uniqueReference(tx),
           kind: 'SCHEDULED',
@@ -362,6 +381,24 @@ export class PassengerNetworkService {
         },
         include: { route: { select: { name: true } }, providerProfile: { select: { businessName: true } } },
       });
+      await this.audit.record(
+        {
+          action: 'PASSENGER_TRIP_CREATED',
+          actorId: actor.userId,
+          targetUserId: route.providerProfile.userId,
+          ipAddress: actor.ipAddress ?? null,
+          sessionId: actor.sessionId ?? null,
+          newValue: {
+            tripId: t.id,
+            reference: t.reference,
+            routeId: route.id,
+            scheduledDepartureAt: t.scheduledDepartureAt?.toISOString() ?? null,
+            isTest: t.isTest,
+          },
+        },
+        tx,
+      );
+      return t;
     });
     return this.serializeTrip(trip);
   }
