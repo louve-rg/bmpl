@@ -42,6 +42,7 @@ import { relativeTime } from '../../../lib/notifications';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Alert, Badge, Button, EmptyState, Field, Input, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
+import { LIVE_PLACEMENTS, rendersNowhereYet } from '../../../lib/placement-liveness';
 
 /**
  * Marketing & Business Promotion admin console — M26. Client shapes mirror the
@@ -1724,7 +1725,10 @@ function PlacementsTab() {
             return (
               <div key={slot} className="rounded-bmpl-xl border border-slate-200 bg-white">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-4">
-                  <h3 className="text-sm font-semibold text-belize-navy">{placementLabel(slot)}</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-semibold text-belize-navy">{placementLabel(slot)}</h3>
+                    {rendersNowhereYet(slot) && <Badge tone="warning">Not shown anywhere yet</Badge>}
+                  </div>
                   <span className="text-xs text-slate-400">
                     {num(slotRows.length)} {slotRows.length === 1 ? 'assignment' : 'assignments'}
                   </span>
@@ -1848,9 +1852,18 @@ function AssignPlacementForm({
               {PROMOTION_PLACEMENTS.map((p) => (
                 <option key={p} value={p}>
                   {placementLabel(p)}
+                  {rendersNowhereYet(p) ? ' — not shown anywhere yet' : ''}
                 </option>
               ))}
             </Select>
+            {rendersNowhereYet(form.placement) ? (
+              <p className="mt-1 text-xs font-medium text-amber-700">
+                No page displays this slot yet, so this assignment will not appear anywhere. Assigning is still
+                allowed — it goes live if the slot is ever added to a page.
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-slate-500">Shown on {LIVE_PLACEMENTS[form.placement]}.</p>
+            )}
           </Field>
 
           <Field
