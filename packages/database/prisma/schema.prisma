@@ -335,6 +335,14 @@ enum AuditAction {
   WALLET_TEST_FUNDING_GRANTED
   WALLET_SELF_SERVICE_TEST_FUNDING_GRANTED
   USER_TEST_FLAG_CHANGED
+  // ---- Passenger transportation (admin oversight hooks) ----
+  PASSENGER_ROUTE_CREATED
+  PASSENGER_ROUTE_UPDATED
+  PASSENGER_VEHICLE_APPROVED
+  PASSENGER_VEHICLE_REJECTED
+  PASSENGER_TRIP_CANCELLED
+  PASSENGER_DRIVER_TEST_MODE_CHANGED
+  PASSENGER_PROVIDER_TEST_MODE_CHANGED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -538,6 +546,11 @@ model User {
   avatarReviewsMade          User[]                    @relation("AvatarReviewer")
   shipments                  Shipment[]                @relation("ShipmentCustomer")
   custodyEventsRecorded      CustodyEvent[]            @relation("CustodyActor")
+  // Passenger transportation
+  passengerDriverProfile     PassengerDriverProfile?   @relation("UserPassengerDriverProfile")
+  passengerProviderProfile   PassengerProviderProfile? @relation("UserPassengerProviderProfile")
+  passengerBookings          PassengerBooking[]        @relation("PassengerBookingRider")
+  passengerAssignmentsMade   PassengerTripAssignment[] @relation("PassengerAssignmentAssignedBy")
 
   @@index([status])
   @@index([district])
@@ -4635,4 +4648,447 @@ model CustodyEvent {
   @@index([shipmentId, occurredAt])
   @@index([shipmentLegId])
   @@map("custody_events")
+}
+
+// ---- Passenger Transportation (foundation) ----------------------------------
+// People, not parcels. Schema only in this phase: no dispatch service, no
+// pricing, no money movement. The shape is deliberately general enough that
+// BOTH an on-demand point-to-point trip (a taxi) and a scheduled service (a
+// bus or water-taxi run) fit without a rewrite.
+//
+// What is deliberately REUSED rather than re-invented:
+//   - Role approval: PASSENGER_DRIVER / PASSENGER_PROVIDER already exist in
+//     RoleCode and go through the same RoleApplication / UserRole machinery as
+//     every other role. Nothing here duplicates approval state for the person.
+//   - DriverAvailability, VehicleApprovalStatus, DeliveryAssignmentStatus and
+//     District: shared vocabulary that already means the right thing.
+//
+// What is deliberately SEPARATE:
+//   - PassengerDriverProfile is NOT DriverProfile. DriverProfile is wired into
+//     delivery dispatch, the driver queue and the self-delivery invariant;
+//     overloading it would put passenger drivers into parcel dispatch.
+//   - PassengerVehicle is NOT DriverVehicle. A passenger vehicle carries seat
+//     capacity and can belong to a fleet operator rather than one driver.
+//
+// NO money moves here. Fare fields are nullable BigInt minor units with no
+// default, no formula and no rate: null means "no pricing policy exists yet",
+// and a fare only ever appears once the product owner decides how fares work.
+
+/// What kind of vehicle carries passengers. A separate vocabulary from the
+/// delivery VehicleType on purpose: BUS and BOAT are central here and
+/// meaningless for parcels, while BICYCLE and SCOOTER carry parcels but not
+/// fare-paying passengers. Extending the shared enum would couple the two
+/// domains' exhaustive switches for no gain.
+enum PassengerVehicleType {
+  CAR
+  SUV
+  VAN
+  MINIBUS
+  BUS
+  BOAT
+  MOTORCYCLE
+  OTHER
+}
+
+/// The two shapes of passenger work. ON_DEMAND is point-to-point, requested by
+/// one rider; SCHEDULED is a departure of a configured PassengerRoute that many
+/// riders book seats on.
+enum PassengerTripKind {
+  ON_DEMAND
+  SCHEDULED
+}
+
+/// The trip's operational state. One vocabulary covers both kinds: a scheduled
+/// departure sits at SCHEDULED until it needs a driver; an on-demand trip is
+/// born PENDING_ASSIGNMENT. EN_ROUTE_TO_PICKUP exists because a taxi's "coming
+/// to get you" is a state the rider genuinely waits in; a bus route skips it.
+enum PassengerTripStatus {
+  SCHEDULED
+  PENDING_ASSIGNMENT
+  ASSIGNED
+  EN_ROUTE_TO_PICKUP
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  EXCEPTION
+}
+
+/// A rider's booking lifecycle. REQUESTED is the ask; CONFIRMED is a held seat
+/// (or an accepted on-demand request); EXPIRED is an on-demand request nobody
+/// answered. NO_SHOW is recorded rather than folded into CANCELLED because the
+/// two mean different things to an operator reviewing a route.
+enum PassengerBookingStatus {
+  REQUESTED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  EXPIRED
+}
+
+/// Who cancelled. Recorded on the row (with the acting user in the audit
+/// trail) because "the driver cancelled" and "the rider cancelled" are
+/// different facts a future cancellation policy will need - and by then it is
+/// too late to reconstruct them.
+enum PassengerCancellationParty {
+  PASSENGER
+  DRIVER
+  PROVIDER
+  ADMIN
+  SYSTEM
+}
+
+/// A person approved (via the existing role machinery) to carry passengers.
+/// Mirrors DriverProfile's SHAPE without touching DriverProfile itself - the
+/// two kinds of driving are different jobs held by possibly the same human.
+model PassengerDriverProfile {
+  id                    String                    @id @default(cuid())
+  /// A designated simulation driver. Admin-set only, exactly like
+  /// DriverProfile.isTest: test trips are offered ONLY to these and these are
+  /// offered ONLY test trips, so a rehearsal can never pick up a real rider
+  /// and a real trip can never land on a test account.
+  isTest                Boolean                   @default(false)
+  userId                String                    @unique
+  user                  User                      @relation("UserPassengerDriverProfile", fields: [userId], references: [id], onDelete: Cascade)
+  /// A fleet driver drives for an operator; an independent driver has none.
+  /// SetNull: a fleet dissolving leaves its drivers independent, not deleted.
+  providerProfileId     String?
+  providerProfile       PassengerProviderProfile? @relation(fields: [providerProfileId], references: [id], onDelete: SetNull)
+  // Application / identity data (captured with the role application).
+  legalName             String
+  displayName           String
+  phone                 String
+  homeDistrict          District
+  homeAddress           String?
+  latitude              Float?
+  longitude             Float?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  licenceNumber         String
+  licenceExpiry         DateTime
+  termsAcceptedAt       DateTime?
+  applicantNotes        String?
+  profilePhotoKey       String? // private-bucket storage key
+  // Operational.
+  availability          DriverAvailability        @default(OFFLINE)
+  isActive              Boolean                   @default(true)
+  // Placeholders - populated once trips actually complete; NO money attached.
+  ratingAverage         Float                     @default(0)
+  ratingCount           Int                       @default(0)
+  completedTrips        Int                       @default(0)
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  vehiclesOwned   PassengerVehicle[]        @relation("PassengerVehicleOwnerDriver")
+  trips           PassengerTrip[]           @relation("PassengerTripDriver")
+  tripAssignments PassengerTripAssignment[]
+
+  @@index([availability])
+  @@index([providerProfileId])
+  @@map("passenger_driver_profiles")
+}
+
+/// A fleet / transport operator: the business that owns vehicles and runs
+/// routes. Approval of the PERSON is the existing PASSENGER_PROVIDER role
+/// application; this row is the operating profile behind an approved role,
+/// exactly as VendorProfile sits behind VENDOR.
+model PassengerProviderProfile {
+  id                     String    @id @default(cuid())
+  /// A simulation operator. Admin-set only; everything it runs is test-side.
+  isTest                 Boolean   @default(false)
+  userId                 String    @unique
+  user                   User      @relation("UserPassengerProviderProfile", fields: [userId], references: [id], onDelete: Cascade)
+  businessName           String
+  description            String?
+  contactEmail           String
+  contactPhone           String?
+  district               District?
+  city                   String?
+  addressLine1           String?
+  logoKey                String? // public-bucket storage key
+  /// The operator's transport permit, if they hold one. Names and dates only -
+  /// what the licence permits is an admin judgement, not a schema rule.
+  operatingLicenceNumber String?
+  operatingLicenceExpiry DateTime?
+  isActive               Boolean   @default(true)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  drivers  PassengerDriverProfile[]
+  vehicles PassengerVehicle[]       @relation("PassengerVehicleOwnerProvider")
+  routes   PassengerRoute[]
+  trips    PassengerTrip[]          @relation("PassengerTripProvider")
+
+  @@index([isTest, isActive])
+  @@map("passenger_provider_profiles")
+}
+
+/// A vehicle that carries people. Mirrors DriverVehicle's approval /
+/// registration / insurance shape, but ownership is different in kind: a
+/// passenger vehicle belongs to EITHER a fleet operator OR an owner-driver
+/// (exactly one - enforced in the validation layer, where the rule can explain
+/// itself, rather than as a CHECK constraint), and it carries seat capacity
+/// because a booking has to know whether a seat is left to sell.
+model PassengerVehicle {
+  id                    String                    @id @default(cuid())
+  /// Derived from the owning profile's isTest when created; never from a request.
+  isTest                Boolean                   @default(false)
+  providerProfileId     String?
+  providerProfile       PassengerProviderProfile? @relation("PassengerVehicleOwnerProvider", fields: [providerProfileId], references: [id], onDelete: Cascade)
+  ownerDriverProfileId  String?
+  ownerDriverProfile    PassengerDriverProfile?   @relation("PassengerVehicleOwnerDriver", fields: [ownerDriverProfileId], references: [id], onDelete: Cascade)
+  type                  PassengerVehicleType
+  make                  String
+  model                 String
+  year                  Int?
+  color                 String?
+  licencePlate          String
+  registrationNumber    String?
+  registrationExpiry    DateTime?
+  insuranceProvider     String?
+  insurancePolicyNumber String?
+  insuranceExpiry       DateTime?
+  photoKeys             String[] // private-bucket storage keys
+  /// Passenger seats available to sell, excluding the driver. Required: a
+  /// passenger vehicle with unknown capacity cannot take a booking.
+  seatCapacity          Int
+  isActive              Boolean                   @default(true)
+  isPrimary             Boolean                   @default(false)
+  approvalStatus        VehicleApprovalStatus     @default(PENDING)
+  rejectionReason       String?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  trips           PassengerTrip[]           @relation("PassengerTripVehicle")
+  tripAssignments PassengerTripAssignment[]
+
+  @@index([providerProfileId])
+  @@index([ownerDriverProfileId])
+  @@index([approvalStatus])
+  @@map("passenger_vehicles")
+}
+
+/// A configured passenger service between two places - the thing a scheduled
+/// trip is a departure OF. Endpoints are district + city, like a CourierLane:
+/// which towns a service connects is a FACT ABOUT BELIZE entered by an
+/// operator, never derived from a district column and never invented here.
+/// Ships EMPTY - real routes are business configuration.
+model PassengerRoute {
+  id                  String                   @id @default(cuid())
+  /// Simulation infrastructure, exactly as for hubs, routes and lanes: a TEST
+  /// route exists only to exercise the machinery and never carries a real rider.
+  isTest              Boolean                  @default(false)
+  /// Routes belong to the operator that runs them. Restrict: deleting an
+  /// operator with configured routes must be a deliberate two-step act, not a
+  /// cascade that silently unpublishes a transport network.
+  providerProfileId   String
+  providerProfile     PassengerProviderProfile @relation(fields: [providerProfileId], references: [id], onDelete: Restrict)
+  name                String
+  description         String?
+  originDistrict      District
+  originCity          String
+  destinationDistrict District
+  destinationCity     String
+  /// Scheduling is a label, not a calendar - operations write "Mon-Sat 06:30"
+  /// and the product only reports it, exactly as LogisticsRoute.scheduleNote.
+  scheduleNote        String?
+  /// Null means unknown, not zero minutes.
+  durationMinutes     Int?
+  /// Structure for pricing to attach later. Null means NO fare policy exists -
+  /// there is no formula, no rate and no default anywhere in this phase.
+  baseFareMinor       BigInt?
+  isActive            Boolean                  @default(true)
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  stops PassengerRouteStop[]
+  trips PassengerTrip[]
+
+  @@index([isTest, isActive])
+  @@index([providerProfileId])
+  @@index([originDistrict, originCity])
+  @@index([destinationDistrict, destinationCity])
+  @@map("passenger_routes")
+}
+
+/// An INTERMEDIATE stop on a route, in order. The endpoints live on the route
+/// itself and are deliberately not repeated here - stating them twice is an
+/// opportunity for them to disagree.
+model PassengerRouteStop {
+  id        String         @id @default(cuid())
+  routeId   String
+  route     PassengerRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  sequence  Int
+  district  District
+  city      String
+  name      String?
+  latitude  Float?
+  longitude Float?
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  // Two stops numbered 3 would make "what is next" unanswerable.
+  @@unique([routeId, sequence])
+  @@map("passenger_route_stops")
+}
+
+/// One vehicle movement carrying passengers - a taxi run or one departure of a
+/// scheduled route. Origin/destination are SNAPSHOTS for on-demand trips (a
+/// trip in progress must not change shape because a saved place was edited);
+/// scheduled trips carry their geography on the route. Town and district are
+/// required by the validation layer wherever a snapshot is present - a pin
+/// never implies them, exactly as for delivery addresses.
+model PassengerTrip {
+  id        String              @id @default(cuid())
+  /// Rider-facing reference, like a shipment's tracking code.
+  reference String              @unique
+  kind      PassengerTripKind
+  status    PassengerTripStatus
+  /// Derived from the operator / driver / requesting rider - never from a
+  /// request body. The test boundary is symmetric from day one: a test trip is
+  /// never offered to a real driver and never carries a real rider.
+  isTest    Boolean             @default(false)
+
+  /// SCHEDULED trips reference the route they are a departure of. Restrict:
+  /// route history stays reconstructible.
+  routeId           String?
+  route             PassengerRoute?           @relation(fields: [routeId], references: [id], onDelete: Restrict)
+  providerProfileId String?
+  providerProfile   PassengerProviderProfile? @relation("PassengerTripProvider", fields: [providerProfileId], references: [id], onDelete: SetNull)
+  driverProfileId   String?
+  driverProfile     PassengerDriverProfile?   @relation("PassengerTripDriver", fields: [driverProfileId], references: [id], onDelete: SetNull)
+  vehicleId         String?
+  vehicle           PassengerVehicle?         @relation("PassengerTripVehicle", fields: [vehicleId], references: [id], onDelete: SetNull)
+  /// Snapshot of the vehicle's seatCapacity at assignment, so seats-remaining
+  /// stays answerable even if the vehicle record later changes.
+  seatCapacity      Int?
+
+  scheduledDepartureAt DateTime?
+  scheduledArrivalAt   DateTime?
+
+  // ---- Origin (snapshot; on-demand trips) ----
+  originDistrict  District?
+  originCity      String?
+  originAddress   String?
+  originLatitude  Float?
+  originLongitude Float?
+
+  // ---- Destination (snapshot; on-demand trips) ----
+  destinationDistrict  District?
+  destinationCity      String?
+  destinationAddress   String?
+  destinationLatitude  Float?
+  destinationLongitude Float?
+
+  // ---- Lifecycle ----
+  assignedAt         DateTime?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  cancelledBy        PassengerCancellationParty?
+  cancellationReason String?
+  exceptionAt        DateTime?
+  exceptionReason    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings    PassengerBooking[]
+  assignments PassengerTripAssignment[]
+
+  @@index([status, isTest])
+  @@index([routeId, scheduledDepartureAt])
+  @@index([driverProfileId, status])
+  @@index([providerProfileId, status])
+  @@map("passenger_trips")
+}
+
+/// A rider's reservation: the request for an on-demand trip, or seats held on
+/// a scheduled departure. tripId is null while an on-demand request has not
+/// yet been dispatched - the ask exists before the vehicle movement does.
+model PassengerBooking {
+  id              String                 @id @default(cuid())
+  /// Rider-facing booking code.
+  reference       String                 @unique
+  /// Derived from the rider's account (User.isTest, admin-set only) - never
+  /// from a request body.
+  isTest          Boolean                @default(false)
+  passengerUserId String?
+  passenger       User?                  @relation("PassengerBookingRider", fields: [passengerUserId], references: [id], onDelete: SetNull)
+  tripId          String?
+  trip            PassengerTrip?         @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  seats           Int                    @default(1)
+  status          PassengerBookingStatus @default(REQUESTED)
+
+  /// When the rider asked to travel (pre-booked on-demand); a scheduled
+  /// booking inherits its time from the trip.
+  requestedDepartureAt DateTime?
+
+  // ---- Pickup / dropoff (snapshot; on-demand and flag-stop riders) ----
+  // Town and district required by validation wherever these are used - a pin
+  // never implies them.
+  pickupDistrict   District?
+  pickupCity       String?
+  pickupAddress    String?
+  pickupLatitude   Float?
+  pickupLongitude  Float?
+  dropoffDistrict  District?
+  dropoffCity      String?
+  dropoffAddress   String?
+  dropoffLatitude  Float?
+  dropoffLongitude Float?
+
+  /// Structure for pricing to attach later. Null means no fare policy exists
+  /// yet; nothing in this phase computes, quotes or charges one.
+  fareQuotedMinor BigInt?
+  /// Where a future fare came from (a rate card reference, a policy id).
+  /// Unset until a pricing policy exists.
+  fareBasis       String?
+
+  // ---- Lifecycle ----
+  confirmedAt        DateTime?
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  cancelledBy        PassengerCancellationParty?
+  cancellationReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([passengerUserId, createdAt])
+  @@index([tripId, status])
+  @@index([status, isTest])
+  @@map("passenger_bookings")
+}
+
+/// Append-only assignment history for a trip, mirroring DeliveryAssignment /
+/// ShipmentLegOffer: the CURRENT driver and vehicle are denormalized onto the
+/// trip for fast reads; this is the record of everyone who was ever asked,
+/// which is what stops a dispatcher asking twice and what answers "why did
+/// this trip take an hour to staff". Reuses DeliveryAssignmentStatus - the
+/// attempt lifecycle vocabulary is identical and already proven.
+model PassengerTripAssignment {
+  id               String                   @id @default(cuid())
+  tripId           String
+  trip             PassengerTrip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  driverProfileId  String
+  driverProfile    PassengerDriverProfile   @relation(fields: [driverProfileId], references: [id], onDelete: Restrict)
+  vehicleId        String?
+  vehicle          PassengerVehicle?        @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  /// The admin who assigned by hand; null when dispatch (or the driver
+  /// accepting an open offer) did it - recorded truthfully, not attributed.
+  assignedByUserId String?
+  assignedBy       User?                    @relation("PassengerAssignmentAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+  status           DeliveryAssignmentStatus @default(ACTIVE)
+  assignedAt       DateTime                 @default(now())
+  respondedAt      DateTime?
+  endedAt          DateTime?
+  declineReason    String?
+  endReason        String?
+  createdAt        DateTime                 @default(now())
+
+  @@index([tripId, assignedAt])
+  @@index([driverProfileId, status])
+  @@map("passenger_trip_assignments")
 }

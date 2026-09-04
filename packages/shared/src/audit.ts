@@ -212,6 +212,16 @@ export const AUDIT_ACTIONS = [
   'AVATAR_APPROVED',
   'AVATAR_REJECTED',
   'AVATAR_REMOVED',
+  // ---- Passenger transportation (admin oversight hooks) ----
+  'PASSENGER_ROUTE_CREATED',
+  'PASSENGER_ROUTE_UPDATED',
+  'PASSENGER_VEHICLE_APPROVED',
+  'PASSENGER_VEHICLE_REJECTED',
+  'PASSENGER_TRIP_CANCELLED',
+  // The admin-set-only simulation flags, security relevant exactly as the
+  // vendor and delivery-driver equivalents above.
+  'PASSENGER_DRIVER_TEST_MODE_CHANGED',
+  'PASSENGER_PROVIDER_TEST_MODE_CHANGED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
