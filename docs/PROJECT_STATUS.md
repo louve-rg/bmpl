@@ -36,12 +36,28 @@ Active business areas, in the order they matter right now:
 1. **Marketplace** — vendors, products, cart, checkout, orders.
 2. **Shipping & Delivery** — sending a parcel, possibly across several legs.
 3. **Delivery driver** — the courier who actually moves it.
-4. **Wallet & payments** — a ledger, escrow and settlement behind all of it.
+4. **Passenger Transportation** — moving people rather than parcels. Formally
+   authorized by the product owner, in foundation stage.
+5. **Wallet & payments** — a ledger, escrow and settlement behind all of it.
 
 Also present, and **not** the current focus: Belize Connect (jobs), real estate,
 marketing/promotions.
 
-**Passenger transportation is out of scope.** Do not begin it.
+**Passenger transportation is an active, authorized vertical.** Earlier versions
+of this document said it was out of scope; the product owner has since
+authorized it, and those versions are superseded. What has **not** changed:
+
+- No real-money passenger payments — no fare is charged, no commission is
+  taken, no cancellation fee is collected. `WALLET_MONEY_MOVEMENT_ENABLED` is
+  untouched.
+- No invented fare formulas, rates or commercial policy. Pricing is an
+  unresolved product-owner decision; a plausible fare here becomes a real charge
+  to a real person.
+- No invented Belize operators, routes, schedules or geography — the same
+  no-fabrication rule that governs logistics (§9) applies identically.
+- `PASSENGER_DRIVER` / `PASSENGER_PROVIDER` already exist as role codes, and the
+  existing role-application, approval and admin machinery is reused, not
+  replaced. See [`../CLAUDE.md`](../CLAUDE.md) §8.
 
 ---
 

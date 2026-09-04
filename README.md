@@ -14,7 +14,8 @@ public landing page.
 > closed, double-entry ledger with escrow and settlement, but there is no
 > payment provider, card rail, bank rail, top-up, payout or withdrawal — and
 > adding one is a product decision, not an engineering one. Passenger transport
-> is out of scope.
+> is an authorized vertical in foundation stage, and the same rule holds there:
+> no fares, commissions or cancellation fees are charged.
 >
 > For the authoritative current state — live feature flags, what is simulation
 > data, what is real, and what still needs a person — read
