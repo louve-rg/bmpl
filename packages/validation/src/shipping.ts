@@ -307,6 +307,25 @@ export const collectShipmentSchema = z.object({
 });
 export type CollectShipmentInput = z.infer<typeof collectShipmentSchema>;
 
+/**
+ * Admin assigns a driver (+ one of their approved vehicles) to a courier leg by
+ * hand — the production path while automatic dispatch is off. Same shape as the
+ * delivery console's assign, deliberately: one vocabulary for one job.
+ */
+export const assignShipmentLegSchema = z.object({
+  driverProfileId: cuidSchema,
+  vehicleId: cuidSchema,
+});
+export type AssignShipmentLegInput = z.infer<typeof assignShipmentLegSchema>;
+
+/** Admin reassigns a courier leg; a reason is mandatory (preserves history). */
+export const reassignShipmentLegSchema = z.object({
+  driverProfileId: cuidSchema,
+  vehicleId: cuidSchema,
+  reason: z.string().trim().min(1, 'A reason is required.').max(500),
+});
+export type ReassignShipmentLegInput = z.infer<typeof reassignShipmentLegSchema>;
+
 export const cancelShipmentSchema = z.object({
   reason: z.string().trim().min(4, 'Say why it is being cancelled.').max(500),
 });

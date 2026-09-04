@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
+  assignShipmentLegSchema,
   cancelShipmentSchema,
   collectShipmentSchema,
   createCourierLaneSchema,
@@ -10,11 +11,13 @@ import {
   legDepartSchema,
   legExceptionSchema,
   legHandoffSchema,
+  reassignShipmentLegSchema,
   shipmentListSchema,
   shipmentQuoteSchema,
   updateCourierLaneSchema,
   updateHubSchema,
   updateRouteSchema,
+  type AssignShipmentLegInput,
   type CancelShipmentInput,
   type CollectShipmentInput,
   type CreateCourierLaneInput,
@@ -24,6 +27,7 @@ import {
   type LegDepartInput,
   type LegExceptionInput,
   type LegHandoffInput,
+  type ReassignShipmentLegInput,
   type ShipmentListInput,
   type ShipmentQuoteInput,
   type UpdateCourierLaneInput,
@@ -35,6 +39,7 @@ import { CurrentUser, Public, RequirePermission, Roles } from '../common/decorat
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { LogisticsNetworkService } from './logistics-network.service';
+import { ShipmentDispatchService } from './shipment-dispatch.service';
 import { ShipmentService } from './shipment.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -135,6 +140,7 @@ export class AdminLogisticsController {
   constructor(
     private readonly shipments: ShipmentService,
     private readonly network: LogisticsNetworkService,
+    private readonly legDispatch: ShipmentDispatchService,
   ) {}
 
   /* ---- the network, as data ---- */
@@ -232,6 +238,31 @@ export class AdminLogisticsController {
   }
 
   /* ---- legs ---- */
+
+  /**
+   * Manual driver assignment — the production dispatch path while
+   * `dispatchAutomatic` is off. Who may be chosen, and every refusal the
+   * automatic engine enforces (payment, parcel location, the simulation
+   * boundary, the sender never couriering their own parcel), is enforced again
+   * in the service.
+   */
+  @RequirePermission('logistics.operate')
+  @Get('legs/:id/eligible-drivers')
+  eligibleDrivers(@Param('id') id: string) {
+    return this.legDispatch.eligibleDriversForLeg(id);
+  }
+
+  @RequirePermission('logistics.operate')
+  @Post('legs/:id/assign')
+  assignLeg(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(assignShipmentLegSchema)) dto: AssignShipmentLegInput) {
+    return this.legDispatch.adminAssign({ userId: u.userId }, id, dto);
+  }
+
+  @RequirePermission('logistics.operate')
+  @Post('legs/:id/reassign')
+  reassignLeg(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(reassignShipmentLegSchema)) dto: ReassignShipmentLegInput) {
+    return this.legDispatch.adminReassign({ userId: u.userId }, id, dto);
+  }
 
   @RequirePermission('logistics.operate')
   @Post('legs/:id/start')
