@@ -60,12 +60,16 @@ async function seedNetwork() {
   ];
   hub = {};
   for (const h of hubs) {
+    // Priced THROUGH the API. This used to be a direct prisma write because the
+    // hub schema silently dropped courierFeeMinor — the defect that made door
+    // service unreachable end to end. The fixture now proves the product path.
     const r = await post(admin, 'admin/logistics/hubs', {
       code: h.code, name: h.name, type: h.type, district: h.district, city: h.city, modes: h.modes,
+      courierFeeMinor: h.courierFee,
     });
     expect(r.status).toBe(201);
+    expect(r.body.courierFeeMinor).toBe(h.courierFee);
     hub[h.code] = r.body.id;
-    await ctx.prisma.logisticsHub.update({ where: { id: r.body.id }, data: { courierFeeMinor: BigInt(h.courierFee) } });
   }
   const routes = [
     { from: 'PLA', to: 'MUN', mode: 'AIR', durationMinutes: 45, priceMinor: 8000 },
@@ -1044,5 +1048,107 @@ describe('the customer sees one journey', () => {
     const s = await book();
     const lineHaul = s.legs.find((l: { kind: string }) => l.kind === 'LINE_HAUL');
     expect(lineHaul.carrier).toBe('Tropic Air');
+  });
+});
+
+/**
+ * A hub can be priced THROUGH THE PRODUCT.
+ *
+ * The hub schema silently dropped `courierFeeMinor`, so the admin Terminals
+ * screen's "Courier rate" PATCH was stripped to `{}` and 400'd — an operator
+ * could build the whole network in the console and still never make door
+ * service quotable. These tests walk the exact path that was broken.
+ */
+describe('pricing a hub through the product', () => {
+  it('accepts the fee at creation, and the admin screen PATCH prices an unpriced hub', async () => {
+    // Created WITHOUT a fee: legitimately unpriced, not an error.
+    const created = await post(admin, 'admin/logistics/hubs', {
+      code: `UPR${(seq += 1)}`, name: 'Unpriced Terminal', type: 'BUS_TERMINAL',
+      district: 'CAYO', city: 'San Ignacio', modes: ['LAND'],
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.courierFeeMinor).toBe(0);
+
+    // The EXACT request shape the admin Terminals screen sends
+    // (apps/admin/.../logistics/hubs/page.tsx: Math.round(dollars * 100)).
+    const priced = await patch(admin, `admin/logistics/hubs/${created.body.id}`, { courierFeeMinor: Math.round(13.5 * 100) });
+    expect(priced.status).toBe(200);
+    expect(priced.body.courierFeeMinor).toBe(1350);
+    // Persisted as BigInt minor units, and audited as money configuration.
+    const row = await ctx.prisma.logisticsHub.findUniqueOrThrow({ where: { id: created.body.id } });
+    expect(row.courierFeeMinor).toBe(1350n);
+    const audits = (await ctx.prisma.auditLog.findMany({ where: { action: 'LOGISTICS_HUB_UPDATED' } })).filter(
+      (a) => (a.newValue as { hubId?: string }).hubId === created.body.id,
+    );
+    expect((audits.at(-1)!.newValue as { courierFeeMinor?: number }).courierFeeMinor).toBe(1350);
+  });
+
+  it('a door quote is available and fully priced because the fees were set through the API', async () => {
+    // seedNetwork now prices every hub via the API. If the schema ever drops
+    // the field again, pricingIncomplete flips true and this fails.
+    const q = await post(customer, 'shipping/quote', doorToDoor());
+    expect(q.status).toBe(201);
+    expect(q.body.available).toBe(true);
+    expect(q.body.pricingIncomplete).toBe(false);
+    expect(q.body.totalMinor).toBeGreaterThan(0);
+    // And the journey books end to end — the consequence that was unreachable.
+    const b = await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true });
+    expect(b.status).toBe(201);
+  });
+});
+
+/**
+ * The simulation network can be built through the console.
+ *
+ * Hub and route creation dropped `isTest`, so nothing an admin created could
+ * ever serve a test customer — the simulation spec had to seed its network
+ * with raw prisma writes. The flag is admin-set here (these endpoints are
+ * logistics.manage-gated), exactly as courier lanes already accept it; it is
+ * still never an ordinary client's assertion.
+ */
+describe('an admin-created simulation network', () => {
+  it('routes a test customer, and stays invisible to a real one', async () => {
+    // Districts the REAL fixture network has no presence in, so the two sides
+    // of the boundary give opposite answers to the same question.
+    const s = uniq();
+    const tcz = await post(admin, 'admin/logistics/hubs', {
+      code: `TC${(seq += 1)}`, name: 'Test Corozal Strip', type: 'AIRSTRIP',
+      district: 'COROZAL', city: 'Corozal Town', modes: ['LAND', 'AIR'],
+      courierFeeMinor: 1200, isTest: true,
+    });
+    const tow = await post(admin, 'admin/logistics/hubs', {
+      code: `TO${(seq += 1)}`, name: 'Test Orange Walk Strip', type: 'AIRSTRIP',
+      district: 'ORANGE_WALK', city: 'Orange Walk Town', modes: ['LAND', 'AIR'],
+      courierFeeMinor: 1000, isTest: true,
+    });
+    expect(tcz.status).toBe(201);
+    expect(tow.status).toBe(201);
+    expect((await ctx.prisma.logisticsHub.findUniqueOrThrow({ where: { id: tcz.body.id } })).isTest).toBe(true);
+    const route = await post(admin, 'admin/logistics/routes', {
+      originHubId: tcz.body.id, destinationHubId: tow.body.id, mode: 'AIR',
+      durationMinutes: 30, priceMinor: 7000, carrierName: 'Tropic Air', isTest: true,
+    });
+    expect(route.status).toBe(201);
+    expect((await ctx.prisma.logisticsRoute.findUniqueOrThrow({ where: { id: route.body.id } })).isTest).toBe(true);
+
+    // A designated test customer — flagged through the product too.
+    const t = await registerCustomer(`simc_${s}@example.com`);
+    expect((await post(admin, 'admin/users/test-flag', { userId: t.userId, isTest: true, reason: 'Network console test.' })).status).toBe(201);
+
+    const journey = {
+      service: 'DOOR_TO_DOOR',
+      origin: { district: 'COROZAL', city: 'Corozal Town', address: '1 Fifth Ave', name: 'S', phone: '501-2223333' },
+      destination: { district: 'ORANGE_WALK', city: 'Orange Walk Town', address: '2 Main St', name: 'R', phone: '501-4445555' },
+      preferredMode: 'AIR',
+    };
+    // The test customer routes over the admin-created simulation network…
+    const q = await post(t.cookies, 'shipping/quote', journey);
+    expect(q.status).toBe(201);
+    expect(q.body.available).toBe(true);
+    expect(q.body.pricingIncomplete).toBe(false);
+    // …and a real customer cannot: the real network has nothing in Corozal or
+    // Orange Walk, and a test hub must never leak into a real quote.
+    const real = await post(customer, 'shipping/quote', journey);
+    expect(real.body.available).toBe(false);
   });
 });

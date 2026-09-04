@@ -150,7 +150,14 @@ export class LogisticsNetworkService {
 
   async createHub(input: CreateHubInput, actorId: string) {
     const hub = await this.prisma.logisticsHub
-      .create({ data: { ...input, isActive: input.isActive ?? true } })
+      .create({
+        data: {
+          ...input,
+          // Money is BigInt minor units; absent means "not priced yet" (0).
+          courierFeeMinor: BigInt(input.courierFeeMinor ?? 0),
+          isActive: input.isActive ?? true,
+        },
+      })
       .catch((e: unknown) => {
         throw this.hubCodeConflict(e, input.code);
       });
@@ -161,14 +168,21 @@ export class LogisticsNetworkService {
   async updateHub(id: string, input: UpdateHubInput, actorId: string) {
     const before = await this.prisma.logisticsHub.findUnique({ where: { id } });
     if (!before) throw new NotFoundException('Hub not found.');
-    const hub = await this.prisma.logisticsHub.update({ where: { id }, data: input }).catch((e: unknown) => {
-      throw this.hubCodeConflict(e, input.code ?? before.code);
-    });
+    const hub = await this.prisma.logisticsHub
+      .update({
+        where: { id },
+        data: { ...input, ...(input.courierFeeMinor != null ? { courierFeeMinor: BigInt(input.courierFeeMinor) } : {}) },
+      })
+      .catch((e: unknown) => {
+        throw this.hubCodeConflict(e, input.code ?? before.code);
+      });
     await this.audit.record({
       action: 'LOGISTICS_HUB_UPDATED',
       actorId,
-      previousValue: { code: before.code, isActive: before.isActive, modes: before.modes },
-      newValue: { hubId: hub.id, code: hub.code, isActive: hub.isActive, modes: hub.modes },
+      // The courier fee is money configuration; a change to it must be visible
+      // in the trail, not just the fact that "something" changed.
+      previousValue: { code: before.code, isActive: before.isActive, modes: before.modes, courierFeeMinor: money(before.courierFeeMinor) },
+      newValue: { hubId: hub.id, code: hub.code, isActive: hub.isActive, modes: hub.modes, courierFeeMinor: money(hub.courierFeeMinor) },
     });
     return this.hubOut(hub);
   }

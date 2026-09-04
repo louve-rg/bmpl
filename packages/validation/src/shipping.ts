@@ -62,7 +62,19 @@ const hubBase = z.object({
   instructions: z.string().trim().max(1000).optional(),
   contactName: z.string().trim().max(120).optional(),
   contactPhone: phoneSchema.optional(),
+  // What BML charges for the courier run between this terminal and a door in
+  // its town, in minor units. 0 is allowed and MEANS "not priced yet" — the
+  // quote flags it and, since the zero-total rule, booking refuses it. This
+  // field was missing entirely, which meant the admin Terminals screen's
+  // "Courier rate" control was stripped to nothing by this very schema and no
+  // hub could EVER be priced through the product.
+  courierFeeMinor: z.coerce.number().int().min(0).max(100_000_000).optional(),
   isActive: z.boolean().optional(),
+  // Simulation infrastructure, exactly as courier lanes already accept: this
+  // endpoint is admin-only (logistics.manage), so the flag is admin-set, never
+  // an ordinary client's assertion. Without it, nothing an admin builds in the
+  // console could ever serve a test customer.
+  isTest: z.boolean().optional(),
 });
 
 export const createHubSchema = withPinRules(hubBase);
@@ -82,6 +94,8 @@ const routeBase = z.object({
   durationMinutes: z.coerce.number().int().min(1).max(60 * 24 * 7),
   priceMinor: z.coerce.number().int().min(0).max(100_000_000),
   isActive: z.boolean().optional(),
+  // Admin-set simulation flag, consistent with hubs and courier lanes.
+  isTest: z.boolean().optional(),
 });
 
 /** A route from a hub to itself would let the planner loop for free. */

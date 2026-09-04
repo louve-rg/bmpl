@@ -88,12 +88,14 @@ async function seedNetwork() {
   ];
   hub = {};
   for (const h of hubs) {
+    // Priced THROUGH the API (was a direct prisma write while the hub schema
+    // dropped courierFeeMinor — the defect fixed on this branch).
     const r = await post(admin, 'admin/logistics/hubs', {
       code: h.code, name: h.name, type: 'AIRSTRIP', district: h.district, city: h.city, modes: ['LAND', 'AIR'],
+      courierFeeMinor: h.fee,
     });
     expect(r.status).toBe(201);
     hub[h.code] = r.body.id;
-    await ctx.prisma.logisticsHub.update({ where: { id: r.body.id }, data: { courierFeeMinor: BigInt(h.fee) } });
   }
   for (const r of [
     { from: 'PLA', to: 'MUN', minutes: 45, price: 8000 },
