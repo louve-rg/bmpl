@@ -1166,6 +1166,10 @@ export class ShipmentService {
         destinationHub: l.destinationHub,
         carrier: l.carrierName ?? l.route?.carrierName ?? null,
         carrierBookingRef: opts.audience === 'STAFF' ? l.carrierBookingRef : null,
+        // Ops must be able to see whether a courier leg already has a driver
+        // before acting on it; the courier pipeline is staff-facing detail.
+        courierStatus: opts.audience === 'STAFF' ? l.courierStatus : null,
+        assignedDriverProfileId: opts.audience === 'STAFF' ? l.assignedDriverProfileId : null,
         scheduleNote: l.route?.scheduleNote ?? null,
         scheduledDepartureAt: l.scheduledDepartureAt,
         departedAt: l.departedAt,

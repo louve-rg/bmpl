@@ -49,6 +49,9 @@ export class AdminPassengerService {
       .map((p) => ({
         id: p.id,
         userId: p.userId,
+        // Fleet affiliation, so the assign flow can narrow to an operator's own
+        // drivers before the server refuses a cross-fleet pick.
+        providerProfileId: p.providerProfileId,
         name: `${p.user.firstName} ${p.user.lastName}`,
         email: p.user.email,
         displayName: p.displayName,

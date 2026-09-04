@@ -290,6 +290,45 @@ describe('manual staffing', () => {
     expect(r.status).toBe(400);
     expect(r.body.message).toMatch(/not approved/i);
   });
+
+  it('an assigned departure says who is driving, in what, and how many seats remain', async () => {
+    // Assignment was act-able but not see-able: the trip serializer carried no
+    // driver, vehicle or seat arithmetic, so a Departures screen could not show
+    // WHO is on a trip once it left SCHEDULED.
+    const op = await makeProvider('Test Visible Staffing');
+    const { tripId } = await makeDeparture(op, 2000);
+    const driver = await makeFleetDriver(op.profileId);
+    const vehicleId = await makeFleetVehicle(op, 10);
+    expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
+
+    const rider = await registerUser(`pb_vis_${uniq()}@example.com`);
+    const booking = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 3 });
+    expect(booking.status).toBe(201);
+    expect((await post(op.cookies, `passenger/provider/bookings/${booking.body.id}/confirm`)).status).toBe(201);
+
+    // Operator and admin read the same truth.
+    for (const [cookies, path] of [
+      [op.cookies, 'passenger/provider/trips'],
+      [admin, 'admin/passengers/trips'],
+    ] as const) {
+      const list = await get(cookies, path);
+      expect(list.status).toBe(200);
+      const t = list.body.find((x: { id: string }) => x.id === tripId);
+      expect(t.driverProfileId).toBe(driver.driverProfileId);
+      expect(t.driverName).toMatch(/^PBDrv/);
+      expect(t.vehicle).toMatchObject({ make: 'Toyota', model: 'Hiace' });
+      expect(t.seatCapacity).toBe(10);
+      expect(t.seatsConfirmed).toBe(3);
+      expect(t.seatsRemaining).toBe(7);
+    }
+
+    // And the drivers listing names the fleet, so an assign flow can narrow to
+    // the operator's own drivers before the server has to refuse a wrong pick.
+    const drivers = await get(admin, 'admin/passengers/drivers');
+    expect(drivers.status).toBe(200);
+    const row = drivers.body.find((d: { id: string }) => d.id === driver.driverProfileId);
+    expect(row.providerProfileId).toBe(op.profileId);
+  });
 });
 
 describe('the self-service invariant, on userId, both directions', () => {
