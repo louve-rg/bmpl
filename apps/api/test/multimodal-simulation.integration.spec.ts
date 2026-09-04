@@ -168,10 +168,13 @@ beforeEach(async () => {
   await ctx.prisma.logisticsRoute.deleteMany();
   await ctx.prisma.logisticsHub.deleteMany();
 
-  const settings = await ctx.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
-  const data = { dispatchAutomatic: true, dispatchMaxConcurrentPerDriver: 5, localCourierFeeTestMinor: 1500n };
-  if (settings) await ctx.prisma.platformSetting.update({ where: { id: settings.id }, data });
-  else await ctx.prisma.platformSetting.create({ data });
+  // Through the console's PATCH (audit finding H1): the test-side courier fee
+  // is money configuration, and this suite must fail if ops cannot set it.
+  const settingsRes = await request(ctx.server)
+    .patch('/api/admin/ops/settings')
+    .set('Cookie', admin)
+    .send({ dispatchAutomatic: true, dispatchMaxConcurrentPerDriver: 5, localCourierFeeTestMinor: 1500 });
+  expect(settingsRes.status).toBe(200);
 
   hub = await seedSimulationNetwork();
 

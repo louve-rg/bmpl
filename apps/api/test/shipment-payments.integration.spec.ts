@@ -44,21 +44,19 @@ async function fund(userId: string, amountMinor: number) {
   expect(r.status).toBe(201);
 }
 
-/** The platform-wide price of a local courier run. */
+/**
+ * The platform-wide price of a local courier run, set the way operations sets
+ * it (audit finding H1: the raw platformSetting write this replaces never
+ * proved the console path worked). Both rates: a real customer is priced by
+ * the first, a designated test account by the second, and this suite
+ * exercises both kinds of customer.
+ */
 async function setLocalCourierFee(feeMinor: bigint) {
-  const existing = await ctx.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
-  if (existing) {
-    // Both rates: a real customer is priced by the first, a designated test
-    // account by the second, and this suite exercises both kinds of customer.
-    await ctx.prisma.platformSetting.update({
-      where: { id: existing.id },
-      data: { localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 },
-    });
-  } else {
-    await ctx.prisma.platformSetting.create({
-      data: { localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 },
-    });
-  }
+  const r = await request(ctx.server)
+    .patch('/api/admin/ops/settings')
+    .set('Cookie', admin)
+    .send({ localCourierFeeMinor: Number(feeMinor), localCourierFeeTestMinor: Number(feeMinor), localCourierMinutes: 60 });
+  expect(r.status).toBe(200);
 }
 
 const PRICE = 1500; // BZ$15.00

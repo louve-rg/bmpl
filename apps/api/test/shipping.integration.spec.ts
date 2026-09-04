@@ -182,17 +182,15 @@ describe('a local door-to-door parcel', () => {
     destination: { district: 'BELIZE', city: 'Belize City' },
   };
 
-  /** The settings singleton is created lazily, so a bare update matches nothing. */
+  /**
+   * Priced the way operations prices it: through the console's PATCH. The raw
+   * platformSetting write this replaces was audit finding H1 — it kept every
+   * shipping test green without ever proving the console path could set a fee,
+   * exactly how the hub-pricing defect stayed hidden.
+   */
   async function setLocalCourierFee(feeMinor: bigint, minutes = 60) {
-    const existing = await ctx.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
-    if (existing) {
-      await ctx.prisma.platformSetting.update({
-        where: { id: existing.id },
-        data: { localCourierFeeMinor: feeMinor, localCourierMinutes: minutes },
-      });
-    } else {
-      await ctx.prisma.platformSetting.create({ data: { localCourierFeeMinor: feeMinor, localCourierMinutes: minutes } });
-    }
+    const r = await patch(admin, 'admin/ops/settings', { localCourierFeeMinor: Number(feeMinor), localCourierMinutes: minutes });
+    expect(r.status).toBe(200);
   }
 
   it('is quoted as a single courier run with no terminal in it', async () => {
@@ -203,6 +201,35 @@ describe('a local door-to-door parcel', () => {
     expect(r.body.legs.map((l: { kind: string }) => l.kind)).toEqual(['DIRECT']);
     expect(r.body.totalMinor).toBe(1500);
     expect(r.body.pricingIncomplete).toBe(false);
+  });
+
+  it('the fee round-trips through the console: set, read back, audited, and it prices the quote', async () => {
+    // Audit finding H1. The console path (PATCH admin/ops/settings) existed and
+    // worked, but nothing exercised it for fees — so the fee fields could have
+    // been dropped from the ops schema, the hub-pricing failure exactly, with
+    // this whole suite green. This test is about the FEATURE, not the field:
+    // the number an operator types is the number the next customer is quoted.
+    const set = await patch(admin, 'admin/ops/settings', { localCourierFeeMinor: 2222, localCourierMinutes: 45 });
+    expect(set.status).toBe(200);
+    expect(set.body.localCourierFeeMinor).toBe(2222);
+
+    const read = await get(admin, 'admin/ops/settings');
+    expect(read.status).toBe(200);
+    expect(read.body.localCourierFeeMinor).toBe(2222);
+    expect(read.body.localCourierMinutes).toBe(45);
+
+    // Money configuration is no longer audit-invisible: the row carries the
+    // fee on both sides, as hub fee changes have since A6.
+    const audits = (
+      await ctx.prisma.auditLog.findMany({ where: { action: 'PLATFORM_SETTING_UPDATED' } })
+    ).filter((a) => (a.newValue as { localCourierFeeMinor?: number }).localCourierFeeMinor === 2222);
+    expect(audits.length).toBeGreaterThanOrEqual(1);
+    expect(audits[0]!.previousValue).toHaveProperty('localCourierFeeMinor');
+
+    const q = await post(customer, 'shipping/quote', localDoorToDoor);
+    expect(q.body.available).toBe(true);
+    expect(q.body.pricingIncomplete).toBe(false);
+    expect(q.body.totalMinor).toBe(2222);
   });
 
   it('says the price is not set rather than quoting a local run as free', async () => {
@@ -496,12 +523,7 @@ describe('a door end given as a pin', () => {
   };
 
   it('books with no typed address at either end', async () => {
-    const existing = await ctx.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
-    if (existing) {
-      await ctx.prisma.platformSetting.update({ where: { id: existing.id }, data: { localCourierFeeMinor: 1500n } });
-    } else {
-      await ctx.prisma.platformSetting.create({ data: { localCourierFeeMinor: 1500n } });
-    }
+    expect((await patch(admin, 'admin/ops/settings', { localCourierFeeMinor: 1500 })).status).toBe(200);
 
     const r = await post(customer, 'shipping', { ...pinned, payWithWallet: true });
     expect(r.status).toBe(201);

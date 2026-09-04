@@ -789,18 +789,14 @@ describe('handoff PIN access', () => {
    * fee exactly as the sibling suites do (shipment-payments, shipping), so this
    * test exercises the PIN behaviour it exists for, on a booking that pays.
    */
+  // Set through the console's PATCH, not a raw platformSetting write — the raw
+  // form was audit finding H1: green tests over a fee path nothing exercised.
   const setLocalCourierFee = async (feeMinor: bigint) => {
-    const existing = await ctx.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
-    if (existing) {
-      await ctx.prisma.platformSetting.update({
-        where: { id: existing.id },
-        data: { localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 },
-      });
-    } else {
-      await ctx.prisma.platformSetting.create({
-        data: { localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 },
-      });
-    }
+    const r = await request(ctx.server)
+      .patch('/api/admin/ops/settings')
+      .set('Cookie', admin)
+      .send({ localCourierFeeMinor: Number(feeMinor), localCourierFeeTestMinor: Number(feeMinor), localCourierMinutes: 60 });
+    expect(r.status).toBe(200);
   };
 
   it('shows a DIRECT leg PIN to the customer, and never in the staff serialization', async () => {
