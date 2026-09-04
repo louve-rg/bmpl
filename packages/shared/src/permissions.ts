@@ -94,6 +94,12 @@ export const PERMISSIONS = [
   'homepage.manage', // curate homepage hero/featured placements
   // ---- Profile pictures ----
   'avatars.moderate', // approve/reject profile pictures the automatic face check was unsure about
+  // ---- Passenger Transportation (supply & moderation) ----
+  // Same shape as the delivery side's drivers.read / drivers.moderate: one pair
+  // covers the vertical's supply (driver + provider profiles, vehicles,
+  // availability, test flags). Role approval reuses role_applications.review.
+  'passengers.read', // view passenger driver/provider profiles + vehicles (read-only)
+  'passengers.moderate', // approve/reject passenger vehicles; set driver/provider test mode
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -126,6 +132,7 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'property_owners.read',
     'promotions.read',
     'marketing.analytics',
+    'passengers.read',
   ],
   ADMIN: [
     'users.read',
@@ -194,6 +201,9 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     'homepage.manage',
     // Profile pictures
     'avatars.moderate',
+    // Passenger Transportation
+    'passengers.read',
+    'passengers.moderate',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };

@@ -14,6 +14,7 @@ export * from './payments';
 export * from './settlement';
 export * from './reviews';
 export * from './driver';
+export * from './passenger';
 export * from './dispatch';
 export * from './shipping';
 export * from './route-planner';

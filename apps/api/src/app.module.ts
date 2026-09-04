@@ -21,6 +21,7 @@ import { CartModule } from './cart/cart.module';
 import { OrdersModule } from './orders/orders.module';
 import { DeliveryModule } from './delivery/delivery.module';
 import { DriverModule } from './driver/driver.module';
+import { PassengerModule } from './passenger/passenger.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { SettlementModule } from './settlement/settlement.module';
@@ -69,6 +70,7 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     OrdersModule,
     DeliveryModule,
     DriverModule,
+    PassengerModule,
     DispatchModule,
     MessagingModule,
     SettlementModule,
