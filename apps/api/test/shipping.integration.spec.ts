@@ -1173,4 +1173,50 @@ describe('an admin-created simulation network', () => {
     const real = await post(customer, 'shipping/quote', journey);
     expect(real.body.available).toBe(false);
   });
+
+  it('never leaks a rehearsal terminal into the public picker or the public modes list', async () => {
+    // The leak bmpl-web found: /shipping/hubs filtered only isActive, so the
+    // moment a simulation network exists in production, "(simulation)"
+    // terminals appear in every real customer's booking form. The public
+    // surfaces are anonymous and answer for the REAL side only — exactly as
+    // availableModes and the planner already decide; a designated test
+    // account exercises the simulation network through quote and booking,
+    // which derive the side from the user, never from this picker.
+    const t1 = await post(admin, 'admin/logistics/hubs', {
+      code: `TL${(seq += 1)}`, name: 'Test Leak Terminal (simulation)', type: 'BMPL_HUB',
+      district: 'COROZAL', city: 'Corozal Town', modes: ['LAND', 'SEA'],
+      courierFeeMinor: 1000, isTest: true,
+    });
+    const t2 = await post(admin, 'admin/logistics/hubs', {
+      code: `TL${(seq += 1)}`, name: 'Test Leak Pier (simulation)', type: 'SEAPORT',
+      district: 'ORANGE_WALK', city: 'Orange Walk Town', modes: ['SEA'],
+      courierFeeMinor: 1000, isTest: true,
+    });
+    expect(t1.status).toBe(201);
+    expect(t2.status).toBe(201);
+    // A test-side SEA route — the real fixture network runs LAND and AIR only,
+    // so a modes leak would be visible as SEA appearing publicly.
+    expect(
+      (
+        await post(admin, 'admin/logistics/routes', {
+          originHubId: t1.body.id, destinationHubId: t2.body.id, mode: 'SEA',
+          durationMinutes: 120, priceMinor: 3000, carrierName: 'Test Ferry (simulation)', isTest: true,
+        })
+      ).status,
+    ).toBe(201);
+
+    // The anonymous public picker: every real fixture hub, no simulation row.
+    const publicHubs = await request(ctx.server).get('/api/shipping/hubs');
+    expect(publicHubs.status).toBe(200);
+    const ids = publicHubs.body.map((h: { id: string }) => h.id);
+    expect(ids).toContain(hub.PLA);
+    expect(ids).not.toContain(t1.body.id);
+    expect(ids).not.toContain(t2.body.id);
+    expect(JSON.stringify(publicHubs.body)).not.toMatch(/simulation/i);
+
+    // And the public modes list is not inflated by the test-side SEA route.
+    const modes = await request(ctx.server).get('/api/shipping/modes');
+    expect(modes.status).toBe(200);
+    expect(modes.body).not.toContain('SEA');
+  });
 });
