@@ -5,6 +5,7 @@ export * from './roles';
 export * from './admin';
 export * from './marketplace';
 export * from './driver';
+export * from './passenger';
 export * from './dispatch';
 export * from './notifications';
 export * from './messaging';
