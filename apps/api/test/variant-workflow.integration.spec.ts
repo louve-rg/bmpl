@@ -249,7 +249,12 @@ describe('brand image role (M6.2)', () => {
     const list = await get([], `marketplace/products?pageSize=48`);
     const card = list.body.items.find((p: { id: string }) => p.id === v.productId);
     expect(card).toBeTruthy();
-    expect(card.primaryImageUrl).toBe(brand.url);
+    // Both sides are freshly presigned URLs, and each carries the second it was
+    // signed at plus a signature over it. Comparing them whole asserts that two
+    // separate API calls happened inside the same second, which is not the
+    // claim — it fails whenever the pair straddles a tick. The claim is which
+    // OBJECT the card points at, so compare the object path.
+    expect(new URL(card.primaryImageUrl).pathname).toBe(new URL(brand.url).pathname);
 
     // setting another image as brand replaces the designation (no delete)
     const other = imgs[1]!;
