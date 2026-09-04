@@ -1104,8 +1104,50 @@ export class ShipmentService {
 
   private pinFor(l: { kind: string; status: string; handoffPin: string | null }, audience: 'CUSTOMER' | 'STAFF', endsAtHub: boolean): string | null {
     if (audience === 'STAFF') return null; // staff reveal it deliberately, not by listing
-    if (endsAtHub || l.kind !== 'LAST_MILE') return null;
+    // A DIRECT leg is last-mile-equivalent: it ends at the RECIPIENT's door, not
+    // a counter, so the recipient is the party who must hold the code. Before
+    // this, a local door-to-door parcel had a PIN nobody could obtain and the
+    // handoff could never legitimately complete.
+    if (endsAtHub || (l.kind !== 'LAST_MILE' && l.kind !== 'DIRECT')) return null;
     if (l.status === 'COMPLETED' || l.status === 'CANCELLED') return null;
     return l.handoffPin;
+  }
+
+  /**
+   * The deliberate STAFF reveal the serializer's null promises. FIRST_MILE and
+   * line-haul handoffs end at a counter, and the code the deliverer must produce
+   * is held by the RECEIVING side — terminal staff — who until now had no way to
+   * obtain it (finding 2 of the delivery audit: those handoffs could not
+   * legitimately complete). Mirrors the delivery console's PIN reveal, with one
+   * deliberate difference: EVERY reveal writes an audit row, because this module
+   * already audits failed PIN attempts and an unaudited reveal would be below
+   * its own standard. The audit records THAT the code was revealed and by whom —
+   * never the code itself.
+   */
+  async revealHandoffPin(legId: string, actor: { userId: string }) {
+    const leg = await this.prisma.shipmentLeg.findUnique({
+      where: { id: legId },
+      select: {
+        id: true,
+        shipmentId: true,
+        kind: true,
+        status: true,
+        handoffPin: true,
+        handoffPinAttempts: true,
+        handoffVerificationStatus: true,
+        shipment: { select: { reference: true } },
+      },
+    });
+    if (!leg) throw new NotFoundException('Leg not found.');
+    await this.audit.record({
+      action: 'SHIPMENT_HANDOFF_PIN_REVEALED',
+      actorId: actor.userId,
+      newValue: { legId: leg.id, shipmentId: leg.shipmentId, reference: leg.shipment.reference, kind: leg.kind, legStatus: leg.status },
+    });
+    return {
+      handoffPin: leg.handoffPin,
+      handoffPinAttempts: leg.handoffPinAttempts,
+      handoffVerificationStatus: leg.handoffVerificationStatus,
+    };
   }
 }

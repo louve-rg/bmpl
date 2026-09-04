@@ -282,6 +282,18 @@ export class AdminLogisticsController {
     return this.shipments.arriveLeg(id, { userId: u.userId });
   }
 
+  /**
+   * Deliberate, audited reveal of a leg's handoff code for the receiving desk.
+   * Same permission as performing the handoff itself: the staff member typing
+   * the code at the counter is the one who needs to see it.
+   */
+  @RequirePermission('logistics.operate')
+  @StrictThrottle()
+  @Get('legs/:id/handoff-pin')
+  handoffPin(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.shipments.revealHandoffPin(id, { userId: u.userId });
+  }
+
   /** Completing a leg means proving the handoff, not asserting it. */
   @RequirePermission('logistics.operate')
   @StrictThrottle()

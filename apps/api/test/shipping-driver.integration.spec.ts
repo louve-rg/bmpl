@@ -737,6 +737,71 @@ describe('test and real stay apart', () => {
 });
 
 /**
+ * Handoff PIN access — the code reaches the party who is supposed to hold it.
+ *
+ * Every leg completion verifies a PIN, so every leg's PIN must be OBTAINABLE by
+ * its legitimate receiving party: the recipient at their door (LAST_MILE and
+ * DIRECT), or the receiving desk at a terminal (everything else, via a
+ * deliberate, AUDITED staff reveal). A PIN nobody can obtain is not a
+ * verification — it is a leg that can never complete.
+ */
+describe('handoff PIN access', () => {
+  const localDoorToDoor = () => ({
+    service: 'DOOR_TO_DOOR',
+    origin: { district: 'BELIZE', city: 'Belize City', address: '1 North Front Street', name: 'Sender', phone: '501-2223333' },
+    destination: { district: 'BELIZE', city: 'Belize City', address: '9 Albert Street', name: 'Recipient', phone: '501-4445555' },
+    description: 'One envelope',
+  });
+  const referenceOf = async (shipmentId: string) =>
+    (await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, select: { reference: true } })).reference;
+
+  it('shows a DIRECT leg PIN to the customer, and never in the staff serialization', async () => {
+    await makeDriver();
+    const s = await book(localDoorToDoor());
+    const [leg] = await legs(s.id);
+    expect(leg!.kind).toBe('DIRECT');
+    const reference = await referenceOf(s.id);
+
+    const mine = await get(customer, `shipping/${reference}`);
+    expect(mine.status).toBe(200);
+    expect(mine.body.legs[0].handoffPin).toBe(await pinOf(leg!.id));
+
+    // Staff serialization stays null — staff reveal it deliberately, not by listing.
+    const staff = await get(admin, `admin/logistics/shipments/${reference}`);
+    expect(staff.status).toBe(200);
+    expect(staff.body.legs[0].handoffPin).toBeNull();
+  });
+
+  it('reveals a leg PIN to permitted staff, and writes the reveal to the audit trail', async () => {
+    await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+
+    const r = await get(admin, `admin/logistics/legs/${first.id}/handoff-pin`);
+    expect(r.status).toBe(200);
+    expect(r.body.handoffPin).toBe(await pinOf(first.id));
+    expect(r.body.handoffVerificationStatus).toBe('PENDING');
+
+    const reveals = (
+      await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_HANDOFF_PIN_REVEALED' } })
+    ).filter((row) => (row.newValue as { legId?: string }).legId === first.id);
+    expect(reveals).toHaveLength(1);
+    // The trail records THAT it was revealed and by whom — never the code itself.
+    expect(reveals[0]!.actorId).not.toBeNull();
+    expect(Object.keys(reveals[0]!.newValue as object)).not.toContain('handoffPin');
+    expect(Object.keys(reveals[0]!.newValue as object)).not.toContain('pin');
+  });
+
+  it('refuses the reveal to a caller without the logistics permission', async () => {
+    await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const r = await get(customer, `admin/logistics/legs/${first.id}/handoff-pin`);
+    expect(r.status).toBe(403);
+  });
+});
+
+/**
  * Manual assignment — the PRODUCTION dispatch path.
  *
  * `dispatchAutomatic` is deliberately OFF in production, so every test here
