@@ -173,8 +173,8 @@ private bucket, signed URLs generated only by the API, short expiry, ownership +
 namespace checks before signing, MIME allow-list, size validation, randomized
 keys, no user-controlled raw paths, real metadata verified via `HEAD`.
 **Object deletion & retention** policies are documented as follow-ups in
-[`REMAINING_WORK.md`](../REMAINING_WORK.md) (add lifecycle rules + an
-authenticated delete path when the domain features land).
+[`SECURITY.md`](../SECURITY.md) under current known limitations (add lifecycle
+rules + an authenticated delete path).
 
 ## 6–7. Vercel — web and admin (two separate projects)
 
