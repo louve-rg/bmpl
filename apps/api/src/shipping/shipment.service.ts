@@ -1135,10 +1135,30 @@ export class ShipmentService {
         handoffPin: true,
         handoffPinAttempts: true,
         handoffVerificationStatus: true,
+        assignedDriver: { select: { userId: true } },
         shipment: { select: { reference: true } },
       },
     });
     if (!leg) throw new NotFoundException('Leg not found.');
+    // Only a code held at a DESK is staff's to reveal. A LAST_MILE or DIRECT
+    // leg ends at the recipient's door, and that code belongs to the recipient
+    // — the serializer already shows it to them, and staff have no business
+    // reading it out.
+    if (leg.kind !== 'FIRST_MILE' && leg.kind !== 'LINE_HAUL') {
+      throw new BadRequestException('This code is held by the recipient, not at a terminal, and cannot be revealed to staff.');
+    }
+    // A completed or cancelled leg's code is dead — the same rule pinFor
+    // applies to the customer's own view.
+    if (leg.status === 'COMPLETED' || leg.status === 'CANCELLED') {
+      throw new BadRequestException('This leg is finished; its handoff code is no longer valid.');
+    }
+    // The self-delivery invariant, in reveal form: the driver who must PRODUCE
+    // the code never obtains it from us, whatever permissions their other hats
+    // hold. Matched on the USER id, never the active role, exactly as every
+    // other conflict-of-interest check in this codebase.
+    if (leg.assignedDriver && leg.assignedDriver.userId === actor.userId) {
+      throw new ForbiddenException('You are the assigned driver for this leg; the receiving side holds the code.');
+    }
     await this.audit.record({
       action: 'SHIPMENT_HANDOFF_PIN_REVEALED',
       actorId: actor.userId,

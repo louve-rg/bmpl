@@ -284,10 +284,15 @@ export class AdminLogisticsController {
 
   /**
    * Deliberate, audited reveal of a leg's handoff code for the receiving desk.
-   * Same permission as performing the handoff itself: the staff member typing
-   * the code at the counter is the one who needs to see it.
+   *
+   * logistics.verify, NOT logistics.operate — the catalog pre-provisioned it
+   * for exactly this ("reveal a leg handoff PIN"), and the split mirrors the
+   * delivery console, where deliveries.verify guards the PIN reveal separately
+   * from working the delivery. Keeping them apart preserves the two-party
+   * property: a pure operator completes a handoff only with a code somebody
+   * else chose to give them.
    */
-  @RequirePermission('logistics.operate')
+  @RequirePermission('logistics.verify')
   @StrictThrottle()
   @Get('legs/:id/handoff-pin')
   handoffPin(@CurrentUser() u: AuthContext, @Param('id') id: string) {

@@ -16,7 +16,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
 
 let ctx: TestContext;
@@ -794,12 +794,20 @@ describe('handoff PIN access', () => {
     expect(staff.body.legs[0].handoffPin).toBeNull();
   });
 
-  it('reveals a leg PIN to permitted staff, and writes the reveal to the audit trail', async () => {
+  /** A limited admin holding exactly the given permissions, signed in. */
+  const limitedAdmin = async (permissions: string[]) => {
+    const seeded = await seedLimitedAdmin(ctx.prisma, `lim_${uniq()}@example.bz`, permissions);
+    const login = await request(ctx.server).post('/api/auth/login').send({ email: seeded.email, password: seeded.password });
+    return { id: seeded.id, cookies: cookiesOf(login) };
+  };
+
+  it('reveals a FIRST_MILE PIN to logistics.verify, and audits WHO asked', async () => {
     await makeDriver();
     const s = await book();
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const verifier = await limitedAdmin(['logistics.verify']);
 
-    const r = await get(admin, `admin/logistics/legs/${first.id}/handoff-pin`);
+    const r = await get(verifier.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
     expect(r.status).toBe(200);
     expect(r.body.handoffPin).toBe(await pinOf(first.id));
     expect(r.body.handoffVerificationStatus).toBe('PENDING');
@@ -808,18 +816,81 @@ describe('handoff PIN access', () => {
       await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_HANDOFF_PIN_REVEALED' } })
     ).filter((row) => (row.newValue as { legId?: string }).legId === first.id);
     expect(reveals).toHaveLength(1);
-    // The trail records THAT it was revealed and by whom — never the code itself.
-    expect(reveals[0]!.actorId).not.toBeNull();
+    // The trail records exactly who asked — never the code itself.
+    expect(reveals[0]!.actorId).toBe(verifier.id);
     expect(Object.keys(reveals[0]!.newValue as object)).not.toContain('handoffPin');
     expect(Object.keys(reveals[0]!.newValue as object)).not.toContain('pin');
   });
 
-  it('refuses the reveal to a caller without the logistics permission', async () => {
+  it('refuses the reveal to logistics.operate alone — completing a handoff and revealing its code stay two different powers', async () => {
     await makeDriver();
     const s = await book();
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
-    const r = await get(customer, `admin/logistics/legs/${first.id}/handoff-pin`);
+    // This caller can work every leg operation, including consuming the code at
+    // the desk. They still cannot READ the code: somebody with logistics.verify
+    // has to choose to give it to them. The pair with the test above pins the
+    // permission split — a super-admin caller would pass either way and prove
+    // nothing.
+    const operator = await limitedAdmin(['logistics.operate']);
+    const r = await get(operator.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
     expect(r.status).toBe(403);
+  });
+
+  it('refuses the reveal to a customer and to a driver', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect((await get(customer, `admin/logistics/legs/${first.id}/handoff-pin`)).status).toBe(403);
+    expect((await get(driver.cookies, `admin/logistics/legs/${first.id}/handoff-pin`)).status).toBe(403);
+  });
+
+  it('refuses to reveal a leg to its own assigned driver, whatever else they hold', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    // Dispatch offered the first mile to the only driver online — this driver.
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId).toBe(driver.driverProfileId);
+    // Now give that same human staff powers: the dual-status case. The reveal
+    // must still refuse — the person who must PRODUCE the code never obtains it,
+    // matched on the user, exactly like the self-delivery invariant.
+    await ctx.prisma.adminPermissionGrant.create({ data: { userId: driver.userId, permission: 'logistics.verify' } });
+    const r = await get(driver.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
+    expect(r.status).toBe(403);
+  });
+
+  it('refuses to reveal a door-ending leg — that code belongs to the recipient', async () => {
+    await makeDriver();
+    await setLocalCourierFee(1500n);
+    const s = await book(localDoorToDoor());
+    const [direct] = await legs(s.id);
+    expect(direct!.kind).toBe('DIRECT');
+    const verifier = await limitedAdmin(['logistics.verify']);
+    const r = await get(verifier.cookies, `admin/logistics/legs/${direct!.id}/handoff-pin`);
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/recipient/i);
+  });
+
+  it('refuses to reveal a completed leg — a dead code stays dead', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await driveCourierLeg(driver, first.id);
+    const verifier = await limitedAdmin(['logistics.verify']);
+    const r = await get(verifier.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/no longer valid/i);
+  });
+
+  it("nulls the DIRECT leg's customer-visible PIN once the leg completes", async () => {
+    const driver = await makeDriver();
+    await setLocalCourierFee(1500n);
+    const s = await book(localDoorToDoor());
+    const [direct] = await legs(s.id);
+    await driveCourierLeg(driver, direct!.id);
+    const reference = await referenceOf(s.id);
+    const mine = await get(customer, `shipping/${reference}`);
+    expect(mine.status).toBe(200);
+    expect(mine.body.legs[0].handoffPin).toBeNull();
   });
 });
 
