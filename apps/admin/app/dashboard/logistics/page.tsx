@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
 import { adminCrumbs } from '../../../lib/admin-nav';
+import { legAssignMode } from '../../../lib/leg-assign';
+import { LegAssignModal } from '../../../components/logistics/LegAssignModal';
 import { Alert, Badge, Button, Card, EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
 
 /**
@@ -71,6 +73,7 @@ export default function LogisticsOpsPage() {
   const [includeTest, setIncludeTest] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [assigning, setAssigning] = useState<{ leg: OpsLeg; mode: 'assign' | 'reassign' } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -188,6 +191,7 @@ export default function LogisticsOpsPage() {
             <ol className="mt-3 flex flex-wrap gap-2">
               {s.legs.map((leg) => {
                 const state = legState(leg);
+                const mode = legAssignMode(s.legs, leg);
                 return (
                   <li key={leg.id} className="rounded-bmpl-md border border-slate-200 bg-white px-2 py-1 text-xs">
                     <span className="font-medium text-slate-700">
@@ -197,6 +201,15 @@ export default function LogisticsOpsPage() {
                       {state.label}
                     </Badge>
                     {leg.operator && <span className="ml-1.5 text-slate-500">{leg.operator}</span>}
+                    {mode && (
+                      <button
+                        type="button"
+                        onClick={() => setAssigning({ leg, mode })}
+                        className="ml-1.5 font-medium text-belize-blue hover:underline"
+                      >
+                        {mode === 'assign' ? 'Assign driver' : 'Reassign'}
+                      </button>
+                    )}
                   </li>
                 );
               })}
@@ -204,6 +217,19 @@ export default function LogisticsOpsPage() {
           </Card>
         ))}
       </div>
+
+      {assigning && (
+        <LegAssignModal
+          legId={assigning.leg.id}
+          mode={assigning.mode}
+          currentOperator={assigning.leg.operator}
+          onClose={() => setAssigning(null)}
+          onDone={() => {
+            setAssigning(null);
+            void load();
+          }}
+        />
+      )}
     </div>
   );
 }
