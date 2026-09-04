@@ -266,12 +266,29 @@ through the shipment planner.
 
 ## 8. Scope
 
-**Passenger transportation is out of scope. Do not begin it**, despite
-`PASSENGER_DRIVER` / `PASSENGER_PROVIDER` existing as role codes.
+**Passenger transportation is an active, authorized vertical, in foundation
+stage.** The product owner has formally authorized it; earlier versions of this
+section said the opposite and are void.
 
 Active business areas, in priority order: Marketplace · Shipping & Delivery ·
-Delivery driver · Wallet & payments. Also present but not the current focus:
-Belize Connect (jobs), real estate, marketing.
+Delivery driver · Passenger Transportation · Wallet & payments. Also present but
+not the current focus: Belize Connect (jobs), real estate, marketing.
+
+The boundaries that remain are exactly the ones an agent would otherwise get
+wrong:
+
+- **No real-money passenger payments.** No fare is charged, no commission is
+  taken, no cancellation fee is collected. §1 and §4 apply to passengers exactly
+  as they do to parcels, and `WALLET_MONEY_MOVEMENT_ENABLED` is untouched.
+- **No invented fare formulas, rates or commercial policy.** Pricing policy is
+  unresolved and belongs to the product owner. A plausible fare in this system
+  becomes a real charge to a real person — see §12.
+- **No invented Belize operators, routes, schedules or geography.** The
+  no-fabrication rule in §5 governs passenger transport identically.
+- `PASSENGER_DRIVER` and `PASSENGER_PROVIDER` already exist as role codes, and
+  the existing role-application, approval and admin machinery is **reused, not
+  replaced**. A second application pipeline would be a defect, not a feature
+  (§12).
 
 ---
 
