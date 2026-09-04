@@ -210,6 +210,33 @@ describe('listing lifecycle depth', () => {
     expect((await post(owner.cookies, `property-owner/listings/${id}/status`, { action: 'ARCHIVE' })).body.status).toBe('ARCHIVED');
   });
 
+  it('moderation SUSPEND/ARCHIVE respect the lifecycle: no back door from draft to published', async () => {
+    const owner = await makeOwner();
+    // A draft that has never seen a moderator. Before the from-state guard,
+    // SUSPEND here succeeded — and RESTORE takes SUSPENDED to PUBLISHED, so
+    // two admin clicks put a never-reviewed listing on the public site.
+    const draft = await post(owner.cookies, 'property-owner/listings', {
+      purpose: 'FOR_SALE', propertyType: 'HOUSE', title: `Backdoor ${uniq()}`,
+      description: 'A wonderful family home with a garden and sea views, close to town.',
+      priceMinor: 25000000, district: 'BELIZE', locality: 'Belize City', exactAddress: '9 Hidden Lane',
+    });
+    expect(draft.status).toBe(201);
+    const suspendDraft = await post(admin, `admin/properties/${draft.body.id}/moderate`, { action: 'SUSPEND' });
+    expect(suspendDraft.status).toBe(400);
+    expect(suspendDraft.body.message).toMatch(/live listing/i);
+    // Archiving a draft remains legitimate tidying (same rule as the owner path).
+    expect((await post(admin, `admin/properties/${draft.body.id}/moderate`, { action: 'ARCHIVE' })).body.status).toBe('ARCHIVED');
+
+    // A live listing: cannot be archived in place, suspends once, restores.
+    const live = await publishListing(owner);
+    const archiveLive = await post(admin, `admin/properties/${live.id}/moderate`, { action: 'ARCHIVE' });
+    expect(archiveLive.status).toBe(400);
+    expect(archiveLive.body.message).toMatch(/withdraw or wait/i);
+    expect((await post(admin, `admin/properties/${live.id}/moderate`, { action: 'SUSPEND' })).body.status).toBe('SUSPENDED');
+    expect((await post(admin, `admin/properties/${live.id}/moderate`, { action: 'SUSPEND' })).status).toBe(400);
+    expect((await post(admin, `admin/properties/${live.id}/moderate`, { action: 'RESTORE' })).body.status).toBe('PUBLISHED');
+  });
+
   it('proves MORE_INFO_REQUIRED is a loop, not a dead end: edit, resubmit, approve', async () => {
     const owner = await makeOwner();
     const c = await post(owner.cookies, 'property-owner/listings', {
