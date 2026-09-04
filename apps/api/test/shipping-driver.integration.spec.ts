@@ -16,7 +16,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
 
 let ctx: TestContext;
@@ -733,6 +733,164 @@ describe('test and real stay apart', () => {
     const out = await dispatch.dispatchLeg(first.id);
     expect(out.result).toBe('SKIPPED');
     expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId).toBeNull();
+  });
+});
+
+/**
+ * Handoff PIN access — the code reaches the party who is supposed to hold it.
+ *
+ * Every leg completion verifies a PIN, so every leg's PIN must be OBTAINABLE by
+ * its legitimate receiving party: the recipient at their door (LAST_MILE and
+ * DIRECT), or the receiving desk at a terminal (everything else, via a
+ * deliberate, AUDITED staff reveal). A PIN nobody can obtain is not a
+ * verification — it is a leg that can never complete.
+ */
+describe('handoff PIN access', () => {
+  const localDoorToDoor = () => ({
+    service: 'DOOR_TO_DOOR',
+    origin: { district: 'BELIZE', city: 'Belize City', address: '1 North Front Street', name: 'Sender', phone: '501-2223333' },
+    destination: { district: 'BELIZE', city: 'Belize City', address: '9 Albert Street', name: 'Recipient', phone: '501-4445555' },
+    description: 'One envelope',
+  });
+  const referenceOf = async (shipmentId: string) =>
+    (await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, select: { reference: true } })).reference;
+
+  /**
+   * Local door-to-door is priced from a platform setting, not a hub fee, and an
+   * unset fee is 0 — which today books a zero-total shipment that the wallet
+   * then refuses to escrow (reported separately as a product finding). Seed the
+   * fee exactly as the sibling suites do (shipment-payments, shipping), so this
+   * test exercises the PIN behaviour it exists for, on a booking that pays.
+   */
+  const setLocalCourierFee = async (feeMinor: bigint) => {
+    const existing = await ctx.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
+    if (existing) {
+      await ctx.prisma.platformSetting.update({
+        where: { id: existing.id },
+        data: { localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 },
+      });
+    } else {
+      await ctx.prisma.platformSetting.create({
+        data: { localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 },
+      });
+    }
+  };
+
+  it('shows a DIRECT leg PIN to the customer, and never in the staff serialization', async () => {
+    await makeDriver();
+    await setLocalCourierFee(1500n);
+    const s = await book(localDoorToDoor());
+    const [leg] = await legs(s.id);
+    expect(leg!.kind).toBe('DIRECT');
+    const reference = await referenceOf(s.id);
+
+    const mine = await get(customer, `shipping/${reference}`);
+    expect(mine.status).toBe(200);
+    expect(mine.body.legs[0].handoffPin).toBe(await pinOf(leg!.id));
+
+    // Staff serialization stays null — staff reveal it deliberately, not by listing.
+    const staff = await get(admin, `admin/logistics/shipments/${reference}`);
+    expect(staff.status).toBe(200);
+    expect(staff.body.legs[0].handoffPin).toBeNull();
+  });
+
+  /** A limited admin holding exactly the given permissions, signed in. */
+  const limitedAdmin = async (permissions: string[]) => {
+    const seeded = await seedLimitedAdmin(ctx.prisma, `lim_${uniq()}@example.bz`, permissions);
+    const login = await request(ctx.server).post('/api/auth/login').send({ email: seeded.email, password: seeded.password });
+    return { id: seeded.id, cookies: cookiesOf(login) };
+  };
+
+  it('reveals a FIRST_MILE PIN to logistics.verify, and audits WHO asked', async () => {
+    await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const verifier = await limitedAdmin(['logistics.verify']);
+
+    const r = await get(verifier.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
+    expect(r.status).toBe(200);
+    expect(r.body.handoffPin).toBe(await pinOf(first.id));
+    expect(r.body.handoffVerificationStatus).toBe('PENDING');
+
+    const reveals = (
+      await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_HANDOFF_PIN_REVEALED' } })
+    ).filter((row) => (row.newValue as { legId?: string }).legId === first.id);
+    expect(reveals).toHaveLength(1);
+    // The trail records exactly who asked — never the code itself.
+    expect(reveals[0]!.actorId).toBe(verifier.id);
+    expect(Object.keys(reveals[0]!.newValue as object)).not.toContain('handoffPin');
+    expect(Object.keys(reveals[0]!.newValue as object)).not.toContain('pin');
+  });
+
+  it('refuses the reveal to logistics.operate alone — completing a handoff and revealing its code stay two different powers', async () => {
+    await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    // This caller can work every leg operation, including consuming the code at
+    // the desk. They still cannot READ the code: somebody with logistics.verify
+    // has to choose to give it to them. The pair with the test above pins the
+    // permission split — a super-admin caller would pass either way and prove
+    // nothing.
+    const operator = await limitedAdmin(['logistics.operate']);
+    const r = await get(operator.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
+    expect(r.status).toBe(403);
+  });
+
+  it('refuses the reveal to a customer and to a driver', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect((await get(customer, `admin/logistics/legs/${first.id}/handoff-pin`)).status).toBe(403);
+    expect((await get(driver.cookies, `admin/logistics/legs/${first.id}/handoff-pin`)).status).toBe(403);
+  });
+
+  it('refuses to reveal a leg to its own assigned driver, whatever else they hold', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    // Dispatch offered the first mile to the only driver online — this driver.
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId).toBe(driver.driverProfileId);
+    // Now give that same human staff powers: the dual-status case. The reveal
+    // must still refuse — the person who must PRODUCE the code never obtains it,
+    // matched on the user, exactly like the self-delivery invariant.
+    await ctx.prisma.adminPermissionGrant.create({ data: { userId: driver.userId, permission: 'logistics.verify' } });
+    const r = await get(driver.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
+    expect(r.status).toBe(403);
+  });
+
+  it('refuses to reveal a door-ending leg — that code belongs to the recipient', async () => {
+    await makeDriver();
+    await setLocalCourierFee(1500n);
+    const s = await book(localDoorToDoor());
+    const [direct] = await legs(s.id);
+    expect(direct!.kind).toBe('DIRECT');
+    const verifier = await limitedAdmin(['logistics.verify']);
+    const r = await get(verifier.cookies, `admin/logistics/legs/${direct!.id}/handoff-pin`);
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/recipient/i);
+  });
+
+  it('refuses to reveal a completed leg — a dead code stays dead', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await driveCourierLeg(driver, first.id);
+    const verifier = await limitedAdmin(['logistics.verify']);
+    const r = await get(verifier.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/no longer valid/i);
+  });
+
+  it("nulls the DIRECT leg's customer-visible PIN once the leg completes", async () => {
+    const driver = await makeDriver();
+    await setLocalCourierFee(1500n);
+    const s = await book(localDoorToDoor());
+    const [direct] = await legs(s.id);
+    await driveCourierLeg(driver, direct!.id);
+    const reference = await referenceOf(s.id);
+    const mine = await get(customer, `shipping/${reference}`);
+    expect(mine.status).toBe(200);
+    expect(mine.body.legs[0].handoffPin).toBeNull();
   });
 });
 
