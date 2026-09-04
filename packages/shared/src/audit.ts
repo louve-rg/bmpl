@@ -225,6 +225,13 @@ export const AUDIT_ACTIONS = [
   // Publishing a departure names who typed it in — an admin acting for an
   // operator must be distinguishable from the operator themselves.
   'PASSENGER_TRIP_CREATED',
+  // The booking/movement lifecycle (S3): confirmation is when seats are held,
+  // cancellation carries the party attribution a future policy will need,
+  // assignment names the human who staffed the departure, completion closes it.
+  'PASSENGER_BOOKING_CONFIRMED',
+  'PASSENGER_BOOKING_CANCELLED',
+  'PASSENGER_TRIP_ASSIGNED',
+  'PASSENGER_TRIP_COMPLETED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

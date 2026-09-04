@@ -1,14 +1,18 @@
 import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
+  passengerBookingCancelSchema,
   passengerRouteSchema,
   passengerRouteStopsSchema,
   passengerRouteUpdateSchema,
+  passengerTripAssignSchema,
   passengerTripCancelSchema,
   passengerTripCreateSchema,
+  type PassengerBookingCancelInput,
   type PassengerRouteInput,
   type PassengerRouteStopsInput,
   type PassengerRouteUpdateInput,
+  type PassengerTripAssignInput,
   type PassengerTripCancelInput,
   type PassengerTripCreateInput,
 } from '@bmpl/validation';
@@ -16,6 +20,7 @@ import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Roles } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
 import { PassengerNetworkService } from './passenger-network.service';
+import { PassengerOperationsService } from './passenger-operations.service';
 
 /**
  * Operator self-service over their OWN routes and departures. Unlike the S1
@@ -27,7 +32,10 @@ import { PassengerNetworkService } from './passenger-network.service';
 @Roles('PASSENGER_PROVIDER')
 @Controller('passenger/provider')
 export class PassengerNetworkController {
-  constructor(private readonly network: PassengerNetworkService) {}
+  constructor(
+    private readonly network: PassengerNetworkService,
+    private readonly ops: PassengerOperationsService,
+  ) {}
 
   private actor(user: AuthContext, req: Request) {
     return { userId: user.userId, ipAddress: req.ip, sessionId: user.sessionId };
@@ -86,5 +94,37 @@ export class PassengerNetworkController {
     @Body(ZodBody(passengerTripCancelSchema)) body: PassengerTripCancelInput,
   ) {
     return this.network.cancelTripForProvider(this.actor(u, req), id, body.reason);
+  }
+
+  // ---- movement (S3): staffing a departure and answering its riders ----
+
+  @Post('trips/:id/assign')
+  assignTrip(
+    @CurrentUser() u: AuthContext,
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(ZodBody(passengerTripAssignSchema)) body: PassengerTripAssignInput,
+  ) {
+    return this.ops.assignTripAsProvider(this.actor(u, req), id, body);
+  }
+
+  @Get('bookings')
+  listBookings(@CurrentUser() u: AuthContext, @Query('tripId') tripId?: string, @Query('status') status?: string) {
+    return this.ops.listProviderBookings(u.userId, { tripId, status });
+  }
+
+  @Post('bookings/:id/confirm')
+  confirmBooking(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
+    return this.ops.confirmBookingAsProvider(this.actor(u, req), id);
+  }
+
+  @Post('bookings/:id/cancel')
+  cancelBooking(
+    @CurrentUser() u: AuthContext,
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(ZodBody(passengerBookingCancelSchema)) body: PassengerBookingCancelInput,
+  ) {
+    return this.ops.cancelBookingAsProvider(this.actor(u, req), id, body.reason);
   }
 }

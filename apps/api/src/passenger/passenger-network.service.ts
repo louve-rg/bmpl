@@ -53,9 +53,13 @@ export class PassengerNetworkService {
   /* ------------------------------------------------------------ scoping */
 
   private async providerOf(userId: string) {
+    // isActive is selected so PUBLISH paths can honour suspension (S3 review
+    // F2 — S2 and S3 must tell the same suspension story). Reads, edits and
+    // cancellations deliberately still work for a suspended operator:
+    // cleanup survives suspension.
     const p = await this.prisma.passengerProviderProfile.findUnique({
       where: { userId },
-      select: { id: true, userId: true, isTest: true, businessName: true },
+      select: { id: true, userId: true, isTest: true, isActive: true, businessName: true },
     });
     if (!p) throw new NotFoundException('Start your transport-operator application first.');
     return p;
@@ -67,7 +71,7 @@ export class PassengerNetworkService {
       where: { id: routeId },
       include: {
         stops: { orderBy: { sequence: 'asc' } },
-        providerProfile: { select: { id: true, userId: true, businessName: true } },
+        providerProfile: { select: { id: true, userId: true, isActive: true, businessName: true } },
       },
     });
     if (!r || (providerProfileId && r.providerProfileId !== providerProfileId)) {
@@ -140,7 +144,7 @@ export class PassengerNetworkService {
   async createRouteAdmin(actor: Actor, dto: AdminPassengerRouteInput) {
     const p = await this.prisma.passengerProviderProfile.findUnique({
       where: { id: dto.providerProfileId },
-      select: { id: true, userId: true, isTest: true, businessName: true },
+      select: { id: true, userId: true, isTest: true, isActive: true, businessName: true },
     });
     if (!p) throw new NotFoundException('Transport operator not found.');
     const { providerProfileId: _ignored, ...route } = dto;
@@ -157,9 +161,13 @@ export class PassengerNetworkService {
 
   private async createRoute(
     actor: Actor,
-    provider: { id: string; userId: string; isTest: boolean },
+    provider: { id: string; userId: string; isTest: boolean; isActive: boolean },
     dto: PassengerRouteInput,
   ) {
+    // Publishing is gated on suspension; whoever is typing (S3 review F2).
+    if (!provider.isActive) {
+      throw new BadRequestException('This operator account is suspended.');
+    }
     const route = await this.prisma.$transaction(async (tx) => {
       const r = await tx.passengerRoute.create({
         data: {
@@ -174,7 +182,9 @@ export class PassengerNetworkService {
           destinationCity: dto.destinationCity,
           scheduleNote: dto.scheduleNote ?? null,
           durationMinutes: dto.durationMinutes ?? null,
-          // baseFareMinor deliberately untouched: null means no fare policy exists.
+          // The operator's number, verbatim (S3 fare ruling). Null/0 keep the
+          // booking gate closed; nothing computes with it.
+          baseFareMinor: dto.baseFareMinor != null ? BigInt(dto.baseFareMinor) : null,
           stops: dto.stops?.length
             ? { create: dto.stops.map((s, i) => this.stopData(s, i + 1)) }
             : undefined,
@@ -194,6 +204,7 @@ export class PassengerNetworkService {
             origin: `${r.originCity}, ${r.originDistrict}`,
             destination: `${r.destinationCity}, ${r.destinationDistrict}`,
             stops: r.stops.length,
+            baseFareMinor: r.baseFareMinor == null ? null : Number(r.baseFareMinor),
             isTest: r.isTest,
           },
         },
@@ -219,6 +230,10 @@ export class PassengerNetworkService {
     const data: Prisma.PassengerRouteUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    // Fare is money configuration, not geography: it stays editable after
+    // departures exist (no charge has occurred; bookings snapshot nothing),
+    // and every change lands in the ROUTE_UPDATED audit row below.
+    if (dto.baseFareMinor !== undefined) data.baseFareMinor = BigInt(dto.baseFareMinor);
     if (dto.originDistrict !== undefined) data.originDistrict = dto.originDistrict;
     if (dto.originCity !== undefined) data.originCity = dto.originCity;
     if (dto.destinationDistrict !== undefined) data.destinationDistrict = dto.destinationDistrict;
@@ -357,11 +372,16 @@ export class PassengerNetworkService {
    */
   private async createTrip(
     actor: Actor,
-    route: PassengerRoute & { providerProfile: { userId: string } },
+    route: PassengerRoute & { providerProfile: { userId: string; isActive?: boolean } },
     dto: PassengerTripCreateInput,
   ) {
     if (!route.isActive) {
       throw new BadRequestException('This route is inactive. Reactivate it before publishing departures.');
+    }
+    // Suspension gates publishing here too (S3 review F2) — a suspended
+    // operator's routes stay readable and cancellable, but publish nothing.
+    if (route.providerProfile?.isActive === false) {
+      throw new BadRequestException('This operator account is suspended.');
     }
     if (dto.scheduledDepartureAt.getTime() <= Date.now()) {
       throw new BadRequestException('That departure time has already passed.');
@@ -414,8 +434,11 @@ export class PassengerNetworkService {
     party: PassengerCancellationParty,
     reason?: string,
   ) {
-    if (trip.status !== 'SCHEDULED') {
-      throw new BadRequestException('Only a scheduled departure that has not begun can be cancelled here.');
+    // S3 widened this from SCHEDULED-only: a staffed departure that has not
+    // begun is still normal ops to cancel. Anything IN_PROGRESS or later is
+    // people on a vehicle, and that is not a cancellation, it is an exception.
+    if (trip.status !== 'SCHEDULED' && trip.status !== 'ASSIGNED') {
+      throw new BadRequestException('Only a departure that has not begun can be cancelled here.');
     }
     const updated = await this.prisma.$transaction(async (tx) => {
       const t = await tx.passengerTrip.update({
@@ -427,6 +450,17 @@ export class PassengerNetworkService {
           cancellationReason: reason ?? null,
         },
         include: { route: { select: { name: true } }, providerProfile: { select: { businessName: true } } },
+      });
+      // Riders on the departure are cancelled WITH it, attributed to the same
+      // party — a booking on a cancelled trip is not a booking anyone can honour.
+      await tx.passengerBooking.updateMany({
+        where: { tripId: trip.id, status: { in: ['REQUESTED', 'CONFIRMED'] } },
+        data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledBy: party, cancellationReason: 'The departure was cancelled.' },
+      });
+      // And the staffing record is closed truthfully rather than left ACTIVE.
+      await tx.passengerTripAssignment.updateMany({
+        where: { tripId: trip.id, status: 'ACTIVE' },
+        data: { status: 'CANCELLED', endedAt: new Date(), endReason: 'Departure cancelled.' },
       });
       await this.audit.record(
         {
@@ -444,13 +478,24 @@ export class PassengerNetworkService {
     return this.serializeTrip(updated);
   }
 
-  /** Rider-facing reference, same alphabet and collision discipline as a shipment's tracking code. */
+  /**
+   * Rider-facing reference, same alphabet and collision discipline as a
+   * shipment's tracking code. BML-T… is lexically a valid BML-… shipment
+   * reference (the S2 review's F4), so uniqueness is checked against BOTH
+   * tables: a reference names exactly one thing anywhere in the product, and
+   * a support agent pasting it into the wrong lookup gets a miss, never a
+   * different customer's shipment.
+   */
   private async uniqueReference(tx: Prisma.TransactionClient): Promise<string> {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1
     for (let attempt = 0; attempt < 8; attempt++) {
       const body = Array.from({ length: 7 }, () => alphabet[randomInt(0, alphabet.length)]).join('');
       const reference = `BML-T${body}`;
-      if (!(await tx.passengerTrip.findUnique({ where: { reference }, select: { id: true } }))) return reference;
+      const [asTrip, asShipment] = await Promise.all([
+        tx.passengerTrip.findUnique({ where: { reference }, select: { id: true } }),
+        tx.shipment.findUnique({ where: { reference }, select: { id: true } }),
+      ]);
+      if (!asTrip && !asShipment) return reference;
     }
     throw new BadRequestException('Could not allocate a trip reference. Please try again.');
   }
@@ -465,6 +510,7 @@ export class PassengerNetworkService {
       destination: `${r.destinationCity}, ${r.destinationDistrict}`,
       scheduleNote: r.scheduleNote,
       durationMinutes: r.durationMinutes,
+      baseFareMinor: r.baseFareMinor == null ? null : Number(r.baseFareMinor),
       isActive: r.isActive,
     };
   }

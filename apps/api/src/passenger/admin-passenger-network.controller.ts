@@ -2,13 +2,17 @@ import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req } from '@nes
 import type { Request } from 'express';
 import {
   adminPassengerRouteSchema,
+  passengerBookingCancelSchema,
   passengerRouteStopsSchema,
   passengerRouteUpdateSchema,
+  passengerTripAssignSchema,
   passengerTripCancelSchema,
   passengerTripCreateSchema,
   type AdminPassengerRouteInput,
+  type PassengerBookingCancelInput,
   type PassengerRouteStopsInput,
   type PassengerRouteUpdateInput,
+  type PassengerTripAssignInput,
   type PassengerTripCancelInput,
   type PassengerTripCreateInput,
 } from '@bmpl/validation';
@@ -16,6 +20,7 @@ import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, RequirePermission } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
 import { PassengerNetworkService } from './passenger-network.service';
+import { PassengerOperationsService } from './passenger-operations.service';
 
 /**
  * Ops oversight of the passenger network: every operator's routes and
@@ -29,7 +34,10 @@ import { PassengerNetworkService } from './passenger-network.service';
  */
 @Controller('admin/passengers')
 export class AdminPassengerNetworkController {
-  constructor(private readonly network: PassengerNetworkService) {}
+  constructor(
+    private readonly network: PassengerNetworkService,
+    private readonly ops: PassengerOperationsService,
+  ) {}
 
   private actor(user: AuthContext, req: Request) {
     return { userId: user.userId, ipAddress: req.ip, sessionId: user.sessionId };
@@ -96,5 +104,41 @@ export class AdminPassengerNetworkController {
     @Body(ZodBody(passengerTripCancelSchema)) body: PassengerTripCancelInput,
   ) {
     return this.network.cancelTripAdmin(this.actor(u, req), id, body.reason);
+  }
+
+  // ---- movement oversight (S3) ----
+
+  @Get('bookings')
+  @RequirePermission('passengers.read')
+  listBookings(@Query('tripId') tripId?: string, @Query('status') status?: string) {
+    return this.ops.listAllBookings({ tripId, status });
+  }
+
+  @Post('trips/:id/assign')
+  @RequirePermission('passengers.moderate')
+  assignTrip(
+    @CurrentUser() u: AuthContext,
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(ZodBody(passengerTripAssignSchema)) body: PassengerTripAssignInput,
+  ) {
+    return this.ops.assignTripAsAdmin(this.actor(u, req), id, body);
+  }
+
+  @Post('bookings/:id/confirm')
+  @RequirePermission('passengers.moderate')
+  confirmBooking(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
+    return this.ops.confirmBookingAsAdmin(this.actor(u, req), id);
+  }
+
+  @Post('bookings/:id/cancel')
+  @RequirePermission('passengers.moderate')
+  cancelBooking(
+    @CurrentUser() u: AuthContext,
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body(ZodBody(passengerBookingCancelSchema)) body: PassengerBookingCancelInput,
+  ) {
+    return this.ops.cancelBookingAsAdmin(this.actor(u, req), id, body.reason);
   }
 }
