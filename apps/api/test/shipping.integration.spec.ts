@@ -1188,7 +1188,9 @@ describe('an admin-created simulation network', () => {
       courierFeeMinor: 1000, isTest: true,
     });
     const t2 = await post(admin, 'admin/logistics/hubs', {
-      code: `TL${(seq += 1)}`, name: 'Test Leak Pier (simulation)', type: 'SEAPORT',
+      // SEA_TERMINAL, from the real HubType vocabulary — the first version of
+      // this test invented "SEAPORT" and the validator rightly refused it.
+      code: `TL${(seq += 1)}`, name: 'Test Leak Pier (simulation)', type: 'SEA_TERMINAL',
       district: 'ORANGE_WALK', city: 'Orange Walk Town', modes: ['SEA'],
       courierFeeMinor: 1000, isTest: true,
     });
