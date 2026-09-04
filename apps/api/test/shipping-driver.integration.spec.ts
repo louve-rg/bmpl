@@ -524,6 +524,30 @@ describe('what the driver is shown', () => {
   });
 });
 
+describe('what ops can see', () => {
+  it('shows staff which driver holds a leg; the customer sees no courier pipeline', async () => {
+    // Before this, the staff serialization omitted courierStatus and
+    // assignedDriverProfileId entirely, so ops could not tell whether a leg
+    // already had a driver before acting on it (assign/reassign in the dark).
+    const driver = await makeDriver();
+    const s = await book();
+    const [first] = await legs(s.id);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first!.id}/accept`)).status).toBe(201);
+
+    const staff = await get(admin, `admin/logistics/shipments/${s.reference}`);
+    expect(staff.status).toBe(200);
+    const staffLeg = staff.body.legs.find((l: { id: string }) => l.id === first!.id);
+    expect(staffLeg.courierStatus).toBe('DRIVER_ACCEPTED');
+    expect(staffLeg.assignedDriverProfileId).toBe(driver.driverProfileId);
+
+    const own = await get(customer, `shipping/${s.reference}`);
+    expect(own.status).toBe(200);
+    const custLeg = own.body.legs.find((l: { id: string }) => l.id === first!.id);
+    expect(custLeg.courierStatus).toBeNull();
+    expect(custLeg.assignedDriverProfileId).toBeNull();
+  });
+});
+
 describe('the offer lifecycle', () => {
   it('lets a driver decline, and offers it to the next one', async () => {
     const a = await makeDriver();

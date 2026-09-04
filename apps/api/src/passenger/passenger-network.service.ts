@@ -340,9 +340,19 @@ export class PassengerNetworkService {
       include: {
         route: { select: { name: true } },
         providerProfile: { select: { businessName: true } },
+        driverProfile: { select: { displayName: true } },
+        vehicle: { select: { make: true, model: true, licencePlate: true } },
       },
     });
-    return rows.map((t) => this.serializeTrip(t));
+    // Same capacity rule as confirmation and the rider feed: only CONFIRMED
+    // bookings spend seats.
+    const seatCounts = await this.prisma.passengerBooking.groupBy({
+      by: ['tripId'],
+      where: { tripId: { in: rows.map((t) => t.id) }, status: 'CONFIRMED' },
+      _sum: { seats: true },
+    });
+    const confirmedBy = new Map(seatCounts.map((s) => [s.tripId, s._sum.seats ?? 0]));
+    return rows.map((t) => this.serializeTrip(t, { seatsConfirmed: confirmedBy.get(t.id) ?? 0 }));
   }
 
   async createTripForProvider(actor: Actor, dto: PassengerTripCreateInput) {
@@ -556,7 +566,13 @@ export class PassengerNetworkService {
   }
 
   serializeTrip(
-    t: PassengerTrip & { route?: { name: string } | null; providerProfile?: { businessName: string } | null },
+    t: PassengerTrip & {
+      route?: { name: string } | null;
+      providerProfile?: { businessName: string } | null;
+      driverProfile?: { displayName: string } | null;
+      vehicle?: { make: string; model: string; licencePlate: string } | null;
+    },
+    opts?: { seatsConfirmed?: number },
   ) {
     return {
       id: t.id,
@@ -568,6 +584,19 @@ export class PassengerNetworkService {
       routeName: t.route?.name ?? null,
       providerProfileId: t.providerProfileId,
       providerName: t.providerProfile?.businessName ?? null,
+      // Assignment is act-able through the console, so it must be see-able:
+      // once a trip leaves SCHEDULED, these say who is driving and in what.
+      driverProfileId: t.driverProfileId,
+      driverName: t.driverProfile?.displayName ?? null,
+      vehicleId: t.vehicleId,
+      vehicle: t.vehicle ? { make: t.vehicle.make, model: t.vehicle.model, licencePlate: t.vehicle.licencePlate } : null,
+      seatCapacity: t.seatCapacity,
+      ...(opts?.seatsConfirmed !== undefined
+        ? {
+            seatsConfirmed: opts.seatsConfirmed,
+            seatsRemaining: t.seatCapacity == null ? null : t.seatCapacity - opts.seatsConfirmed,
+          }
+        : {}),
       scheduledDepartureAt: t.scheduledDepartureAt,
       scheduledArrivalAt: t.scheduledArrivalAt,
       cancelledAt: t.cancelledAt,
