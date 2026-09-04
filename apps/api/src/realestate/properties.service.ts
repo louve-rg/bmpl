@@ -299,6 +299,11 @@ export class PropertiesService {
         title = 'Your listing was unpublished';
         break;
       case 'SUSPEND':
+        // Live listings only. RESTORE takes SUSPENDED straight to PUBLISHED,
+        // so suspending a never-approved listing (DRAFT, SUBMITTED, …) would
+        // open a two-step path onto the public site that skips moderation —
+        // and suspending SOLD/RENTED/ARCHIVED rewrites a closed record.
+        if (!['PUBLISHED', 'UNDER_OFFER'].includes(listing.status)) throw new BadRequestException('Only a live listing can be suspended.');
         to = 'SUSPENDED';
         title = 'Your listing was suspended';
         break;
@@ -309,6 +314,9 @@ export class PropertiesService {
         if (!listing.publishedAt) extra.publishedAt = new Date();
         break;
       case 'ARCHIVE':
+        // The same rule the owner path enforces: a live listing comes down via
+        // UNPUBLISH/SUSPEND first, and one still in review gets a decision.
+        if (['SUBMITTED', 'UNDER_REVIEW', 'PUBLISHED', 'UNDER_OFFER'].includes(listing.status)) throw new BadRequestException('Withdraw or wait for review before archiving.');
         to = 'ARCHIVED';
         title = 'Your listing was archived';
         extra.archivedAt = new Date();
