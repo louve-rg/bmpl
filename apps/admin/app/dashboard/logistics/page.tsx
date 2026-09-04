@@ -74,6 +74,7 @@ export default function LogisticsOpsPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<{ leg: OpsLeg; mode: 'assign' | 'reassign' } | null>(null);
+  const [hiddenSimulation, setHiddenSimulation] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,9 +82,20 @@ export default function LogisticsOpsPage() {
       const qs = new URLSearchParams();
       if (status) qs.set('status', status);
       if (includeTest) qs.set('includeTest', 'true');
-      const res = await api.get<{ rows: OpsRow[] }>(`/admin/logistics/shipments?${qs}`);
+      const res = await api.get<{ rows: OpsRow[]; total: number }>(`/admin/logistics/shipments?${qs}`);
       setRows(res.rows);
       setErr(null);
+      // An empty board with the simulation filter on can be hiding the very
+      // shipment somebody is walking through UAT with. One cheap count answers
+      // "is there really nothing?" honestly instead of leaving it ambiguous.
+      if (res.rows.length === 0 && !includeTest) {
+        const withTest = await api.get<{ total: number }>(
+          `/admin/logistics/shipments?${new URLSearchParams({ ...(status ? { status } : {}), includeTest: 'true', pageSize: '1' })}`,
+        );
+        setHiddenSimulation(Math.max(0, withTest.total - res.total));
+      } else {
+        setHiddenSimulation(0);
+      }
     } catch (e) {
       setErr((e as ApiError).message ?? 'Could not load shipments.');
     } finally {
@@ -150,7 +162,21 @@ export default function LogisticsOpsPage() {
       {err && <Alert tone="warning" className="mt-4">{err}</Alert>}
       {!loading && !err && rows.length === 0 && (
         <div className="mt-6">
-          <EmptyState title="No shipments" description="Nothing matches those filters." />
+          <EmptyState
+            title="No shipments"
+            description={
+              hiddenSimulation > 0
+                ? `Nothing matches those filters — but ${hiddenSimulation} simulation shipment${hiddenSimulation === 1 ? ' is' : 's are'} hidden by "Include simulation shipments".`
+                : 'Nothing matches those filters.'
+            }
+            action={
+              hiddenSimulation > 0 ? (
+                <Button variant="outline" onClick={() => setIncludeTest(true)}>
+                  Show simulation shipments
+                </Button>
+              ) : undefined
+            }
+          />
         </div>
       )}
 
