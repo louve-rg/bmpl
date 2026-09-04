@@ -755,8 +755,30 @@ describe('handoff PIN access', () => {
   const referenceOf = async (shipmentId: string) =>
     (await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, select: { reference: true } })).reference;
 
+  /**
+   * Local door-to-door is priced from a platform setting, not a hub fee, and an
+   * unset fee is 0 — which today books a zero-total shipment that the wallet
+   * then refuses to escrow (reported separately as a product finding). Seed the
+   * fee exactly as the sibling suites do (shipment-payments, shipping), so this
+   * test exercises the PIN behaviour it exists for, on a booking that pays.
+   */
+  const setLocalCourierFee = async (feeMinor: bigint) => {
+    const existing = await ctx.prisma.platformSetting.findFirst({ orderBy: { createdAt: 'asc' } });
+    if (existing) {
+      await ctx.prisma.platformSetting.update({
+        where: { id: existing.id },
+        data: { localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 },
+      });
+    } else {
+      await ctx.prisma.platformSetting.create({
+        data: { localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 },
+      });
+    }
+  };
+
   it('shows a DIRECT leg PIN to the customer, and never in the staff serialization', async () => {
     await makeDriver();
+    await setLocalCourierFee(1500n);
     const s = await book(localDoorToDoor());
     const [leg] = await legs(s.id);
     expect(leg!.kind).toBe('DIRECT');
