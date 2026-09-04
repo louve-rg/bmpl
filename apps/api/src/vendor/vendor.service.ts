@@ -335,6 +335,10 @@ export class VendorService {
     const rows = await this.prisma.vendorProfile.findMany({
       where: {
         approvalStatus: 'APPROVED',
+        // Public directory answers for the real marketplace only — simulation
+        // storefronts never appear to an anonymous shopper (same convention as
+        // product search and discovery).
+        isTest: false,
         settings: { is: { vacationMode: false } },
         ...(q ? { businessName: { contains: q, mode: 'insensitive' as const } } : {}),
         ...(query?.district
@@ -362,7 +366,11 @@ export class VendorService {
   /** A single approved storefront by slug. 404 for unknown/unapproved vendors. */
   async publicStorefront(slug: string) {
     const p = await this.prisma.vendorProfile.findFirst({
-      where: { slug, approvalStatus: 'APPROVED' },
+      // isTest: a simulation storefront is not publicly reachable even by its
+      // exact slug — otherwise a shared link walks a real shopper into a
+      // rehearsal store whose checkout would silently become a test order.
+      // Vendors preview their own unapproved/test store via previewOwn().
+      where: { slug, approvalStatus: 'APPROVED', isTest: false },
       include: STOREFRONT_INCLUDE,
     });
     if (!p) throw new NotFoundException('Storefront not found.');
