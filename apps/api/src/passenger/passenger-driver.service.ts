@@ -22,10 +22,11 @@ import { PrismaService } from '../prisma/prisma.service';
  *
  * Deliberately absent in S1, so nobody mistakes omissions for oversights:
  * photo uploads (no passenger storage namespace exists yet, so no storage keys
- * are accepted anywhere); provider affiliation (who initiates a fleet
- * relationship and who consents is an open product decision — the column
- * stays null until it is made); and every audit code not among the seven
- * PASSENGER_* actions already in the enum.
+ * are accepted anywhere); and every audit code not among the seven
+ * PASSENGER_* actions already in the enum. Provider affiliation, deferred
+ * here since S1, now lives in PassengerAffiliationService: mutual
+ * consent, and the ONLY writer of providerProfileId — nothing in this service
+ * touches that column.
  */
 @Injectable()
 export class PassengerDriverService {
@@ -47,8 +48,12 @@ export class PassengerDriverService {
 
   // ---- profile ------------------------------------------------------------
 
+  /** The fleet identity a driver needs to RECOGNISE, not just an id — loaded
+   *  at every serialize site so a driver always sees who they drive for. */
+  private static readonly PROVIDER_IDENTITY = { providerProfile: { select: { id: true, businessName: true } } } as const;
+
   async getProfile(userId: string) {
-    const p = await this.prisma.passengerDriverProfile.findUnique({ where: { userId } });
+    const p = await this.prisma.passengerDriverProfile.findUnique({ where: { userId }, include: PassengerDriverService.PROVIDER_IDENTITY });
     return p ? this.serializeProfile(p) : null;
   }
 
@@ -72,7 +77,12 @@ export class PassengerDriverService {
     };
     // isTest is not in `data` and never will be: the simulation flag is
     // admin-set only, exactly as on DriverProfile and VendorProfile.
-    const p = await this.prisma.passengerDriverProfile.upsert({ where: { userId }, create: { userId, ...data }, update: data });
+    const p = await this.prisma.passengerDriverProfile.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: data,
+      include: PassengerDriverService.PROVIDER_IDENTITY,
+    });
     return this.serializeProfile(p);
   }
 
@@ -87,7 +97,7 @@ export class PassengerDriverService {
     }
     if (dto.licenceExpiry !== undefined) data.licenceExpiry = dto.licenceExpiry;
     if (dto.termsAccepted !== undefined) data.termsAcceptedAt = dto.termsAccepted ? new Date() : null;
-    const p = await this.prisma.passengerDriverProfile.update({ where: { userId }, data });
+    const p = await this.prisma.passengerDriverProfile.update({ where: { userId }, data, include: PassengerDriverService.PROVIDER_IDENTITY });
     return this.serializeProfile(p);
   }
 
@@ -210,6 +220,7 @@ export class PassengerDriverService {
     const updated = await this.prisma.passengerDriverProfile.update({
       where: { userId },
       data: { availability: dto.availability as DriverAvailability },
+      include: PassengerDriverService.PROVIDER_IDENTITY,
     });
     // NOTE: unaudited in S1 — no PASSENGER availability audit code exists among
     // the seven provisioned actions, and audit codes are additive migrations.
@@ -255,7 +266,7 @@ export class PassengerDriverService {
 
   // ---- shaping ------------------------------------------------------------
 
-  serializeProfile(p: PassengerDriverProfile) {
+  serializeProfile(p: PassengerDriverProfile & { providerProfile?: { id: string; businessName: string } | null }) {
     return {
       id: p.id,
       legalName: p.legalName,
@@ -263,6 +274,12 @@ export class PassengerDriverService {
       phone: p.phone,
       homeDistrict: p.homeDistrict,
       homeAddress: p.homeAddress,
+      // The driver's OWN affiliation, on their own profile: both parties must
+      // be able to SEE what they consented to (and a person who cannot see
+      // their fleet cannot meaningfully leave it). Identity only, no roster,
+      // no commercial fields.
+      providerProfileId: p.providerProfileId,
+      provider: p.providerProfile ? { id: p.providerProfile.id, businessName: p.providerProfile.businessName } : null,
       emergencyContactName: p.emergencyContactName,
       emergencyContactPhone: p.emergencyContactPhone,
       licenceNumber: p.licenceNumber,

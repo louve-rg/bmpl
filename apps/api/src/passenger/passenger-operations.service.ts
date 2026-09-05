@@ -487,9 +487,11 @@ export class PassengerOperationsService {
 
   /**
    * Manual staffing only — the delivery lesson; no automatic dispatch exists
-   * for passengers. Fleet drivers only: whether an INDEPENDENT driver may be
-   * put on an operator's route is the unresolved affiliation-consent
-   * question, so it fails closed rather than defaulting to yes.
+   * for passengers. Fleet drivers only: the affiliation-consent model is now
+   * decided and managed (PassengerAffiliationService), so
+   * providerProfileId below is only ever set by a mutually consented,
+   * ACCEPTED affiliation. An independent driver still cannot be put on an
+   * operator's route — join the fleet first.
    */
   private async assignTrip(
     actor: Actor,

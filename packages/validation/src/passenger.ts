@@ -199,3 +199,24 @@ export const passengerTripAssignSchema = z.object({
   vehicleId: z.string().trim().min(1),
 });
 export type PassengerTripAssignInput = z.infer<typeof passengerTripAssignSchema>;
+
+/**
+ * Fleet affiliation — MUTUAL CONSENT. Each side may only ASK; the
+ * other side answers. Note what is absent: no status (the lifecycle is the
+ * service's, never the caller's), no isTest (derived from the two profiles),
+ * and no commercial terms of any kind.
+ */
+
+/** An operator invites a driver into their fleet. The driver must accept. */
+export const passengerAffiliationInviteSchema = z.object({
+  driverProfileId: z.string().trim().min(1),
+  message: z.string().trim().max(500).optional(),
+});
+export type PassengerAffiliationInviteInput = z.infer<typeof passengerAffiliationInviteSchema>;
+
+/** A driver asks to join a fleet. The operator must approve. */
+export const passengerAffiliationRequestSchema = z.object({
+  providerProfileId: z.string().trim().min(1),
+  message: z.string().trim().max(500).optional(),
+});
+export type PassengerAffiliationRequestInput = z.infer<typeof passengerAffiliationRequestSchema>;

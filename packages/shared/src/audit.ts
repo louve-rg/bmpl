@@ -232,6 +232,10 @@ export const AUDIT_ACTIONS = [
   'PASSENGER_BOOKING_CANCELLED',
   'PASSENGER_TRIP_ASSIGNED',
   'PASSENGER_TRIP_COMPLETED',
+  // Fleet affiliation: one action for the whole consent lifecycle
+  // (invited / requested / accepted / declined / withdrawn / ended, carried in
+  // newValue.event) — the PROPERTY_ASSIGNMENT_CHANGED precedent.
+  'PASSENGER_AFFILIATION_CHANGED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
