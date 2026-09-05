@@ -129,6 +129,11 @@ curl -s https://www.bzemarketplace.com/api/health/ready
 curl -sI https://www.bzemarketplace.com/ | grep -i x-bmpl-commit
 curl -sI https://bmpl-admin.vercel.app/ | grep -i x-bmpl-commit
 # X-Bmpl-Commit: a2bab27e703c
+
+# The web app also answers it as JSON, shaped like the API's health endpoint.
+# commit is null when the build has no commit identity — unknown, not "dev".
+curl -s https://www.bzemarketplace.com/health
+# {"status":"ok","commit":"a2bab27"}
 ```
 
 `/api/health/live` does not exist — do not look for it.
