@@ -119,7 +119,9 @@ Rules, in order:
 1. **Deploy and verify the API first.** Confirm with
    `curl -sI https://www.bzemarketplace.com/api/health` → the `X-BMPL-Api-Commit`
    header must show the intended commit. `X-BMPL-Commit` is the web build's commit;
-   the two are independent and routinely differ.
+   the two are independent and routinely differ. The web build's commit is also
+   served as JSON at `https://www.bzemarketplace.com/health` (`commit` is `null`
+   for a build with no commit identity, never a placeholder).
 2. **Only then deploy the web app** that depends on the new endpoint.
 3. **For breaking API changes, keep the old path working** for the length of the
    transition — add the new endpoint alongside the old one and remove the old one in a
