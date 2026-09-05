@@ -2,7 +2,7 @@
 
 How passenger transport actually works in BML today, written for a new
 engineer or an operator. Everything here was read from the code on 2026-09-05
-(`main` @ `fc84f86`), and every claim names the file it came from so it stays
+(`main` @ `dff8d2c`), and every claim names the file it came from so it stays
 checkable. **When this document and the code disagree, the code wins** — and
 this document is what gets fixed.
 
@@ -91,7 +91,15 @@ admin variants converge on the same private implementations).
   (`createTripForProvider`, `passenger-network.service.ts:358`). Every trip
   the product can create today is `kind: 'SCHEDULED'`
   (`passenger-network.service.ts:403`); the `ON_DEMAND` enum value has no
-  writer — see [What is not built](#8-what-is-not-built--do-not-infer-capability-from-silence).
+  writer — see
+  [What is not built](#8-what-is-not-built--do-not-infer-capability-from-silence).
+- **Suspension stops publishing, not cleanup.** A suspended operator can
+  create no new route (`passenger-network.service.ts:168`) and publish no
+  new departure (`:392`, and an inactive route refuses at `:388`) — but
+  their reads, edits and cancellations deliberately keep working, so a
+  suspended operator can still wind things down
+  (`passenger-network.service.ts:56`, the `providerOf` comment: "cleanup
+  survives suspension").
 - Geography is the operator's own declaration. Nothing here invents towns,
   connections, schedules or times — the no-fabrication rule of `CLAUDE.md` §5
   applies to passenger transport identically (§8).
@@ -176,8 +184,31 @@ ever wrong — both headers say so).
 
 ## 5. Booking a seat
 
-The rider surface is `CUSTOMER`-gated and scoped throughout to the caller's
-own side of the simulation boundary (`passenger-rider.controller.ts`).
+The rider API is `CUSTOMER`-gated and scoped throughout to the caller's
+own side of the simulation boundary (`passenger-rider.controller.ts`). The
+web surface for it is `/dashboard/passenger` (browse and request) and
+`/dashboard/passenger/bookings` (the rider's own bookings) — "Passenger
+Service" sits in the base dashboard navigation with no role requirement
+(`apps/web/lib/dashboard-nav-items.ts:44`), because every signed-in person
+is a potential rider; the API's own gate still applies underneath.
+
+The rider screens hold two **honesty rules**, kept as pure, unit-tested
+functions rather than copy conventions
+(`apps/web/lib/passenger-travel.ts`, tests in `passenger-travel.test.ts`):
+
+- **The fare gate is rendered as a refusal, not a disabled button.** An
+  unpriced departure shows a cannot-be-booked-yet message *in place of* any
+  booking control — nothing on the screen can attempt to book around the
+  server's `fareConfigured` answer (`apps/web/components/travel/DeparturesList.tsx`,
+  header comment). A configured fare is labelled just **"Fare"**, and the
+  seats input never multiplies it into a total — whether the figure is per
+  seat or per booking is undecided commercial policy, and the UI refuses to
+  imply an answer.
+- **Seats are held at confirmation, not at request** — the `REQUESTED`
+  wording says plainly that no seat is held yet (`riderBookingView`), and
+  seats-remaining is `null`-until-assigned rather than an invented number,
+  because capacity does not exist before a vehicle is snapshotted
+  (`seatsLeft`).
 
 **Browse.** `GET passenger/departures` lists upcoming, bookable departures:
 `SCHEDULED`/`ASSIGNED`, future-dated, active route, active operator, the
@@ -299,8 +330,6 @@ today**. Do not describe any of these as working.
   pending invitation or request lives until answered or withdrawn;
   acceptance re-checks everything that matters, but time itself is not
   re-checked.
-- **No rider web surface.** Browsing departures and booking seats is
-  API-only today; no page in `apps/web` renders it.
 - **No passenger payments of any kind** — no fare charged, no commission, no
   cancellation fee, no wallet movement. See the money note at the top and
   `CLAUDE.md` §8.
@@ -316,13 +345,10 @@ today**. Do not describe any of these as working.
   integration suite (`apps/api/test/passenger-*.integration.spec.ts`) and
   usable the moment a real operator is onboarded and declares a network —
   that onboarding is a business step, not an engineering one.
-- **A suspended operator can still create routes and trips** via the S2
-  surfaces (`providerOf` there does not check `isActive`); the results are
-  invisible and unbookable to riders, so there is no rider exposure — but
-  the asymmetry with the affiliation and booking surfaces (which do check)
-  is real. Known, low severity.
-- **The rider is the one persona without a web surface.** Driver, operator
-  and admin flows are all on screen (including fleet consent and staffing,
-  since `fc84f86`); a rider can act only through the API.
+- Earlier revisions of this document listed two more gaps — a suspended
+  operator able to publish routes and trips, and a rider without a web
+  surface. **Both are closed on main**: suspension now gates publishing
+  (§2), and the rider screens shipped in `dff8d2c` (§5). They stay named
+  here only so a reader of an old brief knows the claims changed.
 
 When you close one of these, update this section in the same change.
