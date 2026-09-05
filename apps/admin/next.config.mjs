@@ -1,11 +1,12 @@
 // Non-secret build identifier, matching the one the web app already emits. A
 // deployment audit could confirm which commit web and API were serving but not
 // admin, which meant the admin console had to be verified by inference.
-const COMMIT = (
-  process.env.VERCEL_GIT_COMMIT_SHA ||
-  process.env.NEXT_PUBLIC_COMMIT_SHA ||
-  'dev'
-).slice(0, 12);
+// RAW_COMMIT is '' when the build has no commit identity (a local build) — the
+// header degrades to 'dev', while GET /health reports null so an unknown build
+// stays reportable AS unknown rather than as a value.
+const RAW_COMMIT =
+  process.env.VERCEL_GIT_COMMIT_SHA || process.env.NEXT_PUBLIC_COMMIT_SHA || '';
+const COMMIT = (RAW_COMMIT || 'dev').slice(0, 12);
 
 const securityHeaders = [
   { key: 'X-BMPL-Commit', value: COMMIT },
@@ -36,6 +37,11 @@ function apiBase(raw) {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Baked into the bundle at build time so GET /health answers from the build
+  // itself, independent of what the runtime environment happens to expose. One
+  // computation (RAW_COMMIT above) feeds both the header and the endpoint, so
+  // the two channels cannot disagree about which commit this build is.
+  env: { BMPL_BUILD_COMMIT: RAW_COMMIT },
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
   transpilePackages: ['@bmpl/shared', '@bmpl/validation'],
