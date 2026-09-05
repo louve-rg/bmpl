@@ -26,6 +26,9 @@ export interface PassengerDriverProfile {
   licenceExpiry: string | null;
   licenceExpiryStatus?: ExpiryStatus;
   availability: PassengerAvailability;
+  /** The driver's own affiliation (BMPL-39): identity only, no roster, no commercial fields. */
+  providerProfileId?: string | null;
+  provider?: { id: string; businessName: string } | null;
   isActive?: boolean;
   isTest?: boolean;
   ratingAverage?: number | null;

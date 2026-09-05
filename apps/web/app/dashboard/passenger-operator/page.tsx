@@ -25,7 +25,7 @@ export default function OperatorDashboardPage() {
         {(data, reload) => (
           <div className="space-y-5">
             <OperatorStatusBanner hasProfile={!!data.profile} roleStatus={data.roleStatus} />
-            {data.profile ? <FleetRosterCard /> : <OperatorProfileForm profile={null} onDone={reload} />}
+            {data.profile ? <FleetRosterCard providerProfileId={data.profile.id} /> : <OperatorProfileForm profile={null} onDone={reload} />}
           </div>
         )}
       </OperatorShell>

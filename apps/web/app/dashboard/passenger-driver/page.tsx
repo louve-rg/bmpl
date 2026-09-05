@@ -33,7 +33,7 @@ export default function PassengerDriverDashboardPage() {
             {data.profile ? (
               <>
                 <AvailabilityCard profile={data.profile} eligibility={data.eligibility} onDone={reload} />
-                <FleetCard />
+                <FleetCard driverProfileId={data.profile.id} />
               </>
             ) : (
               <ProfileForm profile={null} onDone={reload} />
