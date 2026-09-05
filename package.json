@@ -19,6 +19,7 @@
     "test:unit": "pnpm --filter @bmpl/wallet --filter @bmpl/authorization --filter @bmpl/api test",
     "test:integration": "pnpm --filter @bmpl/api test:integration",
     "clean": "turbo run clean",
+    "deploy:status": "node scripts/deploy-status.mjs",
     "db:generate": "pnpm --filter @bmpl/database generate",
     "db:migrate": "pnpm --filter @bmpl/database migrate",
     "db:migrate:deploy": "pnpm --filter @bmpl/database migrate:deploy",
