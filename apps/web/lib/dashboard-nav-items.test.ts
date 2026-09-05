@@ -145,6 +145,25 @@ describe('passenger-operator navigation', () => {
   });
 });
 
+describe('rider navigation', () => {
+  it('gives every signed-in customer the Passenger Service entry, ungated', () => {
+    // The demand side of passenger transport is a customer capability like
+    // Shipments — it must not sit behind any role.
+    const rider = BASE_NAV.find((i) => i.href === '/dashboard/passenger');
+    expect(rider?.label).toBe('Passenger Service');
+    expect(ROLE_GROUPS.some((g) => g.items.some((i) => i.href === '/dashboard/passenger'))).toBe(false);
+  });
+
+  it('does not collide with the passenger-driver or operator prefixes', () => {
+    // '/dashboard/passenger' vs '/dashboard/passenger-driver': prefix matching
+    // is boundary-aware ('/passenger/' vs '/passenger-'), so each lights only
+    // its own section.
+    const hrefs = allNavHrefs([{ items: BASE_NAV }, ...ROLE_GROUPS]);
+    expect(isNavItemActive('/dashboard/passenger', '/dashboard/passenger-driver', hrefs)).toBe(false);
+    expect(isNavItemActive('/dashboard/passenger', '/dashboard/passenger/bookings', hrefs)).toBe(true);
+  });
+});
+
 describe('isNavItemActive', () => {
   const hrefs = allNavHrefs([{ items: BASE_NAV }, ...ROLE_GROUPS]);
 

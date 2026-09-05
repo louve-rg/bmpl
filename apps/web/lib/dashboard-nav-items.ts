@@ -39,6 +39,9 @@ export const BASE_NAV: NavItem[] = [
   // Separate from Orders on purpose: a shipment can exist without a purchase,
   // and a locally-delivered order has no shipment at all.
   { label: 'Shipments', href: '/dashboard/shipments', icon: 'M3 8h11v8H3zM14 11h4l3 3v2h-7zM6.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm11 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z' },
+  // Riding is a customer capability like shipping a parcel — the demand side
+  // of passenger transport, deliberately NOT under any role-gated group.
+  { label: 'Passenger Service', href: '/dashboard/passenger', icon: 'M4 5h16v10H4V5Zm0 4h16M7 15v3M17 15v3M7.5 12h.01M16.5 12h.01' },
   { label: 'Wishlist', href: '/wishlist', icon: HEART_ICON },
   { label: 'My Reviews', href: '/dashboard/reviews', icon: 'M12 3l2.9 5.88 6.49.94-4.7 4.58 1.11 6.46L12 17.3l-5.8 3.06 1.1-6.46-4.69-4.58 6.49-.94L12 3Z' },
   { label: 'Wallet', href: '/wallet', icon: 'M3 7h18v12H3zM17 12h2M3 10h14a2 2 0 0 1 2 2' },
