@@ -118,6 +118,15 @@ async function driveTo(driver: { cookies: string[]; driverProfileId: string; veh
  * failure honestly; taking the last step through the API instead would settle
  * the order inside the fixture and turn every assertion below into a no-op
  * replay against an already-settled ledger.
+ *
+ * The simulation is honest but not perfect. A REAL failed auto-settle would
+ * leave four things this write does not: the driver assignment COMPLETED (here
+ * it stays ACCEPTED), delivery verification VERIFIED (here PENDING), a
+ * recipientName recorded from the handoff (here none), and the driver's
+ * completedDeliveries counter incremented (here it is not). No assertion in
+ * this file may rely on those four looking settled-failure-real — if a future
+ * test needs one of them, the fixture must move that piece through the API
+ * rather than widening this write.
  */
 async function markDeliveredUnsettled(deliveryId: string) {
   await ctx.prisma.orderDelivery.update({ where: { id: deliveryId }, data: { status: 'DELIVERED', deliveredAt: new Date() } });
@@ -146,7 +155,7 @@ async function seedDelivered(opts: { subtotal: number; deliveryFee: number } = {
 
   const cust = await register(`cust_${s}@example.bz`);
   expect((await post(adminCookies, 'admin/wallet/test-credit', { userId: cust.userId, amountMinor: total, reason: 'Settlement fixture funding.' })).status).toBe(201);
-  expect((await post(cust.cookies, 'cart/items', { productId: vendor.productId, quantity: 1 })).status).toBeLessThan(400);
+  expect((await post(cust.cookies, 'cart/items', { productId: vendor.productId, quantity: 1 })).status).toBe(201);
   const co = await post(cust.cookies, 'checkout', { vendors: [{ vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'DELIVERY' }], deliveryAddress: ADDRESS, payWithWallet: true });
   expect(co.status).toBe(201);
 
@@ -286,8 +295,8 @@ describe('multi-vendor independence', () => {
 
     const cust = await register(`mv_cust_${s}@example.bz`);
     expect((await post(adminCookies, 'admin/wallet/test-credit', { userId: cust.userId, amountMinor: 16000, reason: 'Multi-vendor settlement fixture.' })).status).toBe(201);
-    expect((await post(cust.cookies, 'cart/items', { productId: a.productId, quantity: 1 })).status).toBeLessThan(400);
-    expect((await post(cust.cookies, 'cart/items', { productId: b.productId, quantity: 1 })).status).toBeLessThan(400);
+    expect((await post(cust.cookies, 'cart/items', { productId: a.productId, quantity: 1 })).status).toBe(201);
+    expect((await post(cust.cookies, 'cart/items', { productId: b.productId, quantity: 1 })).status).toBe(201);
     const co = await post(cust.cookies, 'checkout', {
       vendors: [
         { vendorProfileId: a.vendorProfileId, deliveryMethod: 'DELIVERY' },
