@@ -424,6 +424,37 @@ describe('the simulation boundary', () => {
     expect(lateAccept.status).toBe(400);
     expect(lateAccept.body.message).toMatch(/test boundary/i);
     expect(await pointerOf(drv.driverProfileId)).toBeNull();
+
+    // The same death when the boundary moves on the OPERATOR's side instead.
+    const op2 = await makeProvider('Test Boundary Lines Two');
+    const drv2 = await makeDriver();
+    const invite2 = await post(op2.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: drv2.driverProfileId });
+    expect(invite2.status).toBe(201);
+    expect((await patch(admin, `admin/passengers/providers/${op2.profileId}/test-mode`, { isTest: true })).status).toBe(200);
+    const lateAccept2 = await post(drv2.cookies, `passenger/driver/affiliations/${invite2.body.id}/accept`);
+    expect(lateAccept2.status).toBe(400);
+    expect(lateAccept2.body.message).toMatch(/test boundary/i);
+    expect(await pointerOf(drv2.driverProfileId)).toBeNull();
+  });
+
+  it('the database itself refuses twin pending asks — the invariant is structural, not advisory', async () => {
+    const op = await makeProvider('Test Structural Lines');
+    const drv = await makeDriver();
+    expect((await post(op.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: drv.driverProfileId })).status).toBe(201);
+    // Raw on purpose, uniquely in this suite: this test attacks the
+    // CONSTRAINT, not the service. A second PENDING for the same pair
+    // written PAST the API — the state two racing asks would produce —
+    // must be refused by Postgres itself (the partial unique index of
+    // migration 20261104093000), not merely by the service's pre-check.
+    await expect(
+      ctx.prisma.passengerFleetAffiliation.create({
+        data: { providerProfileId: op.profileId, driverProfileId: drv.driverProfileId, initiatedBy: 'DRIVER', status: 'PENDING' },
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+    // Settled rows repeat freely — only the unanswered ask is unique.
+    const declined = await post(drv.cookies, `passenger/driver/affiliations/${(await get(op.cookies, 'passenger/provider/affiliations')).body[0].id}/decline`);
+    expect(declined.status).toBe(201);
+    expect((await post(op.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: drv.driverProfileId })).status).toBe(201);
   });
 
   it('an ACCEPTED affiliation pins both test-mode flags — end it first', async () => {
