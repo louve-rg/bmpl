@@ -189,6 +189,16 @@ export class ReviewsService {
   async listForSubject(subjectType: ReviewSubjectType, subjectId: string, opts: { sort?: string; rating?: number; page?: number; viewerId?: string }) {
     const page = Math.max(1, opts.page ?? 1);
     const pageSize = 10;
+    // A simulation-side subject answers BYTE-IDENTICALLY to a subject that
+    // does not exist: the same empty page a real subject with no reviews
+    // gets. An empty list is this endpoint's honest answer for "nothing
+    // visible here", and it leaks nothing an enumerator can use — a 404
+    // would hand them exactly the exists/doesn't distinction they want.
+    // Review's subject is soft-polymorphic (no relation to join through),
+    // so the boundary is asked per type instead.
+    if (!(await this.subjectServesPublicly(subjectType, subjectId))) {
+      return { aggregate: aggregateRatings([]), total: 0, page, pageSize, reviews: [] };
+    }
     const where: Prisma.ReviewWhereInput = { subjectType, subjectId, status: 'PUBLISHED', ...(opts.rating ? { rating: opts.rating } : {}) };
     const orderBy: Prisma.ReviewOrderByWithRelationInput = opts.sort === 'helpful' ? { helpfulCount: 'desc' } : opts.sort === 'rating_desc' ? { rating: 'desc' } : opts.sort === 'rating_asc' ? { rating: 'asc' } : { createdAt: 'desc' };
     const [rows, total, all] = await Promise.all([
@@ -203,6 +213,30 @@ export class ReviewsService {
       pageSize,
       reviews: await Promise.all(rows.map((r) => this.serialize(r, opts.viewerId))),
     };
+  }
+
+  /**
+   * Whether this subject belongs on the public, real-marketplace side.
+   * Every subject type carries (or derives) the simulation flag: a product
+   * through its vendor, a vendor and a delivery driver directly. A subject
+   * that does not exist is simply "not visible" — the caller's empty page
+   * then matches the test-side answer with no extra work.
+   */
+  private async subjectServesPublicly(subjectType: ReviewSubjectType, subjectId: string): Promise<boolean> {
+    switch (subjectType) {
+      case 'PRODUCT': {
+        const p = await this.prisma.product.findUnique({ where: { id: subjectId }, select: { vendorProfile: { select: { isTest: true } } } });
+        return p != null && !p.vendorProfile.isTest;
+      }
+      case 'VENDOR': {
+        const v = await this.prisma.vendorProfile.findUnique({ where: { id: subjectId }, select: { isTest: true } });
+        return v != null && !v.isTest;
+      }
+      case 'DRIVER': {
+        const d = await this.prisma.driverProfile.findUnique({ where: { id: subjectId }, select: { isTest: true } });
+        return d != null && !d.isTest;
+      }
+    }
   }
 
   async getById(reviewId: string, actor?: Actor) {

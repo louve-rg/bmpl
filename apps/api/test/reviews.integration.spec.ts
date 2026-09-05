@@ -32,12 +32,16 @@ async function register(email: string) {
 }
 
 interface Seed { customerCookies: string[]; customerId: string; vendorUserId: string; vendorCookies: string[]; vendorProfileId: string; productId: string; variantId: string; orderItemId: string; vendorOrderId: string; deliveryId: string; driverProfileId: string; driverUserId: string }
-async function seedFulfilled(method: 'DELIVERY' | 'PICKUP' = 'DELIVERY'): Promise<Seed> {
+/** opts.isTest builds the graph on the SIMULATION side of the boundary. Set at
+ *  creation because that is the only honest way here: the product-path flip
+ *  (admin test-mode) rightly refuses a vendor with opposite-side order
+ *  history, which this fixture's vendor always has. */
+async function seedFulfilled(method: 'DELIVERY' | 'PICKUP' = 'DELIVERY', opts: { isTest?: boolean } = {}): Promise<Seed> {
   const s = uniq();
   const vend = await register(`vend_${s}@example.bz`);
   const vendorCookies = await login(`vend_${s}@example.bz`, 'CustomerPass123');
   await ctx.prisma.userRole.create({ data: { userId: vend.userId, roleCode: 'VENDOR', status: 'APPROVED', approvedAt: new Date() } });
-  const vp = await ctx.prisma.vendorProfile.create({ data: { userId: vend.userId, businessName: `Store ${s}`, slug: `store-${s}`, contactEmail: `v${s}@x.bz`, approvalStatus: 'APPROVED', storeStatus: 'OPEN' } });
+  const vp = await ctx.prisma.vendorProfile.create({ data: { userId: vend.userId, businessName: `Store ${s}`, slug: `store-${s}`, contactEmail: `v${s}@x.bz`, approvalStatus: 'APPROVED', storeStatus: 'OPEN', isTest: opts.isTest ?? false } });
   const product = await ctx.prisma.product.create({
     data: {
       vendorProfileId: vp.id, categoryId, title: `Body Lotion ${s}`, slug: `p-${s}`, sku: `SKU-${s}`, status: 'PUBLISHED', priceMinor: 1000n, currency: 'BZD',
@@ -47,7 +51,7 @@ async function seedFulfilled(method: 'DELIVERY' | 'PICKUP' = 'DELIVERY'): Promis
   });
   const variant = await ctx.prisma.productVariant.create({ data: { productId: product.id, displayName: 'Perfect in Pink', sku: `V-${s}`, optionValues: { create: { productOptionValueId: product.options[0]!.values[0]!.id } } } });
   const drv = await register(`drv_${s}@example.bz`);
-  const dp = await ctx.prisma.driverProfile.create({ data: { userId: drv.userId, legalName: 'D', displayName: `Drv${s}`, phone: '+501', homeDistrict: 'BELIZE', licenceNumber: `DL${s}`, licenceExpiry: FUTURE, vehicleOwnership: 'OWNED' } });
+  const dp = await ctx.prisma.driverProfile.create({ data: { userId: drv.userId, legalName: 'D', displayName: `Drv${s}`, phone: '+501', homeDistrict: 'BELIZE', licenceNumber: `DL${s}`, licenceExpiry: FUTURE, vehicleOwnership: 'OWNED', isTest: opts.isTest ?? false } });
   const cust = await register(`cust_${s}@example.bz`);
   const num = `ORD-${s}`;
   const order = await ctx.prisma.order.create({
@@ -206,5 +210,40 @@ describe('aggregates, responses, moderation, reports, helpful', () => {
     await post(o.customerCookies, 'reviews', { subjectType: 'PRODUCT', contextId: o.orderItemId, rating: 5, body: 'x' });
     const after = await get(o.customerCookies, 'reviews/eligible');
     expect(after.body.some((e: { subjectType: string; contextId: string }) => e.subjectType === 'PRODUCT' && e.contextId === o.orderItemId)).toBe(false);
+  });
+});
+
+describe('the simulation boundary', () => {
+  it('a test-side subject answers a guessed id with an empty page, byte-identical to a subject that does not exist', async () => {
+    const live = await seedFulfilled('DELIVERY');
+    const sim = await seedFulfilled('DELIVERY', { isTest: true });
+    // Reviews genuinely exist on BOTH sides — the guard must hide content,
+    // never merely coincide with its absence.
+    expect((await post(live.customerCookies, 'reviews', { subjectType: 'PRODUCT', contextId: live.orderItemId, rating: 5, body: 'Real and lovely' })).status).toBe(201);
+    expect((await post(sim.customerCookies, 'reviews', { subjectType: 'PRODUCT', contextId: sim.orderItemId, rating: 1, body: 'Rehearsal grumble' })).status).toBe(201);
+    expect((await post(sim.customerCookies, 'reviews', { subjectType: 'VENDOR', contextId: sim.vendorOrderId, rating: 2, body: 'Rehearsal store' })).status).toBe(201);
+    expect((await post(sim.customerCookies, 'reviews', { subjectType: 'DRIVER', contextId: sim.deliveryId, rating: 3, body: 'Rehearsal driver' })).status).toBe(201);
+    expect(await ctx.prisma.review.count({ where: { subjectId: { in: [sim.productId, sim.vendorProfileId, sim.driverProfileId] }, status: 'PUBLISHED' } })).toBe(3);
+
+    // The live side still serves normally.
+    const livePub = await get([], `marketplace/reviews/PRODUCT/${live.productId}`);
+    expect(livePub.status).toBe(200);
+    expect(livePub.body.total).toBe(1);
+
+    // Every test-side subject type answers exactly like nothing: same status,
+    // same body, no exists/doesn't distinction for an enumerator to read.
+    const unknown = await get([], `marketplace/reviews/PRODUCT/nonexistent-${uniq()}`);
+    expect(unknown.status).toBe(200);
+    expect(unknown.body.total).toBe(0);
+    expect(unknown.body.reviews).toEqual([]);
+    for (const [type, id] of [
+      ['PRODUCT', sim.productId],
+      ['VENDOR', sim.vendorProfileId],
+      ['DRIVER', sim.driverProfileId],
+    ] as const) {
+      const r = await get([], `marketplace/reviews/${type}/${id}`);
+      expect(r.status).toBe(200);
+      expect(r.body).toEqual(unknown.body);
+    }
   });
 });
