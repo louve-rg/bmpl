@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PassengerAffiliationInviteInput, PassengerAffiliationRequestInput } from '@bmpl/validation';
-import type { PassengerFleetAffiliation, Prisma } from '@bmpl/database';
+import { Prisma } from '@bmpl/database';
+import type { PassengerFleetAffiliation } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -123,16 +124,14 @@ export class PassengerAffiliationService {
     }
     await this.refuseIfTaken(driver.providerProfileId, provider.id);
     await this.refuseIfPending(provider.id, driver.id);
-    const row = await this.prisma.passengerFleetAffiliation.create({
-      data: {
-        providerProfileId: provider.id,
-        driverProfileId: driver.id,
-        initiatedBy: 'PROVIDER',
-        status: 'PENDING',
-        message: dto.message ?? null,
-        // Both sides were just proven to match; either one is the derivation.
-        isTest: provider.isTest,
-      },
+    const row = await this.createAsk({
+      providerProfileId: provider.id,
+      driverProfileId: driver.id,
+      initiatedBy: 'PROVIDER',
+      status: 'PENDING',
+      message: dto.message ?? null,
+      // Both sides were just proven to match; either one is the derivation.
+      isTest: provider.isTest,
     });
     await this.record(actor, row, driver.userId, 'invited');
     await this.notifications.createInApp({
@@ -167,15 +166,13 @@ export class PassengerAffiliationService {
     }
     await this.refuseIfTaken(driver.providerProfileId, provider.id);
     await this.refuseIfPending(provider.id, driver.id);
-    const row = await this.prisma.passengerFleetAffiliation.create({
-      data: {
-        providerProfileId: provider.id,
-        driverProfileId: driver.id,
-        initiatedBy: 'DRIVER',
-        status: 'PENDING',
-        message: dto.message ?? null,
-        isTest: driver.isTest,
-      },
+    const row = await this.createAsk({
+      providerProfileId: provider.id,
+      driverProfileId: driver.id,
+      initiatedBy: 'DRIVER',
+      status: 'PENDING',
+      message: dto.message ?? null,
+      isTest: driver.isTest,
     });
     await this.record(actor, row, provider.userId, 'requested');
     await this.notifications.createInApp({
@@ -205,7 +202,7 @@ export class PassengerAffiliationService {
       throw new BadRequestException('You asked to join this fleet; the operator must approve it.');
     }
     if (!asn.providerProfile.isActive) throw new BadRequestException('That operator account is suspended.');
-    return this.activate(actor, asn, driver.isTest, asn.providerProfile.isTest, asn.providerProfile.userId);
+    return this.activate(actor, asn, { driverIsTest: driver.isTest, providerIsTest: asn.providerProfile.isTest }, asn.providerProfile.userId);
   }
 
   /** Operator approves a driver's REQUEST. The one provider-side consent. */
@@ -224,7 +221,7 @@ export class PassengerAffiliationService {
       throw new BadRequestException('You invited this driver; only the driver can accept.');
     }
     if (!asn.driverProfile.isActive) throw new BadRequestException('That driver profile is deactivated.');
-    return this.activate(actor, asn, provider.isTest, asn.driverProfile.isTest, asn.driverProfile.userId);
+    return this.activate(actor, asn, { driverIsTest: asn.driverProfile.isTest, providerIsTest: provider.isTest }, asn.driverProfile.userId);
   }
 
   /**
@@ -232,8 +229,8 @@ export class PassengerAffiliationService {
    * updateMany is the race guard: if another fleet accepted this driver
    * between the read and here, the count is 0 and nothing was changed.
    */
-  private async activate(actor: Actor, asn: PassengerFleetAffiliation, actorIsTest: boolean, otherIsTest: boolean, notifyUserId: string) {
-    if (actorIsTest !== otherIsTest) {
+  private async activate(actor: Actor, asn: PassengerFleetAffiliation, sides: { driverIsTest: boolean; providerIsTest: boolean }, notifyUserId: string) {
+    if (sides.driverIsTest !== sides.providerIsTest) {
       // A test-mode flip since the ask was created; the sides no longer match.
       throw new BadRequestException('The two accounts are on opposite sides of the test boundary.');
     }
@@ -247,17 +244,34 @@ export class PassengerAffiliationService {
         where: { id: asn.id, status: 'PENDING' },
         // isTest re-derived at the moment the link becomes real, in case both
         // sides were flipped together since the ask was created.
-        data: { status: 'ACCEPTED', acceptedAt: new Date(), isTest: actorIsTest },
+        data: { status: 'ACCEPTED', acceptedAt: new Date(), isTest: sides.driverIsTest },
       });
       if (consented.count !== 1) {
         throw new BadRequestException('This ask can no longer be accepted.');
       }
+      // Both profile rows are verified with CONDITIONAL WRITES inside this
+      // transaction. A write takes the row lock, so a concurrent admin
+      // test-mode flip (whose own affiliation guard runs inside its
+      // transaction after updating the same row) SERIALIZES against this
+      // consent instead of racing it — whichever commits second sees the
+      // other and refuses. The provider write is same-value on purpose: a
+      // lock and a check, not a change.
+      const providerHeld = await tx.passengerProviderProfile.updateMany({
+        where: { id: asn.providerProfileId, isTest: sides.providerIsTest },
+        data: { isTest: sides.providerIsTest },
+      });
+      if (providerHeld.count !== 1) {
+        throw new BadRequestException('The two accounts are on opposite sides of the test boundary.');
+      }
       const linked = await tx.passengerDriverProfile.updateMany({
-        where: { id: asn.driverProfileId, providerProfileId: null },
+        where: { id: asn.driverProfileId, providerProfileId: null, isTest: sides.driverIsTest },
         data: { providerProfileId: asn.providerProfileId },
       });
       if (linked.count !== 1) {
-        throw new BadRequestException('This driver already drives for a fleet.');
+        const d = await tx.passengerDriverProfile.findUniqueOrThrow({ where: { id: asn.driverProfileId }, select: { providerProfileId: true } });
+        throw new BadRequestException(
+          d.providerProfileId != null ? 'This driver already drives for a fleet.' : 'The two accounts are on opposite sides of the test boundary.',
+        );
       }
       const row = await tx.passengerFleetAffiliation.findUniqueOrThrow({ where: { id: asn.id } });
       await this.record(actor, row, notifyUserId, 'accepted', tx);
@@ -379,6 +393,32 @@ export class PassengerAffiliationService {
       select: { id: true },
     });
     if (pending) throw new BadRequestException('An affiliation between you is already awaiting an answer.');
+  }
+
+  /**
+   * The one-live-ask rule is a DATABASE fact too: a partial unique index
+   * (migration 20261104093000) covers the pair WHERE status = 'PENDING'.
+   * refuseIfPending gives the ordinary case its friendly refusal; this
+   * converts the index's P2002 — two asks racing past that check — into the
+   * same plain words, so the invariant holds without the caller ever seeing
+   * a constraint error.
+   */
+  private async createAsk(data: {
+    providerProfileId: string;
+    driverProfileId: string;
+    initiatedBy: 'DRIVER' | 'PROVIDER';
+    status: 'PENDING';
+    message: string | null;
+    isTest: boolean;
+  }) {
+    try {
+      return await this.prisma.passengerFleetAffiliation.create({ data });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new BadRequestException('An affiliation between you is already awaiting an answer.');
+      }
+      throw e;
+    }
   }
 
   /** A settled row settles once: transition only from the expected status. */

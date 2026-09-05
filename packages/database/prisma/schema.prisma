@@ -4863,6 +4863,23 @@ model PassengerProviderProfile {
 /// agreement is a new row. No commercial terms live here or anywhere else on
 /// this row — employment and commission policy are deliberately absent until
 /// the product owner decides them.
+///
+/// TO WHOEVER ADDS A COMMERCIAL FIELD TO THIS ROW (a rate, a split, an
+/// employment term): today the row is terms-free, and that is load-bearing.
+/// Everything on an ask that matters is re-verified at the moment of
+/// consent, so answering an EXISTING ask with accept/approve is exactly
+/// equivalent to making your own — which is why a second ask for the same
+/// pair is refused rather than matched, and why that refusal is safe. The
+/// moment a field carries terms, the two directions stop consenting to the
+/// same thing, and the one-ask-per-pair stitching decision must be
+/// RE-OPENED IN THE SAME CHANGE that adds the field. Do not add the field
+/// without re-deciding it.
+///
+/// The one-live-ask rule is also a DATABASE fact: a partial unique index on
+/// (providerProfileId, driverProfileId) WHERE status = 'PENDING' lives in
+/// migration 20261104093000. Prisma cannot express partial indexes, so it
+/// is deliberately absent from this file — NEVER accept a generated
+/// migration that proposes dropping it as drift.
 model PassengerFleetAffiliation {
   id                String                     @id @default(cuid())
   /// Derived from the two profiles, which must sit on the SAME side of the
