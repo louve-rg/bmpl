@@ -4,6 +4,7 @@ import {
   BASE_NAV,
   DRIVER_NAV,
   PASSENGER_DRIVER_NAV,
+  PASSENGER_OPERATOR_NAV,
   ROLE_GROUPS,
   allNavHrefs,
   isNavItemActive,
@@ -109,6 +110,38 @@ describe('passenger-driver navigation', () => {
       'Driver',
       'Passenger Driver',
     ]);
+  });
+});
+
+describe('passenger-operator navigation', () => {
+  it('is its own group, gated on the provider role alone', () => {
+    // Running a service and driving one are different jobs; the operator
+    // group must not leak into either driver group or vice versa.
+    const group = ROLE_GROUPS.find((g) => g.heading === 'Passenger Operator');
+    expect(group?.requires).toEqual(['PASSENGER_PROVIDER']);
+    expect(group?.items).toBe(PASSENGER_OPERATOR_NAV);
+    expect(PASSENGER_DRIVER_NAV.some((i) => i.href.startsWith('/dashboard/passenger-operator'))).toBe(false);
+  });
+
+  it('points each destination at a real operator route', () => {
+    expect(PASSENGER_OPERATOR_NAV.map((i) => i.href)).toEqual([
+      '/dashboard/passenger-operator',
+      '/dashboard/passenger-operator/routes',
+      '/dashboard/passenger-operator/departures',
+      '/dashboard/passenger-operator/bookings',
+      '/dashboard/passenger-operator/vehicles',
+      '/dashboard/passenger-operator/profile',
+    ]);
+  });
+
+  it('is shown to an approved provider and to nobody else', () => {
+    expect(
+      visibleRoleGroups(ROLE_GROUPS, [
+        { roleCode: 'CUSTOMER', status: 'APPROVED' },
+        { roleCode: 'PASSENGER_PROVIDER', status: 'APPROVED' },
+      ]).map((g) => g.heading),
+    ).toEqual(['Passenger Operator']);
+    expect(visibleRoleGroups(ROLE_GROUPS, [{ roleCode: 'PASSENGER_PROVIDER', status: 'PENDING' }])).toEqual([]);
   });
 });
 

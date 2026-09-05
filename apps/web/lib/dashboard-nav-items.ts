@@ -83,6 +83,21 @@ export const PASSENGER_DRIVER_NAV: NavItem[] = [
   { label: 'My Vehicles', href: '/dashboard/passenger-driver/vehicles', icon: 'M5 16h14M5 16a2 2 0 1 0 4 0M15 16a2 2 0 1 0 4 0M4 16v-4l2-5h9l3 5h2v4' },
 ];
 
+/**
+ * Fleet-operator tools — the business side of passenger transport (the
+ * vendors-and-products model: the operator self-serves here, the admin
+ * console reaches across all operators). Separate from PASSENGER_DRIVER_NAV:
+ * running a service and driving one are different jobs.
+ */
+export const PASSENGER_OPERATOR_NAV: NavItem[] = [
+  { label: 'Operator Dashboard', href: '/dashboard/passenger-operator', icon: HOME_ICON },
+  { label: 'My Routes', href: '/dashboard/passenger-operator/routes', icon: 'M6 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm12-12a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM6 16V9a3 3 0 0 1 3-3h6M18 8v7a3 3 0 0 1-3 3H9' },
+  { label: 'Departures', href: '/dashboard/passenger-operator/departures', icon: CALENDAR_ICON },
+  { label: 'Bookings', href: '/dashboard/passenger-operator/bookings', icon: 'M6 3h12l1 4H5l1-4Zm-1 4v13h14V7M9 11h6' },
+  { label: 'Fleet Vehicles', href: '/dashboard/passenger-operator/vehicles', icon: 'M5 16h14M5 16a2 2 0 1 0 4 0M15 16a2 2 0 1 0 4 0M4 16v-4l2-5h9l3 5h2v4' },
+  { label: 'Business Profile', href: '/dashboard/passenger-operator/profile', icon: BUILDING_ICON },
+];
+
 const VENDOR_NAV: NavItem[] = [
   { label: 'My Store', href: '/dashboard/store', icon: 'M4 8h16l-1 3H5L4 8Zm1 3v9h14v-9M9 20v-5h6v5' },
   { label: 'My Products', href: '/dashboard/products', icon: 'M4 7l8-4 8 4-8 4-8-4Zm0 0v10l8 4 8-4V7' },
@@ -153,6 +168,7 @@ export const ROLE_GROUPS: ReadonlyArray<RoleGatedGroup<NavItem>> = [
   { heading: 'Real Estate', items: REALESTATE_NAV, requires: ['PROPERTY_OWNER', 'REAL_ESTATE_AGENT'] },
   { heading: 'Driver', items: DRIVER_NAV, requires: ['DELIVERY_DRIVER'] },
   { heading: 'Passenger Driver', items: PASSENGER_DRIVER_NAV, requires: ['PASSENGER_DRIVER'] },
+  { heading: 'Passenger Operator', items: PASSENGER_OPERATOR_NAV, requires: ['PASSENGER_PROVIDER'] },
   { heading: 'Vendor', items: VENDOR_NAV, requires: ['VENDOR'] },
   { heading: 'Employer', items: EMPLOYER_NAV, requires: ['EMPLOYER'] },
   { heading: 'Property Owner', items: PROPERTY_OWNER_NAV, requires: ['PROPERTY_OWNER'] },

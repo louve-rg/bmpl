@@ -16,8 +16,22 @@ import type { PassengerVehicle } from '../../lib/passenger-driver';
  * `seatCapacity` is the field that makes a vehicle a PASSENGER vehicle —
  * seats available to sell, excluding the driver. No photo upload here: the
  * passenger API deliberately accepts no storage keys yet.
+ *
+ * Shared by the driver (own vehicles) and the fleet operator (fleet vehicles):
+ * the two APIs take the identical vehicle shape and differ only in the path,
+ * so `apiBase` is the whole difference rather than a second component.
  */
-export function PassengerVehicleManager({ vehicles, onDone }: { vehicles: PassengerVehicle[]; onDone: () => Promise<void> }) {
+export function PassengerVehicleManager({
+  vehicles,
+  onDone,
+  apiBase = '/passenger/driver/vehicles',
+  emptyDescription = 'Add a vehicle with its seat capacity — a departure can only be assigned to a driver with an approved vehicle.',
+}: {
+  vehicles: PassengerVehicle[];
+  onDone: () => Promise<void>;
+  apiBase?: string;
+  emptyDescription?: string;
+}) {
   const [addingOpen, setAddingOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -30,9 +44,7 @@ export function PassengerVehicleManager({ vehicles, onDone }: { vehicles: Passen
         </Alert>
       )}
 
-      {vehicles.length === 0 && !addingOpen && (
-        <EmptyState title="No vehicles yet" description="Add a vehicle with its seat capacity — a departure can only be assigned to a driver with an approved vehicle." />
-      )}
+      {vehicles.length === 0 && !addingOpen && <EmptyState title="No vehicles yet" description={emptyDescription} />}
 
       {vehicles.length > 0 && (
         <ul className="mb-4 space-y-3">
@@ -40,6 +52,7 @@ export function PassengerVehicleManager({ vehicles, onDone }: { vehicles: Passen
             editingId === v.id ? (
               <li key={v.id}>
                 <VehicleForm
+                  apiBase={apiBase}
                   vehicle={v}
                   onCancel={() => setEditingId(null)}
                   onSaved={async () => {
@@ -53,6 +66,7 @@ export function PassengerVehicleManager({ vehicles, onDone }: { vehicles: Passen
             ) : (
               <VehicleRow
                 key={v.id}
+                apiBase={apiBase}
                 vehicle={v}
                 onEdit={() => {
                   setErr(null);
@@ -71,6 +85,7 @@ export function PassengerVehicleManager({ vehicles, onDone }: { vehicles: Passen
 
       {addingOpen ? (
         <VehicleForm
+          apiBase={apiBase}
           onCancel={() => setAddingOpen(false)}
           onSaved={async () => {
             setAddingOpen(false);
@@ -89,11 +104,13 @@ export function PassengerVehicleManager({ vehicles, onDone }: { vehicles: Passen
 }
 
 function VehicleRow({
+  apiBase,
   vehicle,
   onEdit,
   onChanged,
   onError,
 }: {
+  apiBase: string;
   vehicle: PassengerVehicle;
   onEdit: () => void;
   onChanged: () => Promise<void>;
@@ -105,7 +122,7 @@ function VehicleRow({
   async function patch(body: Record<string, unknown>) {
     setBusy(true);
     try {
-      await api.patch(`/passenger/driver/vehicles/${vehicle.id}`, body);
+      await api.patch(`${apiBase}/${vehicle.id}`, body);
       await onChanged();
     } catch (e) {
       onError(errMessage(e));
@@ -161,7 +178,7 @@ function VehicleRow({
             onClick={async () => {
               setBusy(true);
               try {
-                await api.del(`/passenger/driver/vehicles/${vehicle.id}`);
+                await api.del(`${apiBase}/${vehicle.id}`);
                 await onChanged();
               } catch (e) {
                 onError(errMessage(e));
@@ -179,11 +196,13 @@ function VehicleRow({
 }
 
 function VehicleForm({
+  apiBase,
   vehicle,
   onCancel,
   onSaved,
   onError,
 }: {
+  apiBase: string;
   vehicle?: PassengerVehicle;
   onCancel: () => void;
   onSaved: () => Promise<void>;
@@ -231,9 +250,9 @@ function VehicleForm({
       };
       if (isEdit) {
         body.isActive = f.isActive;
-        await api.patch(`/passenger/driver/vehicles/${vehicle.id}`, body);
+        await api.patch(`${apiBase}/${vehicle.id}`, body);
       } else {
-        await api.post('/passenger/driver/vehicles', body);
+        await api.post(apiBase, body);
       }
       await onSaved();
     } catch (e) {
