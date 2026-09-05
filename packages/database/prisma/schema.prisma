@@ -348,6 +348,7 @@ enum AuditAction {
   PASSENGER_BOOKING_CANCELLED
   PASSENGER_TRIP_ASSIGNED
   PASSENGER_TRIP_COMPLETED
+  PASSENGER_AFFILIATION_CHANGED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -4743,6 +4744,29 @@ enum PassengerCancellationParty {
   SYSTEM
 }
 
+/// The lifecycle of a fleet-membership agreement. Vocabulary reused from
+/// ListingAssignmentStatus (PENDING / ACCEPTED / DECLINED / ENDED — the
+/// existing two-party assignment shape) plus RoleApplicationStatus's
+/// WITHDRAWN (the initiator cancels their own pending ask). ACCEPTED is the
+/// only state in which the operational link
+/// (PassengerDriverProfile.providerProfileId) is set; every other state
+/// leaves the driver independent.
+enum PassengerAffiliationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+  ENDED
+}
+
+/// Which side of the agreement acted. Mutual consent is the rule: the party
+/// recorded as the initiator is never the one whose consent activates the
+/// affiliation.
+enum PassengerAffiliationParty {
+  DRIVER
+  PROVIDER
+}
+
 /// A person approved (via the existing role machinery) to carry passengers.
 /// Mirrors DriverProfile's SHAPE without touching DriverProfile itself - the
 /// two kinds of driving are different jobs held by possibly the same human.
@@ -4784,9 +4808,10 @@ model PassengerDriverProfile {
   createdAt             DateTime                  @default(now())
   updatedAt             DateTime                  @updatedAt
 
-  vehiclesOwned   PassengerVehicle[]        @relation("PassengerVehicleOwnerDriver")
-  trips           PassengerTrip[]           @relation("PassengerTripDriver")
+  vehiclesOwned   PassengerVehicle[]          @relation("PassengerVehicleOwnerDriver")
+  trips           PassengerTrip[]             @relation("PassengerTripDriver")
   tripAssignments PassengerTripAssignment[]
+  affiliations    PassengerFleetAffiliation[]
 
   @@index([availability])
   @@index([providerProfileId])
@@ -4819,13 +4844,49 @@ model PassengerProviderProfile {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  drivers  PassengerDriverProfile[]
-  vehicles PassengerVehicle[]       @relation("PassengerVehicleOwnerProvider")
-  routes   PassengerRoute[]
-  trips    PassengerTrip[]          @relation("PassengerTripProvider")
+  drivers      PassengerDriverProfile[]
+  vehicles     PassengerVehicle[]          @relation("PassengerVehicleOwnerProvider")
+  routes       PassengerRoute[]
+  trips        PassengerTrip[]             @relation("PassengerTripProvider")
+  affiliations PassengerFleetAffiliation[]
 
   @@index([isTest, isActive])
   @@map("passenger_provider_profiles")
+}
+
+/// One fleet-membership agreement between an operator and a passenger driver.
+/// Mirrors PropertyListingAssignment's consent shape: a PENDING row is an
+/// unanswered ask, and ONLY the counterparty's consent makes it ACCEPTED —
+/// which is when (and the only place) the driver's operational
+/// providerProfileId pointer is set, in the same transaction. Rows are
+/// history: termination ENDs a row rather than deleting it, and a new
+/// agreement is a new row. No commercial terms live here or anywhere else on
+/// this row — employment and commission policy are deliberately absent until
+/// the product owner decides them.
+model PassengerFleetAffiliation {
+  id                String                     @id @default(cuid())
+  /// Derived from the two profiles, which must sit on the SAME side of the
+  /// simulation boundary — never taken from a request.
+  isTest            Boolean                    @default(false)
+  providerProfileId String
+  providerProfile   PassengerProviderProfile   @relation(fields: [providerProfileId], references: [id], onDelete: Cascade)
+  driverProfileId   String
+  driverProfile     PassengerDriverProfile     @relation(fields: [driverProfileId], references: [id], onDelete: Cascade)
+  /// Who asked. PROVIDER = an invitation the driver must accept;
+  /// DRIVER = a request the operator must approve.
+  initiatedBy       PassengerAffiliationParty
+  status            PassengerAffiliationStatus @default(PENDING)
+  /// A free-text note from the initiator to the counterparty.
+  message           String?
+  acceptedAt        DateTime?
+  endedAt           DateTime?
+  endedBy           PassengerAffiliationParty?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  @@index([providerProfileId, status])
+  @@index([driverProfileId, status])
+  @@map("passenger_fleet_affiliations")
 }
 
 /// A vehicle that carries people. Mirrors DriverVehicle's approval /

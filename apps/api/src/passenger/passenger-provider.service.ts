@@ -16,9 +16,9 @@ import { PassengerDriverService } from './passenger-driver.service';
  * the fleet's vehicles. Vehicle rows created here set providerProfileId and
  * never ownerDriverProfileId — the other half of the exactly-one-owner rule.
  *
- * NOT here in S1: routes (S2), driver affiliation management (who initiates a
- * fleet relationship and who consents is an open product decision), and photo
- * uploads (no passenger storage namespace yet).
+ * NOT here in S1: routes (now in PassengerNetworkService, S2), driver
+ * affiliation management (now in PassengerAffiliationService —
+ * mutual consent), and photo uploads (no passenger storage namespace yet).
  */
 @Injectable()
 export class PassengerProviderService {

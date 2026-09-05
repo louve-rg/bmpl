@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
+  passengerAffiliationInviteSchema,
   passengerBookingCancelSchema,
   passengerRouteSchema,
   passengerRouteStopsSchema,
@@ -8,6 +9,7 @@ import {
   passengerTripAssignSchema,
   passengerTripCancelSchema,
   passengerTripCreateSchema,
+  type PassengerAffiliationInviteInput,
   type PassengerBookingCancelInput,
   type PassengerRouteInput,
   type PassengerRouteStopsInput,
@@ -21,6 +23,7 @@ import { CurrentUser, Roles } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
 import { PassengerNetworkService } from './passenger-network.service';
 import { PassengerOperationsService } from './passenger-operations.service';
+import { PassengerAffiliationService } from './passenger-affiliation.service';
 
 /**
  * Operator self-service over their OWN routes and departures. Unlike the S1
@@ -35,6 +38,7 @@ export class PassengerNetworkController {
   constructor(
     private readonly network: PassengerNetworkService,
     private readonly ops: PassengerOperationsService,
+    private readonly affiliations: PassengerAffiliationService,
   ) {}
 
   private actor(user: AuthContext, req: Request) {
@@ -126,5 +130,40 @@ export class PassengerNetworkController {
     @Body(ZodBody(passengerBookingCancelSchema)) body: PassengerBookingCancelInput,
   ) {
     return this.ops.cancelBookingAsProvider(this.actor(u, req), id, body.reason);
+  }
+
+  // ---- fleet affiliation: the operator's half of mutual consent.
+  // The operator can ASK (invite) and can ANSWER a driver's ask (approve /
+  // decline); no endpoint here can turn the operator's own invitation into an
+  // active affiliation. That consent belongs to the driver.
+
+  @Get('affiliations')
+  listAffiliations(@CurrentUser() u: AuthContext, @Query('status') status?: string) {
+    return this.affiliations.listForProvider(u.userId, status);
+  }
+
+  @Post('affiliations/invite')
+  inviteDriver(@CurrentUser() u: AuthContext, @Req() req: Request, @Body(ZodBody(passengerAffiliationInviteSchema)) body: PassengerAffiliationInviteInput) {
+    return this.affiliations.invite(this.actor(u, req), body);
+  }
+
+  @Post('affiliations/:id/approve')
+  approveAffiliation(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
+    return this.affiliations.approveAsProvider(this.actor(u, req), id);
+  }
+
+  @Post('affiliations/:id/decline')
+  declineAffiliation(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
+    return this.affiliations.decline(this.actor(u, req), id, 'PROVIDER');
+  }
+
+  @Post('affiliations/:id/withdraw')
+  withdrawAffiliation(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
+    return this.affiliations.withdraw(this.actor(u, req), id, 'PROVIDER');
+  }
+
+  @Post('affiliations/:id/end')
+  endAffiliation(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
+    return this.affiliations.end(this.actor(u, req), id, 'PROVIDER');
   }
 }

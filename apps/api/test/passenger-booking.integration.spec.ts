@@ -16,11 +16,11 @@
  *  - manual staffing only, fleet drivers only, approved vehicles only.
  *
  * Every route, departure, booking, assignment and movement step is created
- * THROUGH the API. The raw writes are role approvals, the fleet-affiliation
- * link (its management API is deliberately unbuilt — the consent model is an
- * open product question), and one isActive=false write in the suspension
- * test, which exists precisely because no product path can write it (the S2
- * review's F5, still open, honoured here as a live check).
+ * THROUGH the API — including, since BMPL-39, the fleet-affiliation link
+ * (operator invites, driver accepts: mutual consent). The raw writes left are
+ * role approvals and one isActive=false write in the suspension test, which
+ * exists precisely because no product path can write it (the S2 review's F5,
+ * still open, honoured here as a live check).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -63,12 +63,11 @@ async function makeProvider(businessName: string) {
 }
 
 /**
- * A fleet driver, driving-ready. The affiliation link is a raw write: fleet
- * membership has NO management API yet (the consent model is an open product
- * question, deferred since S1) — until that ships, real operators cannot
- * staff departures at all, which is reported as a sequencing gap, not hidden.
+ * A fleet driver, driving-ready, whose membership goes THROUGH the product:
+ * the operator invites and the driver accepts — BMPL-39's mutual consent,
+ * exercised on every fixture rather than bypassed by a raw write.
  */
-async function makeFleetDriver(providerProfileId: string) {
+async function makeFleetDriver(operator: { cookies: string[]; profileId: string }) {
   const u = await registerUser(`pb_drv_${uniq()}@example.com`);
   await approveRole(u.userId, 'PASSENGER_DRIVER');
   const prof = await put(u.cookies, 'passenger/driver/profile', {
@@ -81,9 +80,12 @@ async function makeFleetDriver(providerProfileId: string) {
     termsAccepted: true,
   });
   expect(prof.status).toBe(200);
-  await ctx.prisma.passengerDriverProfile.update({ where: { userId: u.userId }, data: { providerProfileId } });
-  const profile = await ctx.prisma.passengerDriverProfile.findUniqueOrThrow({ where: { userId: u.userId } });
-  return { ...u, driverProfileId: profile.id };
+  const invite = await post(operator.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: prof.body.id });
+  expect(invite.status).toBe(201);
+  const accepted = await post(u.cookies, `passenger/driver/affiliations/${invite.body.id}/accept`);
+  expect(accepted.status).toBe(201);
+  expect(accepted.body.status).toBe('ACCEPTED');
+  return { ...u, driverProfileId: prof.body.id as string, affiliationId: invite.body.id as string };
 }
 
 /** An APPROVED fleet vehicle, registered and moderated through the product. */
@@ -188,7 +190,7 @@ describe('the fare gate', () => {
   it('holds at confirmation too: a fare zeroed after the request refuses the seat', async () => {
     const op = await makeProvider('Test Regressed Lines');
     const { routeId, tripId } = await makeDeparture(op, 2500);
-    const driver = await makeFleetDriver(op.profileId);
+    const driver = await makeFleetDriver(op);
     const vehicleId = await makeFleetVehicle(op, 12);
     expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
     const rider = await registerUser(`pb_r4_${uniq()}@example.com`);
@@ -216,7 +218,7 @@ describe('seats are held at confirmation, not at request', () => {
   it('fails closed when capacity is spent, and a cancellation frees the seats', async () => {
     const op = await makeProvider('Test Full Bus');
     const { tripId } = await makeDeparture(op, 2000);
-    const driver = await makeFleetDriver(op.profileId);
+    const driver = await makeFleetDriver(op);
     const vehicleId = await makeFleetVehicle(op, 2);
     expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
 
@@ -250,7 +252,7 @@ describe('manual staffing', () => {
   it('assigns a fleet driver and an approved vehicle, snapshots capacity, and names the assigner', async () => {
     const op = await makeProvider('Test Staffed Lines');
     const { tripId } = await makeDeparture(op, 2000);
-    const driver = await makeFleetDriver(op.profileId);
+    const driver = await makeFleetDriver(op);
     const vehicleId = await makeFleetVehicle(op, 14);
 
     const r = await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId });
@@ -267,12 +269,12 @@ describe('manual staffing', () => {
     expect(audits).toHaveLength(1);
   });
 
-  it('refuses an independent driver — affiliation is a question nobody has answered', async () => {
+  it('refuses an independent driver — fleet membership is consented, never assumed', async () => {
     const op = await makeProvider('Test Fleetless');
     const { tripId } = await makeDeparture(op, 2000);
-    const independent = await makeFleetDriver(op.profileId);
-    // Sever the affiliation: an independent, fully-approved driver.
-    await ctx.prisma.passengerDriverProfile.update({ where: { id: independent.driverProfileId }, data: { providerProfileId: null } });
+    const independent = await makeFleetDriver(op);
+    // Sever the affiliation THROUGH the product: the driver leaves the fleet.
+    expect((await post(independent.cookies, `passenger/driver/affiliations/${independent.affiliationId}/end`)).status).toBe(201);
     const vehicleId = await makeFleetVehicle(op, 12);
     const r = await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: independent.driverProfileId, vehicleId });
     expect(r.status).toBe(400);
@@ -282,7 +284,7 @@ describe('manual staffing', () => {
   it('refuses an unapproved vehicle', async () => {
     const op = await makeProvider('Test Unmoderated Wheels');
     const { tripId } = await makeDeparture(op, 2000);
-    const driver = await makeFleetDriver(op.profileId);
+    const driver = await makeFleetDriver(op);
     const v = await post(op.cookies, 'passenger/provider/vehicles', {
       type: 'VAN', make: 'Toyota', model: 'Hiace', licencePlate: `PBX-${uniq()}`.slice(0, 18), seatCapacity: 12,
     }); // registered but never moderated
@@ -297,7 +299,7 @@ describe('manual staffing', () => {
     // WHO is on a trip once it left SCHEDULED.
     const op = await makeProvider('Test Visible Staffing');
     const { tripId } = await makeDeparture(op, 2000);
-    const driver = await makeFleetDriver(op.profileId);
+    const driver = await makeFleetDriver(op);
     const vehicleId = await makeFleetVehicle(op, 10);
     expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
 
@@ -335,7 +337,7 @@ describe('the self-service invariant, on userId, both directions', () => {
   it('the assigned driver cannot book a seat; a seated rider cannot be assigned to drive', async () => {
     const op = await makeProvider('Test Conflict Lines');
     const { tripId } = await makeDeparture(op, 2000);
-    const driver = await makeFleetDriver(op.profileId);
+    const driver = await makeFleetDriver(op);
     const vehicleId = await makeFleetVehicle(op, 12);
     expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
 
@@ -346,7 +348,7 @@ describe('the self-service invariant, on userId, both directions', () => {
 
     // Direction two: a seated rider is proposed as the driver of another departure.
     const { tripId: secondTrip } = await makeDeparture(op, 2000);
-    const ridingDriver = await makeFleetDriver(op.profileId);
+    const ridingDriver = await makeFleetDriver(op);
     expect((await post(ridingDriver.cookies, 'passenger/bookings', { tripId: secondTrip, seats: 1 })).status).toBe(201);
     const r = await post(op.cookies, `passenger/provider/trips/${secondTrip}/assign`, { driverProfileId: ridingDriver.driverProfileId, vehicleId });
     expect(r.status).toBe(400);
@@ -358,7 +360,7 @@ describe('movement', () => {
   it('start closes the doors, completion settles the manifest — and the unanswered request is left alone', async () => {
     const op = await makeProvider('Test Moving Lines');
     const { tripId } = await makeDeparture(op, 2000);
-    const driver = await makeFleetDriver(op.profileId);
+    const driver = await makeFleetDriver(op);
     const vehicleId = await makeFleetVehicle(op, 12);
     await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId });
 
@@ -369,7 +371,7 @@ describe('movement', () => {
     const unanswered = await post(unansweredRider.cookies, 'passenger/bookings', { tripId, seats: 1 });
 
     // A stranger to the trip cannot start it.
-    const other = await makeFleetDriver(op.profileId);
+    const other = await makeFleetDriver(op);
     expect((await post(other.cookies, `passenger/driver/trips/${tripId}/start`)).status).toBe(404);
 
     expect((await post(driver.cookies, `passenger/driver/trips/${tripId}/start`)).status).toBe(201);
@@ -403,7 +405,7 @@ describe('movement', () => {
   it('cancelling a staffed departure cancels its riders with it, attributed to the canceller', async () => {
     const op = await makeProvider('Test Cancelled Lines');
     const { tripId } = await makeDeparture(op, 2000);
-    const driver = await makeFleetDriver(op.profileId);
+    const driver = await makeFleetDriver(op);
     const vehicleId = await makeFleetVehicle(op, 12);
     await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId });
     const rider = await registerUser(`pb_r11_${uniq()}@example.com`);
@@ -489,7 +491,7 @@ describe('oversight and suspension', () => {
   it('a suspended operator takes no bookings and staffs nothing', async () => {
     const op = await makeProvider('Test Suspended Lines');
     const { tripId } = await makeDeparture(op, 2000);
-    const driver = await makeFleetDriver(op.profileId);
+    const driver = await makeFleetDriver(op);
     const vehicleId = await makeFleetVehicle(op, 12);
     // Raw write BY NECESSITY: no product path can suspend an operator (the S2
     // review's F5, still unbuilt). The checks below are live so the moment a

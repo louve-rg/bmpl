@@ -193,6 +193,16 @@ export class AdminPassengerService {
     if (openTrips > 0) {
       throw new BadRequestException(`This driver has ${openTrips} trip(s) in progress. Let them finish before changing test mode.`);
     }
+    // A fleet affiliation joins two independently-flagged accounts, so a flip
+    // cannot re-derive it the way owned rows are re-derived — it would strand
+    // the agreement across the boundary. Refuse, like open trips: end the
+    // affiliation (audited, consented machinery) first.
+    const activeAffiliations = await this.prisma.passengerFleetAffiliation.count({
+      where: { driverProfileId: profileId, status: 'ACCEPTED' },
+    });
+    if (activeAffiliations > 0) {
+      throw new BadRequestException('This driver is in a fleet. End the affiliation before changing test mode.');
+    }
     const updated = await this.prisma.$transaction(async (tx) => {
       const u = await tx.passengerDriverProfile.update({ where: { id: profileId }, data: { isTest } });
       const vehicles = await tx.passengerVehicle.updateMany({
@@ -240,6 +250,14 @@ export class AdminPassengerService {
     });
     if (openTrips > 0) {
       throw new BadRequestException(`This operator has ${openTrips} trip(s) open. Close them before changing test mode.`);
+    }
+    // Same rule as the driver-side flip: an ACCEPTED affiliation spans two
+    // independently-flagged accounts and cannot be re-derived from one side.
+    const activeAffiliations = await this.prisma.passengerFleetAffiliation.count({
+      where: { providerProfileId: profileId, status: 'ACCEPTED' },
+    });
+    if (activeAffiliations > 0) {
+      throw new BadRequestException('This operator has fleet drivers. End the affiliations before changing test mode.');
     }
     const updated = await this.prisma.$transaction(async (tx) => {
       const u = await tx.passengerProviderProfile.update({ where: { id: profileId }, data: { isTest } });

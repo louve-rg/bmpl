@@ -4,9 +4,11 @@ import { PassengerDriverService } from './passenger-driver.service';
 import { PassengerProviderService } from './passenger-provider.service';
 import { PassengerNetworkService } from './passenger-network.service';
 import { PassengerOperationsService } from './passenger-operations.service';
+import { PassengerAffiliationService } from './passenger-affiliation.service';
 import { AdminPassengerService } from './admin-passenger.service';
 import { PassengerDriverController } from './passenger-driver.controller';
 import { PassengerDriverTripsController } from './passenger-driver-trips.controller';
+import { PassengerDriverAffiliationsController } from './passenger-driver-affiliations.controller';
 import { PassengerProviderController } from './passenger-provider.controller';
 import { PassengerNetworkController } from './passenger-network.controller';
 import { PassengerRiderController } from './passenger-rider.controller';
@@ -23,6 +25,7 @@ import { AdminPassengerNetworkController } from './admin-passenger-network.contr
   controllers: [
     PassengerDriverController,
     PassengerDriverTripsController,
+    PassengerDriverAffiliationsController,
     PassengerProviderController,
     PassengerNetworkController,
     PassengerRiderController,
@@ -34,6 +37,7 @@ import { AdminPassengerNetworkController } from './admin-passenger-network.contr
     PassengerProviderService,
     PassengerNetworkService,
     PassengerOperationsService,
+    PassengerAffiliationService,
     AdminPassengerService,
   ],
   exports: [PassengerDriverService, PassengerProviderService],
