@@ -70,6 +70,19 @@ export const DRIVER_NAV: NavItem[] = [
   { label: 'Service Areas', href: '/dashboard/driver/service-areas', icon: 'M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10Zm0-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z' },
 ];
 
+/**
+ * Passenger-driver tools — deliberately a separate group from DRIVER_NAV:
+ * carrying passengers is a different job from carrying parcels, with its own
+ * role, its own vehicles (seat capacity, buses, boats) and its own trip
+ * surface. The same human may hold both roles and then sees both groups.
+ */
+export const PASSENGER_DRIVER_NAV: NavItem[] = [
+  { label: 'Passenger Dashboard', href: '/dashboard/passenger-driver', icon: HOME_ICON },
+  { label: 'My Departures', href: '/dashboard/passenger-driver/trips', icon: 'M4 5h16v10H4V5Zm0 4h16M7 15v3M17 15v3M7.5 12h.01M16.5 12h.01' },
+  { label: 'Passenger Profile', href: '/dashboard/passenger-driver/profile', icon: PERSON_ICON },
+  { label: 'My Vehicles', href: '/dashboard/passenger-driver/vehicles', icon: 'M5 16h14M5 16a2 2 0 1 0 4 0M15 16a2 2 0 1 0 4 0M4 16v-4l2-5h9l3 5h2v4' },
+];
+
 const VENDOR_NAV: NavItem[] = [
   { label: 'My Store', href: '/dashboard/store', icon: 'M4 8h16l-1 3H5L4 8Zm1 3v9h14v-9M9 20v-5h6v5' },
   { label: 'My Products', href: '/dashboard/products', icon: 'M4 7l8-4 8 4-8 4-8-4Zm0 0v10l8 4 8-4V7' },
@@ -139,6 +152,7 @@ export const ROLE_GROUPS: ReadonlyArray<RoleGatedGroup<NavItem>> = [
   { heading: 'Belize Connect', items: JOBS_NAV, requires: ['JOB_SEEKER'] },
   { heading: 'Real Estate', items: REALESTATE_NAV, requires: ['PROPERTY_OWNER', 'REAL_ESTATE_AGENT'] },
   { heading: 'Driver', items: DRIVER_NAV, requires: ['DELIVERY_DRIVER'] },
+  { heading: 'Passenger Driver', items: PASSENGER_DRIVER_NAV, requires: ['PASSENGER_DRIVER'] },
   { heading: 'Vendor', items: VENDOR_NAV, requires: ['VENDOR'] },
   { heading: 'Employer', items: EMPLOYER_NAV, requires: ['EMPLOYER'] },
   { heading: 'Property Owner', items: PROPERTY_OWNER_NAV, requires: ['PROPERTY_OWNER'] },

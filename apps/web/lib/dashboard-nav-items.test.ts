@@ -3,6 +3,7 @@ import { visibleRoleGroups, type HeldRole } from './dashboard-nav';
 import {
   BASE_NAV,
   DRIVER_NAV,
+  PASSENGER_DRIVER_NAV,
   ROLE_GROUPS,
   allNavHrefs,
   isNavItemActive,
@@ -74,6 +75,40 @@ describe('driver navigation', () => {
     expect(visibleRoleGroups(ROLE_GROUPS, driver).map((g) => g.heading)).toEqual(['Driver']);
     expect(visibleRoleGroups(ROLE_GROUPS, [{ roleCode: 'CUSTOMER', status: 'APPROVED' }])).toEqual([]);
     expect(visibleRoleGroups(ROLE_GROUPS, [{ roleCode: 'DELIVERY_DRIVER', status: 'PENDING' }])).toEqual([]);
+  });
+});
+
+describe('passenger-driver navigation', () => {
+  it('is its own group, separate from the parcel Driver group', () => {
+    // Carrying passengers is a different job from carrying parcels; folding it
+    // into DRIVER_NAV would show passenger pages to parcel-only drivers.
+    const group = ROLE_GROUPS.find((g) => g.heading === 'Passenger Driver');
+    expect(group?.requires).toEqual(['PASSENGER_DRIVER']);
+    expect(group?.items).toBe(PASSENGER_DRIVER_NAV);
+    expect(DRIVER_NAV.some((i) => i.href.startsWith('/dashboard/passenger-driver'))).toBe(false);
+  });
+
+  it('points each destination at a real passenger-driver route', () => {
+    expect(PASSENGER_DRIVER_NAV.map((i) => i.href)).toEqual([
+      '/dashboard/passenger-driver',
+      '/dashboard/passenger-driver/trips',
+      '/dashboard/passenger-driver/profile',
+      '/dashboard/passenger-driver/vehicles',
+    ]);
+  });
+
+  it('is shown to an approved passenger driver and to nobody else', () => {
+    const passengerDriver: HeldRole[] = [
+      { roleCode: 'CUSTOMER', status: 'APPROVED' },
+      { roleCode: 'PASSENGER_DRIVER', status: 'APPROVED' },
+    ];
+    expect(visibleRoleGroups(ROLE_GROUPS, passengerDriver).map((g) => g.heading)).toEqual(['Passenger Driver']);
+    expect(visibleRoleGroups(ROLE_GROUPS, [{ roleCode: 'PASSENGER_DRIVER', status: 'PENDING' }])).toEqual([]);
+    // The same human holding both driving roles sees both groups.
+    expect(visibleRoleGroups(ROLE_GROUPS, [...driver, { roleCode: 'PASSENGER_DRIVER', status: 'APPROVED' }]).map((g) => g.heading)).toEqual([
+      'Driver',
+      'Passenger Driver',
+    ]);
   });
 });
 
