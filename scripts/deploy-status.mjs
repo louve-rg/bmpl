@@ -12,8 +12,21 @@
  *
  * Verdicts and exit codes:
  *   CURRENT  (0) production's commit is main's head
- *   BEHIND   (1) production runs an ancestor of main — both commits named,
- *                and with a local repo the undelivered commits are listed
+ *   BEHIND   (1) production is MISSING SOMETHING IT SHOULD HAVE: it runs an
+ *                ancestor of main and the delta touches files Railway
+ *                watches (railway.json build.watchPatterns — read from
+ *                origin/main, never hardcoded). Both commits named; inside
+ *                a repo the undelivered commits are listed, each labelled
+ *                [api] or [unwatched]
+ *   NOTHING_TO_DELIVER (0) main has moved, but only in ways this deployment
+ *                would never build (web-only, docs-only merges). Railway is
+ *                right not to deploy, so this is a calm verdict — if it
+ *                said BEHIND on every routine web merge, BEHIND would stop
+ *                being believed on the day it matters. Outside a repo the
+ *                delta's files cannot be inspected, so this refinement is
+ *                never claimed there: the script degrades to plain BEHIND
+ *                with a note, because saying less is honest and guessing
+ *                is not
  *   UNKNOWN  (2) a question could not be ANSWERED (endpoint unreachable,
  *                malformed health payload, git unreachable). Deliberately
  *                distinct from BEHIND: an empty answer is not a negative
@@ -72,6 +85,9 @@ function normalizeRoute(r) {
   return r.startsWith('/') ? r : `/${r}`;
 }
 const webRoute = normalizeRoute(flag('web-route'));
+/** Dry-run lever: judge history as if production reported this commit — for
+ *  "what would the verdict be" questions and for testing the classifier. */
+const assumeProduction = flag('assume-production');
 const asJson = has('json');
 
 /** Read-only git; returns stdout or null (never throws). */
@@ -109,11 +125,47 @@ function inRepo() {
   return git('rev-parse', '--is-inside-work-tree') === 'true';
 }
 
+/**
+ * Railway rebuilds the API only when a commit touches build.watchPatterns
+ * (railway.json — the deploy's own source of truth, read from origin/main so
+ * a stale checkout cannot lie; never hardcoded here, because it will change
+ * without telling this script). Returns the pattern list, or null when it
+ * cannot be read — and null means "do not claim the refinement", never
+ * "assume everything matters" or "assume nothing does".
+ */
+function watchPatterns(main) {
+  const raw = git('show', `${main}:railway.json`) ?? git('show', 'HEAD:railway.json');
+  if (!raw) return null;
+  try {
+    const patterns = JSON.parse(raw)?.build?.watchPatterns;
+    return Array.isArray(patterns) && patterns.length > 0 ? patterns : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Root-relative glob of railway's dialect: `**` crosses slashes, `*` does not. */
+function globToRegex(pattern) {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replaceAll('**', '0000').replaceAll('*', '[^/]*').replaceAll('0000', '.*');
+  return new RegExp(`^${escaped}$`);
+}
+
+function matchesAny(file, regexes) {
+  return regexes.some((r) => r.test(file));
+}
+
 function classify(prodCommit, main) {
   if (main.startsWith(prodCommit) || prodCommit.startsWith(main)) return { verdict: 'CURRENT' };
   if (!inRepo()) {
-    // Without local history we know the commits differ but not their relation.
-    return { verdict: 'BEHIND', note: 'commits differ; run inside a repo checkout to confirm ancestry and list what is undelivered', unconfirmed: true };
+    // Without local history we know the commits differ but not their
+    // relation — and we cannot see which FILES the delta touches, so the
+    // deliverable/not-deliverable refinement below is honestly out of reach:
+    // degrade to plain BEHIND and say so, never guess.
+    return {
+      verdict: 'BEHIND',
+      note: 'commits differ; run inside a repo checkout to confirm ancestry, list the delta and judge whether any of it is deliverable',
+      unconfirmed: true,
+    };
   }
   // Resolve the (possibly short) production commit locally; fetch main quietly
   // so ancestry is judged against the remote's real head, not a stale one.
@@ -124,7 +176,37 @@ function classify(prodCommit, main) {
   if (!ancestor) return { verdict: 'DIVERGED', note: `production's commit ${prodCommit} is not an ancestor of origin/main` };
   const count = git('rev-list', '--count', `${full}..${main}`);
   const missing = git('log', '--oneline', `${full}..${main}`);
-  return { verdict: 'BEHIND', count: count ? Number(count) : null, missing: missing ? missing.split('\n') : [] };
+
+  // BEHIND must mean "production is MISSING something it should have".
+  // A web-only or docs-only merge moves main without ever triggering an API
+  // build — Railway is right not to build, and a verdict that cries BEHIND
+  // on every such merge teaches everyone to ignore the day it matters. So
+  // the endpoint diff (what production actually lacks — a change reverted
+  // within the range needs no delivering) is judged against watchPatterns:
+  // nothing deliverable in it is a calm verdict, not an alarming one.
+  const patterns = watchPatterns(main);
+  const files = git('diff', '--name-only', `${full}..${main}`);
+  const base = {
+    count: count ? Number(count) : null,
+    missing: missing ? missing.split('\n') : [],
+  };
+  if (!patterns || files === null) {
+    return { ...base, verdict: 'BEHIND', note: 'could not read railway.json watchPatterns (or the delta), so whether this delta would trigger a deploy is unjudged' };
+  }
+  const regexes = patterns.map(globToRegex);
+  const deliverable = files.split('\n').filter(Boolean).filter((f) => matchesAny(f, regexes));
+  if (deliverable.length === 0) {
+    return { ...base, verdict: 'NOTHING_TO_DELIVER' };
+  }
+  // Label each undelivered commit so the reader sees which ones are the
+  // reason this is BEHIND and which merely ride along in the range.
+  const labelled = base.missing.map((line) => {
+    const sha = line.split(' ')[0];
+    const touched = git('diff-tree', '--no-commit-id', '--name-only', '-r', sha) ?? '';
+    const watched = touched.split('\n').filter(Boolean).some((f) => matchesAny(f, regexes));
+    return `${watched ? '[api] ' : '[unwatched] '}${line}`;
+  });
+  return { ...base, verdict: 'BEHIND', missing: labelled, deliverableFiles: deliverable.length };
 }
 
 async function head(url) {
@@ -169,12 +251,14 @@ async function probeWeb(route) {
     : { verdict: 'UNKNOWN', detail: `route ${target.status} vs control ${ctl.status} — answers neither shipped nor missing` };
 }
 
-const EXIT = { CURRENT: 0, BEHIND: 1, UNKNOWN: 2, DIVERGED: 3 };
+const EXIT = { CURRENT: 0, NOTHING_TO_DELIVER: 0, BEHIND: 1, UNKNOWN: 2, DIVERGED: 3 };
 
 async function main() {
   const result = { api: {}, web: null };
 
-  const health = await fetchJson(`${apiBase}/api/health`);
+  const health = assumeProduction
+    ? { body: { commit: assumeProduction, assumed: true } }
+    : await fetchJson(`${apiBase}/api/health`);
   const mainSha = mainHead();
 
   if (health.error || typeof health.body?.commit !== 'string' || !health.body.commit) {
@@ -197,8 +281,11 @@ async function main() {
       main: mainSha.slice(0, 7),
       startedAt: health.body.startedAt ?? null,
       uptimeSeconds: typeof health.body.uptime === 'number' ? Math.round(health.body.uptime) : null,
-      ...(c.count != null ? { commitsBehind: c.count } : {}),
-      ...(c.missing?.length ? { undelivered: c.missing } : {}),
+      ...(health.body.assumed ? { assumed: 'production commit was ASSUMED via --assume-production, not fetched' } : {}),
+      ...(c.count != null ? (c.verdict === 'NOTHING_TO_DELIVER' ? { mainAheadBy: c.count } : { commitsBehind: c.count }) : {}),
+      // Under the calm verdict nothing is "undelivered" — the commits are
+      // merely ahead, in files this deployment never builds from.
+      ...(c.missing?.length ? (c.verdict === 'NOTHING_TO_DELIVER' ? { aheadUnwatched: c.missing } : { undelivered: c.missing }) : {}),
       ...(c.note ? { note: c.note } : {}),
     };
   }
@@ -210,12 +297,18 @@ async function main() {
   } else {
     const a = result.api;
     if (a.verdict === 'CURRENT') console.log(`CURRENT — production runs ${a.production}, which is origin/main (${a.main})`);
+    else if (a.verdict === 'NOTHING_TO_DELIVER')
+      console.log(
+        `NOTHING TO DELIVER — production runs ${a.production}; origin/main is ${a.main}, ${a.mainAheadBy} commit${a.mainAheadBy === 1 ? '' : 's'} ahead, none touching what this deployment builds from (railway.json watchPatterns)`,
+      );
     else if (a.verdict === 'BEHIND') console.log(`BEHIND — production runs ${a.production}, origin/main is ${a.main}${a.commitsBehind != null ? ` (${a.commitsBehind} commit${a.commitsBehind === 1 ? '' : 's'} behind)` : ''}`);
     else if (a.verdict === 'DIVERGED') console.log(`DIVERGED — production runs ${a.production}, origin/main is ${a.main}`);
     else console.log(`UNKNOWN — ${a.reason}`);
     if (a.startedAt) console.log(`  deployed instance started ${a.startedAt} (uptime ${a.uptimeSeconds}s)`);
+    if (a.assumed) console.log(`  note: ${a.assumed}`);
     if (a.note) console.log(`  note: ${a.note}`);
     for (const line of a.undelivered ?? []) console.log(`  undelivered: ${line}`);
+    for (const line of a.aheadUnwatched ?? []) console.log(`  ahead, unwatched: ${line}`);
     if (result.web) console.log(`WEB ${result.web.verdict} — ${result.web.route} on ${result.web.base}: ${result.web.detail}`);
   }
 
