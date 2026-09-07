@@ -11,6 +11,7 @@ import {
   MAX_DOCUMENT_BYTES,
   ROLE_DEFINITIONS,
   roleRequiresApproval,
+  roleRequiresVerifiedEmail,
   sniffDocumentMime,
   STORAGE_PREFIX,
   type DocumentMime,
@@ -56,6 +57,9 @@ export class RolesService {
         service: def.service,
         requiredDocuments: def.requiredDocuments,
         requiresApproval: def.requiresApproval,
+        // Surfaced so the UI can SAY "verify your email first" before the
+        // refusal, instead of the person discovering it at submit.
+        requiresVerifiedEmail: roleRequiresVerifiedEmail(code),
         status: current?.status ?? null,
         canApply: !current || ['REJECTED', 'REVOKED'].includes(current.status),
       };
@@ -153,6 +157,13 @@ export class RolesService {
 
   async submitApplication(userId: string, input: SubmitRoleApplicationInput) {
     const roleCode = input.roleCode as RoleCode;
+
+    // A verified email is the precondition for provider-type roles — the
+    // owner's ruling. Consumes the existing verification state; the customer
+    // and job-seeker paths never pass through this.
+    if (roleRequiresVerifiedEmail(roleCode)) {
+      await this.requireVerifiedEmail(userId, `apply for the ${ROLE_DEFINITIONS[roleCode].label} role`);
+    }
 
     const existingRole = await this.prisma.userRole.findUnique({
       where: { userId_roleCode: { userId, roleCode } },
@@ -300,6 +311,21 @@ export class RolesService {
   }
 
   /**
+   * Honest, actionable refusal — the fare-gate pattern: the reason stated in
+   * place of the action, so the person can fix it themselves. This CONSUMES
+   * the existing verification state (User.emailVerifiedAt, set by the
+   * verify-email flow); nothing about how verification works changes here.
+   */
+  private async requireVerifiedEmail(userId: string, action: string) {
+    const u = await this.prisma.user.findUnique({ where: { id: userId }, select: { emailVerifiedAt: true } });
+    if (!u?.emailVerifiedAt) {
+      throw new ForbiddenException(
+        `Verify your email address to ${action}. Check your inbox for the verification link, or request a new one.`,
+      );
+    }
+  }
+
+  /**
    * Switch the active role. Only APPROVED roles are selectable; pending,
    * rejected, suspended, or revoked roles are refused (backend-enforced — not
    * merely hidden in the UI).
@@ -311,6 +337,13 @@ export class RolesService {
     if (!userRole) throw new NotFoundException('You do not hold that role.');
     if (userRole.status !== 'APPROVED') {
       throw new ForbiddenException('Only approved roles can be activated.');
+    }
+    // Activation of a provider-type role requires the same verified email as
+    // applying for one — an account approved before this rule existed is
+    // asked to verify on its next switch, with the fix stated in the refusal.
+    // Switching to CUSTOMER (or any non-provider role) is never gated.
+    if (roleRequiresVerifiedEmail(roleCode)) {
+      await this.requireVerifiedEmail(userId, `use your ${ROLE_DEFINITIONS[roleCode].label} role`);
     }
 
     const previous = await this.prisma.user.findUnique({

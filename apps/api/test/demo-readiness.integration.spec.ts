@@ -133,6 +133,9 @@ describe('VENDOR application enforces its document requirement', () => {
 
   beforeAll(async () => {
     customer = await registerCustomer('demo_vendor_applicant@example.bz');
+    // Verified so the submits below reach the rules THEY test (documents,
+    // review flow) — the verified-email gate itself has its own spec.
+    await ctx.prisma.user.update({ where: { email: 'demo_vendor_applicant@example.bz' }, data: { emailVerifiedAt: new Date() } });
   });
 
   it('rejects a VENDOR application submitted with NO documents (400)', async () => {
@@ -162,6 +165,7 @@ describe('VENDOR application enforces its document requirement', () => {
 describe('customer can respond to a request for more information and resubmit', () => {
   it('applicant resubmits after MORE_INFO_REQUIRED and returns to PENDING', async () => {
     const customer = await registerCustomer('demo_moreinfo@example.bz');
+    await ctx.prisma.user.update({ where: { email: 'demo_moreinfo@example.bz' }, data: { emailVerifiedAt: new Date() } });
     const key = await uploadVendorDoc(customer);
     const submit = await request(ctx.server)
       .post('/api/roles/applications')
