@@ -4,7 +4,11 @@ How passenger transport actually works in BML today, written for a new
 engineer or an operator. Everything here was read from the code on 2026-09-05
 (`main` @ `dff8d2c`), and every claim names the file it came from so it stays
 checkable. **When this document and the code disagree, the code wins** — and
-this document is what gets fixed.
+this document is what gets fixed. On 2026-09-07 every citation was re-verified
+against `main` @ `8d21848` — all 44 were still exact, zero had rotted — and
+converted from line numbers to symbol+file form (a single-line quoted marker
+where no symbol encloses the spot), so a stale citation now fails loudly as a
+missing grep hit instead of silently pointing at the wrong line.
 
 The honest parts are at the end:
 [What is not built](#8-what-is-not-built--do-not-infer-capability-from-silence)
@@ -22,7 +26,8 @@ business decision, made through their dashboard — never seed data.
 A note on money, which governs this whole vertical: **no passenger money
 moves.** No fare is charged, no commission taken, no cancellation fee
 collected. `fareQuotedMinor` exists on the booking row and is deliberately
-never written (`apps/api/src/passenger/passenger-operations.service.ts:187`),
+never written (`apps/api/src/passenger/passenger-operations.service.ts`, at
+"fareQuotedMinor deliberately untouched: no pricing policy exists"),
 because whether a fare is per seat or per booking — and every other piece of
 pricing policy — is a product-owner decision that has not been made. This
 document therefore contains no amounts, and neither should the code.
@@ -35,7 +40,8 @@ Three roles, all held alongside a person's other roles (the same human can be
 a customer, a vendor and a passenger driver):
 
 - **Rider** — any `CUSTOMER`. No extra vetting; the rider surface is plain
-  customer functionality (`passenger-rider.controller.ts:20`).
+  customer functionality (the class `@Roles('CUSTOMER')` decorator,
+  `passenger-rider.controller.ts`).
 - **Passenger driver** — a person approved to carry passengers. Role code
   `PASSENGER_DRIVER`.
 - **Transport operator** (fleet provider) — a business running routes. Role
@@ -48,16 +54,18 @@ There is no passenger-specific application pipeline, deliberately.
 
 The profile is the application's substance. Any customer may build a
 driver or operator profile *before* approval — the profile endpoints are
-`CUSTOMER`-gated (`passenger-driver.controller.ts:25`,
-`passenger-provider.controller.ts:23`) — but **operations are gated
+`CUSTOMER`-gated (class `@Roles('CUSTOMER')` decorators,
+`passenger-driver.controller.ts` and `passenger-provider.controller.ts`) —
+but **operations are gated
 separately** on the role actually being APPROVED: the trips, network and
 affiliation surfaces demand `PASSENGER_DRIVER` / `PASSENGER_PROVIDER`
-(`passenger-driver-trips.controller.ts:14`,
+(`passenger-driver-trips.controller.ts`,
 `passenger-network.controller.ts`, class decorators).
 
 **Vehicles are vetted individually.** A vehicle belongs to *either* a fleet
 operator *or* an owner-driver, never both, and must be admin-approved before
-it can carry anyone (`admin-passenger.controller.ts:58-64`,
+it can carry anyone (the `approve`/`reject` handlers,
+`admin-passenger.controller.ts`,
 `POST admin/passengers/vehicles/:id/approve|reject`).
 
 **Whether a driver can actually work is computed, not stored.**
@@ -65,7 +73,7 @@ it can carry anyone (`admin-passenger.controller.ts:58-64`,
 profile + unexpired licence + at least one usable vehicle — where *usable*
 means approved, active, registration and insurance unexpired, and either the
 driver's own or, for a fleet driver, one of their operator's
-(`passenger-driver.service.ts:242`, `eligibility()`).
+(`eligibility()`, `passenger-driver.service.ts`).
 
 The web surfaces for all of this are merged: driver dashboard at
 `apps/web/app/dashboard/passenger-driver/` (profile, vehicles, trips),
@@ -78,27 +86,31 @@ vehicles, routes, departures, bookings), and moderation at
 ## 2. The network: routes, stops, departures
 
 An approved operator declares their own network; admins can also enter it on
-an operator's behalf (`passenger-network.service.ts:111-158` — provider and
+an operator's behalf (`createRouteForProvider` through `replaceStopsAdmin`,
+`passenger-network.service.ts` — provider and
 admin variants converge on the same private implementations).
 
 - A **route** is origin to destination, with optional **ordered stops**
   replaced as a whole list (`replaceStops`,
-  `passenger-network.service.ts:284`). Once a route has departures — *any*
+  `passenger-network.service.ts`). Once a route has departures — *any*
   departures, cancelled ones included — its stops freeze
-  (`passenger-network.service.ts:268`): a trip row means the route was
+  (at "The freeze deliberately counts CANCELLED departures too",
+`passenger-network.service.ts`): a trip row means the route was
   operated as described, so the description stops being editable.
 - A **departure** (trip) is one dated run of a route
-  (`createTripForProvider`, `passenger-network.service.ts:358`). Every trip
+  (`createTripForProvider`, `passenger-network.service.ts`). Every trip
   the product can create today is `kind: 'SCHEDULED'`
-  (`passenger-network.service.ts:403`); the `ON_DEMAND` enum value has no
+  (the literal in `createTripForProvider`); the `ON_DEMAND` enum value has no
   writer — see
   [What is not built](#8-what-is-not-built--do-not-infer-capability-from-silence).
 - **Suspension stops publishing, not cleanup.** A suspended operator can
-  create no new route (`passenger-network.service.ts:168`) and publish no
-  new departure (`:392`, and an inactive route refuses at `:388`) — but
+  create no new route (the shared `createRoute`,
+  `passenger-network.service.ts`) and publish no new departure (in
+  `createTripForProvider`, at "routes stay readable and cancellable, but
+  publish nothing"; an inactive route refuses in the same method) — but
   their reads, edits and cancellations deliberately keep working, so a
   suspended operator can still wind things down
-  (`passenger-network.service.ts:56`, the `providerOf` comment: "cleanup
+  (`providerOf`, `passenger-network.service.ts`, its comment: "cleanup
   survives suspension").
 - Geography is the operator's own declaration. Nothing here invents towns,
   connections, schedules or times — the no-fabrication rule of `CLAUDE.md` §5
@@ -114,7 +126,7 @@ names exactly one thing anywhere in the product
 ## 3. The fare gate
 
 The rule, exactly as the code behaves
-(`passenger-operations.service.ts:73-79`, `fareGate()`):
+(`fareGate()`, `passenger-operations.service.ts`):
 
 > A booking can be neither **created** nor **confirmed** unless the trip's
 > route carries a configured fare. **Null is no fare, and zero is not a
@@ -122,14 +134,14 @@ The rule, exactly as the code behaves
 > check back.
 
 The gate holds at both doors: booking creation
-(`passenger-operations.service.ts:163`) and confirmation — re-checked inside
+(in `createBooking`) and confirmation — re-checked inside
 the confirming transaction, so a fare unset *after* the request still refuses
-(`passenger-operations.service.ts:394-396`). Rider browse marks each
+(in `confirmBooking`). Rider browse marks each
 departure `fareConfigured` so the UI can say so up front
-(`passenger-operations.service.ts:133`).
+(the `fareConfigured` field in `listDepartures`).
 
 `baseFareMinor` is configuration an operator may enter on their own route
-(`packages/validation/src/passenger.ts:138`) — like a hub's fees, it is
+(`packages/validation/src/passenger.ts`) — like a hub's fees, it is
 their commercial declaration, not the platform's invention. Nothing anywhere
 quotes, computes or charges an amount from it.
 
@@ -151,20 +163,22 @@ What the code guarantees, with the line to check:
   `PassengerDriverProfile.providerProfileId` — the operational pointer the
   staffing rule reads — and it does so in the same transaction, conditionally,
   so a driver can never land in two fleets
-  (`passenger-affiliation.service.ts:232`, `activate()`).
+  (`activate()`, `passenger-affiliation.service.ts`).
 - **One live ask per pair, in either direction**, is a database fact, not
   just a service check: a partial unique index refuses twin pending asks that
   race past the pre-check
   (`packages/database/prisma/migrations/20261104093000_one_pending_ask_per_pair/`;
   the service converts the collision into the ordinary refusal,
-  `passenger-affiliation.service.ts:417`). The second asker answers the
+  in `createAsk`, `passenger-affiliation.service.ts`). The second asker
+  answers the
   existing ask with the proper verb instead.
 - **Ending is unilateral** — consent creates the relationship, either side
   dissolves it. Departures already staffed stay staffed; only *new* staffing
-  refuses (`passenger-affiliation.service.ts:322`, `end()`).
+  refuses (`end()`, `passenger-affiliation.service.ts`).
 - **No one consents on someone else's behalf, admin included.** There is no
   admin affiliation mutation route; moderation sees affiliations through the
-  driver detail (`admin-passenger.service.ts:52`).
+  driver detail (`admin-passenger.service.ts`, at "Fleet affiliation, so the
+  assign flow can narrow").
 - The affiliation row is **deliberately terms-free** — no commission, split
   or employment term — and the schema comment on `PassengerFleetAffiliation`
   explains why that is load-bearing for the consent design and what must be
@@ -189,7 +203,8 @@ own side of the simulation boundary (`passenger-rider.controller.ts`). The
 web surface for it is `/dashboard/passenger` (browse and request) and
 `/dashboard/passenger/bookings` (the rider's own bookings) — "Passenger
 Service" sits in the base dashboard navigation with no role requirement
-(`apps/web/lib/dashboard-nav-items.ts:44`), because every signed-in person
+(the `'Passenger Service'` item, `apps/web/lib/dashboard-nav-items.ts`),
+because every signed-in person
 is a potential rider; the API's own gate still applies underneath.
 
 The rider screens hold two **honesty rules**, kept as pure, unit-tested
@@ -212,30 +227,33 @@ functions rather than copy conventions
 
 **Browse.** `GET passenger/departures` lists upcoming, bookable departures:
 `SCHEDULED`/`ASSIGNED`, future-dated, active route, active operator, the
-rider's own `isTest` side (`passenger-operations.service.ts:85-95`).
+rider's own `isTest` side (`listDepartures`,
+`passenger-operations.service.ts`).
 
 **Request.** `POST passenger/bookings` creates a `REQUESTED` booking for a
 seat count — after the fare gate, a duplicate-booking check, and the
 self-service invariant on **user id, as always**: the person assigned to
-drive a departure cannot ride it (`passenger-operations.service.ts:165-176`).
+drive a departure cannot ride it (in `createBooking`, at "departure does not
+ride it as a passenger").
 A request holds no seat.
 
 **Confirm.** The operator (or an admin) confirms
-(`passenger-network.controller.ts` / `admin-passenger-network.controller.ts:128`).
+(`passenger-network.controller.ts` / `admin-passenger-network.controller.ts`).
 Confirmation is the moment a seat is actually held, and it **fails closed
 three ways**: no configured fare, no assigned vehicle (capacity unknowable),
 or not enough seats left — with the capacity sum run under a row lock on the
 trip so concurrent confirmations serialize instead of overselling
-(`passenger-operations.service.ts:378-407`).
+(`confirmBooking`, at "Confirmation is the moment a seat is actually held").
 
 **Cancel.** A rider cancels their own booking; the operator and admin can
 cancel any booking on their trips, attributed by party
-(`cancelBooking`, `passenger-operations.service.ts:439`). Once a departure
+(`cancelBooking`, `passenger-operations.service.ts`). Once a departure
 has begun, bookings on it can no longer be cancelled — with one deliberate
 exception: a rider may **always withdraw their own unanswered `REQUESTED`
 booking**, even after the departure left or completed, because it holds no
 seat and would otherwise sit in their list forever
-(`passenger-operations.service.ts:449-457`, and the open question it
+(in `cancelBooking`, at "departure has left or been cancelled", and the open
+question it
 preserves is recorded right there in the comment).
 
 **Completion.** Completing a trip completes its `CONFIRMED` bookings with it;
@@ -247,18 +265,18 @@ unanswered request *becomes* is undecided).
 ## 6. Staffing and movement
 
 **Assignment is manual** — there is no automatic dispatch for passengers
-(the delivery lesson, `passenger-operations.service.ts:488`, the `assignTrip`
-comment).
+(the delivery lesson — the comment atop `assignTrip`,
+`passenger-operations.service.ts`).
 The operator (or admin) assigns a driver and vehicle to one departure
 (`POST passenger/provider/trips/:id/assign`,
-`admin-passenger-network.controller.ts:117`). On the operator's web
+`admin-passenger-network.controller.ts`). On the operator's web
 Departures page the staffing control offers the fleet's ACCEPTED drivers and
 its usable vehicles, shows every server refusal verbatim, and with nobody in
 the roster does not render at all — the row says why instead
 (`apps/web/components/passenger-operator/DeparturesManager.tsx`, header
 comment).
 
-The gates, in order (`passenger-operations.service.ts:500-560`):
+The gates, in order (in `assignTrip`, `passenger-operations.service.ts`):
 
 - Only an unstaffed `SCHEDULED` departure can be assigned — there is **no
   reassignment path**, which is itself a guarantee: staffing cannot be
@@ -269,7 +287,7 @@ The gates, in order (`passenger-operations.service.ts:500-560`):
   (`driver.providerProfileId !== trip.providerProfileId` refuses — this is
   what affiliation exists to set).
 - The driver must not be **booked as a passenger** on the very trip they
-  would drive (`passenger-operations.service.ts:529` — the self-delivery
+  would drive (in `assignTrip` — the self-delivery
   invariant, matched on user id).
 - The vehicle must be approved, on the right side of the boundary, and
   either the operator's own or the assigned driver's own.
@@ -282,12 +300,13 @@ The gates, in order (`passenger-operations.service.ts:500-560`):
 `ASSIGNED` trip to `IN_PROGRESS`; `POST :id/complete` takes `IN_PROGRESS` to
 `COMPLETED`, completing confirmed bookings and closing the assignment row in
 the same transaction, and incrementing the driver's completed-trip count
-(`passenger-operations.service.ts:301-340`).
+(`startTrip` and `completeTrip`, `passenger-operations.service.ts`).
 
 **Cancellation** of a departure is allowed from `SCHEDULED` and `ASSIGNED`
 only — anything in progress "is people on a vehicle, and that is not a
-cancellation, it is an exception" (`passenger-network.service.ts:441`,
-`cancelTrip`). Riders on the departure are cancelled *with* it, attributed to
+cancellation, it is an exception" (`cancelTrip`,
+`passenger-network.service.ts`). Riders on the departure are cancelled *with*
+it, attributed to
 the same party, and the staffing record is closed truthfully.
 
 ---
@@ -299,11 +318,12 @@ vehicles, routes, trips, bookings, affiliations), and the flag is **derived
 server-side, never accepted from a request**:
 
 - A rider's bookings and browse results are scoped to their own account's
-  flag (`passenger-operations.service.ts:87`, `:151`).
+  flag (the `isTest` scoping in `listDepartures` and `createBooking`,
+  `passenger-operations.service.ts`).
 - An affiliation may only join two profiles on the same side, re-verified at
   the moment of consent (`passenger-affiliation.service.ts`, `activate()`).
 - Staffing refuses a driver or vehicle from the other side
-  (`passenger-operations.service.ts:513`, `:543`).
+  (both in `assignTrip`, `passenger-operations.service.ts`).
 - Admin test-mode flips re-derive an account's dependent rows and **refuse**
   while the account has open trips or an ACCEPTED affiliation — the guards
   run inside the flip transaction after the profile-row lock, so a flip
@@ -319,11 +339,13 @@ today**. Do not describe any of these as working.
 
 - **No on-demand flow.** `PassengerTripKind.ON_DEMAND` has no writer; every
   creatable trip is `SCHEDULED`. The request flow, its timing and its
-  expiry semantics are undecided (`passenger-operations.service.ts:40`).
+  expiry semantics are undecided (the contract comment atop
+  `passenger-operations.service.ts`, at "ON_DEMAND request flow").
 - **`NO_SHOW` and `EXPIRED` bookings are unreachable.** The enum values
   exist; nothing sets them. Who may declare a no-show, and when an
   unanswered request expires, are open product questions — recorded in the
-  code where they bite (`passenger-operations.service.ts:439`, comment).
+  code where they bite (the comments in `cancelBooking`,
+  `passenger-operations.service.ts`).
 - **`PENDING_ASSIGNMENT`, `EN_ROUTE_TO_PICKUP` and `EXCEPTION` trips are
   unreachable** — reserved vocabulary with no writers.
 - **Unanswered fleet asks never expire** (BMPL-61, with the owner). A
