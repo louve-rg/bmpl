@@ -173,9 +173,9 @@ Neither general payload ever contains a PIN
   wallet payment is created and escrowed, and if the customer cannot afford it
   the whole booking rolls back. An **unpaid shipment is never dispatched** —
   its legs stay `PENDING`, and `ShipmentDispatchService.isPaidFor` re-checks
-  regardless (`shipment-dispatch.service.ts:91-93`);
+  regardless (`shipment-dispatch.service.ts:99-101`);
 - generates a 4-digit **handoff PIN per leg** at booking
-  (`shipment.service.ts:440`);
+  (`shipment.service.ts:457`);
 - marks leg 1 `READY` and, if it is a courier leg, offers it to a driver
   immediately rather than waiting for the sweeper;
 - `isTest` is derived from the booking account, never from the request, and a
@@ -203,7 +203,7 @@ driver works them through `/driver/shipping-jobs`
 sailed or driven by a **carrier BML does not employ**, so there is no driver
 app for it — an operator with `logistics.operate` confirms what the carrier
 did through `/admin/logistics/legs/:id/start|depart|arrive|handoff|exception`
-(`apps/api/src/shipping/shipping.controller.ts:133-286`).
+(`apps/api/src/shipping/shipping.controller.ts:268-314`).
 
 ### Sequence is authority; status is derived; custody is append-only
 
@@ -241,7 +241,7 @@ engine**: eligibility comes from `DriverService`, ranking from `@bmpl/shared`,
 and the timeout/retry/concurrency settings from the same `platform_settings`
 the delivery engine reads — including `dispatchAutomatic`, so **when automatic
 dispatch is off, `dispatchLeg` always returns SKIPPED**
-(`shipment-dispatch.service.ts:55`). Workload is counted across **both** job
+(`shipment-dispatch.service.ts:63`). Workload is counted across **both** job
 tables so a driver holding three marketplace deliveries is not handed a fourth
 job. Its own sweeper (`shipment-dispatch.scheduler.ts`, ~20s, separate Redis
 lock so one engine cannot take the other down) expires offers and re-offers;
@@ -255,12 +255,12 @@ while automatic dispatch is off (closed gap 1).
 
 The PIN proves the handoff: whoever **receives** the parcel holds the code,
 and the person handing it over must produce it. Five failed attempts lock the
-leg with an admin alert (`shipment.service.ts:734-760`). Who can see which
+leg with an admin alert (`shipment.service.ts:751-777`). Who can see which
 PIN:
 
 - The **customer (sender)** sees the PIN for a `LAST_MILE` **or `DIRECT`** leg
   on a journey ending at their recipient's door — the code they pass to the
-  recipient (`pinFor`, `shipment.service.ts:1111`; a DIRECT leg is
+  recipient (`pinFor`, `shipment.service.ts:1197`; a DIRECT leg is
   last-mile-equivalent because it ends at the recipient's door, not a counter).
   The sender is the channel because the recipient has no account — see gap 5.
 - **Desk-held codes** (a first mile or line-haul ending at a terminal) are
@@ -269,7 +269,7 @@ PIN:
   **different** permission from `logistics.operate`, mirroring how deliveries
   separate operating from code-holding (`deliveries.verify`). Every reveal
   writes an audit row (never containing the code), and the endpoint refuses
-  the leg's **own assigned driver** (`shipment.service.ts:1160`) — the person
+  the leg's **own assigned driver** (`shipment.service.ts:1252`) — the person
   producing the code must not be its source.
 - **Staff serialization still returns null** — the reveal endpoint is the only
   staff path to a code.
@@ -286,7 +286,7 @@ When the service ends at a hub (`DOOR_TO_HUB`, `HUB_TO_HUB`), the completed
 journey reads `AWAITING_COLLECTION`. No leg moves when the recipient walks in,
 so an operator records the collection at
 `POST /admin/logistics/shipments/:id/collect`
-(`ShipmentService.recordCollection`, `shipment.service.ts:927`) — custody
+(`ShipmentService.recordCollection`, `shipment.service.ts:944`) — custody
 passes HUB → RECIPIENT and the shipment recomputes to `DELIVERED`. This flow
 works today, including settlement.
 
@@ -305,7 +305,7 @@ into escrow, so test funds never become real earnings.
 
 `POST /shipping/:id/cancel` (customer) or
 `POST /admin/logistics/shipments/:id/cancel` (staff, `logistics.manage`) —
-`ShipmentService.cancel` (`shipment.service.ts:975`). A customer is refused
+`ShipmentService.cancel` (`shipment.service.ts:1002`). A customer is refused
 once any leg is `IN_PROGRESS` ("contact support"); staff can always cancel.
 Completed legs stay completed — a parcel that genuinely flew to San Pedro did
 fly, and rewriting that would put a lie in the custody chain. Non-terminal
@@ -426,7 +426,7 @@ terminal, the assignment and vehicle are cleared, the ACTIVE or ACCEPTED
 states, including the notification.
 
 **4. A leg EXCEPTION is one-way.** `flagException`
-(`shipment.service.ts:763`) sets the leg to EXCEPTION and stamps
+(`shipment.service.ts:780`) sets the leg to EXCEPTION and stamps
 `shipment.exceptionAt`; no endpoint clears either, `isLegActionable` refuses
 EXCEPTION legs (`packages/shared/src/shipping.ts:238`), and any EXCEPTION leg
 makes the whole shipment read EXCEPTION (`deriveShipmentStatus`). The only
@@ -434,7 +434,7 @@ exit is cancelling the shipment — there is no "damaged, repacked, continue"
 path.
 
 **5. The recipient is invisible.** Every shipment notification goes to
-`customerUserId` — the sender (`notifyCustomer`, `shipment.service.ts:905`
+`customerUserId` — the sender (`notifyCustomer`, `shipment.service.ts:922`
 and `shipment-driver.service.ts:371`). The `destinationEmail` /
 `destinationPhone` snapshots are written at booking and the email is never
 used for anything (verified by grep). There is no public or anonymous
@@ -450,7 +450,7 @@ a leg.** `cancel` releases the full held amount to the customer
 full), completed legs deliberately stay COMPLETED, and `settleShipment` only
 runs on DELIVERED / AWAITING_COLLECTION — so a driver who genuinely drove
 leg 1 earns nothing when staff cancel at leg 2. The code comment "Nobody has
-started work" (`shipment.service.ts:991`) is true on the customer path, whose
+started work" (`shipment.service.ts:1051`) is true on the customer path, whose
 guard blocks cancellation once a leg is IN_PROGRESS, and false on the staff
 path. **Money-adjacent: what the driver should be paid, and what the customer
 should be refunded, is a product-owner decision. Do not invent a policy.**
@@ -494,7 +494,9 @@ console.
 (gaps 3 and 7 closed by #15/#18, item 9 added closed by #19, and the
 operations-vs-code framing corrected above); updated against `3c41e1e`
 (gap 8 corrected to CLOSED — it was already closed by #13 at the previous
-review and the register was wrong; gaps 4, 5 and 6 re-verified still open).
+review and the register was wrong; gaps 4, 5 and 6 re-verified still open);
+every `file:line` anchor in this document re-verified against `origin/main`
+at `75e9ef1` on 2026-09-07 — 38 checked, 12 corrected, prose untouched.
 Sources: the controllers
 and services cited inline — every endpoint named here was read in its
 controller. Cross-references: `docs/PROJECT_STATUS.md` §6–7 for shipping and
