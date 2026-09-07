@@ -32,6 +32,9 @@ export interface ApplicableRole {
   service: string;
   requiredDocuments: string[];
   requiresApproval: boolean;
+  /** Provider-type roles need a verified email to apply (BMPL-40); the API
+   *  surfaces this per role so the UI can say so BEFORE the refusal. */
+  requiresVerifiedEmail: boolean;
   status: string | null;
   canApply: boolean;
 }
