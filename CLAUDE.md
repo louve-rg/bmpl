@@ -356,6 +356,12 @@ pnpm --filter @bmpl/api test:integration
 which then runs `prisma migrate deploy` against it. It **must** name a different
 database from `DATABASE_URL` — the suite truncates between tests.
 
+Targeted runs: append the filter directly — `pnpm test:integration shipping` —
+with **no `--` separator** (the npm habit; the wrapper strips it and says so).
+And know the one filter that can still lie: **a `-t` name filter matching
+nothing exits 0 with every test skipped** — it verified nothing, and the only
+tell is the skip count, so read it before believing the green.
+
 **A change to `apps/api/src`, the Prisma schema, money, dispatch or routing is
 not verified until this suite has been run.** Unit tests do not cover the same
 ground. If you genuinely cannot run it, say so explicitly rather than omitting
