@@ -461,10 +461,20 @@ should be refunded, is a product-owner decision. Do not invent a policy.**
 (#12) beside each first-mile and line-haul row, so desk staff see what is
 coming and can produce the code the courier must be told.
 
-**8. Booking a shipment whose total is zero crashes with a 500 instead of
-refusing.** Confirmed reachable in production. A fix exists on an **unmerged**
-branch (`fix/zero-total-shipment-booking`) — this stays OPEN until that
-merges; do not describe it as fixed.
+**8. CLOSED on `main` (PR #13) — an unpriced journey is refused in words,
+not a 500.** This entry previously read "a fix exists on an unmerged branch
+(`fix/zero-total-shipment-booking`) — this stays OPEN until that merges", and
+**that was wrong at the 2026-09-04 review**: #13 (`f1d7553`) merged on
+2026-09-04 and is an ancestor of `111cd4b`, the commit that review was made
+against; the register carried the gap as open while the guard sat on `main`.
+Corrected 2026-09-07 by reading the code. The guard lives at
+`apps/api/src/shipping/shipment.service.ts:327`: a plan whose
+`plan.totalMinor <= 0` is refused with a plain-words 400 ("this journey has
+not been priced yet"), keyed on the total — deliberately not on
+`pricingIncomplete`, so a zero-fee hub on a journey with priced transport
+still books — and zero remains "not a price". A deliberate free shipment,
+if the product ever wants one, is an explicit opt-in on top of this guard,
+not a loosening of it.
 
 **9. CLOSED on `main` (PR #19) — hub courier fees were unreachable through
 the product.** Found by walking the admin flow, not by reading the API:
@@ -482,7 +492,9 @@ console.
 *Written against `main` at `c73a2ed`; updated against `6b2e0d1`
 (gaps 1–2 closed by #11/#12, gap 8 added); updated against `111cd4b`
 (gaps 3 and 7 closed by #15/#18, item 9 added closed by #19, and the
-operations-vs-code framing corrected above).
+operations-vs-code framing corrected above); updated against `3c41e1e`
+(gap 8 corrected to CLOSED — it was already closed by #13 at the previous
+review and the register was wrong; gaps 4, 5 and 6 re-verified still open).
 Sources: the controllers
 and services cited inline — every endpoint named here was read in its
 controller. Cross-references: `docs/PROJECT_STATUS.md` §6–7 for shipping and

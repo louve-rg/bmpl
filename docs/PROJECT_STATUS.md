@@ -4,12 +4,21 @@
 project up from the repository alone. It carries no secrets, no credentials and
 no customer data — only what is true about the code and how it is run.
 
-Last reviewed: 2026-09-04, against `main` at **`111cd4b`**. Landed since the
-previous review: manual courier-leg assignment (#11), handoff-PIN access
-(#12), cancellation releasing the driver (#15), Passenger supply/moderation
-(#16), the leg-assign UI (#17), the handoff-desk screen (#18), and hub
-pricing through the admin console (#19). Deployment state of any commit is a
-live value; check `/api/health`. What is still unverified is listed in §12.
+Last reviewed: 2026-09-07, against `main` at **`3c41e1e`** — **36 PRs**
+(#20–#55) landed since the 2026-09-04 review at `111cd4b`. The largest
+change: the passenger vertical grew a working, simulation-money-free product
+surface on every side — rider booking (#47), operator, fleet and driver apps
+(#40–#44), departures and the fare gate (#23, #32), admin oversight and
+vetting (#28, #34) — see §1. Also landed: rehearsal/simulation isolation
+fixes (#33, #35, #45), the verified-email provider-role gate (#52, #53),
+self-service resend-verification (#29, #30), the admin wallet lock (#54,
+§4), dispatch load fairness (#22), and deployment identity and drift
+tooling (#48–#51, §2); production email delivery now works (§12). This
+review also **corrected a claim the 2026-09-04 review got wrong**: the
+zero-total booking 500 was already fixed on `main` at that review (#13),
+while this document and the gap register still called it open — see §12.
+Deployment state of any commit is a live value; check `/api/health` or run
+`pnpm deploy:status`. What is still unverified is listed in §12.
 
 **One distinction to hold onto before reading anything else — carrying a
 correction this document owes its readers.** An earlier revision of this
@@ -58,11 +67,25 @@ Active business areas, in the order they matter right now:
 2. **Shipping & Delivery** — sending a parcel, possibly across several legs.
 3. **Delivery driver** — the courier who actually moves it.
 4. **Passenger Transportation** — moving people rather than parcels. Formally
-   authorized by the product owner, in foundation stage: the schema (eight
-   `passenger_*` tables) plus the supply side merged by #16 — provider/driver
-   vetting and moderation in `apps/api/src/passenger`, with its own
-   integration spec. **No rider-facing product exists**: no trip search, no
-   booking, no fares, no passenger UI.
+   authorized by the product owner and now a working vertical end to end,
+   **with no real money anywhere in it**. An earlier revision of this item
+   said "no rider-facing product exists: no trip search, no booking, no
+   fares, no passenger UI" — true at `111cd4b`, superseded since: riders
+   browse published departures and request seats (`/dashboard/passenger`,
+   My Bookings — #47); operators describe services, publish departures,
+   staff them with consenting fleet drivers and approved vehicles, and
+   confirm or decline bookings (#23, #32, #41, #42, #44 — confirmation is
+   **manual only**, the delivery lesson); drivers run the trip (#40); admins
+   oversee it at seat level under the `passengers.read`/`passengers.moderate`
+   split (#28, #34). **Seats are held at confirmation, not at request**,
+   under a row lock so the last seat cannot be oversold. **Fares are gated,
+   never charged**: a booking is refused unless the route carries an
+   operator-entered `baseFareMinor` (zero is not a price), a configured fare
+   renders verbatim, and `fareQuotedMinor` stays null on every booking —
+   nothing computes, quotes or charges an amount, because **per-seat versus
+   per-booking is undecided commercial policy**
+   (`apps/api/src/passenger/passenger-operations.service.ts`). Full
+   walkthrough: [`PASSENGER-LIFECYCLE.md`](./PASSENGER-LIFECYCLE.md).
 5. **Wallet & payments** — a ledger, escrow and settlement behind all of it.
 
 Also present, and **not** the current focus: Belize Connect (jobs), real estate,
@@ -139,6 +162,14 @@ curl -s https://bmpl-admin.vercel.app/health
 
 `/api/health/live` does not exist — do not look for it.
 
+**`pnpm deploy:status`** (`scripts/deploy-status.mjs`, #48) compares the
+commit production's `/api/health` reports against `origin/main` read live
+from the remote and answers **CURRENT / BEHIND / UNKNOWN / DIVERGED** with
+distinct exit codes, both commits named. It is scoped to API-affecting paths
+(#51), so a web-only or docs-only merge does not read as BEHIND for a
+deployment Railway rightly did not rebuild; unreachable is UNKNOWN, never
+BEHIND.
+
 CI (`.github/workflows/ci.yml`): build + typecheck + `pnpm test:unit`, then
 integration tests against real Postgres/Redis/MinIO. `format:check` and `lint`
 are **informational** and currently fail repo-wide; do not treat that as a
@@ -187,6 +218,26 @@ Ledger-backed, double-entry, with system/clearing accounts, escrow, holds,
 authorization, settlement and full transaction history. Concurrency is handled
 with row locks plus unique transaction references; idempotency keys guard
 checkout.
+
+### Admin wallet lock — a fraud/security lever that moves no money
+
+`WalletAccountStatus.LOCKED` existed since the wallet shipped and the
+movement paths always refused a non-ACTIVE wallet, but nothing could set the
+status; #54 (`a1ad211`) added the lever, on the owner's approval. An
+administrator holding the new **`wallet.lock`** permission — deliberately
+unbundled, held only by SUPER_ADMIN, the `wallet.credit_test` precedent —
+can lock and unlock a **user** wallet by user id; system, clearing and
+escrow accounts are out of reach. The lever moves no money, ever: no ledger
+entry, no hold, no amount read or written. Locking removes the wallet's
+permission to *originate* new movement — spend authorization refuses (the
+order fails cleanly, holds released, nothing escrows) and every credit path
+refuses (admin test credit, self-service UAT funding) — while money already
+authorized keeps moving on its existing rails, unchanged. Both directions
+demand a reason and write one `WALLET_ACCOUNT_STATUS_CHANGED` audit row
+naming actor, subject, direction and reason; a double lock refuses rather
+than writing a second, misleading record. `SUSPENDED` is a different state
+with **undefined semantics** — the lever refuses to enter or leave it, and
+what it should mean is an unmade product decision, not a gap to fill.
 
 ### Temporary self-service UAT funding — **must be off before launch**
 
@@ -381,7 +432,10 @@ Read the live value; do not assume.
 
 ---
 
-## 11. Last milestone: shipped 2026-09-03
+## 11. Milestone record — PR #1, merged and deployed 2026-09-03
+
+A dated record of the address/lanes/funding milestone's ship and its
+verification; work merged since is summarized in this document's header.
 
 PR [#1](https://github.com/louve-rg/bmpl/pull/1), merged as **`a2bab27`**.
 
@@ -502,7 +556,8 @@ form no longer asks for a street, and the pay button is not blocked.
 
 The full gap register lives in
 [`DELIVERY-LIFECYCLE.md`](./DELIVERY-LIFECYCLE.md) §6 — one place, so the two
-documents cannot drift. Status summary as of `111cd4b`:
+documents cannot drift. Status summary re-checked 2026-09-07 against
+`3c41e1e`:
 
 - **Closed on `main`**: manual courier-leg assignment (PR #11) and its admin
   UI (#17); handoff-PIN access (DIRECT legs last-mile-equivalent for the
@@ -512,10 +567,21 @@ documents cannot drift. Status summary as of `111cd4b`:
   driver instead of stranding them with a phantom job (#15); and hub courier
   fees are enterable through the admin console (#19 — a code defect until
   then, see the header of this document).
-- **Open**: leg EXCEPTION has no recovery path; the recipient has no
-  notification or tracking channel; and **booking a shipment whose total is
-  zero crashes with a 500 instead of refusing** (a fix exists on an unmerged
-  branch — it is open until merged).
+- **Closed since the last review**: dispatch load fairness (#22, `fb17b17`)
+  — a driver's real load now counts marketplace deliveries and courier legs
+  together, and a driver whose load is unknown no longer wins the queue.
+- **Open**: leg EXCEPTION has no recovery path, and the recipient has no
+  notification or tracking channel.
+- **Corrected 2026-09-07 — this list was wrong at the last review.** It said
+  "booking a shipment whose total is zero crashes with a 500 instead of
+  refusing (a fix exists on an unmerged branch — it is open until merged)".
+  **The fix was already merged**: #13 (`f1d7553`, 2026-09-04) is an ancestor
+  of `111cd4b`, the very commit that review was made against. The guard is
+  live at `apps/api/src/shipping/shipment.service.ts:327` — an unpriced
+  journey (`plan.totalMinor <= 0`) is refused with a plain-words 400, and
+  zero remains "not a price", so an operator's missing configuration can no
+  longer surface as a customer's 500. Read the code, not a review's summary
+  of it.
 - **Awaiting a product decision, not code**: what a driver who completed a leg
   is owed when staff cancel the rest of the journey. The full escrow currently
   returns to the customer. Do not write or imply a refund/earnings policy —
