@@ -12,7 +12,7 @@ anyone.
 A note on money: every fee in this document is an **integer in BZD cents**
 (minor units), never a float. In the delivery and shipping API payloads the
 `*Minor` fields are serialized as JSON **numbers** (the `money` helper,
-`apps/api/src/shipping/shipment.service.ts:40`, converts from the database's
+`apps/api/src/shipping/shipment.service.ts`, converts from the database's
 `BigInt`; the BigInt JSON patch lives in `apps/api/src/main.ts`). Wallet and
 ledger amounts stay `BigInt` end to end and serialize as **strings** — a client
 must not assume the two look alike.
@@ -52,7 +52,7 @@ owns the record.
 
 `OrdersService.createFromCart` creates the `OrderDelivery` inside the checkout
 transaction with status `PENDING_ASSIGNMENT`
-(`apps/api/src/orders/orders.service.ts:309`), snapshotting the fee, the free
+(`apps/api/src/orders/orders.service.ts`), snapshotting the fee, the free
 threshold and the estimate from the vendor's delivery settings and the zone
 that matched (`appliedZoneId`). Vendors configure those at
 `/vendor/delivery` (`apps/api/src/delivery/delivery.controller.ts`); customers
@@ -62,11 +62,12 @@ get a pre-checkout quote from `POST /checkout/delivery-quote`.
 
 Nothing is offered to any driver until the vendor marks the order ready.
 `VendorFulfilmentService.markReady`
-(`apps/api/src/orders/vendor-fulfilment.service.ts:79`) sets the vendor order
+(`apps/api/src/orders/vendor-fulfilment.service.ts`) sets the vendor order
 `READY_FOR_PICKUP` and stamps `readyForDispatchAt` on the delivery, then calls
 the dispatch engine best-effort. The engine independently requires **both**
 `readyForDispatchAt` and the vendor-order status to agree
-(`apps/api/src/dispatch/dispatch-engine.service.ts:117-125`) — an over-broad
+(`DispatchEngineService.dispatch`, `apps/api/src/dispatch/dispatch-engine.service.ts`,
+at "TWO independent checks on the same fact") — an over-broad
 backfill once made unprepared orders look dispatchable, so the two checks are
 deliberate.
 
@@ -78,7 +79,8 @@ driver at a time, ranked by `rankDrivers` in `@bmpl/shared`, with an offer
 timeout, a retry budget (`dispatchMaxOffers`) and a per-driver concurrency cap.
 It reads its settings from the `platform_settings` row; `dispatchAutomatic`
 **defaults to off, including when no row exists**
-(`dispatch-engine.service.ts:67`), and it is deliberately off in production —
+(`DispatchEngineService.settings`, `dispatch-engine.service.ts`), and it is
+deliberately off in production —
 that is correct configuration, not a bug. A sweeper
 (`apps/api/src/dispatch/dispatch-scheduler.service.ts`, every ~20s under a
 Redis lock) expires unanswered offers (back to `DRIVER_DECLINED`, then
@@ -91,7 +93,7 @@ are alerted that manual assignment is needed.
 assignment history, eligible drivers, `POST /admin/deliveries/:id/assign` and
 `/reassign` (permission `deliveries.assign`), `/cancel` (`deliveries.manage`).
 Both automatic and admin assignment funnel into the same
-`DispatchService.assignInternal` (`apps/api/src/dispatch/dispatch.service.ts:201`),
+`DispatchService.assignInternal` (`apps/api/src/dispatch/dispatch.service.ts`),
 so they produce identical state: eligibility re-checked at assignment time,
 **fresh pickup and delivery PINs generated per assignment**, an append-only
 `DeliveryAssignment` history row, timeline event, audit row and notifications.
@@ -122,17 +124,19 @@ Worth knowing about each step:
 
 - **Accept** is a conditional write (`updateMany` re-asserting status and
   ownership), because the sweeper may be expiring the offer at the same moment
-  — the database is the arbiter (`driver-jobs.service.ts:368-397`). Accepting
+  — the database is the arbiter (`DriverJobsService.accept`,
+  `driver-jobs.service.ts`). Accepting
   is also when the customer↔driver and vendor↔driver message threads open, not
   at assignment — a driver who merely saw an offer never joins a customer's
   conversation.
 - **The customer's identity is earned by accepting.** Before `acceptedAt`, the
   driver's view carries the area, fee, vendor and item count only; the street
   address, name, phone, map pin and instructions unlock on acceptance
-  (`delivery-core.service.ts:258-339`).
+  (the DRIVER-audience branch of `serialize()`, `delivery-core.service.ts`).
 - **Pickup requires the vendor's PIN.** The vendor reads it at
   `GET /vendor/deliveries/:id/pickup-pin`
-  (`apps/api/src/dispatch/delivery-access.controller.ts:53`) and hands it to
+  (`pickupPin()`, `apps/api/src/dispatch/delivery-access.controller.ts`) and
+  hands it to
   the driver. Verification is constant-time, capped at 5 attempts
   (`DELIVERY_PIN_MAX_ATTEMPTS`), locks with an admin alert on exhaustion, and
   an admin can reveal PINs at `GET /admin/deliveries/:id/pins` (permission
@@ -150,8 +154,10 @@ Worth knowing about each step:
 
 The customer follows progress at `GET /deliveries/:id` (status, timeline,
 driver display name and vehicle, POD); the vendor at `GET /vendor/deliveries`.
-Neither general payload ever contains a PIN
-(`delivery-core.service.ts:25-27`).
+Neither general payload ever contains a PIN — per the audience contract at the
+top of `delivery-core.service.ts` ("Audience determines which fields a
+serialized delivery exposes"), PINs are revealed only via dedicated,
+permission-checked endpoints.
 
 ---
 
@@ -162,7 +168,7 @@ Neither general payload ever contains a PIN
 `POST /api/shipping/quote` prices the journey without creating anything;
 `POST /api/shipping` books it (`apps/api/src/shipping/shipping.controller.ts`,
 `@Roles('CUSTOMER')`). Booking (`ShipmentService.create`,
-`apps/api/src/shipping/shipment.service.ts:276`):
+`apps/api/src/shipping/shipment.service.ts`):
 
 - freezes the planner's output into `ShipmentLeg` rows — addresses are
   **snapshotted**, so editing a saved address later cannot change a journey in
@@ -173,9 +179,9 @@ Neither general payload ever contains a PIN
   wallet payment is created and escrowed, and if the customer cannot afford it
   the whole booking rolls back. An **unpaid shipment is never dispatched** —
   its legs stay `PENDING`, and `ShipmentDispatchService.isPaidFor` re-checks
-  regardless (`shipment-dispatch.service.ts:99-101`);
+  regardless (`shipment-dispatch.service.ts`);
 - generates a 4-digit **handoff PIN per leg** at booking
-  (`shipment.service.ts:457`);
+  (`genPin()`, stamped per leg by `legData()`, `shipment.service.ts`);
 - marks leg 1 `READY` and, if it is a courier leg, offers it to a driver
   immediately rather than waiting for the sweeper;
 - `isTest` is derived from the booking account, never from the request, and a
@@ -191,7 +197,8 @@ district) and the cheapest chain of configured `LogisticsRoute` rows is found;
 no chain → **refusal with an explanation a customer can act on**. Fees are
 read, never invented: an unset hub courier fee, lane price or local-courier
 platform setting makes the quote say `pricingIncomplete` rather than shipping
-free (`shipment.service.ts:93-154`). Production currently has no configured
+free (`ShipmentService.quote`, `shipment.service.ts`). Production currently
+has no configured
 network, so production shipping can quote a same-town direct courier and
 nothing else — that is business configuration, not a defect.
 
@@ -203,20 +210,21 @@ driver works them through `/driver/shipping-jobs`
 sailed or driven by a **carrier BML does not employ**, so there is no driver
 app for it — an operator with `logistics.operate` confirms what the carrier
 did through `/admin/logistics/legs/:id/start|depart|arrive|handoff|exception`
-(`apps/api/src/shipping/shipping.controller.ts:268-314`).
+(`AdminLogisticsController`, `apps/api/src/shipping/shipping.controller.ts`).
 
 ### Sequence is authority; status is derived; custody is append-only
 
 Three rules govern every leg transition
-(`shipment.service.ts:60-71`, enforced in `transition()`):
+(the "SEQUENCE IS AUTHORITY" contract atop `ShipmentService`,
+`shipment.service.ts`, enforced in `transition()`):
 
 1. **A leg may only be worked once every earlier live leg has completed** —
-   `isLegActionable` (`packages/shared/src/shipping.ts:234`), the same
+   `isLegActionable` (`packages/shared/src/shipping.ts`), the same
    function dispatch uses, so no courier is ever sent to a terminal the parcel
    has not reached.
 2. **Shipment status is never set by hand** — it is recomputed from the legs
    after every transition by `deriveShipmentStatus`
-   (`packages/shared/src/shipping.ts:192`): AWAITING_PICKUP → FIRST_MILE →
+   (`packages/shared/src/shipping.ts`): AWAITING_PICKUP → FIRST_MILE →
    AT_ORIGIN_HUB → IN_TRANSIT → AT_DESTINATION_HUB → OUT_FOR_DELIVERY →
    DELIVERED, or AWAITING_COLLECTION when the journey ends at a hub.
 3. **Custody is append-only** (`CustodyEvent`): SENDER → DRIVER/CARRIER → HUB
@@ -241,7 +249,7 @@ engine**: eligibility comes from `DriverService`, ranking from `@bmpl/shared`,
 and the timeout/retry/concurrency settings from the same `platform_settings`
 the delivery engine reads — including `dispatchAutomatic`, so **when automatic
 dispatch is off, `dispatchLeg` always returns SKIPPED**
-(`shipment-dispatch.service.ts:63`). Workload is counted across **both** job
+(`shipment-dispatch.service.ts`). Workload is counted across **both** job
 tables so a driver holding three marketplace deliveries is not handed a fourth
 job. Its own sweeper (`shipment-dispatch.scheduler.ts`, ~20s, separate Redis
 lock so one engine cannot take the other down) expires offers and re-offers;
@@ -255,12 +263,13 @@ while automatic dispatch is off (closed gap 1).
 
 The PIN proves the handoff: whoever **receives** the parcel holds the code,
 and the person handing it over must produce it. Five failed attempts lock the
-leg with an admin alert (`shipment.service.ts:751-777`). Who can see which
+leg with an admin alert (`verifyHandoffPin()`, `shipment.service.ts`). Who can
+see which
 PIN:
 
 - The **customer (sender)** sees the PIN for a `LAST_MILE` **or `DIRECT`** leg
   on a journey ending at their recipient's door — the code they pass to the
-  recipient (`pinFor`, `shipment.service.ts:1197`; a DIRECT leg is
+  recipient (`pinFor`, `shipment.service.ts`; a DIRECT leg is
   last-mile-equivalent because it ends at the recipient's door, not a counter).
   The sender is the channel because the recipient has no account — see gap 5.
 - **Desk-held codes** (a first mile or line-haul ending at a terminal) are
@@ -269,7 +278,8 @@ PIN:
   **different** permission from `logistics.operate`, mirroring how deliveries
   separate operating from code-holding (`deliveries.verify`). Every reveal
   writes an audit row (never containing the code), and the endpoint refuses
-  the leg's **own assigned driver** (`shipment.service.ts:1252`) — the person
+  the leg's **own assigned driver** (`revealHandoffPin()`,
+  `shipment.service.ts`) — the person
   producing the code must not be its source.
 - **Staff serialization still returns null** — the reveal endpoint is the only
   staff path to a code.
@@ -286,7 +296,7 @@ When the service ends at a hub (`DOOR_TO_HUB`, `HUB_TO_HUB`), the completed
 journey reads `AWAITING_COLLECTION`. No leg moves when the recipient walks in,
 so an operator records the collection at
 `POST /admin/logistics/shipments/:id/collect`
-(`ShipmentService.recordCollection`, `shipment.service.ts:944`) — custody
+(`ShipmentService.recordCollection`, `shipment.service.ts`) — custody
 passes HUB → RECIPIENT and the shipment recomputes to `DELIVERED`. This flow
 works today, including settlement.
 
@@ -294,7 +304,7 @@ works today, including settlement.
 
 When a shipment reaches `DELIVERED` or `AWAITING_COLLECTION`,
 `SettlementService.settleShipment`
-(`apps/api/src/settlement/settlement.service.ts:98`) releases the escrow in
+(`apps/api/src/settlement/settlement.service.ts`) releases the escrow in
 one balanced ledger transaction keyed uniquely to the shipment: **one driver
 earning per courier leg a driver actually completed** (share set by the same
 `PlatformFeeConfig` the marketplace uses), remainder to platform revenue. A
@@ -305,7 +315,7 @@ into escrow, so test funds never become real earnings.
 
 `POST /shipping/:id/cancel` (customer) or
 `POST /admin/logistics/shipments/:id/cancel` (staff, `logistics.manage`) —
-`ShipmentService.cancel` (`shipment.service.ts:1002`). A customer is refused
+`ShipmentService.cancel` (`shipment.service.ts`). A customer is refused
 once any leg is `IN_PROGRESS` ("contact support"); staff can always cancel.
 Completed legs stay completed — a parcel that genuinely flew to San Pedro did
 fly, and rewriting that would put a lie in the custody chain. Non-terminal
@@ -347,14 +357,16 @@ at every layer, so no single upstream mistake can defeat it:
 - candidate pools exclude the requester
   (`eligibleDriversForDistrict({ excludeUserId })`, both engines);
 - admin/system assignment hard-refuses the customer's own profile
-  (`dispatch.service.ts:222-229`);
+  (in `assignInternal()`, `dispatch.service.ts`);
 - shipment dispatch re-checks the chosen driver
-  (`shipment-dispatch.service.ts:135-143`);
-- the driver feed filters both kinds in the query (`notOwnOrder`,
-  `notOwnDelivery`, `notOwnLeg` — `driver-job-feed.service.ts:97-103`);
+  (in `dispatchLeg()`, `shipment-dispatch.service.ts`, at "The pool query
+  already excluded the sender");
+- the driver feed filters both kinds in the query (`notOwnDelivery` and
+  `notOwnLeg`, `driver-job-feed.service.ts`; the marketplace job lists apply
+  `notOwnOrder`, defined in `driver-jobs.service.ts`);
 - every per-job action passes an ownership check that 404s a driver's own
-  order (`driver-jobs.service.ts:105-120`,
-  `shipment-driver.service.ts:87-97`).
+  order (`ownedDelivery()`, `driver-jobs.service.ts`; `ownedLeg()`,
+  `shipment-driver.service.ts`).
 
 Covered by `apps/api/test/self-delivery.integration.spec.ts` (6 tests) and
 `self-courier.integration.spec.ts` (5).
@@ -365,7 +377,7 @@ Covered by `apps/api/test/self-delivery.integration.spec.ts` (6 tests) and
 
 - **No live GPS tracking** of any driver, bus, boat or aircraft. Route
   recommendations start from the driver's home district because that is the
-  best legitimate proxy (`driver-job-feed.service.ts:216-218`), and route
+  best legitimate proxy (in `queue()`, `driver-job-feed.service.ts`), and route
   estimates carry a disclosure precisely because there is no traffic data.
 - **No timetables or scheduled departures.** `scheduleNote` is a label an
   operator types, not a calendar.
@@ -426,16 +438,16 @@ terminal, the assignment and vehicle are cleared, the ACTIVE or ACCEPTED
 states, including the notification.
 
 **4. A leg EXCEPTION is one-way.** `flagException`
-(`shipment.service.ts:780`) sets the leg to EXCEPTION and stamps
+(`shipment.service.ts`) sets the leg to EXCEPTION and stamps
 `shipment.exceptionAt`; no endpoint clears either, `isLegActionable` refuses
-EXCEPTION legs (`packages/shared/src/shipping.ts:238`), and any EXCEPTION leg
+EXCEPTION legs (`packages/shared/src/shipping.ts`), and any EXCEPTION leg
 makes the whole shipment read EXCEPTION (`deriveShipmentStatus`). The only
 exit is cancelling the shipment — there is no "damaged, repacked, continue"
 path.
 
 **5. The recipient is invisible.** Every shipment notification goes to
-`customerUserId` — the sender (`notifyCustomer`, `shipment.service.ts:922`
-and `shipment-driver.service.ts:371`). The `destinationEmail` /
+`customerUserId` — the sender (`notifyCustomer`, defined in both
+`shipment.service.ts` and `shipment-driver.service.ts`). The `destinationEmail` /
 `destinationPhone` snapshots are written at booking and the email is never
 used for anything (verified by grep). There is no public or anonymous
 tracking: `GET /shipping/:reference` requires the CUSTOMER role and
@@ -446,11 +458,12 @@ itself works — the collection flow is gap-free once the recipient shows up.)
 **6. Staff cancellation returns the whole escrow even when a driver completed
 a leg.** `cancel` releases the full held amount to the customer
 (`PaymentsService.releaseForShipment` →
-`apps/api/src/payments/payments.service.ts:121`, which releases each hold in
+`apps/api/src/payments/payments.service.ts`, which releases each hold in
 full), completed legs deliberately stay COMPLETED, and `settleShipment` only
 runs on DELIVERED / AWAITING_COLLECTION — so a driver who genuinely drove
 leg 1 earns nothing when staff cancel at leg 2. The code comment "Nobody has
-started work" (`shipment.service.ts:1051`) is true on the customer path, whose
+started work" (in `ShipmentService.cancel`, `shipment.service.ts`) is true on
+the customer path, whose
 guard blocks cancellation once a leg is IN_PROGRESS, and false on the staff
 path. **Money-adjacent: what the driver should be paid, and what the customer
 should be refunded, is a product-owner decision. Do not invent a policy.**
@@ -467,8 +480,9 @@ not a 500.** This entry previously read "a fix exists on an unmerged branch
 **that was wrong at the 2026-09-04 review**: #13 (`f1d7553`) merged on
 2026-09-04 and is an ancestor of `111cd4b`, the commit that review was made
 against; the register carried the gap as open while the guard sat on `main`.
-Corrected 2026-09-07 by reading the code. The guard lives at
-`apps/api/src/shipping/shipment.service.ts:327`: a plan whose
+Corrected 2026-09-07 by reading the code. The guard lives in
+`ShipmentService.create` (`apps/api/src/shipping/shipment.service.ts`, the
+"ZERO IS NOT A PRICE" guard): a plan whose
 `plan.totalMinor <= 0` is refused with a plain-words 400 ("this journey has
 not been priced yet"), keyed on the total — deliberately not on
 `pricingIncomplete`, so a zero-fee hub on a journey with priced transport
@@ -496,7 +510,10 @@ operations-vs-code framing corrected above); updated against `3c41e1e`
 (gap 8 corrected to CLOSED — it was already closed by #13 at the previous
 review and the register was wrong; gaps 4, 5 and 6 re-verified still open);
 every `file:line` anchor in this document re-verified against `origin/main`
-at `75e9ef1` on 2026-09-07 — 38 checked, 12 corrected, prose untouched.
+at `75e9ef1` on 2026-09-07 — 38 checked, 12 corrected, prose untouched; then
+converted to symbol+file form (a quoted marker where no symbol encloses the
+spot) later the same day, so a stale citation fails loudly as a missing grep
+hit instead of silently pointing at the wrong line.
 Sources: the controllers
 and services cited inline — every endpoint named here was read in its
 controller. Cross-references: `docs/PROJECT_STATUS.md` §6–7 for shipping and
