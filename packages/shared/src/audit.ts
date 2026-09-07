@@ -199,6 +199,9 @@ export const AUDIT_ACTIONS = [
   'SHIPMENT_LEG_DRIVER_ASSIGNED',
   // ---- Wallet activation ----
   'WALLET_TOPUP_POSTED',
+  // One action for the wallet lock/unlock fraud control — direction and
+  // reason travel in previousValue/newValue (the status-changed precedent).
+  'WALLET_ACCOUNT_STATUS_CHANGED',
   'WALLET_TEST_FUNDING_GRANTED',
   // Simulation money a person issued to their own wallet during UAT. Kept
   // distinct from WALLET_TEST_FUNDING_GRANTED (an administrator granting it to

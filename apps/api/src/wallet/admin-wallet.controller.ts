@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
-import { adminTestCreditSchema, type AdminTestCreditInput } from '@bmpl/validation';
+import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import type { Request } from 'express';
+import { adminTestCreditSchema, adminWalletLockSchema, type AdminTestCreditInput, type AdminWalletLockInput } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, RequirePermission } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
@@ -7,13 +8,15 @@ import type { AuthContext } from '../common/auth-context';
 import { WalletService } from './wallet.service';
 
 /**
- * Admin wallet visibility, plus the two operational actions that exist.
+ * Admin wallet visibility, plus the few operational actions that exist.
  *
- * Reads are read-only and always were. The one write is not a manual balance
- * adjustment: it posts a labelled simulation credit through the ordinary
- * ledger. There is still no way for an administrator to set a balance.
- * Releasing stale holds lives on the admin payments controller, next to the
- * rest of the payment lifecycle.
+ * Reads are read-only and always were. The test-credit write is not a manual
+ * balance adjustment: it posts a labelled simulation credit through the
+ * ordinary ledger. The lock/unlock pair is the fraud control over the
+ * wallet's EXISTING status vocabulary and never touches an amount. There is
+ * still no way for an administrator to set a balance. Releasing stale holds
+ * lives on the admin payments controller, next to the rest of the payment
+ * lifecycle.
  */
 @Controller('admin/wallet')
 export class AdminWalletController {
@@ -47,4 +50,18 @@ export class AdminWalletController {
     return this.wallet.adminTestCredit(u.userId, dto.userId, BigInt(dto.amountMinor), dto.reason);
   }
 
+  // ---- the fraud/security lock. Addressed by USER (the id an administrator
+  // can see), reason required both ways, both directions audited.
+
+  @Post('users/:userId/lock')
+  @RequirePermission('wallet.lock')
+  lock(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('userId') userId: string, @Body(ZodBody(adminWalletLockSchema)) dto: AdminWalletLockInput) {
+    return this.wallet.setUserWalletLock({ userId: u.userId, ipAddress: req.ip, sessionId: u.sessionId }, userId, 'lock', dto.reason);
+  }
+
+  @Post('users/:userId/unlock')
+  @RequirePermission('wallet.lock')
+  unlock(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('userId') userId: string, @Body(ZodBody(adminWalletLockSchema)) dto: AdminWalletLockInput) {
+    return this.wallet.setUserWalletLock({ userId: u.userId, ipAddress: req.ip, sessionId: u.sessionId }, userId, 'unlock', dto.reason);
+  }
 }

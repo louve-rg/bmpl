@@ -57,6 +57,14 @@ export const adminTestCreditSchema = z.object({
 });
 export type AdminTestCreditInput = z.infer<typeof adminTestCreditSchema>;
 
+/** Lock or unlock a wallet as a fraud/security control. The reason is
+ *  REQUIRED both ways: this control exists to be reviewed after an incident,
+ *  and an unlock nobody can explain is worse than no feature. */
+export const adminWalletLockSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+});
+export type AdminWalletLockInput = z.infer<typeof adminWalletLockSchema>;
+
 /** How stale a never-authorized hold must be before the sweep releases it. */
 export const expireHoldsSchema = z.object({
   olderThanHours: z.number().int().min(1).max(24 * 90).optional().default(24),

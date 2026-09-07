@@ -39,6 +39,12 @@ export const PERMISSIONS = [
   // Release soft holds whose payment never authorized. Operational cleanup, not
   // a way to move money — the sweep can only ever give a reservation back.
   'wallet.reconcile',
+  // HIGHLY RESTRICTED. Lock / unlock a wallet as a fraud or security control.
+  // Never moves money and never touches a balance: it flips the account's
+  // permission to originate NEW movement, and both directions are audited
+  // with actor and reason. Not in any bundle, so only SUPER_ADMIN holds it —
+  // freezing a person's money is not an everyday moderation action.
+  'wallet.lock',
   // ---- Logistics: Driver Management (Phase 4 · M14) ----
   'drivers.read', // view driver profiles / vehicles / service areas / availability (read-only)
   'drivers.moderate', // approve/reject driver vehicles (driver role approval reuses role_applications.review)

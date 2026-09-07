@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let adminCookies: string[];
@@ -193,15 +193,105 @@ describe('wallet validation failures (each rolls back)', () => {
   it('rejects a locked wallet', async () => {
     const { customer, paymentId } = await setup('auth_lock@example.bz', 'LockShop', 'LOCK');
     const u = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'auth_lock@example.bz' } });
-    await ctx.prisma.walletAccount.updateMany({ where: { userId: u.id, type: 'USER' }, data: { status: 'LOCKED' } });
+    // Locked THROUGH the product: the admin fraud control, not a raw write.
+    await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/lock`).set('Cookie', adminCookies).send({ reason: 'Fixture: fraud review' }).expect(201);
     expect((await authorize(customer, paymentId)).status).toBe(409);
   });
 
   it('rejects a suspended wallet', async () => {
     const { customer, paymentId } = await setup('auth_susp@example.bz', 'SuspShop', 'SUSP');
     const u = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'auth_susp@example.bz' } });
+    // Raw on purpose: SUSPENDED has no product path (its semantics are
+    // deliberately undefined — the lock control refuses to manage it), so the
+    // enforcement can only be exercised by forcing the state.
     await ctx.prisma.walletAccount.updateMany({ where: { userId: u.id, type: 'USER' }, data: { status: 'SUSPENDED' } });
     expect((await authorize(customer, paymentId)).status).toBe(409);
+  });
+});
+
+describe('the admin wallet lock control', () => {
+  it('lock refuses new movement, unlock restores it, both are audited, and no balance moves', async () => {
+    const customer = await registerCustomer('lockctl@example.bz');
+    await fundWallet('lockctl@example.bz', 10000);
+    const u = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'lockctl@example.bz' } });
+    const account = await ctx.prisma.walletAccount.findFirstOrThrow({ where: { userId: u.id, type: 'USER' } });
+    const balanceBefore = await balanceOf(account.id);
+
+    const locked = await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/lock`).set('Cookie', adminCookies).send({ reason: 'Suspicious activity report 47' });
+    expect(locked.status).toBe(201);
+    expect(locked.body.status).toBe('LOCKED');
+
+    // What a locked wallet CANNOT do: originate new movement, in or out.
+    const vendor = await makeVendor('lockctl_v@example.bz', 'LockCtlShop');
+    const productId = await createProduct(vendor.cookies, { title: 'LockCtl Item', sku: 'LCTL', priceMinor: 2000 });
+    await setStock(vendor.cookies, productId, 5);
+    await addToCart(customer, { productId, quantity: 1 }).expect(201);
+    await checkout(customer).expect(201);
+    const refused = await authorize(customer, (await paymentOf(customer)).id);
+    expect(refused.status).toBe(409);
+    const credit = await request(ctx.server)
+      .post('/api/admin/wallet/test-credit')
+      .set('Cookie', adminCookies)
+      .send({ userId: u.id, amountMinor: 500, reason: 'Should be refused' });
+    expect(credit.status).toBe(400);
+    expect(credit.body.message).toMatch(/not active/i);
+
+    // Settled transitions settle once: a second lock refuses instead of
+    // writing a second, misleading audit row.
+    expect((await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/lock`).set('Cookie', adminCookies).send({ reason: 'again' })).status).toBe(400);
+
+    const unlocked = await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/unlock`).set('Cookie', adminCookies).send({ reason: 'Cleared by review' });
+    expect(unlocked.status).toBe(201);
+    expect(unlocked.body.status).toBe('ACTIVE');
+
+    // NOT ONE CENT moved in either direction across the whole episode.
+    expect(await balanceOf(account.id)).toBe(balanceBefore);
+    expect(await globalLedgerNet()).toBe(0n);
+
+    // Both directions permanently recorded: actor, subject, reason.
+    const audits = await ctx.prisma.auditLog.findMany({ where: { action: 'WALLET_ACCOUNT_STATUS_CHANGED', targetUserId: u.id }, orderBy: { createdAt: 'asc' } });
+    expect(audits).toHaveLength(2);
+    expect(audits.map((a) => (a.newValue as { action?: string }).action)).toEqual(['lock', 'unlock']);
+    expect(audits.map((a) => (a.newValue as { reason?: string }).reason)).toEqual(['Suspicious activity report 47', 'Cleared by review']);
+    expect(audits.every((a) => a.actorId !== null)).toBe(true);
+
+    // Unlocked, the wallet spends again — the control is a gate, not a scar.
+    await addToCart(customer, { productId, quantity: 1 }).expect(201);
+    await checkout(customer).expect(201);
+    await authorize(customer, (await paymentOf(customer)).id).expect(201);
+  });
+
+  it('the lock is authorized, addressable, and refuses what it must not manage', async () => {
+    const customer = await registerCustomer('lockctl2@example.bz');
+    await fundWallet('lockctl2@example.bz', 5000);
+    const u = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'lockctl2@example.bz' } });
+
+    // wallet.read is documented "no adjustments" — and stays that way.
+    const reader = await seedLimitedAdmin(ctx.prisma, 'lockctl_reader@example.bz', ['wallet.read']);
+    const readerCookies = await login(reader.email, reader.password);
+    expect((await request(ctx.server).get('/api/admin/wallet/accounts').set('Cookie', readerCookies)).status).toBe(200);
+    expect((await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/lock`).set('Cookie', readerCookies).send({ reason: 'not allowed test' })).status).toBe(403);
+    // A plain customer is refused outright.
+    expect((await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/lock`).set('Cookie', customer).send({ reason: 'not allowed test' })).status).toBe(403);
+
+    // A reason is not optional, in either direction.
+    expect((await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/lock`).set('Cookie', adminCookies).send({})).status).toBe(400);
+
+    // Unlocking a wallet that is not locked refuses.
+    expect((await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/unlock`).set('Cookie', adminCookies).send({ reason: 'test reason' })).status).toBe(400);
+
+    // A subject with no wallet: nothing to lock, said plainly. (Registration
+    // creates every real user's wallet eagerly, so only a nonexistent user
+    // can produce this state.)
+    expect((await request(ctx.server).post(`/api/admin/wallet/users/no-such-user-id/lock`).set('Cookie', adminCookies).send({ reason: 'test reason' })).status).toBe(404);
+
+    // A reason below the minimum is refused by validation before anything runs.
+    expect((await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/lock`).set('Cookie', adminCookies).send({ reason: 'x' })).status).toBe(400);
+
+    // SUSPENDED is not this control's to manage — in or out.
+    await ctx.prisma.walletAccount.updateMany({ where: { userId: u.id, type: 'USER' }, data: { status: 'SUSPENDED' } });
+    expect((await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/lock`).set('Cookie', adminCookies).send({ reason: 'test reason' })).status).toBe(400);
+    expect((await request(ctx.server).post(`/api/admin/wallet/users/${u.id}/unlock`).set('Cookie', adminCookies).send({ reason: 'test reason' })).status).toBe(400);
   });
 });
 
