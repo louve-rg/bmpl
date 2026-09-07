@@ -221,3 +221,17 @@ export const isAdminRole = (code: RoleCode): boolean => ROLE_DEFINITIONS[code].i
 
 export const roleRequiresApproval = (code: RoleCode): boolean =>
   ROLE_DEFINITIONS[code].requiresApproval;
+
+/**
+ * Provider-type roles require a VERIFIED EMAIL to apply for or activate (the
+ * owner's ruling): someone about to sell, drive, transport, list or advertise
+ * must be reachable at a proven address. The classification is DERIVED, not a
+ * second hand-kept list: provider-type is exactly the approval-gated,
+ * non-staff roles — the person offers goods, services, listings or campaigns
+ * to others, which is why each already goes through admin review. Ordinary
+ * customer use never demands verification: CUSTOMER is auto-granted and
+ * JOB_SEEKER (a person looking for work — consumer-shaped) is deliberately
+ * outside the gate.
+ */
+export const roleRequiresVerifiedEmail = (code: RoleCode): boolean =>
+  ROLE_DEFINITIONS[code].requiresApproval && !ROLE_DEFINITIONS[code].isAdminRole;

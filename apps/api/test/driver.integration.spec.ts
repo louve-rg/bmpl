@@ -83,6 +83,9 @@ describe('driver profile / application', () => {
 
   it('the driver role requires supporting documents (no-doc submit → 400)', async () => {
     const { cookies } = await registerCustomer('drv_docs@example.bz');
+    // Verified so the submit reaches the DOCUMENT rule this test is about —
+    // the earlier verified-email gate has its own spec.
+    await ctx.prisma.user.update({ where: { email: 'drv_docs@example.bz' }, data: { emailVerifiedAt: new Date() } });
     const res = await post(cookies, 'roles/applications', { roleCode: 'DELIVERY_DRIVER', documentKeys: [] });
     expect(res.status).toBe(400);
   });

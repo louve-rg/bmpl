@@ -51,6 +51,10 @@ beforeAll(async () => {
   vendorCookies = await registerCustomer('wf_vendor@example.bz');
   const vendor = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'wf_vendor@example.bz' } });
   vendorUserId = vendor.id;
+  // Provider-type applications require a verified email. This spec's subject
+  // is the application workflow, not verification (which has its own spec and
+  // its own gate test), so the flag is satisfied directly.
+  await ctx.prisma.user.update({ where: { id: vendorUserId }, data: { emailVerifiedAt: new Date() } });
 });
 afterAll(async () => {
   await ctx.app.close();
