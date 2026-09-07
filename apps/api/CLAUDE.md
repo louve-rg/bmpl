@@ -53,8 +53,11 @@ If you touch `src/dispatch`, `src/driver`, `src/delivery` or `src/shipping`,
 run:
 
 ```bash
-pnpm --filter @bmpl/api test:integration -- self-delivery self-courier
+pnpm --filter @bmpl/api test:integration self-delivery self-courier
 ```
+
+(No `--` before the filters — vitest 2 discards everything after a literal
+`--`, which silently ran the FULL suite until the wrapper began stripping it.)
 
 ## 3. Controller naming convention
 
