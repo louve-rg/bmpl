@@ -11,7 +11,7 @@
     "lint": "eslint \"src/**/*.ts\" --max-warnings 0",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration": "node test/run-integration.mjs",
     "smoke:storage": "node scripts/storage-smoke.mjs",
     "clean": "rimraf dist .turbo"
   },
