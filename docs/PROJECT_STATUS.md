@@ -477,6 +477,26 @@ form no longer asks for a street, and the pay button is not blocked.
   session: Admin → Dispatch, or `GET /api/admin/ops/settings`. It shipped off
   by migration; whether it is on today is a live value, not something to infer.
   It was deliberately not changed by this milestone.
+- **Production email delivery works** (added 2026-09-07, BMPL-73). The API
+  sends through Resend: the owner corrected the Railway email configuration,
+  rotated the Resend API key, redeployed, and tested the resend-verification
+  flow end to end — the message was delivered and the link verified the
+  account. Until that fix, production ran the `console` email transport — a
+  dev transport that logs the message, reports success and delivers nothing —
+  so verification emails never reached anyone. **That was a deployment
+  configuration gap, not a code defect**: the API-side implementation
+  (single-use hashed token, 24-hour TTL, replay rejected) was correct
+  throughout and is unchanged by the fix. The owner's standing instruction:
+  no further email configuration changes unless a new defect is observed.
+- **A verified email is now required to apply for or activate a provider-type
+  role** (#52, `36b05bc`; the roles screen states the requirement before the
+  form, #53, `2c8994a` — both landed after this document's last full review).
+  Provider-type is **derived, not hand-listed**: exactly the approval-gated,
+  non-staff roles (`roleRequiresVerifiedEmail`,
+  `packages/shared/src/roles.ts`). `CUSTOMER` and `JOB_SEEKER` are
+  deliberately outside the gate; ordinary customer use never demands
+  verification. This gate only became honest once production email delivery
+  worked (previous bullet) — a gate a person cannot satisfy is a lockout.
 
 ### Delivery & courier lifecycle
 
