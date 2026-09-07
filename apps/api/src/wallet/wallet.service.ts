@@ -459,6 +459,71 @@ export class WalletService {
     return rows.map((t) => this.shape(t));
   }
 
+  /**
+   * The fraud/security lever over an EXISTING state: WalletAccountStatus has
+   * carried LOCKED since the wallet shipped, and the movement paths already
+   * refuse a non-ACTIVE wallet — this is the authorized, audited way to SET
+   * it, which never existed. Addressed by USER (the fraud subject is a
+   * person, and that is the id an administrator can actually see), flipping
+   * every USER wallet the person holds; system, clearing and escrow accounts
+   * are the ledger's own plumbing and are unreachable from here.
+   *
+   * What this deliberately is NOT: a balance operation. No ledger entry is
+   * posted, no hold is touched, no amount is read or written. Locking
+   * removes the wallet's permission to ORIGINATE new movement — spend
+   * authorization, top-up, test credit — and money already authorized keeps
+   * moving on its existing rails. SUSPENDED is a different state with no
+   * product semantics defined; this lever refuses to walk through it rather
+   * than quietly defining them.
+   */
+  async setUserWalletLock(
+    actor: { userId: string; ipAddress?: string | null; sessionId?: string | null },
+    targetUserId: string,
+    action: 'lock' | 'unlock',
+    reason: string,
+  ) {
+    const from = action === 'lock' ? 'ACTIVE' : 'LOCKED';
+    const to = action === 'lock' ? 'LOCKED' : 'ACTIVE';
+    const accounts = await this.prisma.walletAccount.findMany({
+      where: { userId: targetUserId, type: 'USER' },
+      select: { id: true, status: true, currency: true },
+    });
+    if (accounts.length === 0) throw new NotFoundException('This user has no wallet account.');
+    if (accounts.every((a) => a.status === 'SUSPENDED')) {
+      throw new BadRequestException('This wallet is suspended; suspension is not managed by the lock control.');
+    }
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Conditional, like every status transition: only wallets in the
+      // expected state move, so a concurrent change loses instead of being
+      // silently overwritten, and a double-lock refuses instead of writing
+      // a second, misleading audit row.
+      const changed = await tx.walletAccount.updateMany({
+        where: { userId: targetUserId, type: 'USER', status: from },
+        data: { status: to },
+      });
+      if (changed.count === 0) {
+        throw new BadRequestException(
+          action === 'lock' ? 'This wallet is not active, so there is nothing to lock.' : 'This wallet is not locked.',
+        );
+      }
+      await this.audit.record(
+        {
+          action: 'WALLET_ACCOUNT_STATUS_CHANGED',
+          actorId: actor.userId,
+          targetUserId,
+          ipAddress: actor.ipAddress ?? null,
+          sessionId: actor.sessionId ?? null,
+          reason,
+          previousValue: { status: from },
+          newValue: { status: to, action, reason, walletAccountsChanged: changed.count },
+        },
+        tx,
+      );
+      return changed.count;
+    });
+    return { userId: targetUserId, status: to, walletAccountsChanged: result };
+  }
+
   /** Escrow + system account balances (read-only). */
   async adminAccounts() {
     const rows = await this.prisma.walletAccount.findMany({ where: { userId: null }, orderBy: { type: 'asc' } });
