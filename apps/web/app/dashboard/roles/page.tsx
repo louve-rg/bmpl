@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
-import type { ApplicableRole } from '../../../lib/types';
+import type { ApplicableRole, MeView } from '../../../lib/types';
+import { verifyEmailFirst, verifyEmailFirstMessage } from '../../../lib/role-gate';
+import { VerifyEmailBanner } from '../../../components/VerifyEmailBanner';
 import { Alert, Button, Card, Label, PageHeader, Spinner, StatusBadge, Textarea } from '../../../components/ui';
 
 interface AppReview {
@@ -41,18 +43,24 @@ async function uploadDoc(roleCode: string, file: File): Promise<string> {
 export default function RolesPage() {
   const [roles, setRoles] = useState<ApplicableRole[]>([]);
   const [apps, setApps] = useState<RoleApplication[]>([]);
+  const [me, setMe] = useState<MeView | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [r, a] = await Promise.all([
+      const [r, a, m] = await Promise.all([
         api.get<ApplicableRole[]>('/roles/applicable'),
         api.get<RoleApplication[]>('/roles/applications'),
+        // Whether the email is verified decides, per role, if Apply can
+        // succeed at all — fetched here so the person learns that BEFORE
+        // filling anything in, not from the refusal after.
+        api.get<MeView>('/me'),
       ]);
       setRoles(r);
       setApps(a);
+      setMe(m);
     } finally {
       setLoading(false);
     }
@@ -80,9 +88,20 @@ export default function RolesPage() {
         </div>
       ) : (
         <>
+          {/* The way OUT of the gate, on the page where the gate bites: the
+              banner carries the resend action the per-card messages point at.
+              A verified person never sees it. */}
+          {me && !me.emailVerified && roles.some((r) => verifyEmailFirst(r, me.emailVerified)) && (
+            <VerifyEmailBanner email={me.email} />
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             {roles.map((role) => (
-              <RoleCard key={role.roleCode} role={role} onDone={(m) => { setMessage(m); void load(); }} />
+              <RoleCard
+                key={role.roleCode}
+                role={role}
+                emailVerified={me ? me.emailVerified : null}
+                onDone={(m) => { setMessage(m); void load(); }}
+              />
             ))}
           </div>
 
@@ -102,7 +121,16 @@ export default function RolesPage() {
   );
 }
 
-function RoleCard({ role, onDone }: { role: ApplicableRole; onDone: (m: { kind: 'ok' | 'err'; text: string }) => void }) {
+function RoleCard({
+  role,
+  emailVerified,
+  onDone,
+}: {
+  role: ApplicableRole;
+  /** null while /me is unknown — an unknown state never pre-blocks. */
+  emailVerified: boolean | null;
+  onDone: (m: { kind: 'ok' | 'err'; text: string }) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState<Record<string, File | null>>({});
@@ -156,6 +184,11 @@ function RoleCard({ role, onDone }: { role: ApplicableRole; onDone: (m: { kind: 
       <div className="mt-4">
         {!role.canApply ? (
           <span className="text-sm text-slate-400">{role.status === 'APPROVED' ? 'Active' : 'In progress'}</span>
+        ) : verifyEmailFirst(role, emailVerified) ? (
+          // The reason in place of the action (the fare-gate pattern): a live
+          // Apply control here leads to a certain refusal at submit. The
+          // server still enforces this independently — see the catch below.
+          <p className="text-sm font-medium text-amber-700">{verifyEmailFirstMessage(role.label)}</p>
         ) : !role.requiresApproval ? (
           <Button size="sm" disabled={busy} onClick={applyNoDocs}>{busy ? 'Activating…' : 'Activate'}</Button>
         ) : !open ? (
