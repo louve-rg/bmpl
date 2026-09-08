@@ -71,8 +71,11 @@ Active business areas, in the order they matter right now:
    **with no real money anywhere in it**. An earlier revision of this item
    said "no rider-facing product exists: no trip search, no booking, no
    fares, no passenger UI" — true at `111cd4b`, superseded since: riders
-   browse published departures and request seats (`/dashboard/passenger`,
-   My Bookings — #47); operators describe services, publish departures,
+   discover what services run and where they stop, open a departure and
+   read its stops in the operator's stored order, request seats, and follow
+   and cancel their bookings (`/dashboard/passenger`, `/services`,
+   `/departures/[id]`, My Bookings — #47, #63, #64); operators describe
+   services, publish departures,
    staff them with consenting fleet drivers and approved vehicles, and
    confirm or decline bookings (#23, #32, #41, #42, #44 — confirmation is
    **manual only**, the delivery lesson); drivers run the trip (#40); admins
@@ -86,6 +89,28 @@ Active business areas, in the order they matter right now:
    per-booking is undecided commercial policy**
    (`apps/api/src/passenger/passenger-operations.service.ts`). Full
    walkthrough: [`PASSENGER-LIFECYCLE.md`](./PASSENGER-LIFECYCLE.md).
+
+   **The rider journey is verified end to end** (2026-09-08, QA re-walk at
+   `46ecc29` — BMPL-88, hive record `bmpl-rider-journey-2.md`; every rider
+   endpoint's guard is pinned by
+   `apps/api/test/passenger-rider-auth.integration.spec.ts`, so removing a
+   guard fails a spec). bmpl-qa's summary, quoted verbatim because both
+   halves matter and neither may be read without the other:
+
+   > A signed-in customer can complete the entire rider journey today —
+   > discover what services run and where they stop, open a departure and
+   > read its stops in the operator's order, request seats on a priced
+   > departure, follow the booking's status, and cancel it — the moment any
+   > operator has configured a route with a fare and published a departure.
+   > The capability is live in production now (API `1c425bd`, measured);
+   > the configuration is zero (no operator, route or fare exists), so
+   > today the journey ends, correctly and honestly, at an empty services
+   > list.
+
+   **Capability and configuration are different claims — do not blur
+   them.** Nobody is riding today, because no service exists to ride;
+   operator onboarding is with the owner (BMPL-86). And nothing about that
+   is a defect: the empty services list is the system answering truthfully.
 5. **Wallet & payments** — a ledger, escrow and settlement behind all of it.
 
 Also present, and **not** the current focus: Belize Connect (jobs), real estate,
@@ -577,7 +602,8 @@ documents cannot drift. Status summary re-checked 2026-09-07 against
   refusing (a fix exists on an unmerged branch — it is open until merged)".
   **The fix was already merged**: #13 (`f1d7553`, 2026-09-04) is an ancestor
   of `111cd4b`, the very commit that review was made against. The guard is
-  live at `apps/api/src/shipping/shipment.service.ts:327` — an unpriced
+  live in `ShipmentService.create` (`apps/api/src/shipping/shipment.service.ts`,
+  the "ZERO IS NOT A PRICE" guard) — an unpriced
   journey (`plan.totalMinor <= 0`) is refused with a plain-words 400, and
   zero remains "not a price", so an operator's missing configuration can no
   longer surface as a customer's 500. Read the code, not a review's summary
@@ -602,6 +628,12 @@ documents cannot drift. Status summary re-checked 2026-09-07 against
   model supports it; the price is a business decision. Do not invent one to make
   a demo work. Create it at admin → Logistics → Courier lanes when there is a
   confirmed origin, destination, rate and authorisation.
+- **No passenger operator, route, departure or fare exists in production.**
+  The rider journey is built and verified (§1) and today ends, correctly, at
+  an empty services list — the empty state is the system answering
+  truthfully, not a bug to fix with seed data. Operator onboarding is a
+  business step with the owner (BMPL-86); do not invent an operator, route
+  or fare to fill the screen.
 
 ### Standing limitations — do not describe these as working
 

@@ -8,7 +8,10 @@ this document is what gets fixed. On 2026-09-07 every citation was re-verified
 against `main` @ `8d21848` — all 44 were still exact, zero had rotted — and
 converted from line numbers to symbol+file form (a single-line quoted marker
 where no symbol encloses the spot), so a stale citation now fails loudly as a
-missing grep hit instead of silently pointing at the wrong line.
+missing grep hit instead of silently pointing at the wrong line. On
+2026-09-08 the rider surface was completed (#62–#64) and the whole rider
+journey re-walked by QA at `main` @ `46ecc29` (BMPL-88, hive record
+`bmpl-rider-journey-2.md`); §5 describes the surface as it now stands.
 
 The honest parts are at the end:
 [What is not built](#8-what-is-not-built--do-not-infer-capability-from-silence)
@@ -199,8 +202,13 @@ ever wrong — both headers say so).
 ## 5. Booking a seat
 
 The rider API is `CUSTOMER`-gated and scoped throughout to the caller's
-own side of the simulation boundary (`passenger-rider.controller.ts`). The
-web surface for it is `/dashboard/passenger` (browse and request) and
+own side of the simulation boundary (`passenger-rider.controller.ts`), and
+**every rider endpoint's guard is pinned by spec** — removing one fails
+`passenger-rider-auth.integration.spec.ts` (anonymous 401, suspended
+customer 403, twin success on content). The web surface is
+`/dashboard/passenger/services` (what runs and where it stops — discovery
+only), `/dashboard/passenger` (browse and request),
+`/dashboard/passenger/departures/[id]` (one departure and its stops) and
 `/dashboard/passenger/bookings` (the rider's own bookings) — "Passenger
 Service" sits in the base dashboard navigation with no role requirement
 (the `'Passenger Service'` item, `apps/web/lib/dashboard-nav-items.ts`),
@@ -224,6 +232,29 @@ functions rather than copy conventions
   seats-remaining is `null`-until-assigned rather than an invented number,
   because capacity does not exist before a vehicle is snapshotted
   (`seatsLeft`).
+- **A restricted account gets a calm refusal, not an error screen.**
+  `riderAccessView` keys **only** on a 403 and renders the server's own
+  words ("Not available on your account"); a 500 or a network failure still
+  renders as a loud error. Nothing is masked, and nothing leaks beyond the
+  guard's message.
+
+**Discover.** `GET /passenger/services` (`listServices`,
+`passenger-operations.service.ts`) lists the **same** `PassengerRoute` rows
+operators manage — no second list to drift — scoped exactly as the
+departures list is (own boundary side, active route, active operator), each
+with its ordered stops, its operator's name, and its fare or an honest
+none. The services page (`ServicesList`) is **discovery only — deliberately
+no booking control**. With nothing configured, the list is honestly empty
+(§9).
+
+**Departure detail.** `GET /passenger/departures/:id` (`getDeparture`) is
+the list entry plus the route's stops — a spec pins detail == list entry so
+the two cannot drift — with live seat arithmetic once a vehicle is
+assigned. Stops render **in the operator's stored order**, stored sequence
+numbers printed (`StopsList`): nothing sorts, renumbers or re-derives
+geography. A departure outside the rider's visibility — other boundary
+side, inactive route, suspended operator, or already departed — answers
+**404, indistinguishable from an id that never existed**.
 
 **Browse.** `GET passenger/departures` lists upcoming, bookable departures:
 `SCHEDULED`/`ASSIGNED`, future-dated, active route, active operator, the
@@ -366,7 +397,13 @@ today**. Do not describe any of these as working.
   fare exists in production. Everything in §§2-6 is exercised by the
   integration suite (`apps/api/test/passenger-*.integration.spec.ts`) and
   usable the moment a real operator is onboarded and declares a network —
-  that onboarding is a business step, not an engineering one.
+  that onboarding is a business step, not an engineering one (BMPL-86, with
+  the owner). Re-verified 2026-09-08 by QA's full rider re-walk at
+  `46ecc29` (BMPL-88, hive record `bmpl-rider-journey-2.md`): the
+  capability is live in production (API `1c425bd`, measured — an anonymous
+  `GET /api/passenger/services` answers 401), and the journey today
+  ends, **correctly**, at the empty services list. The empty state is the
+  system answering truthfully, not a defect to file.
 - Earlier revisions of this document listed two more gaps — a suspended
   operator able to publish routes and trips, and a rider without a web
   surface. **Both are closed on main**: suspension now gates publishing
