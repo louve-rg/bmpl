@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { MAX_PASSENGER_SEATS } from '@bmpl/shared';
-import { api } from '../../lib/api';
+import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Button, Card as UiCard, EmptyState, Field, Input, Spinner } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
 import { formatBzd } from '../../lib/passenger-operator';
-import { seatsLeft, type Departure } from '../../lib/passenger-travel';
+import { riderAccessView, seatsLeft, type Departure } from '../../lib/passenger-travel';
 
 /**
  * Published departures a rider can ask to travel on.
@@ -26,14 +26,14 @@ import { seatsLeft, type Departure } from '../../lib/passenger-travel';
  */
 export function DeparturesList() {
   const [rows, setRows] = useState<Departure[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<ApiError | null>(null);
 
   const reload = useCallback(async () => {
     try {
       setRows(await api.get<Departure[]>('/passenger/departures'));
       setErr(null);
     } catch (e) {
-      setErr(errMessage(e));
+      setErr(e as ApiError);
     }
   }, []);
 
@@ -41,7 +41,16 @@ export function DeparturesList() {
     void reload();
   }, [reload]);
 
-  if (err) return <Alert tone="error">{err}</Alert>;
+  if (err) {
+    // A restricted account (suspended customer role) is told calmly, in the
+    // server's words — a decision about the account is not a malfunction.
+    const view = riderAccessView(err.status, errMessage(err));
+    return view.kind === 'restricted' ? (
+      <EmptyState title={view.title} description={view.detail} />
+    ) : (
+      <Alert tone="error">{view.detail}</Alert>
+    );
+  }
   if (!rows) {
     return (
       <div className="flex items-center gap-2 text-sm text-slate-500">
@@ -53,7 +62,15 @@ export function DeparturesList() {
     return (
       <EmptyState
         title="No departures scheduled"
-        description="When an operator publishes an upcoming departure, it appears here with its route, time and fare."
+        description="When an operator publishes an upcoming departure, it appears here with its route, time and fare. Services shows what runs even when nothing is scheduled yet."
+        action={
+          <Link
+            href="/dashboard/passenger/services"
+            className="rounded-bmpl-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5"
+          >
+            Browse services
+          </Link>
+        }
       />
     );
   }
@@ -61,13 +78,22 @@ export function DeparturesList() {
   return (
     <div className="space-y-3">
       {rows.map((d) => (
-        <DepartureCard key={d.id} departure={d} onBooked={reload} />
+        <DepartureCard key={d.id} departure={d} onBooked={reload} detailHref={`/dashboard/passenger/departures/${d.id}`} />
       ))}
     </div>
   );
 }
 
-function DepartureCard({ departure: d, onBooked }: { departure: Departure; onBooked: () => Promise<void> }) {
+export function DepartureCard({
+  departure: d,
+  onBooked,
+  detailHref,
+}: {
+  departure: Departure;
+  onBooked: () => Promise<void>;
+  /** Link to the departure's stops/detail page — omitted when the card IS that page. */
+  detailHref?: string;
+}) {
   const [bookingOpen, setBookingOpen] = useState(false);
   const [requested, setRequested] = useState(false);
   const left = seatsLeft(d.seatCapacity, d.seatsConfirmed);
@@ -103,6 +129,11 @@ function DepartureCard({ departure: d, onBooked }: { departure: Departure; onBoo
                 ? 'Currently full — a request now can only be confirmed if seats free up.'
                 : `${left} seat${left === 1 ? '' : 's'} available`}
           </p>
+          {detailHref && (
+            <Link href={detailHref} className="mt-1 inline-block text-sm font-semibold text-belize-blue hover:underline">
+              Stops &amp; details
+            </Link>
+          )}
         </div>
 
         {d.fareConfigured && !bookingOpen && !requested && (

@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '../../lib/api';
+import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Button, Card as UiCard, EmptyState, Field, Input, Spinner } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
-import { riderBookingView, type RiderBooking } from '../../lib/passenger-travel';
+import { riderAccessView, riderBookingView, type RiderBooking } from '../../lib/passenger-travel';
 
 /**
  * The rider's own bookings. Each row's words come from riderBookingView,
@@ -16,14 +16,14 @@ import { riderBookingView, type RiderBooking } from '../../lib/passenger-travel'
  */
 export function MyBookings() {
   const [rows, setRows] = useState<RiderBooking[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<ApiError | null>(null);
 
   const reload = useCallback(async () => {
     try {
       setRows(await api.get<RiderBooking[]>('/passenger/bookings'));
       setErr(null);
     } catch (e) {
-      setErr(errMessage(e));
+      setErr(e as ApiError);
     }
   }, []);
 
@@ -31,7 +31,16 @@ export function MyBookings() {
     void reload();
   }, [reload]);
 
-  if (err) return <Alert tone="error">{err}</Alert>;
+  if (err) {
+    // A restricted account is told calmly, in the server's words — see
+    // riderAccessView. A malfunction still looks like one.
+    const view = riderAccessView(err.status, errMessage(err));
+    return view.kind === 'restricted' ? (
+      <EmptyState title={view.title} description={view.detail} />
+    ) : (
+      <Alert tone="error">{view.detail}</Alert>
+    );
+  }
   if (!rows) {
     return (
       <div className="flex items-center gap-2 text-sm text-slate-500">
