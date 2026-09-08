@@ -33,6 +33,79 @@ export interface Departure {
   seatsConfirmed: number;
 }
 
+/**
+ * One ordered stop of a route, exactly as the operator entered it. `sequence`
+ * is the operator's numbering as stored — the UI renders it verbatim and never
+ * sorts, renumbers or re-derives the order. The sequence is authority: it is
+ * what answers "does this bus stop for me?" for a person boarding between the
+ * endpoints, which in Belize is the common case.
+ */
+export interface RouteStop {
+  sequence: number;
+  district: string;
+  city: string;
+  name: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/**
+ * One row of `GET /passenger/services` — a service that EXISTS, whether or not
+ * anything is currently scheduled on it. An unpriced service is deliberately
+ * present with `fareConfigured` false (the pricing-unavailable state); the
+ * fare gate still refuses any booking on it server-side.
+ */
+export interface PassengerService {
+  id: string;
+  name: string;
+  description: string | null;
+  originDistrict: string;
+  originCity: string;
+  destinationDistrict: string;
+  destinationCity: string;
+  scheduleNote: string | null;
+  durationMinutes: number | null;
+  stops: RouteStop[];
+  operator: string | null;
+  baseFareMinor: number | null;
+  fareConfigured: boolean;
+}
+
+/**
+ * `GET /passenger/departures/:id` — the list row byte-for-byte, plus the
+ * route's ordered stops (the one thing the list omits). Anything the list
+ * would hide answers 404, indistinguishable from nonexistent.
+ */
+export interface DepartureDetail extends Omit<Departure, 'route'> {
+  route: Departure['route'] & { stops: RouteStop[] };
+}
+
+/**
+ * What to call a stop: its name when the operator gave one, otherwise the
+ * town itself — both are the operator's own data, nothing invented.
+ */
+export function stopLabel(stop: Pick<RouteStop, 'name' | 'city'>): string {
+  const name = stop.name?.trim();
+  return name ? name : stop.city;
+}
+
+/**
+ * How a failed rider-surface load is presented. A 403 here is a decision
+ * about the ACCOUNT (a restricted/suspended customer role), not a malfunction
+ * — so it renders calm and plain, carrying the server's own sentence, with no
+ * error styling and no invented remedy channel. Everything else is a real
+ * error and stays one.
+ */
+export function riderAccessView(
+  status: number | undefined,
+  serverMessage: string,
+): { kind: 'restricted'; title: string; detail: string } | { kind: 'error'; detail: string } {
+  if (status === 403) {
+    return { kind: 'restricted', title: 'Not available on your account', detail: serverMessage };
+  }
+  return { kind: 'error', detail: serverMessage };
+}
+
 /** One row of `GET /passenger/bookings` (the rider's own). */
 export interface RiderBooking {
   id: string;

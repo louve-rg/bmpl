@@ -19,12 +19,20 @@ export default function PassengerServicePage() {
           title="Passenger Service"
           description="Upcoming departures across Belize — request seats, and the operator confirms."
         />
-        <Link
-          href="/dashboard/passenger/bookings"
-          className="rounded-bmpl-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5"
-        >
-          My Bookings
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href="/dashboard/passenger/services"
+            className="rounded-bmpl-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5"
+          >
+            Services
+          </Link>
+          <Link
+            href="/dashboard/passenger/bookings"
+            className="rounded-bmpl-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5"
+          >
+            My Bookings
+          </Link>
+        </div>
       </div>
       <DeparturesList />
     </div>

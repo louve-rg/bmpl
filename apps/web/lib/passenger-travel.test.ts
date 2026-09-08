@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { riderBookingView, seatsLeft } from './passenger-travel';
+import { riderAccessView, riderBookingView, seatsLeft, stopLabel } from './passenger-travel';
 
 describe('seatsLeft', () => {
   it('is unknowable until a vehicle is assigned — null, never an invented number', () => {
@@ -39,5 +39,33 @@ describe('riderBookingView — the held-at-confirmation rule, in the copy', () =
     const v = riderBookingView('EXPIRED');
     expect(v.label).toBe('EXPIRED');
     expect(v.cancellable).toBe(false);
+  });
+});
+
+describe('stopLabel', () => {
+  it('uses the operator-given stop name when there is one', () => {
+    expect(stopLabel({ name: 'Market Square', city: 'Belmopan' })).toBe('Market Square');
+  });
+
+  it('falls back to the town — operator data, never an invented name', () => {
+    expect(stopLabel({ name: null, city: 'Belmopan' })).toBe('Belmopan');
+    expect(stopLabel({ name: '   ', city: 'Belmopan' })).toBe('Belmopan');
+  });
+});
+
+describe('riderAccessView — a restricted account is told calmly, not alarmed', () => {
+  it('renders a 403 as a plain account restriction carrying the server’s words', () => {
+    const v = riderAccessView(403, 'Your Customer role is suspended.');
+    expect(v.kind).toBe('restricted');
+    if (v.kind === 'restricted') {
+      expect(v.title).toBe('Not available on your account');
+      // Verbatim: the server's sentence is the authority on what they are told.
+      expect(v.detail).toBe('Your Customer role is suspended.');
+    }
+  });
+
+  it('leaves every other failure an error — a malfunction must still look like one', () => {
+    expect(riderAccessView(500, 'boom').kind).toBe('error');
+    expect(riderAccessView(undefined, 'network down').kind).toBe('error');
   });
 });
