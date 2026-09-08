@@ -20,6 +20,42 @@ interface Actor {
 const BOOKABLE_TRIP_STATUSES = ['SCHEDULED', 'ASSIGNED'] as const;
 
 /**
+ * What a rider is shown about a departure — one include and one mapper
+ * (serializeRiderDeparture), shared by the list and the by-id detail so the
+ * two answers can never drift apart.
+ */
+const RIDER_DEPARTURE_INCLUDE = {
+  route: {
+    select: {
+      name: true, originDistrict: true, originCity: true, destinationDistrict: true,
+      destinationCity: true, scheduleNote: true, durationMinutes: true, baseFareMinor: true,
+    },
+  },
+  providerProfile: { select: { businessName: true } },
+} satisfies Prisma.PassengerTripInclude;
+
+type RiderDepartureRow = Prisma.PassengerTripGetPayload<{ include: typeof RIDER_DEPARTURE_INCLUDE }>;
+
+/**
+ * The ordered stops a rider is shown, on the detail and on discovery: the
+ * operator's sequence exactly as stored (replaceStops numbers it from array
+ * position, unique per route) — never sorted by geography, deduped or
+ * re-derived. This is what answers "does this bus stop for me?" for a person
+ * boarding between the endpoints — in Belize the common case, not the edge.
+ */
+const RIDER_STOPS_ARG = {
+  where: { isActive: true },
+  orderBy: { sequence: 'asc' },
+  select: { sequence: true, district: true, city: true, name: true, latitude: true, longitude: true },
+} satisfies Prisma.PassengerRoute$stopsArgs;
+
+/** The detail is the list row plus the route's ordered stops — nothing else differs. */
+const RIDER_DEPARTURE_DETAIL_INCLUDE = {
+  ...RIDER_DEPARTURE_INCLUDE,
+  route: { select: { ...RIDER_DEPARTURE_INCLUDE.route.select, stops: RIDER_STOPS_ARG } },
+} satisfies Prisma.PassengerTripInclude;
+
+/**
  * Passenger booking & movement (S3), behind the fare gate.
  *
  * THE FARE GATE (the product owner's ruling — #13 applied to passengers):
@@ -80,39 +116,26 @@ export class PassengerOperationsService {
     }
   }
 
-  /* ------------------------------------------------------ rider surface */
+  /**
+   * The one visibility predicate of the rider surface: the departures list,
+   * the by-id detail and (for routes) the service catalogue all answer from
+   * this door — the rider's side of the simulation boundary, an active route,
+   * an active operator. A departure this predicate hides is answered exactly
+   * like one that does not exist.
+   */
+  private riderDepartureWhere(isTest: boolean): Prisma.PassengerTripWhereInput {
+    return {
+      kind: 'SCHEDULED',
+      status: { in: [...BOOKABLE_TRIP_STATUSES] },
+      isTest,
+      scheduledDepartureAt: { gt: new Date() },
+      route: { isActive: true },
+      providerProfile: { isActive: true },
+    };
+  }
 
-  /** Departures a rider may browse: their side of the boundary, active services only. */
-  async listDepartures(userId: string) {
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { isTest: true } });
-    const trips = await this.prisma.passengerTrip.findMany({
-      where: {
-        kind: 'SCHEDULED',
-        status: { in: [...BOOKABLE_TRIP_STATUSES] },
-        isTest: user.isTest,
-        scheduledDepartureAt: { gt: new Date() },
-        route: { isActive: true },
-        providerProfile: { isActive: true },
-      },
-      orderBy: { scheduledDepartureAt: 'asc' },
-      take: 100,
-      include: {
-        route: {
-          select: {
-            name: true, originDistrict: true, originCity: true, destinationDistrict: true,
-            destinationCity: true, scheduleNote: true, durationMinutes: true, baseFareMinor: true,
-          },
-        },
-        providerProfile: { select: { businessName: true } },
-      },
-    });
-    const seatCounts = await this.prisma.passengerBooking.groupBy({
-      by: ['tripId'],
-      where: { tripId: { in: trips.map((t) => t.id) }, status: 'CONFIRMED' },
-      _sum: { seats: true },
-    });
-    const confirmedBy = new Map(seatCounts.map((s) => [s.tripId, s._sum.seats ?? 0]));
-    return trips.map((t) => ({
+  private serializeRiderDeparture(t: RiderDepartureRow, seatsConfirmed: number) {
+    return {
       id: t.id,
       reference: t.reference,
       status: t.status,
@@ -132,7 +155,89 @@ export class PassengerOperationsService {
       baseFareMinor: t.route!.baseFareMinor == null ? null : Number(t.route!.baseFareMinor),
       fareConfigured: t.route!.baseFareMinor != null && t.route!.baseFareMinor > 0n,
       seatCapacity: t.seatCapacity,
-      seatsConfirmed: confirmedBy.get(t.id) ?? 0,
+      seatsConfirmed,
+    };
+  }
+
+  /* ------------------------------------------------------ rider surface */
+
+  /** Departures a rider may browse: their side of the boundary, active services only. */
+  async listDepartures(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { isTest: true } });
+    const trips = await this.prisma.passengerTrip.findMany({
+      where: this.riderDepartureWhere(user.isTest),
+      orderBy: { scheduledDepartureAt: 'asc' },
+      take: 100,
+      include: RIDER_DEPARTURE_INCLUDE,
+    });
+    const seatCounts = await this.prisma.passengerBooking.groupBy({
+      by: ['tripId'],
+      where: { tripId: { in: trips.map((t) => t.id) }, status: 'CONFIRMED' },
+      _sum: { seats: true },
+    });
+    const confirmedBy = new Map(seatCounts.map((s) => [s.tripId, s._sum.seats ?? 0]));
+    return trips.map((t) => this.serializeRiderDeparture(t, confirmedBy.get(t.id) ?? 0));
+  }
+
+  /**
+   * One departure, in exactly the list's shape plus the route's ordered stops
+   * (the one thing the list omits). Anything the list would not show — the
+   * other side of the boundary, an inactive route or operator, a departure
+   * that already left or stopped taking bookings — is "not found" here too:
+   * an id is not a probe, and existence is not a hint.
+   */
+  async getDeparture(userId: string, tripId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { isTest: true } });
+    const trip = await this.prisma.passengerTrip.findFirst({
+      where: { id: tripId, ...this.riderDepartureWhere(user.isTest) },
+      include: RIDER_DEPARTURE_DETAIL_INCLUDE,
+    });
+    if (!trip) throw new NotFoundException('Departure not found.');
+    const sold = await this.prisma.passengerBooking.aggregate({
+      where: { tripId: trip.id, status: 'CONFIRMED' },
+      _sum: { seats: true },
+    });
+    const base = this.serializeRiderDeparture(trip, sold._sum.seats ?? 0);
+    return { ...base, route: { ...base.route, stops: trip.route!.stops } };
+  }
+
+  /**
+   * The services that exist at all — the same PassengerRoute rows the operator
+   * manages and every departure hangs off, NOT a second list that could drift.
+   * With nothing scheduled the departures list is honestly empty; this is how
+   * a rider still learns what runs, when the operator says it runs
+   * (scheduleNote is a label, not a calendar), and whether it is priced yet.
+   * Scoping matches listDepartures exactly: the rider's side of the boundary,
+   * active routes, active operators. An unpriced service is deliberately
+   * SHOWN, with fareConfigured false — that is the pricing-unavailable state;
+   * booking it still refuses at the fare gate.
+   */
+  async listServices(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { isTest: true } });
+    const routes = await this.prisma.passengerRoute.findMany({
+      where: { isTest: user.isTest, isActive: true, providerProfile: { isActive: true } },
+      orderBy: [{ originCity: 'asc' }, { name: 'asc' }],
+      take: 100,
+      include: {
+        stops: RIDER_STOPS_ARG,
+        providerProfile: { select: { businessName: true } },
+      },
+    });
+    return routes.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      originDistrict: r.originDistrict,
+      originCity: r.originCity,
+      destinationDistrict: r.destinationDistrict,
+      destinationCity: r.destinationCity,
+      scheduleNote: r.scheduleNote,
+      durationMinutes: r.durationMinutes,
+      stops: r.stops,
+      operator: r.providerProfile.businessName,
+      // Verbatim, never computed on — same reporting rule as the departures list.
+      baseFareMinor: r.baseFareMinor == null ? null : Number(r.baseFareMinor),
+      fareConfigured: r.baseFareMinor != null && r.baseFareMinor > 0n,
     }));
   }
 

@@ -13,7 +13,10 @@
  *    driving a departure holds no seat on it;
  *  - isTest symmetry end to end, including the reverse order: a rider with
  *    live bookings cannot be flipped across the boundary;
- *  - manual staffing only, fleet drivers only, approved vehicles only.
+ *  - manual staffing only, fleet drivers only, approved vehicles only;
+ *  - rider discovery answers from the SAME door as the departures list: one
+ *    visibility predicate for services, list and by-id detail, so nothing is
+ *    readable by id that the list would have hidden.
  *
  * Every route, departure, booking, assignment and movement step is created
  * THROUGH the API — including, since BMPL-39, the fleet-affiliation link
@@ -468,6 +471,144 @@ describe('the simulation boundary, end to end', () => {
 
     await post(rider.cookies, `passenger/bookings/${b.body.id}/cancel`);
     expect((await post(admin, 'admin/users/test-flag', { userId: rider.userId, isTest: true, reason: 'Now it is fine.' })).status).toBe(201);
+  });
+});
+
+describe('rider discovery and departure detail', () => {
+  it('services are discoverable with nothing scheduled, the unpriced ones honestly so', async () => {
+    const op = await makeProvider('Test Discovery Lines');
+    const unpriced = await post(op.cookies, 'passenger/provider/routes', routeBody());
+    expect(unpriced.status).toBe(201);
+    const stops = await put(op.cookies, `passenger/provider/routes/${unpriced.body.id}/stops`, [
+      { district: 'TOLEDO', city: 'Test Landing Middle', name: 'Market' },
+    ] as unknown as object);
+    expect(stops.status).toBe(200);
+    const priced = await post(op.cookies, 'passenger/provider/routes', routeBody(2500));
+    expect(priced.status).toBe(201);
+
+    const rider = await registerUser(`pb_disc_${uniq()}@example.com`);
+    // Nothing is scheduled, so the departures list is honestly empty — this
+    // was the whole gap: the rider could not learn the services exist at all.
+    expect((await get(rider.cookies, 'passenger/departures')).body).toEqual([]);
+
+    const services = await get(rider.cookies, 'passenger/services');
+    expect(services.status).toBe(200);
+    const u = services.body.find((s: { id: string }) => s.id === unpriced.body.id);
+    expect(u).toMatchObject({
+      originDistrict: 'TOLEDO',
+      originCity: 'Test Landing North',
+      destinationCity: 'Test Landing South',
+      scheduleNote: 'Mon-Sat 06:30',
+      operator: 'Test Discovery Lines',
+      // The pricing-unavailable state, shown rather than hidden: no figure,
+      // and no figure invented.
+      baseFareMinor: null,
+      fareConfigured: false,
+    });
+    expect(u.stops).toEqual([
+      { sequence: 1, district: 'TOLEDO', city: 'Test Landing Middle', name: 'Market', latitude: null, longitude: null },
+    ]);
+    const p = services.body.find((s: { id: string }) => s.id === priced.body.id);
+    expect(p).toMatchObject({ baseFareMinor: 2500, fareConfigured: true, stops: [] });
+  });
+
+  it('the detail is the list entry plus the ordered stops, knows its seat arithmetic, and opens no way past the fare gate', async () => {
+    const op = await makeProvider('Test Detail Lines');
+    // Stops go on before the departure publishes (the promise then freezes) —
+    // ordered by the OPERATOR, and deliberately not in geographic order, so a
+    // sorted answer would be caught.
+    const route = await post(op.cookies, 'passenger/provider/routes', routeBody(2500));
+    expect(route.status).toBe(201);
+    const stopsPut = await put(op.cookies, `passenger/provider/routes/${route.body.id}/stops`, [
+      { district: 'TOLEDO', city: 'Test Landing East' },
+      { district: 'TOLEDO', city: 'Test Landing Middle', name: 'Market' },
+    ] as unknown as object);
+    expect(stopsPut.status).toBe(200);
+    const trip = await post(op.cookies, 'passenger/provider/trips', { routeId: route.body.id, scheduledDepartureAt: TOMORROW().toISOString() });
+    expect(trip.status).toBe(201);
+    const tripId = trip.body.id as string;
+    const rider = await registerUser(`pb_det_${uniq()}@example.com`);
+
+    const list = await get(rider.cookies, 'passenger/departures');
+    const entry = list.body.find((d: { id: string }) => d.id === tripId);
+    expect(entry).toBeTruthy();
+    // The list stays exactly as it was — stops live on the detail.
+    expect(entry.route).not.toHaveProperty('stops');
+    const detail = await get(rider.cookies, `passenger/departures/${tripId}`);
+    expect(detail.status).toBe(200);
+    // The rider at an intermediate stop gets their answer: the operator's
+    // sequence verbatim — East first, Market second, exactly as stored.
+    expect(detail.body.route.stops).toEqual([
+      { sequence: 1, district: 'TOLEDO', city: 'Test Landing East', name: null, latitude: null, longitude: null },
+      { sequence: 2, district: 'TOLEDO', city: 'Test Landing Middle', name: 'Market', latitude: null, longitude: null },
+    ]);
+    // Drift guard: one predicate, one serializer — apart from the stops, the
+    // detail IS the list entry.
+    const { stops: _stops, ...detailRoute } = detail.body.route;
+    expect({ ...detail.body, route: detailRoute }).toEqual(entry);
+
+    // Staff it and sell some seats; the detail keeps counting like the list.
+    const driver = await makeFleetDriver(op);
+    const vehicleId = await makeFleetVehicle(op, 12);
+    expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
+    const buyer = await registerUser(`pb_det2_${uniq()}@example.com`);
+    const b = await post(buyer.cookies, 'passenger/bookings', { tripId, seats: 3 });
+    expect((await post(op.cookies, `passenger/provider/bookings/${b.body.id}/confirm`)).status).toBe(201);
+    const after = await get(rider.cookies, `passenger/departures/${tripId}`);
+    expect(after.body.status).toBe('ASSIGNED');
+    expect(after.body.seatCapacity).toBe(12);
+    expect(after.body.seatsConfirmed).toBe(3);
+
+    // An unpriced departure is READABLE — that is the pricing-unavailable
+    // state doing its job — and booking it still refuses at the gate.
+    const { tripId: unpricedTrip } = await makeDeparture(op);
+    const d2 = await get(rider.cookies, `passenger/departures/${unpricedTrip}`);
+    expect(d2.status).toBe(200);
+    expect(d2.body.fareConfigured).toBe(false);
+    expect(d2.body.baseFareMinor).toBeNull();
+    const refused = await post(rider.cookies, 'passenger/bookings', { tripId: unpricedTrip, seats: 1 });
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toMatch(/pricing.*not available/i);
+  });
+
+  it('what the list would hide, discovery and detail hide too: wrong boundary side, inactive route, suspended operator, unknown id', async () => {
+    // A test-side network, built through the product then flipped by a moderator.
+    const testOp = await makeProvider('Test Otherside Lines');
+    const moderator = await seedLimitedAdmin(ctx.prisma, `pb_dmod_${uniq()}@example.bz`, ['passengers.moderate']);
+    const mc = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: moderator.email, password: moderator.password }));
+    expect((await patch(mc, `admin/passengers/providers/${testOp.profileId}/test-mode`, { isTest: true })).status).toBe(200);
+    const testDep = await makeDeparture(testOp, 2000);
+
+    // Two real-side services, both visible first so each later refusal fails
+    // for its own reason and not a broken fixture.
+    const opA = await makeProvider('Test Dormant Route Lines');
+    const depA = await makeDeparture(opA, 2000);
+    const opB = await makeProvider('Test Suspended Discovery');
+    const depB = await makeDeparture(opB, 2000);
+    const rider = await registerUser(`pb_neg_${uniq()}@example.com`);
+    const before = await get(rider.cookies, 'passenger/services');
+    expect(before.body.map((s: { id: string }) => s.id)).toEqual(expect.arrayContaining([depA.routeId, depB.routeId]));
+    expect((await get(rider.cookies, `passenger/departures/${depA.tripId}`)).status).toBe(200);
+    expect((await get(rider.cookies, `passenger/departures/${depB.tripId}`)).status).toBe(200);
+
+    // The other side of the boundary: not listed, and not readable by id.
+    expect(before.body.map((s: { id: string }) => s.id)).not.toContain(testDep.routeId);
+    expect((await get(rider.cookies, `passenger/departures/${testDep.tripId}`)).status).toBe(404);
+
+    // A route the operator retired disappears from both answers.
+    expect((await patch(opA.cookies, `passenger/provider/routes/${depA.routeId}`, { isActive: false })).status).toBe(200);
+    // A suspended operator's services go with them. Raw write by necessity —
+    // no product path can suspend an operator (the S2 review's F5, open).
+    await ctx.prisma.passengerProviderProfile.update({ where: { id: opB.profileId }, data: { isActive: false } });
+
+    const afterIds = (await get(rider.cookies, 'passenger/services')).body.map((s: { id: string }) => s.id);
+    expect(afterIds).not.toContain(depA.routeId);
+    expect(afterIds).not.toContain(depB.routeId);
+    expect((await get(rider.cookies, `passenger/departures/${depA.tripId}`)).status).toBe(404);
+    expect((await get(rider.cookies, `passenger/departures/${depB.tripId}`)).status).toBe(404);
+
+    // An unknown id is exactly as unknown as a hidden one.
+    expect((await get(rider.cookies, 'passenger/departures/nonexistent-departure-id')).status).toBe(404);
   });
 });
 
