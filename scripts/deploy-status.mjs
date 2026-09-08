@@ -7,8 +7,21 @@
  * deploys, and changes nothing anywhere.
  *
  *   node scripts/deploy-status.mjs
- *   node scripts/deploy-status.mjs --web-route /dashboard/passenger
+ *   node scripts/deploy-status.mjs --web              # + MEASURE the web build's commit
+ *   node scripts/deploy-status.mjs --web-route /dashboard/passenger   # PROBE one route
  *   node scripts/deploy-status.mjs --json
+ *
+ * --web reads the web origin's unauthenticated /health, which reports the
+ * commit BAKED INTO THE BUILD BEING SERVED (BMPL-67) — a measurement, where
+ * --web-route is an inference from behaviour. Web verdicts are ancestry-only
+ * (CURRENT / BEHIND / DIVERGED / UNKNOWN): Vercel's rebuild rules are not in
+ * this repository, so the API's NOTHING_TO_DELIVER refinement is deliberately
+ * NOT claimed for web — a web BEHIND means "commits exist since this build",
+ * which may be entirely legitimate (an api-only merge), and the output says
+ * so. UNKNOWN (endpoint unreachable, or a build with no commit identity) is
+ * never reported as agreement: "cannot verify" and "stale" are different
+ * answers and the reader must always know which one they got. Exit codes
+ * remain the API's alone; the web result is reported, not scored.
  *
  * Verdicts and exit codes:
  *   CURRENT  (0) production's commit is main's head
@@ -73,6 +86,16 @@ const has = (name) => args.includes(`--${name}`);
 const apiBase = flag('api-base') ?? DEFAULTS.apiBase;
 const webBase = flag('web-base') ?? DEFAULTS.webBase;
 const remote = flag('remote') ?? DEFAULTS.remote;
+/**
+ * --web MEASURES the deployed web build's commit from the web origin's
+ * /health (BMPL-67: unauthenticated, outside every gated prefix, reports the
+ * commit baked in at build time). This is a MEASUREMENT, not a probe — the
+ * output says so, because the two answer different questions: a measurement
+ * reads what the build IS; the --web-route probe infers what the router
+ * serves, and only a difference against its control is evidence there.
+ * Exit codes stay the API's alone; the web result is reported, not scored.
+ */
+const webCheck = has('web');
 /**
  * Route paths may arrive mangled: Git Bash (MSYS) rewrites a leading-slash
  * argument into a Windows path (`/dashboard/x` -> `C:/Program Files/Git/dashboard/x`).
@@ -154,7 +177,7 @@ function matchesAny(file, regexes) {
   return regexes.some((r) => r.test(file));
 }
 
-function classify(prodCommit, main) {
+function classify(prodCommit, main, { refineDeliverable = true } = {}) {
   if (main.startsWith(prodCommit) || prodCommit.startsWith(main)) return { verdict: 'CURRENT' };
   if (!inRepo()) {
     // Without local history we know the commits differ but not their
@@ -176,6 +199,20 @@ function classify(prodCommit, main) {
   if (!ancestor) return { verdict: 'DIVERGED', note: `production's commit ${prodCommit} is not an ancestor of origin/main` };
   const count = git('rev-list', '--count', `${full}..${main}`);
   const missing = git('log', '--oneline', `${full}..${main}`);
+
+  // The deliverable refinement is RAILWAY-SPECIFIC: watchPatterns is the API
+  // deploy's own config. The web deployment's rebuild rules (Vercel's) are
+  // not in this repository, so callers judging the web pass
+  // refineDeliverable:false and get plain ancestry verdicts — claiming a
+  // NOTHING_TO_DELIVER we cannot derive would be a guess wearing a calm face.
+  if (!refineDeliverable) {
+    return {
+      count: count ? Number(count) : null,
+      missing: missing ? missing.split('\n') : [],
+      verdict: 'BEHIND',
+      note: "commits exist since this build; whether the web deploy should have rebuilt is not knowable from this repository (Vercel's rules live outside it)",
+    };
+  }
 
   // BEHIND must mean "production is MISSING something it should have".
   // A web-only or docs-only merge moves main without ever triggering an API
@@ -292,6 +329,33 @@ async function main() {
 
   if (webRoute) result.web = { route: webRoute, base: webBase, ...(await probeWeb(webRoute)) };
 
+  if (webCheck) {
+    const webHealth = await fetchJson(`${webBase}/health`);
+    if (webHealth.error || typeof webHealth.body?.commit !== 'string' || !webHealth.body.commit) {
+      // Unreachable or commit-less is UNKNOWN — an unverifiable build must
+      // never be reported as agreement with main.
+      result.webBuild = {
+        verdict: 'UNKNOWN',
+        reason: webHealth.error
+          ? `web /health unanswerable (${webHealth.error})`
+          : 'web /health carries no commit (a build without commit identity)',
+        main: mainSha ? mainSha.slice(0, 7) : null,
+      };
+    } else if (!mainSha) {
+      result.webBuild = { verdict: 'UNKNOWN', reason: 'could not read origin/main from the remote', deployed: webHealth.body.commit };
+    } else {
+      const c = classify(webHealth.body.commit, mainSha, { refineDeliverable: false });
+      result.webBuild = {
+        verdict: c.verdict,
+        deployed: webHealth.body.commit,
+        main: mainSha.slice(0, 7),
+        ...(c.count != null ? { commitsSince: c.count } : {}),
+        ...(c.missing?.length ? { since: c.missing } : {}),
+        ...(c.note ? { note: c.note } : {}),
+      };
+    }
+  }
+
   if (asJson) {
     console.log(JSON.stringify(result, null, 2));
   } else {
@@ -309,7 +373,17 @@ async function main() {
     if (a.note) console.log(`  note: ${a.note}`);
     for (const line of a.undelivered ?? []) console.log(`  undelivered: ${line}`);
     for (const line of a.aheadUnwatched ?? []) console.log(`  ahead, unwatched: ${line}`);
-    if (result.web) console.log(`WEB ${result.web.verdict} — ${result.web.route} on ${result.web.base}: ${result.web.detail}`);
+    if (result.web) console.log(`WEB ROUTE (probe) ${result.web.verdict} — ${result.web.route} on ${result.web.base}: ${result.web.detail}`);
+    if (result.webBuild) {
+      const w = result.webBuild;
+      if (w.verdict === 'CURRENT') console.log(`WEB BUILD (measured) CURRENT — the deployed web build is ${w.deployed}, which is origin/main (${w.main})`);
+      else if (w.verdict === 'BEHIND')
+        console.log(`WEB BUILD (measured) BEHIND — deployed build is ${w.deployed}, origin/main is ${w.main}${w.commitsSince != null ? ` (${w.commitsSince} commit${w.commitsSince === 1 ? '' : 's'} since)` : ''}`);
+      else if (w.verdict === 'DIVERGED') console.log(`WEB BUILD (measured) DIVERGED — deployed build is ${w.deployed}, origin/main is ${w.main}`);
+      else console.log(`WEB BUILD UNKNOWN — ${w.reason} (an unverifiable build is never reported as current)`);
+      if (w.note) console.log(`  note: ${w.note}`);
+      for (const line of w.since ?? []) console.log(`  since this build: ${line}`);
+    }
   }
 
   process.exitCode = EXIT[result.api.verdict] ?? EXIT.UNKNOWN;
