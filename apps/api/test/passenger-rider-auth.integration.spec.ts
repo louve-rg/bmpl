@@ -130,6 +130,29 @@ describe('the rider auth boundary — every endpoint refuses the unauthorized an
     expect(view.body.map((d: { id: string }) => d.id)).toContain(tripId);
   });
 
+  it('discovery and departure detail: the two newest rider reads carry the same boundary as the oldest', async () => {
+    // The charter of this file: NO rider endpoint without a pinned guard.
+    // These two arrived with rider discovery; they are pinned the same day.
+    const op = await makeProvider('Test Boundary Discovery');
+    const tripId = await makePricedDeparture(op);
+    const route = await ctx.prisma.passengerTrip.findUniqueOrThrow({ where: { id: tripId }, select: { routeId: true } });
+
+    expect((await anonGet('passenger/services')).status).toBe(401);
+    expect((await anonGet(`passenger/departures/${tripId}`)).status).toBe(401);
+    const suspended = await makeSuspendedCustomer();
+    expect((await get(suspended.cookies, 'passenger/services')).status).toBe(403);
+    expect((await get(suspended.cookies, `passenger/departures/${tripId}`)).status).toBe(403);
+
+    // The twin successes, on content: the same requests answer the rider.
+    const rider = await registerUser(`ra_r5_${uniq()}@example.com`);
+    const services = await get(rider.cookies, 'passenger/services');
+    expect(services.status).toBe(200);
+    expect(services.body.map((s: { id: string }) => s.id)).toContain(route.routeId);
+    const detail = await get(rider.cookies, `passenger/departures/${tripId}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.id).toBe(tripId);
+  });
+
   it('booking create: logged-out and suspended write nothing; the same body books 201 for the rider', async () => {
     const op = await makeProvider('Test Boundary Booked');
     const tripId = await makePricedDeparture(op);

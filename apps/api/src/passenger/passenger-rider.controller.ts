@@ -12,10 +12,11 @@ import type { AuthContext } from '../common/auth-context';
 import { PassengerOperationsService } from './passenger-operations.service';
 
 /**
- * The rider's side of passenger transport: browse published departures on
- * their side of the simulation boundary, request seats, and manage their own
- * bookings. Every query is self-scoped on userId; the fare gate refuses a
- * booking on any service whose operator has not published a fare.
+ * The rider's side of passenger transport: discover what services run, browse
+ * published departures on their side of the simulation boundary, request
+ * seats, and manage their own bookings. Every query is self-scoped on userId;
+ * the fare gate refuses a booking on any service whose operator has not
+ * published a fare.
  */
 @Roles('CUSTOMER')
 @Controller('passenger')
@@ -26,9 +27,19 @@ export class PassengerRiderController {
     return { userId: user.userId, ipAddress: req.ip, sessionId: user.sessionId };
   }
 
+  @Get('services')
+  listServices(@CurrentUser() u: AuthContext) {
+    return this.ops.listServices(u.userId);
+  }
+
   @Get('departures')
   listDepartures(@CurrentUser() u: AuthContext) {
     return this.ops.listDepartures(u.userId);
+  }
+
+  @Get('departures/:id')
+  getDeparture(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.ops.getDeparture(u.userId, id);
   }
 
   @Post('bookings')
