@@ -12,6 +12,7 @@ import {
   legExceptionSchema,
   legHandoffSchema,
   reassignShipmentLegSchema,
+  resolveLegExceptionSchema,
   shipmentListSchema,
   shipmentQuoteSchema,
   updateCourierLaneSchema,
@@ -28,6 +29,7 @@ import {
   type LegExceptionInput,
   type LegHandoffInput,
   type ReassignShipmentLegInput,
+  type ResolveLegExceptionInput,
   type ShipmentListInput,
   type ShipmentQuoteInput,
   type UpdateCourierLaneInput,
@@ -311,6 +313,23 @@ export class AdminLogisticsController {
   @Post('legs/:id/exception')
   exception(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legExceptionSchema)) dto: LegExceptionInput) {
     return this.shipments.flagException(id, dto, { userId: u.userId });
+  }
+
+  /**
+   * The way back out of an exception. `logistics.operate`, same as the way in:
+   * flagging and resolving are the same operator's job. RESUME continues the
+   * leg where it stood; RELEASE_DRIVER re-queues an uncollected leg. A parcel
+   * already in a driver's hands cannot be released here — that needs a policy
+   * nobody has written, and the service refuses rather than inventing one.
+   */
+  @RequirePermission('logistics.operate')
+  @Post('legs/:id/resolve-exception')
+  resolveException(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(resolveLegExceptionSchema)) dto: ResolveLegExceptionInput,
+  ) {
+    return this.shipments.resolveException(id, dto, { userId: u.userId });
   }
 
   /** The recipient walked in and picked it up. No leg moves, so nothing else can

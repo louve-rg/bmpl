@@ -183,10 +183,11 @@ paths:
       summary: Cancel own shipment (refused once any leg is moving)
       description: >-
         Owner only. Refused with 400 ("contact support") once any leg is
-        IN_PROGRESS — staff can still cancel via the admin route. Non-terminal
-        legs go CANCELLED, any assigned/offered driver is released and
-        notified, and the escrow hold is returned in full
-        (`ShipmentService.cancel`).
+        IN_PROGRESS — or in EXCEPTION after it had started, which is the same
+        fact (the parcel is in somebody's hands) under a different status.
+        Staff can still cancel via the admin route. Non-terminal legs go
+        CANCELLED, any assigned/offered driver is released and notified, and
+        the escrow hold is returned in full (`ShipmentService.cancel`).
       parameters:
         - { $ref: "#/components/parameters/shipmentId" }
       requestBody:
@@ -763,9 +764,10 @@ paths:
       tags: [AdminLogistics]
       summary: Record that something went wrong on a leg (logistics.operate)
       description: >-
-        One-way today: the leg goes EXCEPTION, the shipment reads EXCEPTION,
-        and no endpoint clears either — the only exit is cancelling the
-        shipment (a known, recorded gap; see DELIVERY-LIFECYCLE.md §6 gap 4).
+        The leg goes EXCEPTION, the shipment reads EXCEPTION, admins holding
+        logistics.read are alerted, and the leg stops being actionable. The
+        way back out is `POST legs/{id}/resolve-exception`; cancelling the
+        shipment remains the terminal exit.
       parameters: [ { $ref: "#/components/parameters/legId" } ]
       requestBody:
         required: true
@@ -776,6 +778,45 @@ paths:
               required: [reason]
               properties:
                 reason: { type: string, minLength: 4, maxLength: 500 }
+      responses:
+        "201":
+          description: The updated shipment, staff audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/resolve-exception:
+    post:
+      tags: [AdminLogistics]
+      summary: Resolve a leg exception — resume it, or release its driver (logistics.operate)
+      description: >-
+        The way back out of EXCEPTION. RESUME restores exactly the state the
+        leg was flagged from — IN_PROGRESS if it had started, READY if not —
+        with its driver assignment and custody chain untouched. RELEASE_DRIVER
+        re-queues an uncollected courier leg: the assignment clears, the offer
+        history closes, and the leg returns to the dispatch pool (manual
+        assignment, or the sweeper where automatic dispatch is on). Refused
+        with 400 once the driver has collected the parcel: what happens to a
+        parcel stranded mid-carry — where it physically goes, who pays for the
+        interrupted run, what the customer is owed — is an unresolved product
+        decision, deliberately not implemented; the outs are RESUME or a staff
+        cancellation. Also refused on a leg not in EXCEPTION, on a transport
+        (carrier) leg for RELEASE_DRIVER, and when no driver holds the leg.
+        Every resolution is audited (SHIPMENT_LEG_EXCEPTION_RESOLVED).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution, note]
+              properties:
+                resolution: { type: string, enum: [RESUME, RELEASE_DRIVER] }
+                note: { type: string, minLength: 4, maxLength: 500 }
       responses:
         "201":
           description: The updated shipment, staff audience
