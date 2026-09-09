@@ -3,17 +3,20 @@ info:
   title: BML Passenger API
   version: "1.0.0"
   description: >
-    Belize Marketplace & Logistics — the passenger transportation surface, first
-    slice: the rider journey (discover services, browse departures, request and
-    manage seat bookings), passenger-driver self-service (profile, vehicles,
-    availability, eligibility), fleet-operator self-service (profile, fleet
-    vehicles), and the assigned driver's movement routes. The operator network
-    surface (routes/departures/booking answers), fleet affiliation, and the
-    admin surfaces are NOT yet documented here — tracked as BMPL-102. All paths
-    are under the `/api` prefix. Every endpoint was documented from its
-    controller and its serializer read at `origin/main`
-    (`passenger-rider.controller.ts`, `passenger-driver.controller.ts`,
-    `passenger-provider.controller.ts`, `passenger-driver-trips.controller.ts`
+    Belize Marketplace & Logistics — the complete passenger transportation
+    surface: the rider journey (discover services, browse departures, request
+    and manage seat bookings), passenger-driver self-service (profile,
+    vehicles, availability, eligibility), fleet-operator self-service (profile,
+    fleet vehicles), the assigned driver's movement routes, the operator
+    network surface (routes, stops, departures, staffing, booking answers),
+    fleet affiliation on both sides (mutual consent), and the admin oversight
+    and moderation surfaces. All paths are under the `/api` prefix. Every
+    endpoint was documented from its controller and its serializer read at
+    `origin/main` (`passenger-rider.controller.ts`,
+    `passenger-driver.controller.ts`, `passenger-provider.controller.ts`,
+    `passenger-driver-trips.controller.ts`, `passenger-network.controller.ts`,
+    `passenger-driver-affiliations.controller.ts`,
+    `admin-passenger.controller.ts`, `admin-passenger-network.controller.ts`
     and the services they call) — nothing is described that was not read.
 
     THE FARE GATE, exactly as the code behaves (`fareGate()`,
@@ -63,6 +66,28 @@ tags:
       The assigned driver's movement surface — requires an APPROVED
       PASSENGER_DRIVER role. EN_ROUTE_TO_PICKUP is deliberately absent: that is
       the on-demand state, and on-demand is not built.
+  - name: OperatorNetwork
+    description: >-
+      Operator self-service over their OWN routes and departures — requires an
+      APPROVED PASSENGER_PROVIDER role (publishing a service is operational,
+      unlike the CUSTOMER-gated application surface). Every query is scoped to
+      the caller's own provider profile. Includes the operator's half of fleet
+      affiliation and their booking answers (confirm/cancel) and staffing.
+  - name: DriverAffiliations
+    description: >-
+      The driver's half of fleet affiliation — requires an APPROVED
+      PASSENGER_DRIVER role. Mutual consent: the driver can ASK (request) and
+      ANSWER an operator's ask (accept/decline); no endpoint can turn the
+      driver's own request into an active affiliation — that consent is the
+      operator's to give.
+  - name: AdminPassengers
+    description: >-
+      Admin oversight and moderation. Reads sit behind the `passengers.read`
+      permission, mutations behind `passengers.moderate` — the drivers.read /
+      drivers.moderate split of the delivery side, mirrored. An admin-created
+      route still BELONGS to the operator named in the request and inherits
+      that operator's simulation-boundary side. There is deliberately NO admin
+      affiliation mutation route — nobody consents on someone else's behalf.
 security:
   - cookieAuth: []
 
@@ -564,6 +589,922 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  # ---- Operator network: routes and stops ----
+  /passenger/provider/routes:
+    get:
+      tags: [OperatorNetwork]
+      summary: The operator's own routes, newest first, with stops and trip counts
+      responses:
+        "200":
+          description: Own routes (stops ordered, tripCount included)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/OperatorRoute" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [OperatorNetwork]
+      summary: Describe a service — an operator-entered fact about Belize
+      description: >-
+        Nothing is derived or defaulted from geography; the operator declares
+        which towns their service connects, in what order. `baseFareMinor` is
+        their commercial declaration (0 keeps the booking gate closed).
+        `isTest` is never accepted — a route inherits the operator's
+        boundary side. A suspended operator can create no new route.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RouteInput" }
+      responses:
+        "201":
+          description: The created route
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorRoute" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/routes/{id}:
+    get:
+      tags: [OperatorNetwork]
+      summary: One of the operator's own routes
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      responses:
+        "200":
+          description: The route
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorRoute" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [OperatorNetwork]
+      summary: Update a route — endpoints freeze once departures exist; the fare stays editable
+      description: >-
+        Moving the route's origin/destination is refused once ANY departure
+        exists (cancelled ones included) — a trip row is history that
+        reconstructs against the route's geography; create a new route
+        instead. The fare is money configuration, not geography: it stays
+        editable after departures exist (no charge has occurred; bookings
+        snapshot nothing), and every change lands in the audit trail.
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [ { $ref: "#/components/schemas/RouteInput" } ]
+              description: All fields optional (stops excluded — use the stops route); also accepts isActive
+      responses:
+        "200":
+          description: The updated route
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorRoute" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/routes/{id}/stops:
+    put:
+      tags: [OperatorNetwork]
+      summary: Replace the route's ordered stops as a whole list
+      description: >-
+        Order comes from array position — a client never numbers stops itself.
+        Refused once the route has ANY departures, cancelled ones included: a
+        trip row means the route was operated as described, so the description
+        stops being editable.
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              maxItems: 50
+              items: { $ref: "#/components/schemas/RouteStopInput" }
+      responses:
+        "200":
+          description: The route with its new stops
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorRoute" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Operator network: departures, staffing, booking answers ----
+  /passenger/provider/trips:
+    get:
+      tags: [OperatorNetwork]
+      summary: The operator's own departures, with seat arithmetic
+      parameters:
+        - { name: routeId, in: query, required: false, schema: { type: string } }
+        - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/TripStatus" } }
+      responses:
+        "200":
+          description: Departures (seatsConfirmed / seatsRemaining included; only CONFIRMED bookings spend seats)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/OperatorTrip" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [OperatorNetwork]
+      summary: Publish a departure of one of the operator's own routes
+      description: >-
+        Every creatable trip is `kind: SCHEDULED` — the ON_DEMAND enum value
+        has no writer. An inactive route, or a suspended operator, publishes
+        nothing (reads, edits and cancellations keep working so a suspended
+        operator can wind down). The reference (BML-T…) is unique across trips
+        AND shipments.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TripCreateInput" }
+      responses:
+        "201":
+          description: The published departure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorTrip" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/trips/{id}/cancel:
+    post:
+      tags: [OperatorNetwork]
+      summary: Cancel a departure — SCHEDULED or ASSIGNED only
+      description: >-
+        Anything in progress is people on a vehicle, and that is not a
+        cancellation. Riders on the departure are cancelled WITH it, attributed
+        to the same party, and the staffing record is closed truthfully.
+      parameters: [ { $ref: "#/components/parameters/tripId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The cancelled departure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorTrip" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/trips/{id}/assign:
+    post:
+      tags: [OperatorNetwork]
+      summary: Staff a departure with a fleet driver and a vehicle — manual only, no reassignment path
+      description: >-
+        Assignment is manual by design (the delivery lesson — no automatic
+        dispatch exists for passengers), and only an unstaffed SCHEDULED
+        departure can be assigned; the absence of a reassignment path is
+        itself a guarantee. Gates, each read in `assignTrip`
+        (`passenger-operations.service.ts`): the driver must be active, on the
+        trip's boundary side, hold an APPROVED PASSENGER_DRIVER role
+        (re-checked live), belong to the operator's own fleet, and not hold a
+        booking on the very departure they would drive (the self-service
+        invariant, on user id); the vehicle must be approved, on the right
+        boundary side, and either the fleet's or the assigned driver's own.
+        Seat capacity is snapshotted from the vehicle HERE — it is what
+        confirmations sell — and an audited staffing record is written.
+      parameters: [ { $ref: "#/components/parameters/tripId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [driverProfileId, vehicleId]
+              properties:
+                driverProfileId: { type: string }
+                vehicleId: { type: string }
+      responses:
+        "201":
+          description: The staffing result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TripAssignResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/bookings:
+    get:
+      tags: [OperatorNetwork]
+      summary: Bookings on the operator's own departures, newest first (up to 300)
+      parameters:
+        - { name: tripId, in: query, required: false, schema: { type: string } }
+        - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/BookingStatus" } }
+      responses:
+        "200":
+          description: Bookings with trip context and passenger name
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StaffBooking" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/bookings/{id}/confirm:
+    post:
+      tags: [OperatorNetwork]
+      summary: Confirm a booking — the moment a seat is actually held; fails closed three ways
+      description: >-
+        Only a REQUESTED booking on a still-bookable departure confirms, and it
+        fails closed three ways (`confirmBooking`): no configured fare (the
+        fare gate holds at confirmation too — a fare unset since the request
+        still refuses), no assigned vehicle (capacity unknowable — "assign a
+        vehicle first"), or not enough seats left. The capacity sum runs under
+        a row lock on the trip so concurrent confirmations serialize instead
+        of overselling the last seat. The response is the bare booking row
+        (trip-derived fields null).
+      parameters: [ { $ref: "#/components/parameters/bookingId" } ]
+      responses:
+        "201":
+          description: The CONFIRMED booking (bare row)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiderBooking" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/bookings/{id}/cancel:
+    post:
+      tags: [OperatorNetwork]
+      summary: Cancel a booking on one of the operator's own departures
+      description: >-
+        Attributed `cancelledBy: PROVIDER`, audited, and the rider is notified.
+        Refused once the departure has begun (only the rider's own REQUESTED
+        withdrawal survives that rule). Bare-row response.
+      parameters: [ { $ref: "#/components/parameters/bookingId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The cancelled booking (bare row)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiderBooking" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Fleet affiliation: the operator's half ----
+  /passenger/provider/affiliations:
+    get:
+      tags: [OperatorNetwork]
+      summary: The fleet's affiliations, newest first (up to 200), each with the driver's identity
+      parameters:
+        - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/AffiliationStatus" } }
+      responses:
+        "200":
+          description: Affiliations with a driver identity block
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProviderAffiliation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/affiliations/invite:
+    post:
+      tags: [OperatorNetwork]
+      summary: Invite a driver into the fleet — creates a PENDING ask, never an ACCEPTED row
+      description: >-
+        Mutual consent: the driver must accept. One live ask per pair in either
+        direction is a database fact (a partial unique index refuses twin
+        pending asks that race past the pre-check) — the second asker answers
+        the existing ask with the proper verb instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [driverProfileId]
+              properties:
+                driverProfileId: { type: string }
+                message: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The PENDING invitation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Affiliation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/affiliations/{id}/approve:
+    post:
+      tags: [OperatorNetwork]
+      summary: Approve a driver's join request — the operator's consent
+      description: >-
+        Answers a DRIVER-initiated ask only; no endpoint turns the operator's
+        own invitation into an active affiliation. Acceptance is the single
+        place in the whole API that sets the driver's fleet pointer, in the
+        same transaction, conditionally — a driver can never land in two
+        fleets.
+      parameters: [ { $ref: "#/components/parameters/affiliationId" } ]
+      responses:
+        "201":
+          description: The ACCEPTED affiliation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Affiliation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/affiliations/{id}/decline:
+    post:
+      tags: [OperatorNetwork]
+      summary: Decline a driver's join request
+      parameters: [ { $ref: "#/components/parameters/affiliationId" } ]
+      responses:
+        "201":
+          description: The DECLINED affiliation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Affiliation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/affiliations/{id}/withdraw:
+    post:
+      tags: [OperatorNetwork]
+      summary: Withdraw the operator's own pending invitation
+      parameters: [ { $ref: "#/components/parameters/affiliationId" } ]
+      responses:
+        "201":
+          description: The WITHDRAWN affiliation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Affiliation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/affiliations/{id}/end:
+    post:
+      tags: [OperatorNetwork]
+      summary: End an active affiliation — unilateral, either side may dissolve
+      description: >-
+        Consent creates the relationship; either side ends it alone. Departures
+        already staffed stay staffed; only NEW staffing refuses afterwards.
+      parameters: [ { $ref: "#/components/parameters/affiliationId" } ]
+      responses:
+        "201":
+          description: The ENDED affiliation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Affiliation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Fleet affiliation: the driver's half ----
+  /passenger/driver/affiliations:
+    get:
+      tags: [DriverAffiliations]
+      summary: The driver's affiliations, newest first (up to 200), each with the operator's identity
+      parameters:
+        - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/AffiliationStatus" } }
+      responses:
+        "200":
+          description: Affiliations with a provider identity block
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DriverAffiliation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/driver/affiliations/request:
+    post:
+      tags: [DriverAffiliations]
+      summary: Ask to join a fleet — creates a PENDING ask the operator must approve
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [providerProfileId]
+              properties:
+                providerProfileId: { type: string }
+                message: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The PENDING request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Affiliation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/driver/affiliations/{id}/accept:
+    post:
+      tags: [DriverAffiliations]
+      summary: Accept an operator's invitation — the driver's consent
+      description: >-
+        Answers a PROVIDER-initiated ask only. Acceptance sets the driver's
+        fleet pointer in the same transaction, conditionally — the single
+        writer of that pointer in the whole API, so a driver can never land in
+        two fleets.
+      parameters: [ { $ref: "#/components/parameters/affiliationId" } ]
+      responses:
+        "201":
+          description: The ACCEPTED affiliation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Affiliation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/driver/affiliations/{id}/decline:
+    post:
+      tags: [DriverAffiliations]
+      summary: Decline an operator's invitation
+      parameters: [ { $ref: "#/components/parameters/affiliationId" } ]
+      responses:
+        "201":
+          description: The DECLINED affiliation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Affiliation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/driver/affiliations/{id}/withdraw:
+    post:
+      tags: [DriverAffiliations]
+      summary: Withdraw the driver's own pending request
+      parameters: [ { $ref: "#/components/parameters/affiliationId" } ]
+      responses:
+        "201":
+          description: The WITHDRAWN affiliation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Affiliation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/driver/affiliations/{id}/end:
+    post:
+      tags: [DriverAffiliations]
+      summary: Leave the fleet — unilateral, either side may dissolve
+      parameters: [ { $ref: "#/components/parameters/affiliationId" } ]
+      responses:
+        "201":
+          description: The ENDED affiliation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Affiliation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Admin: supply oversight and moderation ----
+  /admin/passengers/drivers:
+    get:
+      tags: [AdminPassengers]
+      summary: All passenger drivers with vetting posture (passengers.read)
+      parameters:
+        - { name: district, in: query, required: false, schema: { $ref: "#/components/schemas/District" } }
+        - { name: availability, in: query, required: false, schema: { $ref: "#/components/schemas/Availability" } }
+        - { name: roleStatus, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Driver rows (up to 300) with role status, vehicle counts and expired-docs flag
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminDriverRow" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/passengers/drivers/{id}:
+    get:
+      tags: [AdminPassengers]
+      summary: One driver in full — profile, user, role status, fleet, vehicles (passengers.read)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: Driver profile id }
+      responses:
+        "200":
+          description: The full driver detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminDriverDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/providers:
+    get:
+      tags: [AdminPassengers]
+      summary: All transport operators with fleet posture (passengers.read)
+      responses:
+        "200":
+          description: Operator rows (up to 300) with role status, vehicle and driver counts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminProviderRow" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/passengers/drivers/{id}/test-mode:
+    patch:
+      tags: [AdminPassengers]
+      summary: Flip a driver between real and simulation (passengers.moderate; audited)
+      description: >-
+        The simulation flag is admin-set ONLY, on every passenger model. The
+        flip re-derives the driver's dependent rows and REFUSES while the
+        account has open trips or an ACCEPTED affiliation — the guards run
+        inside the flip transaction after a profile-row lock, so a flip cannot
+        race a consent into a cross-boundary link (`setDriverTestMode`,
+        `admin-passenger.service.ts`). A no-op flip returns without writing.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: Driver profile id }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TestModeInput" }
+      responses:
+        "200":
+          description: The new flag
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  displayName: { type: string }
+                  isTest: { type: boolean }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/providers/{id}/test-mode:
+    patch:
+      tags: [AdminPassengers]
+      summary: Flip an operator between real and simulation (passengers.moderate; audited)
+      description: >-
+        Same guards as the driver flip, plus: the flip re-derives every route
+        and fleet vehicle the operator owns in the same transaction — every
+        later departure inherits its side from the ROUTE. Open trips refuse the
+        flip; CLOSED trips keep their flag deliberately, as a record of which
+        side they actually ran on (`setProviderTestMode`).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: Provider profile id }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TestModeInput" }
+      responses:
+        "200":
+          description: The new flag
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  businessName: { type: string }
+                  isTest: { type: boolean }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/vehicles/{id}/approve:
+    post:
+      tags: [AdminPassengers]
+      summary: Approve a vehicle to carry passengers (passengers.moderate; audited)
+      parameters: [ { $ref: "#/components/parameters/vehicleId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The vehicle, approvalStatus APPROVED
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerVehicle" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/vehicles/{id}/reject:
+    post:
+      tags: [AdminPassengers]
+      summary: Reject a vehicle (passengers.moderate; audited)
+      parameters: [ { $ref: "#/components/parameters/vehicleId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The vehicle, approvalStatus REJECTED with the reason recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerVehicle" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Admin: network oversight (acts across ALL operators) ----
+  /admin/passengers/routes:
+    get:
+      tags: [AdminPassengers]
+      summary: Every operator's routes (passengers.read; up to 300)
+      parameters:
+        - { name: isTest, in: query, required: false, schema: { type: string, enum: ["true", "false"] } }
+      responses:
+        "200":
+          description: Routes with stops, provider identity and trip counts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/OperatorRoute" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [AdminPassengers]
+      summary: Create a route on an operator's behalf (passengers.moderate; audited)
+      description: >-
+        The request names the owning operator (`providerProfileId`) —
+        everything else is identical to the operator's own schema. The route
+        still BELONGS to that operator and inherits THEIR simulation-boundary
+        side: admin authorship changes who typed it in, not whose service it
+        is.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [ { $ref: "#/components/schemas/RouteInput" } ]
+              required: [providerProfileId]
+              properties:
+                providerProfileId: { type: string }
+      responses:
+        "201":
+          description: The created route
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorRoute" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/routes/{id}:
+    get:
+      tags: [AdminPassengers]
+      summary: One route, any operator (passengers.read)
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      responses:
+        "200":
+          description: The route
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorRoute" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [AdminPassengers]
+      summary: Update any route (passengers.moderate; same freeze rules as the operator's own)
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [ { $ref: "#/components/schemas/RouteInput" } ]
+              description: All fields optional (stops excluded); also accepts isActive
+      responses:
+        "200":
+          description: The updated route
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorRoute" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/routes/{id}/stops:
+    put:
+      tags: [AdminPassengers]
+      summary: Replace any route's stops (passengers.moderate; same freeze rule)
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              maxItems: 50
+              items: { $ref: "#/components/schemas/RouteStopInput" }
+      responses:
+        "200":
+          description: The route with its new stops
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorRoute" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/trips:
+    get:
+      tags: [AdminPassengers]
+      summary: Every operator's departures (passengers.read)
+      parameters:
+        - { name: routeId, in: query, required: false, schema: { type: string } }
+        - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/TripStatus" } }
+      responses:
+        "200":
+          description: Departures with seat arithmetic
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/OperatorTrip" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [AdminPassengers]
+      summary: Publish a departure on any route (passengers.moderate; same publish gates)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TripCreateInput" }
+      responses:
+        "201":
+          description: The published departure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorTrip" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/trips/{id}/cancel:
+    post:
+      tags: [AdminPassengers]
+      summary: Cancel any departure (passengers.moderate; SCHEDULED/ASSIGNED only, riders cancelled with it)
+      parameters: [ { $ref: "#/components/parameters/tripId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The cancelled departure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OperatorTrip" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/trips/{id}/assign:
+    post:
+      tags: [AdminPassengers]
+      summary: Staff any departure (passengers.moderate; identical gates to the operator's assign)
+      parameters: [ { $ref: "#/components/parameters/tripId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [driverProfileId, vehicleId]
+              properties:
+                driverProfileId: { type: string }
+                vehicleId: { type: string }
+      responses:
+        "201":
+          description: The staffing result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TripAssignResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/bookings:
+    get:
+      tags: [AdminPassengers]
+      summary: Seat-level booking oversight across all operators (passengers.read)
+      parameters:
+        - { name: tripId, in: query, required: false, schema: { type: string } }
+        - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/BookingStatus" } }
+      responses:
+        "200":
+          description: Bookings with trip context and passenger name (up to 300)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StaffBooking" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/passengers/bookings/{id}/confirm:
+    post:
+      tags: [AdminPassengers]
+      summary: Confirm any booking (passengers.moderate; same three fail-closed gates and row lock)
+      parameters: [ { $ref: "#/components/parameters/bookingId" } ]
+      responses:
+        "201":
+          description: The CONFIRMED booking (bare row)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiderBooking" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/bookings/{id}/cancel:
+    post:
+      tags: [AdminPassengers]
+      summary: Cancel any booking (passengers.moderate; attributed ADMIN, rider notified)
+      parameters: [ { $ref: "#/components/parameters/bookingId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The cancelled booking (bare row)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiderBooking" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -578,6 +1519,8 @@ components:
     tripId: { name: id, in: path, required: true, schema: { type: string }, description: Departure (trip) id }
     bookingId: { name: id, in: path, required: true, schema: { type: string }, description: Booking id }
     vehicleId: { name: id, in: path, required: true, schema: { type: string }, description: Vehicle id }
+    routeId: { name: id, in: path, required: true, schema: { type: string }, description: Route id }
+    affiliationId: { name: id, in: path, required: true, schema: { type: string }, description: Affiliation id }
   responses:
     ValidationError:
       description: Validation failed, or the operation is not legal in this state (plain-words message)
@@ -873,3 +1816,234 @@ components:
         status: { $ref: "#/components/schemas/TripStatus" }
         startedAt: { type: string, format: date-time }
         completedAt: { type: string, format: date-time }
+    AffiliationStatus:
+      type: string
+      enum: [PENDING, ACCEPTED, DECLINED, WITHDRAWN, ENDED]
+    AffiliationParty:
+      type: string
+      enum: [DRIVER, PROVIDER]
+    RouteStopInput:
+      type: object
+      description: Order comes from array position — a client never numbers stops itself
+      required: [district, city]
+      properties:
+        district: { $ref: "#/components/schemas/District" }
+        city: { type: string, minLength: 1, maxLength: 120 }
+        name: { type: string, maxLength: 120 }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+    RouteInput:
+      type: object
+      description: >-
+        Required fields apply to create; PATCH takes any subset (stops
+        excluded — PUT the stops route) and additionally accepts isActive.
+        `isTest` is never accepted: a route inherits the owning operator's
+        boundary side.
+      required: [name, originDistrict, originCity, destinationDistrict, destinationCity]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 2000 }
+        originDistrict: { $ref: "#/components/schemas/District" }
+        originCity: { type: string, minLength: 1, maxLength: 120 }
+        destinationDistrict: { $ref: "#/components/schemas/District" }
+        destinationCity: { type: string, minLength: 1, maxLength: 120 }
+        scheduleNote: { type: string, maxLength: 200, description: "A label the operator writes, reported verbatim — not a calendar" }
+        durationMinutes: { type: integer, minimum: 1, maximum: 10080 }
+        baseFareMinor:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+          description: >-
+            The operator's commercial declaration, BZD minor units, stored
+            verbatim. Zero means "not priced yet" and keeps the booking gate
+            closed. Nothing computes, multiplies or charges with it — per seat
+            vs per booking is unset commercial policy.
+        stops:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/RouteStopInput" }
+          description: Create only — updates go through the stops route
+    OperatorRoute:
+      type: object
+      description: >-
+        The route as its operator (or an admin) sees it
+        (`serializeRoute`, `passenger-network.service.ts`). `stops`, `provider`
+        and `tripCount` appear when the view loads them: operator/admin lists
+        and the by-id reads include stops and tripCount; admin views add the
+        provider identity.
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        originDistrict: { $ref: "#/components/schemas/District" }
+        originCity: { type: string }
+        destinationDistrict: { $ref: "#/components/schemas/District" }
+        destinationCity: { type: string }
+        scheduleNote: { type: [string, "null"] }
+        durationMinutes: { type: [integer, "null"] }
+        baseFareMinor: { $ref: "#/components/schemas/BaseFareMinor" }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        stops:
+          type: array
+          items:
+            allOf: [ { $ref: "#/components/schemas/RouteStop" } ]
+            properties:
+              id: { type: string }
+        provider:
+          type: object
+          properties:
+            id: { type: string }
+            businessName: { type: string }
+        tripCount: { type: integer }
+    TripCreateInput:
+      type: object
+      required: [routeId, scheduledDepartureAt]
+      properties:
+        routeId: { type: string }
+        scheduledDepartureAt: { type: string, format: date-time }
+        scheduledArrivalAt: { type: string, format: date-time, description: Must be after departure }
+    OperatorTrip:
+      type: object
+      description: >-
+        A departure as its operator (or an admin) sees it (`serializeTrip`).
+        Staffing is see-able because it is act-able: driver and vehicle
+        identity appear once assigned. `seatsConfirmed`/`seatsRemaining`
+        appear on list views (only CONFIRMED bookings spend seats);
+        `seatsRemaining` is null until a vehicle is assigned.
+      properties:
+        id: { type: string }
+        reference: { type: string, description: "BML-T… — unique across trips AND shipments" }
+        kind: { type: string, enum: [SCHEDULED, ON_DEMAND], description: Every creatable trip is SCHEDULED; ON_DEMAND has no writer }
+        status: { $ref: "#/components/schemas/TripStatus" }
+        isTest: { type: boolean }
+        routeId: { type: [string, "null"] }
+        routeName: { type: [string, "null"] }
+        providerProfileId: { type: [string, "null"] }
+        providerName: { type: [string, "null"] }
+        driverProfileId: { type: [string, "null"] }
+        driverName: { type: [string, "null"] }
+        vehicleId: { type: [string, "null"] }
+        vehicle:
+          type: [object, "null"]
+          properties:
+            make: { type: string }
+            model: { type: string }
+            licencePlate: { type: string }
+        seatCapacity: { type: [integer, "null"], description: Snapshotted from the vehicle at assignment }
+        seatsConfirmed: { type: integer }
+        seatsRemaining: { type: [integer, "null"] }
+        scheduledDepartureAt: { type: [string, "null"], format: date-time }
+        scheduledArrivalAt: { type: [string, "null"], format: date-time }
+        cancelledAt: { type: [string, "null"], format: date-time }
+        cancelledBy:
+          oneOf: [ { $ref: "#/components/schemas/CancellationParty" }, { type: "null" } ]
+        cancellationReason: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    TripAssignResult:
+      type: object
+      description: The staffing write's own selection — not a full trip view
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        status: { type: string, const: ASSIGNED }
+        driverProfileId: { type: string }
+        vehicleId: { type: string }
+        seatCapacity: { type: integer }
+        assignedAt: { type: string, format: date-time }
+    Affiliation:
+      type: object
+      description: >-
+        Deliberately terms-free — no commission, split or employment field
+        exists on the row; adding one re-opens the consent design.
+      properties:
+        id: { type: string }
+        providerProfileId: { type: string }
+        driverProfileId: { type: string }
+        initiatedBy: { $ref: "#/components/schemas/AffiliationParty" }
+        status: { $ref: "#/components/schemas/AffiliationStatus" }
+        message: { type: [string, "null"] }
+        isTest: { type: boolean }
+        acceptedAt: { type: [string, "null"], format: date-time }
+        endedAt: { type: [string, "null"], format: date-time }
+        endedBy:
+          oneOf: [ { $ref: "#/components/schemas/AffiliationParty" }, { type: "null" } ]
+        createdAt: { type: string, format: date-time }
+    ProviderAffiliation:
+      allOf: [ { $ref: "#/components/schemas/Affiliation" } ]
+      properties:
+        driver:
+          type: object
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+            homeDistrict:
+              oneOf: [ { $ref: "#/components/schemas/District" }, { type: "null" } ]
+            availability: { $ref: "#/components/schemas/Availability" }
+            isActive: { type: boolean }
+    DriverAffiliation:
+      allOf: [ { $ref: "#/components/schemas/Affiliation" } ]
+      properties:
+        provider:
+          type: object
+          properties:
+            id: { type: string }
+            businessName: { type: string }
+            district:
+              oneOf: [ { $ref: "#/components/schemas/District" }, { type: "null" } ]
+            isActive: { type: boolean }
+    StaffBooking:
+      allOf: [ { $ref: "#/components/schemas/RiderBooking" } ]
+      description: A rider booking plus the passenger's name, for operator and admin lists
+      properties:
+        passengerName: { type: [string, "null"] }
+    TestModeInput:
+      type: object
+      required: [isTest]
+      properties:
+        isTest: { type: boolean }
+        reason: { type: string, maxLength: 500 }
+    AdminDriverRow:
+      type: object
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        providerProfileId: { type: [string, "null"], description: "Fleet affiliation, so the assign flow can narrow" }
+        name: { type: string }
+        email: { type: string }
+        displayName: { type: string }
+        homeDistrict: { $ref: "#/components/schemas/District" }
+        availability: { $ref: "#/components/schemas/Availability" }
+        roleStatus: { type: [string, "null"] }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+        vehicleCount: { type: integer }
+        approvedVehicles: { type: integer }
+        hasExpiredDocs: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    AdminDriverDetail:
+      allOf: [ { $ref: "#/components/schemas/PassengerDriverProfile" } ]
+      description: The self-service profile view plus account identity, role status and every owned vehicle
+      properties:
+        user:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            email: { type: string }
+        roleStatus: { type: [string, "null"] }
+        vehicles:
+          type: array
+          items: { $ref: "#/components/schemas/PassengerVehicle" }
+    AdminProviderRow:
+      allOf: [ { $ref: "#/components/schemas/PassengerProviderProfile" } ]
+      properties:
+        userId: { type: string }
+        contactName: { type: string }
+        accountEmail: { type: string }
+        roleStatus: { type: [string, "null"] }
+        vehicleCount: { type: integer }
+        approvedVehicles: { type: integer }
+        driverCount: { type: integer }
