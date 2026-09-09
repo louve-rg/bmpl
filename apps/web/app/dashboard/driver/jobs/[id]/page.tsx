@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../../lib/api';
 import { uploadFile } from '../../../../../lib/uploads';
+import { pickupView, type PickupLocation } from '../../../../../lib/driver-job';
 import {
   Card,
   PageHeader,
@@ -55,16 +56,6 @@ interface Address {
   city?: string | null;
   district?: string | null;
 }
-interface PickupLocation {
-  label?: string | null;
-  addressLine1?: string | null;
-  addressLine2?: string | null;
-  city?: string | null;
-  district?: string | null;
-  pinnedLocation?: { latitude: number; longitude: number } | null;
-  navigationUrl?: string | null;
-  pickupInstructions?: string | null;
-}
 interface JobItem {
   productTitle: string;
   variantTitle?: string | null;
@@ -103,7 +94,8 @@ interface JobDetail {
   deliveryInstructions?: string | null;
   /** A simulation order — labelled so it is never mistaken for a real one. */
   isTest?: boolean;
-  pickupLocation: PickupLocation;
+  /** Null when the vendor has no pickup location on file — the page must handle it. */
+  pickupLocation: PickupLocation | null;
   items: JobItem[];
   vehicle?: Vehicle | null;
   requiresPickupPin: boolean;
@@ -313,30 +305,43 @@ function NavigateButton({ url, label }: { url: string; label: string }) {
   );
 }
 
-function PickupBlock({ pickup, vendorName }: { pickup: PickupLocation; vendorName?: string | null }) {
-  const hasAddress = pickup.addressLine1 || pickup.city;
+function PickupBlock({ pickup, vendorName }: { pickup: PickupLocation | null; vendorName?: string | null }) {
+  // Decide the whole view once, safely, so a null pickup can never be
+  // dereferenced here (BMPL-113). The API sends pickupLocation: null when the
+  // vendor has no pickup location, and this page must still render.
+  const view = pickupView(pickup);
   return (
     <div className="text-sm text-slate-600">
       {vendorName && <p className="font-semibold text-belize-navy">{vendorName}</p>}
-      {pickup.label && <p className="text-xs uppercase tracking-wide text-slate-400">{pickup.label}</p>}
-      {pickup.addressLine1 && <p className="mt-1 break-words">{pickup.addressLine1}</p>}
-      {pickup.addressLine2 && <p className="break-words">{pickup.addressLine2}</p>}
-      <p>{[pickup.city, districtLabel(pickup.district)].filter(Boolean).join(', ')}</p>
 
-      {pickup.pickupInstructions && (
-        <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <span className="font-semibold">From the store:</span> {pickup.pickupInstructions}
+      {view.missing ? (
+        <p className="mt-1 break-words text-slate-500">
+          The store hasn&rsquo;t added a pickup address yet. Contact the store or support to confirm where to collect
+          this order before you set off.
         </p>
-      )}
-
-      {pickup.navigationUrl ? (
-        <NavigateButton url={pickup.navigationUrl} label="Navigate to the store" />
       ) : (
-        hasAddress && (
-          <p className="mt-2 text-xs text-slate-400">
-            This store hasn&rsquo;t pinned its location — use the written address above.
-          </p>
-        )
+        <>
+          {view.label && <p className="text-xs uppercase tracking-wide text-slate-400">{view.label}</p>}
+          {view.addressLine1 && <p className="mt-1 break-words">{view.addressLine1}</p>}
+          {view.addressLine2 && <p className="break-words">{view.addressLine2}</p>}
+          {view.cityLine && <p>{view.cityLine}</p>}
+
+          {view.instructions && (
+            <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <span className="font-semibold">From the store:</span> {view.instructions}
+            </p>
+          )}
+
+          {view.navigationUrl ? (
+            <NavigateButton url={view.navigationUrl} label="Navigate to the store" />
+          ) : (
+            view.hasAddress && (
+              <p className="mt-2 text-xs text-slate-400">
+                This store hasn&rsquo;t pinned its location — use the written address above.
+              </p>
+            )
+          )}
+        </>
       )}
     </div>
   );
