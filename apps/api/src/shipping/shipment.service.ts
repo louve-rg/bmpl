@@ -8,6 +8,7 @@ import {
   findCourierLane,
   isLocalDoorToDoor,
   planRoute,
+  LEG_KIND_LABELS,
   SHIPMENT_STATUS_LABELS,
   SHIPPING_SERVICE_DESCRIPTIONS,
   SHIPPING_SERVICE_LABELS,
@@ -339,6 +340,11 @@ export class ShipmentService {
       const created = await tx.shipment.create({
         data: {
           reference: await this.uniqueReference(tx),
+          // The recipient's capability link, minted at booking. The sender
+          // shares it; holding it grants the minimal public view and nothing
+          // else. Never derived from the reference — a reference is short
+          // enough to guess at, and guessing a URL must never find a parcel.
+          recipientToken: await this.uniqueRecipientToken(tx),
           service: input.service,
           isTest: simulated,
           customerUserId: userId,
@@ -476,6 +482,23 @@ export class ShipmentService {
     throw new BadRequestException('Could not allocate a tracking reference. Please try again.');
   }
 
+  /**
+   * The recipient link's capability token.
+   *
+   * 24 characters from a 32-symbol alphabet is ~120 bits of entropy — holding
+   * the token IS the authorisation, so the token has to be beyond enumeration,
+   * not merely unique. Same collision discipline as the reference: checked,
+   * never assumed (the unique index is the backstop for the race).
+   */
+  private async uniqueRecipientToken(tx: Prisma.TransactionClient): Promise<string> {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const token = Array.from({ length: 24 }, () => alphabet[randomInt(0, alphabet.length)]).join('');
+      if (!(await tx.shipment.findUnique({ where: { recipientToken: token }, select: { id: true } }))) return token;
+    }
+    throw new BadRequestException('Could not allocate a tracking link. Please try again.');
+  }
+
   /* ------------------------------------------------------------- tracking */
 
   /** One journey, whoever is asking. Customers see their own; staff see any. */
@@ -488,6 +511,77 @@ export class ShipmentService {
       throw new NotFoundException('No shipment with that reference.');
     }
     return this.serialize(shipment, { audience: viewer.isStaff ? 'STAFF' : 'CUSTOMER' });
+  }
+
+  /**
+   * The RECIPIENT's view: unauthenticated, capability-addressed, minimal.
+   *
+   * Anyone holding the link is the audience, so this is an ALLOWLIST built by
+   * hand — it deliberately does not reuse `serialize()`, whose job is to tell
+   * the whole story to people entitled to it. A field appears here only
+   * because the recipient needs it to act:
+   *
+   *   - reference: what they quote at a collection desk;
+   *   - status and step progress, in the customer-language labels;
+   *   - the collection terminal, once the parcel is waiting there — terminal
+   *     details are already public via /shipping/hubs;
+   *   - the destination town, so the link is recognisably "coming to me".
+   *
+   * What a holder never sees, and why: the sender's identity and address
+   * (privacy — the sender typed it for delivery, not for publication), all
+   * money (the price is the customer's business), the parcel description
+   * (customer-typed, can be sensitive), the handoff PIN (the two-party
+   * handoff survives a leaked link only if the link cannot complete one),
+   * custody actor names, driver identity, and operator-typed exception or
+   * cancellation reasons (label only).
+   *
+   * A miss is one fixed 404 whatever the cause — wrong token, deleted row,
+   * never existed — so a guessed URL cannot confirm a real shipment exists.
+   */
+  async trackPublic(token: string) {
+    const s = await this.prisma.shipment.findUnique({
+      where: { recipientToken: token },
+      include: {
+        legs: { orderBy: { sequence: 'asc' } },
+        destinationHub: { select: { name: true, city: true, addressLine1: true, instructions: true } },
+      },
+    });
+    if (!s) throw new NotFoundException('No shipment for that link.');
+
+    const endsAtHub = !needsLastMile(s.service);
+    const live = s.legs.filter((l) => l.status !== 'CANCELLED');
+    const current = live.find((l) => l.status !== 'COMPLETED') ?? null;
+
+    return {
+      reference: s.reference,
+      status: s.status,
+      statusLabel: SHIPMENT_STATUS_LABELS[s.status] ?? s.status,
+      serviceLabel: SHIPPING_SERVICE_LABELS[s.service],
+      bookedAt: s.bookedAt,
+      deliveredAt: s.deliveredAt,
+      destination: { city: s.destinationCity, district: s.destinationDistrict },
+      // Where to collect, only once there is genuinely something to collect.
+      collectionHub:
+        endsAtHub && s.status === 'AWAITING_COLLECTION' && s.destinationHub
+          ? {
+              name: s.destinationHub.name,
+              city: s.destinationHub.city,
+              address: s.destinationHub.addressLine1,
+              instructions: s.destinationHub.instructions,
+            }
+          : null,
+      steps: live.map((l) => ({
+        sequence: l.sequence,
+        kindLabel: LEG_KIND_LABELS[l.kind],
+        modeLabel: TRANSPORT_MODE_LABELS[l.mode],
+        // The planner's own description — generated from terminal names only,
+        // never from an address or a person.
+        description: l.description,
+        completed: l.status === 'COMPLETED',
+        isCurrent: current?.id === l.id,
+        completedAt: l.completedAt,
+      })),
+    };
   }
 
   async listMine(userId: string) {
@@ -1316,6 +1410,11 @@ export class ShipmentService {
       quotedTotalMinor: money(s.quotedTotalMinor),
       quotedMinutes: s.quotedMinutes,
       explanation: s.planExplanation,
+      // The recipient's share link, as a token: the sender forwards it (or the
+      // web app renders it as a copyable URL). Support can re-read it for a
+      // customer, so both audiences carry it. Null on shipments booked before
+      // the token existed.
+      recipientTrackingToken: s.recipientToken,
       description: s.description,
       pieces: s.pieces,
       weightGrams: s.weightGrams,
