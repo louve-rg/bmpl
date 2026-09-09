@@ -359,7 +359,10 @@ server-side, never accepted from a request**:
   while the account has open trips or an ACCEPTED affiliation — the guards
   run inside the flip transaction after the profile-row lock, so a flip
   cannot race a consent into a cross-boundary link
-  (`admin-passenger.service.ts`, both `setTestMode` variants).
+  (`setDriverTestMode` and `setProviderTestMode`,
+  `admin-passenger.service.ts` — an earlier revision called them
+  "`setTestMode` variants", a name that greps to nothing there; corrected
+  2026-09-09).
 
 ---
 

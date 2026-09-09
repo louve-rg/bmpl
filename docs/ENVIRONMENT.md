@@ -16,10 +16,10 @@ Placeholders below are **examples only** — never commit real secrets.
 | `NODE_ENV` | api,ci,db | ✅ | 🌐 | Runtime mode | `production` |
 | `PORT` | api | ⭕ | 🌐 | PaaS-injected listen port (wins over API_PORT) | `4000` |
 | `API_PORT` | api | ⭕ | 🌐 | Local listen port fallback | `4000` |
-| `API_URL` | api | ⭕ | 🌐 | Canonical API URL (logs/links) | `https://api-dev.bzemarketplace.com` |
+| `API_URL` | api | ⭕ | 🌐 | Canonical API URL (logs/links) | `https://bmplapi-production.up.railway.app` |
 | `APP_VERSION` | api | ⭕ | 🌐 | Release id in logs/Sentry | `0.1.0` |
 | `LOG_FORMAT` | api | ⭕ | 🌐 | `pretty` (dev) / `json` (cloud) | `json` |
-| `CORS_ORIGINS` | api | ✅ | 🌐 | Comma-sep allow-list (CORS + CSRF origin) | `https://dev.bzemarketplace.com,https://admin-dev.bzemarketplace.com` |
+| `CORS_ORIGINS` | api | ✅ | 🌐 | Comma-sep allow-list (CORS + CSRF origin) | `https://www.bzemarketplace.com,https://bmpl-admin.vercel.app` |
 
 ## Database (Railway PostgreSQL)
 
@@ -105,8 +105,8 @@ Setting a provider turns on automatic approval and rejection.
 
 | Name | App | Req? | Secret? | Purpose | Example |
 |---|---|---|---|---|---|
-| `NEXT_PUBLIC_API_URL` | web | ✅ | 🌐 | Proxy target for `/api/*` | `https://api-dev.bzemarketplace.com` |
-| `NEXT_PUBLIC_SITE_URL` | web,api | ⭕ | 🌐 | Canonical site URL (email links) | `https://dev.bzemarketplace.com` |
+| `NEXT_PUBLIC_API_URL` | web | ✅ | 🌐 | Proxy target for `/api/*` | `https://bmplapi-production.up.railway.app` |
+| `NEXT_PUBLIC_SITE_URL` | web,api | ⭕ | 🌐 | Canonical site URL (email links) | `https://www.bzemarketplace.com` |
 | `NEXT_PUBLIC_PUBLIC_ASSET_HOST` | web | ⭕ | 🌐 | Allowed image host | `cdn-dev.bzemarketplace.com` |
 | `NEXT_PUBLIC_SENTRY_DSN` | web | ⭕ | 🌐 | Browser Sentry DSN (public by design) | `https://«key»@o0.ingest.sentry.io/0` |
 
@@ -114,15 +114,15 @@ Setting a provider turns on automatic approval and rejection.
 
 | Name | App | Req? | Secret? | Purpose | Example |
 |---|---|---|---|---|---|
-| `ADMIN_PUBLIC_API_URL` | admin | ✅ | 🌐 | Proxy target for `/api/*` | `https://api-dev.bzemarketplace.com` |
-| `ADMIN_SITE_URL` | admin,api | ⭕ | 🌐 | Canonical admin URL | `https://admin-dev.bzemarketplace.com` |
+| `ADMIN_PUBLIC_API_URL` | admin | ✅ | 🌐 | Proxy target for `/api/*` | `https://bmplapi-production.up.railway.app` |
+| `ADMIN_SITE_URL` | admin,api | ⭕ | 🌐 | Canonical admin URL | `https://bmpl-admin.vercel.app` |
 | `NEXT_PUBLIC_SENTRY_DSN` | admin | ⭕ | 🌐 | Browser Sentry DSN | `https://«key»@o0.ingest.sentry.io/0` |
 
 ## Mobile (Expo EAS — apps/mobile)
 
 | Name | App | Req? | Secret? | Purpose | Example |
 |---|---|---|---|---|---|
-| `EXPO_PUBLIC_API_URL` | mobile | ✅ | 🌐 | API base (set per EAS build profile) | `https://api-dev.bzemarketplace.com` |
+| `EXPO_PUBLIC_API_URL` | mobile | ✅ | 🌐 | API base (set per EAS build profile) | `https://bmplapi-production.up.railway.app` |
 | `EXPO_PUBLIC_SENTRY_DSN` | mobile | ⭕ | 🌐 | Mobile Sentry DSN | `https://«key»@o0.ingest.sentry.io/0` |
 | `EAS_PROJECT_ID` | mobile | ⭕ | 🌐 | EAS project id | `«uuid»` |
 

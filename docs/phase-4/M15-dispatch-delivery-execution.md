@@ -1,5 +1,12 @@
 # Phase 4 · M15 — Dispatch & Delivery Execution
 
+> **📅 Dated milestone design note (banner added 2026-09-09).** The "out of
+> scope (deferred)" list below describes M15's own boundary, not the product
+> today: driver earnings and settlement (M18), messaging (M17), reviews (M19)
+> and passenger transportation have all shipped since. Current state:
+> [`PROJECT_STATUS.md`](../PROJECT_STATUS.md); the delivery lifecycle as it
+> works today: [`DELIVERY-LIFECYCLE.md`](../DELIVERY-LIFECYCLE.md).
+
 Connects **eligible approved drivers** to delivery orders and runs the operational
 delivery lifecycle from assignment through completion. Builds directly on
 [M13 delivery pricing](./M13-delivery-foundation.md) (which created `OrderDelivery`

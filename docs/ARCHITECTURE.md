@@ -93,8 +93,10 @@ the same DB transaction, and notifies the applicant.
 - Pickup/delivery **PINs** are held by the vendor/customer and submitted by the
   driver; attempt-capped, throttled, revealed only via role-checked endpoints, never
   in general payloads or logs. Proof-of-delivery lives in the **private** bucket.
-- **No money moves** in dispatch — see the wallet section; settlement/payouts/refunds
-  are deferred.
+- **No money moves inside dispatch itself** — settlement runs after delivery as
+  its own transaction (see "Settlement & earnings (M18)" above; an earlier
+  revision of this line still called settlement deferred). External payouts and
+  refund-to-source remain absent.
 
 ### Notifications & event system (M16)
 
