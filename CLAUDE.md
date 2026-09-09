@@ -346,15 +346,19 @@ Docker is available on this machine and the suite runs here — **691 tests acro
 
 ```bash
 pnpm infra:up            # postgres 5432, redis 6379, minio 9000/9001
-# One-time: docker-compose creates only the `bmpl` dev database, so the
-# disposable test database TEST_DATABASE_URL points at must be created once.
-docker exec bmpl-postgres psql -U bmpl -d postgres -c "CREATE DATABASE bmpl_test OWNER bmpl;"
 pnpm --filter @bmpl/api test:integration
 ```
 
 `TEST_DATABASE_URL` is read from the root `.env` by `test/integration.global.ts`,
 which then runs `prisma migrate deploy` against it. It **must** name a different
-database from `DATABASE_URL` — the suite truncates between tests.
+database from `DATABASE_URL` — the suite truncates between tests. When it names
+the shared default `bmpl_test`, the wrapper **redirects a local run to a
+per-worktree database** (`bmpl_test_<worktree>`, created automatically on first
+use — no manual `CREATE DATABASE` step), because concurrent checkouts truncating
+one shared database gave each other flakes at best and **false greens at worst**
+(BMPL-115). CI and any explicitly custom `TEST_DATABASE_URL` are untouched;
+`BMPL_SHARED_TEST_DB=1` restores the shared database if you are coordinating
+serial runs yourself.
 
 Targeted runs: append the filter directly — `pnpm test:integration shipping` —
 with **no `--` separator** (the npm habit; the wrapper strips it and says so).
