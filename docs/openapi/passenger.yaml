@@ -1,0 +1,875 @@
+openapi: 3.1.0
+info:
+  title: BML Passenger API
+  version: "1.0.0"
+  description: >
+    Belize Marketplace & Logistics — the passenger transportation surface, first
+    slice: the rider journey (discover services, browse departures, request and
+    manage seat bookings), passenger-driver self-service (profile, vehicles,
+    availability, eligibility), fleet-operator self-service (profile, fleet
+    vehicles), and the assigned driver's movement routes. The operator network
+    surface (routes/departures/booking answers), fleet affiliation, and the
+    admin surfaces are NOT yet documented here — tracked as BMPL-102. All paths
+    are under the `/api` prefix. Every endpoint was documented from its
+    controller and its serializer read at `origin/main`
+    (`passenger-rider.controller.ts`, `passenger-driver.controller.ts`,
+    `passenger-provider.controller.ts`, `passenger-driver-trips.controller.ts`
+    and the services they call) — nothing is described that was not read.
+
+    THE FARE GATE, exactly as the code behaves (`fareGate()`,
+    `passenger-operations.service.ts`): a booking can be neither created nor
+    confirmed unless the departure's route carries an operator-configured fare.
+    NULL IS NO FARE AND ZERO IS NOT A PRICE — `baseFareMinor <= 0` refuses with
+    a plain-words 400 telling the rider to check back. No request on this
+    surface carries a fare field anywhere: `baseFareMinor` is the operator's
+    own configuration (set on their route, not documented here), it is REPORTED
+    verbatim as a read-only JSON number (or null), and nothing computes,
+    multiplies, quotes or charges with it — whether it is per seat or per
+    booking is commercial policy nobody has set, and `fareQuotedMinor` on the
+    booking row is deliberately never written and never serialized. An
+    integrator cannot send 0 and expect a free ride: 0 keeps the gate closed.
+
+    NO PASSENGER MONEY MOVES: no fare charged, no commission, no cancellation
+    fee, no wallet movement of any kind on any endpoint here. The only money
+    figure on the surface is the read-only `baseFareMinor` above. No live GPS
+    tracking exists; `scheduleNote` is a label an operator typed, not a
+    timetable. Production currently has no operator, route, departure or fare
+    configured — the empty lists these endpoints answer are the system working.
+servers:
+  - url: https://bmplapi-production.up.railway.app/api
+    description: Production
+  - url: http://localhost:4000/api
+    description: Local
+tags:
+  - name: Rider
+    description: >-
+      Any signed-in CUSTOMER; self-scoped, on the rider's own side of the
+      simulation boundary. A departure outside the rider's visibility (other
+      boundary side, inactive route, suspended operator, already departed)
+      answers 404, indistinguishable from an id that never existed.
+  - name: PassengerDriver
+    description: >-
+      Passenger-driver self-service. CUSTOMER-gated deliberately — an applicant
+      builds their profile BEFORE the PASSENGER_DRIVER role is approved; going
+      ONLINE is gated by computed eligibility in the service, not by the role
+      guard.
+  - name: PassengerProvider
+    description: >-
+      Fleet-operator (transport operator) self-service. CUSTOMER-gated for the
+      same applicant reason; operational surfaces are gated downstream by role
+      approval and vehicle moderation.
+  - name: DriverTrips
+    description: >-
+      The assigned driver's movement surface — requires an APPROVED
+      PASSENGER_DRIVER role. EN_ROUTE_TO_PICKUP is deliberately absent: that is
+      the on-demand state, and on-demand is not built.
+security:
+  - cookieAuth: []
+
+paths:
+  # ---- Rider ----
+  /passenger/services:
+    get:
+      tags: [Rider]
+      summary: What services run at all — discovery, deliberately no booking control
+      description: >-
+        The SAME PassengerRoute rows operators manage — not a second list that
+        could drift (`listServices`, `passenger-operations.service.ts`). Scoped
+        exactly as the departures list: the rider's boundary side, active
+        routes, active operators. Each entry carries its ordered stops and its
+        fare or an honest none — an unpriced service is deliberately SHOWN with
+        `fareConfigured: false`; booking it still refuses at the fare gate.
+        With nothing configured (production today) the list is honestly empty.
+      responses:
+        "200":
+          description: Active services on the rider's boundary side (up to 100)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RiderService" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /passenger/departures:
+    get:
+      tags: [Rider]
+      summary: Upcoming bookable departures
+      description: >-
+        SCHEDULED or ASSIGNED, future-dated, active route and operator, the
+        rider's own boundary side, soonest first (up to 100)
+        (`listDepartures`). Seats-remaining arithmetic needs a vehicle:
+        `seatCapacity` is null until one is assigned — never an invented
+        number.
+      responses:
+        "200":
+          description: Bookable departures
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RiderDeparture" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /passenger/departures/{id}:
+    get:
+      tags: [Rider]
+      summary: One departure — exactly the list entry plus the route's ordered stops
+      description: >-
+        The detail is the list row plus stops, nothing else differs
+        (`getDeparture` shares the list's include and mapper so the two cannot
+        drift). Stops come in the operator's stored sequence — never sorted,
+        renumbered or re-derived from geography. Anything the list would not
+        show answers 404, indistinguishable from a nonexistent id.
+      parameters: [ { $ref: "#/components/parameters/tripId" } ]
+      responses:
+        "200":
+          description: The departure with ordered stops
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiderDepartureDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/bookings:
+    post:
+      tags: [Rider]
+      summary: Request seats on a departure — a request holds NO seat
+      description: >-
+        Creates a REQUESTED booking after the fare gate (null is no fare, zero
+        is not a price — 400 if the route is unpriced), a duplicate-booking
+        check (one live booking per rider per departure), and the self-service
+        invariant on user id — the person assigned to DRIVE the departure
+        cannot ride it (`createBooking`). Seats are held at CONFIRMATION (by
+        the operator), not at request. `isTest` is derived from the account,
+        never the request. The response is the bare booking row: its
+        trip-derived fields (`tripReference`, `routeName`, `from`, `to`,
+        `scheduledDepartureAt`, `tripStatus`) are null here — read
+        GET /passenger/bookings for the joined view.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tripId, seats]
+              properties:
+                tripId: { type: string }
+                seats: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "201":
+          description: The REQUESTED booking (bare row — see description)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiderBooking" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    get:
+      tags: [Rider]
+      summary: The rider's own bookings, newest first (up to 100)
+      responses:
+        "200":
+          description: Bookings with trip and route context joined
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RiderBooking" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /passenger/bookings/{id}/cancel:
+    post:
+      tags: [Rider]
+      summary: Cancel own booking
+      description: >-
+        Attributed `cancelledBy: PASSENGER` and audited. Once a departure has
+        begun, bookings on it can no longer be cancelled — with one deliberate
+        exception: a rider may ALWAYS withdraw their own unanswered REQUESTED
+        booking, even after the departure left or completed, because it holds
+        no seat and would otherwise sit in their list forever
+        (`cancelOwnBooking` → the shared `cancelBooking`). A settled booking
+        (already completed/cancelled) answers 400. Like create, the response is
+        the bare row with trip-derived fields null.
+      parameters: [ { $ref: "#/components/parameters/bookingId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The cancelled booking (bare row)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiderBooking" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Passenger-driver self-service ----
+  /passenger/driver/profile:
+    get:
+      tags: [PassengerDriver]
+      summary: Own passenger-driver profile, or JSON null if none exists yet
+      responses:
+        "200":
+          description: The profile, or null — no profile is not an error for a would-be applicant
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PassengerDriverProfile"
+                  - type: "null"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [PassengerDriver]
+      summary: Create or replace the profile (the application's substance)
+      description: >-
+        Open to any customer — an applicant builds this before approval;
+        operations are gated separately on the role being APPROVED. `isTest` is
+        never accepted: the simulation flag is admin-set only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PassengerDriverProfileInput" }
+      responses:
+        "200":
+          description: The saved profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerDriverProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [PassengerDriver]
+      summary: Update profile fields (any subset; an empty patch is refused)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [ { $ref: "#/components/schemas/PassengerDriverProfileInput" } ]
+              description: All fields optional
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerDriverProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/driver/eligibility:
+    get:
+      tags: [PassengerDriver]
+      summary: Whether this driver can go ONLINE — computed live, never stored
+      description: >-
+        Approved PASSENGER_DRIVER role + active profile + unexpired licence +
+        at least one usable vehicle, where usable means approved, active,
+        registration and insurance unexpired, and either the driver's own or —
+        for an affiliated fleet driver — one of their operator's
+        (`eligibility()`, `passenger-driver.service.ts`). Reasons come back in
+        plain words.
+      responses:
+        "200":
+          description: The verdict and every reason blocking it
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  canGoOnline: { type: boolean }
+                  reasons: { type: array, items: { type: string } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /passenger/driver/vehicles:
+    get:
+      tags: [PassengerDriver]
+      summary: Own vehicles, primary first
+      responses:
+        "200":
+          description: The driver's own vehicles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PassengerVehicle" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [PassengerDriver]
+      summary: Register a vehicle — enters moderation as PENDING
+      description: >-
+        Sets the driver as the exactly-one owner; `isTest` is inherited from
+        the owner's profile, never the request. The first vehicle becomes
+        primary automatically. Admin approval is required before it can carry
+        anyone.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PassengerVehicleInput" }
+      responses:
+        "201":
+          description: The vehicle, approvalStatus PENDING
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerVehicle" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/driver/vehicles/{id}:
+    patch:
+      tags: [PassengerDriver]
+      summary: Update own vehicle — editing regulated fields resets moderation to PENDING
+      description: >-
+        Changing licence plate, registration, insurance expiry or seat capacity
+        sends the vehicle back to PENDING for re-review
+        (`vehicleUpdateData`). A vehicle not owned by the caller answers 404.
+      parameters: [ { $ref: "#/components/parameters/vehicleId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [ { $ref: "#/components/schemas/PassengerVehicleInput" } ]
+              description: All fields optional; also accepts isActive (boolean)
+      responses:
+        "200":
+          description: The updated vehicle
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerVehicle" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [PassengerDriver]
+      summary: Delete own vehicle
+      parameters: [ { $ref: "#/components/parameters/vehicleId" } ]
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/driver/availability:
+    patch:
+      tags: [PassengerDriver]
+      summary: Go ONLINE / OFFLINE / UNAVAILABLE
+      description: >-
+        SUSPENDED is admin-only and not accepted here. Going ONLINE runs the
+        eligibility check and refuses with every blocking reason in one
+        message; going OFFLINE/UNAVAILABLE always succeeds
+        (`setAvailability`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [availability]
+              properties:
+                availability: { type: string, enum: [OFFLINE, ONLINE, UNAVAILABLE] }
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerDriverProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Fleet-operator self-service ----
+  /passenger/provider/profile:
+    get:
+      tags: [PassengerProvider]
+      summary: Own operator profile, or JSON null if none exists yet
+      responses:
+        "200":
+          description: The profile, or null
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PassengerProviderProfile"
+                  - type: "null"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [PassengerProvider]
+      summary: Create or replace the operator profile
+      description: "`isTest` is never accepted — admin-set only."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PassengerProviderProfileInput" }
+      responses:
+        "200":
+          description: The saved profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [PassengerProvider]
+      summary: Update operator profile fields (any subset; an empty patch is refused)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [ { $ref: "#/components/schemas/PassengerProviderProfileInput" } ]
+              description: All fields optional
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/vehicles:
+    get:
+      tags: [PassengerProvider]
+      summary: The fleet's vehicles, primary first
+      responses:
+        "200":
+          description: Fleet vehicles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PassengerVehicle" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [PassengerProvider]
+      summary: Register a fleet vehicle — enters moderation as PENDING
+      description: >-
+        Sets the fleet as the exactly-one owner (never a driver); `isTest` is
+        inherited from the fleet's profile. Unlike the driver path, a first
+        fleet vehicle is NOT auto-primary.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PassengerVehicleInput" }
+      responses:
+        "201":
+          description: The vehicle, approvalStatus PENDING
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerVehicle" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/provider/vehicles/{id}:
+    patch:
+      tags: [PassengerProvider]
+      summary: Update a fleet vehicle — regulated-field edits reset moderation to PENDING
+      parameters: [ { $ref: "#/components/parameters/vehicleId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [ { $ref: "#/components/schemas/PassengerVehicleInput" } ]
+              description: All fields optional; also accepts isActive (boolean)
+      responses:
+        "200":
+          description: The updated vehicle
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PassengerVehicle" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [PassengerProvider]
+      summary: Delete a fleet vehicle
+      parameters: [ { $ref: "#/components/parameters/vehicleId" } ]
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Assigned driver movement ----
+  /passenger/driver/trips:
+    get:
+      tags: [DriverTrips]
+      summary: The driver's own ASSIGNED and IN_PROGRESS departures, soonest first
+      responses:
+        "200":
+          description: Up to 100 trips
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DriverTrip" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/driver/trips/{id}/start:
+    post:
+      tags: [DriverTrips]
+      summary: Start an ASSIGNED departure
+      description: >-
+        Own assignment only — anything else answers 404. Only an ASSIGNED
+        departure can start (`startTrip`).
+      parameters: [ { $ref: "#/components/parameters/tripId" } ]
+      responses:
+        "201":
+          description: The trip, now IN_PROGRESS
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TripTransitionResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /passenger/driver/trips/{id}/complete:
+    post:
+      tags: [DriverTrips]
+      summary: Complete an IN_PROGRESS departure
+      description: >-
+        Completes the trip's CONFIRMED bookings with it and closes the staffing
+        record in the same transaction, incrementing the driver's
+        completed-trip count. REQUESTED bookings are deliberately left
+        untouched — what an unanswered request becomes when the bus leaves is
+        an open product question, not a default to invent (`completeTrip`).
+      parameters: [ { $ref: "#/components/parameters/tripId" } ]
+      responses:
+        "201":
+          description: The trip, now COMPLETED
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TripTransitionResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+    csrfToken:
+      type: apiKey
+      in: header
+      name: x-csrf-token
+  parameters:
+    tripId: { name: id, in: path, required: true, schema: { type: string }, description: Departure (trip) id }
+    bookingId: { name: id, in: path, required: true, schema: { type: string }, description: Booking id }
+    vehicleId: { name: id, in: path, required: true, schema: { type: string }, description: Vehicle id }
+  responses:
+    ValidationError:
+      description: Validation failed, or the operation is not legal in this state (plain-words message)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              errors:
+                type: array
+                items:
+                  type: object
+                  properties: { path: { type: string }, message: { type: string } }
+    Unauthorized: { description: Authentication required }
+    Forbidden: { description: Missing role (DriverTrips requires an APPROVED PASSENGER_DRIVER role) }
+    NotFound: { description: Not found, not owned, or outside the caller's visibility (deliberately indistinguishable) }
+  schemas:
+    BaseFareMinor:
+      type: [integer, "null"]
+      description: >-
+        The operator's configured fare in BZD minor units (cents), as a JSON
+        NUMBER (converted from BigInt with Number() in
+        passenger-operations.service.ts) or null when unset. READ-ONLY and
+        REPORTED VERBATIM — nothing computes, multiplies or charges with it;
+        whether it is per seat or per booking is undecided commercial policy.
+        Null is no fare and zero is not a price: both keep the booking gate
+        closed (`fareConfigured` is true only when the value is > 0). No
+        request on this surface accepts a fare field.
+    District:
+      type: string
+      enum: [BELIZE, CAYO, COROZAL, ORANGE_WALK, STANN_CREEK, TOLEDO]
+    TripStatus:
+      type: string
+      enum: [SCHEDULED, PENDING_ASSIGNMENT, ASSIGNED, EN_ROUTE_TO_PICKUP, IN_PROGRESS, COMPLETED, CANCELLED, EXCEPTION]
+      description: >-
+        Reachable today: SCHEDULED, ASSIGNED, IN_PROGRESS, COMPLETED,
+        CANCELLED. PENDING_ASSIGNMENT, EN_ROUTE_TO_PICKUP and EXCEPTION are
+        reserved vocabulary with no writers — do not expect them.
+    BookingStatus:
+      type: string
+      enum: [REQUESTED, CONFIRMED, COMPLETED, CANCELLED, NO_SHOW, EXPIRED]
+      description: >-
+        Reachable today: REQUESTED, CONFIRMED, COMPLETED, CANCELLED. NO_SHOW
+        and EXPIRED exist in the enum but nothing sets them — who may declare a
+        no-show, and when an unanswered request expires, are open product
+        questions.
+    CancellationParty:
+      type: string
+      enum: [PASSENGER, DRIVER, PROVIDER, ADMIN, SYSTEM]
+    VehicleType:
+      type: string
+      enum: [CAR, SUV, VAN, MINIBUS, BUS, BOAT, MOTORCYCLE, OTHER]
+    ApprovalStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+    Availability:
+      type: string
+      enum: [OFFLINE, ONLINE, UNAVAILABLE, SUSPENDED]
+      description: SUSPENDED is admin-set; a driver may set only the other three
+    ExpiryStatus:
+      type: [string, "null"]
+      enum: [VALID, EXPIRING_SOON, EXPIRED, null]
+      description: Derived from the expiry date; null when no date is recorded
+
+    RouteStop:
+      type: object
+      description: One stop, in the operator's stored order — never re-derived from geography
+      properties:
+        sequence: { type: integer }
+        district: { $ref: "#/components/schemas/District" }
+        city: { type: string }
+        name: { type: [string, "null"] }
+        latitude: { type: [number, "null"] }
+        longitude: { type: [number, "null"] }
+    RiderService:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        originDistrict: { $ref: "#/components/schemas/District" }
+        originCity: { type: string }
+        destinationDistrict: { $ref: "#/components/schemas/District" }
+        destinationCity: { type: string }
+        scheduleNote: { type: [string, "null"], description: "A label the operator wrote, reported verbatim — not a calendar" }
+        durationMinutes: { type: [integer, "null"] }
+        stops:
+          type: array
+          items: { $ref: "#/components/schemas/RouteStop" }
+        operator: { type: string, description: The operator's business name }
+        baseFareMinor: { $ref: "#/components/schemas/BaseFareMinor" }
+        fareConfigured: { type: boolean }
+    RiderDeparture:
+      type: object
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        status: { $ref: "#/components/schemas/TripStatus" }
+        scheduledDepartureAt: { type: string, format: date-time }
+        scheduledArrivalAt: { type: [string, "null"], format: date-time }
+        route:
+          type: object
+          properties:
+            name: { type: string }
+            originDistrict: { $ref: "#/components/schemas/District" }
+            originCity: { type: string }
+            destinationDistrict: { $ref: "#/components/schemas/District" }
+            destinationCity: { type: string }
+            scheduleNote: { type: [string, "null"] }
+            durationMinutes: { type: [integer, "null"] }
+        operator: { type: [string, "null"] }
+        baseFareMinor: { $ref: "#/components/schemas/BaseFareMinor" }
+        fareConfigured: { type: boolean }
+        seatCapacity: { type: [integer, "null"], description: "Null until a vehicle is assigned — capacity does not exist before a vehicle is snapshotted" }
+        seatsConfirmed: { type: integer, description: Seats sold (CONFIRMED bookings) }
+    RiderDepartureDetail:
+      allOf:
+        - $ref: "#/components/schemas/RiderDeparture"
+      description: The list entry plus the route's ordered stops — nothing else differs
+      properties:
+        route:
+          type: object
+          properties:
+            stops:
+              type: array
+              items: { $ref: "#/components/schemas/RouteStop" }
+    RiderBooking:
+      type: object
+      description: >-
+        A booking carries NO fare field of any kind — `fareQuotedMinor` exists
+        on the database row, is deliberately never written, and is never
+        serialized. On create/cancel responses the trip-derived fields are null
+        (the row is returned bare); the list joins them.
+      properties:
+        id: { type: string }
+        reference: { type: string, description: "BML-B… — unique across bookings AND shipments" }
+        status: { $ref: "#/components/schemas/BookingStatus" }
+        seats: { type: integer }
+        isTest: { type: boolean }
+        tripId: { type: string }
+        tripReference: { type: [string, "null"] }
+        tripStatus: { type: [string, "null"] }
+        scheduledDepartureAt: { type: [string, "null"], format: date-time }
+        routeName: { type: [string, "null"] }
+        from: { type: [string, "null"] }
+        to: { type: [string, "null"] }
+        confirmedAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        cancelledAt: { type: [string, "null"], format: date-time }
+        cancelledBy:
+          oneOf: [ { $ref: "#/components/schemas/CancellationParty" }, { type: "null" } ]
+        cancellationReason: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    PassengerDriverProfileInput:
+      type: object
+      description: Required fields apply to PUT; PATCH takes any subset. `isTest` is never accepted.
+      required: [legalName, displayName, phone, homeDistrict, licenceNumber, licenceExpiry, termsAccepted]
+      properties:
+        legalName: { type: string, minLength: 1, maxLength: 160 }
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        phone: { type: string, minLength: 5, maxLength: 40 }
+        homeDistrict: { $ref: "#/components/schemas/District" }
+        homeAddress: { type: string, maxLength: 200 }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        emergencyContactName: { type: string, maxLength: 160 }
+        emergencyContactPhone: { type: string, maxLength: 40 }
+        licenceNumber: { type: string, minLength: 1, maxLength: 60 }
+        licenceExpiry: { type: string, format: date-time }
+        termsAccepted: { type: boolean }
+        applicantNotes: { type: string, maxLength: 1000 }
+    PassengerDriverProfile:
+      type: object
+      properties:
+        id: { type: string }
+        legalName: { type: string }
+        displayName: { type: string }
+        phone: { type: string }
+        homeDistrict: { $ref: "#/components/schemas/District" }
+        homeAddress: { type: [string, "null"] }
+        providerProfileId: { type: [string, "null"], description: "The driver's fleet, set ONLY by mutually consented affiliation acceptance — nothing on this surface writes it" }
+        provider:
+          type: [object, "null"]
+          properties:
+            id: { type: string }
+            businessName: { type: string }
+        emergencyContactName: { type: [string, "null"] }
+        emergencyContactPhone: { type: [string, "null"] }
+        licenceNumber: { type: string }
+        licenceExpiry: { type: string, format: date-time }
+        licenceExpiryStatus: { $ref: "#/components/schemas/ExpiryStatus" }
+        availability: { $ref: "#/components/schemas/Availability" }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+        ratingAverage: { type: [number, "null"] }
+        completedTrips: { type: integer }
+        createdAt: { type: string, format: date-time }
+    PassengerProviderProfileInput:
+      type: object
+      description: Required fields apply to PUT; PATCH takes any subset. `isTest` is never accepted.
+      required: [businessName, contactEmail]
+      properties:
+        businessName: { type: string, minLength: 1, maxLength: 160 }
+        description: { type: string, maxLength: 2000 }
+        contactEmail: { type: string, format: email, maxLength: 320 }
+        contactPhone: { type: string, maxLength: 40 }
+        district: { $ref: "#/components/schemas/District" }
+        city: { type: string, maxLength: 120 }
+        addressLine1: { type: string, maxLength: 200 }
+        operatingLicenceNumber: { type: string, maxLength: 60 }
+        operatingLicenceExpiry: { type: string, format: date-time }
+    PassengerProviderProfile:
+      type: object
+      properties:
+        id: { type: string }
+        businessName: { type: string }
+        description: { type: [string, "null"] }
+        contactEmail: { type: string }
+        contactPhone: { type: [string, "null"] }
+        district:
+          oneOf: [ { $ref: "#/components/schemas/District" }, { type: "null" } ]
+        city: { type: [string, "null"] }
+        addressLine1: { type: [string, "null"] }
+        operatingLicenceNumber: { type: [string, "null"] }
+        operatingLicenceExpiry: { type: [string, "null"], format: date-time }
+        operatingLicenceExpiryStatus: { $ref: "#/components/schemas/ExpiryStatus" }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    PassengerVehicleInput:
+      type: object
+      description: >-
+        Required fields apply to POST; PATCH takes any subset and additionally
+        accepts isActive. `seatCapacity` is seats available to sell, excluding
+        the driver — required at registration because a vehicle with unknown
+        capacity can never take a booking. `isTest` is never accepted
+        (inherited from the owning profile).
+      required: [type, make, model, licencePlate, seatCapacity]
+      properties:
+        type: { $ref: "#/components/schemas/VehicleType" }
+        make: { type: string, minLength: 1, maxLength: 80 }
+        model: { type: string, minLength: 1, maxLength: 80 }
+        year: { type: integer, minimum: 1900, maximum: 2100 }
+        color: { type: string, maxLength: 40 }
+        licencePlate: { type: string, minLength: 1, maxLength: 20 }
+        registrationNumber: { type: string, maxLength: 60 }
+        registrationExpiry: { type: string, format: date-time }
+        insuranceProvider: { type: string, maxLength: 120 }
+        insurancePolicyNumber: { type: string, maxLength: 80 }
+        insuranceExpiry: { type: string, format: date-time }
+        seatCapacity: { type: integer, minimum: 1, maximum: 100 }
+        isPrimary: { type: boolean }
+    PassengerVehicle:
+      type: object
+      properties:
+        id: { type: string }
+        type: { $ref: "#/components/schemas/VehicleType" }
+        make: { type: string }
+        model: { type: string }
+        year: { type: [integer, "null"] }
+        color: { type: [string, "null"] }
+        licencePlate: { type: string }
+        registrationNumber: { type: [string, "null"] }
+        registrationExpiry: { type: [string, "null"], format: date-time }
+        registrationExpiryStatus: { $ref: "#/components/schemas/ExpiryStatus" }
+        insuranceProvider: { type: [string, "null"] }
+        insuranceExpiry: { type: [string, "null"], format: date-time }
+        insuranceExpiryStatus: { $ref: "#/components/schemas/ExpiryStatus" }
+        seatCapacity: { type: integer }
+        isActive: { type: boolean }
+        isPrimary: { type: boolean }
+        approvalStatus: { $ref: "#/components/schemas/ApprovalStatus" }
+        rejectionReason: { type: [string, "null"] }
+    DriverTrip:
+      type: object
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        status: { $ref: "#/components/schemas/TripStatus" }
+        scheduledDepartureAt: { type: [string, "null"], format: date-time }
+        routeName: { type: [string, "null"] }
+        from: { type: [string, "null"] }
+        to: { type: [string, "null"] }
+        operator: { type: [string, "null"] }
+        seatCapacity: { type: [integer, "null"] }
+    TripTransitionResult:
+      type: object
+      description: start returns startedAt; complete returns completedAt
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        status: { $ref: "#/components/schemas/TripStatus" }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
