@@ -350,6 +350,7 @@ enum AuditAction {
   PASSENGER_TRIP_ASSIGNED
   PASSENGER_TRIP_COMPLETED
   PASSENGER_AFFILIATION_CHANGED
+  SHIPMENT_LEG_EXCEPTION_RESOLVED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------

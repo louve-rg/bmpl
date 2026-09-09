@@ -315,6 +315,21 @@ export const legExceptionSchema = z.object({
 });
 export type LegExceptionInput = z.infer<typeof legExceptionSchema>;
 
+/**
+ * Resolving a leg exception — the way back out of the state legExceptionSchema
+ * records the way into.
+ *
+ * RESUME says the problem was dealt with where the parcel stands and the same
+ * actors continue. RELEASE_DRIVER says the assigned driver cannot do the job
+ * and the leg goes back to the dispatch pool — only legal while the parcel has
+ * not moved, which the service enforces (custody is not a validation question).
+ */
+export const resolveLegExceptionSchema = z.object({
+  resolution: z.enum(['RESUME', 'RELEASE_DRIVER']),
+  note: z.string().trim().min(4, 'Say how it was resolved.').max(500),
+});
+export type ResolveLegExceptionInput = z.infer<typeof resolveLegExceptionSchema>;
+
 /** Recording that a recipient collected their parcel from a terminal. */
 export const collectShipmentSchema = z.object({
   collectedByName: z.string().trim().min(2, 'Who collected it?').max(120),

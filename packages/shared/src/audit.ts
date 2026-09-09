@@ -239,6 +239,11 @@ export const AUDIT_ACTIONS = [
   // (invited / requested / accepted / declined / withdrawn / ended, carried in
   // newValue.event) — the PROPERTY_ASSIGNMENT_CHANGED precedent.
   'PASSENGER_AFFILIATION_CHANGED',
+  // The way back out of a leg EXCEPTION: one action for both resolutions
+  // (resume in place / release the driver and re-queue), the chosen resolution
+  // carried in newValue — the PASSENGER_AFFILIATION_CHANGED precedent of one
+  // code per lifecycle rather than one per verb.
+  'SHIPMENT_LEG_EXCEPTION_RESOLVED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

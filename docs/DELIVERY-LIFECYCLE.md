@@ -446,13 +446,24 @@ terminal, the assignment and vehicle are cleared, the ACTIVE or ACCEPTED
 — is notified after the commit. Covered by regression tests for both entry
 states, including the notification.
 
-**4. A leg EXCEPTION is one-way.** `flagException`
-(`shipment.service.ts`) sets the leg to EXCEPTION and stamps
-`shipment.exceptionAt`; no endpoint clears either, `isLegActionable` refuses
-EXCEPTION legs (`packages/shared/src/shipping.ts`), and any EXCEPTION leg
-makes the whole shipment read EXCEPTION (`deriveShipmentStatus`). The only
-exit is cancelling the shipment — there is no "damaged, repacked, continue"
-path.
+**4. CLOSED on `main` (BMPL-103) — a leg EXCEPTION has a way back out.**
+`POST /admin/logistics/legs/:id/resolve-exception` (`logistics.operate`, the
+same permission that flags one; `ShipmentService.resolveException`) offers two
+resolutions, both restoring states the lifecycle already defines. RESUME puts
+the leg back exactly where it was flagged from — IN_PROGRESS if it had
+started, READY if not — with its driver, its custody chain and everything
+else untouched. RELEASE_DRIVER re-queues an uncollected courier leg: the
+assignment clears, the offer history closes, and manual assignment (or the
+sweeper, where automatic dispatch is on) restaffs it. Cancellation now
+composes with exception too: `cancel` closes the driver's half of an
+EXCEPTION leg (previously a phantom job survived in the driver's feed), and a
+customer cannot self-cancel a shipment whose flagged leg had already started
+— that is support's call, exactly as for IN_PROGRESS. Deliberately still
+refused, because the policy does not exist (see gap 6): releasing a driver
+who has already collected the parcel. Where a parcel stranded mid-carry
+should go, who pays for the interrupted run and what the customer is owed are
+owner decisions; until they are made, the endpoint fails closed and the outs
+are RESUME or a staff cancellation.
 
 **5. The recipient is invisible.** Every shipment notification goes to
 `customerUserId` — the sender (`notifyCustomer`, defined in both

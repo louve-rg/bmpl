@@ -1,0 +1,19 @@
+-- A shipment leg in EXCEPTION had no way out (delivery-lifecycle gap #4):
+-- flagException set the leg to EXCEPTION and stamped the shipment, no endpoint
+-- cleared either, and isLegActionable refuses EXCEPTION legs — so the only
+-- exit was cancelling the whole shipment. The recovery endpoint being added
+-- alongside this migration resolves an exception in place (resume) or releases
+-- the assigned driver back to the dispatch pool, and a privileged action that
+-- changes who works a customer's parcel must land in the audit trail.
+--
+-- One enum value, not two: both resolutions are the same lifecycle moment
+-- ("the exception is over"), and which one it was is carried in the audit
+-- row's newValue — the same shape PASSENGER_AFFILIATION_CHANGED already uses
+-- for a multi-verb lifecycle. Alternatives rejected: reusing
+-- SHIPMENT_LEG_EXCEPTION (would make entering and leaving the state
+-- indistinguishable in the trail), and a value per resolution (two codes for
+-- one decision point drift apart).
+--
+-- Additive and idempotent; nothing else changes. No table, no column, no
+-- backfill, and no existing enum value is touched.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_LEG_EXCEPTION_RESOLVED';

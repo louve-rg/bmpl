@@ -25,6 +25,7 @@ import type {
   LegDepartInput,
   LegExceptionInput,
   LegHandoffInput,
+  ResolveLegExceptionInput,
   ShipmentQuoteInput,
 } from '@bmpl/validation';
 import type { CustodyHolder, LegStatus, Prisma, ShipmentStatus } from '@bmpl/database';
@@ -801,6 +802,185 @@ export class ShipmentService {
   }
 
   /**
+   * The way back out of an exception (delivery-lifecycle gap #4: EXCEPTION was
+   * one-way, and the only exit was cancelling the whole shipment).
+   *
+   * Deliberately NOT routed through `transition()`: that helper's first rule is
+   * `isLegActionable`, which refuses EXCEPTION legs — the very state this
+   * method exists to leave. Everything else transition() guarantees (one
+   * transaction, conditional write, status recomputation, an audit row) is
+   * reproduced here by hand.
+   *
+   * Two resolutions, both restoring states the lifecycle already defines:
+   *
+   *  RESUME — the problem was dealt with where the parcel stands and the same
+   *  actors continue. `startedAt` decides what "back" means: a leg that had
+   *  started goes back to IN_PROGRESS, one that had not goes back to READY
+   *  (an EXCEPTION leg was actionable when it was flagged, so READY is the
+   *  only other state it can have come from). Custody is untouched — nothing
+   *  moved, so there is nothing to record.
+   *
+   *  RELEASE_DRIVER — the assigned driver cannot do the job, so the leg goes
+   *  back to the dispatch pool. Only legal while the parcel has NOT moved
+   *  (`startedAt`/`pickedUpAt` both null): once a driver is carrying the
+   *  parcel, releasing them is not a state edit — where the parcel physically
+   *  goes, who pays for the interrupted run and what the customer is owed are
+   *  policy decisions nobody has written, and inventing them here is exactly
+   *  what the fare-gate rule forbids. Mid-carry, the outs are RESUME or a
+   *  staff cancellation.
+   */
+  async resolveException(legId: string, input: ResolveLegExceptionInput, actor: { userId: string }) {
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      const leg = await tx.shipmentLeg.findUnique({
+        where: { id: legId },
+        include: { shipment: { select: { id: true, reference: true, customerUserId: true, cancelledAt: true } } },
+      });
+      if (!leg) throw new NotFoundException('Leg not found.');
+      if (leg.status !== 'EXCEPTION') {
+        throw new BadRequestException('This leg is not in exception, so there is nothing to resolve.');
+      }
+      if (leg.shipment.cancelledAt) {
+        throw new BadRequestException('That shipment was cancelled; a cancelled journey is not resumed.');
+      }
+
+      let restored: LegStatus;
+      let releasedDriverProfileId: string | null = null;
+
+      if (input.resolution === 'RESUME') {
+        restored = leg.startedAt ? 'IN_PROGRESS' : 'READY';
+        // Conditional, not an update by id: two operators can both be looking
+        // at the same exception, and exactly one resolution may land.
+        const claimed = await tx.shipmentLeg.updateMany({
+          where: { id: leg.id, status: 'EXCEPTION' },
+          data: { status: restored, exceptionAt: null, exceptionReason: null },
+        });
+        if (claimed.count === 0) throw new BadRequestException('This exception was already resolved by someone else.');
+      } else {
+        // RELEASE_DRIVER
+        if (leg.kind === 'LINE_HAUL') {
+          throw new BadRequestException('A transport leg is operated by a carrier, not a driver — there is no driver to release.');
+        }
+        if (!leg.assignedDriverProfileId) {
+          throw new BadRequestException('No driver holds this leg. Resolve it with "resume" instead.');
+        }
+        // THE policy line. A parcel in a driver's hands cannot be "released"
+        // by clearing columns — custody is append-only and real. What should
+        // happen to a parcel stranded mid-carry is an owner decision that does
+        // not exist yet; until it does, this fails closed.
+        if (leg.startedAt != null || leg.pickedUpAt != null) {
+          throw new BadRequestException(
+            'This driver has already collected the parcel, so they cannot be released here. Resume the leg, or cancel the shipment through support.',
+          );
+        }
+        restored = 'READY';
+        releasedDriverProfileId = leg.assignedDriverProfileId;
+        const claimed = await tx.shipmentLeg.updateMany({
+          where: { id: leg.id, status: 'EXCEPTION' },
+          data: {
+            status: 'READY',
+            exceptionAt: null,
+            exceptionReason: null,
+            // Back to the pool, exactly as cancel() clears the courier half —
+            // except the destination is dispatchable, not terminal.
+            courierStatus: 'PENDING_ASSIGNMENT',
+            assignedDriverProfileId: null,
+            assignedVehicleId: null,
+            offerExpiresAt: null,
+            driverQueuePosition: null,
+            acceptedAt: null,
+            declinedAt: null,
+            declineReason: null,
+          },
+        });
+        if (claimed.count === 0) throw new BadRequestException('This exception was already resolved by someone else.');
+        // History closes with the assignment; the audit row below says why.
+        // (declineReason stays empty — a release is not a decline.)
+        await tx.shipmentLegOffer.updateMany({
+          where: { shipmentLegId: leg.id, status: { in: ['ACTIVE', 'ACCEPTED'] } },
+          data: { status: 'CANCELLED', endedAt: new Date() },
+        });
+      }
+
+      // The shipment-level flag mirrors the legs: clear it only when no leg is
+      // still exceptional. (The lifecycle can only produce one EXCEPTION leg at
+      // a time, but this reads the truth rather than assuming it.)
+      const stillExceptional = await tx.shipmentLeg.count({
+        where: { shipmentId: leg.shipmentId, status: 'EXCEPTION' },
+      });
+      if (stillExceptional === 0) {
+        await tx.shipment.update({
+          where: { id: leg.shipmentId },
+          data: { exceptionAt: null, exceptionReason: null },
+        });
+      }
+
+      const status = await this.recompute(tx, leg.shipmentId);
+      await this.audit.record(
+        {
+          action: 'SHIPMENT_LEG_EXCEPTION_RESOLVED',
+          actorId: actor.userId,
+          reason: input.note,
+          newValue: {
+            legId: leg.id,
+            shipmentId: leg.shipmentId,
+            reference: leg.shipment.reference,
+            resolution: input.resolution,
+            restoredStatus: restored,
+            releasedDriverProfileId,
+          },
+        },
+        tx,
+      );
+      return {
+        shipmentId: leg.shipmentId,
+        customerUserId: leg.shipment.customerUserId,
+        reference: leg.shipment.reference,
+        status,
+        restored,
+        releasedDriverProfileId,
+        legKind: leg.kind,
+      };
+    });
+
+    // Everything after the commit, so nothing below can announce a resolution
+    // that rolled back — the same ordering completeLeg uses for its dispatch.
+    await this.notifyCustomer(outcome);
+
+    if (outcome.releasedDriverProfileId) {
+      const profile = await this.prisma.driverProfile.findUnique({
+        where: { id: outcome.releasedDriverProfileId },
+        select: { userId: true },
+      });
+      if (profile) {
+        await this.notifications.notifyUsers([profile.userId], {
+          type: 'MARKETPLACE',
+          category: 'DELIVERY',
+          event: 'SHIPMENT_LEG_CANCELLED',
+          title: 'Job cancelled',
+          body: `Shipment ${outcome.reference}: the job has been removed from your queue.`,
+          data: { shipmentId: outcome.shipmentId },
+        });
+      }
+    }
+
+    // A READY courier leg with nobody on it is dispatchable again — offer it
+    // now rather than waiting for the sweeper. dispatchLeg re-reads state and
+    // re-checks payment, sequence and the simulation boundary itself, and
+    // no-ops when automatic dispatch is off (manual assignment then takes over,
+    // as everywhere else).
+    if (outcome.restored === 'READY' && outcome.legKind !== 'LINE_HAUL') {
+      const fresh = await this.prisma.shipmentLeg.findUnique({
+        where: { id: legId },
+        select: { assignedDriverProfileId: true },
+      });
+      if (fresh && fresh.assignedDriverProfileId === null) await this.dispatch.dispatchLeg(legId);
+    }
+
+    const shipment = await this.prisma.shipment.findUniqueOrThrow({ where: { id: outcome.shipmentId }, include: SHIPMENT_INCLUDE });
+    return this.serialize(shipment, { audience: 'STAFF' });
+  }
+
+  /**
    * Every leg transition goes through here, so the sequencing rule, the status
    * recomputation and the audit trail cannot be forgotten by a new caller.
    */
@@ -1005,7 +1185,15 @@ export class ShipmentService {
       if (!s) throw new NotFoundException('Shipment not found.');
       if (!actor.isStaff && s.customerUserId !== actor.userId) throw new NotFoundException('Shipment not found.');
       if (s.cancelledAt) throw new BadRequestException('That shipment is already cancelled.');
-      if (s.legs.some((l) => l.status === 'IN_PROGRESS') && !actor.isStaff) {
+      // An exception on a leg that had STARTED is a moving shipment with a
+      // problem, not a stationary one: the parcel is in somebody's hands and a
+      // self-service cancellation would release the full escrow while it is.
+      // Same rule as IN_PROGRESS, because it is the same fact — the flag
+      // changed the leg's status, not where the parcel physically is.
+      const moving = s.legs.some(
+        (l) => l.status === 'IN_PROGRESS' || (l.status === 'EXCEPTION' && l.startedAt != null),
+      );
+      if (moving && !actor.isStaff) {
         throw new BadRequestException('This shipment is already moving. Contact support to stop it.');
       }
 
@@ -1019,10 +1207,16 @@ export class ShipmentService {
 
       // Close the driver's half of any leg a driver has ever seen: the courier
       // view goes terminal, the assignment and the offer window are cleared.
+      // EXCEPTION is in both lists deliberately. It is a live state, not
+      // history: a leg stuck in exception still has a driver's half that must
+      // close with the shipment's, and leaving it out stranded exactly the
+      // phantom job this block exists to prevent — listed in the driver's feed
+      // (which filters on courierStatus alone), impossible to work, impossible
+      // to decline. Completed legs stay completed, as ever.
       await tx.shipmentLeg.updateMany({
         where: {
           shipmentId: id,
-          status: { in: ['PENDING', 'READY', 'IN_PROGRESS'] },
+          status: { in: ['PENDING', 'READY', 'IN_PROGRESS', 'EXCEPTION'] },
           OR: [{ assignedDriverProfileId: { not: null } }, { courierStatus: { not: null } }],
         },
         data: {
@@ -1035,7 +1229,7 @@ export class ShipmentService {
       });
 
       await tx.shipmentLeg.updateMany({
-        where: { shipmentId: id, status: { in: ['PENDING', 'READY', 'IN_PROGRESS'] } },
+        where: { shipmentId: id, status: { in: ['PENDING', 'READY', 'IN_PROGRESS', 'EXCEPTION'] } },
         data: { status: 'CANCELLED', cancelledAt: new Date() },
       });
 
