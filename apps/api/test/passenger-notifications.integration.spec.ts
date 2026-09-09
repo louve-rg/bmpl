@@ -15,12 +15,12 @@
  * a human would act on (the reference they'd search, the reason they'd read,
  * the vehicle they'd look for).
  *
- * Two DELIBERATE SILENCES are pinned as behaviour, not gaps to fix here:
- * a rider withdrawing their own request notifies nobody (the rider knows,
- * and the operator was never holding a seat for it), and every notification
- * below goes to its one recipient with no copies. If the floor decides the
- * operator should learn of rider cancellations, that is a product change
- * with its own card — this file will fail on it, which is the point.
+ * One rule holds everywhere: every notification goes to its ONE recipient
+ * with no copies — an actor never gets an echo of their own action. A rider
+ * self-cancel was originally pinned here as deliberate silence toward the
+ * operator; BMPL-112 ended that (a freed seat is a fact the operator can act
+ * on), and the two rider-cancel tests below assert the notification exactly
+ * as this file's silence assertion once promised they would.
  *
  * The capture window is an ID DIFF around the step, copied from the shipping
  * suite: comparing row-id sets cannot skew the way clock comparisons do, and
@@ -248,9 +248,10 @@ describe('booking notifications', () => {
     expect(n.body).toContain('Vehicle out of service');
   });
 
-  it('a rider withdrawing their own request notifies nobody — pinned silence, not an oversight in this file', async () => {
+  it('a rider withdrawing their own request notifies the operator — the silence that used to be here was deliberate, and BMPL-112 ended it', async () => {
     const op = await makeProvider('Test Notify Lines');
-    const { tripId } = await makeDeparture(op, `Test Notify Run ${uniq()}`);
+    const routeName = `Test Notify Run ${uniq()}`;
+    const { tripId, tripReference } = await makeDeparture(op, routeName);
     const rider = await registerUser(`pn_r4_${uniq()}@example.com`);
     const booking = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 1 });
     expect(booking.status).toBe(201);
@@ -260,10 +261,52 @@ describe('booking notifications', () => {
       expect(r.status).toBe(201);
     });
 
-    // The rider knows (they acted), and no seat was held. Whether the OPERATOR
-    // should learn of rider cancellations is an open product question — if that
-    // is ever decided, this assertion is the one that changes.
-    expect(delivered).toHaveLength(0);
+    // This assertion was written as pinned SILENCE — "if that is ever decided,
+    // this assertion is the one that changes" — and BMPL-112 decided it: the
+    // operator now hears of rider cancellations, because a freed seat is a fact
+    // they can act on. The rider still gets no self-echo, so the delta is
+    // exactly one row. A withdrawn REQUEST held no seat, and the body says so.
+    expect(delivered).toHaveLength(1);
+    const n = delivered[0]!;
+    expect(n.userId).toBe(op.userId); // the operator — the rider gets no echo of their own action
+    expect(n.title).toBe('Seat request withdrawn');
+    expect(n.body).toContain(booking.body.reference);
+    expect(n.body).toContain(routeName);
+    expect(n.body).toContain(tripReference);
+    expect(n.body).toContain('No seat was held');
+    expect(n.data.tripId).toBe(tripId);
+  });
+
+  it('a rider cancelling a CONFIRMED booking tells the operator how many seats came back', async () => {
+    const op = await makeProvider('Test Notify Lines');
+    const routeName = `Test Notify Run ${uniq()}`;
+    const { tripId, tripReference } = await makeDeparture(op, routeName);
+    const driver = await makeLoneDriver();
+    await joinFleet(op, driver);
+    const vehicleId = await makeFleetVehicle(op);
+    expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
+
+    const rider = await registerUser(`pn_r5_${uniq()}@example.com`);
+    const booking = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 2 });
+    expect(booking.status).toBe(201);
+    expect((await post(op.cookies, `passenger/provider/bookings/${booking.body.id}/confirm`)).status).toBe(201);
+
+    const delivered = await capture(async () => {
+      const r = await post(rider.cookies, `passenger/bookings/${booking.body.id}/cancel`);
+      expect(r.status).toBe(201);
+    });
+
+    // The commercially live case BMPL-112 was opened for: two held seats just
+    // came free, and the operator can resell them only if they hear about it.
+    expect(delivered).toHaveLength(1);
+    const n = delivered[0]!;
+    expect(n.userId).toBe(op.userId);
+    expect(n.title).toBe('Rider cancelled — seats freed');
+    expect(n.body).toContain('2 seat(s) freed');
+    expect(n.body).toContain(routeName);
+    expect(n.body).toContain(tripReference);
+    expect(n.body).toContain(booking.body.reference);
+    expect(n.data.bookingId).toBe(booking.body.id);
   });
 
   it('staffing notifies the driver — naming the route and the vehicle they will look for', async () => {

@@ -587,6 +587,34 @@ export class PassengerOperationsService {
         data: { bookingId: b.id },
       });
     }
+    if (party === 'PASSENGER') {
+      // This was DELIBERATE SILENCE until BMPL-112. The rider knows (they
+      // acted), but a cancelled CONFIRMED booking frees seats the operator
+      // could resell, and they used to discover that only by re-reading their
+      // list. Telling them states a fact that already happened — it decides
+      // nothing about penalties, refunds or whether a rider may cancel, which
+      // stay owner questions. `b.status` is the pre-cancel snapshot, so it
+      // still says whether a seat was actually held.
+      const trip = b.tripId
+        ? await this.prisma.passengerTrip.findUnique({
+            where: { id: b.tripId },
+            select: { id: true, reference: true, route: { select: { name: true } }, providerProfile: { select: { userId: true } } },
+          })
+        : null;
+      if (trip?.providerProfile) {
+        const run = `${trip.route?.name ?? 'A route'} (${trip.reference})`;
+        await this.notifications.createInApp({
+          userId: trip.providerProfile.userId,
+          type: 'ACCOUNT',
+          title: b.status === 'CONFIRMED' ? 'Rider cancelled — seats freed' : 'Seat request withdrawn',
+          body:
+            b.status === 'CONFIRMED'
+              ? `${b.seats} seat(s) freed on ${run} — booking ${b.reference} was cancelled by the rider.`
+              : `The request for ${b.seats} seat(s) on ${run} was withdrawn (booking ${b.reference}). No seat was held.`,
+          data: { bookingId: b.id, tripId: trip.id },
+        });
+      }
+    }
     return this.serializeBooking(updated);
   }
 
