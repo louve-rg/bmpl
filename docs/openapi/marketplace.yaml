@@ -6,9 +6,10 @@ info:
     Belize Marketplace & Logistics — the marketplace surface and what grew on
     it: catalog/search, vendors, products, cart, checkout/orders, payments &
     wallet, marketplace dispatch & delivery (M15), settlement (M18), reviews,
-    jobs. NOT yet documented here: the multimodal shipping surface
-    (/shipping/*, courier legs, hubs/modes) and the passenger surface
-    (/passenger/*) — tracked as BMPL-100. All paths are under the `/api`
+    jobs. The multimodal shipping surface (/shipping/*, courier legs,
+    hubs/modes, admin logistics) is documented separately in shipping.yaml in
+    this directory; the passenger surface (/passenger/*) is not yet documented
+    (tracked as BMPL-101). All paths are under the `/api`
     prefix. Money is integer minor units (BZD cents); wallet/ledger amounts
     are BigInt-backed and serialize as JSON strings on wallet surfaces, while
     delivery/shipping fee fields serialize as JSON numbers — verify per

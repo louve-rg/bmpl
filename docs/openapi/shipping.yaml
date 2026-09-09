@@ -1,0 +1,1369 @@
+openapi: 3.1.0
+info:
+  title: BML Shipping API
+  version: "1.0.0"
+  description: >
+    Belize Marketplace & Logistics — the multimodal shipping surface: public
+    network discovery, customer quote/booking/tracking/cancellation, the driver
+    courier-leg job family, and the admin logistics console (network
+    configuration, operations board, manual leg dispatch, leg operation,
+    handoff verification, collection, cancellation). All paths are under the
+    `/api` prefix. Every endpoint here was documented from its controller and
+    service read at `origin/main` (`shipping.controller.ts`,
+    `driver-shipping.controller.ts`, and the services they call) — nothing is
+    described that was not read.
+
+    MONEY, verified per field: every amount on this surface (`courierFeeMinor`,
+    `priceMinor`, `quotedTotalMinor`, `totalMinor`, `feeMinor`) is an integer in
+    BZD minor units (cents) serialized as a JSON NUMBER — each is converted
+    from the database's BigInt with an explicit `Number()` (the `money` helpers
+    in `shipment.service.ts` and `logistics-network.service.ts`, and
+    `Number(leg.priceMinor)` in `shipment-driver.service.ts`). This differs
+    from BML's wallet/ledger surfaces, where BigInt amounts serialize as JSON
+    STRINGS. Do not assume one convention from the other. A price of 0 means
+    "not priced yet", never "free" — quotes flag it (`pricingIncomplete`) and
+    booking refuses an unpriced journey.
+
+    Not modelled anywhere on this surface, so not documented: live GPS tracking
+    of any vehicle, timetables/scheduled-departure calendars (`scheduleNote` is
+    a label an operator typed), and reverse geocoding. Production currently has
+    no configured transport network (hubs `[]`, modes `[]`), which these
+    endpoints report truthfully.
+servers:
+  - url: https://bmplapi-production.up.railway.app/api
+    description: Production
+  - url: http://localhost:4000/api
+    description: Local
+tags:
+  - name: Public
+    description: Unauthenticated network discovery. Real (non-test) network only.
+  - name: Shipping
+    description: >-
+      Customer shipping (requires the CUSTOMER role; self-scoped). The
+      simulation boundary is derived from the ACCOUNT — a test customer is
+      quoted and routed over the simulation network only, a real customer never
+      sees it.
+  - name: DriverShippingJobs
+    description: >-
+      A driver working a shipment courier leg (requires the DELIVERY_DRIVER
+      role; own assignments only — anything else answers 404). A sibling of
+      /driver/jobs: the list is unified in the driver job feed, but transitions
+      stay on separate routes. `jobKind` on a job says which family to post to.
+  - name: AdminLogistics
+    description: >-
+      Operating the network and the journeys over it. Permission-gated per
+      route — logistics.read / logistics.manage / logistics.operate /
+      logistics.verify (PIN reveal only) — and audited.
+security:
+  - cookieAuth: []
+
+paths:
+  # ---- Public network discovery ----
+  /shipping/hubs:
+    get:
+      tags: [Public]
+      summary: Active terminals a customer can pick (public, real network only)
+      description: >-
+        No authentication. Active, non-test hubs only — a rehearsal terminal is
+        never offered to a real customer (`LogisticsNetworkService.publicHubs`).
+        Nothing operational (fees, isTest) is in the payload.
+      security: []
+      responses:
+        "200":
+          description: Active real hubs, ordered by district then name
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PublicHub" }
+  /shipping/modes:
+    get:
+      tags: [Public]
+      summary: Transport modes the network can actually offer (public)
+      description: >-
+        Derived from ACTIVE configured routes between active hubs, never from
+        the enum — a mode nothing runs is not offered
+        (`LogisticsNetworkService.availableModes`). With no routes configured
+        (production today) this is `[]`.
+      security: []
+      responses:
+        "200":
+          description: Subset of LAND, AIR, SEA, in that order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string, enum: [LAND, AIR, SEA] }
+
+  # ---- Customer shipping ----
+  /shipping/quote:
+    post:
+      tags: [Shipping]
+      summary: Price a journey without creating anything
+      description: >-
+        CUSTOMER role. Strictly throttled. A POST deliberately — addresses do
+        not belong in URLs that land in access logs. `payWithWallet` is ignored
+        here: asking the price never moves money. The caller's own `isTest`
+        flag picks the network side (`ShipmentService.quote`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuoteRequest" }
+      responses:
+        "201":
+          description: A priced plan, or an honest refusal — both succeed (201, the NestJS POST default; no @HttpCode override exists)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/QuoteAvailable"
+                  - $ref: "#/components/schemas/QuoteUnavailable"
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /shipping:
+    post:
+      tags: [Shipping]
+      summary: Book a shipment
+      description: >-
+        CUSTOMER role. Strictly throttled. Freezes the plan into legs
+        (addresses snapshotted), writes the first custody event (SENDER), and
+        when `payWithWallet` is true creates and escrows the wallet payment IN
+        THE SAME TRANSACTION — an unaffordable booking rolls back entirely. An
+        unpriced journey (`plan total <= 0`) is refused with a plain-words 400
+        (the "ZERO IS NOT A PRICE" guard). An unpaid shipment is created but
+        never dispatched. `isTest` is derived from the account, never the
+        request. A paid journey starting with a courier leg is offered to a
+        driver immediately (`ShipmentService.create`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateShipmentRequest" }
+      responses:
+        "201":
+          description: The booked shipment, customer audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    get:
+      tags: [Shipping]
+      summary: The caller's own shipments (newest first, up to 50)
+      responses:
+        "200":
+          description: Customer-audience views
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ShipmentView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /shipping/{reference}:
+    get:
+      tags: [Shipping]
+      summary: Track one shipment by reference (owner only)
+      description: >-
+        A wrong-owner lookup answers the same 404 as a miss — "wrong customer"
+        would be an enumeration oracle (`ShipmentService.track`).
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string }, description: "Tracking reference, e.g. BML-XXXXXXXX" }
+      responses:
+        "200":
+          description: Customer-audience view
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/{id}/cancel:
+    post:
+      tags: [Shipping]
+      summary: Cancel own shipment (refused once any leg is moving)
+      description: >-
+        Owner only. Refused with 400 ("contact support") once any leg is
+        IN_PROGRESS — staff can still cancel via the admin route. Non-terminal
+        legs go CANCELLED, any assigned/offered driver is released and
+        notified, and the escrow hold is returned in full
+        (`ShipmentService.cancel`).
+      parameters:
+        - { $ref: "#/components/parameters/shipmentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CancelRequest" }
+      responses:
+        "201":
+          description: The cancelled shipment, customer audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Driver courier-leg jobs ----
+  /driver/shipping-jobs/{id}:
+    get:
+      tags: [DriverShippingJobs]
+      summary: One courier-leg job, as the assigned driver sees it
+      description: >-
+        Own assignment only; anything else is 404. Contact details, exact
+        address, pin and navigation link stay sealed until the driver accepts
+        (`addressUnlocked`); before that only the area is shown
+        (`ShipmentDriverService.getJob`).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "200":
+          description: Driver job view
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverShippingJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /driver/shipping-jobs/{id}/accept:
+    post:
+      tags: [DriverShippingJobs]
+      summary: Accept the offered leg
+      description: >-
+        Conditional write racing the sweeper — the database is the arbiter.
+        Idempotent when already accepted. Accepting opens the message thread
+        and unlocks the door address.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "201":
+          description: The job, now accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverShippingJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /driver/shipping-jobs/{id}/decline:
+    post:
+      tags: [DriverShippingJobs]
+      summary: Decline the offered leg
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  declined: { type: boolean, const: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /driver/shipping-jobs/{id}/pickup:
+    post:
+      tags: [DriverShippingJobs]
+      summary: Confirm pickup — the parcel is in the vehicle, custody moves
+      description: >-
+        Sets the driver view PICKUP_CONFIRMED and starts the leg through the
+        shipment layer (custody event, leg IN_PROGRESS, shipment status
+        recomputed).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "201":
+          description: The job after pickup
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverShippingJob" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /driver/shipping-jobs/{id}/in-transit:
+    post:
+      tags: [DriverShippingJobs]
+      summary: Mark the leg in transit
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "201":
+          description: The job in transit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverShippingJob" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /driver/shipping-jobs/{id}/arriving:
+    post:
+      tags: [DriverShippingJobs]
+      summary: Mark the leg arriving
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "201":
+          description: The job arriving
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverShippingJob" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /driver/shipping-jobs/{id}/handoff:
+    post:
+      tags: [DriverShippingJobs]
+      summary: Complete the leg by producing the receiver's handoff code
+      description: >-
+        Strictly throttled — a code-verification endpoint. The PIN is held by
+        whoever RECEIVES the parcel; 5 failed attempts lock the leg with an
+        admin alert. Verification, custody write and next-leg release are the
+        shipment layer's `completeLeg` — deliberately not a second
+        implementation.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegHandoffRequest" }
+      responses:
+        "201":
+          description: The finished job plus the updated shipment (staff-shaped view; its handoffPin fields are always null)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: "#/components/schemas/DriverShippingJob" }
+                  shipment: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "PIN attempts exhausted — an administrator has to confirm this handoff" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Admin logistics: the network as data ----
+  /admin/logistics/hubs:
+    get:
+      tags: [AdminLogistics]
+      summary: All hubs, active first (logistics.read)
+      responses:
+        "200":
+          description: Full hub rows, money as numbers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminHub" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [AdminLogistics]
+      summary: Create a hub (logistics.manage; audited)
+      description: >-
+        `code` is uppercased and unique — a duplicate answers 409. `isTest` is
+        admin-set here (this is how the simulation network is built through the
+        console); it is never a customer's assertion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HubInput" }
+      responses:
+        "201":
+          description: The created hub
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminHub" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/logistics/hubs/{id}:
+    patch:
+      tags: [AdminLogistics]
+      summary: Update a hub (logistics.manage; audited, fee changes visible in the trail)
+      parameters: [ { $ref: "#/components/parameters/hubId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [ { $ref: "#/components/schemas/HubInput" } ]
+              description: All fields optional; an empty patch is refused ("Nothing to update.")
+      responses:
+        "200":
+          description: The updated hub
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminHub" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/logistics/routes:
+    get:
+      tags: [AdminLogistics]
+      summary: All routes with hub briefs, active first (logistics.read)
+      responses:
+        "200":
+          description: Route rows (priceMinor as number) including originHub/destinationHub briefs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminRoute" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [AdminLogistics]
+      summary: Create a route between two hubs (logistics.manage; audited)
+      description: >-
+        Both hubs must exist and both must handle the mode; a self-referential
+        route is refused. Configuration mistakes are caught at entry, not at
+        the customer's quote.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RouteInput" }
+      responses:
+        "201":
+          description: The created route
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminRoute" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/routes/{id}:
+    patch:
+      tags: [AdminLogistics]
+      summary: Update a route (logistics.manage; audited)
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [ { $ref: "#/components/schemas/RouteInput" } ]
+              description: All fields optional; an empty patch is refused
+      responses:
+        "200":
+          description: The updated route
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminRoute" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/courier-lanes:
+    get:
+      tags: [AdminLogistics]
+      summary: All courier lanes (logistics.read)
+      description: >-
+        Deliberately not public — a lane is a fact the planner uses, and
+        listing lanes to customers would read as a timetable BML is not
+        offering.
+      responses:
+        "200":
+          description: Lane rows, priceMinor as number
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminCourierLane" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [AdminLogistics]
+      summary: Declare two towns connected by road (logistics.manage; audited)
+      description: >-
+        One road, one row — the same pair reversed or re-cased answers 409,
+        because the planner reads a lane in both directions. A lane from a town
+        to itself is refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CourierLaneInput" }
+      responses:
+        "201":
+          description: The created lane
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminCourierLane" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /admin/logistics/courier-lanes/{id}:
+    patch:
+      tags: [AdminLogistics]
+      summary: Update a courier lane (logistics.manage; audited)
+      parameters: [ { $ref: "#/components/parameters/laneId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf: [ { $ref: "#/components/schemas/CourierLaneInput" } ]
+              description: All fields optional; an empty patch is refused
+      responses:
+        "200":
+          description: The updated lane
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminCourierLane" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  # ---- Admin logistics: shipments ----
+  /admin/logistics/shipments:
+    get:
+      tags: [AdminLogistics]
+      summary: The operations board (logistics.read)
+      description: >-
+        Sorted "needs a human first" — exceptions, then dispatch-exhausted
+        legs, then newest. Test shipments are hidden unless `includeTest=true`
+        (the query parser respects the word "false").
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string }, description: "ShipmentStatus filter" }
+        - { name: service, in: query, required: false, schema: { $ref: "#/components/schemas/ShippingService" } }
+        - { name: includeTest, in: query, required: false, schema: { type: string, enum: ["true", "false", "1", "0"] } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: Paged board rows
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpsBoard" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/logistics/hubs/{id}/expected:
+    get:
+      tags: [AdminLogistics]
+      summary: What a terminal should be expecting, for the handoff desk (logistics.read)
+      parameters: [ { $ref: "#/components/parameters/hubId" } ]
+      responses:
+        "200":
+          description: Inbound READY/IN_PROGRESS legs ending at this hub (up to 100)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ExpectedParcel" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/logistics/shipments/{reference}:
+    get:
+      tags: [AdminLogistics]
+      summary: Track any shipment by reference (logistics.read)
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Staff-audience view (courierStatus and carrierBookingRef visible; handoffPin always null — the reveal endpoint is the only staff path to a code)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Admin logistics: courier-leg dispatch and leg operation ----
+  /admin/logistics/legs/{id}/eligible-drivers:
+    get:
+      tags: [AdminLogistics]
+      summary: The eligible pool for one courier leg (logistics.operate)
+      description: >-
+        The same filters assignment applies — online, active, role APPROVED,
+        licence current, serving the district, at least one usable vehicle,
+        the matching side of the simulation boundary, never the sender — so an
+        administrator is not offered a choice the assignment would then refuse.
+        Includes each candidate's live-job count across BOTH job tables.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "200":
+          description: Fully eligible candidates only
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EligibleDriver" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/assign:
+    post:
+      tags: [AdminLogistics]
+      summary: Assign a driver and vehicle to a courier leg by hand (logistics.operate)
+      description: >-
+        The production dispatch path while `dispatchAutomatic` is off (its
+        shipped default; read the live value, do not assume it). Re-checks
+        everything the engine checks, conditionally — a concurrent change
+        answers 400 "someone else got there first".
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssignLegRequest" }
+      responses:
+        "201":
+          description: Assignment result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegAssignmentResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/reassign:
+    post:
+      tags: [AdminLogistics]
+      summary: Reassign a courier leg; a reason is mandatory (logistics.operate)
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReassignLegRequest" }
+      responses:
+        "201":
+          description: Assignment result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegAssignmentResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/start:
+    post:
+      tags: [AdminLogistics]
+      summary: Start a READY leg — the parcel is moving on it (logistics.operate)
+      description: >-
+        Sequence is authority — a leg whose predecessors have not completed is
+        refused. Optional `x-operator-label` header records who physically
+        acted (truncated to 120 chars).
+      parameters:
+        - { $ref: "#/components/parameters/legId" }
+        - { name: x-operator-label, in: header, required: false, schema: { type: string, maxLength: 120 } }
+      responses:
+        "201":
+          description: The updated shipment, staff audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/depart:
+    post:
+      tags: [AdminLogistics]
+      summary: Confirm a line-haul departed (logistics.operate)
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                carrierName: { type: string, maxLength: 120 }
+                carrierBookingRef: { type: string, maxLength: 120 }
+                note: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The updated shipment, staff audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/arrive:
+    post:
+      tags: [AdminLogistics]
+      summary: A line-haul reached the far terminal, not yet handed over (logistics.operate)
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "201":
+          description: The updated shipment, staff audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/handoff-pin:
+    get:
+      tags: [AdminLogistics]
+      summary: Audited reveal of a desk-held handoff code (logistics.verify — a different permission from operating)
+      description: >-
+        Strictly throttled. FIRST_MILE and LINE_HAUL codes only — a LAST_MILE
+        or DIRECT code belongs to the recipient and answers 400. Refused with
+        403 to the leg's own assigned driver, matched on user id (the person
+        producing the code must not be its source). Every reveal writes an
+        audit row that never contains the code
+        (`ShipmentService.revealHandoffPin`).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "200":
+          description: The code and its verification state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  handoffPin: { type: [string, "null"] }
+                  handoffPinAttempts: { type: integer }
+                  handoffVerificationStatus: { type: string }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Missing logistics.verify, or the caller is the leg's own assigned driver" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/handoff:
+    post:
+      tags: [AdminLogistics]
+      summary: Complete a leg by proving the handoff (logistics.operate)
+      description: >-
+        Strictly throttled. The same PIN check, lockout (5 attempts, admin
+        alert), custody write and next-leg release the driver path uses —
+        deliberately one implementation (`ShipmentService.completeLeg`).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegHandoffRequest" }
+      responses:
+        "201":
+          description: The updated shipment, staff audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "PIN attempts exhausted — the leg is locked" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/exception:
+    post:
+      tags: [AdminLogistics]
+      summary: Record that something went wrong on a leg (logistics.operate)
+      description: >-
+        One-way today: the leg goes EXCEPTION, the shipment reads EXCEPTION,
+        and no endpoint clears either — the only exit is cancelling the
+        shipment (a known, recorded gap; see DELIVERY-LIFECYCLE.md §6 gap 4).
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 4, maxLength: 500 }
+      responses:
+        "201":
+          description: The updated shipment, staff audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/shipments/{id}/collect:
+    post:
+      tags: [AdminLogistics]
+      summary: The recipient walked in and collected (logistics.operate)
+      description: >-
+        Only valid from AWAITING_COLLECTION and only once. Custody passes
+        HUB → RECIPIENT and the shipment recomputes to DELIVERED
+        (`ShipmentService.recordCollection`).
+      parameters: [ { $ref: "#/components/parameters/shipmentId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [collectedByName]
+              properties:
+                collectedByName: { type: string, minLength: 2, maxLength: 120 }
+      responses:
+        "201":
+          description: The updated shipment, staff audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/shipments/{id}/cancel:
+    post:
+      tags: [AdminLogistics]
+      summary: Staff cancellation — always allowed (logistics.manage)
+      description: >-
+        Completed legs stay completed; live courier jobs close on the driver's
+        side too (drivers notified after commit); the escrow hold is returned
+        to the customer IN FULL — what a driver who completed an earlier leg
+        is owed is an unresolved product decision, deliberately not implemented
+        (DELIVERY-LIFECYCLE.md §6 gap 6).
+      parameters: [ { $ref: "#/components/parameters/shipmentId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CancelRequest" }
+      responses:
+        "201":
+          description: The cancelled shipment, staff audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+    csrfToken:
+      type: apiKey
+      in: header
+      name: x-csrf-token
+  parameters:
+    shipmentId: { name: id, in: path, required: true, schema: { type: string }, description: Shipment id }
+    legId: { name: id, in: path, required: true, schema: { type: string }, description: Shipment leg id }
+    hubId: { name: id, in: path, required: true, schema: { type: string }, description: Hub id }
+    routeId: { name: id, in: path, required: true, schema: { type: string }, description: Route id }
+    laneId: { name: id, in: path, required: true, schema: { type: string }, description: Courier lane id }
+  responses:
+    ValidationError:
+      description: Validation failed, or the operation is not legal in this state (plain-words message)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              errors:
+                type: array
+                items:
+                  type: object
+                  properties: { path: { type: string }, message: { type: string } }
+    Unauthorized: { description: Authentication required }
+    Forbidden: { description: Missing role/permission }
+    NotFound: { description: Not found or not owned (deliberately indistinguishable) }
+    Conflict: { description: State/uniqueness conflict }
+  schemas:
+    Money:
+      type: integer
+      description: >-
+        BZD minor units (cents) as a JSON NUMBER on this surface — converted
+        from BigInt with Number() in the serializers. 0 means "not priced yet",
+        never free. (Wallet surfaces serialize BigInt money as strings; do not
+        carry that convention here or vice versa.)
+    District:
+      type: string
+      enum: [BELIZE, CAYO, COROZAL, ORANGE_WALK, STANN_CREEK, TOLEDO]
+    TransportMode:
+      type: string
+      enum: [LAND, AIR, SEA]
+    ShippingService:
+      type: string
+      enum: [DOOR_TO_DOOR, DOOR_TO_HUB, HUB_TO_DOOR, HUB_TO_HUB]
+      description: Which ends BML is responsible for — not whether a terminal is involved
+    HubType:
+      type: string
+      enum: [AIRPORT, AIRSTRIP, WATER_TAXI_TERMINAL, SEA_TERMINAL, BUS_TERMINAL, WAREHOUSE, DISTRIBUTION_CENTER, BMPL_HUB]
+    LegKind:
+      type: string
+      enum: [DIRECT, FIRST_MILE, LINE_HAUL, LAST_MILE]
+      description: DIRECT/FIRST_MILE/LAST_MILE are courier legs a BML driver works; LINE_HAUL is operated by a carrier and has no driver app
+    LegStatus:
+      type: string
+      enum: [PENDING, READY, IN_PROGRESS, COMPLETED, CANCELLED, EXCEPTION]
+    ShipmentStatus:
+      type: string
+      enum: [DRAFT, AWAITING_PICKUP, FIRST_MILE, AT_ORIGIN_HUB, IN_TRANSIT, AT_DESTINATION_HUB, OUT_FOR_DELIVERY, AWAITING_COLLECTION, DELIVERED, EXCEPTION, CANCELLED]
+      description: Never set by hand — recomputed from the legs after every transition
+    CourierStatus:
+      type: string
+      enum: [PENDING_ASSIGNMENT, ASSIGNED, DRIVER_ACCEPTED, DRIVER_DECLINED, PICKUP_CONFIRMED, IN_TRANSIT, ARRIVING, DELIVERED, CANCELLED]
+      description: The driver's view of a courier leg — the same DeliveryStatus state machine marketplace deliveries use
+    CustodyHolder:
+      type: string
+      enum: [SENDER, DRIVER, HUB, CARRIER, RECIPIENT]
+
+    EndpointInput:
+      type: object
+      description: >-
+        One end of a journey. A DOOR end needs a district (quote & booking) and
+        — at booking only — a town plus a street OR a pin (either alone is
+        complete); a HUB end needs hubId and neither address nor town. A pin is
+        both coordinates or neither, and must be inside Belize.
+      properties:
+        hubId: { type: string }
+        name: { type: string, maxLength: 120 }
+        phone: { type: string }
+        email: { type: string, maxLength: 160 }
+        company: { type: string, maxLength: 120 }
+        address: { type: string, maxLength: 200 }
+        address2: { type: string, maxLength: 200 }
+        city: { type: string, maxLength: 80 }
+        district: { $ref: "#/components/schemas/District" }
+        instructions: { type: string, maxLength: 1000 }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+    QuoteRequest:
+      type: object
+      required: [service, origin, destination]
+      properties:
+        service: { $ref: "#/components/schemas/ShippingService" }
+        origin: { $ref: "#/components/schemas/EndpointInput" }
+        destination: { $ref: "#/components/schemas/EndpointInput" }
+        preferredMode: { $ref: "#/components/schemas/TransportMode" }
+        weightGrams: { type: integer, minimum: 1, maximum: 2000000 }
+        pieces: { type: integer, minimum: 1, maximum: 500, default: 1 }
+        description: { type: string, maxLength: 500 }
+        payWithWallet: { type: boolean, default: false, description: "Booking only; quoting ignores it — asking the price never moves money" }
+    CreateShipmentRequest:
+      allOf: [ { $ref: "#/components/schemas/QuoteRequest" } ]
+      description: >-
+        A quote plus what is only needed once it is real: each door end must be
+        locatable (street OR pin) and name its town; the destination must carry
+        a name and phone — somebody has to be reachable at the far end.
+    QuoteAvailable:
+      type: object
+      properties:
+        available: { type: boolean, const: true }
+        service: { $ref: "#/components/schemas/ShippingService" }
+        serviceLabel: { type: string }
+        serviceDescription: { type: string }
+        totalMinor: { $ref: "#/components/schemas/Money" }
+        transportMinutes: { type: integer }
+        explanation: { type: string }
+        pricingIncomplete: { type: boolean, description: "True when a hub on the journey has no courier fee configured — flagged, not hidden" }
+        pricingNote: { type: [string, "null"] }
+        legs:
+          type: array
+          items:
+            type: object
+            properties:
+              sequence: { type: integer }
+              kind: { $ref: "#/components/schemas/LegKind" }
+              mode: { $ref: "#/components/schemas/TransportMode" }
+              modeLabel: { type: string }
+              description: { type: string }
+              priceMinor: { $ref: "#/components/schemas/Money" }
+              durationMinutes: { type: integer }
+              originHub: { $ref: "#/components/schemas/HubBrief" }
+              destinationHub: { $ref: "#/components/schemas/HubBrief" }
+    QuoteUnavailable:
+      type: object
+      description: The planner refused, with an explanation a customer can act on. It never invents transport.
+      properties:
+        available: { type: boolean, const: false }
+        reason: { type: string }
+        message: { type: string }
+        useLocalDelivery: { type: boolean, description: "True when the refusal is LOCAL_DELIVERY — the ordinary courier flow already covers this journey" }
+    HubBrief:
+      type: [object, "null"]
+      properties:
+        id: { type: string }
+        code: { type: string }
+        name: { type: string }
+        city: { type: string }
+    PublicHub:
+      type: object
+      properties:
+        id: { type: string }
+        code: { type: string }
+        name: { type: string }
+        type: { $ref: "#/components/schemas/HubType" }
+        district: { $ref: "#/components/schemas/District" }
+        city: { type: string }
+        address: { type: [string, "null"] }
+        latitude: { type: [number, "null"] }
+        longitude: { type: [number, "null"] }
+        modes: { type: array, items: { $ref: "#/components/schemas/TransportMode" } }
+        instructions: { type: [string, "null"] }
+    HubInput:
+      type: object
+      description: Required fields apply to create; PATCH takes any subset
+      properties:
+        code: { type: string, minLength: 2, maxLength: 12, pattern: "^[A-Za-z0-9-]+$", description: Uppercased on the way in; unique }
+        name: { type: string, minLength: 2, maxLength: 120 }
+        type: { $ref: "#/components/schemas/HubType" }
+        district: { $ref: "#/components/schemas/District" }
+        city: { type: string, minLength: 2, maxLength: 80 }
+        addressLine1: { type: string, maxLength: 200 }
+        addressLine2: { type: string, maxLength: 200 }
+        latitude: { type: number }
+        longitude: { type: number }
+        modes: { type: array, minItems: 1, items: { $ref: "#/components/schemas/TransportMode" } }
+        instructions: { type: string, maxLength: 1000 }
+        contactName: { type: string, maxLength: 120 }
+        contactPhone: { type: string }
+        courierFeeMinor: { type: integer, minimum: 0, maximum: 100000000, description: "Minor units; 0 means not priced yet" }
+        isActive: { type: boolean }
+        isTest: { type: boolean, description: "Admin-set simulation flag — how the practice network is built through the console" }
+    AdminHub:
+      type: object
+      description: The full hub row; courierFeeMinor converted to a JSON number
+      properties:
+        id: { type: string }
+        code: { type: string }
+        name: { type: string }
+        type: { $ref: "#/components/schemas/HubType" }
+        district: { $ref: "#/components/schemas/District" }
+        city: { type: string }
+        courierFeeMinor: { $ref: "#/components/schemas/Money" }
+        modes: { type: array, items: { $ref: "#/components/schemas/TransportMode" } }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+      additionalProperties: true
+    RouteInput:
+      type: object
+      properties:
+        originHubId: { type: string }
+        destinationHubId: { type: string }
+        mode: { $ref: "#/components/schemas/TransportMode" }
+        carrierName: { type: string, maxLength: 120 }
+        carrierPhone: { type: string }
+        scheduleNote: { type: string, maxLength: 200, description: "A label operations write — NOT a timetable; no schedule exists" }
+        durationMinutes: { type: integer, minimum: 1, maximum: 10080 }
+        priceMinor: { type: integer, minimum: 0, maximum: 100000000 }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+    AdminRoute:
+      type: object
+      description: The full route row (priceMinor as number) plus hub briefs
+      properties:
+        id: { type: string }
+        originHubId: { type: string }
+        destinationHubId: { type: string }
+        mode: { $ref: "#/components/schemas/TransportMode" }
+        priceMinor: { $ref: "#/components/schemas/Money" }
+        durationMinutes: { type: integer }
+        scheduleNote: { type: [string, "null"] }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+        originHub: { type: object, properties: { id: { type: string }, code: { type: string }, name: { type: string }, modes: { type: array, items: { $ref: "#/components/schemas/TransportMode" } } } }
+        destinationHub: { type: object, properties: { id: { type: string }, code: { type: string }, name: { type: string }, modes: { type: array, items: { $ref: "#/components/schemas/TransportMode" } } } }
+      additionalProperties: true
+    CourierLaneInput:
+      type: object
+      properties:
+        originDistrict: { $ref: "#/components/schemas/District" }
+        originCity: { type: string, minLength: 2, maxLength: 80 }
+        destinationDistrict: { $ref: "#/components/schemas/District" }
+        destinationCity: { type: string, minLength: 2, maxLength: 80 }
+        priceMinor: { type: integer, minimum: 0, maximum: 100000000, description: "Minor units; 0 means not priced yet" }
+        durationMinutes: { type: integer, minimum: 0, maximum: 1440 }
+        note: { type: string, maxLength: 200 }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+    AdminCourierLane:
+      type: object
+      description: The full lane row; priceMinor converted to a JSON number. Read by the planner in BOTH directions.
+      properties:
+        id: { type: string }
+        originDistrict: { $ref: "#/components/schemas/District" }
+        originCity: { type: string }
+        destinationDistrict: { $ref: "#/components/schemas/District" }
+        destinationCity: { type: string }
+        priceMinor: { $ref: "#/components/schemas/Money" }
+        durationMinutes: { type: integer }
+        note: { type: [string, "null"] }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+      additionalProperties: true
+    ShipmentView:
+      type: object
+      description: >-
+        One journey, told once (`ShipmentService.serialize`). The handoff PIN
+        is the ONLY audience-dependent money-adjacent field: a CUSTOMER sees it
+        solely on a live LAST_MILE or DIRECT leg of a door-ending journey (the
+        code THEY hold for their recipient); STAFF always read null here and
+        use the audited reveal endpoint. `courierStatus`,
+        `assignedDriverProfileId` and `carrierBookingRef` are staff-only and
+        null for customers.
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        service: { $ref: "#/components/schemas/ShippingService" }
+        serviceLabel: { type: string }
+        status: { $ref: "#/components/schemas/ShipmentStatus" }
+        statusLabel: { type: string }
+        isTest: { type: boolean }
+        endsAtHub: { type: boolean }
+        quotedTotalMinor: { $ref: "#/components/schemas/Money" }
+        quotedMinutes: { type: [integer, "null"] }
+        explanation: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        pieces: { type: integer }
+        weightGrams: { type: [integer, "null"] }
+        bookedAt: { type: [string, "null"], format: date-time }
+        deliveredAt: { type: [string, "null"], format: date-time }
+        cancelledAt: { type: [string, "null"], format: date-time }
+        cancellationReason: { type: [string, "null"] }
+        exceptionReason: { type: [string, "null"] }
+        origin: { $ref: "#/components/schemas/ShipmentEnd" }
+        destination: { $ref: "#/components/schemas/ShipmentEnd" }
+        currentLegSequence: { type: [integer, "null"] }
+        legs:
+          type: array
+          items: { $ref: "#/components/schemas/ShipmentLegView" }
+        custody:
+          type: array
+          items: { $ref: "#/components/schemas/CustodyEventView" }
+    ShipmentEnd:
+      type: object
+      properties:
+        name: { type: [string, "null"] }
+        phone: { type: [string, "null"] }
+        address: { type: [string, "null"] }
+        city: { type: [string, "null"] }
+        district: { type: [string, "null"] }
+        latitude: { type: [number, "null"] }
+        longitude: { type: [number, "null"] }
+        instructions: { type: [string, "null"] }
+    ShipmentLegView:
+      type: object
+      properties:
+        id: { type: string }
+        sequence: { type: integer }
+        kind: { $ref: "#/components/schemas/LegKind" }
+        mode: { $ref: "#/components/schemas/TransportMode" }
+        modeLabel: { type: string }
+        status: { $ref: "#/components/schemas/LegStatus" }
+        description: { type: [string, "null"] }
+        priceMinor: { $ref: "#/components/schemas/Money" }
+        durationMinutes: { type: [integer, "null"] }
+        isCurrent: { type: boolean }
+        originHub: { $ref: "#/components/schemas/HubBrief" }
+        destinationHub: { $ref: "#/components/schemas/HubBrief" }
+        carrier: { type: [string, "null"] }
+        carrierBookingRef: { type: [string, "null"], description: Staff audience only; null for customers }
+        courierStatus:
+          oneOf: [ { $ref: "#/components/schemas/CourierStatus" }, { type: "null" } ]
+          description: Staff audience only; null for customers
+        assignedDriverProfileId: { type: [string, "null"], description: Staff audience only; null for customers }
+        scheduleNote: { type: [string, "null"], description: An operator-typed label, not a schedule }
+        scheduledDepartureAt: { type: [string, "null"], format: date-time }
+        departedAt: { type: [string, "null"], format: date-time }
+        arrivedAt: { type: [string, "null"], format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        handoffReceivedByName: { type: [string, "null"] }
+        exceptionReason: { type: [string, "null"] }
+        handoffPin:
+          type: [string, "null"]
+          description: >-
+            Customer audience, live LAST_MILE or DIRECT leg of a door-ending
+            journey only — the recipient's door code, 4 digits. Null in every
+            other case, staff always included.
+    CustodyEventView:
+      type: object
+      description: Append-only — one row per handover, never rewritten
+      properties:
+        id: { type: string }
+        fromHolder:
+          oneOf: [ { $ref: "#/components/schemas/CustodyHolder" }, { type: "null" } ]
+        toHolder: { $ref: "#/components/schemas/CustodyHolder" }
+        hubId: { type: [string, "null"] }
+        actorLabel: { type: [string, "null"] }
+        note: { type: [string, "null"] }
+        verification: { type: string, enum: [PENDING, VERIFIED] }
+        occurredAt: { type: string, format: date-time }
+    OpsBoard:
+      type: object
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              reference: { type: string }
+              service: { $ref: "#/components/schemas/ShippingService" }
+              serviceLabel: { type: string }
+              status: { $ref: "#/components/schemas/ShipmentStatus" }
+              statusLabel: { type: string }
+              isTest: { type: boolean }
+              customer: { type: [string, "null"] }
+              origin: { type: [string, "null"] }
+              destination: { type: [string, "null"] }
+              totalMinor: { $ref: "#/components/schemas/Money" }
+              exceptionReason: { type: [string, "null"] }
+              needsAttention: { type: boolean }
+              needsDriver: { type: boolean }
+              createdAt: { type: string, format: date-time }
+              legs:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    sequence: { type: integer }
+                    kind: { $ref: "#/components/schemas/LegKind" }
+                    mode: { $ref: "#/components/schemas/TransportMode" }
+                    status: { $ref: "#/components/schemas/LegStatus" }
+                    courierStatus:
+                      oneOf: [ { $ref: "#/components/schemas/CourierStatus" }, { type: "null" } ]
+                    from: { type: string }
+                    to: { type: string }
+                    operator: { type: [string, "null"] }
+                    needsDriver: { type: boolean }
+    ExpectedParcel:
+      type: object
+      properties:
+        legId: { type: string }
+        reference: { type: string }
+        kind: { $ref: "#/components/schemas/LegKind" }
+        broughtBy: { type: string }
+        contactPhone: { type: [string, "null"] }
+        from: { type: string }
+        parcel: { type: string }
+        arrived: { type: boolean }
+        departedAt: { type: [string, "null"], format: date-time }
+        arrivedAt: { type: [string, "null"], format: date-time }
+        forRecipient: { type: [string, "null"] }
+    EligibleDriver:
+      type: object
+      description: Only fully eligible drivers appear (role APPROVED, licence current, at least one usable vehicle)
+      properties:
+        driverProfileId: { type: string }
+        displayName: { type: [string, "null"] }
+        name: { type: string }
+        homeDistrict: { type: [string, "null"] }
+        availability: { type: string }
+        roleStatus: { type: string }
+        licenceExpired: { type: boolean }
+        completedDeliveries: { type: integer }
+        activeJobs: { type: integer, description: "Live jobs across BOTH job tables — marketplace deliveries and courier legs" }
+        ratingAverage: { type: [number, "null"] }
+        vehicles:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              type: { type: string }
+              make: { type: [string, "null"] }
+              model: { type: [string, "null"] }
+              licencePlate: { type: [string, "null"] }
+              isPrimary: { type: boolean }
+    AssignLegRequest:
+      type: object
+      required: [driverProfileId, vehicleId]
+      properties:
+        driverProfileId: { type: string }
+        vehicleId: { type: string }
+    ReassignLegRequest:
+      type: object
+      required: [driverProfileId, vehicleId, reason]
+      properties:
+        driverProfileId: { type: string }
+        vehicleId: { type: string }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    LegAssignmentResult:
+      type: object
+      properties:
+        legId: { type: string }
+        shipmentReference: { type: string }
+        courierStatus: { type: string, const: ASSIGNED }
+        assignedDriverProfileId: { type: string }
+        assignedVehicleId: { type: string }
+    LegHandoffRequest:
+      type: object
+      required: [pin, receivedByName]
+      properties:
+        pin: { type: string, pattern: "^\\d{4,8}$", description: "The receiver's code (4 digits today)" }
+        receivedByName: { type: string, minLength: 2, maxLength: 120 }
+        note: { type: string, maxLength: 500 }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+    CancelRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 4, maxLength: 500 }
+    DriverShippingJob:
+      type: object
+      description: >-
+        A courier leg as the driver's job (`ShipmentDriverService.serialize`).
+        Contact details, exact address, pin location and navigation link are
+        null until the driver accepts (`addressUnlocked`); a terminal end is
+        always shown in full — it is a public place.
+      properties:
+        id: { type: string }
+        jobKind: { $ref: "#/components/schemas/LegKind" }
+        isShipmentLeg: { type: boolean, const: true }
+        shipmentId: { type: string }
+        reference: { type: string }
+        isTest: { type: boolean }
+        sequence: { type: integer }
+        status: { $ref: "#/components/schemas/CourierStatus" }
+        statusLabel: { type: string }
+        view: { type: string }
+        nextActionLabel: { type: [string, "null"] }
+        mode: { $ref: "#/components/schemas/TransportMode" }
+        modeLabel: { type: string }
+        addressUnlocked: { type: boolean }
+        pickup: { $ref: "#/components/schemas/JobPlace" }
+        dropoff: { $ref: "#/components/schemas/JobPlace" }
+        parcel:
+          type: object
+          properties:
+            description: { type: [string, "null"] }
+            pieces: { type: integer }
+            weightGrams: { type: [integer, "null"] }
+        feeMinor: { $ref: "#/components/schemas/Money" }
+        handoffCodeHeldBy: { type: string, description: "Who the driver gets the code FROM: terminal staff (first mile) or the person receiving it" }
+        offerExpiresAt: { type: [string, "null"], format: date-time }
+        assignedAt: { type: [string, "null"], format: date-time }
+        acceptedAt: { type: [string, "null"], format: date-time }
+        pickedUpAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        queuePosition: { type: [integer, "null"] }
+        pinAttemptsRemaining: { type: integer }
+    JobPlace:
+      type: [object, "null"]
+      properties:
+        kind: { type: string, enum: [ADDRESS, HUB] }
+        name: { type: [string, "null"] }
+        phone: { type: [string, "null"] }
+        address: { type: [string, "null"] }
+        area: { type: [string, "null"] }
+        instructions: { type: [string, "null"] }
+        pinnedLocation:
+          type: [object, "null"]
+          properties:
+            latitude: { type: number }
+            longitude: { type: number }
+        navigationUrl: { type: [string, "null"] }
