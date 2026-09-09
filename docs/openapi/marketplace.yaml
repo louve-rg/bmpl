@@ -8,10 +8,9 @@ info:
     wallet, marketplace dispatch & delivery (M15), settlement (M18), reviews,
     jobs. The multimodal shipping surface (/shipping/*, courier legs,
     hubs/modes, admin logistics) is documented separately in shipping.yaml in
-    this directory; the passenger rider/driver/operator self-service and
-    driver-movement surfaces are in passenger.yaml beside it, while the
-    passenger network, fleet-affiliation and admin surfaces are not yet
-    documented (tracked as BMPL-102). All paths are under the `/api`
+    this directory, and the complete passenger surface (rider, driver,
+    operator, network, affiliation, admin) in passenger.yaml beside it. All
+    paths are under the `/api`
     prefix. Money is integer minor units (BZD cents); wallet/ledger amounts
     are BigInt-backed and serialize as JSON strings on wallet surfaces, while
     delivery/shipping fee fields serialize as JSON numbers — verify per
