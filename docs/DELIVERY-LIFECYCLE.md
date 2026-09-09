@@ -465,15 +465,22 @@ should go, who pays for the interrupted run and what the customer is owed are
 owner decisions; until they are made, the endpoint fails closed and the outs
 are RESUME or a staff cancellation.
 
-**5. The recipient is invisible.** Every shipment notification goes to
-`customerUserId` — the sender (`notifyCustomer`, defined in both
-`shipment.service.ts` and `shipment-driver.service.ts`). The `destinationEmail` /
-`destinationPhone` snapshots are written at booking and the email is never
-used for anything (verified by grep). There is no public or anonymous
-tracking: `GET /shipping/:reference` requires the CUSTOMER role and
-ownership. A recipient without a BML account learns their parcel is
-"ready to collect" only if the sender tells them. (`AWAITING_COLLECTION`
-itself works — the collection flow is gap-free once the recipient shows up.)
+**5. PARTIALLY CLOSED on `main` (BMPL-111) — the recipient can now see, but
+is still not told.** The seeing half: every booking mints a high-entropy
+capability token (`Shipment.recipientToken`), the sender shares the link, and
+`GET /shipping/track/{token}` (public, strictly throttled,
+`ShipmentService.trackPublic`) answers with a deliberate allowlist — status
+and step progress in customer language, the destination town, and the
+collection terminal only while the parcel is waiting there. Never: sender
+identity or address, money, the parcel description, a handoff PIN, custody
+actors, driver identity, or operator-typed reasons. Every miss is one fixed
+404, so a guessed URL confirms nothing. The telling half stays open, and it
+is a policy question, not an engineering one: pushing a notification to the
+recipient requires `destinationEmail` / `destinationPhone` — contact details
+BML holds only because a customer typed them, for a person who never signed
+up. Whether to contact them, on which channel, with what consent posture, is
+the owner's decision; nothing is sent today. (`AWAITING_COLLECTION` and the
+collection flow itself remain gap-free.)
 
 **6. Staff cancellation returns the whole escrow even when a driver completed
 a leg.** `cancel` releases the full held amount to the customer
