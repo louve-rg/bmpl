@@ -1,5 +1,13 @@
 # M26.1 — Full Platform UX, Navigation & Completeness Audit
 
+> **📅 Dated milestone record (banner added 2026-09-09).** Every statement below
+> describes the repository as it stood at M26.1 — do not read scope lines as
+> current. In particular, "Passenger Transportation not started" is **no longer
+> true**: the passenger vertical is built end to end and the rider journey is
+> verified (see [`PROJECT_STATUS.md`](../PROJECT_STATUS.md) §1 and
+> [`PASSENGER-LIFECYCLE.md`](../PASSENGER-LIFECYCLE.md)). For current state,
+> always start from `PROJECT_STATUS.md`.
+
 A product-quality pass over every implemented BMPL module (M0–M26). Focus: the
 small-but-important issues automated tests miss — navigation, back behavior,
 disappearing data, missing lookup/seed data, breadcrumbs, empty states, and

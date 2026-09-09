@@ -1,5 +1,11 @@
 # Marketplace Client Demo Readiness (M12.1)
 
+> **📅 Dated milestone record (banner added 2026-09-09).** The "not in scope" /
+> "does not extend the roadmap" statements below describe the M12.1 demo
+> milestone, not the product today. Delivery & shipping (Phase 4), settlement
+> (M18), and passenger transportation have all shipped since. For current
+> state, start from [`PROJECT_STATUS.md`](../PROJECT_STATUS.md).
+
 This milestone makes the existing marketplace demonstrable end-to-end with **real
 production workflows** — no shortcuts, no seeded fakes, no admin backdoors. A
 client can create an account, become an approved vendor with real documents, build

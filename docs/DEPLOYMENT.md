@@ -5,6 +5,16 @@
 > Architecture + trust boundaries: [`DEPLOYMENT-ARCHITECTURE.md`](./DEPLOYMENT-ARCHITECTURE.md).
 > Variables: [`ENVIRONMENT.md`](./ENVIRONMENT.md).
 
+> **⚠️ The `*-dev.bzemarketplace.com` hosts in this runbook were never the
+> deployed reality (noted 2026-09-09).** The live API host is
+> **`bmplapi-production.up.railway.app`**, also reachable as
+> **`https://www.bzemarketplace.com/api/*`** through the web app's same-origin
+> proxy; web is `www.bzemarketplace.com`, admin is `bmpl-admin.vercel.app`.
+> `api-dev.bzemarketplace.com` is **dead** (confirmed 2026-09-09 — Vercel
+> `DEPLOYMENT_NOT_FOUND`). During an incident, check
+> `https://www.bzemarketplace.com/api/health` — never `api-dev`. Current
+> deployment state: [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) §2.
+
 Runtime baseline: **Node 24 LTS**, **pnpm 9**, Prisma migrations via
 `prisma migrate deploy` (never `db push`).
 
@@ -186,10 +196,12 @@ For **each** app (`apps/web`, `apps/admin`): **[needs creds]**
 2. Build settings come from each app's `vercel.json` (monorepo-aware:
    `pnpm turbo run build --filter=@bmpl/web|@bmpl/admin`, output `.next`).
 3. Env vars:
-   - web: `NEXT_PUBLIC_API_URL=https://api-dev.bzemarketplace.com`,
-     `NEXT_PUBLIC_SITE_URL=https://dev.bzemarketplace.com` (+ optional Sentry/asset host).
-   - admin: `ADMIN_PUBLIC_API_URL=https://api-dev.bzemarketplace.com`,
-     `ADMIN_SITE_URL=https://admin-dev.bzemarketplace.com`.
+   - web: `NEXT_PUBLIC_API_URL=https://bmplapi-production.up.railway.app`,
+     `NEXT_PUBLIC_SITE_URL=https://www.bzemarketplace.com` (+ optional Sentry/asset host).
+   - admin: `ADMIN_PUBLIC_API_URL=https://bmplapi-production.up.railway.app`,
+     `ADMIN_SITE_URL=https://bmpl-admin.vercel.app`.
+   (Earlier revisions named the never-provisioned `*-dev.bzemarketplace.com`
+   hosts here — see the banner at the top.)
 4. Security headers ship from each app's `next.config.mjs`. A strict CSP is
    planned (see §16) and intentionally not yet enforced.
 5. **Preview deployments** get per-deploy URLs. Because auth cookies are
@@ -199,6 +211,10 @@ For **each** app (`apps/web`, `apps/admin`): **[needs creds]**
    cross-origin. Prefer the same-origin proxy to avoid preview cookie issues.
 
 ## 8–9. Development domains & DNS  **[needs creds]**
+
+**This step was never carried out** — none of these dev CNAMEs is the deployed
+reality, and `api-dev.bzemarketplace.com` is confirmed dead (2026-09-09). The
+table is kept as the original plan only; the live hosts are in the banner above.
 
 | Host | Points to | Record |
 |---|---|---|
@@ -268,7 +284,9 @@ without explicit authorization. Rotate the temporary password after first login.
 
 ## 13. Cloud verification
 
-- `GET https://api-dev.bzemarketplace.com/api/health` → `{"status":"ok"}`.
+- `GET https://www.bzemarketplace.com/api/health` → `{"status":"ok"}` (or the
+  Railway host directly: `https://bmplapi-production.up.railway.app/api/health`;
+  the `api-dev` host an earlier revision named here is dead).
 - `GET .../api/health/ready` → `{"status":"ready","checks":{"database":true,"redis":true,"storage":true}}`.
 - Web loads at `dev.…`; register/login sets HttpOnly cookies; dashboard renders.
 - Admin loads at `admin-dev.…`; sign in as the bootstrap admin; the applications

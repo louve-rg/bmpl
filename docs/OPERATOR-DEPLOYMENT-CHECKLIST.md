@@ -113,6 +113,10 @@ Admin env: `ADMIN_PUBLIC_API_URL`, `ADMIN_SITE_URL`. No secrets in `NEXT_PUBLIC_
 ## 13. DNS — [YOU]
 CNAME `dev`/`admin-dev` → Vercel, `api-dev` → Railway. Then update the API
 `CORS_ORIGINS` to the exact HTTPS origins and redeploy.
+*(Reality note, 2026-09-09: this step was never carried out. The live hosts are
+`www.bzemarketplace.com` (web, and `/api/*` proxy to the API),
+`bmpl-admin.vercel.app` (admin) and `bmplapi-production.up.railway.app` (API);
+`api-dev.bzemarketplace.com` is dead — Vercel `DEPLOYMENT_NOT_FOUND`.)*
 
 ## 14. Browser deployment gate (Step 15/17–21 of the phase) — [YOU]
 In a real browser against the deployed URLs, verify: login → refresh page →

@@ -3,6 +3,18 @@
 > This documents the intended **development cloud** topology. Nothing is deployed
 > in Phase 1.5B — this is preparation only.
 
+> **⚠️ Dated plan — the hosts below are not what shipped (noted 2026-09-09).**
+> The `*-dev.bzemarketplace.com` topology in this document was never the deployed
+> reality. What is live today: API at **`bmplapi-production.up.railway.app`**
+> (also reachable as **`https://www.bzemarketplace.com/api/*`** via the web app's
+> same-origin proxy), web at **`www.bzemarketplace.com`**, admin at
+> **`bmpl-admin.vercel.app`**. `api-dev.bzemarketplace.com` is **dead** —
+> confirmed 2026-09-09, it answers Vercel `DEPLOYMENT_NOT_FOUND`; do not send
+> anyone there during an incident. Whether `dev.` / `admin-dev.` were ever
+> provisioned cannot be checked from the repository. Current deployment state:
+> [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) §2. The trust-boundary and
+> cookie/CSRF reasoning below still describes the architecture accurately.
+
 ## Diagram
 
 ```mermaid
@@ -75,7 +87,8 @@ flowchart TB
 
 | Env | Web | Admin | API |
 |---|---|---|---|
-| Cloud dev | `dev.bzemarketplace.com` | `admin-dev.bzemarketplace.com` | `api-dev.bzemarketplace.com` |
+| **Live today** (2026-09-09) | `www.bzemarketplace.com` | `bmpl-admin.vercel.app` | `bmplapi-production.up.railway.app` (proxied as `www.bzemarketplace.com/api/*`) |
+| Cloud dev (planned, **never provisioned** — `api-dev` confirmed dead 2026-09-09) | `dev.bzemarketplace.com` | `admin-dev.bzemarketplace.com` | `api-dev.bzemarketplace.com` |
 | Production (future) | `bzemarketplace.com` (+`www`) | `admin.bzemarketplace.com` | `api.bzemarketplace.com` |
 
 ## Cookie / CSRF strategy per topology

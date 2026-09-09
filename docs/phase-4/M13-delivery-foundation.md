@@ -1,5 +1,12 @@
 # Phase 4 · M13 — Delivery & Shipping Foundation
 
+> **📅 Dated milestone design note (banner added 2026-09-09).** The "no delivery
+> execution" scope statement below describes what M13 itself built, not the
+> product today: dispatch and delivery execution (M15), driver earnings and
+> settlement (M18), multimodal shipping, and passenger transportation have all
+> shipped since. Current state: [`PROJECT_STATUS.md`](../PROJECT_STATUS.md);
+> how a parcel moves today: [`DELIVERY-LIFECYCLE.md`](../DELIVERY-LIFECYCLE.md).
+
 Establishes the **data model, pricing engine, checkout integration, and vendor
 delivery settings** for logistics. It stores delivery information only — there is
 **no delivery execution**: no driver applications/dashboard/assignment, no

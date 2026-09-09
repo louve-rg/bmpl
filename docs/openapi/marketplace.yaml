@@ -3,9 +3,16 @@ info:
   title: BMPL Marketplace API
   version: "2.0.0"
   description: >
-    Belize Marketplace & Logistics — Phase 2 marketplace endpoints (categories,
-    vendors, products, images, variants, inventory, public catalog/search).
-    All paths are under the `/api` prefix. Money is integer minor units (BZD cents).
+    Belize Marketplace & Logistics — the marketplace surface and what grew on
+    it: catalog/search, vendors, products, cart, checkout/orders, payments &
+    wallet, marketplace dispatch & delivery (M15), settlement (M18), reviews,
+    jobs. NOT yet documented here: the multimodal shipping surface
+    (/shipping/*, courier legs, hubs/modes) and the passenger surface
+    (/passenger/*) — tracked as BMPL-100. All paths are under the `/api`
+    prefix. Money is integer minor units (BZD cents); wallet/ledger amounts
+    are BigInt-backed and serialize as JSON strings on wallet surfaces, while
+    delivery/shipping fee fields serialize as JSON numbers — verify per
+    endpoint before assuming either.
 servers:
   - url: https://bmplapi-production.up.railway.app/api
     description: Production
@@ -23,9 +30,17 @@ tags:
   - name: Orders
     description: Checkout + orders. Customer (self), Vendor (own vendor orders), Admin (read-only).
   - name: Payments
-    description: Payment & wallet-hold foundation (M11) — read-only. NO money moves; no capture/settlement.
+    description: >-
+      Payment & wallet-hold surface (M11/M12). Internal wallet money only.
+      Settlement (M18) exists and releases escrow internally (see the
+      /admin/settlements and /orders/{id}/settlement paths); there is still no
+      external capture, payout, refund-to-source or withdrawal anywhere.
   - name: Wallet
-    description: Wallet authorization & escrow (M12). Money moves ONLY customer↔escrow via balanced double-entry.
+    description: >-
+      Wallet authorization & escrow (M12) plus internal settlement (M18). Every
+      movement is a balanced double-entry transaction between internal
+      accounts — customer↔escrow at authorization, escrow→vendor/driver/platform
+      fees at settlement. No external money rail exists.
   - name: Reviews
     description: Verified reviews & ratings (M19) tied to completed transactions. Public reads; customer writes; vendor responses; admin moderation.
   - name: Engagement

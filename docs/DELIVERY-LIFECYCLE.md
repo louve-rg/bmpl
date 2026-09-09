@@ -50,11 +50,13 @@ owns the record.
 
 ### Created at checkout
 
-`OrdersService.createFromCart` creates the `OrderDelivery` inside the checkout
-transaction with status `PENDING_ASSIGNMENT`
-(`apps/api/src/orders/orders.service.ts`), snapshotting the fee, the free
-threshold and the estimate from the vendor's delivery settings and the zone
-that matched (`appliedZoneId`). Vendors configure those at
+`OrdersService.checkout` (the private `runCheckout` transaction it wraps)
+creates the `OrderDelivery` with status `PENDING_ASSIGNMENT`
+(`apps/api/src/orders/orders.service.ts`), snapshotting the fee, whether the
+free-delivery threshold applied (`freeApplied`) and the estimate from the
+vendor's delivery settings and the zone that matched (`appliedZoneId`). (An
+earlier revision cited `createFromCart`, a symbol that never existed —
+corrected 2026-09-09.) Vendors configure those at
 `/vendor/delivery` (`apps/api/src/delivery/delivery.controller.ts`); customers
 get a pre-checkout quote from `POST /checkout/delivery-quote`.
 
@@ -79,9 +81,12 @@ driver at a time, ranked by `rankDrivers` in `@bmpl/shared`, with an offer
 timeout, a retry budget (`dispatchMaxOffers`) and a per-driver concurrency cap.
 It reads its settings from the `platform_settings` row; `dispatchAutomatic`
 **defaults to off, including when no row exists**
-(`DispatchEngineService.settings`, `dispatch-engine.service.ts`), and it is
-deliberately off in production —
-that is correct configuration, not a bug. A sweeper
+(`DispatchEngineService.settings`, `dispatch-engine.service.ts`), and it
+shipped off by migration. Whether it is on in production today is a **live
+value this repository cannot prove** — read it (Admin → Dispatch, or
+`GET /api/admin/ops/settings`) rather than assuming it
+(`PROJECT_STATUS.md` §12); off is the shipped default, and off is correct
+configuration, not a bug. A sweeper
 (`apps/api/src/dispatch/dispatch-scheduler.service.ts`, every ~20s under a
 Redis lock) expires unanswered offers (back to `DRIVER_DECLINED`, then
 re-offer) and picks up anything a trigger missed. When the retry budget is
@@ -383,12 +388,16 @@ Covered by `apps/api/test/self-delivery.integration.spec.ts` (6 tests) and
   operator types, not a calendar.
 - **No reverse geocoding** — a pin cannot fill in its own town, which is part
   of why the town is always asked for directly.
-- **Automatic dispatch is off in production**, by deliberate decision
-  (migration `20261009120000_dispatch_default_off`), and the engine treats a
-  missing settings row as off. Turning it on is a human product decision
-  (`AGENT-WORKFLOW.md` §7). While it is off, **manual assignment is the
-  production dispatch path** for both marketplace deliveries and shipment
-  courier legs (closed gap 1 below).
+- **Automatic dispatch shipped off** (migration
+  `20261009120000_dispatch_default_off`), and the engine treats a missing
+  settings row as off. **Whether it is on in production today cannot be
+  checked from the repository** — the live `platform_settings` row must be
+  read, not assumed (`PROJECT_STATUS.md` §12 records it as unread). Turning
+  it on is a human product decision (`AGENT-WORKFLOW.md` §7). While it is
+  off, **manual assignment is the production dispatch path** for both
+  marketplace deliveries and shipment courier legs (closed gap 1 below).
+  (An earlier revision asserted "off in production" as fact — corrected
+  2026-09-09 to match what the repository can actually prove.)
 
 ---
 
@@ -416,8 +425,8 @@ now checked rather than assumed.
 by hand.** `GET /admin/logistics/legs/:id/eligible-drivers`,
 `POST legs/:id/assign` and `POST legs/:id/reassign` (all `logistics.operate`)
 give operators the manual dispatch path the exhaustion alert always promised.
-With `dispatchAutomatic` off — still deliberate in production — this is the
-production dispatch path for courier legs.
+With `dispatchAutomatic` off — its shipped default; the live value is read,
+not assumed (§5) — this is the production dispatch path for courier legs.
 
 **2. CLOSED on `main` (PR #12) — every handoff code can reach the hand that
 must type it.** `pinFor` treats a `DIRECT` leg as last-mile-equivalent, so the
@@ -513,7 +522,11 @@ every `file:line` anchor in this document re-verified against `origin/main`
 at `75e9ef1` on 2026-09-07 — 38 checked, 12 corrected, prose untouched; then
 converted to symbol+file form (a quoted marker where no symbol encloses the
 spot) later the same day, so a stale citation fails loudly as a missing grep
-hit instead of silently pointing at the wrong line.
+hit instead of silently pointing at the wrong line; updated 2026-09-09
+(BMPL-99, audited at `5b97624`): the `createFromCart` citation corrected to
+`checkout`/`runCheckout`, and the `dispatchAutomatic` production claim
+reduced to what the repository proves (the default-off migration) — the live
+value is a read, not an assumption.
 Sources: the controllers
 and services cited inline — every endpoint named here was read in its
 controller. Cross-references: `docs/PROJECT_STATUS.md` §6–7 for shipping and
