@@ -160,6 +160,31 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/ShipmentView" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /shipping/track/{token}:
+    get:
+      tags: [Shipping]
+      summary: "Recipient's public tracking view (no authentication; capability token)"
+      description: >-
+        The link a sender shares with the person their parcel is going to.
+        Anyone holding the link is the audience, so the payload is a
+        deliberate ALLOWLIST (`ShipmentService.trackPublic`): reference,
+        status and step progress in customer language, the destination town,
+        and the collection terminal once (and only while) the parcel is
+        waiting there. It NEVER carries the sender's identity or address, any
+        money, the parcel description, a handoff PIN, custody actors, driver
+        identity, or operator-typed exception/cancellation reasons. The token
+        is a server-minted 24-character capability (~120 bits) — never derived
+        from the reference or an id — and every miss is one fixed 404, so a
+        guessed URL cannot confirm a real shipment exists. Strictly throttled.
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string }, description: "Capability token from the booking customer's `recipientTrackingToken`" }
+      responses:
+        "200":
+          description: The recipient's minimal, status-only view
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipientTrackingView" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /shipping/{reference}:
     get:
       tags: [Shipping]
@@ -1162,6 +1187,12 @@ components:
         quotedTotalMinor: { $ref: "#/components/schemas/Money" }
         quotedMinutes: { type: [integer, "null"] }
         explanation: { type: [string, "null"] }
+        recipientTrackingToken:
+          type: [string, "null"]
+          description: >-
+            Capability token for the recipient's public tracking link
+            (`GET /shipping/track/{token}`) — the sender shares it. Null on
+            shipments booked before the token existed.
         description: { type: [string, "null"] }
         pieces: { type: integer }
         weightGrams: { type: [integer, "null"] }
@@ -1179,6 +1210,44 @@ components:
         custody:
           type: array
           items: { $ref: "#/components/schemas/CustodyEventView" }
+    RecipientTrackingView:
+      type: object
+      description: >-
+        The recipient's public, status-only view — an allowlist, built by hand
+        and never derived from `ShipmentView` (see the endpoint description
+        for what is deliberately excluded, and why).
+      properties:
+        reference: { type: string }
+        status: { $ref: "#/components/schemas/ShipmentStatus" }
+        statusLabel: { type: string }
+        serviceLabel: { type: string }
+        bookedAt: { type: [string, "null"], format: date-time }
+        deliveredAt: { type: [string, "null"], format: date-time }
+        destination:
+          type: object
+          properties:
+            city: { type: [string, "null"] }
+            district: { type: [string, "null"] }
+        collectionHub:
+          type: [object, "null"]
+          description: Present only while the shipment is AWAITING_COLLECTION at a terminal.
+          properties:
+            name: { type: string }
+            city: { type: string }
+            address: { type: [string, "null"] }
+            instructions: { type: [string, "null"] }
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              sequence: { type: integer }
+              kindLabel: { type: string }
+              modeLabel: { type: string }
+              description: { type: string }
+              completed: { type: boolean }
+              isCurrent: { type: boolean }
+              completedAt: { type: [string, "null"], format: date-time }
     ShipmentEnd:
       type: object
       properties:

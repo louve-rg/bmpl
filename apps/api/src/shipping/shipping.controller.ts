@@ -82,6 +82,28 @@ export class ShippingModesController {
 }
 
 /**
+ * The recipient's public tracking view (BML's "where is my parcel" link).
+ *
+ * Its own controller for the same reason the hub list has one: a genuinely
+ * public route cannot live inside the role-gated customer controller. The
+ * token in the path IS the authorisation — a high-entropy capability minted at
+ * booking — so the guard here is the strict throttle plus the service's one
+ * fixed 404 for every miss: rate-limited guessing that cannot distinguish
+ * "wrong token" from "no such shipment" enumerates nothing.
+ */
+@Public()
+@Controller('shipping/track')
+export class ShippingTrackController {
+  constructor(private readonly shipments: ShipmentService) {}
+
+  @StrictThrottle()
+  @Get(':token')
+  track(@Param('token') token: string) {
+    return this.shipments.trackPublic(token);
+  }
+}
+
+/**
  * Customer-facing shipping.
  *
  * Quoting is deliberately a POST rather than a GET: the body carries two

@@ -11,7 +11,7 @@ import { DriverShippingController } from './driver-shipping.controller';
 import { ShipmentDispatchScheduler } from './shipment-dispatch.scheduler';
 import { LogisticsNetworkService } from './logistics-network.service';
 import { ShipmentService } from './shipment.service';
-import { AdminLogisticsController, ShippingController, ShippingHubsController, ShippingModesController } from './shipping.controller';
+import { AdminLogisticsController, ShippingController, ShippingHubsController, ShippingModesController, ShippingTrackController } from './shipping.controller';
 
 /**
  * Multi-leg shipping.
@@ -23,7 +23,7 @@ import { AdminLogisticsController, ShippingController, ShippingHubsController, S
  */
 @Module({
   imports: [PrismaModule, DriverModule, DispatchModule, MessagingModule, PaymentsModule, SettlementModule],
-  controllers: [ShippingHubsController, ShippingModesController, ShippingController, AdminLogisticsController, DriverShippingController],
+  controllers: [ShippingHubsController, ShippingModesController, ShippingTrackController, ShippingController, AdminLogisticsController, DriverShippingController],
   providers: [LogisticsNetworkService, ShipmentService, ShipmentDispatchService, ShipmentDriverService, ShipmentDispatchScheduler],
   exports: [ShipmentService, LogisticsNetworkService, ShipmentDispatchService],
 })
