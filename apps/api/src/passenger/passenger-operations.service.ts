@@ -380,6 +380,118 @@ export class PassengerOperationsService {
     return this.assignTrip(actor, trip, dto);
   }
 
+  /**
+   * The vehicles `assignTrip` would ACCEPT for this departure — so the console
+   * asks the authority instead of guessing (it used to load the driver's OWNED
+   * vehicles and show a fleet operator's admin an empty picker).
+   *
+   * This answers ONE question — what may staff THIS trip — and must stay in
+   * lockstep with the pair validation in `assignTrip` directly below it. The
+   * rules are stated twice by necessity (one validates a chosen pair with a
+   * message per refusal, one queries the acceptable set); the integration
+   * suite ties them together by assigning a listed vehicle and asserting an
+   * unlisted one is refused. If you change either, change both, and the tests
+   * will catch you if you forget.
+   *
+   * Two kinds of row come back, exactly as assignTrip accepts them:
+   *   FLEET  — the operator's own approved active vehicle; any eligible fleet
+   *            driver may be paired with it (`usableByDriverProfileId` null).
+   *   DRIVER — an eligible fleet driver's own vehicle; assign accepts it ONLY
+   *            with that driver, so the row says which.
+   * "Eligible" for the owner mirrors assignTrip's driver checks: this
+   * operator's fleet, active, same side of the test boundary, PASSENGER_DRIVER
+   * approved, and not holding a booking on this very departure.
+   */
+  async assignableVehiclesForTrip(tripId: string) {
+    const trip = await this.prisma.passengerTrip.findUnique({
+      where: { id: tripId },
+      select: {
+        id: true,
+        status: true,
+        isTest: true,
+        providerProfileId: true,
+        providerProfile: { select: { isActive: true } },
+      },
+    });
+    if (!trip) throw new NotFoundException('Trip not found.');
+    // The same gates assign opens with, in the same words — a picker for a
+    // departure that cannot be assigned would only collect a later refusal.
+    if (trip.status !== 'SCHEDULED') {
+      throw new BadRequestException('Only an unstaffed scheduled departure can be assigned.');
+    }
+    if (trip.providerProfile?.isActive === false) {
+      throw new BadRequestException('This operator account is suspended.');
+    }
+    // Deliberately NARROWER than assign here: a trip whose operator row was
+    // deleted (SetNull) would make "the assignable set" every unaffiliated
+    // driver's vehicle on the platform, which is a roster, not an answer.
+    // Assign still works on such a trip; this listing declines to enumerate.
+    if (!trip.providerProfileId) {
+      throw new BadRequestException('This departure has no operator on record; assign it directly.');
+    }
+
+    const fleetDrivers = await this.prisma.passengerDriverProfile.findMany({
+      where: { providerProfileId: trip.providerProfileId, isActive: true, isTest: trip.isTest },
+      select: { id: true, userId: true, displayName: true },
+    });
+    const userIds = fleetDrivers.map((d) => d.userId);
+    const [approved, riding] = await Promise.all([
+      this.prisma.userRole.findMany({
+        where: { userId: { in: userIds }, roleCode: 'PASSENGER_DRIVER', status: 'APPROVED' },
+        select: { userId: true },
+      }),
+      this.prisma.passengerBooking.findMany({
+        where: { tripId: trip.id, passengerUserId: { in: userIds }, status: { in: ['REQUESTED', 'CONFIRMED'] } },
+        select: { passengerUserId: true },
+      }),
+    ]);
+    const approvedBy = new Set(approved.map((r) => r.userId));
+    const ridingBy = new Set(riding.map((b) => b.passengerUserId));
+    const eligibleDrivers = fleetDrivers.filter((d) => approvedBy.has(d.userId) && !ridingBy.has(d.userId));
+    const driverNameBy = new Map(eligibleDrivers.map((d) => [d.id, d.displayName]));
+
+    const vehicles = await this.prisma.passengerVehicle.findMany({
+      where: {
+        isActive: true,
+        approvalStatus: 'APPROVED',
+        isTest: trip.isTest,
+        OR: [
+          { providerProfileId: trip.providerProfileId },
+          { ownerDriverProfileId: { in: eligibleDrivers.map((d) => d.id) } },
+        ],
+      },
+      orderBy: [{ ownerDriverProfileId: { sort: 'asc', nulls: 'first' } }, { make: 'asc' }, { model: 'asc' }],
+      select: {
+        id: true,
+        type: true,
+        make: true,
+        model: true,
+        year: true,
+        color: true,
+        licencePlate: true,
+        seatCapacity: true,
+        providerProfileId: true,
+        ownerDriverProfileId: true,
+      },
+    });
+
+    return vehicles.map((v) => ({
+      id: v.id,
+      type: v.type,
+      make: v.make,
+      model: v.model,
+      year: v.year,
+      color: v.color,
+      licencePlate: v.licencePlate,
+      seatCapacity: v.seatCapacity,
+      ownership: v.ownerDriverProfileId ? ('DRIVER' as const) : ('FLEET' as const),
+      // Null means any eligible fleet driver; an id means assign accepts this
+      // vehicle only paired with that driver.
+      usableByDriverProfileId: v.ownerDriverProfileId,
+      usableByDriverName: v.ownerDriverProfileId ? (driverNameBy.get(v.ownerDriverProfileId) ?? null) : null,
+    }));
+  }
+
   /* ------------------------------------------------------ driver surface */
 
   async listDriverTrips(userId: string) {

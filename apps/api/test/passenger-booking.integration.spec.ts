@@ -667,3 +667,151 @@ describe('oversight and suspension', () => {
     expect((await post(op.cookies, `passenger/provider/trips/${trips[0]!.id}/cancel`, { reason: 'Winding down.' })).status).toBe(201);
   });
 });
+
+/* ------------------------------------------------------------------------- */
+
+describe('the admin assignable-vehicles picker asks the authority', () => {
+  /** A driver-owned APPROVED vehicle, registered and moderated through the product. */
+  async function makeDriverVehicle(driver: { cookies: string[] }) {
+    const v = await post(driver.cookies, 'passenger/driver/vehicles', {
+      type: 'CAR',
+      make: 'Honda',
+      model: 'CR-V',
+      licencePlate: `PBD-${uniq()}`.slice(0, 18),
+      seatCapacity: 4,
+    });
+    expect(v.status).toBe(201);
+    expect((await post(admin, `admin/passengers/vehicles/${v.body.id}/approve`)).status).toBe(201);
+    return v.body.id as string;
+  }
+
+  const assignable = (tripId: string, cookies: string[] = admin) =>
+    get(cookies, `admin/passengers/trips/${tripId}/assignable-vehicles`);
+
+  it("lists the operator fleet and an eligible fleet driver's own vehicle — and assign accepts a listed one", async () => {
+    const op = await makeProvider('Test Picker Lines');
+    const driver = await makeFleetDriver(op);
+    const fleetVehicleId = await makeFleetVehicle(op, 12);
+    const ownVehicleId = await makeDriverVehicle(driver);
+    const { tripId } = await makeDeparture(op, 2500);
+
+    const r = await assignable(tripId);
+    expect(r.status).toBe(200);
+    const byId = new Map(r.body.map((v: { id: string }) => [v.id, v]));
+    const fleetRow = byId.get(fleetVehicleId) as { ownership: string; usableByDriverProfileId: string | null } | undefined;
+    const ownRow = byId.get(ownVehicleId) as { ownership: string; usableByDriverProfileId: string | null; usableByDriverName: string | null } | undefined;
+    expect(fleetRow).toBeDefined();
+    expect(fleetRow!.ownership).toBe('FLEET');
+    expect(fleetRow!.usableByDriverProfileId).toBeNull();
+    expect(ownRow).toBeDefined();
+    expect(ownRow!.ownership).toBe('DRIVER');
+    expect(ownRow!.usableByDriverProfileId).toBe(driver.driverProfileId);
+    expect(ownRow!.usableByDriverName).not.toBeNull();
+
+    // The contract that keeps listing and assign in lockstep: a listed vehicle
+    // is one assign ACCEPTS.
+    expect((await post(admin, `admin/passengers/trips/${tripId}/assign`, {
+      driverProfileId: driver.driverProfileId, vehicleId: fleetVehicleId,
+    })).status).toBe(201);
+  });
+
+  it('REFUSES the unrelated operator, both ways: never listed, and assign rejects it too', async () => {
+    const op = await makeProvider('Test Picker Lines A');
+    const rival = await makeProvider('Test Picker Lines B');
+    const driver = await makeFleetDriver(op);
+    await makeFleetVehicle(op, 12);
+    const rivalVehicleId = await makeFleetVehicle(rival, 14);
+    const { tripId } = await makeDeparture(op, 2500);
+
+    const r = await assignable(tripId);
+    expect(r.status).toBe(200);
+    expect(r.body.some((v: { id: string }) => v.id === rivalVehicleId)).toBe(false);
+
+    // The other half of the lockstep contract: an unlisted vehicle is one
+    // assign REFUSES.
+    const denied = await post(admin, `admin/passengers/trips/${tripId}/assign`, {
+      driverProfileId: driver.driverProfileId, vehicleId: rivalVehicleId,
+    });
+    expect(denied.status).toBe(400);
+    expect(denied.body.message).toMatch(/operator's vehicles|assigned driver's own/i);
+  });
+
+  it('a vehicle still awaiting moderation never appears', async () => {
+    const op = await makeProvider('Test Picker Pending Lines');
+    await makeFleetDriver(op);
+    const pending = await post(op.cookies, 'passenger/provider/vehicles', {
+      type: 'VAN', make: 'Toyota', model: 'Hiace',
+      licencePlate: `PBP-${uniq()}`.slice(0, 18), seatCapacity: 12,
+    });
+    expect(pending.status).toBe(201); // deliberately NOT approved
+    const { tripId } = await makeDeparture(op, 2500);
+
+    const r = await assignable(tripId);
+    expect(r.status).toBe(200);
+    expect(r.body.some((v: { id: string }) => v.id === pending.body.id)).toBe(false);
+  });
+
+  it("an unaffiliated driver's own vehicle never appears — their vehicle travels only with them", async () => {
+    const op = await makeProvider('Test Picker Solo Lines');
+    await makeFleetDriver(op);
+    const { tripId } = await makeDeparture(op, 2500);
+
+    // A driving-ready independent: approved role, approved vehicle, NO affiliation.
+    const solo = await registerUser(`pb_solo_${uniq()}@example.com`);
+    await approveRole(solo.userId, 'PASSENGER_DRIVER');
+    const prof = await put(solo.cookies, 'passenger/driver/profile', {
+      legalName: 'Solo Driver', displayName: `PBSolo${uniq()}`, phone: '+5016100001',
+      homeDistrict: 'TOLEDO', licenceNumber: `PBSL-${uniq()}`,
+      licenceExpiry: TOMORROW().toISOString(), termsAccepted: true,
+    });
+    expect(prof.status).toBe(200);
+    const soloVehicleId = await makeDriverVehicle(solo);
+
+    const r = await assignable(tripId);
+    expect(r.status).toBe(200);
+    expect(r.body.some((v: { id: string }) => v.id === soloVehicleId)).toBe(false);
+  });
+
+  it('a fleet driver riding this very departure cannot lend it their vehicle', async () => {
+    const op = await makeProvider('Test Picker Riding Lines');
+    const driver = await makeFleetDriver(op);
+    const fleetVehicleId = await makeFleetVehicle(op, 12);
+    const ownVehicleId = await makeDriverVehicle(driver);
+    const { tripId } = await makeDeparture(op, 2500);
+
+    // The driver books a seat on the departure they might have staffed.
+    expect((await post(driver.cookies, 'passenger/bookings', { tripId, seats: 1 })).status).toBe(201);
+
+    const r = await assignable(tripId);
+    expect(r.status).toBe(200);
+    const ids = r.body.map((v: { id: string }) => v.id);
+    expect(ids).toContain(fleetVehicleId); // the fleet itself is unaffected
+    expect(ids).not.toContain(ownVehicleId); // assign would refuse this pairing
+  });
+
+  it('answers only for a departure that can still be assigned', async () => {
+    const op = await makeProvider('Test Picker Staffed Lines');
+    const driver = await makeFleetDriver(op);
+    const vehicleId = await makeFleetVehicle(op, 12);
+    const { tripId } = await makeDeparture(op, 2500);
+    expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
+
+    const r = await assignable(tripId);
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/scheduled departure/i);
+  });
+
+  it('sits under the assign permission: read-only admins are refused', async () => {
+    const op = await makeProvider('Test Picker Permission Lines');
+    await makeFleetVehicle(op, 12);
+    const { tripId } = await makeDeparture(op, 2500);
+
+    const reader = await seedLimitedAdmin(ctx.prisma, `pb_reader_${uniq()}@example.com`, ['passengers.read']);
+    const readerCookies = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: reader.email, password: reader.password }));
+    expect((await assignable(tripId, readerCookies)).status).toBe(403);
+
+    const moderator = await seedLimitedAdmin(ctx.prisma, `pb_mod_${uniq()}@example.com`, ['passengers.moderate']);
+    const modCookies = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: moderator.email, password: moderator.password }));
+    expect((await assignable(tripId, modCookies)).status).toBe(200);
+  });
+});
