@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { shippingApi, type ShipmentView } from '../../../../lib/shipping';
 import { ShipmentJourney } from '../../../../components/shipping/ShipmentJourney';
+import { ShareTrackingLink } from '../../../../components/shipping/ShareTrackingLink';
 import { Alert, Button, Spinner } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
 
@@ -86,8 +87,15 @@ export default function TrackShipmentPage() {
       )}
 
       {shipment && (
-        <div className="mt-4">
+        <div className="mt-4 space-y-4">
           <ShipmentJourney shipment={shipment} />
+
+          {/* The recipient has no account and no channel of their own — the
+              sender hands them the link. Shown only once the API has minted a
+              token for this shipment. */}
+          {shipment.recipientTrackingToken && !shipment.cancelledAt && (
+            <ShareTrackingLink token={shipment.recipientTrackingToken} reference={shipment.reference} />
+          )}
 
           {canCancel && (
             <div className="mt-4">
