@@ -102,6 +102,42 @@ export interface ShipmentView {
   currentLegSequence: number | null;
   legs: ShipmentLegView[];
   custody: CustodyEntry[];
+  /**
+   * Capability token for the recipient's public tracking link — the sender
+   * shares it (`GET /shipping/track/{token}`). Null on shipments booked before
+   * the token existed; absent until the API that mints it is deployed.
+   */
+  recipientTrackingToken?: string | null;
+}
+
+/**
+ * The recipient's PUBLIC, status-only view — a deliberate allowlist the API
+ * builds by hand, never derived from {@link ShipmentView}. It carries no
+ * sender identity or address, no money, no parcel description, no handoff PIN,
+ * no custody actors and no driver identity. This type must not grow fields the
+ * endpoint does not return: the omissions are a security decision, not a gap.
+ */
+export interface RecipientTrackingStep {
+  sequence: number;
+  kindLabel: string;
+  modeLabel: string;
+  description: string;
+  completed: boolean;
+  isCurrent: boolean;
+  completedAt: string | null;
+}
+
+export interface RecipientTrackingView {
+  reference: string;
+  status: string;
+  statusLabel: string;
+  serviceLabel: string;
+  bookedAt: string | null;
+  deliveredAt: string | null;
+  destination: { city: string | null; district: string | null };
+  /** Present only while the shipment is AWAITING_COLLECTION at a terminal. */
+  collectionHub: { name: string; city: string; address: string | null; instructions: string | null } | null;
+  steps: RecipientTrackingStep[];
 }
 
 export interface QuoteLeg {
@@ -138,6 +174,12 @@ export const shippingApi = {
   mine: () => api.get<ShipmentView[]>('/shipping'),
   track: (reference: string) => api.get<ShipmentView>(`/shipping/${encodeURIComponent(reference)}`),
   cancel: (id: string, reason: string) => api.post<ShipmentView>(`/shipping/${id}/cancel`, { reason }),
+  /**
+   * The recipient's public tracking view — no session required. The token is a
+   * server-minted capability from the sender's shipment; a bad, expired or
+   * unknown token answers the same 404 as any other miss.
+   */
+  trackPublic: (token: string) => api.get<RecipientTrackingView>(`/shipping/track/${encodeURIComponent(token)}`),
 };
 
 /** Minor units to a Belize dollar string. */
