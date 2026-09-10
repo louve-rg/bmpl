@@ -1424,6 +1424,38 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /admin/passengers/trips/{id}/assignable-vehicles:
+    get:
+      tags: [AdminPassengers]
+      summary: "The vehicles assign would accept for this departure (passengers.moderate)"
+      description: >-
+        The console's vehicle picker asks the authority instead of guessing
+        (`PassengerOperationsService.assignableVehiclesForTrip`). Two kinds of
+        row, exactly as assign accepts them: FLEET — the trip operator's own
+        approved active vehicle, usable by any eligible fleet driver
+        (`usableByDriverProfileId` null); DRIVER — an eligible fleet driver's
+        own vehicle, which assign accepts ONLY paired with that driver
+        (`usableByDriverProfileId` names them). "Eligible" mirrors the assign
+        gates: this operator's fleet, active, same side of the test boundary,
+        PASSENGER_DRIVER approved, and not holding a booking on this very
+        departure. Nothing from an unrelated operator ever appears. Answers
+        400 for a departure that can no longer be assigned (not SCHEDULED, or
+        suspended operator), and — deliberately narrower than assign — for a
+        departure whose operator row no longer exists, rather than enumerating
+        unaffiliated drivers' vehicles platform-wide.
+      parameters: [ { $ref: "#/components/parameters/tripId" } ]
+      responses:
+        "200":
+          description: Vehicles the assign endpoint would accept, fleet first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AssignableVehicle" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /admin/passengers/trips/{id}/assign:
     post:
       tags: [AdminPassengers]
@@ -1953,6 +1985,23 @@ components:
         vehicleId: { type: string }
         seatCapacity: { type: integer }
         assignedAt: { type: string, format: date-time }
+    AssignableVehicle:
+      type: object
+      description: One vehicle the assign endpoint would accept for a specific departure.
+      properties:
+        id: { type: string }
+        type: { type: string }
+        make: { type: string }
+        model: { type: string }
+        year: { type: [integer, "null"] }
+        color: { type: [string, "null"] }
+        licencePlate: { type: string }
+        seatCapacity: { type: integer }
+        ownership: { type: string, enum: [FLEET, DRIVER] }
+        usableByDriverProfileId:
+          type: [string, "null"]
+          description: Null for a fleet vehicle (any eligible fleet driver); an id when assign accepts this vehicle only with that driver.
+        usableByDriverName: { type: [string, "null"] }
     Affiliation:
       type: object
       description: >-

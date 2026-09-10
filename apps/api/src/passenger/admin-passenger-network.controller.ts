@@ -114,6 +114,19 @@ export class AdminPassengerNetworkController {
     return this.ops.listAllBookings({ tripId, status });
   }
 
+  /**
+   * What may staff THIS trip — the assign endpoint's own acceptance set, so
+   * the console's vehicle picker asks the authority instead of guessing
+   * (loading the driver's OWNED vehicles showed a fleet operator's admin an
+   * empty picker). Under the assign permission, like the shipping console's
+   * eligible-drivers: the set is only useful to somebody who may act on it.
+   */
+  @Get('trips/:id/assignable-vehicles')
+  @RequirePermission('passengers.moderate')
+  assignableVehicles(@Param('id') id: string) {
+    return this.ops.assignableVehiclesForTrip(id);
+  }
+
   @Post('trips/:id/assign')
   @RequirePermission('passengers.moderate')
   assignTrip(
