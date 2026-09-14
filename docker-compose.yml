@@ -35,7 +35,7 @@ services:
   # Local S3-compatible object storage for documents/images in development.
   # Production uses Cloudflare R2 / Amazon S3 / Supabase Storage via the same S3 API.
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: bmpl-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
