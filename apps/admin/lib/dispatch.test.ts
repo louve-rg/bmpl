@@ -4,7 +4,10 @@ import {
   byFewestActiveJobs,
   canAssign,
   canReassign,
+  manualDispatchNotice,
   money,
+  parseDispatchList,
+  rowAction,
   vehicleSummary,
   type AssignedVehicle,
   type PostalAddress,
@@ -155,5 +158,53 @@ describe('byFewestActiveJobs', () => {
     byFewestActiveJobs(a, b);
     expect(a.activeJobs).toBe(5);
     expect(b.activeJobs).toBe(1);
+  });
+});
+
+/* ------------------------------------------------------------- BMPL-129 --- */
+
+describe('parseDispatchList', () => {
+  const row = { id: 'd1' };
+
+  it('accepts the historical bare array (older API): rows pass through, mode unknown', () => {
+    expect(parseDispatchList([row])).toEqual({ rows: [row], automaticDispatch: null });
+  });
+
+  it('accepts the BMPL-128 envelope and reads automaticDispatch', () => {
+    expect(parseDispatchList({ deliveries: [row], automaticDispatch: false })).toEqual({
+      rows: [row],
+      automaticDispatch: false,
+    });
+    expect(parseDispatchList({ items: [row], automaticDispatch: true })).toEqual({
+      rows: [row],
+      automaticDispatch: true,
+    });
+  });
+
+  it('never crashes on an empty or malformed payload', () => {
+    expect(parseDispatchList(null)).toEqual({ rows: [], automaticDispatch: null });
+    expect(parseDispatchList(undefined)).toEqual({ rows: [], automaticDispatch: null });
+    expect(parseDispatchList({})).toEqual({ rows: [], automaticDispatch: null });
+  });
+});
+
+describe('manualDispatchNotice', () => {
+  it('names the true holdup when automatic dispatch is off — the sentence an operator acts on', () => {
+    expect(manualDispatchNotice(false)).toBe(
+      'Automatic dispatch is off — a delivery that is ready to go stays unassigned until an operator assigns a driver by hand.',
+    );
+  });
+
+  it('shows nothing when automatic dispatch is on or unknown — never claim a mode we have not read', () => {
+    expect(manualDispatchNotice(true)).toBeNull();
+    expect(manualDispatchNotice(null)).toBeNull();
+  });
+});
+
+describe('rowAction', () => {
+  it('a row waiting on a human says Assign; every other row keeps View', () => {
+    expect(rowAction(true)).toBe('Assign');
+    expect(rowAction(false)).toBe('View');
+    expect(rowAction(undefined)).toBe('View'); // older API rows carry no flag
   });
 });

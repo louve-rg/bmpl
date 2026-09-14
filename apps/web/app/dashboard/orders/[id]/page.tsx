@@ -4,9 +4,9 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ordersApi, money, type VendorOrderView } from '../../../../lib/orders';
-import { OrderStatusBadge, DeliveryBadge } from '../../../../components/orders/OrderStatusBadge';
+import { OrderStatusBadge, DeliveryBadge, DeliveryStatusBadge } from '../../../../components/orders/OrderStatusBadge';
 import type { ApiError } from '../../../../lib/api';
-import { Card, Alert, EmptyState, Spinner, StatusBadge } from '../../../../components/ui';
+import { Card, Alert, EmptyState, Spinner } from '../../../../components/ui';
 import { VendorDeliveryPanel } from '../../../../components/VendorDeliveryPanel';
 import { VendorPickupPanel } from '../../../../components/VendorPickupPanel';
 import { VendorFulfilmentPanel } from '../../../../components/VendorFulfilmentPanel';
@@ -90,7 +90,7 @@ export default function VendorOrderDetailPage() {
               <Card className="p-4 text-sm">
                 <div className="flex items-center justify-between gap-2">
                   <p className="bmpl-label">Delivery</p>
-                  <StatusBadge status={vo.delivery.status} />
+                  <DeliveryStatusBadge delivery={vo.delivery} />
                 </div>
                 <p className="mt-1 text-slate-700">
                   {vo.delivery.freeApplied ? 'Free delivery' : money(vo.delivery.feeMinor)}

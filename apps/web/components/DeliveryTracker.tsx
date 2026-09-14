@@ -256,7 +256,10 @@ export function DeliveryTracker({ deliveryId }: { deliveryId: string }) {
       {state === 'ready' && data && (
         <div className="space-y-4">
           <p className="text-sm font-medium text-belize-navy">
-            {data.statusLabel}
+            {/* Prefer the pre-dispatch stage sentence when the API names one
+                (BMPL-128/129) — statusLabel says "Awaiting driver" from the
+                moment of checkout, before the store has even packed. */}
+            {data.stage && data.stageLabel ? data.stageLabel : data.statusLabel}
             {estimateText(data.estimate) && (
               <span className="ml-2 font-normal text-slate-500">· Est. {estimateText(data.estimate)}</span>
             )}

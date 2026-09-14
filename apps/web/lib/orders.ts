@@ -35,6 +35,11 @@ export interface DeliveryEstimate {
 export interface DeliveryInfo {
   id?: string;
   status: string;
+  /** Pre-dispatch stage (BMPL-128): which party the delivery is actually
+   *  waiting on before a driver is involved. Absent/null once dispatched —
+   *  and absent from an older API, which must render exactly as before. */
+  stage?: string | null;
+  stageLabel?: string | null;
   feeMinor: number;
   freeApplied: boolean;
   estimate: DeliveryEstimate | null;
