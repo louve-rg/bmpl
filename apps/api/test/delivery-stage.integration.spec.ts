@@ -132,6 +132,13 @@ describe('the delivery payload tells the truth about where the order is', () => 
     expect(d.stage).toBe('OFFERED');
     expect(d.stageLabel).toBe('Driver offered');
 
+    // The customer tracker (GET /deliveries/:id) carries the same two fields —
+    // it is what the web DeliveryTracker reads, and without them it would keep
+    // saying "Awaiting driver".
+    const tracker = await get(customer.cookies, `deliveries/${deliveryId}`).expect(200);
+    expect(tracker.body.stage).toBe('OFFERED');
+    expect(tracker.body.stageLabel).toBe('Driver offered');
+
     // Driver accepts: the stage steps aside — the status label is honest from here.
     await ctx.prisma.orderDelivery.update({ where: { id: deliveryId }, data: { status: 'DRIVER_ACCEPTED' } });
     d = await customerDelivery(customer, orderId);
@@ -153,7 +160,7 @@ describe('admin dispatch list: needsManualAssignment + automaticDispatch', () =>
 
     const res = await get(adminCookies, 'admin/deliveries').expect(200);
     expect(res.body.automaticDispatch).toBe(false);
-    const byId = new Map(res.body.deliveries.map((r: { id: string }) => [r.id, r]));
+    const byId = new Map(res.body.items.map((r: { id: string }) => [r.id, r]));
 
     // Ready + unassigned + automatic off = a human must act.
     expect((byId.get(ready.deliveryId) as { needsManualAssignment: boolean }).needsManualAssignment).toBe(true);
@@ -164,7 +171,7 @@ describe('admin dispatch list: needsManualAssignment + automaticDispatch', () =>
     const driver = await makeDriver();
     await post(adminCookies, `admin/deliveries/${ready.deliveryId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId: driver.vehicleId }).expect(201);
     const after = await get(adminCookies, 'admin/deliveries').expect(200);
-    const assignedRow = after.body.deliveries.find((r: { id: string }) => r.id === ready.deliveryId);
+    const assignedRow = after.body.items.find((r: { id: string }) => r.id === ready.deliveryId);
     expect(assignedRow.needsManualAssignment).toBe(false);
 
     // With automatic dispatch ON the same ready-unassigned shape is the
@@ -177,7 +184,7 @@ describe('admin dispatch list: needsManualAssignment + automaticDispatch', () =>
       await post(vendor.vendorCookies, `vendor/orders/${readyAuto.vendorOrderId}/ready`).expect(201);
       const auto = await get(adminCookies, 'admin/deliveries').expect(200);
       expect(auto.body.automaticDispatch).toBe(true);
-      expect(auto.body.deliveries.some((r: { needsManualAssignment: boolean }) => r.needsManualAssignment)).toBe(false);
+      expect(auto.body.items.some((r: { needsManualAssignment: boolean }) => r.needsManualAssignment)).toBe(false);
     } finally {
       await patchOps({ dispatchAutomatic: false }).expect(200);
     }

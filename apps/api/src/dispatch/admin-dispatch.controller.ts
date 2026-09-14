@@ -42,11 +42,13 @@ export class AdminDispatchController {
     // off, every ready delivery waits for a person. The engine's settings()
     // is the one place that decides the effective value.
     const { automatic } = await this.engine.settings();
-    const deliveries = await this.dispatch.list(
+    const items = await this.dispatch.list(
       { status, district, vendorProfileId, unassigned: unassigned === 'true' },
       automatic,
     );
-    return { automaticDispatch: automatic, deliveries };
+    // Envelope key is `items` — the console's parser (apps/admin/lib/dispatch
+    // parseDispatchList) binds to it; agreed contract with the web side.
+    return { automaticDispatch: automatic, items };
   }
 
   @Get(':id')

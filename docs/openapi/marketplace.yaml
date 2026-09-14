@@ -684,7 +684,7 @@ paths:
     get: { tags: [Wallet], summary: System / escrow account balances (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read" }
   # ---- Dispatch & Delivery Execution (Phase 4 · M15) ----
   /admin/deliveries:
-    get: { tags: [Dispatch], summary: "List/filter deliveries (status, district, vendorProfileId, unassigned)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.read. Returns { automaticDispatch: boolean, deliveries: [...] }; each row carries needsManualAssignment = ready AND unassigned AND automatic dispatch off — the deliveries a human must assign or they never move." }
+    get: { tags: [Dispatch], summary: "List/filter deliveries (status, district, vendorProfileId, unassigned)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.read. Returns the envelope { automaticDispatch: boolean, items: [...] }; each row carries needsManualAssignment = ready AND unassigned AND automatic dispatch off — the deliveries a human must assign or they never move." }
   /admin/deliveries/{id}:
     get: { tags: [Dispatch], summary: "Delivery detail (timeline, assignment history, POD, current-driver eligibility, read-only payment)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.read" }
   /admin/deliveries/{id}/eligible-drivers:
@@ -724,7 +724,7 @@ paths:
   /driver/jobs/{id}/pod/confirm:
     post: { tags: [Dispatch], summary: "Attach uploaded POD photo keys before completion", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "body { photoKeys }" }
   /deliveries/{id}:
-    get: { tags: [Dispatch], summary: "Customer delivery tracking for their own order", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+    get: { tags: [Dispatch], summary: "Customer delivery tracking for their own order", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Carries stage/stageLabel (pre-dispatch truth: AWAITING_VENDOR / AWAITING_DISPATCH / OFFERED; null once a driver accepts) alongside status/statusLabel — so do the vendor and admin delivery detail reads." }
   /deliveries/{id}/pin:
     get: { tags: [Dispatch], summary: "Reveal the recipient delivery PIN (own order)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
   /deliveries/{id}/proof:
