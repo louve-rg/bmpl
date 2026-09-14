@@ -586,3 +586,91 @@ async function deliverFully() {
   await post(driver.cookies, `driver/jobs/${order.deliveryId}/confirm-delivery`, { pin: dpin, recipientName: 'Recipient' });
   return { vendor, order, driver };
 }
+
+/**
+ * The Issue 2 regression walk (Edward UAT round 2, added in review by
+ * bmpl-qa). One REAL order through the whole marketplace dispatch lifecycle,
+ * exactly as production runs it: product-path checkout, automatic dispatch
+ * OFF, an eligible ONLINE driver watching an empty feed until an operator
+ * assigns by hand, and the simulation boundary refusing a test driver on the
+ * way. The tests above each pin one seam in isolation; Edward's stuck orders
+ * lived in the seams BETWEEN them, so this file gets the one walk that
+ * crosses them all in order.
+ */
+describe('marketplace dispatch lifecycle — the round-2 walk', () => {
+  it('checkout → awaiting vendor → ready (engine SKIPPED, feed empty) → isTest refusal → manual assign → feed shows it → accept', async () => {
+    const { DispatchEngineService } = await import('../src/dispatch/dispatch-engine.service');
+    const engine = ctx.app.get(DispatchEngineService);
+
+    // Deterministic mode: OFF — production's live value. (An earlier test in
+    // this file deliberately leaves the setting ON; never inherit it.)
+    await request(ctx.server).patch('/api/admin/ops/settings').set('Cookie', adminCookies).send({ dispatchAutomatic: false }).expect(200);
+
+    const vendor = await makeVendor();
+    // The product-path checkout must PRICE the delivery: flat base fee.
+    await ctx.prisma.vendorSettings.updateMany({ where: { vendorProfileId: vendor.vendorProfileId }, data: { baseDeliveryFeeMinor: 500n } });
+    const driver = await makeDriver(); // fully eligible: APPROVED, ONLINE, BELIZE, approved vehicle
+    const testDriver = await makeDriver(); // equally eligible — then flagged, so any refusal is the flag's alone
+    await ctx.prisma.driverProfile.update({ where: { id: testDriver.driverProfileId }, data: { isTest: true } });
+
+    // 1. A real customer checks out through the product path (cart → checkout),
+    //    not a hand-built order row — the walk must start where Edward did.
+    const { cookies: customer } = await registerCustomer(`walk_${uniq()}@example.bz`);
+    await post(customer, 'cart/items', { productId: vendor.productId, quantity: 1 }).expect(201);
+    const placed = await post(customer, 'checkout', {
+      vendors: [{ vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'DELIVERY' }],
+      deliveryAddress: { fullName: 'Walk Customer', phone: '+5017770001', addressLine1: '7 Ave', city: 'Belize City', district: 'BELIZE' },
+    }).expect(201);
+    const vo = placed.body.vendorOrders[0];
+    const deliveryId = vo.delivery.id as string;
+    const vendorOrderId = vo.id as string;
+
+    const stageOf = async () => (await get(customer, `orders/${placed.body.id}`).expect(200)).body.vendorOrders[0].delivery;
+    const availableTab = async (whose: Driver) => (await get(whose.cookies, 'driver/jobs?scope=available').expect(200)).body as { id: string }[];
+
+    // 2. Fresh checkout: the store is the gate, and no driver can see anything.
+    let d = await stageOf();
+    expect(d.status).toBe('PENDING_ASSIGNMENT');
+    expect(d.stage).toBe('AWAITING_VENDOR');
+    expect(await availableTab(driver)).toEqual([]); // an ELIGIBLE online driver exists — this emptiness is a claim, not a vacuity
+
+    // 3. The vendor marks it ready. Automatic dispatch is off, so the engine
+    //    itself refuses in its own words and the sweeper finds nothing to do…
+    await post(vendor.vendorCookies, `vendor/orders/${vendorOrderId}/ready`).expect(201);
+    expect(await engine.dispatch(deliveryId)).toEqual({ result: 'SKIPPED', reason: 'automatic dispatch is disabled' });
+    expect(await engine.sweepUndispatched()).toBe(0);
+    //    …the order truly waits for a human, and there is NO open job pool an
+    //    unassigned delivery could leak into.
+    d = await stageOf();
+    expect(d.stage).toBe('AWAITING_DISPATCH');
+    expect((await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: deliveryId } })).assignedDriverProfileId).toBeNull();
+    expect(await availableTab(driver)).toEqual([]);
+    expect((await get(driver.cookies, 'driver/jobs/counts').expect(200)).body.available).toBe(0);
+
+    // 4. Simulation boundary: a test driver on a real order is refused in words,
+    //    and the refusal changes nothing.
+    const refused = await post(adminCookies, `admin/deliveries/${deliveryId}/assign`, { driverProfileId: testDriver.driverProfileId, vehicleId: testDriver.vehicleId });
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toContain('a test driver cannot be assigned a real customer delivery');
+    expect((await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: deliveryId } })).assignedDriverProfileId).toBeNull();
+
+    // 5. Admin manual assignment — the only path to a driver in this mode.
+    await post(adminCookies, `admin/deliveries/${deliveryId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId: driver.vehicleId }).expect(201);
+    d = await stageOf();
+    expect(d.status).toBe('ASSIGNED');
+    expect(d.stage).toBe('OFFERED');
+
+    // 6. NOW the driver's Available tab shows the job — and only that driver's.
+    expect((await availableTab(driver)).map((j) => j.id)).toContain(deliveryId);
+    expect((await get(driver.cookies, 'driver/jobs/counts').expect(200)).body.available).toBe(1);
+    expect(await availableTab(testDriver)).toEqual([]);
+
+    // 7. Accept through the real endpoint: the stage steps aside — the status
+    //    label is the truth from here, and the offer leaves the Available tab.
+    expect((await post(driver.cookies, `driver/jobs/${deliveryId}/accept`)).body.status).toBe('DRIVER_ACCEPTED');
+    d = await stageOf();
+    expect(d.status).toBe('DRIVER_ACCEPTED');
+    expect(d.stage).toBeNull();
+    expect((await availableTab(driver)).map((j) => j.id)).not.toContain(deliveryId);
+  });
+});
