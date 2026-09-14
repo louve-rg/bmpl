@@ -27,7 +27,13 @@ const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.turbo', 'build', '
 const ALLOWED_BMPL = [
   /BMPL_HUB/, // persisted HUB_TYPES enum value
   /X-BMPL-/, // HTTP response headers read by deployment tooling
+  /BMPL_BUILD_COMMIT/, // env var wired into Vercel; the /health endpoints and deploy-status read it
   /BMPL-THEME/, // a real filename on disk
+  // Ticket ids (BMPL-112, BMPL-128…) are identifiers into the tracker, not
+  // product copy — the same convention docs/ already follows. Without this
+  // line, every "fixed in BMPL-nnn" code comment is an offender, and thirty
+  // of them accumulated unseen because CI does not run this package's tests.
+  /BMPL-\d/,
 ];
 
 function sourceFiles(): string[] {
