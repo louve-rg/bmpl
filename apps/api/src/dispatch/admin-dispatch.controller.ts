@@ -12,6 +12,7 @@ import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, RequirePermission } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
 import { DispatchService } from './dispatch.service';
+import { DispatchEngineService } from './dispatch-engine.service';
 
 /**
  * Admin dispatch console. Read (deliveries.read), assign/reassign
@@ -20,7 +21,10 @@ import { DispatchService } from './dispatch.service';
  */
 @Controller('admin/deliveries')
 export class AdminDispatchController {
-  constructor(private readonly dispatch: DispatchService) {}
+  constructor(
+    private readonly dispatch: DispatchService,
+    private readonly engine: DispatchEngineService,
+  ) {}
 
   private actor(user: AuthContext, req: Request) {
     return { userId: user.userId, ipAddress: req.ip, sessionId: user.sessionId };
@@ -28,13 +32,23 @@ export class AdminDispatchController {
 
   @Get()
   @RequirePermission('deliveries.read')
-  list(
+  async list(
     @Query('status') status?: string,
     @Query('district') district?: string,
     @Query('vendorProfileId') vendorProfileId?: string,
     @Query('unassigned') unassigned?: string,
   ) {
-    return this.dispatch.list({ status, district, vendorProfileId, unassigned: unassigned === 'true' });
+    // The console needs to know WHY nothing is moving: with automatic dispatch
+    // off, every ready delivery waits for a person. The engine's settings()
+    // is the one place that decides the effective value.
+    const { automatic } = await this.engine.settings();
+    const items = await this.dispatch.list(
+      { status, district, vendorProfileId, unassigned: unassigned === 'true' },
+      automatic,
+    );
+    // Envelope key is `items` — the console's parser (apps/admin/lib/dispatch
+    // parseDispatchList) binds to it; agreed contract with the web side.
+    return { automaticDispatch: automatic, items };
   }
 
   @Get(':id')

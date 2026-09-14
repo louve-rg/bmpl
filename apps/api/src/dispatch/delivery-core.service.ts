@@ -5,8 +5,10 @@ import {
   mapsNavigationUrl,
   DELIVERY_ACTIONS,
   DELIVERY_PIN_LENGTH,
+  DELIVERY_STAGE_LABELS,
   DELIVERY_STATUS_LABELS,
   buildDeliveryProgress,
+  deliveryStage,
   canPerform,
   userInitials,
   type DeliveryAction,
@@ -216,10 +218,16 @@ export class DeliveryCoreService {
     const address = order.addresses[0] ?? null;
     const pickupLocation = vo.vendorProfile.locations[0] ?? null;
 
+    const stage = deliveryStage(d);
     const base = {
       id: d.id,
       status: d.status,
       statusLabel: DELIVERY_STATUS_LABELS[d.status],
+      // Honest pre-dispatch stage for every audience; the customer tracker
+      // otherwise says "Awaiting driver" while the store is still packing.
+      // Null once a driver accepts — statusLabel is truthful from there.
+      stage,
+      stageLabel: stage ? DELIVERY_STAGE_LABELS[stage] : null,
       vendorOrderId: vo.id,
       vendorOrderNumber: vo.orderNumber,
       orderNumber: order.orderNumber,

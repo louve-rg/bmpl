@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CheckoutInput } from '@bmpl/validation';
+import { DELIVERY_STAGE_LABELS, deliveryStage, type DeliveryStatus } from '@bmpl/shared';
 import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -670,6 +671,7 @@ export class OrdersService {
     primary: Map<string, string | null>,
   ) {
     const d = vo.delivery ?? null;
+    const stage = d ? deliveryStage(d) : null;
     return {
       id: vo.id,
       orderNumber: vo.orderNumber,
@@ -681,6 +683,11 @@ export class OrdersService {
         ? {
             id: d.id,
             status: d.status,
+            // The honest pre-collection stage (null once a driver accepted or
+            // the delivery is finished) — status alone said "Awaiting driver"
+            // while the store was still packing.
+            stage,
+            stageLabel: stage ? DELIVERY_STAGE_LABELS[stage] : null,
             feeMinor: money(d.feeMinor),
             freeApplied: d.freeApplied,
             estimate:
@@ -722,7 +729,8 @@ interface OrderItemRow {
 
 interface DeliveryRow {
   id: string;
-  status: string;
+  status: DeliveryStatus;
+  readyForDispatchAt: Date | null;
   feeMinor: bigint;
   freeApplied: boolean;
   estimateMinHours: number | null;

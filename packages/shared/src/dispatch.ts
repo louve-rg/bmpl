@@ -96,3 +96,35 @@ export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, string> = {
   DELIVERED: 'Delivered',
   CANCELLED: 'Cancelled',
 };
+
+/**
+ * The honest pre-collection stage of a delivery. PENDING_ASSIGNMENT is shown
+ * from the moment of checkout, long before anything is dispatchable — its
+ * label ("Awaiting driver") told the customer a driver was the hold-up while
+ * the store was still packing. The stage names the real gate:
+ *
+ *  - AWAITING_VENDOR:   the vendor has not marked the order ready.
+ *  - AWAITING_DISPATCH: ready, and no driver holds it (fresh or declined).
+ *  - OFFERED:           offered to a driver who has not yet accepted.
+ *  - null:              a driver accepted, or the delivery is finished —
+ *                       DELIVERY_STATUS_LABELS already tells the truth there.
+ */
+export type DeliveryStage = 'AWAITING_VENDOR' | 'AWAITING_DISPATCH' | 'OFFERED';
+
+export const DELIVERY_STAGE_LABELS: Record<DeliveryStage, string> = {
+  AWAITING_VENDOR: 'Being packed by the store',
+  AWAITING_DISPATCH: 'Waiting for a driver to be assigned',
+  OFFERED: 'Driver offered',
+};
+
+/** Derive the stage from facts the delivery row already carries. */
+export function deliveryStage(delivery: {
+  status: DeliveryStatus;
+  readyForDispatchAt: Date | string | null;
+}): DeliveryStage | null {
+  if (delivery.status === 'PENDING_ASSIGNMENT' || delivery.status === 'DRIVER_DECLINED') {
+    return delivery.readyForDispatchAt ? 'AWAITING_DISPATCH' : 'AWAITING_VENDOR';
+  }
+  if (delivery.status === 'ASSIGNED') return 'OFFERED';
+  return null;
+}

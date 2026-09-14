@@ -307,6 +307,26 @@ components:
         subtotalMinor: { type: integer }
         vendor: { type: object, properties: { businessName: { type: string }, slug: { type: string } } }
         items: { type: array, items: { $ref: "#/components/schemas/OrderItem" } }
+        delivery:
+          type: [object, "null"]
+          description: "Present only for DELIVERY vendor-orders (M13 snapshot)."
+          properties:
+            id: { type: string }
+            status: { type: string }
+            stage:
+              type: [string, "null"]
+              enum: [AWAITING_VENDOR, AWAITING_DISPATCH, OFFERED, null]
+              description: >-
+                The honest pre-collection stage: AWAITING_VENDOR until the
+                store marks the order ready, AWAITING_DISPATCH while ready and
+                unassigned (fresh or declined), OFFERED while a driver has the
+                offer but has not accepted. Null once a driver accepted or the
+                delivery finished — the status label is truthful from there.
+            stageLabel: { type: [string, "null"], description: "Customer-safe label for stage (DELIVERY_STAGE_LABELS)." }
+            feeMinor: { type: integer }
+            freeApplied: { type: boolean }
+            estimate: { type: [object, "null"] }
+            instructions: { type: [string, "null"] }
     Order:
       type: object
       description: A placed order — parent totals + one vendor order per storefront.
@@ -664,7 +684,7 @@ paths:
     get: { tags: [Wallet], summary: System / escrow account balances (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read" }
   # ---- Dispatch & Delivery Execution (Phase 4 · M15) ----
   /admin/deliveries:
-    get: { tags: [Dispatch], summary: "List/filter deliveries (status, district, vendorProfileId, unassigned)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.read" }
+    get: { tags: [Dispatch], summary: "List/filter deliveries (status, district, vendorProfileId, unassigned)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.read. Returns the envelope { automaticDispatch: boolean, items: [...] }; each row carries needsManualAssignment = ready AND unassigned AND automatic dispatch off — the deliveries a human must assign or they never move." }
   /admin/deliveries/{id}:
     get: { tags: [Dispatch], summary: "Delivery detail (timeline, assignment history, POD, current-driver eligibility, read-only payment)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.read" }
   /admin/deliveries/{id}/eligible-drivers:
@@ -704,7 +724,7 @@ paths:
   /driver/jobs/{id}/pod/confirm:
     post: { tags: [Dispatch], summary: "Attach uploaded POD photo keys before completion", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "body { photoKeys }" }
   /deliveries/{id}:
-    get: { tags: [Dispatch], summary: "Customer delivery tracking for their own order", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
+    get: { tags: [Dispatch], summary: "Customer delivery tracking for their own order", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Carries stage/stageLabel (pre-dispatch truth: AWAITING_VENDOR / AWAITING_DISPATCH / OFFERED; null once a driver accepts) alongside status/statusLabel — so do the vendor and admin delivery detail reads." }
   /deliveries/{id}/pin:
     get: { tags: [Dispatch], summary: "Reveal the recipient delivery PIN (own order)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
   /deliveries/{id}/proof:
