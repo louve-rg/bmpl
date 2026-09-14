@@ -68,9 +68,11 @@ export function byFewestActiveJobs(a: { activeJobs: number | null }, b: { active
  * operator can see which deliveries are waiting on a human and why.
  */
 
-/** The dispatch list has historically been a bare array; BMPL-128 may wrap it
- *  in an envelope carrying `automaticDispatch`. Accept both, so the console
- *  renders correctly on either side of the API deploy window. */
+/** The dispatch list has historically been a bare array; BMPL-128 (PR #84)
+ *  wraps it in an envelope carrying `automaticDispatch`, with the rows under
+ *  `items` — that is the SHIPPED key (admin-dispatch.controller.ts), so the
+ *  `items` arm below must stay. Accept both shapes, so the console renders
+ *  correctly on either side of the API deploy window. */
 export function parseDispatchList<Row>(
   payload: Row[] | { deliveries?: Row[]; items?: Row[]; rows?: Row[]; automaticDispatch?: boolean } | null | undefined,
 ): { rows: Row[]; automaticDispatch: boolean | null } {
