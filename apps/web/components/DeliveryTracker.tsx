@@ -14,6 +14,7 @@ import {
 } from '../lib/deliveries';
 import type { DeliveryEstimate } from '../lib/orders';
 import type { ApiError } from '../lib/api';
+import { deliveryStatusDisplay } from '../lib/delivery-stage';
 import { Alert, Button, Spinner, StatusBadge } from './ui';
 import { Avatar } from './Avatar';
 
@@ -258,8 +259,12 @@ export function DeliveryTracker({ deliveryId }: { deliveryId: string }) {
           <p className="text-sm font-medium text-belize-navy">
             {/* Prefer the pre-dispatch stage sentence when the API names one
                 (BMPL-128/129) — statusLabel says "Awaiting driver" from the
-                moment of checkout, before the store has even packed. */}
-            {data.stage && data.stageLabel ? data.stageLabel : data.statusLabel}
+                moment of checkout, before the store has even packed. The rule
+                lives once in lib/delivery-stage.ts; do not restate it here. */}
+            {(() => {
+              const display = deliveryStatusDisplay(data);
+              return display.kind === 'stage' ? display.label : data.statusLabel;
+            })()}
             {estimateText(data.estimate) && (
               <span className="ml-2 font-normal text-slate-500">· Est. {estimateText(data.estimate)}</span>
             )}
