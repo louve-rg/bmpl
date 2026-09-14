@@ -61,3 +61,40 @@ export function byFewestActiveJobs(a: { activeJobs: number | null }, b: { active
   if (b.activeJobs == null) return -1;
   return a.activeJobs - b.activeJobs;
 }
+
+/* ------------------------------------------------------------- BMPL-129 ---
+ * Manual-assignment visibility. BMPL-128 adds `needsManualAssignment` to each
+ * dispatch-list row and `automaticDispatch` to the list payload, so an
+ * operator can see which deliveries are waiting on a human and why.
+ */
+
+/** The dispatch list has historically been a bare array; BMPL-128 may wrap it
+ *  in an envelope carrying `automaticDispatch`. Accept both, so the console
+ *  renders correctly on either side of the API deploy window. */
+export function parseDispatchList<Row>(
+  payload: Row[] | { deliveries?: Row[]; items?: Row[]; rows?: Row[]; automaticDispatch?: boolean } | null | undefined,
+): { rows: Row[]; automaticDispatch: boolean | null } {
+  if (Array.isArray(payload)) return { rows: payload, automaticDispatch: null };
+  if (payload && typeof payload === 'object') {
+    const rows = payload.deliveries ?? payload.items ?? payload.rows;
+    return {
+      rows: Array.isArray(rows) ? rows : [],
+      automaticDispatch: typeof payload.automaticDispatch === 'boolean' ? payload.automaticDispatch : null,
+    };
+  }
+  return { rows: [], automaticDispatch: null };
+}
+
+/** The one-line banner: only when automatic dispatch is known to be OFF.
+ *  Unknown (older API, failed settings read) shows nothing — never claim a
+ *  mode we have not read. */
+export function manualDispatchNotice(automaticDispatch: boolean | null): string | null {
+  return automaticDispatch === false
+    ? 'Automatic dispatch is off — a delivery that is ready to go stays unassigned until an operator assigns a driver by hand.'
+    : null;
+}
+
+/** Row action verb: a row waiting on a human says so. */
+export function rowAction(needsManualAssignment: boolean | undefined): 'Assign' | 'View' {
+  return needsManualAssignment ? 'Assign' : 'View';
+}

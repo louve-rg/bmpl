@@ -33,6 +33,11 @@ export interface CustomerDeliveryDetail {
   id: string;
   status: string;
   statusLabel: string;
+  /** Pre-dispatch stage (BMPL-128), when the endpoint provides it. The tracker
+   *  prefers the stage sentence over statusLabel so the customer never reads
+   *  "Awaiting driver" while the store is still packing. */
+  stage?: string | null;
+  stageLabel?: string | null;
   driver: DeliveryDriver | null;
   vehicle: DeliveryVehicle | null;
   estimate: DeliveryEstimate | null;

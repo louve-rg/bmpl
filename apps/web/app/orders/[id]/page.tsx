@@ -7,11 +7,11 @@ import { Header } from '../../../components/landing/Header';
 import { Footer } from '../../../components/landing/Footer';
 import { ordersApi, money, type OrderView } from '../../../lib/orders';
 import { paymentExplanation } from '../../../lib/wallet';
-import { OrderStatusBadge, DeliveryBadge } from '../../../components/orders/OrderStatusBadge';
+import { OrderStatusBadge, DeliveryBadge, DeliveryStatusBadge } from '../../../components/orders/OrderStatusBadge';
 import { paymentsApi, type PaymentDetail } from '../../../lib/payments';
 import { PaymentStatusBadge, HoldStatusBadge } from '../../../components/payments/PaymentStatusBadge';
 import type { ApiError } from '../../../lib/api';
-import { Alert, Card, PageHeader, Spinner, StatusBadge } from '../../../components/ui';
+import { Alert, Card, PageHeader, Spinner } from '../../../components/ui';
 import { DeliveryTracker } from '../../../components/DeliveryTracker';
 import { CustomerPickupCode } from '../../../components/CustomerPickupCode';
 import { MessageButton } from '../../../components/messaging/MessageButton';
@@ -147,7 +147,7 @@ export default function OrderDetailPage() {
                   {vo.deliveryMethod === 'DELIVERY' && vo.delivery && (
                     <div className="space-y-1 border-t border-slate-100 px-4 py-2 text-xs text-slate-600">
                       <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge status={vo.delivery.status} />
+                        <DeliveryStatusBadge delivery={vo.delivery} />
                         <span>{vo.delivery.freeApplied ? 'Free delivery' : money(vo.delivery.feeMinor)}</span>
                         {vo.delivery.estimate && (
                           <span>

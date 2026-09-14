@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
-import { Alert, Card, EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
+import { Alert, Badge, Card, EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
+import { manualDispatchNotice, parseDispatchList, rowAction } from '../../../lib/dispatch';
 
 interface DeliveryRow {
   id: string;
@@ -19,6 +20,9 @@ interface DeliveryRow {
   feeMinor: number | null;
   driver: string | null;
   createdAt: string;
+  /** BMPL-128: ready for dispatch, no driver assigned, and nothing automatic
+   *  is going to pick it up — a human must act. Absent from an older API. */
+  needsManualAssignment?: boolean;
 }
 
 const STATUSES = [
@@ -81,7 +85,12 @@ export default function DispatchPage() {
       if (d) params.set('district', d);
       if (u) params.set('unassigned', 'true');
       const qs = params.toString();
-      setRows(await api.get<DeliveryRow[]>(`/admin/deliveries${qs ? `?${qs}` : ''}`));
+      const payload = await api.get<DeliveryRow[]>(`/admin/deliveries${qs ? `?${qs}` : ''}`);
+      const parsed = parseDispatchList(payload);
+      setRows(parsed.rows);
+      // The list payload is the authority on the live mode when it carries it
+      // (BMPL-128); the settings read above remains the fallback.
+      if (parsed.automaticDispatch != null) setAutoDispatch(parsed.automaticDispatch);
     } catch (e) {
       const err = e as ApiError;
       setError(err.status === 403 ? 'You do not have permission to view deliveries.' : err.message ?? 'Failed to load deliveries.');
@@ -139,6 +148,19 @@ export default function DispatchPage() {
           </>
         )}
       </Card>
+
+      {manualDispatchNotice(autoDispatch) && (
+        <Alert tone="warning" className="mb-4">
+          {manualDispatchNotice(autoDispatch)}{' '}
+          <button
+            type="button"
+            onClick={() => setUnassigned(true)}
+            className="font-semibold text-amber-900 underline hover:no-underline"
+          >
+            Show unassigned deliveries
+          </button>
+        </Alert>
+      )}
 
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Status">
@@ -211,13 +233,18 @@ export default function DispatchPage() {
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={r.status} />
+                    {r.needsManualAssignment && (
+                      <Badge tone="warning" className="mt-1 block w-max">
+                        Needs manual assignment
+                      </Badge>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-600">{r.driver ?? '—'}</td>
                   <td className="px-4 py-3 text-xs text-slate-600">{money(r.feeMinor)}</td>
                   <td className="px-4 py-3 text-xs text-slate-600">{new Date(r.createdAt).toLocaleDateString()}</td>
                   <td className="px-4 py-3 text-right">
                     <Link href={`/dashboard/dispatch/${r.id}`} className="font-semibold text-belize-blue hover:underline">
-                      View →
+                      {rowAction(r.needsManualAssignment)} →
                     </Link>
                   </td>
                 </tr>
