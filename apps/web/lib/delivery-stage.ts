@@ -3,10 +3,12 @@
  *
  * "Awaiting driver" used to appear from the moment of checkout, while the
  * store was still packing — the status enum genuinely cannot tell those
- * situations apart. BMPL-128 adds `stage` / `stageLabel` to the order
- * delivery payload for the pre-dispatch phases (waiting on the vendor,
- * waiting on dispatch, offered to a driver); after dispatch the stage is
- * absent and the status is the truth again.
+ * situations apart. BMPL-128 (PR #84, contract pinned by its tests) adds
+ * `stage` / `stageLabel` to the order delivery payload:
+ * AWAITING_VENDOR ('Being packed by the store') | AWAITING_DISPATCH
+ * ('Waiting for a driver to be assigned') | OFFERED ('Driver offered') |
+ * null once a driver accepts or the delivery finishes — then the status is
+ * the truth again.
  *
  * The rule: when the server names a stage, show the server's sentence for it;
  * otherwise show the status badge exactly as before. An older API that sends

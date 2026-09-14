@@ -8,14 +8,18 @@ import { deliveryStatusDisplay } from './delivery-stage';
  * the status badge when it is not.
  */
 describe('deliveryStatusDisplay', () => {
-  it('renders the server stage sentence when a stage is named', () => {
-    expect(
-      deliveryStatusDisplay({
-        status: 'PENDING_ASSIGNMENT',
-        stage: 'AWAITING_VENDOR',
-        stageLabel: 'Waiting for the store to pack your order',
-      }),
-    ).toEqual({ kind: 'stage', label: 'Waiting for the store to pack your order' });
+  it('renders the server stage sentence for each of the three pre-dispatch stages (BMPL-128 contract, PR #84)', () => {
+    const contract: Array<[string, string]> = [
+      ['AWAITING_VENDOR', 'Being packed by the store'],
+      ['AWAITING_DISPATCH', 'Waiting for a driver to be assigned'],
+      ['OFFERED', 'Driver offered'],
+    ];
+    for (const [stage, stageLabel] of contract) {
+      expect(deliveryStatusDisplay({ status: 'PENDING_ASSIGNMENT', stage, stageLabel })).toEqual({
+        kind: 'stage',
+        label: stageLabel,
+      });
+    }
   });
 
   it('falls back to the status badge when the API sends no stage (older API — deploy-window safe)', () => {
