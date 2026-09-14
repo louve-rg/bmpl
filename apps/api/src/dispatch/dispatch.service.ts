@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DELIVERY_STATUS_LABELS, type DeliveryStatus } from '@bmpl/shared';
+import { DELIVERY_STATUS_LABELS, deliveryStage, type DeliveryStatus } from '@bmpl/shared';
 import type { AssignDeliveryInput, CancelDeliveryInput, ReassignDeliveryInput } from '@bmpl/validation';
 import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
@@ -43,8 +43,19 @@ export class DispatchService {
 
   // ---- reads -------------------------------------------------------------
 
-  /** List deliveries for the dispatch console with light filters. */
-  async list(filter: { status?: string; district?: string; vendorProfileId?: string; unassigned?: boolean }) {
+  /**
+   * List deliveries for the dispatch console with light filters.
+   *
+   * `automaticDispatch` is the engine's effective setting, passed in by the
+   * controller (DispatchEngineService.settings() stays the single authority —
+   * this service must not re-derive the default). With automatic dispatch off,
+   * a ready-but-unassigned delivery moves ONLY when a human assigns it, and
+   * before this flag ops had no signal that anyone had to act.
+   */
+  async list(
+    filter: { status?: string; district?: string; vendorProfileId?: string; unassigned?: boolean },
+    automaticDispatch: boolean,
+  ) {
     const where: Prisma.OrderDeliveryWhereInput = {};
     if (filter.status) where.status = filter.status as DeliveryStatus;
     if (filter.unassigned) where.assignedDriverProfileId = null;
@@ -60,6 +71,7 @@ export class DispatchService {
         vendorOrder: {
           select: {
             orderNumber: true,
+            status: true,
             vendorProfile: { select: { businessName: true } },
             order: { select: { orderNumber: true, addresses: { select: { district: true, city: true } } } },
           },
@@ -71,6 +83,12 @@ export class DispatchService {
       id: d.id,
       status: d.status,
       statusLabel: DELIVERY_STATUS_LABELS[d.status],
+      // "A human must assign this or it moves never": dispatchable by the
+      // engine's own two-fact readiness test (timestamp AND vendor-order
+      // status agree — the backfill lesson), no driver holding it, and the
+      // engine itself switched off.
+      needsManualAssignment:
+        deliveryStage(d) === 'AWAITING_DISPATCH' && d.vendorOrder.status === 'READY_FOR_PICKUP' && !automaticDispatch,
       orderNumber: d.vendorOrder.order.orderNumber,
       vendorOrderNumber: d.vendorOrder.orderNumber,
       vendor: d.vendorOrder.vendorProfile.businessName,
