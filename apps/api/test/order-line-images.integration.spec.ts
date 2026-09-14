@@ -7,13 +7,15 @@
  * later vendor edit cannot rewrite history. Rows with a null snapshot
  * (pre-snapshot orders) fall back to the same live resolution on read.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { StorageService } from '../src/storage/storage.service';
 
 let ctx: TestContext;
 let adminCookies: string[];
 let categoryId: string;
+let storage: StorageService;
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
@@ -43,20 +45,30 @@ async function makeVendor(email: string, business: string) {
   return { cookies, vpId };
 }
 
-/** Raw-body upload; returns the created image's { id, storageKey } read back from the DB. */
+/**
+ * Raw-body upload; returns { id, storageKey, size } read back from the DB.
+ * Every upload gets a UNIQUE byte length (PNG + growing padding — sniffing
+ * only reads the magic header): since checkout now snapshots by COPYING the
+ * object under an immutable orders/... key, the copied object's size is how a
+ * test proves WHICH source image a line frozen — the key alone no longer says.
+ */
+let uploadPad = 0;
 async function uploadImage(cookies: string[], productId: string, variantId?: string) {
-  const before = await ctx.prisma.productImage.findMany({ where: { productId }, select: { id: true } });
+  const body = Buffer.concat([PNG, Buffer.alloc((uploadPad += 3), 1)]);
   const res = await request(ctx.server)
     .post(`/api/vendor/products/${productId}/images/upload${variantId ? `?variantId=${variantId}` : ''}`)
     .set('Cookie', cookies)
     .set('Content-Type', 'image/png')
-    .send(PNG);
+    .send(body);
   expect(res.status).toBe(201);
   const created = await ctx.prisma.productImage.findFirstOrThrow({
-    where: { productId, id: { notIn: before.map((i) => i.id) } },
+    where: { productId, fileSizeBytes: body.length },
   });
-  return { id: created.id, storageKey: created.storageKey };
+  return { id: created.id, storageKey: created.storageKey, size: body.length };
 }
+
+/** The copied snapshot object's metadata (null = object does not exist). */
+const snapshotMeta = (key: string) => storage.headObject(key, 'public');
 
 const markBrand = (cookies: string[], productId: string, imageId: string) =>
   request(ctx.server).post(`/api/vendor/products/${productId}/images/${imageId}/brand`).set('Cookie', cookies).expect(201);
@@ -73,6 +85,7 @@ beforeAll(async () => {
   adminCookies = await login(admin.email, admin.password);
   const cat = await request(ctx.server).post('/api/admin/categories').set('Cookie', adminCookies).send({ name: 'Toiletries' });
   categoryId = cat.body.id;
+  storage = ctx.app.get(StorageService);
 });
 afterAll(async () => {
   await ctx.app.close();
@@ -83,7 +96,9 @@ describe('order-line image snapshot', () => {
   let productId: string;
   let variantId: string;
   let brandKey: string;
-  let variantKey: string;
+  let brandSize: number;
+  let variantSize: number;
+  let snapshotKey: string;
   let customer: string[];
   let orderId: string;
   let vendorOrderId: string;
@@ -109,8 +124,9 @@ describe('order-line image snapshot', () => {
     const brand = await uploadImage(vendor.cookies, productId);
     await markBrand(vendor.cookies, productId, brand.id);
     brandKey = brand.storageKey;
+    brandSize = brand.size;
     const vImg = await uploadImage(vendor.cookies, productId, variantId);
-    variantKey = vImg.storageKey;
+    variantSize = vImg.size;
 
     customer = await registerCustomer('oli_c1@example.bz');
     await addToCart(customer, { productId, variantId, quantity: 1 });
@@ -118,30 +134,52 @@ describe('order-line image snapshot', () => {
     orderId = res.body.id;
     vendorOrderId = res.body.vendorOrders[0].id;
 
-    // The snapshot on the row is the variant image's key…
+    // The snapshot is an immutable COPY under the order's own namespace,
+    // deterministic key, no vendor path in it…
     const item = await ctx.prisma.orderItem.findFirstOrThrow({ where: { vendorOrderId } });
-    expect(item.imageStorageKey).toBe(variantKey);
-    expect(item.imageStorageKey).not.toBe(brandKey);
+    expect(item.imageStorageKey).toBe(`orders/${vendorOrderId}/${item.id}.png`);
+    snapshotKey = item.imageStorageKey!;
 
-    // …and the customer payload serves it, never the brand image.
+    // …whose bytes are the VARIANT image's, not the brand's (sizes unique per upload).
+    const meta = await snapshotMeta(snapshotKey);
+    expect(meta?.sizeBytes).toBe(variantSize);
+    expect(meta?.sizeBytes).not.toBe(brandSize);
+
+    // The customer payload serves the copy, never the brand image.
     const detail = await request(ctx.server).get(`/api/orders/${orderId}`).set('Cookie', customer).expect(200);
     const line = detail.body.vendorOrders[0].items[0];
-    expect(line.imageUrl).toContain(variantKey);
+    expect(line.imageUrl).toContain(snapshotKey);
     expect(line.imageUrl).not.toContain(brandKey);
   });
 
   it('the vendor order view serves the same snapshot', async () => {
     const res = await request(ctx.server).get(`/api/vendor/orders/${vendorOrderId}`).set('Cookie', vendor.cookies).expect(200);
-    expect(res.body.items[0].imageUrl).toContain(variantKey);
+    expect(res.body.items[0].imageUrl).toContain(snapshotKey);
     expect(res.body.items[0].imageUrl).not.toContain(brandKey);
   });
 
-  it('deleting the variant image after purchase does not rewrite the order', async () => {
+  it('replacing AND deleting the variant image after purchase leaves the order line resolvable', async () => {
+    // The qa finding this pins: product-image replace-file/replace/delete all
+    // DELETE the storage object. If the line kept the SOURCE key, both edits
+    // below would leave the order pointing at nothing (broken image).
     const img = await ctx.prisma.productImage.findFirstOrThrow({ where: { productId, variantId } });
-    await request(ctx.server).delete(`/api/vendor/products/${productId}/images/${img.id}`).set('Cookie', vendor.cookies).expect(200);
+    await request(ctx.server)
+      .post(`/api/vendor/products/${productId}/images/${img.id}/replace-file`)
+      .set('Cookie', vendor.cookies)
+      .set('Content-Type', 'image/png')
+      .send(PNG)
+      .expect(201);
+    const replaced = await ctx.prisma.productImage.findUniqueOrThrow({ where: { id: img.id } });
+    await request(ctx.server).delete(`/api/vendor/products/${productId}/images/${replaced.id}`).set('Cookie', vendor.cookies).expect(200);
 
+    // The snapshot OBJECT survives both edits and still holds the bought bytes…
+    const meta = await snapshotMeta(snapshotKey);
+    expect(meta).not.toBeNull();
+    expect(meta?.sizeBytes).toBe(variantSize);
+
+    // …and the order still serves its URL.
     const detail = await request(ctx.server).get(`/api/orders/${orderId}`).set('Cookie', customer).expect(200);
-    expect(detail.body.vendorOrders[0].items[0].imageUrl).toContain(variantKey);
+    expect(detail.body.vendorOrders[0].items[0].imageUrl).toContain(snapshotKey);
   });
 
   it('a legacy row with a null snapshot falls back to the live variant → non-brand resolution', async () => {
@@ -204,7 +242,36 @@ describe('order-line image snapshot', () => {
 
     const voId = res.body.vendorOrders[0].id as string;
     const item = await ctx.prisma.orderItem.findFirstOrThrow({ where: { vendorOrderId: voId } });
-    expect(item.imageStorageKey).toBe(gallery.storageKey);
+    expect(item.imageStorageKey).toBe(`orders/${voId}/${item.id}.png`);
+    expect((await snapshotMeta(item.imageStorageKey!))?.sizeBytes).toBe(gallery.size);
+  });
+
+  it('a snapshot copy failure never fails the checkout — the line stays null and falls back live', async () => {
+    const p = await request(ctx.server)
+      .post('/api/vendor/products')
+      .set('Cookie', vendor.cookies)
+      .send({ title: 'Flaky Sponge', sku: 'FS', categoryId, priceMinor: 700 });
+    const flakyId = p.body.id as string;
+    await request(ctx.server).post(`/api/vendor/products/${flakyId}/inventory/adjust`).set('Cookie', vendor.cookies).send({ delta: 3, reason: 'RESTOCK' }).expect(201);
+    const img = await uploadImage(vendor.cookies, flakyId);
+
+    const buyer = await registerCustomer('oli_c7@example.bz');
+    await addToCart(buyer, { productId: flakyId, quantity: 1 });
+    const spy = vi.spyOn(storage, 'copyObject').mockRejectedValue(new Error('storage unavailable'));
+    try {
+      // Checkout still succeeds: stock is reserved, the order exists.
+      const res = await checkout(buyer);
+
+      const voId = res.body.vendorOrders[0].id as string;
+      const item = await ctx.prisma.orderItem.findFirstOrThrow({ where: { vendorOrderId: voId } });
+      expect(item.imageStorageKey).toBeNull();
+
+      // And the read falls back to live resolution — the source image, today.
+      const detail = await request(ctx.server).get(`/api/orders/${res.body.id}`).set('Cookie', buyer).expect(200);
+      expect(detail.body.vendorOrders[0].items[0].imageUrl).toContain(img.storageKey);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -280,17 +347,23 @@ describe('order-line image snapshot — line alignment and post-checkout edits',
       return item!;
     };
     // Each line wears ITS OWN image — a positional swap fails one of these.
-    expect(byTitle('Scented Candle').imageUrl).toContain(candleVariantImg.storageKey);
-    expect(byTitle('Scented Candle').imageUrl).not.toContain(candleBrand.storageKey);
-    expect(byTitle('Wash Cloth').imageUrl).toContain(clothImg.storageKey);
-    expect(byTitle('Logo Sponge').imageUrl).toBeNull();
-
-    // And the snapshots on the rows agree with what was served.
+    // Snapshots are per-item COPIES now, so identity is proven by the copied
+    // object's byte size (unique per upload), not by the source key.
     const voId = detail.body.vendorOrders[0].id as string;
     const rows = await ctx.prisma.orderItem.findMany({ where: { vendorOrderId: voId } });
-    expect(rows.find((r) => r.productTitle === 'Scented Candle')?.imageStorageKey).toBe(candleVariantImg.storageKey);
-    expect(rows.find((r) => r.productTitle === 'Wash Cloth')?.imageStorageKey).toBe(clothImg.storageKey);
-    expect(rows.find((r) => r.productTitle === 'Logo Sponge')?.imageStorageKey).toBeNull();
+    const rowOf = (t: string) => {
+      const row = rows.find((r) => r.productTitle === t);
+      expect(row, t).toBeDefined();
+      return row!;
+    };
+    expect(byTitle('Scented Candle').imageUrl).toContain(rowOf('Scented Candle').imageStorageKey!);
+    expect(byTitle('Wash Cloth').imageUrl).toContain(rowOf('Wash Cloth').imageStorageKey!);
+    expect(byTitle('Logo Sponge').imageUrl).toBeNull();
+
+    expect((await snapshotMeta(rowOf('Scented Candle').imageStorageKey!))?.sizeBytes).toBe(candleVariantImg.size);
+    expect((await snapshotMeta(rowOf('Scented Candle').imageStorageKey!))?.sizeBytes).not.toBe(candleBrand.size);
+    expect((await snapshotMeta(rowOf('Wash Cloth').imageStorageKey!))?.sizeBytes).toBe(clothImg.size);
+    expect(rowOf('Logo Sponge').imageStorageKey).toBeNull();
   });
 
   it('promoting a NEW primary image after checkout changes new orders, never old ones', async () => {
@@ -315,17 +388,25 @@ describe('order-line image snapshot — line alignment and post-checkout edits',
       .expect(201);
 
     // Control half: a purchase made AFTER the edit snapshots the NEW primary —
-    // proof the edit really did displace the live choice…
+    // proof the edit really did displace the live choice… (identity by copied
+    // bytes: snapshot keys never name the source)
     const secondBuyer = await registerCustomer('oli_c6@example.bz');
     await addToCart(secondBuyer, { productId: loofahId, quantity: 1 });
     const secondOrder = await checkout(secondBuyer);
-    const secondDetail = await request(ctx.server).get(`/api/orders/${secondOrder.body.id}`).set('Cookie', secondBuyer).expect(200);
-    expect(secondDetail.body.vendorOrders[0].items[0].imageUrl).toContain(replacement.storageKey);
+    const secondRow = await ctx.prisma.orderItem.findFirstOrThrow({
+      where: { vendorOrder: { orderId: secondOrder.body.id as string } },
+    });
+    expect((await snapshotMeta(secondRow.imageStorageKey!))?.sizeBytes).toBe(replacement.size);
+    expect(original.size).not.toBe(replacement.size); // the control can actually discriminate
 
     // …which makes this the real assertion: the OLD order still shows what
     // was bought, untouched by the edit.
+    const firstRow = await ctx.prisma.orderItem.findFirstOrThrow({
+      where: { vendorOrder: { orderId: firstOrder.body.id as string } },
+    });
+    expect((await snapshotMeta(firstRow.imageStorageKey!))?.sizeBytes).toBe(original.size);
     const firstDetail = await request(ctx.server).get(`/api/orders/${firstOrder.body.id}`).set('Cookie', firstBuyer).expect(200);
-    expect(firstDetail.body.vendorOrders[0].items[0].imageUrl).toContain(original.storageKey);
+    expect(firstDetail.body.vendorOrders[0].items[0].imageUrl).toContain(firstRow.imageStorageKey!);
     expect(firstDetail.body.vendorOrders[0].items[0].imageUrl).not.toContain(replacement.storageKey);
   });
 });

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { CheckoutInput } from '@bmpl/validation';
 import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,6 +11,7 @@ import { OwnershipService } from '../products/ownership.service';
 import { effectiveUnitPrice } from '../products/pricing.util';
 import { PaymentsService } from '../payments/payments.service';
 import { DeliveryPricingService } from '../delivery/delivery.pricing';
+import { StorageService } from '../storage/storage.service';
 
 export interface ActorContext {
   userId: string;
@@ -29,7 +30,6 @@ interface CheckoutLine {
   productTitle: string;
   variantTitle: string | null;
   sku: string | null;
-  imageStorageKey: string | null;
   unitPriceMinor: bigint;
   quantity: number;
   subtotalMinor: bigint;
@@ -37,6 +37,8 @@ interface CheckoutLine {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
@@ -46,6 +48,7 @@ export class OrdersService {
     private readonly ownership: OwnershipService,
     private readonly payments: PaymentsService,
     private readonly deliveryPricing: DeliveryPricingService,
+    private readonly storage: StorageService,
   ) {}
 
   // ===========================================================================
@@ -86,7 +89,7 @@ export class OrdersService {
   private async runCheckout(actor: ActorContext, dto: CheckoutInput, idempotencyKey?: string): Promise<string> {
     const choiceByVendor = new Map(dto.vendors.map((v) => [v.vendorProfileId, v]));
 
-    return this.prisma.$transaction(async (tx) => {
+    const orderId = await this.prisma.$transaction(async (tx) => {
       const cart = await tx.cart.findUnique({ where: { userId: actor.userId }, include: { items: { orderBy: { createdAt: 'asc' } } } });
       if (!cart || cart.items.length === 0) throw new BadRequestException('Your cart is empty.');
 
@@ -157,7 +160,6 @@ export class OrdersService {
           productTitle: product.title,
           variantTitle,
           sku: variant?.sku ?? product.sku,
-          imageStorageKey: null, // resolved in one batch below, before the order graph is written
           unitPriceMinor,
           quantity: item.quantity,
           subtotalMinor: unitPriceMinor * BigInt(item.quantity),
@@ -241,15 +243,6 @@ export class OrdersService {
       // ---- Create the order graph ----
       const orderNumber = genOrderNumber();
       const allLines = [...linesByVendor.values()].flat();
-
-      // ---- Image snapshot: frozen at checkout so a later vendor edit cannot
-      // rewrite what this order shows. Exact variant bought → the product's own
-      // (non-brand) primary → null. The storefront brand image never qualifies.
-      const lineImageKeys = await this.images.orderLineImageKeys(allLines);
-      allLines.forEach((l, i) => {
-        l.imageStorageKey = lineImageKeys[i] ?? null;
-      });
-
       const subtotalMinor = allLines.reduce((s, l) => s + l.subtotalMinor, 0n);
       const itemCount = allLines.reduce((s, l) => s + l.quantity, 0);
 
@@ -308,7 +301,9 @@ export class OrdersService {
                 productTitle: l.productTitle,
                 variantTitle: l.variantTitle,
                 sku: l.sku,
-                imageStorageKey: l.imageStorageKey,
+                // imageStorageKey stays null here: the immutable snapshot copy
+                // happens AFTER commit (snapshotOrderLineImages) — storage I/O
+                // does not belong inside the checkout transaction.
                 unitPriceMinor: l.unitPriceMinor,
                 quantity: l.quantity,
                 subtotalMinor: l.subtotalMinor,
@@ -407,6 +402,45 @@ export class OrdersService {
 
       return order.id;
     });
+
+    // After the money and stock are safely committed, freeze each line's image.
+    // Best-effort by design: a storage hiccup must never fail a paid checkout.
+    await this.snapshotOrderLineImages(orderId);
+    return orderId;
+  }
+
+  /**
+   * Freeze each order line's image under an immutable key the vendor can never
+   * touch: resolve the line's image (exact variant → the product's own
+   * non-brand primary), COPY the object to orders/<vendorOrderId>/<orderItemId>.<ext>
+   * in the public bucket, and point the line at the copy. Product-image
+   * replace/delete removes the SOURCE object, so storing the source key alone
+   * would leave order history with a dangling URL. Per line, a copy failure is
+   * logged and the snapshot stays null — readers fall back to live resolution.
+   */
+  private async snapshotOrderLineImages(orderId: string): Promise<void> {
+    const items = await this.prisma.orderItem.findMany({
+      where: { vendorOrder: { orderId } },
+      select: { id: true, vendorOrderId: true, productId: true, variantId: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!items.length) return;
+    const sourceKeys = await this.images.orderLineImageKeys(items);
+    await Promise.all(
+      items.map(async (item, i) => {
+        const srcKey = sourceKeys[i];
+        if (!srcKey) return;
+        const dot = srcKey.lastIndexOf('.');
+        const ext = dot > srcKey.lastIndexOf('/') ? srcKey.slice(dot + 1) : 'bin';
+        const dstKey = `orders/${item.vendorOrderId}/${item.id}.${ext}`;
+        try {
+          await this.storage.copyObject(srcKey, dstKey, 'public');
+          await this.prisma.orderItem.update({ where: { id: item.id }, data: { imageStorageKey: dstKey } });
+        } catch (err) {
+          this.logger.warn(`Order-line image snapshot failed for item ${item.id} (source "${srcKey}"): ${String(err)}`);
+        }
+      }),
+    );
   }
 
   // ===========================================================================

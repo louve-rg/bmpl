@@ -2351,9 +2351,12 @@ model OrderItem {
   productTitle   String
   variantTitle   String?
   sku            String?
-  // Image snapshot taken at checkout (variant primary, else the product's own
-  // non-brand primary): the line keeps showing what was bought even after the
-  // vendor re-edits or deletes images. Null on pre-snapshot rows — readers fall
+  // Image snapshot taken at checkout: the chosen image (variant primary, else
+  // the product's own non-brand primary) is COPIED to an immutable key under
+  // orders/<vendorOrderId>/<orderItemId> and this stores that copy's key — a
+  // vendor replacing or deleting the listing image deletes the SOURCE object,
+  // never the frozen copy, so the line keeps showing what was bought. Null on
+  // pre-snapshot rows (and when the copy failed at checkout) — readers fall
   // back to the same live resolution. The brand image never qualifies.
   imageStorageKey String?
   unitPriceMinor BigInt
