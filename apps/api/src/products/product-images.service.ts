@@ -403,7 +403,22 @@ export class ProductImagesService {
    */
   async primaryUrls(productIds: string[]): Promise<Map<string, string | null>> {
     const out = new Map<string, string | null>();
-    if (!productIds.length) return out;
+    const chosen = await this.choosePrimaryRows(productIds, { includeBrand: true });
+    for (const [productId, r] of chosen) out.set(productId, await this.urlOrNull(r.storageKey));
+    return out;
+  }
+
+  /**
+   * Shared chooser behind `primaryUrls` and the order-line resolution. With
+   * `includeBrand: false` the Brand Image never qualifies — the caller wants
+   * the product's OWN image (order lines show what was bought, never the
+   * storefront logo).
+   */
+  private async choosePrimaryRows(
+    productIds: string[],
+    opts: { includeBrand: boolean },
+  ): Promise<Map<string, { storageKey: string }>> {
+    if (!productIds.length) return new Map();
     const [rows, variantRows] = await Promise.all([
       this.prisma.productImage.findMany({
         where: { productId: { in: productIds } },
@@ -418,7 +433,7 @@ export class ProductImagesService {
     ]);
     const hasVariants = new Set(variantRows.map((v) => v.productId));
     const eligible = (r: (typeof rows)[number]): boolean => {
-      if (r.isBrandImage) return true;
+      if (r.isBrandImage) return opts.includeBrand;
       if (hasVariants.has(r.productId)) return r.variantId != null && r.variant?.isActive === true;
       return r.variantId === null; // simple product: general images are public
     };
@@ -430,8 +445,61 @@ export class ProductImagesService {
       const cur = chosen.get(r.productId);
       if (!cur || rank(r) > rank(cur)) chosen.set(r.productId, r);
     }
-    for (const [productId, r] of chosen) out.set(productId, await this.urlOrNull(r.storageKey));
-    return out;
+    return chosen;
+  }
+
+  /**
+   * Order-line image resolution, stated once for both moments it is needed:
+   * the exact variant's primary image, else the product's own (non-brand)
+   * primary, else null. The Brand Image is a listing/card role and is NEVER an
+   * order-line image. Returns storage KEYS aligned with the input — checkout
+   * snapshots these onto `OrderItem.imageStorageKey`.
+   */
+  async orderLineImageKeys(
+    lines: { productId: string | null; variantId: string | null }[],
+  ): Promise<(string | null)[]> {
+    const variantIds = [...new Set(lines.map((l) => l.variantId).filter((id): id is string => !!id))];
+    const productIds = [...new Set(lines.map((l) => l.productId).filter((id): id is string => !!id))];
+    const [variantRows, productChosen] = await Promise.all([
+      variantIds.length
+        ? this.prisma.productImage.findMany({
+            where: { variantId: { in: variantIds } },
+            orderBy: [{ isPrimary: 'desc' }, { position: 'asc' }],
+          })
+        : Promise.resolve([]),
+      this.choosePrimaryRows(productIds, { includeBrand: false }),
+    ]);
+    const variantKey = new Map<string, string>();
+    for (const r of variantRows) {
+      if (r.variantId && !variantKey.has(r.variantId)) variantKey.set(r.variantId, r.storageKey);
+    }
+    return lines.map(
+      (l) =>
+        (l.variantId ? variantKey.get(l.variantId) : null) ??
+        (l.productId ? productChosen.get(l.productId)?.storageKey : null) ??
+        null,
+    );
+  }
+
+  /**
+   * URLs for serialized order lines: the snapshot taken at checkout wins;
+   * a null snapshot (pre-snapshot rows) falls back to the SAME live resolution
+   * checkout would apply today (`orderLineImageKeys`), so legacy orders fix
+   * themselves on read and can never show the brand image either.
+   */
+  async orderLineImageUrls(
+    lines: { imageStorageKey: string | null; productId: string | null; variantId: string | null }[],
+  ): Promise<(string | null)[]> {
+    const needFallback = lines.filter((l) => !l.imageStorageKey);
+    const fallbackKeys = needFallback.length ? await this.orderLineImageKeys(needFallback) : [];
+    const fallbackByIndex = new Map<(typeof lines)[number], string | null>();
+    needFallback.forEach((l, i) => fallbackByIndex.set(l, fallbackKeys[i] ?? null));
+    return Promise.all(
+      lines.map((l) => {
+        const key = l.imageStorageKey ?? fallbackByIndex.get(l) ?? null;
+        return key ? this.urlOrNull(key) : Promise.resolve(null);
+      }),
+    );
   }
 
   /**

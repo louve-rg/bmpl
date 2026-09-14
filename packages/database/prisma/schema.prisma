@@ -2351,6 +2351,11 @@ model OrderItem {
   productTitle   String
   variantTitle   String?
   sku            String?
+  // Image snapshot taken at checkout (variant primary, else the product's own
+  // non-brand primary): the line keeps showing what was bought even after the
+  // vendor re-edits or deletes images. Null on pre-snapshot rows — readers fall
+  // back to the same live resolution. The brand image never qualifies.
+  imageStorageKey String?
   unitPriceMinor BigInt
   quantity       Int
   subtotalMinor  BigInt

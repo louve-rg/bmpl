@@ -293,7 +293,13 @@ components:
         subtotalMinor: { type: integer }
         currency: { type: string }
         productId: { type: [string, "null"] }
-        imageUrl: { type: [string, "null"] }
+        imageUrl:
+          type: [string, "null"]
+          description: >-
+            Snapshot taken at checkout: the exact variant's primary image, else
+            the product's own (non-brand) primary, else null. The storefront
+            brand image is never an order-line image. Pre-snapshot rows resolve
+            live by the same rule.
     VendorOrder:
       type: object
       properties:

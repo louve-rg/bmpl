@@ -29,6 +29,7 @@ interface CheckoutLine {
   productTitle: string;
   variantTitle: string | null;
   sku: string | null;
+  imageStorageKey: string | null;
   unitPriceMinor: bigint;
   quantity: number;
   subtotalMinor: bigint;
@@ -156,6 +157,7 @@ export class OrdersService {
           productTitle: product.title,
           variantTitle,
           sku: variant?.sku ?? product.sku,
+          imageStorageKey: null, // resolved in one batch below, before the order graph is written
           unitPriceMinor,
           quantity: item.quantity,
           subtotalMinor: unitPriceMinor * BigInt(item.quantity),
@@ -239,6 +241,15 @@ export class OrdersService {
       // ---- Create the order graph ----
       const orderNumber = genOrderNumber();
       const allLines = [...linesByVendor.values()].flat();
+
+      // ---- Image snapshot: frozen at checkout so a later vendor edit cannot
+      // rewrite what this order shows. Exact variant bought → the product's own
+      // (non-brand) primary → null. The storefront brand image never qualifies.
+      const lineImageKeys = await this.images.orderLineImageKeys(allLines);
+      allLines.forEach((l, i) => {
+        l.imageStorageKey = lineImageKeys[i] ?? null;
+      });
+
       const subtotalMinor = allLines.reduce((s, l) => s + l.subtotalMinor, 0n);
       const itemCount = allLines.reduce((s, l) => s + l.quantity, 0);
 
@@ -297,6 +308,7 @@ export class OrdersService {
                 productTitle: l.productTitle,
                 variantTitle: l.variantTitle,
                 sku: l.sku,
+                imageStorageKey: l.imageStorageKey,
                 unitPriceMinor: l.unitPriceMinor,
                 quantity: l.quantity,
                 subtotalMinor: l.subtotalMinor,
@@ -603,8 +615,9 @@ export class OrdersService {
   // ===========================================================================
 
   private async serializeOrder(order: OrderWithDetail) {
-    const productIds = [...new Set(order.vendorOrders.flatMap((vo) => vo.items.map((i) => i.productId).filter((id): id is string => !!id)))];
-    const primary = await this.images.primaryUrls(productIds);
+    const vendorOrders = await Promise.all(
+      order.vendorOrders.map(async (vo) => this.shapeVendorOrder(vo, await this.imagesFor(vo))),
+    );
     const address = order.addresses[0];
     return {
       id: order.id,
@@ -627,13 +640,13 @@ export class OrdersService {
             country: address.country,
           }
         : null,
-      vendorOrders: order.vendorOrders.map((vo) => this.shapeVendorOrder(vo, primary)),
+      vendorOrders,
     };
   }
 
   private serializeVendorOrder(vo: VendorOrderWithDetail, opts: { includeCustomer?: boolean } = {}) {
-    return this.imagesFor(vo).then((primary) => {
-      const base = this.shapeVendorOrder(vo, primary);
+    return this.imagesFor(vo).then((lineImageUrls) => {
+      const base = this.shapeVendorOrder(vo, lineImageUrls);
       const address = vo.order.addresses[0];
       return {
         ...base,
@@ -660,14 +673,17 @@ export class OrdersService {
     });
   }
 
-  private async imagesFor(vo: VendorOrderWithDetail) {
-    const productIds = [...new Set(vo.items.map((i) => i.productId).filter((id): id is string => !!id))];
-    return this.images.primaryUrls(productIds);
+  /**
+   * One URL per order line, aligned with `vo.items`: the checkout snapshot,
+   * else the live variant → non-brand-product fallback for pre-snapshot rows.
+   */
+  private async imagesFor(vo: { items: OrderItemRow[] }) {
+    return this.images.orderLineImageUrls(vo.items);
   }
 
   private shapeVendorOrder(
     vo: { id: string; orderNumber: string; status: string; deliveryMethod: string; customerNotes: string | null; currency: string; itemCount: number; subtotalMinor: bigint; vendorProfile: { businessName: string; slug: string }; items: OrderItemRow[]; delivery?: DeliveryRow | null },
-    primary: Map<string, string | null>,
+    lineImageUrls: (string | null)[],
   ) {
     const d = vo.delivery ?? null;
     return {
@@ -694,7 +710,7 @@ export class OrdersService {
       itemCount: vo.itemCount,
       subtotalMinor: money(vo.subtotalMinor),
       vendor: { businessName: vo.vendorProfile.businessName, slug: vo.vendorProfile.slug },
-      items: vo.items.map((i) => ({
+      items: vo.items.map((i, idx) => ({
         productTitle: i.productTitle,
         variantTitle: i.variantTitle,
         sku: i.sku,
@@ -703,7 +719,7 @@ export class OrdersService {
         subtotalMinor: money(i.subtotalMinor),
         currency: i.currency,
         productId: i.productId,
-        imageUrl: i.productId ? primary.get(i.productId) ?? null : null,
+        imageUrl: lineImageUrls[idx] ?? null,
       })),
     };
   }
@@ -713,11 +729,13 @@ interface OrderItemRow {
   productTitle: string;
   variantTitle: string | null;
   sku: string | null;
+  imageStorageKey: string | null;
   unitPriceMinor: bigint;
   quantity: number;
   subtotalMinor: bigint;
   currency: string;
   productId: string | null;
+  variantId: string | null;
 }
 
 interface DeliveryRow {
