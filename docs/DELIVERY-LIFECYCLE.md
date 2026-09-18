@@ -97,6 +97,10 @@ are alerted that manual assignment is needed.
 `apps/api/src/dispatch/admin-dispatch.controller.ts`): list, timeline,
 assignment history, eligible drivers, `POST /admin/deliveries/:id/assign` and
 `/reassign` (permission `deliveries.assign`), `/cancel` (`deliveries.manage`).
+The list returns the envelope `{ automaticDispatch: boolean, items: [...] }`
+(BMPL-128), and each row carries `needsManualAssignment` — true exactly when
+the delivery is ready, unassigned and automatic dispatch is off, i.e. the
+deliveries that never move unless a human assigns them.
 Both automatic and admin assignment funnel into the same
 `DispatchService.assignInternal` (`apps/api/src/dispatch/dispatch.service.ts`),
 so they produce identical state: eligibility re-checked at assignment time,
@@ -159,6 +163,16 @@ Worth knowing about each step:
 
 The customer follows progress at `GET /deliveries/:id` (status, timeline,
 driver display name and vehicle, POD); the vendor at `GET /vendor/deliveries`.
+Alongside `status`/`statusLabel`, these reads (and the admin detail) carry
+`stage`/`stageLabel` (BMPL-128): the honest pre-collection stage —
+`AWAITING_VENDOR` ("Being packed by the store") until the vendor marks the
+order ready, `AWAITING_DISPATCH` ("Waiting for a driver to be assigned")
+while ready and unassigned, `OFFERED` ("Driver offered") while an offer is
+pending — and `null` from driver acceptance onward, where the status label
+is truthful on its own. The rule and labels live once, in
+`deliveryStage`/`DELIVERY_STAGE_LABELS` (`packages/shared/src/dispatch.ts`);
+the web tracker prefers the stage sentence because `statusLabel` says
+"Awaiting driver" from the moment of checkout, before the store has packed.
 Neither general payload ever contains a PIN — per the audience contract at the
 top of `delivery-core.service.ts` ("Audience determines which fields a
 serialized delivery exposes"), PINs are revealed only via dedicated,
@@ -392,10 +406,12 @@ Covered by `apps/api/test/self-delivery.integration.spec.ts` (6 tests) and
   `20261009120000_dispatch_default_off`), and the engine treats a missing
   settings row as off. **Whether it is on in production today cannot be
   checked from the repository** — the live `platform_settings` row must be
-  read, not assumed (`PROJECT_STATUS.md` §12 records it as unread). Turning
-  it on is a human product decision (`AGENT-WORKFLOW.md` §7). While it is
-  off, **manual assignment is the production dispatch path** for both
-  marketplace deliveries and shipment courier legs (closed gap 1 below).
+  read, not assumed (`PROJECT_STATUS.md` §12 records the most recent read:
+  ON as of 2026-09-15, switched on by the owner 2026-09-13). Turning it on
+  was a human product decision (`AGENT-WORKFLOW.md` §7), and turning it back
+  off is a one-row update. Wherever it is off, **manual assignment is the
+  dispatch path** for both marketplace deliveries and shipment courier legs
+  (closed gap 1 below).
   (An earlier revision asserted "off in production" as fact — corrected
   2026-09-09 to match what the repository can actually prove.)
 

@@ -138,6 +138,14 @@ driver as on the way: a driver who never answered is not on the way. A skipped
 intermediate step reads `DONE` with a null timestamp — reaching a later step
 implies the earlier one happened, and nothing is fabricated.
 
+The same honesty governs the headline: delivery reads carry `stage`/`stageLabel`
+(BMPL-128, `deliveryStage` in `packages/shared/src/dispatch.ts`) naming the true
+pre-collection stage — being packed, waiting for assignment, or offered — and the
+customer tracker shows that sentence instead of `statusLabel`, which says
+"Awaiting driver" from the moment of checkout. `stage` is null once a driver
+accepts. The full label text and serving endpoints are documented in
+[`DELIVERY-LIFECYCLE.md`](./DELIVERY-LIFECYCLE.md) §2.
+
 ## Messaging
 
 `ensureDeliveryThreads` opens the customer↔driver and vendor↔driver conversations
@@ -168,7 +176,10 @@ deploy.
   highest-ranked eligible driver, one at a time, and the sweeper retries when an
   offer lapses.
 - **MANUAL** — the engine leaves deliveries in `PENDING_ASSIGNMENT` and an
-  operator chooses from the eligible list on the delivery page.
+  operator chooses from the eligible list on the delivery page. So a manual
+  backlog cannot hide, the admin list envelope (`{ automaticDispatch, items }`)
+  flags each ready-but-unassigned row with `needsManualAssignment` while
+  automatic dispatch is off (BMPL-128).
 
 Both paths call the same `assignInternal`, so a delivery assigned by hand is
 indistinguishable in state from one the engine placed: same eligibility re-check,
