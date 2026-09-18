@@ -1,23 +1,61 @@
 # Phase 1.5C — Operator Deployment Checklist
 
-This is the exact, ordered runbook to take the **already-prepared and locally
-verified** Phase 1 platform live in a development cloud. Steps marked **[YOU]**
-require an account, credential, interactive login, or DNS change that the
-automation environment does not have — do those, then the remaining automated
-verification (smoke scripts + CI) can run.
+This began as the runbook that took the Phase 1 platform to the cloud. **The
+platform has been live in production since September 2026** (see "How a deploy
+actually happens today", below — that section is what you need on a normal
+day). The numbered bring-up steps are kept because they are the recipe for
+standing up a fresh environment; steps marked **[YOU]** require an account,
+credential, interactive login, or DNS change that the automation environment
+does not have.
 
-> **Nothing here has been executed against a real cloud** — no credentials were
-> available. Local artifact verification is complete (see the Phase 1.5C report).
 > Never commit real secrets. Generate them with `node scripts/gen-secrets.mjs`.
+> Counts and facts in this document were re-verified against the repository at
+> `5c9c253` on 2026-09-18; earlier revisions carried Phase 1 numbers.
+
+## How a deploy actually happens today (production)
+
+- **Merging to `main` is the deploy trigger.** There is no manual deploy step.
+  API → Railway; web + admin → Vercel (two projects). Merging requires human
+  approval (root `CLAUDE.md` §11).
+- **Railway rebuilds the API only when the merge touches
+  `railway.json` `build.watchPatterns`** (apps/api, the seven runtime
+  packages, lockfile/workspace/tsconfig files). A web-only or docs-only merge
+  deploys nothing to Railway — that is correct, not a stall.
+- **Railway waits for the GitHub check suite before deploying. A red — or
+  absent — check suite silently blocks the API deploy.** This is Railway
+  dashboard behaviour, not visible in this repository; it was established
+  live on 2026-09-18 (BMPL-131), when a GitHub Actions billing block meant no
+  check suites were created and the API deploy froze for two days with no
+  error anywhere. **Vercel does not wait** — web and admin kept deploying the
+  whole time. If the API will not deploy, check Actions first.
+- **Migrations apply during the deploy**, not by hand: `railway.json`
+  `deploy.preDeployCommand` runs `prisma migrate deploy`, so a failed
+  migration fails the deploy rather than half-applying (81 migrations as of
+  2026-09-18). Health check: `/api/health` (reports the commit being served);
+  readiness: `/api/health/ready`. `/api/health/live` does not exist.
+- **`pnpm deploy:status` answers "is production current?"** by comparing the
+  commit `/api/health` reports against `origin/main` read live:
+  **CURRENT** (exit 0) · **NOTHING_TO_DELIVER** (0 — main moved, but only in
+  paths Railway does not watch) · **BEHIND** (1) · **UNKNOWN** (2 —
+  unreachable is not the same as behind) · **DIVERGED** (3). `--web` also
+  measures the deployed web build (ancestry verdicts only — Vercel's rebuild
+  rules are not in this repo, so NOTHING_TO_DELIVER is never claimed for
+  web); `--web-route <path>` probes one route; `--assume-production <commit>`
+  is a what-if lever that classifies a hypothetical production commit without
+  asking production.
+- **Live hosts:** `www.bzemarketplace.com` (web, and `/api/*` proxy to the
+  API), `bmpl-admin.vercel.app` (admin), `bmplapi-production.up.railway.app`
+  (API). The `*-dev` subdomains planned below were never created (step 13).
 
 ## 0. Accounts required (create/authorize once) — [YOU]
-- GitHub org/repo (private) · Railway · Vercel · Cloudflare (R2) · Resend (or
+- GitHub org/repo (public since 2026-09-18 — see step 1) · Railway · Vercel · Cloudflare (R2) · Resend (or
   Postmark) · Sentry · Expo (EAS). Access to DNS for `bzemarketplace.com`
   (only the `*-dev` subdomains are touched).
 
 ## 1. GitHub — push the repo — [YOU]
-The repo is committed locally (`main` @ current commit; 3 phase commits; clean
-tree; no secrets tracked). Create the remote and push:
+*(Done: the remote is `louve-rg/bmpl`, made **public** on 2026-09-18 so
+Actions runs on GitHub-hosted runners — private-repo minutes had run out,
+which is what triggered the BMPL-131 deploy freeze.)* For a fresh remote:
 ```bash
 git remote add origin git@github.com:<org>/bmpl.git
 git push -u origin main            # do NOT force-push
@@ -27,9 +65,14 @@ Then in GitHub: set branch protection on `main` (require the `CI` checks +
 review); replace `@bmpl-owners` in `.github/CODEOWNERS`.
 
 ## 2. CI runs automatically on push
-Watch **Actions → CI**. Expect 3 jobs green: `build-and-test`,
-`integration` (Postgres+Redis services + MinIO container), `secret-scan`.
-Locally these are already green: **15 unit + 42 integration** tests, all builds.
+CI runs on pushes to `main` and on pull requests into `main` — pushing a
+feature branch alone runs nothing. Watch **Actions → CI**. Expect 3 jobs
+green: **Build, typecheck & unit tests**, **Integration tests (Postgres +
+Redis + MinIO)**, **secret-scan**. Local equivalents as of 2026-09-18:
+**563 unit tests** (all seven test-bearing packages) + **852 integration
+tests across 66 spec files**, all builds. Remember: a missing check suite
+does not just skip CI — it blocks the Railway deploy (see the deploy section
+above).
 
 ## 3. Railway — project + Postgres + Redis + API — [YOU]
 ```bash
@@ -52,11 +95,15 @@ host-only) or `.bzemarketplace.com`, `CORS_ORIGINS` (the real Vercel URLs),
 `STORAGE_*` (R2, step 6), `EMAIL_PROVIDER`, `LOG_FORMAT=json`, `APP_VERSION`.
 
 ## 5. Migrate the database (never `db push`) — [YOU]
+On the live service this happens automatically on every deploy
+(`railway.json` `preDeployCommand`). The manual form is for standing up a
+fresh environment before its first deploy:
 ```bash
-railway run pnpm --filter @bmpl/database migrate:deploy   # applies 20260723233020_init
+railway run pnpm --filter @bmpl/database migrate:deploy   # applies all pending (81 migrations as of 2026-09-18)
 ```
-Verify tables/enums/indexes/FKs exist (16 tables, 14 enums, 47 indexes, 18 FKs;
-audit FKs = SET NULL, ledger FKs = RESTRICT).
+Verify `prisma migrate status` reports no pending migrations. (The original
+Phase 1 counts — 16 tables, 14 enums — are history; the schema has grown far
+past them. Audit FKs = SET NULL, ledger FKs = RESTRICT still hold.)
 
 ## 6. Cloudflare R2 — [YOU]
 Create buckets `bmpl-dev-documents` (PRIVATE) + `bmpl-dev-public`; create a
@@ -124,8 +171,9 @@ token refresh (refresh cookie sent to `/api/auth` path) → logout revokes →
 CSRF (valid token succeeds, altered/missing token 403, disallowed origin 403) →
 mobile Bearer path unaffected → register/duplicate/verify/reset → role apply +
 R2 upload → admin approve (signed doc opens, unsigned 403) → role switch/suspend/
-revoke → account suspend/restore → 429 on excessive logins. These mirror the 42
-passing integration tests, now over real cookies/domains.
+revoke → account suspend/restore → 429 on excessive logins. These mirror the
+auth/role integration specs (a slice of the 852-test suite), now over real
+cookies/domains.
 
 ## 15. Expo EAS (dev build only) — [YOU]
 ```bash
@@ -137,10 +185,11 @@ eas build --profile development --platform android   # or ios
 ---
 ### Fast local re-verification (no cloud needed)
 ```bash
-pwsh scripts/dev-infra/start-infra.ps1
+pnpm infra:up                          # docker compose: Postgres, Redis, MinIO
 pnpm install --frozen-lockfile && pnpm -r --filter "./packages/*" build
 pnpm --filter @bmpl/api build
-pnpm test:unit                         # 15
-pnpm --filter @bmpl/api test:integration   # 42 (real PG+MinIO+Redis)
+pnpm test:unit                         # 563 as of 2026-09-18, all seven packages
+pnpm --filter @bmpl/api test:integration   # 852 tests / 66 files, ~12 min (real PG+MinIO+Redis;
+                                           # a local run auto-isolates to a per-worktree database)
 pnpm --filter @bmpl/api smoke:storage      # 9/9 (S3 path)
 ```
