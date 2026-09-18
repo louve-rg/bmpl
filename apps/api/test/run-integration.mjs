@@ -15,6 +15,16 @@
  *    (ci.yml, "Build packages (needed by the API)") and has no stale dist
  *    to inherit; this trap is local-developer only.
  *
+ *    THE GATE IS "EVERY WORKSPACE PACKAGE BUILT SUCCESSFULLY BY A PATH WE
+ *    TRUST", NOT "TURBO EXITED 0" (BMPL-133). turbo is the primary path,
+ *    unchanged. When turbo itself cannot run — e.g. a machine's Application
+ *    Control policy blocks its native binary, which surfaces as a crash
+ *    inside the child node process, not as a spawn error here — the SAME
+ *    build is attempted once more via pnpm (`pnpm -r --filter "./packages/*"
+ *    run build`), loudly announced. This is a fallback, not a loosened
+ *    gate: a genuine compile error fails BOTH paths and the run still
+ *    refuses, with the same message and a non-zero exit.
+ *
  * 2. THE npm-HABIT `--`. `pnpm test:integration -- shipping` forwards the
  *    literal `--` and vitest 2 discards everything after it — a "targeted"
  *    run that silently executed the full suite, exit 0. A leading `--` is
@@ -59,14 +69,63 @@ const repoRoot = dirname(dirname(apiDir));
 const require = createRequire(join(apiDir, 'package.json'));
 const requireRoot = createRequire(join(repoRoot, 'package.json'));
 
-let args = process.argv.slice(2);
-if (args[0] === '--') {
-  console.log('[run-integration] note: stripped a leading "--" (npm habit) — vitest 2 would have discarded every argument after it and silently run the FULL suite.');
-  args = args.slice(1);
-}
+/** The one refusal (guard 1). Both build paths failing prints exactly this. */
+const BUILD_REFUSAL =
+  '[run-integration] refusing to run: workspace package build failed, and running the suite against stale dist proves nothing.';
 
-const dryRun = process.env.BMPL_DRY_RUN === '1';
-const skipBuild = process.env.CI || process.env.BMPL_SKIP_WORKSPACE_BUILD === '1';
+/** The verified pnpm equivalent of the turbo build (BMPL-133). Every element
+ *  is a literal — nothing user-supplied ever reaches the fallback spawn. */
+const PNPM_FALLBACK_ARGS = ['-r', '--filter=./packages/*', 'run', 'build'];
+
+/**
+ * Guard 1, both paths (exported for the unit spec — no real build is spawned
+ * there). turbo first, unchanged; ANY unsuccessful turbo build — non-zero
+ * status, spawn-level error, or turbo not even resolvable — falls back to
+ * pnpm, because a blocked binary crashes INSIDE the child node process and
+ * shows up as a plain non-zero status, not as `spawnSync().error`. The
+ * fallback must then succeed on its own merits or `exit` is called with the
+ * refusal, before any test could run.
+ *
+ * deps: { spawn, cwd, execPath, npmExecPath, resolveTurboBin, log, error, exit }
+ */
+export function enforceWorkspaceBuild(deps) {
+  const { spawn, cwd, execPath, npmExecPath, resolveTurboBin, log, error, exit } = deps;
+
+  let turboWhy = null;
+  let turboStatus = null;
+  try {
+    const turboBin = resolveTurboBin();
+    const turbo = spawn(execPath, [turboBin, 'run', 'build', '--filter=./packages/*', '--output-logs=errors-only'], {
+      stdio: 'inherit',
+      cwd,
+    });
+    if (turbo.status === 0 && !turbo.error) return { ok: true, via: 'turbo' };
+    turboStatus = turbo.status;
+    turboWhy = turbo.error ? `spawn failed: ${turbo.error.message}` : `exit status ${turbo.status}`;
+  } catch (e) {
+    turboWhy = `turbo could not be resolved: ${e.message}`;
+  }
+
+  log(
+    `[run-integration] TURBO BUILD FAILED OR COULD NOT RUN (${turboWhy}) — falling back to the pnpm path: pnpm ${PNPM_FALLBACK_ARGS.join(' ')}. ` +
+      'The gate is unchanged: every workspace package must still build (BMPL-133). If turbo is blocked on this machine (Application Control policy), that is an owner/machine matter — do not weaken it from here.',
+  );
+
+  // pnpm is not a workspace dependency, so it cannot be resolved the way turbo
+  // is. Under `pnpm run` (the documented invocation) npm_execpath names pnpm's
+  // own JS entry — spawn that through node: no shell, same as turbo. Invoked
+  // any other way, fall back to `pnpm` via the shell; every argument is a
+  // literal (see PNPM_FALLBACK_ARGS), so the shell adds no injection surface.
+  const viaNode = typeof npmExecPath === 'string' && /^pnpm(\.(c|m)?js)?$/.test(basename(npmExecPath));
+  const fallback = viaNode
+    ? spawn(execPath, [npmExecPath, ...PNPM_FALLBACK_ARGS], { stdio: 'inherit', cwd })
+    : spawn('pnpm', [...PNPM_FALLBACK_ARGS], { stdio: 'inherit', cwd, shell: true });
+  if (fallback.status === 0 && !fallback.error) return { ok: true, via: 'pnpm' };
+
+  error(BUILD_REFUSAL);
+  exit(fallback.status || turboStatus || 1);
+  return { ok: false };
+}
 
 /**
  * Decide which test database this run targets (guard 3 in the header).
@@ -126,49 +185,73 @@ async function ensureDatabaseExists(target) {
   }
 }
 
-const isolation = resolveIsolatedTestUrl();
-if (isolation) {
-  console.log(`[run-integration] local run isolated to database "${isolation.dbName}" — the shared bmpl_test truncates under whoever runs last (BMPL-115). BMPL_SHARED_TEST_DB=1 restores the old behaviour.`);
-}
-
-// Resolve vitest's real entry so the spawn needs no shell and user-supplied
-// filter arguments are passed as argv, never interpolated into a string.
-const vitestPkg = require('vitest/package.json');
-const vitestBin = join(dirname(require.resolve('vitest/package.json')), typeof vitestPkg.bin === 'string' ? vitestPkg.bin : vitestPkg.bin.vitest);
-const vitestArgv = [vitestBin, 'run', '--config', 'vitest.integration.config.ts', ...args];
-
-if (dryRun) {
-  console.log(`[run-integration] dry run. build step: ${skipBuild ? 'SKIPPED (' + (process.env.CI ? 'CI builds packages explicitly' : 'BMPL_SKIP_WORKSPACE_BUILD') + ')' : 'turbo run build --filter=./packages/*'}`);
-  console.log(`[run-integration] test database: ${isolation ? `"${isolation.dbName}" (isolated, created on first use)` : 'TEST_DATABASE_URL as configured (CI, custom, or BMPL_SHARED_TEST_DB)'}`);
-  console.log(`[run-integration] would exec: node ${vitestArgv.join(' ')}`);
-  process.exit(0);
-}
-
-if (isolation) {
-  await ensureDatabaseExists(isolation);
-}
-
-if (!skipBuild) {
-  // The floor's standing rebuild-after-base-move rule, made mechanical.
-  // turbo is resolved to its JS entry and run through node directly — no
-  // shell, no .bin shims — so the guard works even when node_modules/.bin
-  // is damaged and cannot be defeated by PATH surprises.
-  const turboBin = requireRoot.resolve('turbo/bin/turbo');
-  const build = spawnSync(process.execPath, [turboBin, 'run', 'build', '--filter=./packages/*', '--output-logs=errors-only'], {
-    stdio: 'inherit',
-    cwd: repoRoot,
-  });
-  if (build.status !== 0) {
-    console.error('[run-integration] refusing to run: workspace package build failed, and running the suite against stale dist proves nothing.');
-    process.exit(build.status ?? 1);
+async function main() {
+  let args = process.argv.slice(2);
+  if (args[0] === '--') {
+    console.log('[run-integration] note: stripped a leading "--" (npm habit) — vitest 2 would have discarded every argument after it and silently run the FULL suite.');
+    args = args.slice(1);
   }
+
+  const dryRun = process.env.BMPL_DRY_RUN === '1';
+  const skipBuild = process.env.CI || process.env.BMPL_SKIP_WORKSPACE_BUILD === '1';
+
+  const isolation = resolveIsolatedTestUrl();
+  if (isolation) {
+    console.log(`[run-integration] local run isolated to database "${isolation.dbName}" — the shared bmpl_test truncates under whoever runs last (BMPL-115). BMPL_SHARED_TEST_DB=1 restores the old behaviour.`);
+  }
+
+  // Resolve vitest's real entry so the spawn needs no shell and user-supplied
+  // filter arguments are passed as argv, never interpolated into a string.
+  const vitestPkg = require('vitest/package.json');
+  const vitestBin = join(dirname(require.resolve('vitest/package.json')), typeof vitestPkg.bin === 'string' ? vitestPkg.bin : vitestPkg.bin.vitest);
+  const vitestArgv = [vitestBin, 'run', '--config', 'vitest.integration.config.ts', ...args];
+
+  if (dryRun) {
+    console.log(`[run-integration] dry run. build step: ${skipBuild ? 'SKIPPED (' + (process.env.CI ? 'CI builds packages explicitly' : 'BMPL_SKIP_WORKSPACE_BUILD') + ')' : 'turbo run build --filter=./packages/* — primary; if turbo itself cannot run, falls back to `pnpm -r --filter=./packages/* run build` (BMPL-133); refuses if both fail'}`);
+    console.log(`[run-integration] test database: ${isolation ? `"${isolation.dbName}" (isolated, created on first use)` : 'TEST_DATABASE_URL as configured (CI, custom, or BMPL_SHARED_TEST_DB)'}`);
+    console.log(`[run-integration] would exec: node ${vitestArgv.join(' ')}`);
+    process.exit(0);
+  }
+
+  if (isolation) {
+    await ensureDatabaseExists(isolation);
+  }
+
+  if (!skipBuild) {
+    // The floor's standing rebuild-after-base-move rule, made mechanical.
+    // turbo is resolved to its JS entry and run through node directly — no
+    // shell, no .bin shims — so the guard works even when node_modules/.bin
+    // is damaged and cannot be defeated by PATH surprises. On failure of BOTH
+    // paths, enforceWorkspaceBuild prints the refusal and exits before any
+    // test can run.
+    enforceWorkspaceBuild({
+      spawn: spawnSync,
+      cwd: repoRoot,
+      execPath: process.execPath,
+      npmExecPath: process.env.npm_execpath,
+      resolveTurboBin: () => requireRoot.resolve('turbo/bin/turbo'),
+      log: console.log,
+      error: console.error,
+      exit: (code) => process.exit(code),
+    });
+  }
+
+  const res = spawnSync(process.execPath, vitestArgv, {
+    stdio: 'inherit',
+    cwd: apiDir,
+    // globalSetup loads the root .env with dotenv's no-override default, so a
+    // TEST_DATABASE_URL set here wins — the redirect needs no change there.
+    env: isolation ? { ...process.env, TEST_DATABASE_URL: isolation.url } : process.env,
+  });
+  process.exit(res.status ?? 1);
 }
 
-const res = spawnSync(process.execPath, vitestArgv, {
-  stdio: 'inherit',
-  cwd: apiDir,
-  // globalSetup loads the root .env with dotenv's no-override default, so a
-  // TEST_DATABASE_URL set here wins — the redirect needs no change there.
-  env: isolation ? { ...process.env, TEST_DATABASE_URL: isolation.url } : process.env,
-});
-process.exit(res.status ?? 1);
+// The unit spec imports this module for enforceWorkspaceBuild; only then must
+// main() stay quiet. The guard deliberately fails TOWARD running: a
+// path-comparison "is main module" check that misfired would turn the wrapper
+// into a silent exit-0 no-op — the precise false green it exists to prevent.
+// vitest sets VITEST in its own process; the wrapper is never otherwise run
+// under it (the suite it spawns is a child, whose env this does not affect).
+if (!process.env.VITEST) {
+  await main();
+}
