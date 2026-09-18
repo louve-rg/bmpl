@@ -22,7 +22,7 @@ export default function VendorOrdersPage() {
 
   return (
     <div>
-      <PageHeader title="Store orders" description="Orders placed with your storefront. Fulfilment controls arrive in a later update." />
+      <PageHeader title="Store orders" description="Orders placed with your storefront. Open an order to start preparing it and mark it ready when it's packed." />
 
       {loading && (
         <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
