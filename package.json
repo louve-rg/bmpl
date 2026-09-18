@@ -16,7 +16,7 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format:write": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "test": "turbo run test",
-    "test:unit": "pnpm --filter @bmpl/wallet --filter @bmpl/authorization --filter @bmpl/api test",
+    "test:unit": "pnpm --filter @bmpl/wallet --filter @bmpl/authorization --filter @bmpl/shared --filter @bmpl/validation --filter @bmpl/web --filter @bmpl/admin --filter @bmpl/api test",
     "test:integration": "pnpm --filter @bmpl/api test:integration",
     "clean": "turbo run clean",
     "deploy:status": "node scripts/deploy-status.mjs",
