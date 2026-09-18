@@ -8,6 +8,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import {
+  CopyObjectCommand,
   CreateBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
@@ -220,9 +221,35 @@ export class StorageService implements OnModuleInit {
     return (await this.presignDownload(key, 'public')).url;
   }
 
+  /**
+   * Server-side copy within one bucket (S3 CopyObject; works on MinIO and R2).
+   * Used to freeze an order line's image under an immutable `orders/...` key at
+   * checkout, so a later product-image replace/delete (which removes the SOURCE
+   * object) cannot leave order history pointing at nothing.
+   */
+  async copyObject(srcKey: string, dstKey: string, visibility: Visibility = 'private'): Promise<void> {
+    const client = this.requireClient();
+    const bucket = this.bucketFor(visibility);
+    await client.send(
+      new CopyObjectCommand({
+        Bucket: bucket,
+        // CopySource is "<bucket>/<key>", URI-encoded per the S3 API.
+        CopySource: `${bucket}/${encodeURIComponent(srcKey).replace(/%2F/g, '/')}`,
+        Key: dstKey,
+      }),
+    );
+  }
+
   /** Delete an object. Best-effort: never throws (callers delete DB rows regardless). */
   async deleteObject(key: string, visibility: Visibility = 'private'): Promise<void> {
     if (!this.enabled || !this.client) return;
+    // Order-history snapshots are immutable: nothing in the system deletes under
+    // orders/ — a product-image edit deletes its own vendors/... key, never the
+    // frozen copy an order line points at. Structural, not a convention.
+    if (key.startsWith('orders/')) {
+      this.logger.error(`Refusing to delete immutable order snapshot "${key}".`);
+      return;
+    }
     try {
       await this.client.send(
         new DeleteObjectCommand({ Bucket: this.bucketFor(visibility), Key: key }),
