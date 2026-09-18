@@ -320,10 +320,10 @@ Verification (see §11 for what to run when):
 
 ```bash
 pnpm turbo run typecheck                  # 19/19 expected
-pnpm test:unit                            # wallet + authorization + api
-pnpm turbo run test --filter=@bmpl/shared --filter=@bmpl/validation --filter=@bmpl/web
+pnpm test:unit                            # all seven test-bearing packages: wallet, authorization,
+                                          # shared, validation, web, admin, api (since PR #86)
 pnpm --filter @bmpl/api test:integration  # needs TEST_DATABASE_URL + pnpm infra:up
-                                          # 691 tests / 55 spec files, ~8 min
+                                          # 852 tests / 66 spec files, ~12 min
 pnpm --filter @bmpl/api build && pnpm --filter @bmpl/web build && pnpm --filter @bmpl/admin build
 ```
 
@@ -341,8 +341,8 @@ and each needs its own scoped change.
 
 ### Running the integration suite locally
 
-Docker is available on this machine and the suite runs here — **691 tests across
-55 spec files, ~8 minutes**, against real Postgres, Redis and MinIO.
+Docker is available on this machine and the suite runs here — **852 tests across
+66 spec files, ~12 minutes**, against real Postgres, Redis and MinIO.
 
 ```bash
 pnpm infra:up            # postgres 5432, redis 6379, minio 9000/9001

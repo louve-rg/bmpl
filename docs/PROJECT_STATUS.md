@@ -552,10 +552,11 @@ form no longer asks for a street, and the pay button is not blocked.
   refresh, and a second claim was refused `409 Your test credit has already
   been issued.` — a cumulative grant, not a balance topped back up.
   **This must be switched off before commercial launch** (see §4).
-- **The live `dispatchAutomatic` value is still unread.** It needs an admin
-  session: Admin → Dispatch, or `GET /api/admin/ops/settings`. It shipped off
-  by migration; whether it is on today is a live value, not something to infer.
-  It was deliberately not changed by this milestone.
+- **`dispatchAutomatic` is ON in production** (the owner switched it on
+  2026-09-13; confirmed by an admin read — Admin → Dispatch /
+  `GET /api/admin/ops/settings` — on 2026-09-15). It shipped off by migration
+  and off remains the code default; the live row stays the only truth — read
+  it again rather than trusting this note's date.
 - **Production email delivery works** (added 2026-09-07, BMPL-73). The API
   sends through Resend: the owner corrected the Railway email configuration,
   rotated the Resend API key, redeployed, and tested the resend-verification
