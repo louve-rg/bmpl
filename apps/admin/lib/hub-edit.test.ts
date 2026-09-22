@@ -4,8 +4,11 @@ import { hubEditFormValid, hubEditPatch, hubToForm, type EditableHub } from './h
 const hub: EditableHub = {
   id: 'hub_1',
   name: 'San Pedro Airstrip',
+  type: 'AIRSTRIP',
   addressLine1: 'Airstrip Rd',
   addressLine2: null,
+  latitude: 17.9139,
+  longitude: -87.9711,
   modes: ['AIR', 'LAND'],
   instructions: 'Counter 2, 8am-5pm',
   contactName: null,
@@ -13,10 +16,11 @@ const hub: EditableHub = {
 };
 
 describe('hubToForm', () => {
-  it('maps nulls to empty strings', () => {
+  it('maps nulls to empty strings and numbers to strings', () => {
     const f = hubToForm(hub);
     expect(f.addressLine2).toBe('');
     expect(f.contactName).toBe('');
+    expect(f.latitude).toBe('17.9139');
     expect(f.modes).toEqual(['AIR', 'LAND']);
   });
 
@@ -56,11 +60,21 @@ describe('hubEditPatch', () => {
     expect(hubEditPatch(hub, { ...hubToForm(hub), modes: ['AIR'] })).toEqual({ modes: ['AIR'] });
   });
 
+  it('moves the pin only as a complete pair, and treats emptied as unchanged', () => {
+    expect(hubEditPatch(hub, { ...hubToForm(hub), latitude: '', longitude: '' })).toEqual({});
+    expect(hubEditPatch(hub, { ...hubToForm(hub), latitude: '18.0', longitude: '' })).toEqual({});
+    expect(hubEditPatch(hub, { ...hubToForm(hub), latitude: '18.0' })).toEqual({ latitude: 18, longitude: -87.9711 });
+  });
+
+  it('carries a changed type', () => {
+    expect(hubEditPatch(hub, { ...hubToForm(hub), type: 'AIRPORT' })).toEqual({ type: 'AIRPORT' });
+  });
+
   it('never produces the network-placing or ruled-out fields', () => {
-    // God's BMPL-139 ruling: code, type, district, city and the pin are
-    // display-only; fee, active and simulation flags have their own controls
-    // or are decisions. A regression that starts sending any of them is a
-    // scope violation, not a feature.
+    // God's BMPL-139 hold: code, district and town are display-only (they
+    // drive planning and identity); fee, active and simulation flags have
+    // their own controls or are decisions. A regression that starts sending
+    // any of them is a scope violation, not a feature.
     const everything = {
       ...hubToForm(hub),
       name: 'Renamed',
@@ -69,7 +83,7 @@ describe('hubEditPatch', () => {
       modes: ['AIR'],
     };
     const patch = hubEditPatch(hub, everything);
-    for (const banned of ['code', 'type', 'district', 'city', 'latitude', 'longitude', 'courierFeeMinor', 'isActive', 'isTest']) {
+    for (const banned of ['code', 'district', 'city', 'courierFeeMinor', 'isActive', 'isTest']) {
       expect(banned in patch, banned).toBe(false);
     }
     expect(Object.keys(patch).sort()).toEqual(['addressLine1', 'contactPhone', 'modes', 'name']);
@@ -84,5 +98,11 @@ describe('hubEditFormValid', () => {
   it('requires a name and at least one mode', () => {
     expect(hubEditFormValid({ ...hubToForm(hub), name: ' ' })).toBe(false);
     expect(hubEditFormValid({ ...hubToForm(hub), modes: [] })).toBe(false);
+  });
+
+  it('requires the pin to be both coordinates or neither, and numeric', () => {
+    expect(hubEditFormValid({ ...hubToForm(hub), latitude: '', longitude: '' })).toBe(true);
+    expect(hubEditFormValid({ ...hubToForm(hub), longitude: '' })).toBe(false);
+    expect(hubEditFormValid({ ...hubToForm(hub), latitude: 'north-ish' })).toBe(false);
   });
 });

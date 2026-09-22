@@ -23,11 +23,8 @@ const MODES = ['LAND', 'AIR', 'SEA'] as const;
 
 interface Hub extends EditableHub {
   code: string;
-  type: string;
   district: string;
   city: string;
-  latitude: number | null;
-  longitude: number | null;
   courierFeeMinor: number;
   isActive: boolean;
   isTest?: boolean;
@@ -303,23 +300,34 @@ export default function HubsPage() {
               {editingId === h.id && edit && (
                 <div className="mt-4 border-t border-slate-100 pt-4">
                   <p className="text-xs text-slate-500">
-                    {/* The parts that place this terminal in the network are not
-                        editable: the planner attaches doors by town and prices by
-                        hub, so changing them re-routes and re-prices journeys —
-                        that is a network decision, not a correction. */}
-                    Fixed: <span className="font-mono">{h.code}</span> · {h.type.replace(/_/g, ' ').toLowerCase()} · {h.city}, {h.district.replace(/_/g, ' ')}
-                    {h.latitude != null && h.longitude != null && <> · pin {h.latitude}, {h.longitude}</>}
-                    {' '}— these place the terminal in the network and are not editable here.
+                    {/* Code, district and town drive planning and identity —
+                        the planner attaches doors by town — so changing them is
+                        a network decision, not a correction (BMPL-139 ruling). */}
+                    Fixed: <span className="font-mono">{h.code}</span> · {h.city}, {h.district.replace(/_/g, ' ')} — the code, town and
+                    district place this terminal in the network and are not editable here.
                   </p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <Field label="Name" htmlFor={`edit-name-${h.id}`}>
                       <Input id={`edit-name-${h.id}`} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+                    </Field>
+                    <Field label="Type" htmlFor={`edit-type-${h.id}`}>
+                      <Select id={`edit-type-${h.id}`} value={edit.type} onChange={(e) => setEdit({ ...edit, type: e.target.value })}>
+                        {HUB_TYPES.map((t) => (
+                          <option key={t} value={t}>{t.replace(/_/g, ' ').toLowerCase()}</option>
+                        ))}
+                      </Select>
                     </Field>
                     <Field label="Address" htmlFor={`edit-addr1-${h.id}`}>
                       <Input id={`edit-addr1-${h.id}`} value={edit.addressLine1} onChange={(e) => setEdit({ ...edit, addressLine1: e.target.value })} />
                     </Field>
                     <Field label="Address line 2" htmlFor={`edit-addr2-${h.id}`}>
                       <Input id={`edit-addr2-${h.id}`} value={edit.addressLine2} onChange={(e) => setEdit({ ...edit, addressLine2: e.target.value })} />
+                    </Field>
+                    <Field label="Latitude" htmlFor={`edit-lat-${h.id}`} hint="A saved pin can be moved, not removed. Leave both blank to keep it.">
+                      <Input id={`edit-lat-${h.id}`} value={edit.latitude} onChange={(e) => setEdit({ ...edit, latitude: e.target.value })} />
+                    </Field>
+                    <Field label="Longitude" htmlFor={`edit-lng-${h.id}`}>
+                      <Input id={`edit-lng-${h.id}`} value={edit.longitude} onChange={(e) => setEdit({ ...edit, longitude: e.target.value })} />
                     </Field>
                     <Field label="Contact name" htmlFor={`edit-cname-${h.id}`}>
                       <Input id={`edit-cname-${h.id}`} value={edit.contactName} onChange={(e) => setEdit({ ...edit, contactName: e.target.value })} />
