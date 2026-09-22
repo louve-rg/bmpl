@@ -11,6 +11,7 @@ import {
   type InterviewMode,
 } from '@bmpl/shared';
 import { type ApiError } from '../../../../../lib/api';
+import { CANDIDATE_VISIBLE_NOTE_LABEL } from '../../../../../lib/candidate-notes';
 import {
   jobsApi,
   fmtDate,
@@ -246,7 +247,7 @@ function StatusControls({ app, onChanged }: { app: EmployerApplicationDetail; on
               </Select>
             </Field>
           </div>
-          <Field label="Note to candidate (optional)">
+          <Field label={CANDIDATE_VISIBLE_NOTE_LABEL}>
             <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
           <Button type="submit" size="sm" disabled={busy}>
@@ -376,7 +377,10 @@ function ScheduleInterview({ id, onChanged }: { id: string; onChanged: () => voi
               <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="e.g. America/Belize" />
             </Field>
           </div>
-          <Field label="Notes (optional)">
+          {/* This note is serialized into the APPLICANT's view of the
+              interview — it is a message to them, and the label must say so.
+              Candid text belongs in the Private notes card. (BMPL-145) */}
+          <Field label={CANDIDATE_VISIBLE_NOTE_LABEL}>
             <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
           <div className="flex gap-2">
