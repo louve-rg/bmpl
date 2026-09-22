@@ -54,6 +54,17 @@ tags:
       Operating the network and the journeys over it. Permission-gated per
       route — logistics.read / logistics.manage / logistics.operate /
       logistics.verify (PIN reveal only) — and audited.
+  - name: ShippingProvider
+    description: >-
+      Carrier-organization self-service (BMPL-137). The profile is the ORG —
+      the operating organization behind an approved SHIPPING_PROVIDER role,
+      created by self-service upsert exactly as the passenger-provider profile
+      is. The legs surface takes two independent gates: the APPROVED
+      SHIPPING_PROVIDER role, and an ACTIVE membership in an ACTIVE
+      organization resolved fresh per request. A member sees exactly the
+      transport legs linked to their organizations; a cross-org id answers 404
+      exactly like a missing one. Handoff completion stays with the receiving
+      desk (phase 2 is its own card).
 security:
   - cookieAuth: []
 
@@ -672,6 +683,210 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/provider/profile:
+    get:
+      tags: [ShippingProvider]
+      summary: My carrier profile, or null before one is started (CUSTOMER role)
+      responses:
+        "200":
+          description: The profile or null
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [ShippingProvider]
+      summary: Create or replace my carrier profile (CUSTOMER role — how an application starts)
+      description: >-
+        The passenger-provider mirror. Creating the profile also births the
+        OWNER membership row. isTest is deliberately not accepted: admin-set
+        only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProviderProfileRequest" }
+      responses:
+        "200":
+          description: The saved profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [ShippingProvider]
+      summary: Partial update of my carrier profile
+      responses:
+        "200":
+          description: The saved profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/provider/legs:
+    get:
+      tags: [ShippingProvider]
+      summary: Every transport leg on my organizations, newest first
+      responses:
+        "200":
+          description: The carrier's legs (allowlisted; no customer details)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProviderLeg" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /shipping/provider/legs/{id}:
+    get:
+      tags: [ShippingProvider]
+      summary: One of my organizations' legs, same shape as the list
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "200":
+          description: The leg
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderLeg" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/provider/legs/{id}/depart:
+    post:
+      tags: [ShippingProvider]
+      summary: Confirm my organization's leg departed
+      description: >-
+        Same request body and state machine as the admin depart; org ownership
+        is asserted first and a foreign leg answers 404 exactly like a missing
+        one. Returns the carrier-safe leg, never the staff shipment payload.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                carrierName: { type: string, maxLength: 120 }
+                carrierBookingRef: { type: string, maxLength: 120 }
+                note: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: The updated leg
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderLeg" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/provider/legs/{id}/arrive:
+    post:
+      tags: [ShippingProvider]
+      summary: Confirm my organization's leg reached the far terminal
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "201":
+          description: The updated leg
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderLeg" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/providers:
+    get:
+      tags: [AdminLogistics]
+      summary: The carrier directory, with active-member counts (logistics.read)
+      responses:
+        "200":
+          description: Carrier organizations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProviderProfile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/logistics/providers/{id}/members:
+    post:
+      tags: [AdminLogistics]
+      summary: Add or reactivate a carrier-organization member (logistics.manage)
+      description: >-
+        One row per person per org — re-adding reactivates the existing row.
+        Audited as SHIPPING_PROVIDER_MEMBER_CHANGED.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: { type: string }
+                memberRole: { type: string, enum: [OWNER, STAFF] }
+      responses:
+        "201":
+          description: The membership row
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/providers/{id}/members/{userId}/end:
+    post:
+      tags: [AdminLogistics]
+      summary: End a STAFF membership (logistics.manage; the OWNER's ends with the org)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        "201":
+          description: The ended membership row
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/operator:
+    post:
+      tags: [AdminLogistics]
+      summary: Set or clear the carrier organization operating a transport leg (logistics.operate)
+      description: >-
+        LINE_HAUL legs only. The org must be active, its owner's
+        SHIPPING_PROVIDER role approved, and its simulation flag matching the
+        shipment's; a completed or cancelled leg refuses. `providerProfileId:
+        null` clears the operator. Audited as SHIPMENT_LEG_OPERATOR_ASSIGNED.
+        Routes may also carry a standing operator
+        (`operatedByProviderId` on the route), copied onto new legs at
+        booking; this endpoint overrides per leg.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [providerProfileId]
+              properties:
+                providerProfileId: { type: [string, "null"] }
+      responses:
+        "201":
+          description: The leg's operator link
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  legId: { type: string }
+                  operatedByProviderId: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /admin/logistics/legs/{id}/start:
     post:
       tags: [AdminLogistics]
@@ -1117,6 +1332,7 @@ components:
         mode: { $ref: "#/components/schemas/TransportMode" }
         carrierName: { type: string, maxLength: 120 }
         carrierPhone: { type: string }
+        operatedByProviderId: { type: [string, "null"], description: "Standing carrier ORGANIZATION for this route (BMPL-137); copied onto new legs at booking, null clears it" }
         scheduleNote: { type: string, maxLength: 200, description: "A label operations write — NOT a timetable; no schedule exists" }
         durationMinutes: { type: integer, minimum: 1, maximum: 10080 }
         priceMinor: { type: integer, minimum: 0, maximum: 100000000 }
@@ -1401,6 +1617,65 @@ components:
         driverProfileId: { type: string }
         vehicleId: { type: string }
         reason: { type: string, minLength: 1, maxLength: 500 }
+    ProviderProfileRequest:
+      type: object
+      required: [businessName, contactEmail]
+      properties:
+        businessName: { type: string, maxLength: 160 }
+        description: { type: string, maxLength: 2000 }
+        contactEmail: { type: string, maxLength: 320 }
+        contactPhone: { type: string }
+        district: { type: string }
+        city: { type: string, maxLength: 120 }
+        addressLine1: { type: string, maxLength: 200 }
+        operatingLicenceNumber: { type: string, maxLength: 60 }
+        operatingLicenceExpiry: { type: string, format: date-time }
+    ProviderProfile:
+      type: object
+      description: The carrier organization. `activeMembers` appears on the admin directory only.
+      properties:
+        id: { type: string }
+        businessName: { type: string }
+        description: { type: [string, "null"] }
+        contactEmail: { type: string }
+        contactPhone: { type: [string, "null"] }
+        district: { type: [string, "null"] }
+        city: { type: [string, "null"] }
+        addressLine1: { type: [string, "null"] }
+        operatingLicenceNumber: { type: [string, "null"] }
+        operatingLicenceExpiry: { type: [string, "null"], format: date-time }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+        activeMembers: { type: integer }
+    ProviderLeg:
+      type: object
+      description: >-
+        The carrier-safe projection of a transport leg. A hand-written
+        allowlist — sender and recipient names, phones, addresses, door
+        coordinates, every PIN and the customer's price never appear.
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        status: { type: string, enum: [PENDING, READY, IN_PROGRESS, COMPLETED, CANCELLED, EXCEPTION] }
+        mode: { type: string }
+        modeLabel: { type: string }
+        from:
+          type: [object, "null"]
+          properties: { name: { type: string }, city: { type: string } }
+        to:
+          type: [object, "null"]
+          properties: { name: { type: string }, city: { type: string } }
+        pieces: { type: integer }
+        description: { type: [string, "null"] }
+        scheduledDepartureAt: { type: [string, "null"], format: date-time }
+        scheduledArrivalAt: { type: [string, "null"], format: date-time }
+        departedAt: { type: [string, "null"], format: date-time }
+        arrivedAt: { type: [string, "null"], format: date-time }
+        carrierName: { type: [string, "null"] }
+        carrierBookingRef: { type: [string, "null"] }
+        isTest: { type: boolean }
+        canDepart: { type: boolean, description: "READY or IN_PROGRESS, not yet departed, and its turn has come" }
+        canArrive: { type: boolean, description: "IN_PROGRESS and not yet arrived" }
     LegAssignmentResult:
       type: object
       properties:

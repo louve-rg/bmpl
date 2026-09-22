@@ -11,6 +11,7 @@ import type {
 import { Prisma, type District } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { assertOperableProvider } from './provider-eligibility';
 
 /**
  * Minor units leave this service as numbers, matching the rest of the API. The
@@ -218,6 +219,12 @@ export class LogisticsNetworkService {
 
   async createRoute(input: CreateRouteInput, actorId: string) {
     await this.assertRouteIsPossible(input.originHubId, input.destinationHubId, input.mode);
+    // A standing carrier org must be real, active, approved, and on this
+    // route's side of the simulation boundary — the one shared rule
+    // (assertOperableProvider), not a local copy of it.
+    if (input.operatedByProviderId) {
+      await assertOperableProvider(this.prisma, input.operatedByProviderId, input.isTest ?? false);
+    }
     const route = await this.prisma.logisticsRoute.create({
       data: { ...input, priceMinor: BigInt(input.priceMinor), isActive: input.isActive ?? true },
     });
@@ -237,6 +244,9 @@ export class LogisticsNetworkService {
     const mode = input.mode ?? before.mode;
     if (originHubId === destinationHubId) throw new BadRequestException('A route has to go between two different hubs.');
     await this.assertRouteIsPossible(originHubId, destinationHubId, mode);
+    if (input.operatedByProviderId) {
+      await assertOperableProvider(this.prisma, input.operatedByProviderId, input.isTest ?? before.isTest);
+    }
 
     const route = await this.prisma.logisticsRoute.update({
       where: { id },

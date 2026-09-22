@@ -336,6 +336,23 @@ export class ShipmentService {
     const originHubId = plan.legs.find((l) => l.kind === 'LINE_HAUL')?.originHubId ?? null;
     const destinationHubId = [...plan.legs].reverse().find((l) => l.kind === 'LINE_HAUL')?.destinationHubId ?? null;
 
+    // The standing carrier organization of each planned route, copied onto the
+    // leg at booking (snapshot rule, like every other planner output): the leg
+    // is then operable by that carrier's own surface from the moment it exists,
+    // and a later route re-assignment never silently re-scopes an in-flight
+    // journey. Overridable per leg by admin (setLegOperator).
+    const plannedRouteIds = plan.legs.map((l) => l.routeId).filter((id): id is string => id != null);
+    const routeOperators = new Map<string, string | null>(
+      plannedRouteIds.length
+        ? (
+            await this.prisma.logisticsRoute.findMany({
+              where: { id: { in: plannedRouteIds } },
+              select: { id: true, operatedByProviderId: true },
+            })
+          ).map((r) => [r.id, r.operatedByProviderId])
+        : [],
+    );
+
     const shipment = await this.prisma.$transaction(async (tx) => {
       const created = await tx.shipment.create({
         data: {
@@ -380,7 +397,7 @@ export class ShipmentService {
           weightGrams: input.weightGrams ?? null,
           pieces: input.pieces,
           bookedAt: new Date(),
-          legs: { create: plan.legs.map((l) => this.legData(l, payNow)) },
+          legs: { create: plan.legs.map((l) => this.legData(l, payNow, routeOperators)) },
         },
         include: SHIPMENT_INCLUDE,
       });
@@ -449,7 +466,7 @@ export class ShipmentService {
    * Unless the shipment has not been paid for, in which case nothing is workable
    * — a driver must never be sent for a parcel nobody has committed money to.
    */
-  private legData(l: PlannedLeg, paid: boolean) {
+  private legData(l: PlannedLeg, paid: boolean, routeOperators?: Map<string, string | null>) {
     return {
       sequence: l.sequence,
       kind: l.kind,
@@ -458,6 +475,9 @@ export class ShipmentService {
       originHubId: l.originHubId,
       destinationHubId: l.destinationHubId,
       routeId: l.routeId,
+      // The route's standing carrier org, snapshotted (BMPL-137). Courier legs
+      // have no route and stay null — they are BML driver work.
+      operatedByProviderId: l.routeId ? (routeOperators?.get(l.routeId) ?? null) : null,
       durationMinutes: l.durationMinutes,
       priceMinor: BigInt(l.priceMinor),
       description: l.description,

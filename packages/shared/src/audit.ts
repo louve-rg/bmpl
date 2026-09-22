@@ -197,6 +197,11 @@ export const AUDIT_ACTIONS = [
   'SHIPMENT_LEG_IN_TRANSIT',
   'SHIPMENT_LEG_ARRIVING',
   'SHIPMENT_LEG_DRIVER_ASSIGNED',
+  // Carrier organizations (BMPL-137). One value per decision surface; the verb
+  // (set/clear, add/end) travels in previousValue/newValue — the
+  // PASSENGER_AFFILIATION_CHANGED precedent.
+  'SHIPMENT_LEG_OPERATOR_ASSIGNED',
+  'SHIPPING_PROVIDER_MEMBER_CHANGED',
   // ---- Wallet activation ----
   'WALLET_TOPUP_POSTED',
   // One action for the wallet lock/unlock fraud control — direction and

@@ -1,0 +1,24 @@
+-- Audit vocabulary for carrier organizations (BMPL-137), part 1 of 2.
+--
+-- Enum values in their OWN migration, applied before the migration that uses
+-- them: Postgres refuses to add an enum value and use it inside one
+-- transaction, and Prisma wraps each migration in one. This is the repo's
+-- established pattern (20261103093000_passenger_trip_created_audit,
+-- 20261104103000_shipment_leg_exception_resolved_audit) — follow it, do not
+-- fold enum DDL into a structural migration.
+--
+-- SHIPMENT_LEG_OPERATOR_ASSIGNED: an administrator set or cleared the carrier
+-- organization operating a transport leg — a privileged action that changes
+-- who moves a customer's parcel, so it lands in the trail. One value for both
+-- set and clear; direction travels in previousValue/newValue (the
+-- WALLET_ACCOUNT_STATUS_CHANGED precedent).
+--
+-- SHIPPING_PROVIDER_MEMBER_CHANGED: an administrator added or ended a
+-- carrier-organization membership — an access-granting action. One value for
+-- the whole lifecycle; the verb travels in newValue (the
+-- PASSENGER_AFFILIATION_CHANGED precedent of one code per decision surface).
+--
+-- Additive and idempotent; no table, no column, no backfill, and no existing
+-- enum value is touched.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_LEG_OPERATOR_ASSIGNED';
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPPING_PROVIDER_MEMBER_CHANGED';
