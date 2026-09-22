@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '../../../lib/api';
+import { loadErrorMessage } from '../../../lib/load-error';
 import { StatusBadge } from '../../../components/StatusBadge';
-import { Badge, EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
+import { Alert, Badge, EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface DriverRow {
@@ -41,9 +42,11 @@ export default function DriversPage() {
   const [roleStatus, setRoleStatus] = useState('');
   const [rows, setRows] = useState<DriverRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   async function load(d: string, a: string, r: string) {
     setLoading(true);
+    setErr(null);
     try {
       const params = new URLSearchParams();
       if (d) params.set('district', d);
@@ -51,6 +54,8 @@ export default function DriversPage() {
       if (r) params.set('roleStatus', r);
       const qs = params.toString();
       setRows(await api.get<DriverRow[]>(`/admin/drivers${qs ? `?${qs}` : ''}`));
+    } catch (e) {
+      setErr(loadErrorMessage(e, 'drivers'));
     } finally {
       setLoading(false);
     }
@@ -64,6 +69,8 @@ export default function DriversPage() {
   return (
     <div>
       <PageHeader breadcrumbs={adminCrumbs('Drivers')} eyebrow="Logistics" title="Drivers" />
+
+      {err && <Alert tone="warning" className="mb-4">{err}</Alert>}
 
       <div className="mb-5 grid gap-3 sm:grid-cols-3">
         <Field label="District">

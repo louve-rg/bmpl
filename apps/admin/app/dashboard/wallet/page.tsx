@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
+import { loadErrorMessage } from '../../../lib/load-error';
 import { StatusBadge } from '../../../components/StatusBadge';
-import { Card, EmptyState, PageHeader, Spinner } from '../../../components/ui';
+import { Alert, Card, EmptyState, PageHeader, Spinner } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 import { WalletOperations } from '../../../components/WalletOperations';
 
@@ -19,10 +20,12 @@ export default function AdminWalletPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [txns, setTxns] = useState<Txn[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(() => {
     return Promise.all([api.get<Account[]>('/admin/wallet/accounts'), api.get<Txn[]>('/admin/wallet/transactions')])
       .then(([a, t]) => { setAccounts(a); setTxns(t); })
+      .catch((e) => setErr(loadErrorMessage(e, 'wallet data')))
       .finally(() => setLoading(false));
   }, []);
 
@@ -44,6 +47,7 @@ export default function AdminWalletPage() {
           looked like it had done nothing. */}
       <WalletOperations onChanged={() => void load()} />
 
+      {err && <Alert tone="warning" className="mb-4">{err}</Alert>}
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Spinner className="h-4 w-4" /> Loading…

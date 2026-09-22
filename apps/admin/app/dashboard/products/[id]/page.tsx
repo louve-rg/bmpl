@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { serverGet } from '../../../../lib/server-api';
+import { AccessNotice } from '../../../../components/AccessNotice';
 import { StatusBadge } from '../../../../components/StatusBadge';
 import { Alert, Badge, Breadcrumbs, Card } from '../../../../components/ui';
 import { adminCrumbs } from '../../../../lib/admin-nav';
@@ -37,7 +38,12 @@ const money = (c: number | null) => (c == null ? '—' : `$${(c / 100).toFixed(2
 
 export default async function AdminProductDetail({ params }: { params: { id: string } }) {
   const res = await serverGet<ProductDetail>(`/admin/products/${params.id}`);
-  if (!res.ok) notFound();
+  // Refused and missing are different answers (BMPL-144): only a real 404
+  // is "not found" - a 403 says so in the server's words.
+  if (!res.ok) {
+    if (res.status === 404) notFound();
+    return <AccessNotice message={res.message} />;
+  }
   const p = res.data;
 
   return (

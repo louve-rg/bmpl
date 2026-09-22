@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '../../../lib/api';
+import { loadErrorMessage } from '../../../lib/load-error';
 import { StatusBadge } from '../../../components/StatusBadge';
-import { EmptyState, PageHeader, Spinner } from '../../../components/ui';
+import { Alert, EmptyState, PageHeader, Spinner } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface OrderRow {
@@ -26,17 +27,21 @@ const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 export default function AdminOrdersPage() {
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     api
       .get<OrderRow[]>('/admin/orders')
       .then(setRows)
+      .catch((e) => setErr(loadErrorMessage(e, 'orders')))
       .finally(() => setLoading(false));
   }, []);
 
   return (
     <div>
       <PageHeader breadcrumbs={adminCrumbs('Orders')} eyebrow="Fulfilment" title="Orders" description="Read-only view. Fulfilment and payment controls are later milestones." />
+
+      {err && <Alert tone="warning" className="mb-4">{err}</Alert>}
 
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-slate-500">

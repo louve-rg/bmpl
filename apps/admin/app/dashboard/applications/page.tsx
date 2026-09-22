@@ -3,6 +3,7 @@ import { ROLE_DEFINITIONS, type RoleCode } from '@bmpl/shared';
 import { serverGet } from '../../../lib/server-api';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { EmptyState, PageHeader } from '../../../components/ui';
+import { AccessNotice } from '../../../components/AccessNotice';
 import { adminCrumbs } from '../../../lib/admin-nav';
 
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,17 @@ export default async function ApplicationsQueue({
 }) {
   const query = searchParams.status ? `?status=${searchParams.status}` : '';
   const res = await serverGet<QueueItem[]>(`/admin/applications${query}`);
-  const items = res.ok ? res.data : [];
+  // Refused is not the same as empty: "no applications" to a refused admin
+  // is a lie of omission (BMPL-144).
+  if (!res.ok) {
+    return (
+      <div>
+        <PageHeader breadcrumbs={adminCrumbs('Role Applications')} eyebrow="Onboarding" title="Role Applications" />
+        <AccessNotice message={res.message} />
+      </div>
+    );
+  }
+  const items = res.data;
 
   const filters: Array<{ label: string; href: string; active: boolean }> = [
     { label: 'All open', href: '/dashboard/applications', active: !searchParams.status },
