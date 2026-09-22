@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
+import { vehiclesUsableWith, vehicleOptionLabel, type AssignableVehicle } from '../../../lib/assignable-vehicles';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
@@ -621,12 +622,15 @@ function DeparturesTab() {
 }
 
 /**
- * Staff a departure. There is no eligibility endpoint for passenger trips, so
- * the picker offers the whole driver directory and the SERVER is the
- * authority on every rule (own-fleet-only, approval, the test boundary, the
- * rider-cannot-drive check) — its refusals are shown verbatim. Vehicles are
- * limited to APPROVED and active ones, which is reading the same row fields
- * the server checks, not a second statement of the rule.
+ * Staff a departure. Vehicles come from the trip's own
+ * assignable-vehicles endpoint (#81), which answers approval, activity, the
+ * test boundary and WHOSE fleet in one payload — including provider-owned
+ * vehicles, which the old per-driver lookup could never see, so a fleet
+ * operator's departure was unstaffable from this console (BMPL-164). The
+ * driver picker still offers the directory and the SERVER stays the
+ * authority on every assignment rule — its refusals are shown verbatim; the
+ * only client-side arithmetic is applying the pairing the payload itself
+ * states (fleet = any eligible driver, owned = its named driver).
  */
 function AssignTripModal({
   trip,
@@ -642,47 +646,36 @@ function AssignTripModal({
   const [drivers, setDrivers] = useState<DriverRow[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [driverId, setDriverId] = useState('');
-  const [vehicles, setVehicles] = useState<Array<{ id: string; make: string; model: string; licencePlate: string; approvalStatus: string; isActive: boolean }> | null>(null);
+  const [assignable, setAssignable] = useState<AssignableVehicle[] | null>(null);
   const [vehicleId, setVehicleId] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .get<DriverRow[]>('/admin/passengers/drivers')
-      .then((list) => {
-        if (!cancelled) setDrivers(list);
+    Promise.all([
+      api.get<DriverRow[]>('/admin/passengers/drivers'),
+      api.get<AssignableVehicle[]>(`/admin/passengers/trips/${trip.id}/assignable-vehicles`),
+    ])
+      .then(([list, veh]) => {
+        if (cancelled) return;
+        setDrivers(list);
+        setAssignable(veh);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setLoadErr((e as ApiError).message ?? 'Could not load drivers.');
+        if (!cancelled) setLoadErr((e as ApiError).message ?? 'Could not load drivers and vehicles.');
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [trip.id]);
 
+  // A changed driver invalidates a picked vehicle only when the pairing says
+  // so — the list below re-derives from the same payload.
+  const usable = driverId && assignable ? vehiclesUsableWith(driverId, assignable) : [];
   useEffect(() => {
-    if (!driverId) {
-      setVehicles(null);
-      return;
-    }
-    let cancelled = false;
-    setVehicles(null);
-    setVehicleId('');
-    api
-      .get<{ vehicles: Array<{ id: string; make: string; model: string; licencePlate: string; approvalStatus: string; isActive: boolean }> }>(
-        `/admin/passengers/drivers/${driverId}`,
-      )
-      .then((d) => {
-        if (!cancelled) setVehicles(d.vehicles.filter((v) => v.approvalStatus === 'APPROVED' && v.isActive));
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setErr((e as ApiError).message ?? 'Could not load that driver.');
-      });
-    return () => {
-      cancelled = true;
-    };
+    if (vehicleId && !usable.some((v) => v.id === vehicleId)) setVehicleId('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driverId]);
 
   async function submit() {
@@ -746,17 +739,21 @@ function AssignTripModal({
             </Field>
 
             {driverId && (
-              <Field label="Vehicle" hint="Approved, active vehicles only.">
-                {vehicles === null ? (
+              <Field label="Vehicle" hint="The operator's fleet, plus this driver's own approved vehicles.">
+                {assignable === null ? (
                   <Loading />
-                ) : vehicles.length === 0 ? (
-                  <p className="text-sm text-slate-500">This driver has no approved active vehicle.</p>
+                ) : usable.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    {assignable.length === 0
+                      ? 'No approved, active vehicle is assignable to this departure.'
+                      : 'No vehicle is usable with this driver — the fleet list is empty and they own none.'}
+                  </p>
                 ) : (
                   <Select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
                     <option value="">Select a vehicle…</option>
-                    {vehicles.map((v) => (
+                    {usable.map((v) => (
                       <option key={v.id} value={v.id}>
-                        {v.make} {v.model} · {v.licencePlate}
+                        {vehicleOptionLabel(v)}
                       </option>
                     ))}
                   </Select>
