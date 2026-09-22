@@ -12,11 +12,13 @@ import {
 } from '@bmpl/shared';
 import { type ApiError } from '../../../../../lib/api';
 import { CANDIDATE_VISIBLE_NOTE_LABEL } from '../../../../../lib/candidate-notes';
+import { interviewActions } from '../../../../../lib/interview-actions';
 import {
   jobsApi,
   fmtDate,
   fmtDateTime,
   type EmployerApplicationDetail,
+  type Interview,
 } from '../../../../../lib/jobs';
 import {
   APPLICATION_STATUS_TONE,
@@ -95,8 +97,8 @@ export default function EmployerApplicantPage() {
       {app.interviews.length > 0 && (
         <Card className="space-y-3 p-5">
           <h2 className="text-base font-bold text-belize-navy">Interviews</h2>
-          {app.interviews.map((iv, i) => (
-            <div key={i} className="rounded-bmpl-md border border-slate-200 p-3">
+          {app.interviews.map((iv) => (
+            <div key={iv.id} className="rounded-bmpl-md border border-slate-200 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-belize-navy">{fmtDateTime(iv.scheduledAt)}</p>
                 <Badge tone={iv.status === 'CANCELLED' ? 'error' : 'info'}>{INTERVIEW_STATUS_LABELS[iv.status]}</Badge>
@@ -106,6 +108,7 @@ export default function EmployerApplicantPage() {
                 {iv.location ? ` · ${iv.location}` : ''}
               </p>
               {iv.notes && <p className="mt-1 text-sm text-slate-600">{iv.notes}</p>}
+              <InterviewControls interview={iv} onChanged={load} />
             </div>
           ))}
         </Card>
@@ -394,5 +397,91 @@ function ScheduleInterview({ id, onChanged }: { id: string; onChanged: () => voi
         </form>
       )}
     </Card>
+  );
+}
+
+/**
+ * The verbs an interview was missing (BMPL-150): the console could schedule
+ * one but never complete, cancel or move it — the CANCELLED badge existed
+ * with nothing able to set it. Complete/Cancel post the status directly;
+ * Reschedule opens an inline form and the SERVER derives the RESCHEDULED
+ * status from the new time (no client-side transition rules — finished
+ * interviews simply offer no controls, and refusals are shown verbatim).
+ * Every change notifies the applicant ("Interview updated"), so these are
+ * deliberate buttons, not quiet edits.
+ */
+function InterviewControls({ interview, onChanged }: { interview: Interview; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState('');
+  const [mode, setMode] = useState<InterviewMode>(interview.mode);
+  const [location, setLocation] = useState(interview.location ?? '');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const actions = interviewActions(interview.status);
+  if (actions.length === 0) return null;
+
+  async function run(patch: Parameters<typeof jobsApi.employer.updateInterview>[1], verb: string) {
+    setBusy(verb);
+    setError(null);
+    try {
+      await jobsApi.employer.updateInterview(interview.id, patch);
+      setOpen(false);
+      onChanged();
+    } catch (e) {
+      setError((e as ApiError).message ?? 'Could not update the interview.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      {error && <Alert tone="error">{error}</Alert>}
+      <div className="mt-1 flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void run({ status: 'COMPLETED' }, 'complete')}>
+          {busy === 'complete' ? 'Saving…' : 'Mark completed'}
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void run({ status: 'CANCELLED' }, 'cancel')}>
+          {busy === 'cancel' ? 'Saving…' : 'Cancel interview'}
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setOpen((v) => !v)}>
+          {open ? 'Keep current time' : 'Reschedule'}
+        </Button>
+      </div>
+      {open && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <Field label="New date & time">
+            <Input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
+          </Field>
+          <Field label="Mode">
+            <Select value={mode} onChange={(e) => setMode(e.target.value as InterviewMode)}>
+              {INTERVIEW_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {INTERVIEW_MODE_LABELS[m]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Location / link (optional)">
+            <Input value={location} onChange={(e) => setLocation(e.target.value)} />
+          </Field>
+          <div className="sm:col-span-3">
+            <Button
+              size="sm"
+              disabled={busy !== null || !scheduledAt}
+              onClick={() =>
+                void run(
+                  { scheduledAt: new Date(scheduledAt).toISOString(), mode, location: location.trim() || null },
+                  'reschedule',
+                )
+              }
+            >
+              {busy === 'reschedule' ? 'Saving…' : 'Confirm new time'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
