@@ -218,3 +218,94 @@ describe('résumé privacy + saved jobs + admin gating', () => {
     expect((await get(adminCookies, 'admin/jobs/analytics')).status).toBe(200);
   });
 });
+
+/**
+ * Interviews: the least-tested corner of the vertical (BMPL-141 follow-up).
+ *
+ * Two decided facts are PINNED here so nobody later "fixes" them server-side:
+ * the orchestrator ruled (2026-09-22) that interview notes and status-change
+ * notes ARE candidate-visible — the private channel is employerNotes, and only
+ * employerNotes. And the interview PATCH carries the one ownership check in
+ * the module that does not go through ownedApplication; until now nothing
+ * proved it refuses a foreign employer.
+ */
+describe('interviews: ownership, and which notes the candidate sees', () => {
+  /** Employer + published job + a submitted application from a fresh seeker. */
+  async function applied() {
+    const emp = await makeEmployer();
+    const { jobId, questionId } = await publishJob(emp);
+    const seeker = await makeSeekerWithResume();
+    const ok = await post(seeker.cookies, 'job-seeker/applications', {
+      jobId, resumeId: seeker.resumeId, answers: [{ questionId, text: 'Because I am great.' }],
+    });
+    expect(ok.status).toBe(201);
+    return { emp, seeker, appId: ok.body.id as string };
+  }
+
+  it('a foreign employer updating an interview reads exactly like a missing one', async () => {
+    const { emp, appId } = await applied();
+    const sched = await post(emp.cookies, `employer/applications/${appId}/interviews`, {
+      scheduledAt: new Date(Date.now() + 86400000).toISOString(), mode: 'VIDEO', location: 'https://meet.example/x',
+    });
+    expect(sched.status).toBe(201);
+    const interviewId = sched.body.interviews[0].id;
+
+    const rival = await makeEmployer();
+    const foreign = await patch(rival.cookies, `employer/interviews/${interviewId}`, { status: 'CANCELLED' });
+    const missing = await patch(rival.cookies, 'employer/interviews/nonexistent00000000000000', { status: 'CANCELLED' });
+    expect(foreign.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(foreign.body).toEqual(missing.body);
+    // And the probe changed nothing.
+    const row = await ctx.prisma.jobInterview.findUniqueOrThrow({ where: { id: interviewId } });
+    expect(row.status).not.toBe('CANCELLED');
+  });
+
+  it('the candidate sees interview notes and status notes — and never employerNotes', async () => {
+    const { emp, seeker, appId } = await applied();
+    // The three note channels, with distinguishable sentinels.
+    expect((await post(emp.cookies, `employer/applications/${appId}/status`, {
+      status: 'UNDER_REVIEW', note: 'STATUSNOTE-VISIBLE-SENTINEL',
+    })).status).toBe(201);
+    expect((await post(emp.cookies, `employer/applications/${appId}/interviews`, {
+      scheduledAt: new Date(Date.now() + 86400000).toISOString(), mode: 'IN_PERSON', location: 'Front desk',
+      notes: 'IVNOTE-VISIBLE-SENTINEL bring two forms of ID',
+    })).status).toBe(201);
+    expect((await post(emp.cookies, `employer/applications/${appId}/notes`, {
+      note: 'EMPLOYERNOTE-PRIVATE-SENTINEL weak references',
+    })).status).toBe(201);
+
+    const mine = await get(seeker.cookies, `job-seeker/applications/${appId}`);
+    expect(mine.status).toBe(200);
+    const raw = JSON.stringify(mine.body);
+    // Ruled candidate-visible: the interview note and the status-change note.
+    expect(raw).toContain('IVNOTE-VISIBLE-SENTINEL');
+    expect(raw).toContain('STATUSNOTE-VISIBLE-SENTINEL');
+    // The one private channel stays private — not under any key, anywhere.
+    expect(raw).not.toContain('EMPLOYERNOTE-PRIVATE-SENTINEL');
+
+    // The employer's own view still carries it.
+    const theirs = await get(emp.cookies, `employer/applications/${appId}`);
+    expect(JSON.stringify(theirs.body)).toContain('EMPLOYERNOTE-PRIVATE-SENTINEL');
+  });
+
+  it('the owner reschedules and cancels, and the candidate sees the outcome', async () => {
+    const { emp, seeker, appId } = await applied();
+    const sched = await post(emp.cookies, `employer/applications/${appId}/interviews`, {
+      scheduledAt: new Date(Date.now() + 86400000).toISOString(), mode: 'VIDEO', location: 'https://meet.example/x',
+    });
+    expect(sched.status).toBe(201);
+    const interviewId = sched.body.interviews[0].id;
+
+    // Reschedule: a new time flips the status without it being spelled out.
+    const newTime = new Date(Date.now() + 2 * 86400000).toISOString();
+    const moved = await patch(emp.cookies, `employer/interviews/${interviewId}`, { scheduledAt: newTime });
+    expect(moved.status).toBe(200);
+    expect(moved.body.interviews.find((iv: { id: string }) => iv.id === interviewId).status).toBe('RESCHEDULED');
+
+    // Cancel: an explicit status the candidate's view reflects.
+    expect((await patch(emp.cookies, `employer/interviews/${interviewId}`, { status: 'CANCELLED' })).status).toBe(200);
+    const mine = await get(seeker.cookies, `job-seeker/applications/${appId}`);
+    expect(mine.body.interviews.find((iv: { id: string }) => iv.id === interviewId).status).toBe('CANCELLED');
+  });
+});
