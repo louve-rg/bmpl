@@ -377,3 +377,69 @@ describe('agent assignment + admin gating', () => {
     expect((await get(admin, 'admin/properties/analytics')).status).toBe(200);
   });
 });
+
+/**
+ * The two dead statuses stay dead (BMPL-163).
+ *
+ * PropertyStatus permits APPROVED and UNDER_REVIEW, but no code path writes
+ * either: moderation reviews from SUBMITTED and its APPROVE lands directly on
+ * PUBLISHED. The danger is that guard lists already half-expect both values,
+ * which is exactly how a state sneaks in unreviewed. This suite walks EVERY
+ * status-writing action the API offers and then asserts, over the status
+ * column AND the append-only status history that every transition records,
+ * that neither value was ever produced. If a future writer makes one
+ * reachable, this fails — and that failure is the review trigger, on purpose.
+ */
+describe('dead listing statuses stay dead (BMPL-163)', () => {
+  it('walks every lifecycle action; APPROVED and UNDER_REVIEW never occur', async () => {
+    const owner = await makeOwner();
+
+    // The full review loop: submit, more-info, resubmit, approve — landing on
+    // PUBLISHED, never APPROVED — then under offer, then sold.
+    const sale = await post(owner.cookies, 'property-owner/listings', {
+      purpose: 'FOR_SALE', propertyType: 'HOUSE', title: `Deadstate Sale ${uniq()}`,
+      description: 'A wonderful family home with a garden and sea views, close to town.',
+      priceMinor: 25000000, district: 'BELIZE', locality: 'Belize City', exactAddress: '1 Pin Lane',
+    });
+    expect(sale.status).toBe(201);
+    const saleId = sale.body.id;
+    expect((await post(owner.cookies, `property-owner/listings/${saleId}/submit`)).body.status).toBe('SUBMITTED');
+    expect((await post(admin, `admin/properties/${saleId}/moderate`, { action: 'REQUEST_INFO', reason: 'Add photos of the garden.' })).body.status).toBe('MORE_INFO_REQUIRED');
+    expect((await post(owner.cookies, `property-owner/listings/${saleId}/submit`)).body.status).toBe('SUBMITTED');
+    const approved = await post(admin, `admin/properties/${saleId}/moderate`, { action: 'APPROVE' });
+    expect(approved.body.status).toBe('PUBLISHED'); // the key line: approval IS publication
+    expect((await post(owner.cookies, `property-owner/listings/${saleId}/status`, { action: 'UNDER_OFFER' })).body.status).toBe('UNDER_OFFER');
+    expect((await post(owner.cookies, `property-owner/listings/${saleId}/status`, { action: 'SOLD' })).body.status).toBe('SOLD');
+
+    // The rental outcome.
+    const rental = await publishListing(owner, { purpose: 'FOR_RENT', rentalPeriod: 'MONTH', title: `Deadstate Rental ${uniq()}` });
+    expect((await post(owner.cookies, `property-owner/listings/${rental.id}/status`, { action: 'RENTED' })).body.status).toBe('RENTED');
+
+    // Admin suspend / restore / unpublish, then owner archive.
+    const churn = await publishListing(owner, { title: `Deadstate Churn ${uniq()}` });
+    expect((await post(admin, `admin/properties/${churn.id}/moderate`, { action: 'SUSPEND', reason: 'Complaint received.' })).body.status).toBe('SUSPENDED');
+    expect((await post(admin, `admin/properties/${churn.id}/moderate`, { action: 'RESTORE' })).body.status).toBe('PUBLISHED');
+    expect((await post(admin, `admin/properties/${churn.id}/moderate`, { action: 'UNPUBLISH', reason: 'Owner request.' })).body.status).toBe('WITHDRAWN');
+    expect((await post(owner.cookies, `property-owner/listings/${churn.id}/status`, { action: 'ARCHIVE' })).body.status).toBe('ARCHIVED');
+
+    // Rejection, and the owner walking away from a live listing.
+    const rejected = await post(owner.cookies, 'property-owner/listings', {
+      purpose: 'FOR_SALE', propertyType: 'LAND', title: `Deadstate Reject ${uniq()}`,
+      description: 'A parcel of land with road access and utilities nearby, ready to build.',
+      priceMinor: 5000000, district: 'CAYO', locality: 'Belmopan', exactAddress: '2 Pin Lane',
+    });
+    expect((await post(owner.cookies, `property-owner/listings/${rejected.body.id}/submit`)).body.status).toBe('SUBMITTED');
+    expect((await post(admin, `admin/properties/${rejected.body.id}/moderate`, { action: 'REJECT', reason: 'Not a real property.' })).body.status).toBe('REJECTED');
+    const withdrawn = await publishListing(owner, { title: `Deadstate Withdraw ${uniq()}` });
+    expect((await post(owner.cookies, `property-owner/listings/${withdrawn.id}/status`, { action: 'WITHDRAW' })).body.status).toBe('WITHDRAWN');
+
+    // The pin, over everything this database has ever seen in this run: the
+    // status column, and the history rows every transition writes — no row,
+    // from any test in this file, ever held either dead value.
+    expect(await ctx.prisma.propertyListing.count({ where: { status: { in: ['APPROVED', 'UNDER_REVIEW'] } } })).toBe(0);
+    expect(await ctx.prisma.propertyStatusHistory.count({ where: { OR: [
+      { toStatus: { in: ['APPROVED', 'UNDER_REVIEW'] } },
+      { fromStatus: { in: ['APPROVED', 'UNDER_REVIEW'] } },
+    ] } })).toBe(0);
+  });
+});
