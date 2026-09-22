@@ -192,8 +192,14 @@ Node 22 or 24 LTS), pnpm 9.
   before/after, reason, IP/session) in the **same transaction** as the change.
 - **Wallet is a double-entry ledger.** Balances are always derived from ledger
   entries; there is no editable balance field as the source of truth. Real-money
-  movement is hard-disabled (`WALLET_MONEY_MOVEMENT_ENABLED = false`) until the
-  payment/regulatory design lands.
+  movement does not exist: no payment rail is integrated (`CREDIT_CARD` and
+  `BANK_TRANSFER` are enum values with zero service references), settlement is
+  internal escrow distribution only, and there is **no global money switch in
+  code** — the wallet package's `assertMoneyMovementEnabled` is a per-call
+  seatbelt each sanctioned internal operation passes explicitly. Enabling real
+  money is a code-and-product decision, not a configuration flip. The one real
+  money-adjacent flag is `ENABLE_SELF_SERVICE_TEST_FUNDING` (one-time UAT
+  simulation credit; off when absent).
 
 - **Rate limiting.** Redis-backed distributed throttling (works across API
   instances); strict per-IP limits on auth, upload, and signed-URL routes.
