@@ -7,6 +7,7 @@ import { Header } from '../../../components/landing/Header';
 import { Footer } from '../../../components/landing/Footer';
 import { ordersApi, money, type OrderView } from '../../../lib/orders';
 import { paymentExplanation } from '../../../lib/wallet';
+import { ORDER_PLACED_MESSAGE } from '../../../lib/order-placed';
 import { OrderStatusBadge, DeliveryBadge, DeliveryStatusBadge } from '../../../components/orders/OrderStatusBadge';
 import { paymentsApi, type PaymentDetail } from '../../../lib/payments';
 import { PaymentStatusBadge, HoldStatusBadge } from '../../../components/payments/PaymentStatusBadge';
@@ -63,8 +64,10 @@ export default function OrderDetailPage() {
         {state === 'ready' && order && (
           <>
             {placed && (
+              // Shown on BOTH payment paths, so it claims neither payment nor
+              // order state — the status badge owns that truth (BMPL-155).
               <Alert tone="success" title="Order placed 🎉" className="mt-4">
-                Your order is <strong>pending</strong>. Inventory has been reserved. Payment will be added in a later update.
+                {ORDER_PLACED_MESSAGE}
               </Alert>
             )}
 
