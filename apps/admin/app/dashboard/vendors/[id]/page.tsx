@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { serverGet } from '../../../../lib/server-api';
+import { AccessNotice } from '../../../../components/AccessNotice';
 import { StatusBadge } from '../../../../components/StatusBadge';
 import { Alert, Breadcrumbs } from '../../../../components/ui';
 import { adminCrumbs } from '../../../../lib/admin-nav';
@@ -32,7 +33,12 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default async function VendorDetailPage({ params }: { params: { id: string } }) {
   const res = await serverGet<VendorDetail>(`/admin/vendors/${params.id}`);
-  if (!res.ok) notFound();
+  // Refused and missing are different answers (BMPL-144): only a real 404
+  // is "not found" - a 403 says so in the server's words.
+  if (!res.ok) {
+    if (res.status === 404) notFound();
+    return <AccessNotice message={res.message} />;
+  }
   const v = res.data;
 
   return (

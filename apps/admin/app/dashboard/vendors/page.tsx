@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '../../../lib/api';
+import { loadErrorMessage } from '../../../lib/load-error';
 import { StatusBadge } from '../../../components/StatusBadge';
-import { PageHeader, Spinner } from '../../../components/ui';
+import { Alert, PageHeader, Spinner } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface VendorRow {
@@ -24,11 +25,15 @@ export default function VendorsPage() {
   const [status, setStatus] = useState('PENDING');
   const [rows, setRows] = useState<VendorRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   async function load(s: string) {
     setLoading(true);
+    setErr(null);
     try {
       setRows(await api.get<VendorRow[]>(`/admin/vendors${s ? `?status=${s}` : ''}`));
+    } catch (e) {
+      setErr(loadErrorMessage(e, 'vendors'));
     } finally {
       setLoading(false);
     }
@@ -40,6 +45,8 @@ export default function VendorsPage() {
   return (
     <div>
       <PageHeader breadcrumbs={adminCrumbs('Vendors')} eyebrow="Marketplace" title="Vendors" />
+
+      {err && <Alert tone="warning" className="mb-4">{err}</Alert>}
       <div className="mb-5 flex flex-wrap gap-2">
         {STATUSES.map((s) => (
           <button

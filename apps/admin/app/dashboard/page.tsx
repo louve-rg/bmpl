@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { serverGet } from '../../lib/server-api';
 import { Card, PageHeader } from '../../components/ui';
+import { AccessNotice } from '../../components/AccessNotice';
 import { adminCrumbs } from '../../lib/admin-nav';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,19 @@ interface Summary {
 
 export default async function AdminDashboard() {
   const res = await serverGet<Summary>('/admin/summary');
-  const s = res.ok ? res.data : null;
+
+  // A refused admin must never read "Total users 0" as a fact — a zeroed
+  // card is a wrong answer stated confidently, worse than no answer
+  // (BMPL-144). Say why instead.
+  if (!res.ok) {
+    return (
+      <div>
+        <PageHeader breadcrumbs={adminCrumbs('Overview')} eyebrow="Admin" title="Overview" description="A quick snapshot of platform activity that needs attention." />
+        <AccessNotice message={res.message} />
+      </div>
+    );
+  }
+  const s = res.data;
 
   const cards = [
     { label: 'Total users', value: s?.totalUsers ?? 0, href: '/dashboard/users' },

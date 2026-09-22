@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { RoleCode } from '@bmpl/shared';
 import { api } from '../../../lib/api';
+import { loadErrorMessage } from '../../../lib/load-error';
 import { StatusBadge } from '../../../components/StatusBadge';
-import { Badge, Button, Input, PageHeader, Spinner } from '../../../components/ui';
+import { Alert, Badge, Button, Input, PageHeader, Spinner } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface UserRow {
@@ -27,14 +28,18 @@ export default function UsersPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   async function search(q: string, statusFilter?: string | null) {
     setLoading(true);
+    setErr(null);
     try {
       const params = new URLSearchParams();
       if (q) params.set('query', q);
       if (statusFilter) params.set('status', statusFilter);
       setResult(await api.get<SearchResult>(`/admin/users?${params.toString()}`));
+    } catch (e) {
+      setErr(loadErrorMessage(e, 'users'));
     } finally {
       setLoading(false);
     }
@@ -88,6 +93,7 @@ export default function UsersPage() {
         <Button type="submit">Search</Button>
       </form>
 
+      {err && <Alert tone="warning" className="mb-4">{err}</Alert>}
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Spinner className="h-4 w-4" /> Searching…

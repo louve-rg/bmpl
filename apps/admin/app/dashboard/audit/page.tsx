@@ -1,5 +1,6 @@
 import { serverGet } from '../../../lib/server-api';
 import { EmptyState, PageHeader } from '../../../components/ui';
+import { AccessNotice } from '../../../components/AccessNotice';
 import { adminCrumbs } from '../../../lib/admin-nav';
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +27,17 @@ export default async function AuditPage({
 }) {
   const q = searchParams.targetUserId ? `?targetUserId=${searchParams.targetUserId}` : '';
   const res = await serverGet<AuditResult>(`/admin/audit${q}`);
-  const items = res.ok ? res.data.items : [];
+  // Refused is not the same as empty (BMPL-144) — and for the AUDIT log in
+  // particular, "no entries yet" to a refused reader would be exactly wrong.
+  if (!res.ok) {
+    return (
+      <div>
+        <PageHeader breadcrumbs={adminCrumbs('Audit Log')} eyebrow="Governance" title="Audit Log" />
+        <AccessNotice message={res.message} />
+      </div>
+    );
+  }
+  const items = res.data.items;
 
   return (
     <div>

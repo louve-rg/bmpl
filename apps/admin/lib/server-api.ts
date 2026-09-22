@@ -16,12 +16,24 @@ const API_URL = apiBase(process.env.ADMIN_PUBLIC_API_URL);
  */
 export async function serverGet<T>(
   path: string,
-): Promise<{ ok: true; data: T } | { ok: false; status: number }> {
+): Promise<{ ok: true; data: T } | { ok: false; status: number; message?: string }> {
   const res = await fetch(`${API_URL}/api${path}`, {
     headers: { cookie: cookies().toString() },
     cache: 'no-store',
   });
-  if (res.status === 401 || res.status === 403) return { ok: false, status: res.status };
+  // 401/403/404 are answers, not failures: pages tell refused from missing
+  // (BMPL-144) instead of a 403 masquerading as "not found" or a 404
+  // crashing the page. The server's own sentence rides along so the screen
+  // can say why in the API's words, the same way the client pages do.
+  if (res.status === 401 || res.status === 403 || res.status === 404) {
+    let message: string | undefined;
+    try {
+      message = ((await res.json()) as { message?: string }).message;
+    } catch {
+      /* body absent or not JSON — the status alone still tells the story */
+    }
+    return { ok: false, status: res.status, message };
+  }
   if (!res.ok) throw new Error(`Admin API ${path} failed: ${res.status}`);
   return { ok: true, data: (await res.json()) as T };
 }
