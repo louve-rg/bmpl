@@ -573,6 +573,17 @@ export const checkoutSchema = z.object({
 });
 export type CheckoutInput = z.infer<typeof checkoutSchema>;
 
+/**
+ * Customer cancels their own order — whole order, only while every
+ * vendor-order is still PENDING (the vendor has not begun preparing). The
+ * reason is optional and shown to the vendor; the window and everything the
+ * cancellation touches are enforced in the service.
+ */
+export const cancelOrderSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+export type CancelOrderInput = z.infer<typeof cancelOrderSchema>;
+
 // ---- Delivery & Shipping Foundation (Phase 4 · M13) -------------------------
 
 /** Vendor delivery zone: a named set of districts with a flat delivery fee. */

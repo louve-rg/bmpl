@@ -604,6 +604,38 @@ paths:
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
       security: [{ cookieAuth: [] }]
       responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } } }, "401": { $ref: "#/components/responses/Unauthorized" }, "404": { $ref: "#/components/responses/NotFound" } }
+  /orders/{id}/cancel:
+    post:
+      tags: [Orders]
+      summary: Cancel my own order — whole order, only while every vendor-order is still PENDING
+      description: >-
+        Owner-approved scope. The window shuts the moment a vendor begins
+        preparing (enforced as a conditional in-transaction write, so a
+        concurrent "start preparing" wins or loses atomically). Money moves
+        only through the EXISTING release path: a never-authorized payment
+        releases its soft hold (no money ever moved); a wallet-paid order
+        returns funds via the balanced escrow→customer ESCROW_RELEASE with the
+        payment ending CANCELLED. Within the window a payment can never be
+        SETTLING or SETTLED — capture starts at pickup confirmation, which is
+        outside the window — so post-settlement money is unreachable by
+        construction. Idempotent: cancelling an already-cancelled order
+        returns it unchanged. A foreign order id answers 404 exactly like a
+        missing one.
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500, description: Optional; shown to the vendor }
+      responses:
+        "201": { description: The cancelled order, customer view, content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: The store has already started preparing this order }
   /vendor/orders:
     get:
       tags: [Orders]

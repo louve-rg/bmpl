@@ -455,7 +455,18 @@ export class OrdersService {
    * cancellation: the order row is left intact (status unchanged).
    */
   async releaseReservations(orderId: string, actorId?: string | null) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => this.releaseReservationsInTx(tx, orderId, actorId ?? null));
+  }
+
+  /**
+   * The release itself, callable inside a caller's transaction so customer
+   * cancellation can compose it atomically with the status writes. Behaviour
+   * is byte-identical to what the public method always did: stock back,
+   * wallet holds released — including the balanced escrow→customer return for
+   * an AUTHORIZED payment — payment CANCELLED, all audited.
+   */
+  private async releaseReservationsInTx(tx: Prisma.TransactionClient, orderId: string, actorId: string | null) {
+    {
       const order = await tx.order.findUnique({
         where: { id: orderId },
         include: { vendorOrders: { include: { items: true } } },
@@ -485,8 +496,119 @@ export class OrdersService {
         },
         tx,
       );
-      return { orderId, orderNumber: order.orderNumber, released: true, alreadyReleased: false, itemsReleased, holdsReleased: payment.holdsReleased };
+      return { orderId, orderNumber: order.orderNumber, released: true, alreadyReleased: false, itemsReleased, holdsReleased: payment.holdsReleased, escrowReturnedMinor: payment.escrowReturnedMinor };
+    }
+  }
+
+  /**
+   * Customer cancels their OWN order (owner-approved scope): the WHOLE order,
+   * and only while EVERY vendor-order is still PENDING — the moment a vendor
+   * begins preparing, the window is shut.
+   *
+   * Money: nothing new. A never-authorized payment releases its soft hold (no
+   * money ever moved); a wallet-paid order returns its funds through the
+   * EXISTING releaseForOrder path — the balanced escrow→customer
+   * ESCROW_RELEASE, payment → CANCELLED — the same mechanism shipment
+   * cancellation uses. Within this window a payment can never be SETTLING or
+   * SETTLED, because capture starts at pickup confirmation and pickup requires
+   * READY_FOR_PICKUP, which is outside the window: post-settlement money is
+   * unreachable by construction, not by guard.
+   *
+   * The window check is the standing race pattern: a conditional lock-taking
+   * write, guarded AFTER — a vendor pressing "start preparing" concurrently
+   * wins or loses atomically, never both.
+   */
+  async cancelOwn(actor: { userId: string }, orderId: string, dto: { reason?: string }) {
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { vendorOrders: { select: { id: true, status: true, vendorProfileId: true } } },
+      });
+      // 404 on a foreign id: a customer must not be able to probe whether
+      // somebody else's order exists.
+      if (!order || order.userId !== actor.userId) throw new NotFoundException('Order not found.');
+      if (order.status === 'CANCELLED') return { already: true as const, vendorProfileIds: [], orderNumber: order.orderNumber };
+
+      // The window, as a conditional write: flip exactly the PENDING
+      // vendor-orders, then compare counts. Any vendor-order the flip did NOT
+      // catch has left PENDING — the vendor has begun — and the whole
+      // transaction rolls back, leaving their work untouched.
+      const flipped = await tx.vendorOrder.updateMany({
+        where: { orderId, status: 'PENDING' },
+        data: { status: 'CANCELLED' },
+      });
+      if (flipped.count !== order.vendorOrders.length) {
+        throw new ConflictException('The store has already started preparing this order, so it can no longer be cancelled.');
+      }
+
+      await tx.order.update({ where: { id: orderId }, data: { status: 'CANCELLED' } });
+
+      // Take any attached deliveries out of the dispatch engine's reach.
+      // Inside the window none can be past PENDING_ASSIGNMENT (dispatch waits
+      // for the vendor's Ready), so the wider filter is the same defensive
+      // guard the payment-failure unwind carries: a future caller must not be
+      // able to erase a delivery already in progress through this path.
+      await tx.orderDelivery.updateMany({
+        where: {
+          vendorOrder: { orderId },
+          status: { in: ['PENDING_ASSIGNMENT', 'ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_DECLINED'] },
+        },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancellationReason: 'Order cancelled by the customer',
+          readyForDispatchAt: null,
+          offerExpiresAt: null,
+          assignedDriverProfileId: null,
+          assignedVehicleId: null,
+        },
+      });
+
+      // Stock back, holds released, escrow returned if authorized, payment
+      // CANCELLED — the existing release, composed atomically.
+      const released = await this.releaseReservationsInTx(tx, orderId, actor.userId);
+
+      await this.audit.record(
+        {
+          action: 'ORDER_CANCELLED',
+          actorId: actor.userId,
+          newValue: {
+            orderId,
+            orderNumber: order.orderNumber,
+            reason: dto.reason ?? null,
+            holdsReleased: released.holdsReleased,
+            escrowReturnedMinor: Number(released.escrowReturnedMinor ?? 0),
+          },
+        },
+        tx,
+      );
+      return {
+        already: false as const,
+        vendorProfileIds: order.vendorOrders.map((vo) => vo.vendorProfileId),
+        orderNumber: order.orderNumber,
+      };
     });
+
+    // Notifications outside the transaction: the cancellation is complete
+    // whether or not anybody could be told about it.
+    if (!outcome.already && outcome.vendorProfileIds.length > 0) {
+      const vendors = await this.prisma.vendorProfile.findMany({
+        where: { id: { in: outcome.vendorProfileIds } },
+        select: { userId: true },
+      });
+      for (const v of vendors) {
+        await this.notifications.createInApp({
+          userId: v.userId,
+          type: 'MARKETPLACE',
+          category: 'ORDER',
+          event: 'ORDER_PLACED',
+          title: 'Order cancelled',
+          body: `Order ${outcome.orderNumber} was cancelled by the customer${dto.reason ? `: ${dto.reason}` : '.'}`,
+          data: { orderId },
+        });
+      }
+    }
+    return this.getOwn(actor.userId, orderId);
   }
 
   /**

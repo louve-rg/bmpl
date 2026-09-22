@@ -176,6 +176,7 @@ enum AuditAction {
   // ---- Marketplace: Orders (Phase 3 · M10) ----
   ORDER_CREATED
   ORDER_RESERVATION_RELEASED
+  ORDER_CANCELLED
   // ---- Marketplace: Payments (Phase 3 · M11) ----
   PAYMENT_CREATED
   PAYMENT_STATE_CHANGED
