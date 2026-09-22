@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../lib/api';
+import { canEnterConsole, NO_ADMIN_ACCESS_MESSAGE, type MeForAccess } from '../../lib/admin-access';
 import { Alert, Button, Field, Input } from '../../components/ui';
 import { Logo } from '../../components/Logo';
 
@@ -21,15 +22,23 @@ export default function AdminLogin() {
         email: form.get('email'),
         password: form.get('password'),
       });
-      // Confirm this account actually has admin capability before entering.
-      await api.get('/admin/summary');
+      // The door gates on IDENTITY, not on a data read (BMPL-143): the old
+      // probe of /admin/summary required users.read, which locked every
+      // scoped admin (e.g. logistics-only) out of the console entirely. An
+      // APPROVED ADMIN role plus at least one admin permission enters; each
+      // screen keeps refusing individually, as it already does.
+      const me = await api.get<MeForAccess>('/me');
+      if (!canEnterConsole(me)) {
+        setError(NO_ADMIN_ACCESS_MESSAGE);
+        return;
+      }
       router.push('/dashboard');
       router.refresh();
     } catch (err) {
       const apiErr = err as ApiError;
       setError(
         apiErr.status === 403
-          ? 'This account does not have administrator access.'
+          ? NO_ADMIN_ACCESS_MESSAGE
           : apiErr.message ?? 'Unable to sign in.',
       );
     } finally {
