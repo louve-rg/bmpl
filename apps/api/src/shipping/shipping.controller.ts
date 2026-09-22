@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
   assignShipmentLegSchema,
@@ -12,7 +12,11 @@ import {
   legExceptionSchema,
   legHandoffSchema,
   reassignShipmentLegSchema,
+  addProviderMemberSchema,
   resolveLegExceptionSchema,
+  setLegOperatorSchema,
+  shippingProviderProfileSchema,
+  shippingProviderProfileUpdateSchema,
   shipmentListSchema,
   shipmentQuoteSchema,
   updateCourierLaneSchema,
@@ -29,7 +33,11 @@ import {
   type LegExceptionInput,
   type LegHandoffInput,
   type ReassignShipmentLegInput,
+  type AddProviderMemberInput,
   type ResolveLegExceptionInput,
+  type SetLegOperatorInput,
+  type ShippingProviderProfileInput,
+  type ShippingProviderProfileUpdateInput,
   type ShipmentListInput,
   type ShipmentQuoteInput,
   type UpdateCourierLaneInput,
@@ -41,6 +49,7 @@ import { CurrentUser, Public, RequirePermission, Roles } from '../common/decorat
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
 import { LogisticsNetworkService } from './logistics-network.service';
+import { ShippingProviderService } from './shipping-provider.service';
 import { ShipmentDispatchService } from './shipment-dispatch.service';
 import { ShipmentService } from './shipment.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -165,7 +174,46 @@ export class AdminLogisticsController {
     private readonly shipments: ShipmentService,
     private readonly network: LogisticsNetworkService,
     private readonly legDispatch: ShipmentDispatchService,
+    private readonly providers: ShippingProviderService,
   ) {}
+
+  /* ---- carrier organizations (BMPL-137) ---- */
+
+  /** The carrier directory: pick an operator for a route or leg, see its staff count. */
+  @RequirePermission('logistics.read')
+  @Get('providers')
+  listProviders() {
+    return this.providers.listProviders();
+  }
+
+  /**
+   * Add (or reactivate) a member of a carrier organization. logistics.manage —
+   * granting a person the ability to act for a carrier is network
+   * configuration, the same job as deciding which carrier runs a route.
+   */
+  @RequirePermission('logistics.manage')
+  @Post('providers/:id/members')
+  addMember(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(addProviderMemberSchema)) dto: AddProviderMemberInput) {
+    return this.providers.addMember(u.userId, id, dto);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Post('providers/:id/members/:userId/end')
+  endMember(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('userId') userId: string) {
+    return this.providers.endMember(u.userId, id, userId);
+  }
+
+  /**
+   * Set (or clear, with null) the carrier organization operating a transport
+   * leg. logistics.operate, same as working the leg by hand: choosing who runs
+   * a leg and running it are the same operator's job. The service validates
+   * the org (active, approved, simulation flag matching the shipment's).
+   */
+  @RequirePermission('logistics.operate')
+  @Post('legs/:id/operator')
+  setOperator(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(setLegOperatorSchema)) dto: SetLegOperatorInput) {
+    return this.providers.setLegOperator(id, dto, u.userId);
+  }
 
   /* ---- the network, as data ---- */
 
@@ -371,5 +419,78 @@ export class AdminLogisticsController {
   private label(req: Request): string | undefined {
     const header = req.get('x-operator-label');
     return header ? header.slice(0, 120) : undefined;
+  }
+}
+
+/**
+ * Carrier profile self-service (BMPL-137) — the passenger-provider mirror.
+ *
+ * @Roles('CUSTOMER') exactly as passenger/provider's profile surface: the
+ * profile is how an applying account STARTS being a carrier, so it cannot sit
+ * behind the role the application has not granted yet. Everything operational
+ * lives on the SHIPPING_PROVIDER-gated controller below instead.
+ */
+@Roles('CUSTOMER')
+@Controller('shipping/provider')
+export class ShippingProviderProfileController {
+  constructor(private readonly providers: ShippingProviderService) {}
+
+  @Get('profile')
+  profile(@CurrentUser() u: AuthContext) {
+    return this.providers.getProfile(u.userId);
+  }
+
+  @Put('profile')
+  upsert(@CurrentUser() u: AuthContext, @Body(ZodBody(shippingProviderProfileSchema)) dto: ShippingProviderProfileInput) {
+    return this.providers.upsertProfile(u.userId, dto);
+  }
+
+  @Patch('profile')
+  update(@CurrentUser() u: AuthContext, @Body(ZodBody(shippingProviderProfileUpdateSchema)) dto: ShippingProviderProfileUpdateInput) {
+    return this.providers.updateProfile(u.userId, dto);
+  }
+}
+
+/**
+ * Carrier-operator self-service (BMPL-137).
+ *
+ * A transport leg is flown, sailed or driven by a carrier BML does not
+ * employ. This is that carrier's own surface: two independent gates, both
+ * deliberate — the APPROVED SHIPPING_PROVIDER role here, and an ACTIVE
+ * membership in an ACTIVE organization resolved per request in the service.
+ * A member sees exactly the legs linked to their organizations and confirms
+ * what physically happened — departed, arrived. Every write funnels into the
+ * SAME leg state machine the admin console uses; a cross-org id answers 404
+ * exactly like a missing one.
+ *
+ * Handoff completion is deliberately NOT here: completing a leg means proving
+ * the handoff with the code the RECEIVING side holds, and that stays with the
+ * receiving desk (phase 2 is its own card). Generic across air, water taxi
+ * and bus by construction — nothing in it knows a mode.
+ */
+@Roles('SHIPPING_PROVIDER')
+@Controller('shipping/provider')
+export class ShippingProviderLegsController {
+  constructor(private readonly providers: ShippingProviderService) {}
+
+  /** Every transport leg on my organizations, newest first. */
+  @Get('legs')
+  myLegs(@CurrentUser() u: AuthContext) {
+    return this.providers.myLegs(u.userId);
+  }
+
+  @Get('legs/:id')
+  leg(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.providers.myLeg(u.userId, id);
+  }
+
+  @Post('legs/:id/depart')
+  depart(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legDepartSchema)) dto: LegDepartInput) {
+    return this.providers.depart(u.userId, id, dto);
+  }
+
+  @Post('legs/:id/arrive')
+  arrive(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.providers.arrive(u.userId, id);
   }
 }
