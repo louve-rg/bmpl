@@ -4817,8 +4817,11 @@ enum PassengerAffiliationParty {
 /// profile, never by a person, so staff can change without history rewriting.
 model ShippingProviderProfile {
   id                     String    @id @default(cuid())
-  /// A simulation carrier. Admin-set only; everything it operates is test-side,
-  /// and the boundary is checked at leg assignment against the SHIPMENT's flag.
+  /// A simulation carrier. Never request input: DERIVED from the creating
+  /// account at profile birth (so the OWNER membership matches the org from
+  /// its first moment — BMPL-161), admin-flipped thereafter. Everything it
+  /// operates is test-side; the boundary is checked at leg assignment against
+  /// the SHIPMENT's flag and at every membership creation against the PERSON's.
   isTest                 Boolean   @default(false)
   userId                 String    @unique
   user                   User      @relation("UserShippingProviderProfile", fields: [userId], references: [id], onDelete: Cascade)

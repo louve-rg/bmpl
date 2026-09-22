@@ -199,6 +199,43 @@ describe('the organization', () => {
     expect(ownerEnd.body.message).toContain('owner');
   });
 
+  it('the simulation boundary governs the PERSON too: derived at birth, refused symmetrically at membership (BMPL-161)', async () => {
+    // A test account's profile is born a TEST org — derived, never requested.
+    const tUser = await registerUser(`xtown_${uniq()}@example.com`);
+    await ctx.prisma.user.update({ where: { id: tUser.userId }, data: { isTest: true } });
+    await approveProviderRole(tUser.userId);
+    const born = await put(tUser.cookies, 'shipping/provider/profile', {
+      businessName: 'Simulation Ferries', contactEmail: 'sim@example.com',
+    });
+    expect(born.status).toBe(200);
+    expect(born.body.isTest).toBe(true);
+    const testOrgId = born.body.id as string;
+
+    // Symmetric refusals, both directions.
+    const realOrg = await makeCarrier('Reef Runner Ltd');
+    const intoReal = await post(admin, `admin/logistics/providers/${realOrg.profileId}/members`, { userId: tUser.userId });
+    expect(intoReal.status).toBe(400);
+    expect(intoReal.body.message).toContain('test account');
+    const realUser = await registerUser(`xreal_${uniq()}@example.com`);
+    const intoTest = await post(admin, `admin/logistics/providers/${testOrgId}/members`, { userId: realUser.userId });
+    expect(intoTest.status).toBe(400);
+    expect(intoTest.body.message).toContain('real account');
+
+    // Matching sides still join freely.
+    const tStaff = await registerUser(`xtstaff_${uniq()}@example.com`);
+    await ctx.prisma.user.update({ where: { id: tStaff.userId }, data: { isTest: true } });
+    expect((await post(admin, `admin/logistics/providers/${testOrgId}/members`, { userId: tStaff.userId })).status).toBe(201);
+
+    // Reactivation is the same creation moment: a member whose flag moved
+    // across the boundary while ENDED cannot slip back in.
+    const staff = await makeStaff(realOrg.profileId);
+    expect((await post(admin, `admin/logistics/providers/${realOrg.profileId}/members/${staff.userId}/end`)).status).toBe(201);
+    await ctx.prisma.user.update({ where: { id: staff.userId }, data: { isTest: true } });
+    const reAdd = await post(admin, `admin/logistics/providers/${realOrg.profileId}/members`, { userId: staff.userId });
+    expect(reAdd.status).toBe(400);
+    expect(reAdd.body.message).toContain('test account');
+  });
+
   it('the OWNER cannot be demoted by re-adding — the side door to ending them stays shut (BMPL-151)', async () => {
     const carrier = await makeCarrier('Reef Runner Ltd');
     // The hole: re-add the owner as STAFF, then end the now-STAFF row.
