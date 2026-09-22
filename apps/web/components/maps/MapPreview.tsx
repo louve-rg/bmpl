@@ -17,6 +17,13 @@ import 'leaflet/dist/leaflet.css';
 export function MapPreview({ points, className = '' }: { points: MapPoint[]; className?: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  // The effect is keyed on the points' CONTENT, not the array identity: a
+  // caller that computes `points` inline re-creates the array every render,
+  // and rebuilding the map each time would flicker it away under the reader.
+  // But a caller whose points genuinely change (or resolve late, after
+  // mount) must get a rebuilt map, not a silently blank one.
+  const pointsKey = points.map((p) => `${p.latitude},${p.longitude},${p.label}`).join('|');
+
   useEffect(() => {
     if (points.length === 0) return;
     let cancelled = false;
@@ -75,9 +82,10 @@ export function MapPreview({ points, className = '' }: { points: MapPoint[]; cla
       map?.remove();
       map = null;
     };
-    // Points come from one fetch of one job; a changed job remounts the page.
+    // `points` is read inside but represented by pointsKey — same content,
+    // stable identity (see above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [pointsKey]);
 
   if (points.length === 0) return null;
   return <div ref={containerRef} className={`h-64 w-full overflow-hidden rounded-bmpl-lg border border-slate-200 ${className}`} />;
