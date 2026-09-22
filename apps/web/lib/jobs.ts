@@ -255,6 +255,9 @@ export interface ApplicationTimelineEntry {
   at: string;
 }
 export interface Interview {
+  /** Sent by the API since day one (applications.service serialize); needed
+   *  by the employer's per-interview controls (BMPL-150). */
+  id: string;
   scheduledAt: string;
   timezone: string | null;
   mode: InterviewMode;
@@ -611,7 +614,9 @@ export const jobsApi = {
       api.post(`/employer/applications/${id}/notes`, { note }),
     scheduleInterview: (id: string, body: CreateInterviewInput) =>
       api.post(`/employer/applications/${id}/interviews`, body),
-    updateInterview: (interviewId: string, body: Partial<CreateInterviewInput> & { status?: InterviewStatus }) =>
+    // location is nullable to match the server schema (optText): null CLEARS
+    // a saved location, undefined leaves it untouched.
+    updateInterview: (interviewId: string, body: Partial<Omit<CreateInterviewInput, 'location'>> & { status?: InterviewStatus; location?: string | null }) =>
       api.patch(`/employer/interviews/${interviewId}`, body),
     openConversation: (id: string) =>
       api.post<Conversation>(`/employer/applications/${id}/conversation`),
