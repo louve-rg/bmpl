@@ -68,10 +68,12 @@ matrix. Reset Redis between rapid reruns if the rate-limit spec flakes
 - Money = integer minor units. New audit codes go in the emitting milestone (Prisma
   enum + `@bmpl/shared` `AUDIT_ACTIONS` mirror together).
 - Uploads reuse `StorageService` (presign → PUT → `headObject` verify → persist key).
-- **Money movement is gated.** The global `WALLET_MONEY_MOVEMENT_ENABLED` stays off;
-  the wallet package's `assertMoneyMovementEnabled(true)` is passed **only** by
-  `WalletService.postTransaction` for the sanctioned **customer↔escrow** operations
-  (M12). Every posted transaction MUST be balanced (`assertBalanced` — debits ==
+- **Money movement is gated in code, not by configuration.** (Correction: the
+  "global `WALLET_MONEY_MOVEMENT_ENABLED`" this document once described was
+  never built — no such variable exists in code.) The gate is the wallet
+  package's `assertMoneyMovementEnabled(enabled)`, a per-call boolean passed
+  `true` **only** by `WalletService.postTransaction`'s sanctioned internal
+  **customer↔escrow** operations (M12). Every posted transaction MUST be balanced (`assertBalanced` — debits ==
   credits, net 0) and carry a **unique `reference`** (ledger-level idempotency).
   Balances are DERIVED from ledger entries; `cachedBalanceMinor` is a maintained
   cache. M11 holds/ledger-refs are metadata (no `WalletLedgerEntry`). Payment state

@@ -279,7 +279,12 @@ wrong:
 
 - **No real-money passenger payments.** No fare is charged, no commission is
   taken, no cancellation fee is collected. §1 and §4 apply to passengers exactly
-  as they do to parcels, and `WALLET_MONEY_MOVEMENT_ENABLED` is untouched.
+  as they do to parcels. Note there is **no global money switch to guard**:
+  `WALLET_MONEY_MOVEMENT_ENABLED` exists in older documents only, not in code.
+  The wallet package's `assertMoneyMovementEnabled` gate is a per-call boolean
+  each sanctioned internal escrow/settlement operation passes explicitly —
+  enabling real money is a code-and-product decision (§4), never a
+  configuration flip.
 - **No invented fare formulas, rates or commercial policy.** Pricing policy is
   unresolved and belongs to the product owner. A plausible fare in this system
   becomes a real charge to a real person — see §12.

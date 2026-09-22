@@ -13,9 +13,11 @@ Related: [wallet/authorize API](../phase-2/API-INVENTORY.md#wallet-authorization
 - **Reuse the wallet package.** Balancing (`assertBalanced`) and the money gate
   (`assertMoneyMovementEnabled`) live in `@bmpl/wallet`. `WalletService`
   (`apps/api/src/wallet`) is the only place that persists transactions.
-- **Gate stays off globally; on per-call for escrow.** `WALLET_MONEY_MOVEMENT_ENABLED`
-  remains `false`; `postTransaction` is invoked with `enabled=true` **only** for the
-  customer↔escrow authorization/release. Nothing else can move money.
+- **Gate is per-call, for escrow only.** (Correction: the global
+  `WALLET_MONEY_MOVEMENT_ENABLED` named in earlier drafts was never built as
+  configuration — no such variable exists in code.) `postTransaction` is invoked
+  with `enabled=true` **only** for the customer↔escrow authorization/release.
+  Nothing else can move money, and no real-money rail exists behind the ledger.
 - **Convert the M11 hold, don't replace it.** The soft `WalletHold` (`HELD`) becomes
   `AUTHORIZED`, linked to the escrow `WalletTransaction`; the M11 `LedgerReference`
   flips `PENDING→POSTED`.
