@@ -184,6 +184,12 @@ export default function HubsPage() {
       {err && <Alert tone="warning" className="mb-4">{err}</Alert>}
       {note && <Alert tone="success" className="mb-4">{note}</Alert>}
 
+      {/* Every control below writes through logistics.manage-guarded routes,
+          so for logistics.read the whole screen reads as a report: no create
+          form, no rate input, no toggle — hidden like the Edit button, not
+          disabled (BMPL-142, settled ruling). The server stays the authority;
+          this only stops drawing buttons that could never work. */}
+      {canManage && (
       <Card className="p-4">
         <h2 className="text-sm font-semibold text-slate-900">Add a terminal</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -245,6 +251,7 @@ export default function HubsPage() {
           {saving ? 'Adding…' : 'Add terminal'}
         </Button>
       </Card>
+      )}
 
       {loading ? (
         <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
@@ -277,7 +284,7 @@ export default function HubsPage() {
                     </p>
                   )}
                 </div>
-                {editingId !== h.id && (
+                {canManage && editingId !== h.id && (
                   <div className="flex shrink-0 flex-wrap items-end gap-2">
                     <Field label="Courier rate (BZ$)">
                       <Input
@@ -287,13 +294,18 @@ export default function HubsPage() {
                         className="w-28"
                       />
                     </Field>
-                    {canManage && (
-                      <Button variant="outline" onClick={() => startEdit(h)}>Edit</Button>
-                    )}
+                    <Button variant="outline" onClick={() => startEdit(h)}>Edit</Button>
                     <Button variant="outline" onClick={() => void toggle(h)}>
                       {h.isActive ? 'Deactivate' : 'Activate'}
                     </Button>
                   </div>
+                )}
+                {/* The fee is a fact the report still states; only the
+                    control is withheld. */}
+                {!canManage && (
+                  <p className="shrink-0 text-sm text-slate-600">
+                    Courier rate <span className="font-semibold text-belize-navy">BZ${(h.courierFeeMinor / 100).toFixed(2)}</span>
+                  </p>
                 )}
               </div>
 
