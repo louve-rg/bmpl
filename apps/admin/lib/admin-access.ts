@@ -1,3 +1,5 @@
+import { ROLE_DEFINITIONS } from '@bmpl/shared';
+
 /**
  * Who may enter the admin console — BMPL-143.
  *
@@ -24,9 +26,17 @@ export interface MeForAccess {
   adminPermissions?: string[] | null;
 }
 
+/** Staff means any role the DOMAIN calls an admin role (isAdminRole in
+ *  @bmpl/shared ROLE_DEFINITIONS: SUPPORT_AGENT, ADMIN, SUPER_ADMIN today) —
+ *  stated once there, consumed here. Checking the literal 'ADMIN' code
+ *  locked the seeded SUPER_ADMIN out of its own console; the live walk
+ *  caught it. */
+const isAdminRoleCode = (code: string): boolean =>
+  (ROLE_DEFINITIONS as Record<string, { isAdminRole?: boolean } | undefined>)[code]?.isAdminRole === true;
+
 export function canEnterConsole(me: MeForAccess | null | undefined): boolean {
   if (!me) return false;
-  const hasAdminRole = (me.roles ?? []).some((r) => r.roleCode === 'ADMIN' && r.status === 'APPROVED');
+  const hasAdminRole = (me.roles ?? []).some((r) => isAdminRoleCode(r.roleCode) && r.status === 'APPROVED');
   const hasAnyGrant = (me.adminPermissions ?? []).length > 0;
   return hasAdminRole && hasAnyGrant;
 }
