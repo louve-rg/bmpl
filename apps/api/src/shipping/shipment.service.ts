@@ -37,6 +37,7 @@ import { LogisticsNetworkService } from './logistics-network.service';
 import { PaymentsService } from '../payments/payments.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { ShipmentDispatchService } from './shipment-dispatch.service';
+import { assertOperableProvider } from './provider-eligibility';
 
 /** Minor units go out as numbers; see the note in logistics-network.service.ts. */
 const money = (v: bigint) => Number(v);
@@ -341,16 +342,33 @@ export class ShipmentService {
     // is then operable by that carrier's own surface from the moment it exists,
     // and a later route re-assignment never silently re-scopes an in-flight
     // journey. Overridable per leg by admin (setLegOperator).
+    //
+    // Eligibility is RE-CHECKED at the copy (BMPL-152): snapshot semantics are
+    // right for a leg that already exists, and wrong for one created after
+    // the org went inactive or lost its approval — such a leg would land where
+    // nobody can act on it and only stall until a human noticed. An ineligible
+    // org's route books with the leg UNASSIGNED, which surfaces it in the
+    // existing manual-assignment path rather than inventing a new one. The
+    // booking itself never fails over a lapsed carrier.
     const plannedRouteIds = plan.legs.map((l) => l.routeId).filter((id): id is string => id != null);
+    const routeRows = plannedRouteIds.length
+      ? await this.prisma.logisticsRoute.findMany({
+          where: { id: { in: plannedRouteIds } },
+          select: { id: true, operatedByProviderId: true },
+        })
+      : [];
+    const eligibleOperators = new Set<string>();
+    for (const pid of new Set(routeRows.map((r) => r.operatedByProviderId).filter((id): id is string => id != null))) {
+      try {
+        await assertOperableProvider(this.prisma, pid, simulated);
+        eligibleOperators.add(pid);
+      } catch {
+        // Leave every leg of this org's routes unassigned — the one shared
+        // rule decides, and the refusal reasons stay its own.
+      }
+    }
     const routeOperators = new Map<string, string | null>(
-      plannedRouteIds.length
-        ? (
-            await this.prisma.logisticsRoute.findMany({
-              where: { id: { in: plannedRouteIds } },
-              select: { id: true, operatedByProviderId: true },
-            })
-          ).map((r) => [r.id, r.operatedByProviderId])
-        : [],
+      routeRows.map((r) => [r.id, r.operatedByProviderId && eligibleOperators.has(r.operatedByProviderId) ? r.operatedByProviderId : null]),
     );
 
     const shipment = await this.prisma.$transaction(async (tx) => {
