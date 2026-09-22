@@ -90,6 +90,9 @@ const routeBase = z.object({
   mode: z.enum(TRANSPORT_MODES),
   carrierName: z.string().trim().max(120).optional(),
   carrierPhone: phoneSchema.optional(),
+  // The standing carrier ORGANIZATION for this route (BMPL-137): copied onto
+  // each new leg at booking. Null clears it. Validated in the service.
+  operatedByProviderId: cuidSchema.nullable().optional(),
   scheduleNote: z.string().trim().max(200).optional(),
   durationMinutes: z.coerce.number().int().min(1).max(60 * 24 * 7),
   priceMinor: z.coerce.number().int().min(0).max(100_000_000),
@@ -335,6 +338,49 @@ export const collectShipmentSchema = z.object({
   collectedByName: z.string().trim().min(2, 'Who collected it?').max(120),
 });
 export type CollectShipmentInput = z.infer<typeof collectShipmentSchema>;
+
+/* ------------------------------------------- carrier organizations (137) */
+
+/**
+ * The operating profile behind an approved SHIPPING_PROVIDER role. Mirrors
+ * passengerProviderProfileSchema field for field — the same idea gets the same
+ * shape. isTest deliberately absent: admin-set only.
+ */
+export const shippingProviderProfileSchema = z.object({
+  businessName: z.string().trim().min(1, 'Business name is required.').max(160),
+  description: z.string().trim().max(2000).optional(),
+  contactEmail: z.string().trim().email('A valid contact email is required.').max(320),
+  contactPhone: phoneSchema.optional(),
+  district: districtSchema.optional(),
+  city: z.string().trim().max(120).optional(),
+  addressLine1: z.string().trim().max(200).optional(),
+  operatingLicenceNumber: z.string().trim().max(60).optional(),
+  operatingLicenceExpiry: z.coerce.date().optional(),
+});
+export type ShippingProviderProfileInput = z.infer<typeof shippingProviderProfileSchema>;
+
+export const shippingProviderProfileUpdateSchema = shippingProviderProfileSchema
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update.' });
+export type ShippingProviderProfileUpdateInput = z.infer<typeof shippingProviderProfileUpdateSchema>;
+
+/**
+ * Admin sets (or clears, with null) the carrier ORGANIZATION operating a
+ * transport leg. The org must be active, its owner's SHIPPING_PROVIDER role
+ * approved, and its simulation flag matching the shipment's — all enforced in
+ * the service, where the facts live.
+ */
+export const setLegOperatorSchema = z.object({
+  providerProfileId: cuidSchema.nullable(),
+});
+export type SetLegOperatorInput = z.infer<typeof setLegOperatorSchema>;
+
+/** Admin adds (or reactivates) a member of a carrier organization. */
+export const addProviderMemberSchema = z.object({
+  userId: cuidSchema,
+  memberRole: z.enum(['OWNER', 'STAFF']).optional(),
+});
+export type AddProviderMemberInput = z.infer<typeof addProviderMemberSchema>;
 
 /**
  * Admin assigns a driver (+ one of their approved vehicles) to a courier leg by

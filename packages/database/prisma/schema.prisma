@@ -331,6 +331,8 @@ enum AuditAction {
   SHIPMENT_LEG_IN_TRANSIT
   SHIPMENT_LEG_ARRIVING
   SHIPMENT_LEG_DRIVER_ASSIGNED
+  SHIPMENT_LEG_OPERATOR_ASSIGNED
+  SHIPPING_PROVIDER_MEMBER_CHANGED
   WALLET_TOPUP_POSTED
   WALLET_ACCOUNT_STATUS_CHANGED
   WALLET_TEST_FUNDING_GRANTED
@@ -559,6 +561,9 @@ model User {
   passengerProviderProfile   PassengerProviderProfile? @relation("UserPassengerProviderProfile")
   passengerBookings          PassengerBooking[]        @relation("PassengerBookingRider")
   passengerAssignmentsMade   PassengerTripAssignment[] @relation("PassengerAssignmentAssignedBy")
+  // Shipping carrier organizations (BMPL-137)
+  shippingProviderProfile    ShippingProviderProfile?  @relation("UserShippingProviderProfile")
+  shippingProviderMemberships ShippingProviderMember[] @relation("ShippingProviderMemberships")
 
   @@index([status])
   @@index([district])
@@ -4332,6 +4337,12 @@ model LogisticsRoute {
   /// Who operates it. BMPL does not fly the planes.
   carrierName      String?
   carrierPhone     String?
+  /// The standing carrier ORGANIZATION for this route (BMPL-137). Copied onto
+  /// each new leg at booking so operations assign a carrier once per route,
+  /// not once per shipment; the leg keeps its own copy (snapshot rule) and
+  /// stays overridable per leg.
+  operatedByProviderId String?
+  operatedByProvider   ShippingProviderProfile? @relation("RouteOperatorOrg", fields: [operatedByProviderId], references: [id], onDelete: SetNull)
   /// Scheduling is a label, not a calendar — operations write "Mon/Wed/Fri 09:00"
   /// and the planner only reports it. Real timetables are a later problem.
   scheduleNote     String?
@@ -4560,6 +4571,15 @@ model ShipmentLeg {
 
   /// A line-haul leg is operated by someone BMPL does not employ, so there is no
   /// driver to track — an operator confirms departure and arrival by hand.
+  ///
+  /// `operatedByProviderId` links the leg to the carrier ORGANIZATION
+  /// (BMPL-137): what the provider surface scopes on, so a carrier's staff see
+  /// and progress exactly their org's legs without any staff permission.
+  /// Admin-set, LINE_HAUL only, validated against the shipment's isTest.
+  /// `carrierName` stays the display label; the link is the authorization
+  /// anchor.
+  operatedByProviderId String?
+  operatedByProvider   ShippingProviderProfile? @relation("LegOperatorOrg", fields: [operatedByProviderId], references: [id], onDelete: SetNull)
   carrierName          String?
   carrierBookingRef    String?
   scheduledDepartureAt DateTime?
@@ -4607,6 +4627,8 @@ model ShipmentLeg {
   @@index([offerExpiresAt])
   // Finding courier work to dispatch: legs whose turn has come and nobody holds.
   @@index([status, kind, courierStatus])
+  // The carrier organization's own work list.
+  @@index([operatedByProviderId, status])
   @@map("shipment_legs")
   driverEarning DriverEarning?
 }
@@ -4786,6 +4808,77 @@ enum PassengerAffiliationParty {
 /// A person approved (via the existing role machinery) to carry passengers.
 /// Mirrors DriverProfile's SHAPE without touching DriverProfile itself - the
 /// two kinds of driving are different jobs held by possibly the same human.
+// ---- Carrier organizations (BMPL-137) --------------------------------------
+
+/// The operating organization behind an approved SHIPPING_PROVIDER role —
+/// exactly as VendorProfile stands behind VENDOR and PassengerProviderProfile
+/// behind PASSENGER_PROVIDER, and created the same way: self-service upsert by
+/// the applying account. THE ORG IS THIS ROW: transport legs are operated by a
+/// profile, never by a person, so staff can change without history rewriting.
+model ShippingProviderProfile {
+  id                     String    @id @default(cuid())
+  /// A simulation carrier. Admin-set only; everything it operates is test-side,
+  /// and the boundary is checked at leg assignment against the SHIPMENT's flag.
+  isTest                 Boolean   @default(false)
+  userId                 String    @unique
+  user                   User      @relation("UserShippingProviderProfile", fields: [userId], references: [id], onDelete: Cascade)
+  businessName           String
+  description            String?
+  contactEmail           String
+  contactPhone           String?
+  district               District?
+  city                   String?
+  addressLine1           String?
+  /// Names and dates only — what the licence permits is an admin judgement,
+  /// not a schema rule (the PassengerProviderProfile precedent).
+  operatingLicenceNumber String?
+  operatingLicenceExpiry DateTime?
+  isActive               Boolean   @default(true)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  members        ShippingProviderMember[]
+  operatedLegs   ShipmentLeg[]            @relation("LegOperatorOrg")
+  operatedRoutes LogisticsRoute[]         @relation("RouteOperatorOrg")
+
+  @@index([isActive, isTest])
+  @@map("shipping_provider_profiles")
+}
+
+enum ShippingProviderMemberRole {
+  OWNER
+  STAFF
+}
+
+enum ShippingProviderMemberStatus {
+  ACTIVE
+  ENDED
+}
+
+/// Who may act for a carrier. The OWNER row is created with the profile; STAFF
+/// rows are admin-managed (phase 1). Provider-surface scoping always matches on
+/// user id + an ACTIVE membership — never on the active role — so ending the
+/// row ends the person's access on their next request, while the organization
+/// keeps its legs and its history.
+model ShippingProviderMember {
+  id                String                       @id @default(cuid())
+  providerProfileId String
+  providerProfile   ShippingProviderProfile      @relation(fields: [providerProfileId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User                         @relation("ShippingProviderMemberships", fields: [userId], references: [id], onDelete: Cascade)
+  memberRole        ShippingProviderMemberRole   @default(STAFF)
+  status            ShippingProviderMemberStatus @default(ACTIVE)
+  endedAt           DateTime?
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+
+  // One membership per person per org; re-joining reactivates the row rather
+  // than growing a second one for the same pair.
+  @@unique([providerProfileId, userId])
+  @@index([userId, status])
+  @@map("shipping_provider_members")
+}
+
 model PassengerDriverProfile {
   id                    String                    @id @default(cuid())
   /// A designated simulation driver. Admin-set only, exactly like
