@@ -198,6 +198,63 @@ describe('the organization', () => {
     expect(ownerEnd.status).toBe(400);
     expect(ownerEnd.body.message).toContain('owner');
   });
+
+  it('the simulation boundary governs the PERSON too: derived at birth, refused symmetrically at membership (BMPL-161)', async () => {
+    // A test account's profile is born a TEST org — derived, never requested.
+    const tUser = await registerUser(`xtown_${uniq()}@example.com`);
+    await ctx.prisma.user.update({ where: { id: tUser.userId }, data: { isTest: true } });
+    await approveProviderRole(tUser.userId);
+    const born = await put(tUser.cookies, 'shipping/provider/profile', {
+      businessName: 'Simulation Ferries', contactEmail: 'sim@example.com',
+    });
+    expect(born.status).toBe(200);
+    expect(born.body.isTest).toBe(true);
+    const testOrgId = born.body.id as string;
+
+    // Symmetric refusals, both directions.
+    const realOrg = await makeCarrier('Reef Runner Ltd');
+    const intoReal = await post(admin, `admin/logistics/providers/${realOrg.profileId}/members`, { userId: tUser.userId });
+    expect(intoReal.status).toBe(400);
+    expect(intoReal.body.message).toContain('test account');
+    const realUser = await registerUser(`xreal_${uniq()}@example.com`);
+    const intoTest = await post(admin, `admin/logistics/providers/${testOrgId}/members`, { userId: realUser.userId });
+    expect(intoTest.status).toBe(400);
+    expect(intoTest.body.message).toContain('real account');
+
+    // Matching sides still join freely.
+    const tStaff = await registerUser(`xtstaff_${uniq()}@example.com`);
+    await ctx.prisma.user.update({ where: { id: tStaff.userId }, data: { isTest: true } });
+    expect((await post(admin, `admin/logistics/providers/${testOrgId}/members`, { userId: tStaff.userId })).status).toBe(201);
+
+    // Reactivation is the same creation moment: a member whose flag moved
+    // across the boundary while ENDED cannot slip back in.
+    const staff = await makeStaff(realOrg.profileId);
+    expect((await post(admin, `admin/logistics/providers/${realOrg.profileId}/members/${staff.userId}/end`)).status).toBe(201);
+    await ctx.prisma.user.update({ where: { id: staff.userId }, data: { isTest: true } });
+    const reAdd = await post(admin, `admin/logistics/providers/${realOrg.profileId}/members`, { userId: staff.userId });
+    expect(reAdd.status).toBe(400);
+    expect(reAdd.body.message).toContain('test account');
+  });
+
+  it('the OWNER cannot be demoted by re-adding — the side door to ending them stays shut (BMPL-151)', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    // The hole: re-add the owner as STAFF, then end the now-STAFF row.
+    const demote = await post(admin, `admin/logistics/providers/${carrier.profileId}/members`, {
+      userId: carrier.userId, memberRole: 'STAFF',
+    });
+    expect(demote.status).toBe(400);
+    expect(demote.body.message).toContain('demoted');
+    const row = await ctx.prisma.shippingProviderMember.findUniqueOrThrow({
+      where: { providerProfileId_userId: { providerProfileId: carrier.profileId, userId: carrier.userId } },
+    });
+    expect(row.memberRole).toBe('OWNER');
+    expect(row.status).toBe('ACTIVE');
+    // Re-adding the owner WITHOUT a role stays a harmless no-op reactivation.
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/members`, { userId: carrier.userId })).status).toBe(201);
+    expect((await ctx.prisma.shippingProviderMember.findUniqueOrThrow({
+      where: { providerProfileId_userId: { providerProfileId: carrier.profileId, userId: carrier.userId } },
+    })).memberRole).toBe('OWNER');
+  });
 });
 
 describe('assigning an operator', () => {
@@ -230,6 +287,69 @@ describe('assigning an operator', () => {
     expect((await setOperator(leg!.id, carrier.profileId)).status).toBe(201);
     expect((await setOperator(leg!.id, null)).status).toBe(201);
     expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg!.id } })).operatedByProviderId).toBeNull();
+  });
+
+  it('a lapsed org stops collecting new legs: booking re-checks eligibility and leaves the leg unassigned (BMPL-152)', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    expect((await patch(admin, `admin/logistics/routes/${route.SEA}`, { operatedByProviderId: carrier.profileId })).status).toBe(200);
+
+    // Deactivated org: the route keeps its standing operator, but a NEW
+    // booking's leg lands UNASSIGNED — surfacing in the manual-assignment
+    // path instead of stalling where nobody can act on it.
+    await ctx.prisma.shippingProviderProfile.update({ where: { id: carrier.profileId }, data: { isActive: false } });
+    const whileInactive = await bookHubToHub('SEA');
+    expect((await legsOf(whileInactive.id))[0]!.operatedByProviderId).toBeNull();
+
+    // The booking itself never fails over a lapsed carrier.
+    await ctx.prisma.shippingProviderProfile.update({ where: { id: carrier.profileId }, data: { isActive: true } });
+    // Suspended owner role: same outcome, same shared rule.
+    await ctx.prisma.userRole.update({
+      where: { userId_roleCode: { userId: carrier.userId, roleCode: 'SHIPPING_PROVIDER' } },
+      data: { status: 'SUSPENDED' },
+    });
+    const whileSuspended = await bookHubToHub('SEA');
+    expect((await legsOf(whileSuspended.id))[0]!.operatedByProviderId).toBeNull();
+
+    // Restored, the standing operator flows again.
+    await approveProviderRole(carrier.userId);
+    const restored = await bookHubToHub('SEA');
+    expect((await legsOf(restored.id))[0]!.operatedByProviderId).toBe(carrier.profileId);
+  });
+
+  it('the simulation boundary refuses in BOTH directions: a real carrier never operates a test shipment', async () => {
+    // The reverse of the pinned real-shipment/test-carrier line (BMPL-137 note a).
+    const carrier = await makeCarrier('Reef Runner Ltd'); // real-side org
+    // A test-side network and customer, built through the product.
+    const th: Record<string, string> = {};
+    for (const h of [
+      { code: 'TSW', name: 'Test San Pedro Dock', city: 'San Pedro' },
+      { code: 'TBW', name: 'Test Belize City Dock', city: 'Belize City' },
+    ]) {
+      const r = await post(admin, 'admin/logistics/hubs', {
+        code: h.code, name: h.name, type: 'WATER_TAXI_TERMINAL', district: 'BELIZE', city: h.city,
+        modes: ['LAND', 'SEA'], courierFeeMinor: 1000, isTest: true,
+      });
+      expect(r.status).toBe(201);
+      th[h.code] = r.body.id;
+    }
+    expect((await post(admin, 'admin/logistics/routes', {
+      originHubId: th.TSW, destinationHubId: th.TBW, mode: 'SEA', durationMinutes: 60, priceMinor: 3000,
+      carrierName: 'UAT Test Boat', isTest: true,
+    })).status).toBe(201);
+    const t = await registerUser(`xtcust_${uniq()}@example.com`);
+    await ctx.prisma.user.update({ where: { id: t.userId }, data: { isTest: true } });
+    await post(admin, 'admin/wallet/test-credit', { userId: t.userId, amountMinor: 100_000, reason: 'Reverse isTest fixture.' });
+    const booked = await post(t.cookies, 'shipping', {
+      service: 'HUB_TO_HUB',
+      origin: { hubId: th.TSW, name: 'S', phone: '501-2223333' },
+      destination: { hubId: th.TBW, name: 'R', phone: '501-4445555' },
+      preferredMode: 'SEA', description: 'Test box', payWithWallet: true,
+    });
+    expect(booked.status).toBe(201);
+    const [leg] = await legsOf(booked.body.id);
+    const refused = await setOperator(leg!.id, carrier.profileId);
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toContain('test carrier');
   });
 
   it("a route's standing carrier flows onto new legs at booking; a bare route stays unassigned", async () => {

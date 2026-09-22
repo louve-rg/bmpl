@@ -61,11 +61,16 @@ export class ShippingProviderService {
       operatingLicenceNumber: dto.operatingLicenceNumber ?? null,
       operatingLicenceExpiry: dto.operatingLicenceExpiry ?? null,
     };
-    // isTest deliberately absent: admin-set only.
+    // isTest is never REQUEST input. At CREATE it is DERIVED from the creating
+    // account (BMPL-161): the OWNER membership is born with the profile, and
+    // the member/org boundary rule below would otherwise be violated at birth —
+    // a test account would create a REAL org and hold real work tomorrow.
+    // On update the flag is untouched (admin flips it thereafter, as before).
+    const creator = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { isTest: true } });
     const p = await this.prisma.$transaction(async (tx) => {
       const profile = await tx.shippingProviderProfile.upsert({
         where: { userId },
-        create: { userId, ...data },
+        create: { userId, isTest: creator.isTest, ...data },
         update: data,
       });
       // The OWNER membership is born with the profile: the org always has at
@@ -110,12 +115,31 @@ export class ShippingProviderService {
   async addMember(actorId: string, providerProfileId: string, dto: AddProviderMemberInput) {
     const profile = await this.prisma.shippingProviderProfile.findUnique({ where: { id: providerProfileId } });
     if (!profile) throw new NotFoundException('That carrier does not exist.');
-    const user = await this.prisma.user.findUnique({ where: { id: dto.userId }, select: { id: true } });
+    const user = await this.prisma.user.findUnique({ where: { id: dto.userId }, select: { id: true, isTest: true } });
     if (!user) throw new NotFoundException('That account does not exist.');
+    // The simulation boundary one level up (BMPL-161): the PERSON must sit on
+    // the org's side, refused symmetrically — the same house rule the org
+    // itself faces when work is assigned. Checked on reactivation too: it is
+    // the same membership-creation moment.
+    if (profile.isTest && !user.isTest) {
+      throw new BadRequestException('A real account cannot join a simulation carrier.');
+    }
+    if (!profile.isTest && user.isTest) {
+      throw new BadRequestException('A test account cannot join a real carrier.');
+    }
 
     const existing = await this.prisma.shippingProviderMember.findUnique({
       where: { providerProfileId_userId: { providerProfileId, userId: dto.userId } },
     });
+    // A GUARD, not a convention (BMPL-151): an OWNER row's role never changes
+    // through this endpoint. Without this line, re-adding the owner as STAFF
+    // quietly demoted them — after which endMember, whose owner-protection
+    // matches on memberRole, would happily end them and leave the organization
+    // with nobody who may act for it. Admin-only and audited is a mitigation;
+    // this is the design.
+    if (existing?.memberRole === 'OWNER' && dto.memberRole === 'STAFF') {
+      throw new BadRequestException("The owner cannot be demoted by re-adding them. The owner's role ends with the organization.");
+    }
     // One row per person per org: re-adding reactivates rather than growing a
     // second row for the same pair.
     const member = existing
