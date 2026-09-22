@@ -19,6 +19,14 @@ describe('canEnterConsole', () => {
     expect(canEnterConsole({ roles: [{ roleCode: 'ADMIN', status: 'APPROVED' }], adminPermissions: ['logistics.read'] })).toBe(true);
   });
 
+  it('admits every DOMAIN-defined admin role, not the literal ADMIN code', () => {
+    // The seeded super admin holds SUPER_ADMIN (+ SUPPORT_AGENT), not ADMIN —
+    // the live walk caught the literal check locking it out of its own console.
+    for (const roleCode of ['SUPER_ADMIN', 'SUPPORT_AGENT']) {
+      expect(canEnterConsole({ roles: [{ roleCode, status: 'APPROVED' }], adminPermissions: ['users.read'] }), roleCode).toBe(true);
+    }
+  });
+
   it('refuses an ordinary customer', () => {
     expect(canEnterConsole({ roles: [{ roleCode: 'CUSTOMER', status: 'APPROVED' }], adminPermissions: [] })).toBe(false);
   });
