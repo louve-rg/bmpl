@@ -6,6 +6,7 @@ import {
   createShipmentSchema,
   shipmentListSchema,
   shipmentQuoteSchema,
+  updateHubSchema,
 } from './shipping';
 
 describe('shipmentListSchema', () => {
@@ -44,6 +45,26 @@ describe('createHubSchema', () => {
     expect(createHubSchema.safeParse({ ...base, latitude: 17.9 }).success).toBe(false);
     expect(createHubSchema.safeParse({ ...base, latitude: 51.5, longitude: -0.12 }).success).toBe(false);
     expect(createHubSchema.safeParse({ ...base, latitude: 17.9, longitude: -87.96 }).success).toBe(true);
+  });
+});
+
+describe('updateHubSchema', () => {
+  // The one place the phone rule is asserted (shared phoneSchema): the API and
+  // the browser both import this schema, so stating it once here covers both.
+  it('refuses a contact phone that is not a phone', () => {
+    expect(updateHubSchema.safeParse({ contactPhone: 'not-a-phone' }).success).toBe(false);
+    expect(updateHubSchema.safeParse({ contactPhone: '+501-226-2194' }).success).toBe(true);
+  });
+
+  it('refuses an empty update outright', () => {
+    // PATCH {} would otherwise be a 200 that did nothing — a lie to the caller.
+    expect(updateHubSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('accepts a partial operational-metadata edit', () => {
+    const parsed = updateHubSchema.parse({ name: 'Belize City Water Taxi Terminal', instructions: 'Counter 2, 8am-5pm.' });
+    expect(parsed.name).toBe('Belize City Water Taxi Terminal');
+    expect(parsed.code).toBeUndefined();
   });
 });
 
