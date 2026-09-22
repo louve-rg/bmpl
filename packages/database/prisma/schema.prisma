@@ -3263,8 +3263,16 @@ enum PropertyType {
 enum PropertyStatus {
   DRAFT
   SUBMITTED
+  /// DEAD VALUE — no code path writes it (BMPL-163). Moderation reviews from
+  /// SUBMITTED directly; guard lists half-expect this state, which is exactly
+  /// how one sneaks in unreviewed. A test pins it unreachable
+  /// (realestate.integration.spec.ts); giving it a writer is a deliberate,
+  /// reviewed decision, and that test failing is the review trigger. Never
+  /// removed: enum removal is a destructive migration for no benefit.
   UNDER_REVIEW
   MORE_INFO_REQUIRED
+  /// DEAD VALUE — no code path writes it (BMPL-163); APPROVE moderation lands
+  /// on PUBLISHED directly. Same contract as UNDER_REVIEW above.
   APPROVED
   PUBLISHED
   REJECTED
