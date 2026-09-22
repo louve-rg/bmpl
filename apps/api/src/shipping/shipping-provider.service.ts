@@ -116,6 +116,15 @@ export class ShippingProviderService {
     const existing = await this.prisma.shippingProviderMember.findUnique({
       where: { providerProfileId_userId: { providerProfileId, userId: dto.userId } },
     });
+    // A GUARD, not a convention (BMPL-151): an OWNER row's role never changes
+    // through this endpoint. Without this line, re-adding the owner as STAFF
+    // quietly demoted them — after which endMember, whose owner-protection
+    // matches on memberRole, would happily end them and leave the organization
+    // with nobody who may act for it. Admin-only and audited is a mitigation;
+    // this is the design.
+    if (existing?.memberRole === 'OWNER' && dto.memberRole === 'STAFF') {
+      throw new BadRequestException("The owner cannot be demoted by re-adding them. The owner's role ends with the organization.");
+    }
     // One row per person per org: re-adding reactivates rather than growing a
     // second row for the same pair.
     const member = existing

@@ -198,6 +198,26 @@ describe('the organization', () => {
     expect(ownerEnd.status).toBe(400);
     expect(ownerEnd.body.message).toContain('owner');
   });
+
+  it('the OWNER cannot be demoted by re-adding — the side door to ending them stays shut (BMPL-151)', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    // The hole: re-add the owner as STAFF, then end the now-STAFF row.
+    const demote = await post(admin, `admin/logistics/providers/${carrier.profileId}/members`, {
+      userId: carrier.userId, memberRole: 'STAFF',
+    });
+    expect(demote.status).toBe(400);
+    expect(demote.body.message).toContain('demoted');
+    const row = await ctx.prisma.shippingProviderMember.findUniqueOrThrow({
+      where: { providerProfileId_userId: { providerProfileId: carrier.profileId, userId: carrier.userId } },
+    });
+    expect(row.memberRole).toBe('OWNER');
+    expect(row.status).toBe('ACTIVE');
+    // Re-adding the owner WITHOUT a role stays a harmless no-op reactivation.
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/members`, { userId: carrier.userId })).status).toBe(201);
+    expect((await ctx.prisma.shippingProviderMember.findUniqueOrThrow({
+      where: { providerProfileId_userId: { providerProfileId: carrier.profileId, userId: carrier.userId } },
+    })).memberRole).toBe('OWNER');
+  });
 });
 
 describe('assigning an operator', () => {
