@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import { checkoutSchema, type CheckoutInput } from '@bmpl/validation';
+import { cancelOrderSchema, checkoutSchema, type CancelOrderInput, type CheckoutInput } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Roles } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -35,6 +35,16 @@ export class OrdersController {
   @Get('orders/:id')
   get(@CurrentUser() user: AuthContext, @Param('id') id: string) {
     return this.orders.getOwn(user.userId, id);
+  }
+
+  /**
+   * Cancel my own order — the whole order, only while every vendor-order is
+   * still PENDING. Money moves only through the existing release path; the
+   * window and the race are enforced in the service.
+   */
+  @Post('orders/:id/cancel')
+  cancel(@CurrentUser() user: AuthContext, @Param('id') id: string, @Body(ZodBody(cancelOrderSchema)) dto: CancelOrderInput) {
+    return this.orders.cancelOwn({ userId: user.userId }, id, dto);
   }
 
   /** Reveal the customer's own pickup PIN to show the store (M18.1). */

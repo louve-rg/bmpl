@@ -46,6 +46,9 @@ export const AUDIT_ACTIONS = [
   // ---- Marketplace: Orders (Phase 3 · M10) ----
   'ORDER_CREATED',
   'ORDER_RESERVATION_RELEASED', // admin/maintenance release of an order's inventory reservations (M10.1)
+  // Customer-initiated whole-order cancellation (owner-approved scope): who
+  // cancelled travels in actorId, reason + escrow return in newValue.
+  'ORDER_CANCELLED',
   // ---- Marketplace: Payments (Phase 3 · M11 — foundation, no money movement) ----
   'PAYMENT_CREATED',
   'PAYMENT_STATE_CHANGED',

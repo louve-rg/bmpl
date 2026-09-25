@@ -1,0 +1,18 @@
+-- Customer order cancellation (owner-approved scope): the audit vocabulary.
+--
+-- Until now an order became CANCELLED only through the system unwind (payment
+-- authorization failure or hold expiry), audited as ORDER_RESERVATION_RELEASED
+-- + PAYMENT_AUTHORIZATION_FAILED. The owner has approved a customer-facing
+-- cancellation (whole order, only while every vendor-order is still PENDING),
+-- which is a distinct lifecycle moment with a person behind it, so it gets its
+-- own action. One value for the decision surface: who cancelled travels in
+-- actorId, the reason and any escrow return in newValue (the
+-- WALLET_ACCOUNT_STATUS_CHANGED precedent).
+--
+-- Enum value in its OWN migration, applied ahead of any code that writes it —
+-- the repo's established pattern (Postgres cannot add and use an enum value in
+-- one transaction, and Prisma wraps each migration in one).
+--
+-- Additive and idempotent; no table, no column, no backfill, and no existing
+-- enum value is touched.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'ORDER_CANCELLED';
