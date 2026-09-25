@@ -8,6 +8,7 @@ import {
   findCourierLane,
   isLocalDoorToDoor,
   planRoute,
+  resolveScheduleStatus,
   userInitials,
   LEG_KIND_LABELS,
   SHIPMENT_STATUS_LABELS,
@@ -124,7 +125,7 @@ export class ShipmentService {
     // given rather than working out what a courier costs.
     const fees = await this.courierFees(input, origin, destination, hubs, lanes, simulated);
     const plan = planRoute(
-      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null },
+      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null, date: this.travelDate() },
       hubs,
       routes,
       {
@@ -179,6 +180,21 @@ export class ShipmentService {
     return h ? { id: h.id, code: h.code, name: h.name, city: h.city } : null;
   }
 
+  /**
+   * The date a journey being quoted or booked right now would travel on
+   * (BMPL-196).
+   *
+   * There is no requested/scheduled travel date anywhere on a shipment yet
+   * (BMPL-184 is the open card for that) - booking is always "as soon as
+   * possible" - so "now" is the only date planning can honestly mean. A
+   * route's schedule is resolved per calendar day, not per instant, so the
+   * few milliseconds between a quote's dry-run fee calculation and its real
+   * plan can never land on different days in practice.
+   */
+  private travelDate(): Date {
+    return new Date();
+  }
+
   /** Turn a validated endpoint into what the planner understands. */
   private toEndpoint(input: ShipmentQuoteInput, side: 'origin' | 'destination'): Endpoint {
     const e = input[side];
@@ -224,6 +240,9 @@ export class ShipmentService {
       destination,
       service: input.service,
       preferredMode: input.preferredMode ?? null,
+      // Same date as the real plan below (BMPL-196), so a hub this dry run
+      // attaches a door to is one the actual plan can still reach.
+      date: this.travelDate(),
     };
 
     /**
@@ -320,7 +339,7 @@ export class ShipmentService {
     const destination = this.toEndpoint(input, 'destination');
     const fees = await this.courierFees(input, origin, destination, hubs, lanes, simulated);
     const plan = planRoute(
-      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null },
+      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null, date: this.travelDate() },
       hubs,
       routes,
       {
@@ -800,12 +819,39 @@ export class ShipmentService {
     });
   }
 
-  /** A line-haul left the terminal. Carrier details are recorded as given. */
+  /**
+   * A line-haul left the terminal. Carrier details are recorded as given.
+   *
+   * Gated on the route's own BMPL-186 schedule for today (BMPL-196): a
+   * carrier who has told BML this route does not run today cannot then
+   * confirm a departure on it. REDUCED still departs — operations said
+   * thinner, not stopped — and a route with no schedule configured at all
+   * (every real route today) resolves OPERATING, so this changes nothing for
+   * the unconfigured network. Both the staff desk and the carrier's own
+   * surface (ShippingProviderService.depart) call this same method, so the
+   * gate applies identically to each.
+   */
   async departLeg(legId: string, input: LegDepartInput, actor: { userId: string; label?: string }) {
     return this.transition(legId, actor, async (tx, leg, shipment) => {
       if (leg.kind !== 'LINE_HAUL') throw new BadRequestException('Only a transport leg departs from a terminal.');
       if (leg.status !== 'READY' && leg.status !== 'IN_PROGRESS') {
         throw new BadRequestException(`This leg is ${leg.status.toLowerCase()}, so it cannot depart.`);
+      }
+      if (leg.routeId) {
+        const [days, exceptions] = await Promise.all([
+          tx.routeOperatingDay.findMany({ where: { routeId: leg.routeId } }),
+          tx.routeScheduleException.findMany({ where: { routeId: leg.routeId } }),
+        ]);
+        const resolution = resolveScheduleStatus(
+          this.travelDate(),
+          days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note })),
+          exceptions.map((e) => ({ date: e.date, status: e.status, reason: e.reason })),
+        );
+        if (resolution.status === 'NOT_OPERATING') {
+          throw new BadRequestException(
+            `This route is configured as not operating today${resolution.note ? ` (${resolution.note})` : ''}. Update the schedule before recording a departure, or contact operations.`,
+          );
+        }
       }
       await tx.shipmentLeg.update({
         where: { id: leg.id },
