@@ -1115,3 +1115,82 @@ describe('admin manual assignment of a courier leg', () => {
     expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId).toBeNull();
   });
 });
+
+/**
+ * BMPL-180: courier and vehicle identification for the customer, once a
+ * courier is actually assigned. No new record — this is a customer-safe read
+ * of the same assignedDriverProfileId/assignedVehicleId link the driver app
+ * already uses to run the leg.
+ */
+describe('courier and vehicle identification (BMPL-180)', () => {
+  const vehicleOf = (driverProfileId: string) => ctx.prisma.driverVehicle.findFirstOrThrow({ where: { driverProfileId } });
+
+  it('has no courier or vehicle for a leg nobody has been sent on yet', async () => {
+    await makeDriver();
+    const s = await book();
+    const view = await get(customer, `shipping/${s.reference}`);
+    const last = view.body.legs.find((l: { kind: string }) => l.kind === 'LAST_MILE');
+    expect(last.courier).toBeNull();
+    expect(last.courierVehicle).toBeNull();
+  });
+
+  it('shows the assigned courier and vehicle once dispatch has picked someone', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const vehicle = await vehicleOf(driver.driverProfileId);
+    const view = await get(customer, `shipping/${s.reference}`);
+    const first = view.body.legs.find((l: { kind: string }) => l.kind === 'FIRST_MILE');
+
+    expect(first.courier).not.toBeNull();
+    expect(first.courier.displayName).toMatch(/^Drv/);
+    expect(first.courier.avatarUrl).toBeNull(); // no approved user avatar in this fixture
+    // Never legal name, phone, or documents — display name only.
+    expect(first.courier).not.toHaveProperty('phone');
+    expect(first.courier).not.toHaveProperty('legalName');
+
+    expect(first.courierVehicle).toEqual({
+      type: vehicle.type,
+      make: vehicle.make,
+      model: vehicle.model,
+      color: vehicle.color,
+      licencePlate: vehicle.licencePlate,
+      photoUrl: null, // no photoKeys in this fixture
+    });
+    expect(first.courierVehicle).not.toHaveProperty('registrationNumber');
+    expect(first.courierVehicle).not.toHaveProperty('insuranceProvider');
+  });
+
+  it('exposes the vehicle photo only once the vehicle itself has cleared review', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const vehicle = await vehicleOf(driver.driverProfileId);
+    await ctx.prisma.driverVehicle.update({
+      where: { id: vehicle.id },
+      data: { photoKeys: ['driver-vehicle-photo/bmpl180-fixture/car.jpg'], approvalStatus: 'PENDING' },
+    });
+
+    let view = await get(customer, `shipping/${s.reference}`);
+    let first = view.body.legs.find((l: { kind: string }) => l.kind === 'FIRST_MILE');
+    expect(first.courierVehicle.photoUrl).toBeNull();
+
+    await ctx.prisma.driverVehicle.update({ where: { id: vehicle.id }, data: { approvalStatus: 'APPROVED' } });
+
+    view = await get(customer, `shipping/${s.reference}`);
+    first = view.body.legs.find((l: { kind: string }) => l.kind === 'FIRST_MILE');
+    expect(typeof first.courierVehicle.photoUrl).toBe('string');
+    expect(first.courierVehicle.photoUrl).toMatch(/^https?:\/\//);
+  });
+
+  it('does not let an unrelated customer read the courier identity off someone else\'s shipment', async () => {
+    await makeDriver();
+    const s = await book();
+    const other = await registerUser(`bmpl180_other_${uniq()}@example.com`);
+    const r = await get(other.cookies, `shipping/${s.reference}`);
+    // Same "not found" the whole-shipment boundary already returns — a
+    // courier-identity leak is exactly the kind of thing that boundary exists
+    // to stop, so this pins it for this field specifically rather than relying
+    // on the generic shipment test to notice if it ever regressed.
+    expect(r.status).toBe(404);
+    expect(r.body).not.toHaveProperty('legs');
+  });
+});
