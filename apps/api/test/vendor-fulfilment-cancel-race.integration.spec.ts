@@ -102,8 +102,6 @@ function pauseVendorWrite(prismaService: PrismaService, vendorOrderId: string) {
   let intercepted = false;
   const middleware: Prisma.Middleware = async (params, next) => {
     const targetsRow = (params.args as { where?: { id?: string } } | undefined)?.where?.id === vendorOrderId;
-    // eslint-disable-next-line no-console
-    console.log('[DEBUG mw]', params.model, params.action, JSON.stringify(params.args?.where ?? {}));
     if (!intercepted && params.model === 'VendorOrder' && (params.action === 'update' || params.action === 'updateMany') && targetsRow) {
       intercepted = true;
       resolveReached();
@@ -161,7 +159,9 @@ describe('a vendor write racing a customer cancellation', () => {
     const prismaService = ctx.app.get(PrismaService);
     const { reached, release } = pauseVendorWrite(prismaService, vendorOrderId);
 
-    const vendorReq = post(vendor.vendorCookies, `vendor/orders/${vendorOrderId}/ready`);
+    // Promise.resolve(...) forces supertest's lazily-started Test to actually
+    // dispatch now — see the comment on the previous test.
+    const vendorReq = Promise.resolve(post(vendor.vendorCookies, `vendor/orders/${vendorOrderId}/ready`));
     await reached;
     const cancelRes = await cancel(customer, orderId);
     expect(cancelRes.status).toBe(201);

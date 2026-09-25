@@ -161,8 +161,6 @@ export class VendorFulfilmentService {
   // ---- internals ----
 
   private async ownedByVendor(userId: string, vendorOrderId: string) {
-    // eslint-disable-next-line no-console
-    console.log('[SVC DEBUG] this.prisma tag =', (this.prisma as unknown as { __testTag?: string }).__testTag, 'has $use?', typeof (this.prisma as unknown as { $use?: unknown }).$use);
     const vendorProfileId = await this.ownership.vendorProfileId(userId);
     const vo = await this.prisma.vendorOrder.findUnique({
       where: { id: vendorOrderId },
