@@ -761,11 +761,31 @@ export class ShipmentService {
 
   /* --------------------------------------------------------- leg operation */
 
-  /** Start a leg: the parcel is now moving on it. */
+  /**
+   * Start a leg: the parcel is now moving on it.
+   *
+   * Same owner rule as `verifyHandoffPin` (BMPL-174), applied to the OTHER end
+   * of a courier's custody: picking up. There is no code to check here — the
+   * sender and the terminal desk do not hold one — but the actor recording the
+   * pickup still has to BE the courier the parcel is credited to, or an ops
+   * account with `logistics.operate` could mark a pickup as done by a driver
+   * who never touched the parcel. `assignedDriverProfileId == null` is the same
+   * owner exception as the handoff check: it is only ever null for a LINE_HAUL
+   * leg (terminal-to-terminal, no individual courier — see PROVEN FACTS), so
+   * this is correctly a no-op there. The driver's own path (`confirmPickup`)
+   * already asserts this via `ownedLeg` before reaching here; this closes the
+   * same gap for the admin desk, the way BMPL-174 closed it for handoff.
+   */
   async startLeg(legId: string, actor: { userId: string; label?: string }) {
     return this.transition(legId, actor, async (tx, leg, shipment) => {
       if (leg.status !== 'READY') {
         throw new BadRequestException(`This leg is ${leg.status.toLowerCase()}, so it cannot be started.`);
+      }
+      if (leg.assignedDriverProfileId != null) {
+        const profile = await tx.driverProfile.findUnique({ where: { userId: actor.userId }, select: { id: true } });
+        if (profile?.id !== leg.assignedDriverProfileId) {
+          throw new ForbiddenException('You are not the courier assigned to this leg.');
+        }
       }
       await tx.shipmentLeg.update({ where: { id: leg.id }, data: { status: 'IN_PROGRESS', startedAt: new Date() } });
       await this.appendCustody(tx, shipment.id, leg.id, {
