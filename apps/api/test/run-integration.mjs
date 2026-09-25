@@ -213,10 +213,6 @@ async function main() {
     process.exit(0);
   }
 
-  if (isolation) {
-    await ensureDatabaseExists(isolation);
-  }
-
   if (!skipBuild) {
     // The floor's standing rebuild-after-base-move rule, made mechanical.
     // turbo is resolved to its JS entry and run through node directly — no
@@ -224,6 +220,15 @@ async function main() {
     // is damaged and cannot be defeated by PATH surprises. On failure of BOTH
     // paths, enforceWorkspaceBuild prints the refusal and exits before any
     // test can run.
+    //
+    // THIS MUST RUN BEFORE ensureDatabaseExists (BMPL-193). On Windows, a
+    // `require('@prisma/client')` in THIS process opens the query-engine DLL
+    // and keeps a handle on it for the life of the process — so if the
+    // client were loaded first, the rebuild this same run triggers could
+    // never replace that DLL, and every agent needing a real rebuild had to
+    // hand-run `pnpm --filter @bmpl/database build` first and skip this gate
+    // with BMPL_SKIP_WORKSPACE_BUILD=1. Building first means any client
+    // reload happens only after the new DLL is already on disk.
     enforceWorkspaceBuild({
       spawn: spawnSync,
       cwd: repoRoot,
@@ -234,6 +239,10 @@ async function main() {
       error: console.error,
       exit: (code) => process.exit(code),
     });
+  }
+
+  if (isolation) {
+    await ensureDatabaseExists(isolation);
   }
 
   const res = spawnSync(process.execPath, vitestArgv, {
