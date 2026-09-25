@@ -139,6 +139,77 @@ describe('service areas', () => {
     const cleared = await put(cookies, 'driver/service-areas', { districts: [] });
     expect(cleared.body).toEqual([]);
   });
+
+  it('a fresh district row serves the whole district (no cities narrowing it)', async () => {
+    const { cookies } = await registerCustomer('drv_area_whole@example.bz');
+    await put(cookies, 'driver/profile', profilePayload());
+    const res = await put(cookies, 'driver/service-areas', { districts: ['BELIZE'] });
+    expect(res.body).toEqual([{ id: expect.any(String), district: 'BELIZE', isActive: true, cities: [] }]);
+  });
+
+  it('narrows a served district to specific cities, then widens it back with an empty list', async () => {
+    const { cookies } = await registerCustomer('drv_area_city@example.bz');
+    await put(cookies, 'driver/profile', profilePayload());
+    await put(cookies, 'driver/service-areas', { districts: ['BELIZE', 'CAYO'] });
+
+    const narrowed = await put(cookies, 'driver/service-areas/BELIZE/cities', { cities: ['San Pedro', 'Belize City'] });
+    expect(narrowed.status).toBe(200);
+    const belize = narrowed.body.find((a: { district: string }) => a.district === 'BELIZE');
+    expect(belize.cities.map((c: { city: string }) => c.city).sort()).toEqual(['Belize City', 'San Pedro']);
+    // CAYO was never narrowed — it still serves the whole district.
+    const cayo = narrowed.body.find((a: { district: string }) => a.district === 'CAYO');
+    expect(cayo.cities).toEqual([]);
+
+    const replaced = await put(cookies, 'driver/service-areas/BELIZE/cities', { cities: ['San Pedro'] });
+    expect(replaced.body.find((a: { district: string }) => a.district === 'BELIZE').cities.map((c: { city: string }) => c.city)).toEqual(['San Pedro']);
+
+    const widened = await put(cookies, 'driver/service-areas/BELIZE/cities', { cities: [] });
+    expect(widened.body.find((a: { district: string }) => a.district === 'BELIZE').cities).toEqual([]);
+  });
+
+  it('refuses to narrow a district the driver does not (yet, or any longer) serve', async () => {
+    const { cookies } = await registerCustomer('drv_area_unserved@example.bz');
+    await put(cookies, 'driver/profile', profilePayload());
+    await put(cookies, 'driver/service-areas', { districts: ['BELIZE'] });
+    const res = await put(cookies, 'driver/service-areas/CAYO/cities', { cities: ['San Ignacio'] });
+    expect(res.status).toBe(400);
+  });
+
+  it('removing a district clears its city narrowing (no orphaned rows)', async () => {
+    const { cookies } = await registerCustomer('drv_area_orphan@example.bz');
+    await put(cookies, 'driver/profile', profilePayload());
+    await put(cookies, 'driver/service-areas', { districts: ['BELIZE'] });
+    await put(cookies, 'driver/service-areas/BELIZE/cities', { cities: ['San Pedro'] });
+    // Replace the whole set without BELIZE — the district row goes, and the
+    // cascade must take its city narrowing with it.
+    const res = await put(cookies, 'driver/service-areas', { districts: ['CAYO'] });
+    expect(res.body).toEqual([{ id: expect.any(String), district: 'CAYO', isActive: true, cities: [] }]);
+    // Re-adding BELIZE proves the district really did lose its narrowing,
+    // rather than the endpoint just hiding it — a fresh BELIZE row serves the
+    // whole district again, exactly like a district that was never narrowed.
+    const readded = await put(cookies, 'driver/service-areas', { districts: ['BELIZE', 'CAYO'] });
+    expect(readded.body.find((a: { district: string }) => a.district === 'BELIZE').cities).toEqual([]);
+  });
+
+  it("a driver cannot read or alter another driver's service areas or cities", async () => {
+    const a = await registerCustomer('drv_area_owner@example.bz');
+    await put(a.cookies, 'driver/profile', profilePayload());
+    await put(a.cookies, 'driver/service-areas', { districts: ['BELIZE'] });
+    await put(a.cookies, 'driver/service-areas/BELIZE/cities', { cities: ['San Pedro'] });
+
+    const b = await registerCustomer('drv_area_intruder@example.bz');
+    await put(b.cookies, 'driver/profile', profilePayload());
+    // B's own writes never touch A's rows — each is scoped to the caller's
+    // own profile, never to an id supplied in the request.
+    await put(b.cookies, 'driver/service-areas', { districts: ['CAYO'] });
+    await put(b.cookies, 'driver/service-areas/CAYO/cities', { cities: ['San Ignacio'] });
+
+    const aAfter = await get(a.cookies, 'driver/dashboard');
+    expect(aAfter.body.serviceAreas).toEqual([{ id: expect.any(String), district: 'BELIZE', isActive: true, cities: [{ id: expect.any(String), city: 'San Pedro', isActive: true }] }]);
+
+    const bAfter = await get(b.cookies, 'driver/dashboard');
+    expect(bAfter.body.serviceAreas).toEqual([{ id: expect.any(String), district: 'CAYO', isActive: true, cities: [{ id: expect.any(String), city: 'San Ignacio', isActive: true }] }]);
+  });
 });
 
 describe('availability + ONLINE eligibility', () => {

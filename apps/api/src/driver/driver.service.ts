@@ -1,11 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  DISTRICTS,
   DOCUMENT_EXPIRY_SOON_DAYS,
   expiryStatus,
   isAllowedProductImageMime,
   isExpiredOrMissing,
   MAX_PRODUCT_IMAGE_BYTES,
   STORAGE_PREFIX,
+  type District,
   type DriverAvailability,
 } from '@bmpl/shared';
 import type {
@@ -13,6 +15,7 @@ import type {
   DriverProfileInput,
   DriverProfileUpdateInput,
   DriverServiceAreasInput,
+  DriverServiceCitiesInput,
   DriverVehicleInput,
   DriverVehicleUpdateInput,
 } from '@bmpl/validation';
@@ -280,8 +283,49 @@ export class DriverService {
     return this.serviceAreas(p.id);
   }
   private async serviceAreas(driverProfileId: string) {
-    const rows = await this.prisma.driverServiceArea.findMany({ where: { driverProfileId }, orderBy: { district: 'asc' } });
-    return rows.map((r) => ({ id: r.id, district: r.district, isActive: r.isActive }));
+    const rows = await this.prisma.driverServiceArea.findMany({
+      where: { driverProfileId },
+      orderBy: { district: 'asc' },
+      include: { serviceCities: { orderBy: { city: 'asc' } } },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      district: r.district,
+      isActive: r.isActive,
+      // Empty => the driver serves the whole district (unchanged meaning).
+      // Non-empty => coverage in this district is narrowed to just these.
+      cities: r.serviceCities.map((c) => ({ id: c.id, city: c.city, isActive: c.isActive })),
+    }));
+  }
+
+  /** Narrow (or, given an empty list, widen back) a driver's coverage of one
+   *  district they already declare in `serviceAreas`. Owner-scoped by `userId`,
+   *  exactly like `setServiceAreas` — a driver can only ever touch their own
+   *  rows, never another driver's, because the profile is looked up from the
+   *  authenticated user, never from an id in the request. */
+  async setServiceCities(userId: string, district: string, dto: DriverServiceCitiesInput) {
+    if (!(DISTRICTS as readonly string[]).includes(district)) throw new BadRequestException('Unknown district.');
+    const p = await this.ownProfileOrThrow(userId);
+    const area = await this.prisma.driverServiceArea.findUnique({
+      where: { driverProfileId_district: { driverProfileId: p.id, district: district as District } },
+    });
+    if (!area) throw new BadRequestException(`You must serve ${district.replace('_', ' ')} before narrowing it to specific cities.`);
+    const cities = [...new Set(dto.cities)];
+    await this.prisma.$transaction([
+      // Same "empty clears, non-empty removes anything not listed" shape as
+      // setServiceAreas — avoid `notIn: []`, which excludes nothing.
+      this.prisma.driverServiceCity.deleteMany({
+        where: { driverProfileId: p.id, district: district as District, ...(cities.length ? { city: { notIn: cities } } : {}) },
+      }),
+      ...cities.map((city) =>
+        this.prisma.driverServiceCity.upsert({
+          where: { driverProfileId_district_city: { driverProfileId: p.id, district: district as District, city } },
+          create: { driverProfileId: p.id, district: district as District, city, isActive: true },
+          update: { isActive: true },
+        }),
+      ),
+    ]);
+    return this.serviceAreas(p.id);
   }
 
   // ===========================================================================

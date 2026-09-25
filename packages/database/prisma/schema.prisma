@@ -1971,6 +1971,8 @@ model DriverProfile {
 
   vehicles            DriverVehicle[]
   serviceAreas        DriverServiceArea[]
+  // Fine-grained narrowing of a serviceAreas district — see DriverServiceCity.
+  serviceCities       DriverServiceCity[]
   // Dispatch (M15): the current deliveries assigned to this driver + full history.
   activeDeliveries    OrderDelivery[]      @relation("DriverActiveDeliveries")
   activeShipmentLegs  ShipmentLeg[]        @relation("DriverShipmentLegs")
@@ -2329,6 +2331,9 @@ model DriverVehicle {
   @@map("driver_vehicles")
 }
 
+// A driver's coarse coverage: "I serve this district." Unchanged by BMPL-176 —
+// this row's meaning has always been "the whole district" and stays exactly
+// that. See DriverServiceCity for the finer grain the defect was missing.
 model DriverServiceArea {
   id              String        @id @default(cuid())
   driverProfileId String
@@ -2338,9 +2343,50 @@ model DriverServiceArea {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  serviceCities DriverServiceCity[]
+
   @@unique([driverProfileId, district])
   @@index([driverProfileId])
   @@map("driver_service_areas")
+}
+
+/// Narrows a driver's district-level coverage (DriverServiceArea) down to one
+/// or more specific towns/cities within that district — the granularity that
+/// DriverServiceArea alone cannot express (a San Pedro courier and a Belize
+/// City courier were indistinguishable; BMPL-176).
+///
+/// A driver with NO rows here for a district serves the WHOLE district — that
+/// is exactly what DriverServiceArea has always meant on its own, so a driver
+/// with no rows in this table is completely unaffected by its existence. A
+/// driver WITH rows here for a district serves ONLY the listed, active
+/// city/cities within it. The parent district row is still required (the
+/// composite FK below enforces that structurally) — this table only narrows
+/// it, never stands alone, and matching a delivery/shipment to a driver's
+/// coverage is an EXPLICIT (district, city) comparison here, never implied by
+/// joining through LogisticsHub or any other table.
+///
+/// `city` is free text, matching the convention already used by
+/// `LogisticsHub.city` — entered by the driver/operator from a real place,
+/// never generated, defaulted or invented here (root CLAUDE.md §5).
+model DriverServiceCity {
+  id              String            @id @default(cuid())
+  driverProfileId String
+  driverProfile   DriverProfile     @relation(fields: [driverProfileId], references: [id], onDelete: Cascade)
+  district        District
+  // Composite FK to the parent DriverServiceArea's own composite unique key:
+  // a city narrowing cannot exist for a district the driver does not (yet, or
+  // any longer) declare as served. Dropping the district row cascades here too,
+  // so removing a district can never leave an orphaned, meaningless narrowing.
+  serviceArea     DriverServiceArea @relation(fields: [driverProfileId, district], references: [driverProfileId, district], onDelete: Cascade)
+  city            String
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([driverProfileId, district, city])
+  @@index([driverProfileId])
+  @@index([district, city])
+  @@map("driver_service_cities")
 }
 
 model OrderItem {
