@@ -46,10 +46,19 @@ export class VendorFulfilmentService {
     if (vo.status !== 'PENDING') {
       throw new ConflictException(`This order is already ${label(vo.status)}.`);
     }
-    await this.prisma.vendorOrder.update({
-      where: { id: vendorOrderId },
+    // Conditional write, guarded in the WHERE: a customer's cancellation can
+    // commit between the read above and this write. An unconditional
+    // `where: { id }` would silently resurrect a just-CANCELLED vendor-order
+    // back to PREPARING — the same race pattern `cancelOwn` itself guards
+    // against, applied here in the other direction.
+    const updated = await this.prisma.vendorOrder.updateMany({
+      where: { id: vendorOrderId, status: 'PENDING' },
       data: { status: 'PREPARING', preparingAt: new Date() },
     });
+    if (updated.count === 0) {
+      const current = await this.prisma.vendorOrder.findUniqueOrThrow({ where: { id: vendorOrderId }, select: { status: true } });
+      throw new ConflictException(`This order is already ${label(current.status)}.`);
+    }
     await this.audit.record({
       action: 'VENDOR_ORDER_PREPARING',
       actorId: userId,
@@ -96,18 +105,30 @@ export class VendorFulfilmentService {
       throw new ConflictException('This order has no delivery attached. Contact support.');
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.vendorOrder.update({
-        where: { id: vendorOrderId },
+    const ready = await this.prisma.$transaction(async (tx) => {
+      // Conditional write, guarded in the WHERE against the exact statuses this
+      // method may leave: a customer's cancellation can commit between the read
+      // above and this write. An unconditional `where: { id }` would silently
+      // resurrect a just-CANCELLED vendor-order back to READY_FOR_PICKUP AND
+      // re-arm dispatch (below) for an order the customer has already been
+      // refunded for.
+      const updated = await tx.vendorOrder.updateMany({
+        where: { id: vendorOrderId, status: { in: ['PENDING', 'PREPARING'] } },
         data: { status: 'READY_FOR_PICKUP', readyForPickupAt: new Date() },
       });
+      if (updated.count === 0) return false;
       // Marks the delivery dispatchable. Until this is set the engine ignores it,
       // so a driver is never sent to wait at a counter for goods still being packed.
       await tx.orderDelivery.update({
         where: { id: delivery.id },
         data: { readyForDispatchAt: new Date() },
       });
+      return true;
     });
+    if (!ready) {
+      const current = await this.prisma.vendorOrder.findUniqueOrThrow({ where: { id: vendorOrderId }, select: { status: true } });
+      throw new ConflictException(`Cannot ready a ${label(current.status)} order.`);
+    }
 
     await this.audit.record({
       action: 'VENDOR_ORDER_READY_FOR_DISPATCH',

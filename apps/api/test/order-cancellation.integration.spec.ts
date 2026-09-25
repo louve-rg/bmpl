@@ -100,15 +100,36 @@ afterAll(async () => {
 });
 
 describe('who may cancel', () => {
-  it('a foreign order reads exactly like a missing one', async () => {
+  it('a foreign order reads exactly like a missing one — and, underneath, is truly untouched', async () => {
     const vendor = await makeVendor();
-    const { orderId } = await checkout([vendor], { pay: false });
+    const { orderId } = await checkout([vendor], { pay: true });
     const stranger = await registerCustomer(`ocx_s${uniq()}@example.bz`);
+    const before = await orderRow(orderId);
+    const invBefore = await ctx.prisma.inventory.findFirstOrThrow({ where: { productId: vendor.productId } });
+
     const foreign = await cancel(stranger, orderId);
     const missing = await cancel(stranger, 'nonexistent00000000000000');
     expect(foreign.status).toBe(404);
     expect(missing.status).toBe(404);
     expect(foreign.body).toEqual(missing.body);
+
+    // The HTTP shape alone is not proof: `cancelOwn`'s own ownership check
+    // must be what stops the stranger, not a coincidental 404 thrown by the
+    // unrelated `getOwn` tail-call AFTER the cancellation already committed.
+    // If it were the latter, the order and its money would be for-real
+    // cancelled underneath a response that looks identical to a clean 404 —
+    // so assert the victim's order, vendor-orders and payment/hold state are
+    // byte-for-byte unchanged, not just that the HTTP status matches.
+    const after = await orderRow(orderId);
+    expect(after.status).toBe(before.status);
+    expect(after.reservationsReleasedAt).toEqual(before.reservationsReleasedAt);
+    expect(after.vendorOrders.map((vo) => ({ id: vo.id, status: vo.status }))).toEqual(
+      before.vendorOrders.map((vo) => ({ id: vo.id, status: vo.status })),
+    );
+    expect(after.payment!.status).toBe(before.payment!.status);
+    expect(await releaseTxnCount(before.payment!.id)).toBe(0);
+    const invAfter = await ctx.prisma.inventory.findFirstOrThrow({ where: { productId: vendor.productId } });
+    expect(invAfter.reserved).toBe(invBefore.reserved);
   });
 });
 
