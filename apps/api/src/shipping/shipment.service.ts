@@ -880,11 +880,38 @@ export class ShipmentService {
    * has to produce it. Same shape as the delivery PIN that already works, and the
    * same lockout after repeated failures — a code that can be guessed forever is
    * not a verification.
+   *
+   * A code is necessary but is not sufficient. When a leg has an assigned
+   * courier (`assignedDriverProfileId` — FIRST_MILE, LAST_MILE, DIRECT), only
+   * the CURRENTLY assigned driver may complete it, even with the right code:
+   * a code overheard, read off a screen or otherwise learned by someone else
+   * with handoff-completing access must not let them stand in for the courier.
+   * Reassignment already updates `assignedDriverProfileId`, so checking the
+   * live column (not who was assigned when the PIN was minted) is what makes a
+   * legitimate reassignment work for the newly assigned driver with no special
+   * case. A leg with no assigned courier — terminal-to-terminal movement inside
+   * a carrier's own operated leg (`LINE_HAUL`) — DOES still reach this method:
+   * `ShippingProviderLegsController` exposes depart/arrive only (handoff is
+   * deliberately left to the receiving desk's `logistics.operate` route, the
+   * same one courier legs use), so a `LINE_HAUL` leg's handoff is completed
+   * right here too. It has nothing to check by construction, not by never
+   * arriving: `assignedDriverProfileId` is only ever set for a driver-carried
+   * leg (FIRST_MILE/LAST_MILE/DIRECT), so it stays null for every LINE_HAUL leg
+   * regardless of who completes the handoff, and the check above is correctly
+   * a no-op for it — the same code-only proof the receiving desk always did.
+   *
+   * The wrong-courier and wrong-code cases are folded into ONE failure path on
+   * purpose: same message shape, same shared attempt counter. Telling the two
+   * apart from the outside — "the code would have worked" vs "you're not the
+   * courier" — is exactly the leak the fix exists to close, and a separate,
+   * uncounted wrong-courier path would let anyone with the code (right or
+   * wrong) probe for who the assigned courier is without ever touching the
+   * lockout.
    */
   private async verifyHandoffPin(legId: string, pin: string, actor: { userId: string }) {
     const leg = await this.prisma.shipmentLeg.findUnique({
       where: { id: legId },
-      select: { id: true, shipmentId: true, status: true, handoffPin: true, handoffPinAttempts: true },
+      select: { id: true, shipmentId: true, status: true, handoffPin: true, handoffPinAttempts: true, assignedDriverProfileId: true },
     });
     if (!leg) throw new NotFoundException('Leg not found.');
     if (leg.status !== 'IN_PROGRESS') {
@@ -893,12 +920,19 @@ export class ShipmentService {
     if (leg.handoffPinAttempts >= MAX_PIN_ATTEMPTS) {
       throw new ForbiddenException('Too many incorrect codes. An administrator has to confirm this handoff.');
     }
-    if (!leg.handoffPin || pin !== leg.handoffPin) {
+
+    const isAssignedCourier =
+      leg.assignedDriverProfileId == null ||
+      (await this.prisma.driverProfile.findUnique({ where: { userId: actor.userId }, select: { id: true } }))?.id ===
+        leg.assignedDriverProfileId;
+    const codeMatches = !!leg.handoffPin && pin === leg.handoffPin;
+
+    if (!isAssignedCourier || !codeMatches) {
       await this.prisma.shipmentLeg.update({ where: { id: leg.id }, data: { handoffPinAttempts: { increment: 1 } } });
       await this.audit.record({
         action: 'SHIPMENT_LEG_HANDOFF_PIN_FAILED',
         actorId: actor.userId,
-        newValue: { legId: leg.id, shipmentId: leg.shipmentId },
+        newValue: { legId: leg.id, shipmentId: leg.shipmentId, wrongCourier: !isAssignedCourier },
       });
       const left = MAX_PIN_ATTEMPTS - leg.handoffPinAttempts - 1;
       throw new BadRequestException(
