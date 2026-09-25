@@ -8,6 +8,7 @@ import {
   findCourierLane,
   isLocalDoorToDoor,
   planRoute,
+  userInitials,
   LEG_KIND_LABELS,
   SHIPMENT_STATUS_LABELS,
   SHIPPING_SERVICE_DESCRIPTIONS,
@@ -38,6 +39,8 @@ import { PaymentsService } from '../payments/payments.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { ShipmentDispatchService } from './shipment-dispatch.service';
 import { assertOperableProvider } from './provider-eligibility';
+import { StorageService } from '../storage/storage.service';
+import { AVATAR_SELECT, publicAvatarUrl } from '../common/avatar-url';
 
 /** Minor units go out as numbers; see the note in logistics-network.service.ts. */
 const money = (v: bigint) => Number(v);
@@ -53,6 +56,21 @@ const SHIPMENT_INCLUDE = {
       originHub: { select: { id: true, code: true, name: true, city: true, instructions: true, latitude: true, longitude: true } },
       destinationHub: { select: { id: true, code: true, name: true, city: true, instructions: true, latitude: true, longitude: true } },
       route: { select: { id: true, carrierName: true, carrierPhone: true, scheduleNote: true } },
+      // Who is actually going to show up (BMPL-180). The same DriverVehicle link
+      // the driver app already uses to run the leg — no new record, just a
+      // customer-safe read of it. See courierSummary()/courierVehicleSummary()
+      // for exactly which fields survive into the customer-facing payload.
+      assignedDriver: {
+        select: {
+          displayName: true,
+          ratingAverage: true,
+          completedDeliveries: true,
+          user: { select: { firstName: true, lastName: true, ...AVATAR_SELECT } },
+        },
+      },
+      assignedVehicle: {
+        select: { type: true, make: true, model: true, color: true, licencePlate: true, photoKeys: true, approvalStatus: true },
+      },
     },
   },
   custodyEvents: { orderBy: { occurredAt: 'asc' } },
@@ -82,6 +100,7 @@ export class ShipmentService {
     private readonly dispatch: ShipmentDispatchService,
     private readonly payments: PaymentsService,
     private readonly settlement: SettlementService,
+    private readonly storage: StorageService,
   ) {}
 
   /* -------------------------------------------------------------- quoting */
@@ -629,7 +648,7 @@ export class ShipmentService {
       include: SHIPMENT_INCLUDE,
       take: 50,
     });
-    return rows.map((s) => this.serialize(s, { audience: 'CUSTOMER' }));
+    return Promise.all(rows.map((s) => this.serialize(s, { audience: 'CUSTOMER' })));
   }
 
   /**
@@ -1485,10 +1504,48 @@ export class ShipmentService {
    * appears for a customer except on the leg that ends at their own door — that
    * is the code THEY hold, and the driver has to produce it.
    */
-  private serialize(s: ShipmentWithGraph, opts: { audience: 'CUSTOMER' | 'STAFF' }) {
+  private async serialize(s: ShipmentWithGraph, opts: { audience: 'CUSTOMER' | 'STAFF' }) {
     const endsAtHub = !needsLastMile(s.service);
     const live = s.legs.filter((l) => l.status !== 'CANCELLED');
     const current = live.find((l) => l.status !== 'COMPLETED') ?? null;
+    const legs = await Promise.all(
+      s.legs.map(async (l) => ({
+        id: l.id,
+        sequence: l.sequence,
+        kind: l.kind,
+        mode: l.mode,
+        modeLabel: TRANSPORT_MODE_LABELS[l.mode],
+        status: l.status,
+        description: l.description,
+        priceMinor: money(l.priceMinor),
+        durationMinutes: l.durationMinutes,
+        isCurrent: current?.id === l.id,
+        originHub: l.originHub,
+        destinationHub: l.destinationHub,
+        carrier: l.carrierName ?? l.route?.carrierName ?? null,
+        carrierBookingRef: opts.audience === 'STAFF' ? l.carrierBookingRef : null,
+        // Ops must be able to see whether a courier leg already has a driver
+        // before acting on it; the courier pipeline is staff-facing detail.
+        courierStatus: opts.audience === 'STAFF' ? l.courierStatus : null,
+        assignedDriverProfileId: opts.audience === 'STAFF' ? l.assignedDriverProfileId : null,
+        // Who is actually showing up, once someone is (BMPL-180). Same shape and
+        // same privacy line as the marketplace delivery card in
+        // delivery-core.service.ts: face + first name + rating, never legal
+        // name, phone, or documents. Null before a courier is assigned.
+        courier: this.courierSummary(l.assignedDriver),
+        courierVehicle: await this.courierVehicleSummary(l.assignedVehicle),
+        scheduleNote: l.route?.scheduleNote ?? null,
+        scheduledDepartureAt: l.scheduledDepartureAt,
+        departedAt: l.departedAt,
+        arrivedAt: l.arrivedAt,
+        startedAt: l.startedAt,
+        completedAt: l.completedAt,
+        handoffReceivedByName: l.handoffReceivedByName,
+        exceptionReason: l.exceptionReason,
+        // The customer's own door code, and nothing else.
+        handoffPin: this.pinFor(l, opts.audience, endsAtHub),
+      })),
+    );
 
     return {
       id: s.id,
@@ -1536,36 +1593,7 @@ export class ShipmentService {
         instructions: s.destinationInstructions,
       },
       currentLegSequence: current?.sequence ?? null,
-      legs: s.legs.map((l) => ({
-        id: l.id,
-        sequence: l.sequence,
-        kind: l.kind,
-        mode: l.mode,
-        modeLabel: TRANSPORT_MODE_LABELS[l.mode],
-        status: l.status,
-        description: l.description,
-        priceMinor: money(l.priceMinor),
-        durationMinutes: l.durationMinutes,
-        isCurrent: current?.id === l.id,
-        originHub: l.originHub,
-        destinationHub: l.destinationHub,
-        carrier: l.carrierName ?? l.route?.carrierName ?? null,
-        carrierBookingRef: opts.audience === 'STAFF' ? l.carrierBookingRef : null,
-        // Ops must be able to see whether a courier leg already has a driver
-        // before acting on it; the courier pipeline is staff-facing detail.
-        courierStatus: opts.audience === 'STAFF' ? l.courierStatus : null,
-        assignedDriverProfileId: opts.audience === 'STAFF' ? l.assignedDriverProfileId : null,
-        scheduleNote: l.route?.scheduleNote ?? null,
-        scheduledDepartureAt: l.scheduledDepartureAt,
-        departedAt: l.departedAt,
-        arrivedAt: l.arrivedAt,
-        startedAt: l.startedAt,
-        completedAt: l.completedAt,
-        handoffReceivedByName: l.handoffReceivedByName,
-        exceptionReason: l.exceptionReason,
-        // The customer's own door code, and nothing else.
-        handoffPin: this.pinFor(l, opts.audience, endsAtHub),
-      })),
+      legs,
       custody: s.custodyEvents.map((c) => ({
         id: c.id,
         fromHolder: c.fromHolder,
@@ -1577,6 +1605,44 @@ export class ShipmentService {
         occurredAt: c.occurredAt,
       })),
     };
+  }
+
+  /**
+   * Who is showing up (BMPL-180). Display name + rating only — never legal
+   * name, phone, or licence/document fields, mirroring driverSummary() in
+   * delivery-core.service.ts. The face is the same APPROVED + moderated user
+   * avatar the marketplace delivery card already uses, not
+   * DriverProfile.profilePhotoKey (an unmoderated verification document).
+   * Null whenever no driver is assigned yet.
+   */
+  private courierSummary(d: ShipmentWithGraph['legs'][number]['assignedDriver']) {
+    if (!d) return null;
+    return {
+      displayName: d.displayName,
+      ratingAverage: d.ratingAverage,
+      completedDeliveries: d.completedDeliveries,
+      initials: userInitials(d.user.firstName, d.user.lastName),
+      avatarUrl: publicAvatarUrl(d.user),
+    };
+  }
+
+  /**
+   * What they are driving. Type/make/model/colour/plate are shown whenever a
+   * vehicle is assigned; the photo is shown only once the vehicle itself has
+   * cleared admin review (`approvalStatus === 'APPROVED'`) — the same
+   * "verified before it's shown" line the avatar uses, applied to the one
+   * DriverVehicle field with no existing moderation gate of its own.
+   */
+  private async courierVehicleSummary(v: ShipmentWithGraph['legs'][number]['assignedVehicle']) {
+    if (!v) return null;
+    const key = v.approvalStatus === 'APPROVED' ? v.photoKeys[0] : undefined;
+    const photoUrl = key
+      ? await this.storage
+          .presignDownload(key, 'private')
+          .then((r) => r.url)
+          .catch(() => null)
+      : null;
+    return { type: v.type, make: v.make, model: v.model, color: v.color, licencePlate: v.licencePlate, photoUrl };
   }
 
   private pinFor(l: { kind: string; status: string; handoffPin: string | null }, audience: 'CUSTOMER' | 'STAFF', endsAtHub: boolean): string | null {
