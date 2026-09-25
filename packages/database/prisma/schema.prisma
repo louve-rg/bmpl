@@ -333,6 +333,10 @@ enum AuditAction {
   SHIPMENT_LEG_DRIVER_ASSIGNED
   SHIPMENT_LEG_OPERATOR_ASSIGNED
   SHIPPING_PROVIDER_MEMBER_CHANGED
+  // BMPL-186: one action for the route schedule surface (weekly pattern set,
+  // exception added, exception removed) - the verb travels in newValue,
+  // same precedent as the two actions immediately above.
+  ROUTE_SCHEDULE_CHANGED
   WALLET_TOPUP_POSTED
   WALLET_ACCOUNT_STATUS_CHANGED
   WALLET_TEST_FUNDING_GRANTED
@@ -564,6 +568,7 @@ model User {
   // Shipping carrier organizations (BMPL-137)
   shippingProviderProfile    ShippingProviderProfile?  @relation("UserShippingProviderProfile")
   shippingProviderMemberships ShippingProviderMember[] @relation("ShippingProviderMemberships")
+  routeScheduleExceptionsMade RouteScheduleException[] @relation("RouteScheduleExceptionCreatedBy")
 
   @@index([status])
   @@index([district])
@@ -4365,10 +4370,89 @@ model LogisticsRoute {
   updatedAt        DateTime      @updatedAt
 
   legs ShipmentLeg[]
+  operatingDays      RouteOperatingDay[]
+  scheduleExceptions RouteScheduleException[]
 
   @@index([originHubId, isActive])
   @@index([destinationHubId, isActive])
   @@map("logistics_routes")
+}
+
+/// Whether a scheduled transport route actually runs, and how well, on a given
+/// day - the CONFIGURATION half of BMPL-186. `scheduleNote` above is a label
+/// nobody can check by machine ("Mon/Wed/Fri 09:00"); these two models make
+/// "does it run today" answerable. The DATA stays gated exactly like hubs,
+/// routes and courier lanes - a route ships with no weekly pattern and no
+/// exceptions, and a real one is entered by the carrier that operates it, not
+/// invented here.
+enum ServiceOperatingStatus {
+  /// The carrier's normal day.
+  OPERATING
+  /// Running, but not at normal capacity - the carrier's own note (below)
+  /// explains why. Never inferred; always the carrier saying so.
+  REDUCED
+  /// No departures that day.
+  NOT_OPERATING
+}
+
+/// The carrier's own default weekly pattern for one route - which days it
+/// normally runs. Shape deliberately mirrors VendorOpeningHours (one row per
+/// day-of-week, unique on the owning entity + dayOfWeek): BMPL-177 (terminal /
+/// business operating hours) should reuse this SAME shape for LogisticsHub and
+/// VendorProfile rather than inventing a second one, even though hubs and
+/// vendors sit on different tables and a hub cares about open/close TIMES
+/// where a route only cares about whether it runs at all.
+///
+/// Absence of a row for a day-of-week means OPERATING - a route with no
+/// configured pattern behaves exactly as it does today (undocumented, assumed
+/// to run). A RouteScheduleException below overrides this default for one
+/// specific date.
+model RouteOperatingDay {
+  id        String                 @id @default(cuid())
+  routeId   String
+  route     LogisticsRoute         @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  dayOfWeek Int // 0=Sunday .. 6=Saturday, matches VendorOpeningHours
+  status    ServiceOperatingStatus @default(OPERATING)
+  /// The carrier's own words for a REDUCED day - "one vessel in maintenance".
+  /// Never BML-authored copy; shown back as the carrier's own note.
+  note      String?
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  @@unique([routeId, dayOfWeek])
+  @@map("route_operating_days")
+}
+
+/// A date-specific override of the weekly default above - a known future
+/// closure, a holiday the carrier observes, a one-off reduced run. Absence of
+/// a row for a date means the weekly default applies (or OPERATING, absent
+/// that too). Dates, reasons and holidays are entered by the carrier that
+/// holds them; nothing here invents a Belize holiday calendar (root
+/// CLAUDE.md sec 5 - no fabricated schedules).
+model RouteScheduleException {
+  id              String                 @id @default(cuid())
+  routeId         String
+  route           LogisticsRoute         @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  /// A calendar date, not a timestamp - a route either runs on 2026-12-25 or
+  /// it does not; there is no time-of-day component to a service-level
+  /// exception (an individual departure's time lives on PassengerTrip /
+  /// ShipmentLeg, not here).
+  date            DateTime               @db.Date
+  status          ServiceOperatingStatus
+  /// Why - "Independence Day", "vessel in dry dock" - the carrier's own words,
+  /// recorded truthfully. Never populated with an assumed public holiday.
+  reason          String?
+  /// Who entered it. SetNull: the exception is a fact about the route that
+  /// outlives the account of whoever recorded it.
+  createdByUserId String?
+  createdBy       User?                  @relation("RouteScheduleExceptionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  // One decision per route per date - a second exception for the same day
+  // would just be an opportunity for it to disagree with the first.
+  @@unique([routeId, date])
+  @@map("route_schedule_exceptions")
 }
 
 /// Two towns one courier can drive between.
