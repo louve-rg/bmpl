@@ -2,8 +2,10 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { TRANSPORT_MODE_LABELS } from '@bmpl/shared';
 import type {
   AddProviderMemberInput,
+  AddRouteScheduleExceptionInput,
   LegDepartInput,
   SetLegOperatorInput,
+  SetRouteWeeklyScheduleInput,
   ShippingProviderProfileInput,
   ShippingProviderProfileUpdateInput,
 } from '@bmpl/validation';
@@ -11,6 +13,7 @@ import type { Prisma, ShippingProviderProfile } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { ShipmentService } from './shipment.service';
+import { LogisticsNetworkService } from './logistics-network.service';
 import { assertOperableProvider } from './provider-eligibility';
 
 /** What the carrier-operator projection is allowed to read. Nothing more is loaded. */
@@ -40,6 +43,7 @@ export class ShippingProviderService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly shipments: ShipmentService,
+    private readonly network: LogisticsNetworkService,
   ) {}
 
   /* ---- profile (self-service; the passenger mirror) ---------------------- */
@@ -284,6 +288,63 @@ export class ShippingProviderService {
     const leg = await this.prisma.shipmentLeg.findUnique({ where: { id: legId }, select: { operatedByProviderId: true } });
     if (!leg || !leg.operatedByProviderId || !orgIds.includes(leg.operatedByProviderId)) {
       throw new NotFoundException('Leg not found.');
+    }
+  }
+
+  /* ---- the carrier's own route schedule (BMPL-186) ------------------------ */
+
+  /** Every route the standing operator on this route is one of my organizations. */
+  async myRoutes(userId: string) {
+    const orgIds = await this.myOrgIds(userId);
+    const routes = await this.prisma.logisticsRoute.findMany({
+      where: { operatedByProviderId: { in: orgIds } },
+      orderBy: { id: 'asc' },
+      include: {
+        originHub: { select: { id: true, code: true, name: true, city: true } },
+        destinationHub: { select: { id: true, code: true, name: true, city: true } },
+      },
+    });
+    return routes.map((r) => ({
+      id: r.id,
+      mode: r.mode,
+      isActive: r.isActive,
+      scheduleNote: r.scheduleNote,
+      origin: { id: r.originHub.id, code: r.originHub.code, name: r.originHub.name, city: r.originHub.city },
+      destination: { id: r.destinationHub.id, code: r.destinationHub.code, name: r.destinationHub.name, city: r.destinationHub.city },
+    }));
+  }
+
+  async myRouteSchedule(userId: string, routeId: string) {
+    await this.assertMyRoute(userId, routeId);
+    return this.network.routeSchedule(routeId);
+  }
+
+  async setMyRouteWeeklySchedule(userId: string, routeId: string, input: SetRouteWeeklyScheduleInput) {
+    await this.assertMyRoute(userId, routeId);
+    return this.network.setWeeklySchedule(routeId, input, userId);
+  }
+
+  async addMyRouteScheduleException(userId: string, routeId: string, input: AddRouteScheduleExceptionInput) {
+    await this.assertMyRoute(userId, routeId);
+    return this.network.addScheduleException(routeId, input, userId);
+  }
+
+  async removeMyRouteScheduleException(userId: string, routeId: string, exceptionId: string) {
+    await this.assertMyRoute(userId, routeId);
+    return this.network.removeScheduleException(routeId, exceptionId, userId);
+  }
+
+  /**
+   * 404 on a cross-org route id, exactly like assertMyLeg: a carrier probing
+   * a route id that is real but not theirs learns nothing more than if it did
+   * not exist. This is the ONE check that makes the whole schedule surface
+   * safe - every method above calls it before touching a row.
+   */
+  private async assertMyRoute(userId: string, routeId: string) {
+    const orgIds = await this.myOrgIds(userId);
+    const route = await this.prisma.logisticsRoute.findUnique({ where: { id: routeId }, select: { operatedByProviderId: true } });
+    if (!route || !route.operatedByProviderId || !orgIds.includes(route.operatedByProviderId)) {
+      throw new NotFoundException('Route not found.');
     }
   }
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
   assignShipmentLegSchema,
@@ -13,8 +13,10 @@ import {
   legHandoffSchema,
   reassignShipmentLegSchema,
   addProviderMemberSchema,
+  addRouteScheduleExceptionSchema,
   resolveLegExceptionSchema,
   setLegOperatorSchema,
+  setRouteWeeklyScheduleSchema,
   shippingProviderProfileSchema,
   shippingProviderProfileUpdateSchema,
   shipmentListSchema,
@@ -34,8 +36,10 @@ import {
   type LegHandoffInput,
   type ReassignShipmentLegInput,
   type AddProviderMemberInput,
+  type AddRouteScheduleExceptionInput,
   type ResolveLegExceptionInput,
   type SetLegOperatorInput,
+  type SetRouteWeeklyScheduleInput,
   type ShippingProviderProfileInput,
   type ShippingProviderProfileUpdateInput,
   type ShipmentListInput,
@@ -251,6 +255,41 @@ export class AdminLogisticsController {
   @Patch('routes/:id')
   updateRoute(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(updateRouteSchema)) dto: UpdateRouteInput) {
     return this.network.updateRoute(id, dto, u.userId);
+  }
+
+  /**
+   * Whether a route runs on a given day (BMPL-186) — admin acts on ANY route,
+   * under the same permissions as the route CRUD immediately above (deciding
+   * who runs a route and deciding when it runs are the same job). The
+   * carrier's own equivalent is ShippingProviderRoutesController, scoped to
+   * routes they operate; both call the SAME LogisticsNetworkService methods.
+   */
+  @RequirePermission('logistics.read')
+  @Get('routes/:id/schedule')
+  routeSchedule(@Param('id') id: string) {
+    return this.network.routeSchedule(id);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Put('routes/:id/schedule')
+  setRouteSchedule(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(setRouteWeeklyScheduleSchema)) dto: SetRouteWeeklyScheduleInput) {
+    return this.network.setWeeklySchedule(id, dto, u.userId);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Post('routes/:id/schedule/exceptions')
+  addRouteScheduleException(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(addRouteScheduleExceptionSchema)) dto: AddRouteScheduleExceptionInput,
+  ) {
+    return this.network.addScheduleException(id, dto, u.userId);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Delete('routes/:id/schedule/exceptions/:exceptionId')
+  removeRouteScheduleException(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('exceptionId') exceptionId: string) {
+    return this.network.removeScheduleException(id, exceptionId, u.userId);
   }
 
   /**
@@ -492,5 +531,54 @@ export class ShippingProviderLegsController {
   @Post('legs/:id/arrive')
   arrive(@CurrentUser() u: AuthContext, @Param('id') id: string) {
     return this.providers.arrive(u.userId, id);
+  }
+}
+
+/**
+ * Carrier route-schedule self-service (BMPL-186).
+ *
+ * Whether a scheduled service actually runs on a given date — the
+ * CONFIGURATION capability the owner authorized while the DATA stays gated
+ * (no route is seeded with a real pattern anywhere in this change). Same two
+ * gates as the legs surface above: the APPROVED SHIPPING_PROVIDER role, and
+ * an ACTIVE membership in the organization that operates the route, resolved
+ * fresh per request. A cross-org route id answers 404 exactly like a missing
+ * one — assertMyRoute is the ONE place that boundary is enforced, and every
+ * method here goes through it before touching a row.
+ */
+@Roles('SHIPPING_PROVIDER')
+@Controller('shipping/provider')
+export class ShippingProviderRoutesController {
+  constructor(private readonly providers: ShippingProviderService) {}
+
+  /** Every route my organizations operate — how a carrier finds the route id to configure. */
+  @Get('routes')
+  myRoutes(@CurrentUser() u: AuthContext) {
+    return this.providers.myRoutes(u.userId);
+  }
+
+  @Get('routes/:id/schedule')
+  schedule(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.providers.myRouteSchedule(u.userId, id);
+  }
+
+  /** Replaces the whole weekly pattern - see setRouteWeeklyScheduleSchema for why. */
+  @Put('routes/:id/schedule')
+  setSchedule(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(setRouteWeeklyScheduleSchema)) dto: SetRouteWeeklyScheduleInput) {
+    return this.providers.setMyRouteWeeklySchedule(u.userId, id, dto);
+  }
+
+  @Post('routes/:id/schedule/exceptions')
+  addScheduleException(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(addRouteScheduleExceptionSchema)) dto: AddRouteScheduleExceptionInput,
+  ) {
+    return this.providers.addMyRouteScheduleException(u.userId, id, dto);
+  }
+
+  @Delete('routes/:id/schedule/exceptions/:exceptionId')
+  removeScheduleException(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('exceptionId') exceptionId: string) {
+    return this.providers.removeMyRouteScheduleException(u.userId, id, exceptionId);
   }
 }
