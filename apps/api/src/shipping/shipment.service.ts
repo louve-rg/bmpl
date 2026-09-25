@@ -890,10 +890,15 @@ export class ShipmentService {
    * live column (not who was assigned when the PIN was minted) is what makes a
    * legitimate reassignment work for the newly assigned driver with no special
    * case. A leg with no assigned courier — terminal-to-terminal movement inside
-   * a carrier's own operated leg — has nothing to check here by construction:
-   * that leg progresses through depart/arrive, never this method (see
-   * `ShippingProviderLegsController`), so `assignedDriverProfileId` being null
-   * is exactly the terminal exception, not a gap.
+   * a carrier's own operated leg (`LINE_HAUL`) — DOES still reach this method:
+   * `ShippingProviderLegsController` exposes depart/arrive only (handoff is
+   * deliberately left to the receiving desk's `logistics.operate` route, the
+   * same one courier legs use), so a `LINE_HAUL` leg's handoff is completed
+   * right here too. It has nothing to check by construction, not by never
+   * arriving: `assignedDriverProfileId` is only ever set for a driver-carried
+   * leg (FIRST_MILE/LAST_MILE/DIRECT), so it stays null for every LINE_HAUL leg
+   * regardless of who completes the handoff, and the check above is correctly
+   * a no-op for it — the same code-only proof the receiving desk always did.
    *
    * The wrong-courier and wrong-code cases are folded into ONE failure path on
    * purpose: same message shape, same shared attempt counter. Telling the two
