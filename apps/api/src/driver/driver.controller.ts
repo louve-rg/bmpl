@@ -5,6 +5,7 @@ import {
   driverProfileSchema,
   driverProfileUpdateSchema,
   driverServiceAreasSchema,
+  driverServiceCitiesSchema,
   driverVehicleSchema,
   driverVehicleUpdateSchema,
   imagePresignSchema,
@@ -12,6 +13,7 @@ import {
   type DriverProfileInput,
   type DriverProfileUpdateInput,
   type DriverServiceAreasInput,
+  type DriverServiceCitiesInput,
   type DriverVehicleInput,
   type DriverVehicleUpdateInput,
   type ImagePresignInput,
@@ -113,6 +115,18 @@ export class DriverController {
   @Put('service-areas')
   setServiceAreas(@CurrentUser() u: AuthContext, @Body(ZodBody(driverServiceAreasSchema)) body: DriverServiceAreasInput) {
     return this.driver.setServiceAreas(u.userId, body);
+  }
+
+  /** Narrow one already-served district to specific cities (empty list widens
+   *  it back to the whole district). `:district` must be one of DISTRICTS —
+   *  validated in the service, since it is a path param rather than a body. */
+  @Put('service-areas/:district/cities')
+  setServiceCities(
+    @CurrentUser() u: AuthContext,
+    @Param('district') district: string,
+    @Body(ZodBody(driverServiceCitiesSchema)) body: DriverServiceCitiesInput,
+  ) {
+    return this.driver.setServiceCities(u.userId, district, body);
   }
 
   @Patch('availability')

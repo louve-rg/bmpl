@@ -66,6 +66,15 @@ export const driverServiceAreasSchema = z.object({
 });
 export type DriverServiceAreasInput = z.infer<typeof driverServiceAreasSchema>;
 
+/** Narrows one already-served district down to specific towns/cities (replaces
+ *  the current set for that district; empty list widens back to the whole
+ *  district). Free text, matching the convention `LogisticsHub.city` already
+ *  uses — never a fabricated or enumerated place list. */
+export const driverServiceCitiesSchema = z.object({
+  cities: z.array(z.string().trim().min(1).max(120)).max(50),
+});
+export type DriverServiceCitiesInput = z.infer<typeof driverServiceCitiesSchema>;
+
 /** Availability change (driver may set OFFLINE/ONLINE/UNAVAILABLE; SUSPENDED is admin-only). */
 export const driverAvailabilitySchema = z.object({
   availability: z.enum(DRIVER_SETTABLE_AVAILABILITY),
