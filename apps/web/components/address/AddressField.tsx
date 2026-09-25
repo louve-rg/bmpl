@@ -4,13 +4,15 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { DISTRICTS, DISTRICT_LABELS, type Coordinates } from '@bmpl/shared';
 import {
+  addressGap,
   switchMethod,
+  toSavedAddressPayload,
   type AddressMethod,
   type AddressValue,
   type ContactLevel,
   type SavedAddress,
 } from '../../lib/address';
-import { api } from '../../lib/api';
+import { api, type ApiError } from '../../lib/api';
 import { Alert, Spinner } from '../ui';
 
 // The map is client-only and heavy. It must not be in the first paint of a form
@@ -80,6 +82,15 @@ export function AddressField({
   const [savedError, setSavedError] = useState<string | null>(null);
   const [loadingSaved, setLoadingSaved] = useState(false);
 
+  // The star: saving a brand-new address into the book, and editing/removing one
+  // already picked from it.
+  const [labelDraft, setLabelDraft] = useState('');
+  const [savingAddress, setSavingAddress] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState('');
+  const [editingAddress, setEditingAddress] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
   const set = useCallback(
     (patch: Partial<AddressValue>) => onChange({ ...value, ...patch }),
     [onChange, value],
@@ -118,6 +129,86 @@ export function AddressField({
       latitude: row.latitude,
       longitude: row.longitude,
     });
+    setEditLabel(row.label);
+    setEditError(null);
+  }
+
+  function apiErrorMessage(e: unknown, fallback: string): string {
+    const err = e as ApiError;
+    return err.errors?.[0]?.message ?? err.message ?? fallback;
+  }
+
+  // Re-fetches the whole list from the server after any mutation, rather than
+  // patching it locally, so the dropdown never shows a partial book (e.g. only
+  // the row just created) if the customer had not opened it yet this session.
+  async function refreshSaved() {
+    try {
+      setSaved(await api.get<SavedAddress[]>('/addresses'));
+    } catch {
+      setSavedError('We could not refresh your saved addresses just now.');
+    }
+  }
+
+  /**
+   * The star affordance. Available the moment an address is complete enough to
+   * save — typed, pinned or a mix — not only once it has already been chosen
+   * from the dropdown. `savedAddressId` (identity), never the address text, is
+   * what decides whether the star is already filled in.
+   */
+  async function saveToAddressBook() {
+    if (!labelDraft.trim()) {
+      setSaveError('Name this address — "Home" or "Office" is fine.');
+      return;
+    }
+    setSavingAddress(true);
+    setSaveError(null);
+    try {
+      const created = await api.post<SavedAddress>('/addresses', toSavedAddressPayload(value, labelDraft));
+      await refreshSaved();
+      set({ savedAddressId: created.id });
+      setEditLabel(created.label);
+      setLabelDraft('');
+    } catch (e) {
+      setSaveError(apiErrorMessage(e, 'Could not save this address just now.'));
+    } finally {
+      setSavingAddress(false);
+    }
+  }
+
+  /** Pushes the form's current fields back onto the saved entry it came from. */
+  async function updateSavedAddress() {
+    if (!value.savedAddressId) return;
+    if (!editLabel.trim()) {
+      setEditError('This address needs a name.');
+      return;
+    }
+    setEditingAddress(true);
+    setEditError(null);
+    try {
+      await api.patch<SavedAddress>(`/addresses/${value.savedAddressId}`, toSavedAddressPayload(value, editLabel));
+      await refreshSaved();
+    } catch (e) {
+      setEditError(apiErrorMessage(e, 'Could not update this address just now.'));
+    } finally {
+      setEditingAddress(false);
+    }
+  }
+
+  async function removeSavedAddress() {
+    if (!value.savedAddressId) return;
+    if (!window.confirm('Remove this address from your saved addresses? This cannot be undone.')) return;
+    const id = value.savedAddressId;
+    setEditingAddress(true);
+    setEditError(null);
+    try {
+      await api.del(`/addresses/${id}`);
+      set({ savedAddressId: null });
+      await refreshSaved();
+    } catch (e) {
+      setEditError(apiErrorMessage(e, 'Could not remove this address just now.'));
+    } finally {
+      setEditingAddress(false);
+    }
   }
 
   const coords: Coordinates | null =
@@ -235,6 +326,46 @@ export function AddressField({
                   </option>
                 ))}
               </select>
+
+              {value.savedAddressId && (
+                <div className="mt-3 rounded-bmpl-md border border-slate-200 bg-slate-50 p-3">
+                  <Labelled id={`${uid}-edit-label`} label="Label" required>
+                    <input
+                      id={`${uid}-edit-label`}
+                      value={editLabel}
+                      onChange={(e) => setEditLabel(e.target.value)}
+                      className={inputClass}
+                    />
+                  </Labelled>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Editing the fields above changes what this saved address will hold — nothing is written back
+                    until you save.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-4">
+                    <button
+                      type="button"
+                      onClick={updateSavedAddress}
+                      disabled={editingAddress}
+                      className="text-sm font-semibold text-belize-blue hover:underline disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      {editingAddress ? 'Saving…' : 'Save changes to this address'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={removeSavedAddress}
+                      disabled={editingAddress}
+                      className="text-sm font-semibold text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      Remove from saved addresses
+                    </button>
+                  </div>
+                  {editError && (
+                    <Alert tone="warning" className="mt-2">
+                      {editError}
+                    </Alert>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -363,6 +494,49 @@ export function AddressField({
           </Alert>
         )}
       </div>
+
+      {/* ------------------------------------------------- save to address book
+          The star. Available the moment the address is complete, whichever way it
+          was given — not only once it has been picked from the saved list. It
+          shows filled the instant `savedAddressId` is set (an actual reference,
+          never a guess from matching the typed text against a label) and stays
+          filled if the customer keeps editing an address they picked from the
+          book, because moving the pin does not un-save it. */}
+      {contact !== 'NONE' && (
+        <div className="mt-4 rounded-bmpl-md border border-dashed border-slate-300 p-3">
+          {value.savedAddressId ? (
+            <p className="flex items-center gap-2 text-sm font-medium text-belize-navy">
+              <span aria-hidden="true" className="text-amber-500">★</span>
+              Saved in your address book{savedRow ? ` as “${savedRow.label}”` : ''}.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <span aria-hidden="true" className="text-lg leading-none text-slate-400">☆</span>
+              <input
+                value={labelDraft}
+                onChange={(e) => setLabelDraft(e.target.value)}
+                placeholder="Name it — Home, Office…"
+                aria-label="Name for this saved address"
+                className={`${inputClass} max-w-[200px]`}
+                disabled={savingAddress}
+              />
+              <button
+                type="button"
+                onClick={saveToAddressBook}
+                disabled={savingAddress || !labelDraft.trim() || addressGap(value, { contact }) != null}
+                className="text-sm font-semibold text-belize-blue hover:underline disabled:cursor-not-allowed disabled:text-slate-400"
+              >
+                {savingAddress ? 'Saving…' : 'Save to my addresses'}
+              </button>
+            </div>
+          )}
+          {saveError && (
+            <Alert tone="warning" className="mt-2">
+              {saveError}
+            </Alert>
+          )}
+        </div>
+      )}
 
       {showInstructions && (
         <div className="mt-4">

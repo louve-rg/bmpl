@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { UNLOCATABLE_ADDRESS_MESSAGE } from '@bmpl/shared';
-import { addressGap, emptyAddress, switchMethod, type AddressValue } from './address';
+import { addressGap, emptyAddress, switchMethod, toSavedAddressPayload, type AddressValue } from './address';
 
 /**
  * The reported defect, as a test.
@@ -101,5 +101,28 @@ describe('switchMethod — changing your mind leaves no stale answer behind', ()
   it('leaves no stale validation state behind: pin → type asks for the street, not the pin', () => {
     const afterSwitch = switchMethod(pinned({ latitude: null, longitude: null }), 'TYPED');
     expect(addressGap(afterSwitch, { contact: 'ESSENTIAL' })).toBe(UNLOCATABLE_ADDRESS_MESSAGE);
+  });
+});
+
+describe('toSavedAddressPayload — what the star affordance sends the address book', () => {
+  it('trims text fields and the given label', () => {
+    const payload = toSavedAddressPayload(typed({ addressLine2: '  Apt 2  ', instructions: '  Blue gate  ' }), '  Home  ');
+    expect(payload.label).toBe('Home');
+    expect(payload.addressLine2).toBe('Apt 2');
+    expect(payload.instructions).toBe('Blue gate');
+  });
+
+  it('turns a blank optional field into null rather than an empty string', () => {
+    const payload = toSavedAddressPayload(typed({ email: '', company: '', addressLine2: '', instructions: '' }), 'Home');
+    expect(payload.email).toBeNull();
+    expect(payload.company).toBeNull();
+    expect(payload.addressLine2).toBeNull();
+    expect(payload.instructions).toBeNull();
+  });
+
+  it('carries the pin through untouched', () => {
+    const payload = toSavedAddressPayload(pinned(), 'Home');
+    expect(payload.latitude).toBe(17.4995);
+    expect(payload.longitude).toBe(-88.1976);
   });
 });
