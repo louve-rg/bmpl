@@ -20,7 +20,10 @@ export const SERVICE_OPERATING_STATUS_LABELS: Record<ServiceOperatingStatus, str
 };
 
 export interface WeeklyOperatingDay {
-  /** 0=Sunday .. 6=Saturday, matching VendorOpeningHours and JS Date#getUTCDay(). */
+  /**
+   * 0=Sunday .. 6=Saturday, matching VendorOpeningHours - but resolved against
+   * Belize LOCAL time (see `toBelizeLocal` below), not JS Date#getUTCDay().
+   */
   dayOfWeek: number;
   status: ServiceOperatingStatus;
   note?: string | null;
@@ -40,12 +43,42 @@ export interface ScheduleResolution {
   note: string | null;
 }
 
-const dateKey = (d: Date): string => {
+/**
+ * Belize is UTC-6 year-round - it has never observed daylight saving - so a
+ * fixed offset correctly answers "what is Belize's local calendar date/weekday
+ * right now" without pulling in an IANA timezone database for a
+ * framework-free package (root CLAUDE.md sec 2). If Belize is ever confirmed
+ * to have adopted DST, this constant is the one place that would need to
+ * become a real zone lookup.
+ */
+const BELIZE_UTC_OFFSET_MINUTES = -6 * 60;
+
+/**
+ * Shifts a UTC instant so that calling the `getUTC*` family on the result
+ * yields Belize LOCAL calendar values instead of UTC ones. This is the ONLY
+ * place a date crosses from "instant" to "Belize calendar day" - every caller
+ * of `resolveScheduleStatus` passes a raw instant (e.g. `new Date()`) and
+ * relies on this conversion happening here, once, rather than converting
+ * (or forgetting to convert) at each call site.
+ */
+const toBelizeLocal = (d: Date): Date => new Date(d.getTime() + BELIZE_UTC_OFFSET_MINUTES * 60_000);
+
+/**
+ * Reads y/m/d off a Date via the UTC accessors with NO further shift. This is
+ * for `ScheduleException.date`, which is a pure calendar date (Prisma
+ * `@db.Date`, normalised to UTC midnight by the caller that stored it - see
+ * `addScheduleException`) - it names a day, not an instant, so it must NOT go
+ * through `toBelizeLocal` a second time or it would land on the wrong day.
+ */
+const calendarDateKey = (d: Date): string => {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
   const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 };
+
+/** Which Belize calendar day a real instant (e.g. `new Date()`) falls on. */
+const instantDateKey = (d: Date): string => calendarDateKey(toBelizeLocal(d));
 
 /**
  * Whether a route/service operates on `date`, and how.
@@ -60,12 +93,12 @@ export function resolveScheduleStatus(
   weeklyPattern: readonly WeeklyOperatingDay[],
   exceptions: readonly ScheduleException[],
 ): ScheduleResolution {
-  const target = dateKey(date);
-  const exception = exceptions.find((e) => dateKey(e.date) === target);
+  const target = instantDateKey(date);
+  const exception = exceptions.find((e) => calendarDateKey(e.date) === target);
   if (exception) {
     return { status: exception.status, isException: true, note: exception.reason ?? null };
   }
-  const weekday = date.getUTCDay();
+  const weekday = toBelizeLocal(date).getUTCDay();
   const day = weeklyPattern.find((d) => d.dayOfWeek === weekday);
   if (day) {
     return { status: day.status, isException: false, note: day.note ?? null };

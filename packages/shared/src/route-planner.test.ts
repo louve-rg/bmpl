@@ -347,8 +347,18 @@ describe('determinism', () => {
  * as it always has. Everything else here is the opt-in behaviour on top.
  */
 describe('route schedules (BMPL-196)', () => {
-  const sunday = new Date('2026-11-01T00:00:00.000Z'); // a Sunday
-  const wednesday = new Date('2026-11-04T00:00:00.000Z'); // a Wednesday
+  // Belize is a fixed UTC-6 with no daylight saving (see service-schedule.ts).
+  // `belizeInstant` names a moment by its Belize local wall-clock date/hour;
+  // `calendarDate` names a pure calendar date the way RouteScheduleException's
+  // date column stores one. Using plain UTC-midnight Dates for both, as this
+  // fixture used to, was the exact BMPL-196 bug: it made every "today" here
+  // silently mean the PRIOR Belize calendar day.
+  const belizeInstant = (year: number, month: number, day: number, hour = 12): Date =>
+    new Date(Date.UTC(year, month - 1, day, hour + 6, 0, 0));
+  const calendarDate = (year: number, month: number, day: number): Date => new Date(Date.UTC(year, month - 1, day));
+
+  const sunday = belizeInstant(2026, 11, 1); // Belize noon, a Sunday
+  const wednesday = belizeInstant(2026, 11, 4); // Belize noon, a Wednesday
 
   it('plans exactly as before when no date is supplied at all', () => {
     const r = planRoute({ origin: at('PLA'), destination: at('SPA'), service: 'HUB_TO_HUB' }, HUBS, ROUTES, COURIER);
@@ -393,7 +403,9 @@ describe('route schedules (BMPL-196)', () => {
         ? {
             ...r,
             weeklyPattern: [{ dayOfWeek: 0, status: 'OPERATING' as const }],
-            scheduleExceptions: [{ date: sunday, status: 'NOT_OPERATING' as const, reason: 'Synthetic test holiday' }],
+            scheduleExceptions: [
+              { date: calendarDate(2026, 11, 1), status: 'NOT_OPERATING' as const, reason: 'Synthetic test holiday' },
+            ],
           }
         : r,
     );
