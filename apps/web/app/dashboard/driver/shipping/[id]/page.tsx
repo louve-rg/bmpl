@@ -41,6 +41,8 @@ interface ShippingJob {
   addressUnlocked: boolean;
   pickup: Place | null;
   dropoff: Place | null;
+  /** The whole known journey, sender door to recipient door — not just this leg's two ends (BMPL-190). */
+  routeStops: Place[];
   parcel: { description: string | null; pieces: number; weightGrams: number | null };
   feeMinor: number;
   handoffCodeHeldBy: string;
@@ -206,17 +208,21 @@ export default function DriverShippingJobPage() {
 
             {/* The map draws only the pins the server sent: a terminal is a
                 public place and arrives pinned before acceptance; a door end
-                stays area-only until the driver commits (BMPL-136). Stops are
-                lettered A, B… in order, with an expand control for a
+                stays area-only until the driver commits (BMPL-136). Stops span
+                the WHOLE shipment — sender door, every real hub it actually
+                routes through, recipient door (BMPL-190) — not just this
+                leg's own two ends, so a first-mile driver can see there's a
+                hub-to-hub hop ahead even though only their own end unlocks.
+                Lettered A, B… in order, with an expand control for a
                 full-screen view (BMPL-182) — still behind a tap so the tiles
                 never load for a driver on data who just wants the words. */}
             {(() => {
-              const points = tripMapPoints(job.pickup, job.dropoff);
+              const points = tripMapPoints(job.routeStops);
               if (points.length === 0) return null;
               return (
                 <Card className="p-4 sm:p-5">
                   <ExpandableRouteMap points={points} title={`${job.reference} · route`} />
-                  {points.length < 2 && !job.addressUnlocked && (
+                  {points.length < job.routeStops.length && !job.addressUnlocked && (
                     <p className="mt-2 text-xs text-slate-500">The other end shows its area above until you accept.</p>
                   )}
                 </Card>
