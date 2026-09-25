@@ -82,9 +82,9 @@ async function makeDriver(opts: { isTest?: boolean; districts?: string[] } = {})
 
 async function seedNetwork() {
   const hubs = [
-    { code: 'MUN', name: 'Belize City Municipal Airstrip', district: 'BELIZE', city: 'Belize City', fee: 1000 },
-    { code: 'SPA', name: 'San Pedro Airstrip', district: 'BELIZE', city: 'San Pedro', fee: 1500 },
-    { code: 'PLA', name: 'Placencia Airstrip', district: 'STANN_CREEK', city: 'Placencia', fee: 1200 },
+    { code: 'MUN', name: 'Belize City Municipal Airstrip', district: 'BELIZE', city: 'Belize City', fee: 1000, latitude: 17.5169, longitude: -88.1874 },
+    { code: 'SPA', name: 'San Pedro Airstrip', district: 'BELIZE', city: 'San Pedro', fee: 1500, latitude: 17.9086, longitude: -87.9598 },
+    { code: 'PLA', name: 'Placencia Airstrip', district: 'STANN_CREEK', city: 'Placencia', fee: 1200, latitude: 16.5225, longitude: -88.3653 },
   ];
   hub = {};
   for (const h of hubs) {
@@ -92,7 +92,7 @@ async function seedNetwork() {
     // dropped courierFeeMinor — the defect fixed on this branch).
     const r = await post(admin, 'admin/logistics/hubs', {
       code: h.code, name: h.name, type: 'AIRSTRIP', district: h.district, city: h.city, modes: ['LAND', 'AIR'],
-      courierFeeMinor: h.fee,
+      courierFeeMinor: h.fee, latitude: h.latitude, longitude: h.longitude,
     });
     expect(r.status).toBe(201);
     hub[h.code] = r.body.id;
@@ -521,6 +521,104 @@ describe('what the driver is shown', () => {
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
     const job = await get(driver.cookies, `driver/shipping-jobs/${first.id}`);
     expect(JSON.stringify(job.body)).not.toContain(await pinOf(first.id));
+  });
+});
+
+/**
+ * BMPL-190: the map's A/B/C/D lettering can only show what the driver payload
+ * actually sends. `routeStops` is the real sender->hub->hub->recipient
+ * journey — every leg of the WHOLE shipment, not just this driver's own —
+ * so the frontend has more than two points to letter when the network
+ * actually routes through more than one hub. The residential-privacy
+ * boundary (BMPL-136/182) must survive unchanged: a door end reveals only
+ * when it is THIS driver's own leg's own door, and only once accepted.
+ */
+describe('the route map shows the real journey (BMPL-190)', () => {
+  it('a DIRECT leg has no hub at all — routeStops stays a genuine two-stop A/B journey, and building it never throws', async () => {
+    const driver = await makeDriver();
+    const fee = await request(ctx.server)
+      .patch('/api/admin/ops/settings')
+      .set('Cookie', admin)
+      .send({ localCourierFeeMinor: 1500, localCourierFeeTestMinor: 1500, localCourierMinutes: 60 });
+    expect(fee.status).toBe(200);
+    const s = await book({
+      service: 'DOOR_TO_DOOR',
+      origin: { district: 'BELIZE', city: 'Belize City', address: '1 North Front Street', name: 'Sender', phone: '501-2223333', latitude: 17.5, longitude: -88.2 },
+      destination: { district: 'BELIZE', city: 'Belize City', address: '9 Albert Street', name: 'Recipient', phone: '501-4445555', latitude: 17.51, longitude: -88.19 },
+      description: 'One envelope',
+    });
+    const [direct] = await legs(s.id);
+    expect(direct!.kind).toBe('DIRECT');
+
+    const offered = await get(driver.cookies, `driver/shipping-jobs/${direct!.id}`);
+    expect(offered.status).toBe(200);
+    expect(offered.body.routeStops).toHaveLength(2);
+    expect(offered.body.routeStops.every((p: { kind: string }) => p.kind === 'ADDRESS')).toBe(true);
+    // Never padded to look like a bigger journey than it is.
+    expect(offered.body.routeStops.some((p: { kind: string }) => p.kind === 'HUB')).toBe(false);
+  });
+
+  it('sends the real sender-hub-hub-hub-recipient stops to the first-mile driver, deduping the hub each leg shares with its neighbour', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+
+    const offered = await get(driver.cookies, `driver/shipping-jobs/${first.id}`);
+    expect(offered.status).toBe(200);
+    const stops = offered.body.routeStops;
+    // Sender door, the three real hubs the network actually routes through
+    // (Placencia -> Belize City Municipal -> San Pedro), recipient door. Each
+    // hub is one stop, not two, even though it borders two legs.
+    expect(stops.map((p: { kind: string }) => p.kind)).toEqual(['ADDRESS', 'HUB', 'HUB', 'HUB', 'ADDRESS']);
+    expect(stops.map((p: { name: string | null }) => p.name)).toEqual([
+      null, 'Placencia Airstrip', 'Belize City Municipal Airstrip', 'San Pedro Airstrip', null,
+    ]);
+    // Sender is this driver's own door — locked until they accept.
+    expect(stops[0].pinnedLocation).toBeNull();
+    // Every hub is a public place regardless of anyone's acceptance.
+    expect(stops[1].pinnedLocation).not.toBeNull();
+    expect(stops[2].pinnedLocation).not.toBeNull();
+    expect(stops[3].pinnedLocation).not.toBeNull();
+    // Recipient's door belongs to a leg this driver never touches.
+    expect(stops[4].pinnedLocation).toBeNull();
+
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    const taken = await get(driver.cookies, `driver/shipping-jobs/${first.id}`);
+    const takenStops = taken.body.routeStops;
+    // Now this driver's OWN door — the sender's — unlocks.
+    expect(takenStops[0].pinnedLocation).not.toBeNull();
+    expect(takenStops[0].name).toBe('Sender');
+    // But the recipient's door — a different leg, a different driver, maybe
+    // not even assigned yet — still never does. Acceptance of THIS leg does
+    // not unlock a door on another one.
+    expect(takenStops[4].pinnedLocation).toBeNull();
+    expect(takenStops[4].name).toBeNull();
+  });
+
+  it('gates the same journey the other way for the last-mile driver — the far door is the one that unlocks', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const rows = await legs(s.id);
+    await driveCourierLeg(driver, rows.find((l) => l.kind === 'FIRST_MILE')!.id);
+    for (const lh of rows.filter((l) => l.kind === 'LINE_HAUL')) await flyLineHaul(lh.id);
+    const last = (await legs(s.id)).find((l) => l.kind === 'LAST_MILE')!;
+
+    const offered = await get(driver.cookies, `driver/shipping-jobs/${last.id}`);
+    const stops = offered.body.routeStops;
+    expect(stops.map((p: { kind: string }) => p.kind)).toEqual(['ADDRESS', 'HUB', 'HUB', 'HUB', 'ADDRESS']);
+    // The sender's door belongs to a leg this driver never touches — always area-only.
+    expect(stops[0].pinnedLocation).toBeNull();
+    // The recipient's door is THIS driver's own — but they have not accepted yet.
+    expect(stops[4].pinnedLocation).toBeNull();
+
+    await post(driver.cookies, `driver/shipping-jobs/${last.id}/accept`);
+    const taken = await get(driver.cookies, `driver/shipping-jobs/${last.id}`);
+    const takenStops = taken.body.routeStops;
+    expect(takenStops[4].pinnedLocation).not.toBeNull();
+    expect(takenStops[4].name).toBe('Recipient');
+    // The far door is still never this driver's to see, accepted or not.
+    expect(takenStops[0].pinnedLocation).toBeNull();
+    expect(takenStops[0].name).toBeNull();
   });
 });
 
