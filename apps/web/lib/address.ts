@@ -58,6 +58,45 @@ export interface SavedAddress {
   isDefault: boolean;
 }
 
+/** The shape the address-book API takes for a create or an update. */
+export interface SavedAddressPayload {
+  label: string;
+  fullName: string;
+  phone: string;
+  email: string | null;
+  company: string | null;
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string;
+  district: string;
+  instructions: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/**
+ * Turn a form's current address into what the address book stores.
+ *
+ * Used both to save a brand-new address (the star affordance) and to push an
+ * edit back to one already saved — one mapping, so the two never drift apart.
+ */
+export function toSavedAddressPayload(v: AddressValue, label: string): SavedAddressPayload {
+  return {
+    label: label.trim(),
+    fullName: v.fullName.trim(),
+    phone: v.phone.trim(),
+    email: v.email.trim() || null,
+    company: v.company.trim() || null,
+    addressLine1: v.addressLine1.trim(),
+    addressLine2: v.addressLine2.trim() || null,
+    city: v.city.trim(),
+    district: v.district,
+    instructions: v.instructions.trim() || null,
+    latitude: v.latitude,
+    longitude: v.longitude,
+  };
+}
+
 export const emptyAddress = (method: AddressMethod = 'TYPED'): AddressValue => ({
   method,
   savedAddressId: null,
