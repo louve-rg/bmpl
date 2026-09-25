@@ -40,10 +40,20 @@ const post = (c: string[], p: string, b: object = {}) => request(ctx.server).pos
 const put = (c: string[], p: string, b: object = {}) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
 const del = (c: string[], p: string) => request(ctx.server).delete(`/api/${p}`).set('Cookie', c);
 
-/** Today's calendar date as the resolver sees it - UTC year-month-day, no time-of-day. */
-const isoToday = () => new Date().toISOString().slice(0, 10);
-/** Today's weekday, 0=Sunday..6=Saturday, matching the weekly-pattern column. */
-const todayWeekday = () => new Date().getUTCDay();
+/**
+ * Belize is a fixed UTC-6 with no daylight saving, and `resolveScheduleStatus`
+ * (packages/shared/src/service-schedule.ts) resolves "today" against Belize
+ * local time, not UTC (BMPL-196). These mirror that same fixed-offset
+ * conversion so the fixtures agree with the resolver about what day it is -
+ * before the fix, both this file and the resolver used a plain UTC read, so
+ * the two were internally consistent but wrong for six hours of every
+ * Belize evening, and nothing ever reddened.
+ */
+const BELIZE_OFFSET_MS = -6 * 60 * 60 * 1000;
+/** Today's calendar date as the resolver sees it - Belize local year-month-day. */
+const isoToday = () => new Date(Date.now() + BELIZE_OFFSET_MS).toISOString().slice(0, 10);
+/** Today's weekday, 0=Sunday..6=Saturday, in Belize local time, matching the weekly-pattern column. */
+const todayWeekday = () => new Date(Date.now() + BELIZE_OFFSET_MS).getUTCDay();
 
 async function registerCustomer(email: string) {
   const reg = await request(ctx.server)
@@ -224,5 +234,26 @@ describe('departing a line-haul leg consults the schedule', () => {
     expect((await post(admin, `admin/logistics/legs/${legId}/depart`, {})).status).toBe(400);
     expect((await del(admin, `admin/logistics/routes/${routeId}/schedule/exceptions/${added.body.id}`)).status).toBe(200);
     expect((await post(admin, `admin/logistics/legs/${legId}/depart`, {})).status).toBe(201);
+  });
+
+  it('a closed route cannot be bypassed via /start - the sibling endpoint an adversarial review found (BMPL-196)', async () => {
+    const { routeId, originHubId, destinationHubId } = await seedRoute();
+    const { legId } = await bookAndFundedCustomer(originHubId, destinationHubId);
+    await post(admin, `admin/logistics/routes/${routeId}/schedule/exceptions`, {
+      date: isoToday(), status: 'NOT_OPERATING', reason: 'Synthetic test closure',
+    });
+
+    const departed = await post(admin, `admin/logistics/legs/${legId}/depart`, {});
+    expect(departed.status).toBe(400);
+
+    // Before the fix, /start had no leg.kind check and consulted no schedule
+    // at all, so this SAME leg could be advanced to IN_PROGRESS through the
+    // sibling endpoint even though /depart correctly refused it.
+    const started = await post(admin, `admin/logistics/legs/${legId}/start`, {});
+    expect(started.status).toBe(400);
+
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.status).toBe('READY');
+    expect(leg.startedAt).toBeNull();
   });
 });

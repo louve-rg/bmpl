@@ -13,10 +13,13 @@
  * `startLeg` — so this suite exercises the admin desk, the same surface
  * BMPL-174's suite used to prove the handoff gap.
  *
- * Same owner rule, same owner exception: a LINE_HAUL leg never has an
- * assigned courier (see BMPL-174's suite and PROVEN FACTS), so the new check
- * is correctly a no-op there and terminal-to-terminal pickup stays
- * unaffected.
+ * A LINE_HAUL leg never has an assigned courier, which is exactly what made
+ * `startLeg`'s owner check a silent no-op for one - and, until BMPL-196,
+ * `startLeg` had no `leg.kind` check at all, so that same admin desk could
+ * advance a transport leg straight to IN_PROGRESS through `/start`,
+ * bypassing the route-schedule guard `/depart` enforces on the identical leg.
+ * Test 3 below now pins the fix: `/start` refuses a LINE_HAUL leg outright,
+ * and terminal-to-terminal pickup happens through `/depart` instead.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -227,7 +230,7 @@ describe('starting a leg checks the courier, not just an admin permission (BMPL-
     expect(after.startedAt).toBeNull();
   });
 
-  it('3 · terminal-to-terminal (LINE_HAUL) pickup stays unaffected — no assigned courier, nothing to check', async () => {
+  it('3 · terminal-to-terminal (LINE_HAUL) pickup happens through /depart, never /start (BMPL-196)', async () => {
     const sender = await fundedSender();
     const courier = await makeCourier('STANN_CREEK');
     const shipment = await book(sender.cookies);
@@ -245,11 +248,18 @@ describe('starting a leg checks the courier, not just an admin permission (BMPL-
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Terminal desk' })).status).toBe(201);
     expect((await legRow(lineHaul.id)).status).toBe('READY');
 
-    // An ops account with logistics.operate and NO driver profile at all still
-    // starts it: the terminal exception is real and unaffected by the new check.
+    // BMPL-196: an ops account with logistics.operate and NO driver profile
+    // used to be able to advance this LINE_HAUL leg straight to IN_PROGRESS
+    // via /start, bypassing the route-schedule guard /depart enforces on the
+    // identical leg. /start now refuses a transport leg outright.
     const deskClerk = await makeOperator(['logistics.operate']);
-    const r = await post(deskClerk.cookies, `admin/logistics/legs/${lineHaul.id}/start`, {});
-    expect(r.status).toBe(201);
+    const blocked = await post(deskClerk.cookies, `admin/logistics/legs/${lineHaul.id}/start`, {});
+    expect(blocked.status).toBe(400);
+    expect((await legRow(lineHaul.id)).status).toBe('READY');
+
+    // The one real way a transport leg leaves READY still works.
+    const departed = await post(deskClerk.cookies, `admin/logistics/legs/${lineHaul.id}/depart`, {});
+    expect(departed.status).toBe(201);
     expect((await legRow(lineHaul.id)).status).toBe('IN_PROGRESS');
   });
 
