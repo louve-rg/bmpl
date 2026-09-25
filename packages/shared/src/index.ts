@@ -17,6 +17,7 @@ export * from './driver';
 export * from './passenger';
 export * from './dispatch';
 export * from './shipping';
+export * from './service-schedule';
 export * from './route-planner';
 export * from './dispatch-ranking';
 export * from './driver-queue';

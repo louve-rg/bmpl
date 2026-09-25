@@ -6,6 +6,7 @@ import {
   OUT_OF_BOUNDS_MESSAGE,
   needsFirstMile,
   needsLastMile,
+  SERVICE_OPERATING_STATUSES,
   SHIPPING_SERVICES,
   TRANSPORT_MODES,
   UNLOCATABLE_ADDRESS_MESSAGE,
@@ -380,6 +381,48 @@ export const setLegOperatorSchema = z.object({
   providerProfileId: cuidSchema.nullable(),
 });
 export type SetLegOperatorInput = z.infer<typeof setLegOperatorSchema>;
+
+/**
+ * Route operating-day configuration (BMPL-186). Same schema whether the
+ * caller is the carrier (own route only, checked in the service) or admin
+ * acting on any route - one rule, not two that could disagree.
+ */
+export const serviceOperatingStatusSchema = z.enum(SERVICE_OPERATING_STATUSES);
+
+const routeOperatingDayInputSchema = z.object({
+  dayOfWeek: z.number().int().min(0, '0=Sunday .. 6=Saturday.').max(6, '0=Sunday .. 6=Saturday.'),
+  status: serviceOperatingStatusSchema,
+  note: z.string().trim().max(300).optional(),
+});
+
+/**
+ * The whole weekly pattern, replaced in one call: partial submission would
+ * leave stale days from a previous version sitting alongside new ones,
+ * silently disagreeing about the same day-of-week.
+ */
+export const setRouteWeeklyScheduleSchema = z.object({
+  days: z
+    .array(routeOperatingDayInputSchema)
+    .min(1, 'At least one day is required.')
+    .max(7)
+    .refine((days) => new Set(days.map((d) => d.dayOfWeek)).size === days.length, {
+      message: 'Each day of the week may appear only once.',
+    }),
+});
+export type SetRouteWeeklyScheduleInput = z.infer<typeof setRouteWeeklyScheduleSchema>;
+
+/**
+ * A single date-specific override - a known future closure, a holiday the
+ * carrier observes, a one-off reduced run. `date` truncates to a calendar
+ * date server-side; there is no time-of-day component to a service-level
+ * exception.
+ */
+export const addRouteScheduleExceptionSchema = z.object({
+  date: z.coerce.date(),
+  status: serviceOperatingStatusSchema,
+  reason: z.string().trim().max(300).optional(),
+});
+export type AddRouteScheduleExceptionInput = z.infer<typeof addRouteScheduleExceptionSchema>;
 
 /** Admin adds (or reactivates) a member of a carrier organization. */
 export const addProviderMemberSchema = z.object({

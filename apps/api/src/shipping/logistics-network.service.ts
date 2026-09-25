@@ -1,9 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PlannerHub, PlannerLane, PlannerRoute } from '@bmpl/shared';
 import type {
+  AddRouteScheduleExceptionInput,
   CreateCourierLaneInput,
   CreateHubInput,
   CreateRouteInput,
+  SetRouteWeeklyScheduleInput,
   UpdateCourierLaneInput,
   UpdateHubInput,
   UpdateRouteInput,
@@ -281,6 +283,91 @@ export class LogisticsNetworkService {
       }
     }
   }
+
+  /* ------------------------------------------------------ route schedule */
+  //
+  // Whether a route actually runs on a given day (BMPL-186). Ownership is
+  // NOT checked here - this service is the shared write path for both the
+  // admin console (logistics.manage, any route) and the carrier's own
+  // surface (ShippingProviderService.assertMyRoute, called before every one
+  // of these). Two callers, one rule, so a carrier and an admin can never
+  // see the schedule computed two different ways.
+
+  async routeSchedule(routeId: string) {
+    const route = await this.prisma.logisticsRoute.findUnique({ where: { id: routeId }, select: { id: true } });
+    if (!route) throw new NotFoundException('Route not found.');
+    const [days, exceptions] = await Promise.all([
+      this.prisma.routeOperatingDay.findMany({ where: { routeId }, orderBy: { dayOfWeek: 'asc' } }),
+      this.prisma.routeScheduleException.findMany({ where: { routeId }, orderBy: { date: 'asc' } }),
+    ]);
+    return {
+      routeId,
+      days: days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note })),
+      exceptions: exceptions.map((e) => this.exceptionOut(e)),
+    };
+  }
+
+  /**
+   * Replaces the ENTIRE weekly pattern in one transaction - deleting what is
+   * not resubmitted rather than patching day-by-day, so a stale day from a
+   * previous version can never sit alongside new ones (the same "partial
+   * submission disagrees with itself" reasoning as the Zod schema's
+   * duplicate-day refusal).
+   */
+  async setWeeklySchedule(routeId: string, input: SetRouteWeeklyScheduleInput, actorId: string) {
+    const route = await this.prisma.logisticsRoute.findUnique({ where: { id: routeId }, select: { id: true } });
+    if (!route) throw new NotFoundException('Route not found.');
+    const before = await this.prisma.routeOperatingDay.findMany({ where: { routeId } });
+    await this.prisma.$transaction([
+      this.prisma.routeOperatingDay.deleteMany({ where: { routeId } }),
+      this.prisma.routeOperatingDay.createMany({
+        data: input.days.map((d) => ({ routeId, dayOfWeek: d.dayOfWeek, status: d.status, note: d.note ?? null })),
+      }),
+    ]);
+    await this.audit.record({
+      action: 'ROUTE_SCHEDULE_CHANGED',
+      actorId,
+      previousValue: { routeId, verb: 'WEEKLY_PATTERN_SET', days: before.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status })) },
+      newValue: { routeId, verb: 'WEEKLY_PATTERN_SET', days: input.days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status })) },
+    });
+    return this.routeSchedule(routeId);
+  }
+
+  /** One date-specific override. Re-submitting the same date replaces it. */
+  async addScheduleException(routeId: string, input: AddRouteScheduleExceptionInput, actorId: string) {
+    const route = await this.prisma.logisticsRoute.findUnique({ where: { id: routeId }, select: { id: true } });
+    if (!route) throw new NotFoundException('Route not found.');
+    const date = new Date(Date.UTC(input.date.getUTCFullYear(), input.date.getUTCMonth(), input.date.getUTCDate()));
+    const exception = await this.prisma.routeScheduleException.upsert({
+      where: { routeId_date: { routeId, date } },
+      create: { routeId, date, status: input.status, reason: input.reason ?? null, createdByUserId: actorId },
+      update: { status: input.status, reason: input.reason ?? null, createdByUserId: actorId },
+    });
+    await this.audit.record({
+      action: 'ROUTE_SCHEDULE_CHANGED',
+      actorId,
+      newValue: { routeId, verb: 'EXCEPTION_SET', exceptionId: exception.id, date: date.toISOString(), status: exception.status },
+    });
+    return this.exceptionOut(exception);
+  }
+
+  /** Removing an exception falls back to the weekly default for that date, not to OPERATING. */
+  async removeScheduleException(routeId: string, exceptionId: string, actorId: string) {
+    const exception = await this.prisma.routeScheduleException.findUnique({ where: { id: exceptionId } });
+    if (!exception || exception.routeId !== routeId) throw new NotFoundException('Exception not found.');
+    await this.prisma.routeScheduleException.delete({ where: { id: exceptionId } });
+    await this.audit.record({
+      action: 'ROUTE_SCHEDULE_CHANGED',
+      actorId,
+      previousValue: { routeId, verb: 'EXCEPTION_REMOVED', exceptionId, date: exception.date.toISOString(), status: exception.status },
+    });
+    return { removed: true };
+  }
+
+  private exceptionOut(e: { id: string; date: Date; status: string; reason: string | null }) {
+    return { id: e.id, date: e.date.toISOString().slice(0, 10), status: e.status, reason: e.reason };
+  }
+
   /* -------------------------------------------------------- courier lanes */
 
   /**

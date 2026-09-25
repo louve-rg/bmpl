@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, Spinner } from '../../../../components/ui';
+import { RouteScheduleEditor } from './schedule-editor';
 
 /**
  * The transport services between terminals.
@@ -54,6 +55,7 @@ export default function RoutesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [scheduleFor, setScheduleFor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -195,10 +197,16 @@ export default function RoutesPage() {
                     {r.scheduleNote ? ` · ${r.scheduleNote}` : ''}
                   </p>
                 </div>
-                <Button variant="outline" onClick={() => void toggle(r)} className="shrink-0">
-                  {r.isActive ? 'Suspend' : 'Resume'}
-                </Button>
+                <div className="flex shrink-0 gap-2">
+                  <Button variant="outline" onClick={() => setScheduleFor(scheduleFor === r.id ? null : r.id)}>
+                    {scheduleFor === r.id ? 'Hide schedule' : 'Schedule'}
+                  </Button>
+                  <Button variant="outline" onClick={() => void toggle(r)}>
+                    {r.isActive ? 'Suspend' : 'Resume'}
+                  </Button>
+                </div>
               </div>
+              {scheduleFor === r.id && <RouteScheduleEditor routeId={r.id} />}
             </Card>
           ))}
         </div>

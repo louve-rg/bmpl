@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { UNLOCATABLE_ADDRESS_MESSAGE } from '@bmpl/shared';
 import {
+  addRouteScheduleExceptionSchema,
   createHubSchema,
   createRouteSchema,
   createShipmentSchema,
+  setRouteWeeklyScheduleSchema,
   shipmentListSchema,
   shipmentQuoteSchema,
   updateHubSchema,
@@ -25,6 +27,55 @@ describe('shipmentListSchema', () => {
     expect(parsed.page).toBe(1);
     expect(parsed.pageSize).toBe(20);
     expect(parsed.includeTest).toBeUndefined();
+  });
+});
+
+describe('setRouteWeeklyScheduleSchema', () => {
+  it('accepts a full weekly pattern with a REDUCED note', () => {
+    const parsed = setRouteWeeklyScheduleSchema.parse({
+      days: [
+        { dayOfWeek: 0, status: 'REDUCED', note: 'Synthetic test note: one vessel only' },
+        { dayOfWeek: 3, status: 'NOT_OPERATING' },
+      ],
+    });
+    expect(parsed.days).toHaveLength(2);
+  });
+
+  it('refuses a duplicate day-of-week - two rows for the same day could disagree', () => {
+    expect(() =>
+      setRouteWeeklyScheduleSchema.parse({
+        days: [
+          { dayOfWeek: 1, status: 'OPERATING' },
+          { dayOfWeek: 1, status: 'NOT_OPERATING' },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it('refuses a day-of-week outside 0-6', () => {
+    expect(() => setRouteWeeklyScheduleSchema.parse({ days: [{ dayOfWeek: 7, status: 'OPERATING' }] })).toThrow();
+  });
+
+  it('refuses an unknown status - never a fabricated fourth state', () => {
+    expect(() =>
+      setRouteWeeklyScheduleSchema.parse({ days: [{ dayOfWeek: 0, status: 'CLOSED_FOR_HOLIDAY' }] }),
+    ).toThrow();
+  });
+});
+
+describe('addRouteScheduleExceptionSchema', () => {
+  it('accepts a synthetic date-specific exception', () => {
+    const parsed = addRouteScheduleExceptionSchema.parse({
+      date: '2026-12-25',
+      status: 'NOT_OPERATING',
+      reason: 'Synthetic test holiday - not a real BML closure',
+    });
+    expect(parsed.status).toBe('NOT_OPERATING');
+    expect(parsed.date).toBeInstanceOf(Date);
+  });
+
+  it('requires a real status', () => {
+    expect(() => addRouteScheduleExceptionSchema.parse({ date: '2026-12-25' })).toThrow();
   });
 });
 

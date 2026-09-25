@@ -205,6 +205,8 @@ export const AUDIT_ACTIONS = [
   // PASSENGER_AFFILIATION_CHANGED precedent.
   'SHIPMENT_LEG_OPERATOR_ASSIGNED',
   'SHIPPING_PROVIDER_MEMBER_CHANGED',
+  // BMPL-186: route schedule surface (weekly pattern, date exceptions).
+  'ROUTE_SCHEDULE_CHANGED',
   // ---- Wallet activation ----
   'WALLET_TOPUP_POSTED',
   // One action for the wallet lock/unlock fraud control — direction and
