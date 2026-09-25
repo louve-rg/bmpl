@@ -363,4 +363,38 @@ describe('shipment pickup photo (BMPL-178)', () => {
     expect(JSON.stringify(track.body)).not.toContain('pickupPhotoUrl');
     expect(JSON.stringify(track.body)).not.toContain(key);
   });
+
+  it('10 · PER-LEG, NOT POOLED: a photo attached to one leg does not appear on its sibling legs of the same shipment', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const firstMile = await assignedFirstMile(shipment.id, courier);
+
+    // This DOOR_TO_DOOR route (Placencia -> Belize City -> San Pedro) genuinely
+    // produces multiple legs — FIRST_MILE, two LINE_HAUL hops, and LAST_MILE —
+    // so there is at least one sibling leg to prove stays untouched.
+    const allLegs = await legsOf(shipment.id);
+    expect(allLegs.length).toBeGreaterThan(1);
+
+    const key = await uploadPickupPhoto(courier, firstMile.id);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup-photo/confirm`, { photoKeys: [key] })).status).toBe(201);
+
+    // A regression that pools every leg's photo keys into one shared URL list
+    // (handed identically to every leg) would still pass test 2's assertions
+    // on the photographed leg alone — only checking the siblings catches it.
+    const senderView = await get(sender.cookies, `shipping/${shipment.reference}`);
+    expect(senderView.status).toBe(200);
+    const senderSiblingLegs = senderView.body.legs.filter((l: { id: string }) => l.id !== firstMile.id);
+    expect(senderSiblingLegs.length).toBe(allLegs.length - 1);
+    for (const l of senderSiblingLegs) expect(l.pickupPhotoUrls).toEqual([]);
+
+    const staffView = await get(admin, `admin/logistics/shipments/${shipment.reference}`);
+    expect(staffView.status).toBe(200);
+    const staffSiblingLegs = staffView.body.legs.filter((l: { id: string }) => l.id !== firstMile.id);
+    expect(staffSiblingLegs.length).toBe(allLegs.length - 1);
+    for (const l of staffSiblingLegs) expect(l.pickupPhotoUrls).toEqual([]);
+
+    // And the photographed leg itself still carries its own photo.
+    expect(senderView.body.legs.find((l: { id: string }) => l.id === firstMile.id).pickupPhotoUrls).toHaveLength(1);
+  });
 });
