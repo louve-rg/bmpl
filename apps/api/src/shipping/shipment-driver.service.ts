@@ -32,10 +32,15 @@ interface Actor {
   sessionId?: string | null;
 }
 
+/** A hub end is a public place — always safe to show in full, exact coordinates included. */
+const HUB_SELECT = {
+  id: true, name: true, city: true, district: true, addressLine1: true, latitude: true, longitude: true, instructions: true, contactPhone: true,
+} satisfies Prisma.LogisticsHubSelect;
+
 /** Everything a driver could need about their leg, in one read. */
 const LEG_INCLUDE = {
-  originHub: { select: { id: true, name: true, city: true, district: true, addressLine1: true, latitude: true, longitude: true, instructions: true, contactPhone: true } },
-  destinationHub: { select: { id: true, name: true, city: true, district: true, addressLine1: true, latitude: true, longitude: true, instructions: true, contactPhone: true } },
+  originHub: { select: HUB_SELECT },
+  destinationHub: { select: HUB_SELECT },
   shipment: {
     select: {
       id: true,
@@ -50,10 +55,19 @@ const LEG_INCLUDE = {
       originLatitude: true, originLongitude: true, originInstructions: true,
       destinationName: true, destinationPhone: true, destinationAddress: true, destinationCity: true, destinationDistrict: true,
       destinationLatitude: true, destinationLongitude: true, destinationInstructions: true,
-      legs: { select: { sequence: true, kind: true, mode: true, status: true } },
+      // Every leg of the WHOLE shipment, hubs included — not just this driver's
+      // own leg — so the map can show the real sender->hub->hub->recipient
+      // journey (BMPL-190), not only the two ends of the one leg this driver
+      // works. Ordered so the walk in serialize() below can trust sequence.
+      legs: {
+        orderBy: { sequence: 'asc' },
+        select: { sequence: true, kind: true, mode: true, status: true, originHub: { select: HUB_SELECT }, destinationHub: { select: HUB_SELECT } },
+      },
     },
   },
 } satisfies Prisma.ShipmentLegInclude;
+
+type HubStop = Prisma.LogisticsHubGetPayload<{ select: typeof HUB_SELECT }>;
 
 type LegWithGraph = Prisma.ShipmentLegGetPayload<{ include: typeof LEG_INCLUDE }>;
 
@@ -363,34 +377,68 @@ export class ShipmentDriverService {
     const doorEnd = collectsFromDoor ? senderEnd : recipientEnd;
     const hubEnd = kind === 'DIRECT' ? null : kind === 'FIRST_MILE' ? leg.destinationHub : leg.originHub;
 
-    // Contact details stay sealed until the driver has actually taken the job.
-    const addressPlace = (end: typeof senderEnd) => ({
+    // Contact details stay sealed until the door end is REVEALED — which, for
+    // this leg's own door, means this driver has committed to it. A door end
+    // belonging to a DIFFERENT leg (the far end of the whole shipment, worked
+    // by a different driver or not yet assigned to anyone) is never this
+    // driver's to accept, so it is never revealed to them at all — always the
+    // same safe area-only representation, independent of that other leg's own
+    // status. This is the residential-privacy boundary from BMPL-136/BMPL-182,
+    // extended to the additional stops below rather than relaxed for them.
+    const addressPlace = (end: typeof senderEnd, revealed: boolean) => ({
       kind: 'ADDRESS' as const,
-      name: committed ? end.name : null,
-      phone: committed ? end.phone : null,
-      address: committed ? end.address : null,
+      name: revealed ? end.name : null,
+      phone: revealed ? end.phone : null,
+      address: revealed ? end.address : null,
       area: [end.city, end.district?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
-      instructions: committed ? end.instructions : null,
-      pinnedLocation: committed && end.latitude != null && end.longitude != null
+      instructions: revealed ? end.instructions : null,
+      pinnedLocation: revealed && end.latitude != null && end.longitude != null
         ? { latitude: end.latitude, longitude: end.longitude }
         : null,
-      navigationUrl: committed ? navUrl(end.latitude, end.longitude, end.address) : null,
+      navigationUrl: revealed ? navUrl(end.latitude, end.longitude, end.address) : null,
     });
-    const doorPlace = addressPlace(doorEnd);
-    const hubPlace = hubEnd
-      ? {
-          // A terminal is a public place — there is nothing to protect, and a
-          // driver comparing offers needs to know how far the trip is.
-          kind: 'HUB' as const,
-          name: hubEnd.name,
-          phone: hubEnd.contactPhone,
-          address: hubEnd.addressLine1,
-          area: [hubEnd.city, hubEnd.district?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
-          instructions: hubEnd.instructions,
-          pinnedLocation: hubEnd.latitude != null && hubEnd.longitude != null ? { latitude: hubEnd.latitude, longitude: hubEnd.longitude } : null,
-          navigationUrl: navUrl(hubEnd.latitude, hubEnd.longitude, hubEnd.name),
-        }
-      : null;
+    // A terminal is a public place — there is nothing to protect, and a driver
+    // comparing offers (or just seeing the whole trip) needs to know how far
+    // it is. Every hub end, on any leg of the shipment, uses this unconditionally.
+    const hubPlace = (hub: HubStop) => ({
+      kind: 'HUB' as const,
+      name: hub.name,
+      phone: hub.contactPhone,
+      address: hub.addressLine1,
+      area: [hub.city, hub.district?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
+      instructions: hub.instructions,
+      pinnedLocation: hub.latitude != null && hub.longitude != null ? { latitude: hub.latitude, longitude: hub.longitude } : null,
+      navigationUrl: navUrl(hub.latitude, hub.longitude, hub.name),
+    });
+    const doorPlace = addressPlace(doorEnd, committed);
+    const hubEndPlace = hubEnd ? hubPlace(hubEnd) : null;
+
+    // The real journey (BMPL-190): every stop the system actually knows about,
+    // sender door to recipient door, in order — not just this leg's own two
+    // ends. Built by walking every leg of the shipment (not only this
+    // driver's), collapsing a hub that borders two legs (e.g. a first mile's
+    // destination and the next leg's origin) into the single stop it is.
+    // Nothing here is invented: a leg with no hub (DIRECT) simply contributes
+    // none, and a shipment with only a DIRECT leg stays a genuine two-stop
+    // A/B journey, never padded out.
+    // Whether THIS driver's own leg is the one that actually touches each
+    // door — the only condition under which that door can ever be revealed.
+    const senderIsMine = kind === 'FIRST_MILE' || kind === 'DIRECT';
+    const recipientIsMine = kind === 'LAST_MILE' || kind === 'DIRECT';
+    const routeStops: Array<ReturnType<typeof addressPlace> | ReturnType<typeof hubPlace>> = [];
+    routeStops.push(addressPlace(senderEnd, senderIsMine && committed));
+    let lastHubId: string | null = null;
+    for (const l of s.legs) {
+      if (l.originHub && l.originHub.id !== lastHubId) {
+        routeStops.push(hubPlace(l.originHub));
+        lastHubId = l.originHub.id;
+      }
+      if (l.destinationHub && l.destinationHub.id !== lastHubId) {
+        routeStops.push(hubPlace(l.destinationHub));
+        lastHubId = l.destinationHub.id;
+      }
+    }
+    routeStops.push(addressPlace(recipientEnd, recipientIsMine && committed));
 
     const pickupPhotoUrls = await this.photoUrls(leg.handoffPhotoKeys);
 
@@ -409,8 +457,12 @@ export class ShipmentDriverService {
       mode: leg.mode,
       modeLabel: TRANSPORT_MODE_LABELS[leg.mode],
       addressUnlocked: committed,
-      pickup: kind === 'LAST_MILE' ? hubPlace : doorPlace,
-      dropoff: kind === 'DIRECT' ? addressPlace(recipientEnd) : kind === 'FIRST_MILE' ? hubPlace : doorPlace,
+      pickup: kind === 'LAST_MILE' ? hubEndPlace : doorPlace,
+      dropoff: kind === 'DIRECT' ? addressPlace(recipientEnd, committed) : kind === 'FIRST_MILE' ? hubEndPlace : doorPlace,
+      // The full known journey, sender door to recipient door, for the map
+      // (BMPL-190) — separate from pickup/dropoff above, which stay exactly
+      // this leg's own two action points for the driver's task text.
+      routeStops,
       parcel: {
         description: s.description,
         pieces: s.pieces,

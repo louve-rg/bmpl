@@ -28,9 +28,18 @@ function point(place: PlaceLike | null | undefined, role: string): MapPoint | nu
   return { latitude: pin.latitude, longitude: pin.longitude, label: where ? `${role}: ${where}` : role };
 }
 
-/** The pins the payload actually contains, labelled with the job's own words. */
-export function tripMapPoints(pickup: PlaceLike | null, dropoff: PlaceLike | null): MapPoint[] {
-  return [point(pickup, 'Collect'), point(dropoff, 'Deliver')].filter((p): p is MapPoint => p !== null);
+/**
+ * The pins the payload actually contains, labelled with the job's own words —
+ * in whatever order the stops arrive: first is the collection, last is the
+ * delivery, and anything in between (BMPL-190: a real hub the shipment
+ * actually routes through, never invented) is "Via". A two-stop leg — the
+ * original BMPL-136 shape — is just the no-middle case of this, not a
+ * different function.
+ */
+export function tripMapPoints(stops: Array<PlaceLike | null | undefined>): MapPoint[] {
+  return stops
+    .map((place, i) => point(place, i === 0 ? 'Collect' : i === stops.length - 1 ? 'Deliver' : 'Via'))
+    .filter((p): p is MapPoint => p !== null);
 }
 
 /**
