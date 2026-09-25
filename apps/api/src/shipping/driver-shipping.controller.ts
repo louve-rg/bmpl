@@ -1,7 +1,15 @@
 import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import { declineJobSchema, legHandoffSchema, type DeclineJobInput, type LegHandoffInput } from '@bmpl/validation';
+import {
+  declineJobSchema,
+  legHandoffSchema,
+  legPickupPhotoSchema,
+  type DeclineJobInput,
+  type LegHandoffInput,
+  type LegPickupPhotoInput,
+} from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
+import { rawBody, uploadFileName } from '../common/raw-upload';
 import { CurrentUser, Roles } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -62,5 +70,18 @@ export class DriverShippingController {
   @Post(':id/handoff')
   handoff(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string, @Body(ZodBody(legHandoffSchema)) b: LegHandoffInput) {
     return this.jobs.completeHandoff(this.actor(u, req), id, b);
+  }
+
+  /** Server-side pickup-evidence photo upload: raw bytes in, storage key out. */
+  @StrictThrottle()
+  @Post(':id/pickup-photo/upload')
+  uploadPickupPhoto(@CurrentUser() u: AuthContext, @Req() req: Request) {
+    return this.jobs.uploadPickupPhoto(u.userId, rawBody(req), uploadFileName(req));
+  }
+
+  /** Attach pickup-evidence photos (uploaded above) to this driver's own leg. */
+  @Post(':id/pickup-photo/confirm')
+  confirmPickupPhoto(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string, @Body(ZodBody(legPickupPhotoSchema)) b: LegPickupPhotoInput) {
+    return this.jobs.confirmPickupPhoto(this.actor(u, req), id, b);
   }
 }

@@ -256,4 +256,10 @@ export const STORAGE_PREFIX = {
   agencyBanner: (agencyId: string) => `real-estate/agencies/${agencyId}/banner`,
   // Marketing & Business Promotion (M26) — public promo media
   promotionAsset: (promotionId: string) => `marketing/promotions/${promotionId}/assets`,
+  // ---- Shipping: pickup-evidence photo (BMPL-178), PRIVATE bucket ----
+  // A photo of the parcel taken when a courier collects it, stored on the leg
+  // record itself (ShipmentLeg.handoffPhotoKeys) so it stays attached through
+  // every later handoff on that leg's history — private, signed URLs only, the
+  // same shape as `deliveryProof` above.
+  shipmentPickupProof: (userId: string) => `shipments/pickup-proof/${userId}`,
 } as const;
