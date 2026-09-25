@@ -34,6 +34,27 @@ export interface ShipmentLegHub {
   longitude: number | null;
 }
 
+/** Who is actually showing up (BMPL-180). Display name only — never legal
+ *  name, phone, or documents. Mirrors DeliveryDriver in lib/deliveries.ts. */
+export interface ShipmentCourier {
+  displayName: string;
+  ratingAverage: number | null;
+  completedDeliveries: number | null;
+  initials: string;
+  avatarUrl: string | null;
+}
+
+/** What they are driving. `photoUrl` is set only once the vehicle itself has
+ *  cleared admin review — an unapproved photo is never shown. */
+export interface ShipmentCourierVehicle {
+  type: string | null;
+  make: string | null;
+  model: string | null;
+  color: string | null;
+  licencePlate: string | null;
+  photoUrl: string | null;
+}
+
 export interface ShipmentLegView {
   id: string;
   sequence: number;
@@ -57,6 +78,9 @@ export interface ShipmentLegView {
   exceptionReason: string | null;
   /** Only ever set on the customer's own final delivery leg. */
   handoffPin: string | null;
+  /** Null until a courier is actually assigned to this leg. */
+  courier: ShipmentCourier | null;
+  courierVehicle: ShipmentCourierVehicle | null;
 }
 
 export interface ShipmentEndpoint {

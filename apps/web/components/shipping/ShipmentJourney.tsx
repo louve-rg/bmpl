@@ -8,6 +8,7 @@ import {
   type ShipmentLegView,
   type ShipmentView,
 } from '../../lib/shipping';
+import { DriverCard } from '../DeliveryTracker';
 
 /**
  * One journey, told once.
@@ -62,6 +63,16 @@ function LegRow({ leg, isLast }: { leg: ShipmentLegView; isLast: boolean }) {
           {formatTransitTime(leg.durationMinutes) && <span>about {formatTransitTime(leg.durationMinutes)}</span>}
           {leg.scheduleNote && <span>{leg.scheduleNote}</span>}
         </div>
+
+        {/* Who is actually showing up, once dispatch has picked someone
+            (BMPL-180). Same card the marketplace delivery tracker already
+            uses — a customer opening the door checks the face, not a leg
+            number. */}
+        {(leg.courier || leg.courierVehicle) && (
+          <div className="mt-2">
+            <DriverCard driver={leg.courier} vehicle={leg.courierVehicle} />
+          </div>
+        )}
 
         {/* What actually happened, once it has. */}
         {leg.completedAt && leg.handoffReceivedByName && (

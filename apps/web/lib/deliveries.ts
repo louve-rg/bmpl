@@ -18,6 +18,9 @@ export interface DeliveryVehicle {
   model: string | null;
   color: string | null;
   licencePlate: string | null;
+  /** Optional: only shipping legs currently return this (BMPL-180), and only
+   *  once the vehicle itself has cleared admin review. */
+  photoUrl?: string | null;
 }
 
 export interface DeliveryTimelineEvent {

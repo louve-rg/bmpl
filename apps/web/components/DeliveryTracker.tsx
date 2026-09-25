@@ -128,6 +128,20 @@ export function DriverCard({ driver, vehicle }: { driver: DeliveryDriver | null;
           </p>
         )}
       </div>
+      {/* Vehicle photo, when the vehicle itself has cleared review (BMPL-180).
+          A broken/expired signed URL degrades to nothing, never a broken-image
+          icon next to someone's door code. */}
+      {vehicle?.photoUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={vehicle.photoUrl}
+          alt=""
+          className="ml-auto h-12 w-16 shrink-0 rounded-bmpl-md object-cover"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -23,6 +23,8 @@ const leg = (over: Partial<ShipmentLegView> = {}): ShipmentLegView => ({
   handoffReceivedByName: null,
   exceptionReason: null,
   handoffPin: null,
+  courier: null,
+  courierVehicle: null,
   ...over,
 });
 
