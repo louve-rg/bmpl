@@ -1,0 +1,14 @@
+# Plain ESM .mjs scripts must check out with LF, unconditionally.
+#
+# BMPL-193(2): apps/api/test/run-integration.mjs is stored as LF in the repo
+# (git blobs have always been LF-only here) but a Windows checkout with
+# core.autocrlf=true rewrites it to CRLF. Vitest loads that file through
+# Vite's SSR transform, which parses plain .mjs with Rollup's own JS/AST
+# parser rather than esbuild (esbuild handles .ts fine either way) — and that
+# parser mis-tokenizes this specific file once it is CRLF, reporting a bogus
+# "Invalid or unexpected token" that points nowhere near any real problem.
+# CI checks out LF by default and never sees it, so the break is invisible
+# there and only bites a Windows contributor's local unit-test run. Pinning
+# eol=lf makes every checkout of a .mjs file LF regardless of the checking-out
+# machine's core.autocrlf, independent of anyone's personal git config.
+*.mjs text eol=lf
