@@ -262,6 +262,17 @@ arriving are simple stamps; the handoff calls the shipment layer's
 `completeLeg` — the same PIN check, lockout, custody write and next-leg
 release the admin path uses, deliberately not a second implementation.
 
+**Starting a leg now also checks who is starting it** (BMPL-187): if the leg
+has an assigned courier (`assignedDriverProfileId` set — FIRST_MILE, LAST_MILE
+or DIRECT), only that courier's own `DriverProfile` may record the pickup,
+403 otherwise (`ShipmentService.startLeg`). The driver's own app was already
+safe (`ownedLeg` gates it first); this closed the gap on the admin desk's
+`POST /admin/logistics/legs/:id/start`, which could previously start — and
+credit — any courier's pickup on behalf of a driver who never touched the
+parcel. A `LINE_HAUL` leg has no individual courier
+(`assignedDriverProfileId` is always null for it), so the check is correctly a
+no-op there — the same reasoning the handoff check below uses.
+
 Dispatch of courier legs (`ShipmentDispatchService`,
 `apps/api/src/shipping/shipment-dispatch.service.ts`) is **not a second
 engine**: eligibility comes from `DriverService`, ranking from `@bmpl/shared`,
@@ -308,6 +319,65 @@ This closed what was gap 2 (PR #12). Still absent in this area: an admin
 message promises one, the permission for it is chosen (`logistics.verify`'s
 charter includes "override a handoff verification"), and whether to build a
 PIN bypass at all is a human-gated decision.
+
+**A correct code is necessary but is not sufficient** (BMPL-174). When the leg
+has an assigned courier, `verifyHandoffPin` also requires the actor's own
+`DriverProfile` to match `assignedDriverProfileId` — a code overheard, read
+off a screen, or otherwise learned by someone else with handoff-completing
+access must not let them stand in for the courier. The check reads the
+**live** `assignedDriverProfileId`, not who was assigned when the PIN was
+minted, so a legitimate reassignment (`POST legs/:id/reassign`, only possible
+before pickup) works for the newly assigned driver with no special case. A
+`LINE_HAUL` leg has no individual courier — handoff there is deliberately left
+to the receiving desk's `logistics.operate` route, and the check is correctly
+a no-op there, the same code-only proof the receiving desk always did. A
+wrong-courier attempt still counts against the 5-attempt lockout and is
+audited (`wrongCourier` on the failure row). The driver's own
+`POST /driver/shipping-jobs/:id/handoff` never exercises the wrong-courier
+branch directly — `ownedLeg` already 404s a non-owner before this check runs —
+so the 403 is reachable only through the admin desk's
+`POST /admin/logistics/legs/:id/handoff` (`logistics.operate`), the same place
+BMPL-187 closed the equivalent gap at pickup (above).
+
+### Courier and vehicle identification, pickup evidence
+
+Once a courier leg has an assigned driver, both the sender and staff views of
+the shipment carry **who is showing up** (BMPL-180,
+`ShipmentService.courierSummary`/`courierVehicleSummary`): display name,
+rating, completed-delivery count, initials/avatar, and the vehicle's type,
+make, model, colour and licence plate. Never legal name, phone or documents —
+the same privacy line the marketplace delivery card already draws in
+`delivery-core.service.ts`. The vehicle photo is included only once the
+vehicle itself has cleared admin moderation (`approvalStatus === 'APPROVED'`);
+both fields are `null` before a courier is assigned.
+
+A courier can also attach **pickup-evidence photos** to their own leg
+(BMPL-178): `POST /driver/shipping-jobs/:id/pickup-photo/upload` (raw bytes)
+then `/confirm` (`{photoKeys}`), gated by the same `ownedLeg` check as every
+other driver-side leg write. The photos appear in `pickupPhotoUrls` on the
+leg, visible to the sender, staff and the courier's own leg view — **not** on
+the public, unauthenticated `shipping/track/:token` link, which already
+excludes the parcel description as customer-typed and potentially sensitive; a
+photo was judged at least as revealing and was not added to that allowlist.
+
+### Route operating-day configuration: a capability, not yet live
+
+A carrier (self-service, scoped to routes their organization operates) or an
+admin can set a weekly operating pattern (`OPERATING`/`REDUCED`/
+`NOT_OPERATING` per day of week) and date-specific exceptions on a
+`LogisticsRoute` (BMPL-186 — `LogisticsNetworkService.setWeeklySchedule`/
+`addScheduleException`/`removeScheduleException`, mirrored for carriers on
+`ShippingProviderRoutesController`). **As of this writing, nothing reads it.**
+`route-planner.ts`'s `cheapestPath` still filters only on `isActive`;
+`departLeg`, `startLeg` and quoting never consult a route's schedule. Setting
+a route to `NOT_OPERATING` for every day has no effect on whether that route
+is offered, quoted, or allowed to depart. Wiring the schedule into planning
+and dispatch eligibility is a separate, **not-yet-merged** change (BMPL-196);
+do not describe route scheduling as affecting what a customer can book or a
+carrier can depart until that lands. Separately, and by deliberate business
+decision, no carrier's real schedule **data** has been entered — this is
+configuration capability only, the same "empty is correct" posture as an
+unconfigured `courier_lanes` table.
 
 ### Ending at a terminal: AWAITING_COLLECTION
 
