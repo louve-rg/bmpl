@@ -318,6 +318,12 @@ export const legExceptionSchema = z.object({
 });
 export type LegExceptionInput = z.infer<typeof legExceptionSchema>;
 
+/** Attach pickup-evidence photo keys (server-side upload) to the courier's own leg. */
+export const legPickupPhotoSchema = z.object({
+  photoKeys: z.array(z.string().trim().min(1).max(512)).min(1).max(6),
+});
+export type LegPickupPhotoInput = z.infer<typeof legPickupPhotoSchema>;
+
 /**
  * Resolving a leg exception — the way back out of the state legExceptionSchema
  * records the way into.
