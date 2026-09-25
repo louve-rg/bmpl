@@ -7,7 +7,7 @@ import { api, type ApiError } from '../../../../../lib/api';
 import { tripMapPoints } from '../../../../../lib/trip-map';
 import { Alert, Button, Card, PageHeader, Spinner, StatusBadge } from '../../../../../components/ui';
 import { DriverBreadcrumb } from '../../../../../components/driver/DriverBreadcrumb';
-import { MapPreview } from '../../../../../components/maps/MapPreview';
+import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRouteMap';
 
 /**
  * One shipment courier leg, from the driver's side.
@@ -125,7 +125,6 @@ export default function DriverShippingJobPage() {
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState('');
   const [receivedBy, setReceivedBy] = useState('');
-  const [mapOpen, setMapOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -207,32 +206,18 @@ export default function DriverShippingJobPage() {
 
             {/* The map draws only the pins the server sent: a terminal is a
                 public place and arrives pinned before acceptance; a door end
-                stays area-only until the driver commits (BMPL-136). Opt-in
-                behind a tap so the tiles never load for a driver on data who
-                just wants the words. */}
+                stays area-only until the driver commits (BMPL-136). Stops are
+                lettered A, B… in order, with an expand control for a
+                full-screen view (BMPL-182) — still behind a tap so the tiles
+                never load for a driver on data who just wants the words. */}
             {(() => {
               const points = tripMapPoints(job.pickup, job.dropoff);
               if (points.length === 0) return null;
               return (
                 <Card className="p-4 sm:p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">On the map</p>
-                    <button
-                      type="button"
-                      onClick={() => setMapOpen((v) => !v)}
-                      className="inline-flex min-h-[44px] items-center rounded-bmpl-md border border-slate-300 px-4 text-sm font-semibold text-belize-navy"
-                    >
-                      {mapOpen ? 'Hide map' : 'Show map'}
-                    </button>
-                  </div>
-                  {mapOpen && (
-                    <>
-                      <MapPreview points={points} className="mt-3" />
-                      <p className="mt-2 text-xs text-slate-500">
-                        {points.map((p) => p.label).join(' · ')}
-                        {points.length < 2 && !job.addressUnlocked && ' — the other end shows its area above until you accept.'}
-                      </p>
-                    </>
+                  <ExpandableRouteMap points={points} title={`${job.reference} · route`} />
+                  {points.length < 2 && !job.addressUnlocked && (
+                    <p className="mt-2 text-xs text-slate-500">The other end shows its area above until you accept.</p>
                   )}
                 </Card>
               );

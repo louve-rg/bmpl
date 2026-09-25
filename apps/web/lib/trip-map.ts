@@ -32,3 +32,18 @@ function point(place: PlaceLike | null | undefined, role: string): MapPoint | nu
 export function tripMapPoints(pickup: PlaceLike | null, dropoff: PlaceLike | null): MapPoint[] {
   return [point(pickup, 'Collect'), point(dropoff, 'Deliver')].filter((p): p is MapPoint => p !== null);
 }
+
+/**
+ * A stop's letter in an ordered route (BMPL-182): A first, B, C… — whatever
+ * letter the last stop actually reaches, never padded out to a fixed count.
+ */
+export function stopLetter(index: number): string {
+  return String.fromCharCode(65 + index);
+}
+
+export type LabeledStop = MapPoint & { letter: string };
+
+/** Attach each stop's route letter, in the order the points already arrived. */
+export function labelStops(points: MapPoint[]): LabeledStop[] {
+  return points.map((p, i) => ({ ...p, letter: stopLetter(i) }));
+}
