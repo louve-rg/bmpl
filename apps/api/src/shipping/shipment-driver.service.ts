@@ -5,19 +5,24 @@ import {
   DELIVERY_STATUS_LABELS,
   driverJobActionLabel,
   driverViewForStatus,
+  isAllowedProductImageMime,
   isLegActionable,
+  MAX_PRODUCT_IMAGE_BYTES,
+  STORAGE_PREFIX,
   TRANSPORT_MODE_LABELS,
   type DeliveryAction,
   type DeliveryStatus,
   type DriverJobKind,
   type LegView,
 } from '@bmpl/shared';
-import type { LegHandoffInput } from '@bmpl/validation';
+import type { LegHandoffInput, LegPickupPhotoInput } from '@bmpl/validation';
 import type { AuditAction, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MessagingService } from '../messaging/messaging.service';
+import { StorageService } from '../storage/storage.service';
+import { UploadIngestService } from '../storage/upload-ingest.service';
 import { ShipmentService } from './shipment.service';
 import { ShipmentDispatchService } from './shipment-dispatch.service';
 
@@ -75,6 +80,8 @@ export class ShipmentDriverService {
     private readonly shipments: ShipmentService,
     private readonly dispatch: ShipmentDispatchService,
     private readonly messaging: MessagingService,
+    private readonly storage: StorageService,
+    private readonly ingest: UploadIngestService,
   ) {}
 
   private async myProfileId(userId: string): Promise<string> {
@@ -202,6 +209,58 @@ export class ShipmentDriverService {
     return this.getJob(actor.userId, legId);
   }
 
+  /* ------------------------------------------------------- pickup photo */
+
+  /** Server-side pickup-evidence photo upload (browser -> API -> private storage). */
+  async uploadPickupPhoto(userId: string, buffer: Buffer | undefined, fileName?: string) {
+    return this.ingest.image(buffer, STORAGE_PREFIX.shipmentPickupProof(userId), 'private', {
+      fileName,
+      fallbackName: 'pickup',
+    });
+  }
+
+  /**
+   * Attach pickup-evidence photos (uploaded above) to the courier's own leg.
+   *
+   * `ownedLeg` is the same necessary-but-not-sufficient check every other
+   * driver-side write on this leg goes through (BMPL-174/187 shape): holding a
+   * driver profile is necessary, but it must also be the profile THIS leg is
+   * assigned to. A leg already handed over has nothing left to photograph.
+   *
+   * Reuses the `SHIPMENT_LEG_PICKED_UP` audit action (with a photo count in
+   * `newValue`) rather than adding a new `AuditAction` enum value, which would
+   * need its own migration — this card is scoped as additive-only, no schema
+   * change.
+   */
+  async confirmPickupPhoto(actor: Actor, legId: string, dto: LegPickupPhotoInput) {
+    const { leg } = await this.ownedLeg(actor.userId, legId);
+    if (leg.status === 'COMPLETED' || leg.status === 'CANCELLED') {
+      throw new BadRequestException('This leg is already finished.');
+    }
+    const keys = await this.resolvePickupPhotoKeys(actor.userId, dto.photoKeys);
+    await this.prisma.shipmentLeg.update({ where: { id: legId }, data: { handoffPhotoKeys: keys } });
+    await this.audit.record({
+      action: 'SHIPMENT_LEG_PICKED_UP',
+      actorId: actor.userId,
+      newValue: { legId, reference: leg.shipment.reference, pickupPhotoCount: keys.length },
+    });
+    return this.getJob(actor.userId, legId);
+  }
+
+  private async resolvePickupPhotoKeys(userId: string, keys: string[]): Promise<string[]> {
+    const namespace = STORAGE_PREFIX.shipmentPickupProof(userId);
+    for (const key of keys) {
+      this.storage.assertKeyInNamespace(key, namespace);
+      const meta = await this.storage.headObject(key, 'private');
+      if (!meta) throw new BadRequestException('An uploaded pickup photo could not be found in storage.');
+      if (!isAllowedProductImageMime(meta.contentType)) throw new BadRequestException('Unsupported image type.');
+      if (meta.sizeBytes <= 0 || meta.sizeBytes > MAX_PRODUCT_IMAGE_BYTES) {
+        throw new BadRequestException('A pickup photo exceeds the maximum allowed size.');
+      }
+    }
+    return keys;
+  }
+
   async markInTransit(actor: Actor, legId: string) {
     return this.simpleTransition(actor, legId, 'IN_TRANSIT', 'IN_TRANSIT', 'inTransitAt', 'SHIPMENT_LEG_IN_TRANSIT');
   }
@@ -288,7 +347,7 @@ export class ShipmentDriverService {
    * that identifies the person at the other end. Only once they have committed
    * does the street address and phone number appear.
    */
-  serialize(leg: LegWithGraph) {
+  async serialize(leg: LegWithGraph) {
     const s = leg.shipment;
     const kind = leg.kind as DriverJobKind;
     const committed = leg.acceptedAt != null;
@@ -333,6 +392,8 @@ export class ShipmentDriverService {
         }
       : null;
 
+    const pickupPhotoUrls = await this.photoUrls(leg.handoffPhotoKeys);
+
     return {
       id: leg.id,
       jobKind: kind,
@@ -365,7 +426,23 @@ export class ShipmentDriverService {
       completedAt: leg.completedAt,
       queuePosition: leg.driverQueuePosition,
       pinAttemptsRemaining: Math.max(0, DELIVERY_PIN_MAX_ATTEMPTS - leg.handoffPinAttempts),
+      pickupPhotoUrls,
     };
+  }
+
+  /** Short-lived signed URLs for stored pickup-photo keys. A dangling/deleted
+   *  key is dropped rather than surfaced as an error — same as delivery POD. */
+  private async photoUrls(keys: string[]): Promise<string[]> {
+    const urls = await Promise.all(
+      keys.map(async (k) => {
+        try {
+          return (await this.storage.presignDownload(k, 'private')).url;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return urls.filter((u): u is string => !!u);
   }
 
   private async notifyCustomer(leg: LegWithGraph, body: string) {

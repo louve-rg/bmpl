@@ -1508,6 +1508,9 @@ export class ShipmentService {
     const endsAtHub = !needsLastMile(s.service);
     const live = s.legs.filter((l) => l.status !== 'CANCELLED');
     const current = live.find((l) => l.status !== 'COMPLETED') ?? null;
+    // The sender and staff both already see the whole story here (ownership /
+    // permission was checked before `serialize` was ever called) — the pickup
+    // photo needs no extra gate on top, same as every other leg field below.
     const legs = await Promise.all(
       s.legs.map(async (l) => ({
         id: l.id,
@@ -1544,6 +1547,9 @@ export class ShipmentService {
         exceptionReason: l.exceptionReason,
         // The customer's own door code, and nothing else.
         handoffPin: this.pinFor(l, opts.audience, endsAtHub),
+        // Per-leg, never pooled: a pickup photo belongs to the leg it was taken
+        // on and must not appear on any sibling leg of the same shipment.
+        pickupPhotoUrls: await this.photoUrls(l.handoffPhotoKeys),
       })),
     );
 
@@ -1654,6 +1660,21 @@ export class ShipmentService {
     if (endsAtHub || (l.kind !== 'LAST_MILE' && l.kind !== 'DIRECT')) return null;
     if (l.status === 'COMPLETED' || l.status === 'CANCELLED') return null;
     return l.handoffPin;
+  }
+
+  /** Short-lived signed URLs for stored pickup-photo keys. A dangling/deleted
+   *  key is dropped rather than surfaced as an error — same as delivery POD. */
+  private async photoUrls(keys: string[]): Promise<string[]> {
+    const urls = await Promise.all(
+      keys.map(async (k) => {
+        try {
+          return (await this.storage.presignDownload(k, 'private')).url;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return urls.filter((u): u is string => !!u);
   }
 
   /**
