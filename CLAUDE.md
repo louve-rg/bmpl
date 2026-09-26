@@ -344,6 +344,28 @@ pnpm --filter @bmpl/api build && pnpm --filter @bmpl/web build && pnpm --filter 
 Do not "fix" any of these as a side effect of unrelated work. Each is tracked
 and each needs its own scoped change.
 
+### A workspace-package error that isn't a code defect
+
+**An error naming a workspace package (`Cannot find module '@bmpl/...'` or a
+third-party dep like `@playwright/test`), or a type error that makes no sense
+against code you can actually see, means check your local tree before you
+believe either one.** Two different symptoms, same underlying cause — a
+worktree that doesn't match the lockfile or the current branch:
+
+- **The module doesn't exist.** `TS2307 Cannot find module` — a dependency is
+  in the lockfile but was never installed into *this* worktree's
+  `node_modules` (e.g. a teammate's branch added one and you haven't run
+  install since).
+- **The module exists and lies.** A type error that contradicts the source
+  you're looking at — a workspace package's compiled `dist` is stale from
+  before a branch switch, a schema change, or a shared-package edit, so its
+  types or values don't match what the current branch actually says.
+
+Fix for either: `pnpm install --frozen-lockfile && pnpm --filter @bmpl/shared
+build && pnpm --filter @bmpl/validation build && pnpm db:generate` — then
+re-run whatever failed. This has fooled multiple agents on the same day; it
+is not your regression and not a reason to guess at a code fix.
+
 ### Running the integration suite locally
 
 Docker is available on this machine and the suite runs here — **852 tests across
