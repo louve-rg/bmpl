@@ -204,6 +204,19 @@ export const shippingApi = {
    * unknown token answers the same 404 as any other miss.
    */
   trackPublic: (token: string) => api.get<RecipientTrackingView>(`/shipping/track/${encodeURIComponent(token)}`),
+  /**
+   * Link this signed-in account to a shipment as its recipient, from the SAME
+   * token `trackPublic` uses. Holding the token only ever authorised reading
+   * that view; this is the deliberate step that lets the shipment show up in
+   * the account's own "incoming" list. Requires a session — a 401 here means
+   * the visitor needs to sign in (or create an account) first, never that the
+   * link is wrong.
+   */
+  claim: (token: string) => api.post<{ reference: string; linked: boolean }>(`/shipping/track/${encodeURIComponent(token)}/claim`),
+  /** Every shipment this account has claimed as recipient. Same allowlisted shape as `trackPublic`. */
+  incoming: () => api.get<RecipientTrackingView[]>('/shipping/incoming'),
+  /** One claimed shipment by reference — 404 if this account never claimed it. */
+  incomingOne: (reference: string) => api.get<RecipientTrackingView>(`/shipping/incoming/${encodeURIComponent(reference)}`),
 };
 
 /** Minor units to a Belize dollar string. */
