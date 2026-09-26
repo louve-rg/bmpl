@@ -62,7 +62,7 @@ export class PropertyEnquiriesService {
       },
     });
     await this.audit.record({ action: 'PROPERTY_ENQUIRY_CREATED', actorId: actor.userId, newValue: { enquiryId: enquiry.id, listingId: dto.listingId } });
-    await this.notifications.createInApp({ userId: listerUserId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'New enquiry', body: `New inquiry about "${listing.title}".`, data: { enquiryId: enquiry.id, listingId: dto.listingId } });
+    await this.notifications.createInApp({ userId: listerUserId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PROPERTY_ENQUIRY_CREATED', title: 'New enquiry', body: `New inquiry about "${listing.title}".`, data: { enquiryId: enquiry.id, listingId: dto.listingId } });
     await this.messaging.postPropertyEnquirySystem(enquiry.id, listerUserId, actor.userId, `Inquiry about "${listing.title}": ${dto.message.slice(0, 200)}`);
     return this.getMineEnquiry(actor.userId, enquiry.id);
   }
@@ -133,7 +133,7 @@ export class PropertyEnquiriesService {
     const e = await this.requireListerEnquiry(actor, enquiryId);
     await this.prisma.propertyEnquiry.update({ where: { id: enquiryId }, data: { status: 'CLOSED', closedAt: new Date() } });
     await this.audit.record({ action: 'PROPERTY_ENQUIRY_UPDATED', actorId: actor.userId, newValue: { enquiryId, action: 'CLOSE' } });
-    await this.notifications.createInApp({ userId: e.enquirerId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'Inquiry closed', body: `Your inquiry about "${e.listing.title}" was closed.`, data: { enquiryId } });
+    await this.notifications.createInApp({ userId: e.enquirerId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PROPERTY_ENQUIRY_CLOSED', title: 'Inquiry closed', body: `Your inquiry about "${e.listing.title}" was closed.`, data: { enquiryId } });
     return this.listerGetEnquiry(actor, enquiryId);
   }
 
@@ -159,7 +159,7 @@ export class PropertyEnquiriesService {
       },
     });
     await this.audit.record({ action: 'PROPERTY_VIEWING_REQUESTED', actorId: actor.userId, newValue: { viewingId: req.id, listingId: dto.listingId } });
-    await this.notifications.createInApp({ userId: listerUserId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'New viewing request', body: `A viewing was requested for "${listing.title}".`, data: { viewingId: req.id, listingId: dto.listingId } });
+    await this.notifications.createInApp({ userId: listerUserId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PROPERTY_VIEWING_REQUESTED', title: 'New viewing request', body: `A viewing was requested for "${listing.title}".`, data: { viewingId: req.id, listingId: dto.listingId } });
     return this.getMineViewing(actor.userId, req.id);
   }
 
@@ -230,7 +230,7 @@ export class PropertyEnquiriesService {
     await this.audit.record({ action: 'PROPERTY_VIEWING_UPDATED', actorId: actor.userId, newValue: { viewingId, from: v.status, to } });
     const listerUserId = v.listing.agentProfile?.userId ?? v.listing.ownerProfile.userId;
     const notifyUserId = actor.userId === v.requesterId ? listerUserId : v.requesterId;
-    await this.notifications.createInApp({ userId: notifyUserId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'Viewing request updated', body: `The viewing for "${v.listing.title}" is now ${to.replace(/_/g, ' ').toLowerCase()}.`, data: { viewingId } });
+    await this.notifications.createInApp({ userId: notifyUserId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PROPERTY_VIEWING_UPDATED', title: 'Viewing request updated', body: `The viewing for "${v.listing.title}" is now ${to.replace(/_/g, ' ').toLowerCase()}.`, data: { viewingId } });
     return isRequester && !isLister ? this.getMineViewing(actor.userId, viewingId) : this.listerGetViewing(actor, viewingId);
   }
 

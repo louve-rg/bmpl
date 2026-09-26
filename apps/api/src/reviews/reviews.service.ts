@@ -96,7 +96,7 @@ export class ReviewsService {
     await this.recompute(dto.subjectType, ctx.subjectId);
     await this.audit.record({ action: 'REVIEW_CREATED', actorId: actor.userId, newValue: { reviewId: review.id, subjectType: dto.subjectType, subjectId: ctx.subjectId, rating: dto.rating } });
     if (ctx.notifyUserId) {
-      await this.notifications.createInApp({ userId: ctx.notifyUserId, type: 'MARKETPLACE', category: 'VENDOR', event: 'PRODUCT_MODERATED', title: 'New review', body: `You received a ${dto.rating}-star review.`, data: { reviewId: review.id } });
+      await this.notifications.createInApp({ userId: ctx.notifyUserId, type: 'MARKETPLACE', category: 'VENDOR', event: 'REVIEW_RECEIVED', title: 'New review', body: `You received a ${dto.rating}-star review.`, data: { reviewId: review.id } });
     }
     return this.getById(review.id, actor);
   }
@@ -288,7 +288,7 @@ export class ReviewsService {
     } else {
       await this.prisma.reviewResponse.create({ data: { reviewId, responderId: actor.userId, body: dto.body } });
       await this.audit.record({ action: 'REVIEW_RESPONSE_ADDED', actorId: actor.userId, newValue: { reviewId } });
-      await this.notifications.createInApp({ userId: r.reviewerId, type: 'MARKETPLACE', category: 'VENDOR', event: 'PRODUCT_MODERATED', title: 'The seller responded', body: 'A seller responded to your review.', data: { reviewId } });
+      await this.notifications.createInApp({ userId: r.reviewerId, type: 'MARKETPLACE', category: 'VENDOR', event: 'REVIEW_RESPONSE_RECEIVED', title: 'The seller responded', body: 'A seller responded to your review.', data: { reviewId } });
     }
     return this.getById(reviewId, actor);
   }

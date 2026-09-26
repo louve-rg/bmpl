@@ -13,6 +13,7 @@ import { bootApp, cookiesOf, putToPresigned, resetDb, seedRoles, seedSuperAdmin,
 
 let ctx: TestContext;
 let adminCookies: string[];
+let adminUserId: string;
 let seq = 0;
 const uniq = () => `${Date.now()}_${(seq += 1)}`;
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
@@ -72,6 +73,7 @@ beforeAll(async () => {
   await resetDb(ctx.prisma);
   await seedRoles(ctx.prisma);
   const admin = await seedSuperAdmin(ctx.prisma);
+  adminUserId = admin.id;
   adminCookies = await login(admin.email, admin.password);
 });
 afterAll(async () => {
@@ -307,5 +309,70 @@ describe('interviews: ownership, and which notes the candidate sees', () => {
     expect((await patch(emp.cookies, `employer/interviews/${interviewId}`, { status: 'CANCELLED' })).status).toBe(200);
     const mine = await get(seeker.cookies, `job-seeker/applications/${appId}`);
     expect(mine.body.interviews.find((iv: { id: string }) => iv.id === interviewId).status).toBe('CANCELLED');
+  });
+});
+
+/**
+ * Notification event codes (BMPL-149): every one of these used to reuse the
+ * marketplace's PRODUCT_MODERATED, so notification analytics could not tell a
+ * job event from a product one. The protected state is the stored `event`
+ * column on the notification row, not the 200/201 the action already returns
+ * — asserted directly, per the floor's state-not-shape standard.
+ */
+describe('notification event codes are job-specific, not PRODUCT_MODERATED (BMPL-149)', () => {
+  async function latestEvent(userId: string) {
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    return row.notification.event;
+  }
+
+  it('a job listing submitted for review tells admins with its own event, and approval tells the employer with its own', async () => {
+    const emp = await makeEmployer();
+    // publishJob() submits then approves; check admins were told at submit time
+    // by reading the admin recipient's row directly rather than re-deriving it.
+    const create = await post(emp.cookies, 'employer/jobs', { title: `Event Job ${uniq()}`, employmentType: 'FULL_TIME', description: 'Build things. '.repeat(5), workArrangement: 'ONSITE', district: 'BELIZE' });
+    expect(create.status).toBe(201);
+    expect((await post(emp.cookies, `employer/jobs/${create.body.id}/submit`)).status).toBe(201);
+    expect(await latestEvent(adminUserId)).toBe('ADMIN_JOB_LISTING_SUBMITTED');
+
+    const mod = await post(adminCookies, `admin/jobs/${create.body.id}/moderate`, { action: 'APPROVE' });
+    expect(mod.status).toBe(201);
+    expect(await latestEvent(emp.userId)).toBe('JOB_LISTING_MODERATED');
+  });
+
+  it('the application pipeline carries its own event at every step', async () => {
+    const emp = await makeEmployer();
+    const { jobId, questionId } = await publishJob(emp);
+    const seeker = await makeSeekerWithResume();
+
+    const applied = await post(seeker.cookies, 'job-seeker/applications', { jobId, resumeId: seeker.resumeId, answers: [{ questionId, text: 'pick me' }] });
+    expect(applied.status).toBe(201);
+    expect(await latestEvent(emp.userId)).toBe('JOB_APPLICATION_RECEIVED');
+    expect(await latestEvent(seeker.userId)).toBe('JOB_APPLICATION_SUBMITTED');
+    const appId = applied.body.id;
+
+    expect((await post(emp.cookies, `employer/applications/${appId}/status`, { status: 'SHORTLISTED' })).status).toBe(201);
+    expect(await latestEvent(seeker.userId)).toBe('JOB_APPLICATION_STATUS_CHANGED');
+
+    const sched = await post(emp.cookies, `employer/applications/${appId}/interviews`, { scheduledAt: new Date(Date.now() + 86400000).toISOString(), mode: 'VIDEO', location: 'https://meet.example/x' });
+    expect(sched.status).toBe(201);
+    expect(await latestEvent(seeker.userId)).toBe('JOB_INTERVIEW_SCHEDULED');
+    const interviewId = sched.body.interviews[0].id;
+
+    expect((await patch(emp.cookies, `employer/interviews/${interviewId}`, { location: 'https://meet.example/y' })).status).toBe(200);
+    expect(await latestEvent(seeker.userId)).toBe('JOB_INTERVIEW_UPDATED');
+  });
+
+  it('a withdrawal tells the employer with its own event', async () => {
+    const emp = await makeEmployer();
+    const { jobId, questionId } = await publishJob(emp);
+    const seeker = await makeSeekerWithResume();
+    const appId = (await post(seeker.cookies, 'job-seeker/applications', { jobId, resumeId: seeker.resumeId, answers: [{ questionId, text: 'x' }] })).body.id;
+
+    expect((await post(seeker.cookies, `job-seeker/applications/${appId}/withdraw`)).status).toBe(201);
+    expect(await latestEvent(emp.userId)).toBe('JOB_APPLICATION_WITHDRAWN');
   });
 });

@@ -110,5 +110,28 @@ export const NOTIFICATION_EVENTS = [
   'MESSAGE_ATTACHMENT',
   'SUPPORT_RESPONSE',
   'CONVERSATION_CLOSED',
+  // Belize Connect / jobs (BMPL-149) — every one of these previously reused
+  // the marketplace's PRODUCT_MODERATED, so notification analytics could not
+  // tell a job event from a product one.
+  'JOB_APPLICATION_RECEIVED',
+  'JOB_APPLICATION_SUBMITTED',
+  'JOB_APPLICATION_WITHDRAWN',
+  'JOB_APPLICATION_STATUS_CHANGED',
+  'JOB_INTERVIEW_SCHEDULED',
+  'JOB_INTERVIEW_UPDATED',
+  'ADMIN_JOB_LISTING_SUBMITTED',
+  'JOB_LISTING_MODERATED',
+  // Real estate (BMPL-149) — same disease as jobs, same fix.
+  'ADMIN_PROPERTY_LISTING_SUBMITTED',
+  'PROPERTY_LISTING_STATUS_CHANGED',
+  'PROPERTY_ASSIGNMENT_INVITED',
+  'PROPERTY_ASSIGNMENT_ACCEPTED',
+  'PROPERTY_ENQUIRY_CREATED',
+  'PROPERTY_ENQUIRY_CLOSED',
+  'PROPERTY_VIEWING_REQUESTED',
+  'PROPERTY_VIEWING_UPDATED',
+  // Reviews (BMPL-149) — same disease, one more vertical.
+  'REVIEW_RECEIVED',
+  'REVIEW_RESPONSE_RECEIVED',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
