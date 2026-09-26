@@ -68,6 +68,35 @@ describe('tripMapPoints', () => {
     const recipient = { name: 'Recipient', area: null, pinnedLocation: { latitude: 2, longitude: 2 } };
     expect(tripMapPoints([sender, hiddenHub, recipient]).map((p) => p.label)).toEqual(['Collect: Sender', 'Deliver: Recipient']);
   });
+
+  it('BMPL-198: a hidden FIRST stop does not push the next visible stop into Via', () => {
+    // The sender's door has no pin yet (courier hasn't accepted) — it drops
+    // out. The first stop that actually has a pin, a hub, must read as
+    // Collect, not inherit Via from its original middle position.
+    const sender = { name: 'Sender', area: null, pinnedLocation: null };
+    const hubA = { name: 'Belize City Terminal', area: null, pinnedLocation: { latitude: 17.49, longitude: -88.19 } };
+    const hubB = { name: 'San Pedro Airstrip', area: null, pinnedLocation: { latitude: 17.9139, longitude: -87.9711 } };
+    const recipient = { name: 'Recipient', area: null, pinnedLocation: { latitude: 17.92, longitude: -87.96 } };
+    expect(tripMapPoints([sender, hubA, hubB, recipient]).map((p) => p.label)).toEqual([
+      'Collect: Belize City Terminal',
+      'Via: San Pedro Airstrip',
+      'Deliver: Recipient',
+    ]);
+  });
+
+  it('BMPL-198: a hidden LAST stop does not leave the final visible stop stuck on Via', () => {
+    // Mirror case: the recipient's door has no pin yet — it drops out. The
+    // last stop that actually has a pin, a hub, must read as Deliver.
+    const sender = { name: 'Sender', area: null, pinnedLocation: { latitude: 17.5, longitude: -88.2 } };
+    const hubA = { name: 'Belize City Terminal', area: null, pinnedLocation: { latitude: 17.49, longitude: -88.19 } };
+    const hubB = { name: 'San Pedro Airstrip', area: null, pinnedLocation: { latitude: 17.9139, longitude: -87.9711 } };
+    const recipient = { name: 'Recipient', area: null, pinnedLocation: null };
+    expect(tripMapPoints([sender, hubA, hubB, recipient]).map((p) => p.label)).toEqual([
+      'Collect: Sender',
+      'Via: Belize City Terminal',
+      'Deliver: San Pedro Airstrip',
+    ]);
+  });
 });
 
 describe('stopLetter', () => {
