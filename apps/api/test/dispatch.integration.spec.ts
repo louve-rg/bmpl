@@ -456,6 +456,75 @@ describe('driver job workflow + verification', () => {
   });
 });
 
+/**
+ * Notification event codes (BMPL-219): DeliveryCoreService.notify() and every
+ * one of its callers passed title/body but never an event, so the entire
+ * delivery lifecycle emitted notifications with no event code at all — a
+ * gap, not a wrong reuse, but the same family of defect as BMPL-149/BMPL-214.
+ * The protected state is the stored `event` column, asserted directly.
+ */
+describe('notification event codes cover the whole delivery lifecycle, not just DELIVER (BMPL-219)', () => {
+  async function latestEvent(userId: string) {
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    return row.notification.event;
+  }
+
+  it('assign, accept, pickup, in-transit, arriving and deliver each carry their own event', async () => {
+    const { vendor, order, driver } = await assignedDelivery();
+    expect(await latestEvent(order.customerId)).toBe('DELIVERY_DRIVER_ASSIGNED');
+
+    expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/accept`)).status).toBe(201);
+    expect(await latestEvent(order.customerId)).toBe('DELIVERY_DRIVER_ACCEPTED');
+
+    const pinRes = await get(vendor.vendorCookies, `vendor/deliveries/${order.deliveryId}/pickup-pin`);
+    expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/confirm-pickup`, { pin: pinRes.body.pickupPin })).status).toBe(201);
+    expect(await latestEvent(order.customerId)).toBe('DELIVERY_PICKUP_CONFIRMED');
+
+    expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/in-transit`)).status).toBe(201);
+    expect(await latestEvent(order.customerId)).toBe('DELIVERY_IN_TRANSIT');
+
+    expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/arriving`)).status).toBe(201);
+    expect(await latestEvent(order.customerId)).toBe('DELIVERY_ARRIVING');
+
+    const dpin = await get(order.customerCookies, `deliveries/${order.deliveryId}/pin`);
+    expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/confirm-delivery`, { pin: dpin.body.deliveryPin, recipientName: 'Jane Recipient' })).status).toBe(201);
+    expect(await latestEvent(order.customerId)).toBe('DELIVERY_DELIVERED');
+  });
+
+  it('a decline tells the vendor with its own event, a reassignment tells the customer with its own, and so does a cancellation', async () => {
+    // Decline notifies the assigner + vendor, not the customer — DeliveryCoreService.notify's
+    // recipient list for DECLINE is [assignedByUserId, vendorProfile.userId].
+    const { vendor: declineVendor, order: declineOrder, driver: declineDriver } = await assignedDelivery();
+    expect((await post(declineDriver.cookies, `driver/jobs/${declineOrder.deliveryId}/decline`, { reason: 'too far' })).status).toBe(201);
+    expect(await latestEvent(declineVendor.vendorUserId)).toBe('DRIVER_ASSIGNMENT_CANCELLED');
+
+    const { order: reassignOrder } = await assignedDelivery();
+    const secondDriver = await makeDriver({ displayName: `Second ${uniq()}` });
+    expect((await post(adminCookies, `admin/deliveries/${reassignOrder.deliveryId}/reassign`, { driverProfileId: secondDriver.driverProfileId, vehicleId: secondDriver.vehicleId, reason: 'first was unreachable' })).status).toBe(201);
+    expect(await latestEvent(reassignOrder.customerId)).toBe('DRIVER_REASSIGNED');
+
+    const { order: cancelOrder } = await assignedDelivery();
+    expect((await post(adminCookies, `admin/deliveries/${cancelOrder.deliveryId}/cancel`, { reason: 'customer cancelled' })).status).toBe(201);
+    expect(await latestEvent(cancelOrder.customerId)).toBe('DELIVERY_CANCELLED');
+  });
+
+  it('attaching proof of delivery ahead of confirm-delivery carries its own event', async () => {
+    const { vendor, order, driver } = await assignedDelivery();
+    await post(driver.cookies, `driver/jobs/${order.deliveryId}/accept`);
+    const ppin = (await get(vendor.vendorCookies, `vendor/deliveries/${order.deliveryId}/pickup-pin`)).body.pickupPin;
+    await post(driver.cookies, `driver/jobs/${order.deliveryId}/confirm-pickup`, { pin: ppin });
+    const presign = await post(driver.cookies, `driver/jobs/${order.deliveryId}/pod/presign`, { fileName: 'pod.jpg', contentType: 'image/jpeg', sizeBytes: 4 });
+    expect(presign.status).toBe(201);
+    await putToPresigned(presign.body.uploadUrl, Buffer.from([0xff, 0xd8, 0xff, 0xd9]), 'image/jpeg');
+    expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/pod/confirm`, { photoKeys: [presign.body.key] })).status).toBe(201);
+    expect(await latestEvent(order.customerId)).toBe('DELIVERY_PROOF_AVAILABLE');
+  });
+});
+
 describe('inventory finalization (exactly once)', () => {
   it('pickup deducts reserved+quantity once; repeated pickup is idempotent', async () => {
     const { vendor, order, driver } = await assignedDelivery();

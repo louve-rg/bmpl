@@ -291,7 +291,7 @@ export class DispatchService {
       await this.core.auditTransition(action, actor.userId, deliveryId, { driverProfileId, vehicleId, reason }, tx);
       await this.core.notify(
         [e.profile.userId, current.vendorOrder.order.userId, current.vendorOrder.vendorProfile.userId],
-        { title: action === 'REASSIGN' ? 'Delivery reassigned' : 'Driver assigned', body: `Order ${current.vendorOrder.order.orderNumber}: a driver has been ${action === 'REASSIGN' ? 'reassigned' : 'assigned'}.`, data: { deliveryId } },
+        { event: action === 'REASSIGN' ? 'DRIVER_REASSIGNED' : 'DELIVERY_DRIVER_ASSIGNED', title: action === 'REASSIGN' ? 'Delivery reassigned' : 'Driver assigned', body: `Order ${current.vendorOrder.order.orderNumber}: a driver has been ${action === 'REASSIGN' ? 'reassigned' : 'assigned'}.`, data: { deliveryId } },
         tx,
       );
     });
@@ -323,7 +323,7 @@ export class DispatchService {
       await this.core.auditTransition('CANCEL', actor.userId, deliveryId, { reason: dto.reason }, tx);
       await this.core.notify(
         [current.assignedDriver ? current.vendorOrder.order.userId : null, current.vendorOrder.order.userId, current.vendorOrder.vendorProfile.userId, current.assignedDriverProfileId ? (await tx.driverProfile.findUnique({ where: { id: current.assignedDriverProfileId }, select: { userId: true } }))?.userId : null],
-        { title: 'Delivery cancelled', body: `The delivery for order ${current.vendorOrder.order.orderNumber} was cancelled.`, data: { deliveryId } },
+        { event: 'DELIVERY_CANCELLED', title: 'Delivery cancelled', body: `The delivery for order ${current.vendorOrder.order.orderNumber} was cancelled.`, data: { deliveryId } },
         tx,
       );
     });

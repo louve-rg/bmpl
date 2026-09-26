@@ -386,7 +386,7 @@ export class DriverJobService {
       await tx.deliveryAssignment.updateMany({ where: { orderDeliveryId: deliveryId, status: 'ACTIVE' }, data: { status: 'ACCEPTED', respondedAt: new Date() } });
       await this.core.appendTimeline(tx, deliveryId, { fromStatus: 'ASSIGNED', toStatus: 'DRIVER_ACCEPTED', event: 'ACCEPT', actorRole: 'DRIVER', actorUserId: actor.userId });
       await this.core.auditTransition('ACCEPT', actor.userId, deliveryId, undefined, tx);
-      await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId], { title: 'Driver accepted', body: `Your driver accepted the delivery for order ${d.vendorOrder.order.orderNumber}.`, data: { deliveryId } }, tx);
+      await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId], { event: 'DELIVERY_DRIVER_ACCEPTED', title: 'Driver accepted', body: `Your driver accepted the delivery for order ${d.vendorOrder.order.orderNumber}.`, data: { deliveryId } }, tx);
       return true;
     });
 
@@ -429,7 +429,7 @@ export class DriverJobService {
       // The vendor is told; the admin who assigned is told only when there WAS
       // one. Under automatic dispatch assignedByUserId is null and the engine
       // re-offers below, so there is nothing for an admin to act on.
-      await this.core.notify([d.assignedByUserId, d.vendorOrder.vendorProfile.userId], { title: 'Driver declined', body: `A driver declined the delivery for order ${d.vendorOrder.order.orderNumber}. Finding another driver.`, data: { deliveryId } }, tx);
+      await this.core.notify([d.assignedByUserId, d.vendorOrder.vendorProfile.userId], { event: 'DRIVER_ASSIGNMENT_CANCELLED', title: 'Driver declined', body: `A driver declined the delivery for order ${d.vendorOrder.order.orderNumber}. Finding another driver.`, data: { deliveryId } }, tx);
       return true;
     });
 
@@ -482,7 +482,7 @@ export class DriverJobService {
       await this.core.appendTimeline(tx, deliveryId, { fromStatus: 'DRIVER_ACCEPTED', toStatus: 'PICKUP_CONFIRMED', event: 'CONFIRM_PICKUP', actorRole: 'DRIVER', actorUserId: actor.userId });
       await this.core.auditTransition('CONFIRM_PICKUP', actor.userId, deliveryId, undefined, tx);
       if (!fresh.inventoryFinalizedAt) await this.audit.record({ action: 'INVENTORY_FULFILLED', actorId: actor.userId, newValue: { deliveryId } }, tx);
-      await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId], { title: 'Order picked up', body: `Your order ${d.vendorOrder.order.orderNumber} was picked up and is on its way soon.`, data: { deliveryId } }, tx);
+      await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId], { event: 'DELIVERY_PICKUP_CONFIRMED', title: 'Order picked up', body: `Your order ${d.vendorOrder.order.orderNumber} was picked up and is on its way soon.`, data: { deliveryId } }, tx);
     });
     await this.messaging.onDeliveryEvent(deliveryId, 'Order picked up.');
     return this.getJob(actor.userId, deliveryId);
@@ -514,7 +514,7 @@ export class DriverJobService {
       await this.core.auditTransition(action, actor.userId, deliveryId, undefined, tx);
       if (notify.customer) {
         const body = action === 'IN_TRANSIT' ? `Your order ${d.vendorOrder.order.orderNumber} is on the way.` : `Your driver is arriving with order ${d.vendorOrder.order.orderNumber}.`;
-        await this.core.notify([d.vendorOrder.order.userId], { title: action === 'IN_TRANSIT' ? 'On the way' : 'Arriving', body, data: { deliveryId } }, tx);
+        await this.core.notify([d.vendorOrder.order.userId], { event: action === 'IN_TRANSIT' ? 'DELIVERY_IN_TRANSIT' : 'DELIVERY_ARRIVING', title: action === 'IN_TRANSIT' ? 'On the way' : 'Arriving', body, data: { deliveryId } }, tx);
       }
     });
     return this.getJob(actor.userId, deliveryId);
@@ -580,7 +580,7 @@ export class DriverJobService {
     const keys = await this.resolvePodKeys(actor.userId, dto.photoKeys);
     await this.prisma.orderDelivery.update({ where: { id: deliveryId }, data: { podPhotoKeys: keys } });
     await this.core.auditTransition('POD', actor.userId, deliveryId, { count: keys.length });
-    await this.core.notify([d.vendorOrder.order.userId], { title: 'Proof of delivery added', body: `Proof of delivery is available for order ${d.vendorOrder.order.orderNumber}.`, data: { deliveryId } });
+    await this.core.notify([d.vendorOrder.order.userId], { event: 'DELIVERY_PROOF_AVAILABLE', title: 'Proof of delivery added', body: `Proof of delivery is available for order ${d.vendorOrder.order.orderNumber}.`, data: { deliveryId } });
     return this.getJob(actor.userId, deliveryId);
   }
 
