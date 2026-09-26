@@ -64,13 +64,26 @@
  *     (e.g. whether `EmploymentType` still has the right VALUES) — only
  *     whether the named thing still lives where the document says it does.
  *
+ * THE COVERAGE NET (added after the schema.prisma:N-outside-backticks format fooled this
+ * script's own first version): the four recognizers above can only report on a citation
+ * they matched. One they never learned to recognise is invisible by construction — no
+ * different, from inside the tool, than a line with no citation at all. After masking
+ * every real match, a second pass scans what's LEFT for the same fingerprint every real
+ * citation in this document has (a digit run near a backtick/`.ts`/`.prisma`/the words
+ * "schema" or "line") and reports anything it still finds as UNRECOGNISED-CANDIDATE — not
+ * a confirmed drift, but never folded into a pass either. It does not parse or resolve
+ * the candidate; it only refuses to stay silent about it. It cannot catch a citation with
+ * no digit/keyword fingerprint at all (plain prose has nothing to grep for) — meaningfully
+ * narrower than complete, which is the honest limit of any regex-based net.
+ *
  * Exit codes:
- *   0  OK        no citation is confirmed drifted or provably out of bounds;
- *                every unresolved-symbol case at least passed the weaker
- *                existence/bounds check
- *   1  UNKNOWN   nothing confirmed wrong, but at least one citation's FILE
- *                could not be found or resolved unambiguously at all — a
- *                real "cannot verify", never folded into a pass
+ *   0  OK        no citation is confirmed drifted or provably out of bounds, and the
+ *                coverage net found nothing unclaimed; every unresolved-symbol case at
+ *                least passed the weaker existence/bounds check
+ *   1  UNKNOWN   nothing confirmed wrong, but at least one citation's FILE could not be
+ *                found or resolved unambiguously, OR the coverage net flagged an
+ *                unrecognised candidate — both are a real "cannot verify", never folded
+ *                into a pass
  *   2  DRIFTED   at least one citation is confirmed wrong: a named symbol is
  *                declared somewhere else (or nowhere), or a cited line/range
  *                no longer fits inside the file at all
@@ -183,7 +196,44 @@ function extractCitations(line) {
     c.symbol = last;
   }
 
-  return citations.sort((a, b) => a.index - b.index);
+  return { citations: citations.sort((a, b) => a.index - b.index), masked };
+}
+
+/**
+ * The coverage net (BMPL-211, third missed format): a citation the four strict patterns
+ * above never learned to recognise is invisible to them by construction — masked.exec()
+ * simply never matches, which looks identical to "no citation here". This scans what is
+ * LEFT after every real match has been masked out, looking for the same fingerprint every
+ * citation in this document actually has: a run of 2+ digits sitting close to a backtick,
+ * a `.ts`/`.prisma` extension, or the word "schema"/"line". A match here does not mean a
+ * citation was missed — it means something LOOKS like one and no recognizer claimed it,
+ * which is exactly the shape of thing worth a human's five seconds rather than silence.
+ *
+ * Deliberately NOT a citation parser: it does not try to resolve a file or a symbol, only
+ * to flag "unexplained digit run near a citation-shaped fingerprint" so a coverage gap
+ * shows up as a discrepancy instead of a smaller number nobody notices.
+ */
+const CANDIDATE_WINDOW = 15;
+const CANDIDATE_KEYWORD_RE = /\.(?:ts|prisma)\b|\bschema\b|\bline\b/i;
+function findUnrecognizedCandidates(masked) {
+  const found = [];
+  const digitRunRe = /\d{2,}/g;
+  let m;
+  while ((m = digitRunRe.exec(masked)) !== null) {
+    // A bare backtick nearby is NOT enough on its own — a migration filename
+    // (`20260915120000_seed_job_categories`) or an event key is backtick-wrapped and
+    // digit-heavy without being remotely citation-shaped, and tripped this net on
+    // every real run before the keyword requirement was added. A real citation always
+    // sits next to one of these words or extensions; requiring one is what keeps the
+    // net from being switched off after its first false alarm.
+    const winStart = Math.max(0, m.index - CANDIDATE_WINDOW);
+    const winEnd = Math.min(masked.length, m.index + m[0].length + CANDIDATE_WINDOW);
+    const window = masked.slice(winStart, winEnd);
+    if (CANDIDATE_KEYWORD_RE.test(window)) {
+      found.push({ index: m.index, digits: m[0], context: window.trim() });
+    }
+  }
+  return found;
 }
 
 function parseLineSpec(spec) {
@@ -261,9 +311,14 @@ function main() {
   const fileCache = new Map();
 
   const results = [];
+  const candidates = [];
   docSrc.split(/\r?\n/).forEach((line, i) => {
-    for (const c of extractCitations(line)) {
+    const { citations, masked } = extractCitations(line);
+    for (const c of citations) {
       results.push({ docLine: i + 1, ...checkCitation(c, index, fileCache) });
+    }
+    for (const cand of findUnrecognizedCandidates(masked)) {
+      candidates.push({ docLine: i + 1, ...cand });
     }
   });
 
@@ -273,13 +328,21 @@ function main() {
   const drifted = results.filter((r) => r.verdict === 'DRIFTED' || r.verdict === 'PAST-EOF');
   const unknown = results.filter((r) => r.verdict === 'FILE-NOT-FOUND' || r.verdict === 'AMBIGUOUS-FILE');
 
-  const exitCode = drifted.length > 0 ? 2 : unknown.length > 0 ? 1 : 0;
+  // An unrecognised candidate is not a confirmed defect (DRIFTED) — it is exactly the same
+  // epistemic status as UNKNOWN: "cannot vouch for this", never folded into a clean pass.
+  const exitCode = drifted.length > 0 ? 2 : unknown.length > 0 || candidates.length > 0 ? 1 : 0;
   const status = exitCode === 2 ? 'DRIFTED' : exitCode === 1 ? 'UNKNOWN' : 'OK';
 
   const scope = `checks ONLY ${rel(DOC_PATH)} — an exit-0 here says nothing about citations in any other document`;
 
   if (asJson) {
-    console.log(JSON.stringify({ docPath: rel(DOC_PATH), scope, total: results.length, byVerdict: by, status, exitCode, results }, null, 2));
+    console.log(
+      JSON.stringify(
+        { docPath: rel(DOC_PATH), scope, total: results.length, byVerdict: by, unrecognizedCandidates: candidates, status, exitCode, results },
+        null,
+        2,
+      ),
+    );
   } else {
     console.log(`detect-lookup-inventory-citation-drift — ${rel(DOC_PATH)}`);
     console.log(scope + '\n');
@@ -301,8 +364,14 @@ function main() {
     for (const r of results.filter((x) => x.verdict === 'AMBIGUOUS-FILE')) {
       console.log(`AMBIGUOUS doc:${r.docLine}  ${r.file}:${r.lineSpec} — matches ${r.candidates.join(', ')}`);
     }
-    console.log(`\n${status}: ${drifted.length} confirmed drift/out-of-bounds, ${unknown.length} unresolvable, ${by['NO-SYMBOL-TO-CHECK'] ?? 0} checked structurally only (no symbol), ${by['OK'] ?? 0} fully verified`);
-    console.log(`\nexit ${exitCode} (0 OK, 1 UNKNOWN, 2 DRIFTED)`);
+    for (const c of candidates) {
+      console.log(`UNRECOGNISED-CANDIDATE doc:${c.docLine}  "${c.digits}" in: ${c.context}`);
+    }
+    console.log(
+      `\n${status}: ${drifted.length} confirmed drift/out-of-bounds, ${unknown.length} unresolvable, ${candidates.length} unrecognised candidates (coverage gap, not a confirmed drift), ` +
+        `${by['NO-SYMBOL-TO-CHECK'] ?? 0} checked structurally only (no symbol), ${by['OK'] ?? 0} fully verified`,
+    );
+    console.log(`\nexit ${exitCode} (0 OK, 1 UNKNOWN or unrecognised candidate, 2 DRIFTED)`);
   }
 
   process.exit(exitCode);
