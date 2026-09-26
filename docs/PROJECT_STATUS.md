@@ -61,10 +61,36 @@ Belize Marketplace & Logistics: a multi-role commerce and logistics platform for
 Belize. One account, many roles — a person can be a customer, a vendor and a
 delivery driver at once, and switch between them.
 
-Active business areas, in the order they matter right now:
+Active business areas, in the order they matter right now. Where an item
+below is tagged **on `main`** vs **in production**, that split is real and
+worth tracking separately, not a formality: as of 2026-09-26, production is
+still serving `1f23e9a` (2026-09-22) while `main` has moved thirteen merges
+further, and the owner holds the deploy decision. Read `pnpm deploy:status`
+for the live gap rather than trusting this note's date — a status document
+that reads as though `main` equals production is its own kind of false claim.
 
-1. **Marketplace** — vendors, products, cart, checkout, orders.
+1. **Marketplace** — vendors, products, cart, checkout, orders. **On `main`,
+   not yet in production**: a customer can cancel an order until the store
+   starts preparing it, with a guard so a cancelled order cannot be
+   resurrected by a later vendor write (`fa92b74`, `6059972`).
 2. **Shipping & Delivery** — sending a parcel, possibly across several legs.
+   Grew a self-service carrier/service-provider vertical (BMPL-137): a
+   carrier's own organization and membership can run their transport legs
+   without BMPL Admin access, scoped to what their organization actually
+   operates. **In production** since `1f23e9a`:
+   `ShippingProviderProfile`/`ShippingProviderMember`, org-scoped legs
+   (`75ef500`), and the owner-demotion guard, lapsed-carrier booking
+   re-check and member simulation boundary (`1f23e9a` itself). **On `main`,
+   not yet in production**: courier-identity verification at handoff and
+   pickup, where a correct code alone is no longer enough — the actor must
+   also be the leg's live assigned courier (`6676d68`, `25044bd`); courier
+   and vehicle identification shown to the customer (`a4fb20d`); a delivery
+   driver's service-area coverage narrowed from a whole district to specific
+   towns (`3950db0`); a private, sender/courier/staff-scoped pickup photo
+   (`682b501`); the real multi-leg journey map with lettered stops,
+   replacing a placeholder (`4eac6e8`, `c99a596`); and route operating-day
+   scheduling, now actually consulted by route planning and line-haul
+   departure rather than merely configurable (`fcc3592`, `509d664`).
 3. **Delivery driver** — the courier who actually moves it.
 4. **Passenger Transportation** — moving people rather than parcels. Formally
    authorized by the product owner and now a working vertical end to end,
@@ -427,7 +453,7 @@ The abbreviation is **BML**, never BMPL, in anything a person reads. Enforced by
 
 | Never fabricate | Use instead |
 | --- | --- |
-| Production terminals, carriers, routes, schedules, commercial rates | `isTest` rows, clearly marked, configured through the admin console |
+| Production terminals, carriers, routes, schedules, commercial rates | `isTest` rows, clearly marked, configured through the admin console — or, for a carrier's own routes and schedules, through their org-scoped self-service surface (§1, BMPL-137/186) |
 | Driver accounts | Onboard a real driver, or use a designated test account |
 | Wallet balances | The ledger, via the self-service or admin test-credit path |
 
@@ -584,22 +610,42 @@ form no longer asks for a street, and the pay button is not blocked.
 
 The full gap register lives in
 [`DELIVERY-LIFECYCLE.md`](./DELIVERY-LIFECYCLE.md) §6 — one place, so the two
-documents cannot drift. Status summary re-checked 2026-09-07 against
-`3c41e1e`:
+documents cannot drift. **They drifted anyway.** This section's own "Open"
+bullet went unchecked against that register from 2026-09-07 to 2026-09-26 and
+was flatly wrong on both items it named the whole time, while §6 had both
+correct. **When this section and `DELIVERY-LIFECYCLE.md` §6 disagree, §6 is
+authoritative** — it is the register kept against the code; this section is
+only a dated pointer into it, and a stale pointer is a smaller failure than a
+stale duplicate. Status summary re-checked 2026-09-07 against `3c41e1e`,
+corrected 2026-09-26 against `cfc4d7a`:
 
 - **Closed on `main`**: manual courier-leg assignment (PR #11) and its admin
   UI (#17); handoff-PIN access (DIRECT legs last-mile-equivalent for the
   customer; audited staff reveal under `logistics.verify`, refused to the
   leg's own assigned driver, #12) and its handoff-desk screen (#18, which
   also consumes the expected-parcels feed); cancellation now releases the
-  driver instead of stranding them with a phantom job (#15); and hub courier
+  driver instead of stranding them with a phantom job (#15); hub courier
   fees are enterable through the admin console (#19 — a code defect until
-  then, see the header of this document).
+  then, see the header of this document); and a leg `EXCEPTION` has had a
+  way back out since BMPL-103 — `RESUME` or `RELEASE_DRIVER`
+  (`ShipmentService.resolveException`, `DELIVERY-LIFECYCLE.md` §6 gap 4).
+  **This document previously and wrongly called that last one "Open".**
 - **Closed since the last review**: dispatch load fairness (#22, `fb17b17`)
   — a driver's real load now counts marketplace deliveries and courier legs
   together, and a driver whose load is unknown no longer wins the queue.
-- **Open**: leg EXCEPTION has no recovery path, and the recipient has no
-  notification or tracking channel.
+- **Partially closed**: the recipient can now **see** their shipment coming
+  — a public, unauthenticated, capability-token tracking link
+  (`GET /shipping/track/{token}`, BMPL-111) that answers with a deliberate
+  allowlist (status, step progress, destination town, the terminal only
+  while waiting there) and one fixed 404 for every miss. The recipient is
+  still not **told**: pushing a notification needs `destinationEmail` /
+  `destinationPhone`, contact details BML holds only because a customer
+  typed them for someone who never signed up, and whether to contact them,
+  on which channel, with what consent posture, is an owner decision nothing
+  has made yet (`DELIVERY-LIFECYCLE.md` §6 gap 5). **This document
+  previously and wrongly called this fully open, with no tracking channel
+  at all** — the tracking half has existed since BMPL-111; only the telling
+  half is still a real gap.
 - **Corrected 2026-09-07 — this list was wrong at the last review.** It said
   "booking a shipment whose total is zero crashes with a 500 instead of
   refusing (a fix exists on an unmerged branch — it is open until merged)".
