@@ -77,6 +77,15 @@ tags:
       transport legs linked to their organizations; a cross-org id answers 404
       exactly like a missing one. Handoff completion stays with the receiving
       desk (phase 2 is its own card).
+  - name: ShipmentRecipient
+    description: >-
+      The parcel's recipient, once they claim it (BMPL-179). NOT role-gated —
+      any authenticated account is the audience, because the recipient is
+      whoever the parcel is going to and may hold no BML role at all.
+      Claiming turns "holds the anonymous tracking link" into "is the
+      recipient of record", but never widens what is visible: every endpoint
+      here returns the exact same allowlisted `RecipientTrackingView` the
+      anonymous `GET /shipping/track/{token}` link already exposes.
 security:
   - cookieAuth: []
 
@@ -207,6 +216,90 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RecipientTrackingView" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/track/{token}/claim:
+    post:
+      tags: [ShipmentRecipient]
+      summary: Claim a shipment as its recipient, linking it to the caller's account (BMPL-179)
+      description: >-
+        Authenticated — any account, no role required, since the recipient
+        may hold no BML role at all — but on a SEPARATE controller from the
+        anonymous `GET /shipping/track/{token}` above so it never inherits
+        that route's `@Public()` (`ShipmentService.claimAsRecipient`).
+        Strictly throttled. Holding the token still only ever proved you
+        could READ the shipment; this is the deliberate, audited step
+        (`SHIPMENT_RECIPIENT_LINKED`) that additionally proves you may claim
+        it — matched on the token alone, never on the customer-typed
+        destination email/phone, which would let a claim probe whether an
+        address belongs to an account. Idempotent for the SAME account: a
+        repeat claim answers exactly like the first success, `linked: true`,
+        never an error. Refuses across the isTest boundary (a real account
+        cannot claim a simulation shipment or vice versa) and refuses a
+        token already claimed by a DIFFERENT account — both are a 400, not a
+        404, because the token resolved to a real shipment; only a token
+        matching no shipment at all is a 404. Claiming never widens what is
+        visible — see `GET /shipping/incoming` below, which returns the
+        exact same allowlist this endpoint's sibling `GET` already does, not
+        a second, richer view.
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string }, description: "Capability token from the booking customer's `recipientTrackingToken`" }
+      responses:
+        "201":
+          description: Claimed — or already claimed by this same account, which answers identically
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference: { type: string }
+                  linked: { type: boolean, enum: [true] }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/incoming:
+    get:
+      tags: [ShipmentRecipient]
+      summary: Every shipment the caller has claimed as recipient, newest first (BMPL-179)
+      description: >-
+        Authenticated, any account, no role required. Returns the exact same
+        allowlisted `RecipientTrackingView` `GET /shipping/track/{token}`
+        already returns for each shipment, scoped to what this account has
+        claimed (`recipientUserId`), newest first, up to 50
+        (`ShipmentService.listIncoming`). Claiming only changes WHERE this
+        view can be read from, never WHAT is in it: sender identity/address,
+        money, the parcel description, the handoff code, custody actor
+        names and driver identity are all still absent. Also absent: the
+        pickup photo (BMPL-178) — widening the recipient's view to include
+        it is an approved but UNBUILT follow-up, not live on this or any
+        recipient-facing surface today.
+      responses:
+        "200":
+          description: The caller's claimed shipments
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/RecipientTrackingView" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /shipping/incoming/{reference}:
+    get:
+      tags: [ShipmentRecipient]
+      summary: One claimed shipment by reference, the recipient's own view (BMPL-179)
+      description: >-
+        Same allowlist and the same absences as `GET /shipping/incoming`
+        above — one row instead of the list. Scoped by `recipientUserId`,
+        never by reference alone: a reference is customer-facing and
+        effectively guessable-adjacent (sequential-ish, read aloud at a
+        collection desk), so a reference that exists but was never claimed
+        by this account answers the SAME fixed 404 as a reference that does
+        not exist at all (`ShipmentService.trackAsRecipient`).
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string }, description: Shipment reference }
+      responses:
+        "200":
+          description: The recipient's view of this one shipment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipientTrackingView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
   /shipping/{reference}:
     get:
