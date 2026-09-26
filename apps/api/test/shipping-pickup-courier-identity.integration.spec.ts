@@ -286,4 +286,64 @@ describe('starting a leg checks the courier, not just an admin permission (BMPL-
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
     expect((await legRow(firstMile.id)).status).toBe('IN_PROGRESS');
   });
+
+  /**
+   * Test 4 above proves an UNRELATED ops-agent profile is refused after
+   * reassignment. It never has courier A — the person who actually WAS the
+   * assigned driver a moment ago — attempt their own former job. That is the
+   * more exacting case: A's driver profile is real, was genuinely valid for
+   * this leg until the reassignment, and a check that tracked "was ever
+   * assigned" instead of reading the LIVE column would let A straight back
+   * in while every other test in this file stayed green (BMPL-140 fresh
+   * audit, mirroring the analogous gap closed in the handoff suite).
+   */
+  it("5 · courier A, reassigned AWAY, cannot record the pickup themselves — own route or admin desk", async () => {
+    const sender = await fundedSender();
+    const courierA = await makeCourier('STANN_CREEK');
+    const courierB = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+
+    // REASSIGN is only valid from ASSIGNED/DRIVER_ACCEPTED/DRIVER_DECLINED
+    // (packages/shared/src/dispatch.ts) — before physical pickup.
+    await dispatch.dispatchLeg(firstMile.id);
+    expect((await legRow(firstMile.id)).assignedDriverProfileId).toBe(courierA.driverProfileId);
+    expect((await post(courierA.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
+
+    const vehicleB = await ctx.prisma.driverVehicle.findFirstOrThrow({ where: { driverProfileId: courierB.driverProfileId } });
+    expect((await post(admin, `admin/logistics/legs/${firstMile.id}/reassign`, {
+      driverProfileId: courierB.driverProfileId,
+      vehicleId: vehicleB.id,
+      reason: 'Courier A reported a breakdown.',
+    })).status).toBe(201);
+    expect((await legRow(firstMile.id)).assignedDriverProfileId).toBe(courierB.driverProfileId);
+
+    // (a) Courier A's own route: ownedLeg refuses on the plain profile mismatch.
+    const ownRoute = await post(courierA.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, {});
+    expect([400, 403, 404]).toContain(ownRoute.status);
+
+    // (b) Courier A, now ALSO holding logistics.operate on their own account —
+    // the same "ops account who happens to be a driver" shape as tests 1/2/4,
+    // just using A's OWN (real, formerly-valid) profile — tries the admin
+    // desk. This is the one path that re-exercises startLeg's own comparison
+    // rather than the earlier ownedLeg gate.
+    await ctx.prisma.userRole.upsert({
+      where: { userId_roleCode: { userId: courierA.userId, roleCode: 'ADMIN' } },
+      create: { userId: courierA.userId, roleCode: 'ADMIN', status: 'APPROVED', approvedAt: new Date() },
+      update: { status: 'APPROVED', approvedAt: new Date() },
+    });
+    await ctx.prisma.adminPermissionGrant.create({ data: { userId: courierA.userId, permission: 'logistics.operate' } });
+    const opsRoute = await post(courierA.cookies, `admin/logistics/legs/${firstMile.id}/start`, {});
+    expect(opsRoute.status).toBe(403);
+
+    const after = await legRow(firstMile.id);
+    expect(after.status).toBe('READY');
+    expect(after.startedAt).toBeNull();
+    expect(after.assignedDriverProfileId).toBe(courierB.driverProfileId);
+
+    // B, who the leg actually belongs to now, is unaffected by A's attempts.
+    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
+    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await legRow(firstMile.id)).status).toBe('IN_PROGRESS');
+  });
 });
