@@ -99,6 +99,39 @@ describe('employer + job lifecycle + public', () => {
     expect((await guest(`jobs/${draft.body.slug}`)).status).toBe(404);
   });
 
+  it('a first draft with every optional field left blank is accepted, exactly as the employer form submits it (BMPL-221)', async () => {
+    const emp = await makeEmployer();
+    // Mirrors EmployerJobForm.buildBody() precisely: every optional field the
+    // user left blank is sent as an explicit null, not omitted.
+    const res = await post(emp.cookies, 'employer/jobs', {
+      title: `Blank Defaults ${uniq()}`,
+      jobCategoryId: null,
+      employmentType: 'FULL_TIME',
+      workArrangement: null,
+      district: null,
+      city: null,
+      description: 'A role with every optional field left at its default. '.repeat(2),
+      responsibilities: null,
+      requirements: null,
+      preferredQualifications: null,
+      experienceLevel: null,
+      educationLevel: null,
+      salaryMinMinor: null,
+      salaryMaxMinor: null,
+      salaryPeriod: null,
+      openings: null,
+      applicationDeadline: null,
+      startDate: null,
+      externalUrl: null,
+      applicationEmail: null,
+    });
+    expect(res.status).toBe(201);
+    // State, not just status: the DB-side defaults actually landed.
+    const row = await ctx.prisma.jobListing.findUniqueOrThrow({ where: { id: res.body.id } });
+    expect(row.workArrangement).toBe('ONSITE');
+    expect(row.openings).toBe(1);
+  });
+
   it('rejects moderation bypass + enforces cross-employer isolation', async () => {
     const empA = await makeEmployer();
     const empB = await makeEmployer();
