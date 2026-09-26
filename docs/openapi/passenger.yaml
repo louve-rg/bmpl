@@ -10,7 +10,12 @@ info:
     fleet vehicles), the assigned driver's movement routes, the operator
     network surface (routes, stops, departures, staffing, booking answers),
     fleet affiliation on both sides (mutual consent), and the admin oversight
-    and moderation surfaces. All paths are under the `/api` prefix. Every
+    and moderation surfaces. PASSENGER_DRIVER here is a DIFFERENT role and
+    profile from DELIVERY_DRIVER (marketplace delivery + shipping courier
+    legs), whose own profile/vehicle/service-area/availability surface is
+    documented separately in driver.yaml beside this file — the similar
+    field names (profile, vehicles, availability) describe two unrelated
+    surfaces. All paths are under the `/api` prefix. Every
     endpoint was documented from its controller and its serializer read at
     `origin/main` (`passenger-rider.controller.ts`,
     `passenger-driver.controller.ts`, `passenger-provider.controller.ts`,

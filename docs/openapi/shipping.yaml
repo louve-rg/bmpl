@@ -7,7 +7,11 @@ info:
     network discovery, customer quote/booking/tracking/cancellation, the driver
     courier-leg job family, and the admin logistics console (network
     configuration, operations board, manual leg dispatch, leg operation,
-    handoff verification, collection, cancellation). All paths are under the
+    handoff verification, collection, cancellation). The courier's own
+    profile/vehicle/service-area/availability surface — the same
+    DELIVERY_DRIVER used for the courier-leg job family here — is a different
+    controller, documented separately in driver.yaml beside this file. All
+    paths are under the
     `/api` prefix. Every endpoint here was documented from its controller and
     service read at `origin/main` (`shipping.controller.ts`,
     `driver-shipping.controller.ts`, and the services they call) — nothing is

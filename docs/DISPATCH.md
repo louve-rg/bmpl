@@ -198,8 +198,14 @@ every job onto whoever happens to sort first.
 
 ## Driver job preferences — not built
 
-Drivers can set service areas (districts) and go online or offline. That is the
-whole of it, and it is the only driver-side input to assignment today.
+Drivers can set service areas (districts), narrow a served district to
+specific towns (BMPL-176), and go online or offline. Assignment itself still
+matches on district alone: `DriverService.eligibleDriversForDistrict` and
+`assignmentEligibility`'s own `servesDistrict` check both compare only
+`district`, never a driver's narrower town-level rows, so a driver narrowed to
+one town is still offered every job anywhere in that district today. Town-
+level matching is unwired (BMPL-194). That district-level match is the only
+driver-side input to assignment today.
 
 A richer preference model — parcel size or weight limits, preferred vendors,
 shift windows, maximum travel distance — is a plausible future option and is
