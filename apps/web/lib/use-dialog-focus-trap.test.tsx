@@ -31,14 +31,14 @@ afterEach(() => {
   container = null;
 });
 
-function TestHarness({ open }: { open: boolean }) {
+function TestHarness({ open, showTrigger = true }: { open: boolean; showTrigger?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   useDialogFocusTrap({ open, containerRef, initialFocusRef: closeRef });
 
   return (
     <>
-      <button id="trigger">Trigger</button>
+      {showTrigger && <button id="trigger">Trigger</button>}
       {open && (
         <div ref={containerRef} role="dialog" aria-modal="true">
           <button ref={closeRef} id="first">First</button>
@@ -73,6 +73,11 @@ describe('useDialogFocusTrap', () => {
 
   it('removes inert from everything when the dialog closes', () => {
     mount(true);
+    // Assert it was actually APPLIED first — otherwise a mutation that
+    // breaks applying inert entirely still reads as "removed" below, since
+    // removing an attribute that was never there also leaves it absent.
+    expect(document.getElementById('trigger')!.hasAttribute('inert')).toBe(true);
+    expect(document.getElementById('page-button')!.hasAttribute('inert')).toBe(true);
     act(() => root!.render(<TestHarness open={false} />));
     expect(document.getElementById('trigger')!.hasAttribute('inert')).toBe(false);
     expect(document.getElementById('page-button')!.hasAttribute('inert')).toBe(false);
@@ -126,5 +131,31 @@ describe('useDialogFocusTrap', () => {
 
     act(() => root!.render(<TestHarness open={false} />));
     expect(document.activeElement!.id).toBe('trigger');
+  });
+
+  it('falls back to <body> instead of leaving focus wherever it drifted, when the opener is unmounted before the dialog closes', () => {
+    // The shape this catches: a list re-renders (an item removed, a page
+    // navigated a different way) while the dialog stays open, so the
+    // element that opened it no longer exists once the dialog closes.
+    mount(false);
+    document.getElementById('trigger')!.focus();
+    act(() => root!.render(<TestHarness open={true} />)); // records #trigger as the opener; focus -> #first
+
+    // The opener disappears while the dialog is STILL open — the trap
+    // itself is unaffected by this.
+    act(() => root!.render(<TestHarness open={true} showTrigger={false} />));
+    expect(document.getElementById('trigger')).toBeNull();
+
+    // Something unrelated to the dialog's own content ends up focused before
+    // it closes. Without this, the browser's own "the focused node was
+    // removed -> focus <body>" rule fires from closing the dialog itself
+    // (its content, including #first, gets unmounted too) and would produce
+    // the same result regardless of this fix — this isolates the assertion
+    // below to the hook's own fallback, not that incidental behaviour.
+    document.getElementById('page-button')!.focus();
+
+    act(() => root!.render(<TestHarness open={false} showTrigger={false} />));
+
+    expect(document.activeElement).toBe(document.body);
   });
 });

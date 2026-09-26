@@ -19,7 +19,10 @@ import { useEffect, useRef } from 'react';
  *   never drift from the rest of the behaviour below;
  * - the element that had focus just before opening is remembered and
  *   refocused when the dialog closes — the WCAG "return focus to the
- *   trigger" pattern neither prior implementation had;
+ *   trigger" pattern neither prior implementation had. If that element has
+ *   since been unmounted (a list re-rendering while the dialog was open),
+ *   focus is explicitly relinquished (rather than left where it silently
+ *   no-op'd) so it lands on `<body>` instead of nowhere in particular;
  * - Tab and Shift+Tab are contained inside the dialog's focusable
  *   descendants, computed fresh on every keypress so dialogs whose content
  *   changes (a legend list, a form) stay correct;
@@ -101,7 +104,19 @@ export function useDialogFocusTrap({
     return () => {
       document.removeEventListener('keydown', onKeyDown);
       for (const el of inerted) el.removeAttribute('inert');
-      opener?.focus();
+      // opener.focus() on a node the caller has since unmounted (a list that
+      // re-rendered while the dialog was open) is a silent no-op — it neither
+      // throws nor moves focus, so the user is left wherever focus happened
+      // to be with nothing to say why. Explicitly relinquishing focus, rather
+      // than trying to force it onto a specific fallback element, is what's
+      // actually guaranteed to land on <body> — document.body.focus() is not
+      // reliably a focusable target on its own (jsdom does not treat it as
+      // one at all; don't lean on it here).
+      if (opener?.isConnected) {
+        opener.focus();
+      } else if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
