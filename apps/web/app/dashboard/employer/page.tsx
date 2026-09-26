@@ -42,7 +42,13 @@ export default function EmployerHomePage() {
     } catch (e) {
       const err = e as ApiError;
       if (err.status === 403) setForbidden(true);
-      else setError(err.message ?? 'Failed to load.');
+      else if (err.status === 404) {
+        // Expected for an approved employer who has never saved a profile
+        // yet — not a failure. `profile` stays null and the form below
+        // renders empty, ready to create one, instead of an error.
+      } else {
+        setError(err.message ?? 'Failed to load.');
+      }
     } finally {
       setLoading(false);
     }
@@ -59,7 +65,7 @@ export default function EmployerHomePage() {
     );
   }
   if (forbidden) return <EmployerGate />;
-  if (error || !profile) return <Alert tone="error">{error ?? 'Failed to load.'}</Alert>;
+  if (error) return <Alert tone="error">{error}</Alert>;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -79,13 +85,17 @@ export default function EmployerHomePage() {
         }
       />
 
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-slate-500">Approval status:</span>
-        <StatusBadge status={profile.approvalStatus} />
-      </div>
+      {profile ? (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-500">Approval status:</span>
+          <StatusBadge status={profile.approvalStatus} />
+        </div>
+      ) : (
+        <Alert tone="brand">Set up your company profile to start posting jobs.</Alert>
+      )}
 
       {analytics && <AnalyticsCard a={analytics} />}
-      <ImageManager profile={profile} onChanged={load} />
+      {profile && <ImageManager profile={profile} onChanged={load} />}
       <ProfileForm profile={profile} onSaved={load} />
     </div>
   );
@@ -180,20 +190,20 @@ function ImageManager({ profile, onChanged }: { profile: EmployerProfile; onChan
   );
 }
 
-function ProfileForm({ profile, onSaved }: { profile: EmployerProfile; onSaved: () => void }) {
+function ProfileForm({ profile, onSaved }: { profile: EmployerProfile | null; onSaved: () => void }) {
   const [v, setV] = useState({
-    companyName: profile.companyName ?? '',
-    legalName: profile.legalName ?? '',
-    description: profile.description ?? '',
-    industry: profile.industry ?? '',
-    companySize: profile.companySize ?? '',
-    contactEmail: profile.contactEmail ?? '',
-    contactPhone: profile.contactPhone ?? '',
-    website: profile.website ?? '',
-    district: profile.district ?? '',
-    addressLine1: profile.addressLine1 ?? '',
-    addressLine2: profile.addressLine2 ?? '',
-    city: profile.city ?? '',
+    companyName: profile?.companyName ?? '',
+    legalName: profile?.legalName ?? '',
+    description: profile?.description ?? '',
+    industry: profile?.industry ?? '',
+    companySize: profile?.companySize ?? '',
+    contactEmail: profile?.contactEmail ?? '',
+    contactPhone: profile?.contactPhone ?? '',
+    website: profile?.website ?? '',
+    district: profile?.district ?? '',
+    addressLine1: profile?.addressLine1 ?? '',
+    addressLine2: profile?.addressLine2 ?? '',
+    city: profile?.city ?? '',
   });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);

@@ -14,6 +14,20 @@ export interface ApiError {
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/**
+ * Every caller across the app reads only `err.message` (never `.errors`,
+ * even though the field is right there) — so a validation failure with a
+ * generic top-level message ("Validation failed") showed a user nothing
+ * about which field was wrong, or why, anywhere in the product. Folding the
+ * per-field detail into the message itself fixes every one of those call
+ * sites at once, rather than needing each to be found and updated to read
+ * `.errors` separately.
+ */
+function withFieldErrors(raw: string, errors: Array<{ path: string; message: string }> | undefined): string {
+  if (!errors || errors.length === 0) return raw;
+  return `${raw}: ${errors.map((e) => (e.path ? `${e.path} — ${e.message}` : e.message)).join('; ')}`;
+}
+
 function readCookie(name: string): string | undefined {
   if (typeof document === 'undefined') return undefined;
   const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]+)`));
@@ -74,7 +88,7 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
       status: res.status,
       message: isOriginOrCsrf
         ? 'We couldn’t complete that request. Please refresh the page and try again.'
-        : raw,
+        : withFieldErrors(raw, data?.errors),
       errors: data?.errors,
       detail: raw,
     };
@@ -113,7 +127,7 @@ async function uploadBinary<T>(path: string, body: Blob, retry = true): Promise<
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
     const raw = (data?.message as string) ?? 'Upload failed';
-    const err: ApiError = { status: res.status, message: raw, errors: data?.errors, detail: raw };
+    const err: ApiError = { status: res.status, message: withFieldErrors(raw, data?.errors), errors: data?.errors, detail: raw };
     throw err;
   }
   return data as T;
