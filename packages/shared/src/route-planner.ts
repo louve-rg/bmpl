@@ -16,6 +16,7 @@
 
 import type { LegKind, ShippingService, TransportMode } from './shipping';
 import { needsFirstMile, needsLastMile } from './shipping';
+import { resolveScheduleStatus, type ScheduleException, type WeeklyOperatingDay } from './service-schedule';
 
 /* ------------------------------------------------------------- network */
 
@@ -40,6 +41,14 @@ export interface PlannerRoute {
   /** Minor units. The line-haul component of the quote. */
   priceMinor: number;
   isActive: boolean;
+  /**
+   * BMPL-186 weekly operating pattern. Absent or empty means every day is
+   * OPERATING (see service-schedule.ts) - true of every route today, since
+   * this is configuration a carrier opts into.
+   */
+  weeklyPattern?: readonly WeeklyOperatingDay[];
+  /** BMPL-186 date-specific overrides for this route. */
+  scheduleExceptions?: readonly ScheduleException[];
 }
 
 /**
@@ -76,6 +85,18 @@ export interface PlanRequest {
   service: ShippingService;
   /** Restrict the line-haul to one mode. Omitted means "whatever works". */
   preferredMode?: TransportMode | null;
+  /**
+   * The date this journey would travel on. Folds each candidate route's
+   * BMPL-186 schedule into the path search: a route resolving NOT_OPERATING
+   * for this date is excluded exactly like an inactive one (BMPL-196).
+   *
+   * Optional, and omitting it disables schedule filtering entirely (every
+   * route is treated as running) - kept optional rather than defaulting to
+   * "now" internally because this module is pure and must never read the
+   * clock itself; a caller that cares about the schedule passes the date it
+   * cares about.
+   */
+  date?: Date;
 }
 
 export interface PlannedLeg {
@@ -226,7 +247,7 @@ export function planRoute(
     };
   }
 
-  const path = cheapestPath(originHub.id, destinationHub.id, routes, req.preferredMode);
+  const path = cheapestPath(originHub.id, destinationHub.id, routes, req.preferredMode, req.date);
   if (!path) {
     return {
       ok: false,
@@ -436,8 +457,9 @@ function cheapestPath(
   toId: string,
   routes: readonly PlannerRoute[],
   mode?: TransportMode | null,
+  date?: Date,
 ): PlannerRoute[] | null {
-  const usable = routes.filter((r) => r.isActive && (!mode || r.mode === mode));
+  const usable = routes.filter((r) => r.isActive && (!mode || r.mode === mode) && routeRunsOn(r, date));
   const out = new Map<string, PlannerRoute[]>();
   for (const r of usable) {
     const list = out.get(r.originHubId) ?? [];
@@ -469,6 +491,24 @@ function cheapestPath(
     }
   }
   return null;
+}
+
+/**
+ * Whether `route` can be used on `date`, folding in its BMPL-186 schedule.
+ *
+ * NOT_OPERATING excludes the route from the path search exactly like
+ * isActive=false. REDUCED still runs - operations have said it is thinner,
+ * not that it stops - and OPERATING obviously runs. No `date` at all means
+ * schedule filtering is off for this call, and every route is treated as
+ * running (see PlanRequest.date). A route with no weekly pattern and no
+ * exceptions - true of every route in production today - resolves OPERATING
+ * (service-schedule.ts's own default), so an unconfigured network is
+ * unaffected either way.
+ */
+function routeRunsOn(route: PlannerRoute, date: Date | undefined): boolean {
+  if (!date) return true;
+  const resolution = resolveScheduleStatus(date, route.weeklyPattern ?? [], route.scheduleExceptions ?? []);
+  return resolution.status !== 'NOT_OPERATING';
 }
 
 function modeVerb(mode: TransportMode): string {

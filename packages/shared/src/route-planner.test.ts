@@ -338,6 +338,113 @@ describe('determinism', () => {
   });
 });
 
+/**
+ * BMPL-196: a configured route schedule (BMPL-186) actually governs whether
+ * the planner will use the route on a given date.
+ *
+ * The load-bearing case is the FIRST test below: every route in production
+ * has zero schedule configuration today, and that must keep planning exactly
+ * as it always has. Everything else here is the opt-in behaviour on top.
+ */
+describe('route schedules (BMPL-196)', () => {
+  // Belize is a fixed UTC-6 with no daylight saving (see service-schedule.ts).
+  // `belizeInstant` names a moment by its Belize local wall-clock date/hour;
+  // `calendarDate` names a pure calendar date the way RouteScheduleException's
+  // date column stores one. Using plain UTC-midnight Dates for both, as this
+  // fixture used to, was the exact BMPL-196 bug: it made every "today" here
+  // silently mean the PRIOR Belize calendar day.
+  const belizeInstant = (year: number, month: number, day: number, hour = 12): Date =>
+    new Date(Date.UTC(year, month - 1, day, hour + 6, 0, 0));
+  const calendarDate = (year: number, month: number, day: number): Date => new Date(Date.UTC(year, month - 1, day));
+
+  const sunday = belizeInstant(2026, 11, 1); // Belize noon, a Sunday
+  const wednesday = belizeInstant(2026, 11, 4); // Belize noon, a Wednesday
+
+  it('plans exactly as before when no date is supplied at all', () => {
+    const r = planRoute({ origin: at('PLA'), destination: at('SPA'), service: 'HUB_TO_HUB' }, HUBS, ROUTES, COURIER);
+    expect(r.ok).toBe(true);
+  });
+
+  it('an unconfigured route - no weekly pattern, no exceptions - still runs on any date', () => {
+    // This is the case that matters most: it is the state of every real route
+    // today, and a schedule feature that broke it would silently ground the
+    // entire network on deploy.
+    const r = planRoute(
+      { origin: at('PLA'), destination: at('SPA'), service: 'HUB_TO_HUB', date: sunday },
+      HUBS,
+      ROUTES,
+      COURIER,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('excludes a route a carrier has marked NOT_OPERATING for that date, via a weekly pattern', () => {
+    const grounded = ROUTES.map((r) =>
+      r.id === 'r_mun_spa' ? { ...r, weeklyPattern: [{ dayOfWeek: 0, status: 'NOT_OPERATING' as const }] } : r,
+    );
+    const onSunday = planRoute(
+      { origin: at('MUN'), destination: at('SPA'), service: 'HUB_TO_HUB', date: sunday },
+      HUBS,
+      grounded,
+    );
+    expect(onSunday.ok).toBe(false);
+    // A Wednesday is not configured on this route at all, so it defaults OPERATING.
+    const onWednesday = planRoute(
+      { origin: at('MUN'), destination: at('SPA'), service: 'HUB_TO_HUB', date: wednesday },
+      HUBS,
+      grounded,
+    );
+    expect(onWednesday.ok).toBe(true);
+  });
+
+  it('excludes a route via a date-specific exception, overriding an otherwise-operating weekly pattern', () => {
+    const withException = ROUTES.map((r) =>
+      r.id === 'r_mun_spa'
+        ? {
+            ...r,
+            weeklyPattern: [{ dayOfWeek: 0, status: 'OPERATING' as const }],
+            scheduleExceptions: [
+              { date: calendarDate(2026, 11, 1), status: 'NOT_OPERATING' as const, reason: 'Synthetic test holiday' },
+            ],
+          }
+        : r,
+    );
+    const r = planRoute(
+      { origin: at('MUN'), destination: at('SPA'), service: 'HUB_TO_HUB', date: sunday },
+      HUBS,
+      withException,
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it('a REDUCED day still plans - operations said thinner, not stopped', () => {
+    const reduced = ROUTES.map((r) =>
+      r.id === 'r_mun_spa' ? { ...r, weeklyPattern: [{ dayOfWeek: 0, status: 'REDUCED' as const }] } : r,
+    );
+    const r = planRoute(
+      { origin: at('MUN'), destination: at('SPA'), service: 'HUB_TO_HUB', date: sunday },
+      HUBS,
+      reduced,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('routes around a grounded leg of a multi-hop chain when another path exists', () => {
+    // MUN -> SPA is grounded on Sunday, but MUN -> WTB -> SPW is unaffected.
+    const grounded = ROUTES.map((r) =>
+      r.id === 'r_mun_spa' ? { ...r, weeklyPattern: [{ dayOfWeek: 0, status: 'NOT_OPERATING' as const }] } : r,
+    );
+    const r = planRoute(
+      { origin: at('MUN'), destination: at('SPW'), service: 'HUB_TO_HUB', date: sunday },
+      HUBS,
+      grounded,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('expected a plan');
+    expect(r.legs.map((l) => l.routeId)).toEqual(['r_mun_wtb', 'r_wtb_spw']);
+  });
+});
+
 describe('explaining itself', () => {
   it('describes each step in plain language, with no identifiers or enums', () => {
     const r = plan({

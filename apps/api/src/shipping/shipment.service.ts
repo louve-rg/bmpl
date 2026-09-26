@@ -8,6 +8,7 @@ import {
   findCourierLane,
   isLocalDoorToDoor,
   planRoute,
+  resolveScheduleStatus,
   userInitials,
   LEG_KIND_LABELS,
   SHIPMENT_STATUS_LABELS,
@@ -124,7 +125,7 @@ export class ShipmentService {
     // given rather than working out what a courier costs.
     const fees = await this.courierFees(input, origin, destination, hubs, lanes, simulated);
     const plan = planRoute(
-      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null },
+      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null, date: this.travelDate() },
       hubs,
       routes,
       {
@@ -179,6 +180,21 @@ export class ShipmentService {
     return h ? { id: h.id, code: h.code, name: h.name, city: h.city } : null;
   }
 
+  /**
+   * The date a journey being quoted or booked right now would travel on
+   * (BMPL-196).
+   *
+   * There is no requested/scheduled travel date anywhere on a shipment yet
+   * (BMPL-184 is the open card for that) - booking is always "as soon as
+   * possible" - so "now" is the only date planning can honestly mean. A
+   * route's schedule is resolved per calendar day, not per instant, so the
+   * few milliseconds between a quote's dry-run fee calculation and its real
+   * plan can never land on different days in practice.
+   */
+  private travelDate(): Date {
+    return new Date();
+  }
+
   /** Turn a validated endpoint into what the planner understands. */
   private toEndpoint(input: ShipmentQuoteInput, side: 'origin' | 'destination'): Endpoint {
     const e = input[side];
@@ -224,6 +240,9 @@ export class ShipmentService {
       destination,
       service: input.service,
       preferredMode: input.preferredMode ?? null,
+      // Same date as the real plan below (BMPL-196), so a hub this dry run
+      // attaches a door to is one the actual plan can still reach.
+      date: this.travelDate(),
     };
 
     /**
@@ -320,7 +339,7 @@ export class ShipmentService {
     const destination = this.toEndpoint(input, 'destination');
     const fees = await this.courierFees(input, origin, destination, hubs, lanes, simulated);
     const plan = planRoute(
-      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null },
+      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null, date: this.travelDate() },
       hubs,
       routes,
       {
@@ -762,22 +781,36 @@ export class ShipmentService {
   /* --------------------------------------------------------- leg operation */
 
   /**
-   * Start a leg: the parcel is now moving on it.
+   * Start a courier leg (FIRST_MILE/LAST_MILE/DIRECT): a driver now has the
+   * parcel.
+   *
+   * A transport leg (LINE_HAUL) NEVER starts here — it leaves READY only
+   * through `departLeg`, which is the one place that consults the route's
+   * BMPL-186 schedule (BMPL-196). Before this guard, `assignedDriverProfileId`
+   * being null for a LINE_HAUL leg made the owner check below a silent no-op,
+   * so `POST admin/logistics/legs/:id/start` — gated only on
+   * `logistics.operate`, with no schedule check of its own — could advance a
+   * LINE_HAUL leg straight to IN_PROGRESS on a route the carrier had marked
+   * NOT_OPERATING for today, bypassing the very check `departLeg` enforces on
+   * the exact same leg. Automatic dispatch and admin manual assignment both
+   * already refuse to put a driver on a LINE_HAUL leg
+   * (`shipment-dispatch.service.ts`), so nothing legitimate ever reaches this
+   * method with one — this closes the gap rather than changing any real path.
    *
    * Same owner rule as `verifyHandoffPin` (BMPL-174), applied to the OTHER end
    * of a courier's custody: picking up. There is no code to check here — the
    * sender and the terminal desk do not hold one — but the actor recording the
    * pickup still has to BE the courier the parcel is credited to, or an ops
    * account with `logistics.operate` could mark a pickup as done by a driver
-   * who never touched the parcel. `assignedDriverProfileId == null` is the same
-   * owner exception as the handoff check: it is only ever null for a LINE_HAUL
-   * leg (terminal-to-terminal, no individual courier — see PROVEN FACTS), so
-   * this is correctly a no-op there. The driver's own path (`confirmPickup`)
+   * who never touched the parcel. The driver's own path (`confirmPickup`)
    * already asserts this via `ownedLeg` before reaching here; this closes the
    * same gap for the admin desk, the way BMPL-174 closed it for handoff.
    */
   async startLeg(legId: string, actor: { userId: string; label?: string }) {
     return this.transition(legId, actor, async (tx, leg, shipment) => {
+      if (leg.kind === 'LINE_HAUL') {
+        throw new BadRequestException('A transport leg does not start here — record its departure instead.');
+      }
       if (leg.status !== 'READY') {
         throw new BadRequestException(`This leg is ${leg.status.toLowerCase()}, so it cannot be started.`);
       }
@@ -790,7 +823,9 @@ export class ShipmentService {
       await tx.shipmentLeg.update({ where: { id: leg.id }, data: { status: 'IN_PROGRESS', startedAt: new Date() } });
       await this.appendCustody(tx, shipment.id, leg.id, {
         fromHolder: leg.sequence === 1 ? 'SENDER' : 'HUB',
-        toHolder: leg.kind === 'LINE_HAUL' ? 'CARRIER' : 'DRIVER',
+        // Never CARRIER: the LINE_HAUL guard above means only a driver leg
+        // (FIRST_MILE/LAST_MILE/DIRECT) reaches this point.
+        toHolder: 'DRIVER',
         hubId: leg.originHubId,
         actorUserId: actor.userId,
         actorLabel: actor.label,
@@ -800,12 +835,49 @@ export class ShipmentService {
     });
   }
 
-  /** A line-haul left the terminal. Carrier details are recorded as given. */
+  /**
+   * A line-haul left the terminal. Carrier details are recorded as given.
+   *
+   * Gated on the route's own BMPL-186 schedule for today (BMPL-196): a
+   * carrier who has told BML this route does not run today cannot then
+   * confirm a departure on it. REDUCED still departs — operations said
+   * thinner, not stopped — and a route with no schedule configured at all
+   * (every real route today) resolves OPERATING, so this changes nothing for
+   * the unconfigured network. Both the staff desk and the carrier's own
+   * surface (ShippingProviderService.depart) call this same method, so the
+   * gate applies identically to each.
+   */
   async departLeg(legId: string, input: LegDepartInput, actor: { userId: string; label?: string }) {
     return this.transition(legId, actor, async (tx, leg, shipment) => {
       if (leg.kind !== 'LINE_HAUL') throw new BadRequestException('Only a transport leg departs from a terminal.');
       if (leg.status !== 'READY' && leg.status !== 'IN_PROGRESS') {
         throw new BadRequestException(`This leg is ${leg.status.toLowerCase()}, so it cannot depart.`);
+      }
+      // ShipmentLeg.routeId is nullable on the column, but a LINE_HAUL leg is
+      // only ever created by the route planner (route-planner.ts), which
+      // unconditionally sets it to the real route it planned — so this branch
+      // is structurally unreachable today. It stays a loud refusal rather
+      // than a silent skip on purpose: the schedule check just below cannot
+      // run without a route to look up, and a future second leg-creation path
+      // that forgot to set routeId would otherwise depart unchecked with
+      // nothing failing anywhere — a quiet way to disable BMPL-196 enforcement
+      // that nobody adding that path would have reason to suspect.
+      if (!leg.routeId) {
+        throw new BadRequestException('This transport leg has no route on record, so its schedule cannot be checked. Contact operations.');
+      }
+      const [days, exceptions] = await Promise.all([
+        tx.routeOperatingDay.findMany({ where: { routeId: leg.routeId } }),
+        tx.routeScheduleException.findMany({ where: { routeId: leg.routeId } }),
+      ]);
+      const resolution = resolveScheduleStatus(
+        this.travelDate(),
+        days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note })),
+        exceptions.map((e) => ({ date: e.date, status: e.status, reason: e.reason })),
+      );
+      if (resolution.status === 'NOT_OPERATING') {
+        throw new BadRequestException(
+          `This route is configured as not operating today${resolution.note ? ` (${resolution.note})` : ''}. Update the schedule before recording a departure, or contact operations.`,
+        );
       }
       await tx.shipmentLeg.update({
         where: { id: leg.id },

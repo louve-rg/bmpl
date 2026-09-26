@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { PlannerHub, PlannerLane, PlannerRoute } from '@bmpl/shared';
+import type { PlannerHub, PlannerLane, PlannerRoute, ScheduleException, WeeklyOperatingDay } from '@bmpl/shared';
 import type {
   AddRouteScheduleExceptionInput,
   CreateCourierLaneInput,
@@ -62,6 +62,30 @@ export class LogisticsNetworkService {
       this.prisma.logisticsRoute.findMany({ where: { isTest }, orderBy: { id: 'asc' } }),
       this.prisma.courierLane.findMany({ where: { isTest }, orderBy: { id: 'asc' } }),
     ]);
+    // The planner needs each route's BMPL-186 schedule to decide whether it
+    // runs on the date it is asked about (BMPL-196) - loaded alongside the
+    // routes themselves, same "no cache" reasoning as the rest of this
+    // method: an operator who has just closed a route must not have it
+    // planned over for the next customer.
+    const routeIds = routes.map((r) => r.id);
+    const [days, exceptions] = routeIds.length
+      ? await Promise.all([
+          this.prisma.routeOperatingDay.findMany({ where: { routeId: { in: routeIds } } }),
+          this.prisma.routeScheduleException.findMany({ where: { routeId: { in: routeIds } } }),
+        ])
+      : [[], []];
+    const daysByRoute = new Map<string, WeeklyOperatingDay[]>();
+    for (const d of days) {
+      const list = daysByRoute.get(d.routeId) ?? [];
+      list.push({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note });
+      daysByRoute.set(d.routeId, list);
+    }
+    const exceptionsByRoute = new Map<string, ScheduleException[]>();
+    for (const e of exceptions) {
+      const list = exceptionsByRoute.get(e.routeId) ?? [];
+      list.push({ date: e.date, status: e.status, reason: e.reason });
+      exceptionsByRoute.set(e.routeId, list);
+    }
     return {
       hubs: hubs.map((h) => ({
         id: h.id,
@@ -80,6 +104,8 @@ export class LogisticsNetworkService {
         durationMinutes: r.durationMinutes,
         priceMinor: Number(r.priceMinor),
         isActive: r.isActive,
+        weeklyPattern: daysByRoute.get(r.id) ?? [],
+        scheduleExceptions: exceptionsByRoute.get(r.id) ?? [],
       })),
       lanes: lanes.map((l) => ({
         id: l.id,

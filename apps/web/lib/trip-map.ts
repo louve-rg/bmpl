@@ -21,11 +21,10 @@ interface PlaceLike {
   pinnedLocation?: { latitude: number; longitude: number } | null;
 }
 
-function point(place: PlaceLike | null | undefined, role: string): MapPoint | null {
+function pinOf(place: PlaceLike | null | undefined): { latitude: number; longitude: number } | null {
   const pin = place?.pinnedLocation;
   if (!pin || !Number.isFinite(pin.latitude) || !Number.isFinite(pin.longitude)) return null;
-  const where = place?.name ?? place?.area;
-  return { latitude: pin.latitude, longitude: pin.longitude, label: where ? `${role}: ${where}` : role };
+  return pin;
 }
 
 /**
@@ -35,11 +34,28 @@ function point(place: PlaceLike | null | undefined, role: string): MapPoint | nu
  * actually routes through, never invented) is "Via". A two-stop leg — the
  * original BMPL-136 shape — is just the no-middle case of this, not a
  * different function.
+ *
+ * The role word is assigned by position among the stops that are actually
+ * VISIBLE (carry a pin), never by original array position (BMPL-198): a
+ * door end withheld pre-acceptance still occupies its array slot, and
+ * labelling by that slot handed its neighbour "Via" instead of "Collect" (or
+ * "Deliver") the moment the real first or last stop was the one filtered
+ * out. This changes only which word sits beside a stop already being shown —
+ * it does not reveal anything a hidden stop wasn't already hiding.
  */
 export function tripMapPoints(stops: Array<PlaceLike | null | undefined>): MapPoint[] {
-  return stops
-    .map((place, i) => point(place, i === 0 ? 'Collect' : i === stops.length - 1 ? 'Deliver' : 'Via'))
-    .filter((p): p is MapPoint => p !== null);
+  const visible = stops
+    .map((place) => {
+      const pin = pinOf(place);
+      return pin ? { place, pin } : null;
+    })
+    .filter((v): v is { place: PlaceLike | null | undefined; pin: { latitude: number; longitude: number } } => v !== null);
+
+  return visible.map(({ place, pin }, i) => {
+    const role = i === 0 ? 'Collect' : i === visible.length - 1 ? 'Deliver' : 'Via';
+    const where = place?.name ?? place?.area;
+    return { latitude: pin.latitude, longitude: pin.longitude, label: where ? `${role}: ${where}` : role };
+  });
 }
 
 /**

@@ -375,4 +375,100 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     expect(r.status).toBe(201);
     expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
   });
+
+  /**
+   * The converse of test 7, and the one no existing test proved (BMPL-140
+   * fresh audit): the check reads the LIVE assignedDriverProfileId column, so
+   * a courier who WAS legitimately assigned and then reassigned away must be
+   * refused exactly like any other wrong courier — even holding the real,
+   * unexpired PIN. A future refactor that tracked "ever assigned" instead of
+   * "currently assigned" would pass every other test in this file, including
+   * the new-courier-succeeds case above, while letting the ousted courier
+   * back in. Only this test would catch that regression.
+   *
+   * Two doors are checked, because they are two different pieces of code:
+   * (a) courier A's OWN route, which the pre-existing driver-scoping
+   * (`ownedLeg`) already refuses on a plain profile-id mismatch — this proves
+   * that lock still holds after a reassignment, not just against a stranger.
+   * (b) the specific mechanism BMPL-174 added inside `verifyHandoffPin`
+   * itself, reached only via the admin route: courier A is ALSO granted
+   * `logistics.operate` on their own account (a real, if narrow, shape — the
+   * same "ops account who happens to be a driver" pattern as test 2, just
+   * using courier A's OWN profile instead of an unrelated one). That is the
+   * one path that actually re-exercises the live-column comparison your
+   * architecture comment worries about, rather than the earlier ownedLeg gate.
+   */
+  it('8 · a courier reassigned AWAY is refused with the real code, even though they held it legitimately a moment ago', async () => {
+    const sender = await fundedSender();
+    const courierA = await makeCourier('STANN_CREEK');
+    const courierB = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+
+    // REASSIGN is only a valid transition from ASSIGNED/DRIVER_ACCEPTED/
+    // DRIVER_DECLINED (packages/shared/src/dispatch.ts) — i.e. strictly
+    // BEFORE physical pickup. Courier A accepts and goes no further.
+    await dispatch.dispatchLeg(firstMile.id);
+    const assigned = await legRow(firstMile.id);
+    expect(assigned.assignedDriverProfileId).toBe(courierA.driverProfileId);
+    expect((await post(courierA.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
+
+    const vehicleB = await ctx.prisma.driverVehicle.findFirstOrThrow({ where: { driverProfileId: courierB.driverProfileId } });
+    expect((await post(admin, `admin/logistics/legs/${firstMile.id}/reassign`, {
+      driverProfileId: courierB.driverProfileId,
+      vehicleId: vehicleB.id,
+      reason: 'Courier A reported a breakdown.',
+    })).status).toBe(201);
+    expect((await legRow(firstMile.id)).assignedDriverProfileId).toBe(courierB.driverProfileId);
+
+    // Courier B carries it all the way to IN_PROGRESS, so the leg has genuinely
+    // started (verifyHandoffPin's own status gate opens) by the time A tries.
+    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
+    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
+    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
+    const pin = await pinOf(firstMile.id);
+
+    // (a) Courier A's own route: the pre-existing driver-scoping refuses —
+    // A was never picked up, so ownedLeg refuses on profile mismatch alone,
+    // BEFORE ever reaching verifyHandoffPin. The counter must NOT move here —
+    // this is a different gate, not a wrong-courier attempt against the PIN.
+    const ownRoute = await post(courierA.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Courier A' });
+    expect([400, 403, 404]).toContain(ownRoute.status);
+    expect((await legRow(firstMile.id)).handoffPinAttempts).toBe(0);
+
+    // (b) Courier A, now ALSO holding logistics.operate, tries the admin
+    // route with their own (still-real, still-current) driver profile — the
+    // exact shape verifyHandoffPin's own check exists to refuse.
+    await ctx.prisma.userRole.upsert({
+      where: { userId_roleCode: { userId: courierA.userId, roleCode: 'ADMIN' } },
+      create: { userId: courierA.userId, roleCode: 'ADMIN', status: 'APPROVED', approvedAt: new Date() },
+      update: { status: 'APPROVED', approvedAt: new Date() },
+    });
+    await ctx.prisma.adminPermissionGrant.create({ data: { userId: courierA.userId, permission: 'logistics.operate' } });
+    const opsRoute = await post(courierA.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, { pin, receivedByName: 'Courier A' });
+    expect(opsRoute.status).toBe(400);
+
+    const after = await legRow(firstMile.id);
+    expect(after.status).not.toBe('COMPLETED');
+    expect(after.assignedDriverProfileId).toBe(courierB.driverProfileId);
+    // The shared attempt counter moved by exactly one — the SAME accounting
+    // as test 2's unrelated impostor, so an ousted courier cannot probe the
+    // real code for free from a de-assigned account. And the audit record
+    // classifies it identically: wrongCourier: true, the one flag that tells
+    // this failure apart from a simple wrong code, same as any other impostor.
+    expect(after.handoffPinAttempts).toBe(1);
+    const failure = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'SHIPMENT_LEG_HANDOFF_PIN_FAILED', actorId: courierA.userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(failure).not.toBeNull();
+    expect((failure!.newValue as { wrongCourier: boolean }).wrongCourier).toBe(true);
+
+    // And B, the courier the leg actually belongs to now, still succeeds —
+    // the ousted attempts above changed nothing about B's own path.
+    const r = await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Receiver' });
+    expect(r.status).toBe(201);
+    expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
+  });
 });

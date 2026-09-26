@@ -360,24 +360,35 @@ the public, unauthenticated `shipping/track/:token` link, which already
 excludes the parcel description as customer-typed and potentially sensitive; a
 photo was judged at least as revealing and was not added to that allowlist.
 
-### Route operating-day configuration: a capability, not yet live
+### Route operating-day configuration: live, but no carrier has used it yet
 
 A carrier (self-service, scoped to routes their organization operates) or an
 admin can set a weekly operating pattern (`OPERATING`/`REDUCED`/
 `NOT_OPERATING` per day of week) and date-specific exceptions on a
 `LogisticsRoute` (BMPL-186 — `LogisticsNetworkService.setWeeklySchedule`/
 `addScheduleException`/`removeScheduleException`, mirrored for carriers on
-`ShippingProviderRoutesController`). **As of this writing, nothing reads it.**
-`route-planner.ts`'s `cheapestPath` still filters only on `isActive`;
-`departLeg`, `startLeg` and quoting never consult a route's schedule. Setting
-a route to `NOT_OPERATING` for every day has no effect on whether that route
-is offered, quoted, or allowed to depart. Wiring the schedule into planning
-and dispatch eligibility is a separate, **not-yet-merged** change (BMPL-196);
-do not describe route scheduling as affecting what a customer can book or a
-carrier can depart until that lands. Separately, and by deliberate business
-decision, no carrier's real schedule **data** has been entered — this is
-configuration capability only, the same "empty is correct" posture as an
-unconfigured `courier_lanes` table.
+`ShippingProviderRoutesController`). BMPL-196 wired this into exactly two
+enforcement points: `route-planner.ts`'s `cheapestPath` excludes a route
+resolving `NOT_OPERATING` for the date, the same way it already excludes an
+inactive one; and `ShipmentService.departLeg` — the single method both the
+staff desk and a carrier's own surface call to confirm a `LINE_HAUL`
+departure — refuses with a 400 on a route resolving `NOT_OPERATING`.
+`REDUCED` never blocks either check. Resolution runs in **Belize local time**
+(a fixed UTC−6 offset, no daylight saving —
+`packages/shared/src/service-schedule.ts`), not UTC, so a closure recorded
+against a weekday or a date lands on the correct Belize calendar day rather
+than shifting at the UTC day boundary. `startLeg` cannot be used to bypass
+this: a `LINE_HAUL` leg is refused there outright and only ever leaves
+`READY` through `departLeg`.
+
+An unconfigured route — every real route today — resolves `OPERATING` and is
+completely unaffected, so this change is invisible until someone configures a
+closure. And separately, by deliberate business decision, **no carrier's
+real schedule data has been entered**: the capability is live in code, but
+nothing has been configured to use it, the same "empty is correct" posture
+as an unconfigured `courier_lanes` table. Do not describe any carrier as
+having a schedule, or any route as currently affected, until operations
+actually configures one.
 
 ### Ending at a terminal: AWAITING_COLLECTION
 
