@@ -92,22 +92,42 @@
  *     removing an entry.
  *
  * Exit codes:
- *   0  OK        every catalog entry has a call site (or a textual hint
- *                inside a flagged non-literal) and every literal/ternary
- *                emitted code is in the catalog
- *   1  DRIFT     at least one catalog entry has no call site and no textual
- *                hint, or at least one emitted code is absent from the
- *                catalog
+ * A NEW orphan is not the same claim as a KNOWN one, so BMPL-220's own
+ * follow-up added a baseline (scripts/notification-event-catalog-known-
+ * orphans.mjs): 11 of today's orphans are architecturally or not-yet-
+ * explained but already RULED not to be deleted (BMPL-219 forbids treating
+ * "unused" as "dead" — that is a product decision). Reporting the same 11
+ * as DRIFT on every run forever is the identical trap god named on the
+ * citation checker's history: an always-red check gets muted, which is a
+ * false green wearing a different color. A baselined orphan is still
+ * PRINTED every run (the known state stays visible) but does not raise the
+ * exit code; a NEW orphan — one the baseline does not name — still does.
+ * Every baseline entry must carry a real, non-empty reason, or this script
+ * treats THAT as its own defect (an unexplained "accepted" is exactly the
+ * silent acceptance the baseline exists to prevent). A baseline entry for a
+ * code that is no longer orphaned is reported as STALE — good news, not
+ * scored as a failure, but never left silently unmentioned either.
+ *
+ * Exit codes:
+ *   0  OK        every catalog entry has a call site, a textual hint, or a
+ *                baseline reason, and every literal/ternary emitted code is
+ *                in the catalog
+ *   1  DRIFT     at least one catalog entry has no call site, no textual
+ *                hint and no baseline reason; at least one emitted code is
+ *                absent from the catalog; or a baseline entry has an empty
+ *                reason
  *   2  UNKNOWN   the catalog or the call-site tree could not be read/parsed
  *                at all — never folded into a pass
- * (A non-literal flag alone, with no drift on either side, does not raise
- * the exit code past 0 — it is a "go read this", not a confirmed defect.
- * The report still lists it, because a exit-0 reader should not think
+ * (A non-literal flag, a baselined orphan or a stale-baseline note alone,
+ * with no drift on any of the scored conditions above, does not raise the
+ * exit code past 0 — each is a "go read this", not a confirmed defect. The
+ * report still lists all of them, because an exit-0 reader should not think
  * nothing needed a human's attention.)
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { KNOWN_ORPHANS } from './notification-event-catalog-known-orphans.mjs';
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
@@ -498,16 +518,37 @@ function main() {
   }
 
   const orphanDetails = orphans.map((code) => ({ code, hints: textualHints(code) }));
-  const trueOrphans = orphanDetails.filter((o) => o.hints.length === 0);
+  const unhintedOrphans = orphanDetails.filter((o) => o.hints.length === 0);
   const hintedOrphans = orphanDetails.filter((o) => o.hints.length > 0);
 
-  const drift = trueOrphans.length > 0 || missing.length > 0;
+  // A baseline entry only "counts" as an acceptance if it says why — an empty
+  // or whitespace reason is not a quieter form of acceptance, it is a defect
+  // in the baseline file itself, scored the same as a real drift.
+  const baselineReasonMissing = Object.entries(KNOWN_ORPHANS)
+    .filter(([, reason]) => !reason || !reason.trim())
+    .map(([code]) => code);
+  const validBaseline = new Set(Object.entries(KNOWN_ORPHANS).filter(([, r]) => r && r.trim()).map(([c]) => c));
+
+  const newOrphans = unhintedOrphans.filter((o) => !validBaseline.has(o.code));
+  const baselineAcknowledged = unhintedOrphans
+    .filter((o) => validBaseline.has(o.code))
+    .map((o) => ({ ...o, reason: KNOWN_ORPHANS[o.code] }));
+
+  // A baseline entry whose code is NOT currently an unhinted orphan is stale —
+  // either it got wired up (good news) or it now has a textual hint or left the
+  // catalog entirely. Surfaced, never silently dropped, but not scored: a
+  // baseline shrinking on its own is the baseline doing its job, not a defect.
+  const unhintedOrphanCodes = new Set(unhintedOrphans.map((o) => o.code));
+  const staleBaselineEntries = Object.keys(KNOWN_ORPHANS).filter((code) => !unhintedOrphanCodes.has(code));
+
+  const drift = newOrphans.length > 0 || missing.length > 0 || baselineReasonMissing.length > 0;
   const exitCode = drift ? 1 : 0;
   const status = drift ? 'DRIFT' : 'OK';
 
   const scope =
     `checks ONLY apps/api/src call sites against packages/shared/src/notifications.ts's NOTIFICATION_EVENTS — ` +
-    `a code emitted elsewhere, a wrong-but-catalogued code, or a non-literal's real runtime value are all outside what an exit 0 here claims`;
+    `a code emitted elsewhere, a wrong-but-catalogued code, or a non-literal's real runtime value are all outside what an exit 0 here claims. ` +
+    `An orphan named in scripts/notification-event-catalog-known-orphans.mjs is reported but does not fail this check — see that file for why each one is accepted.`;
 
   const summary = {
     catalogEntries: catalog.length,
@@ -516,8 +557,11 @@ function main() {
     nonLiteralFlagged: nonLiteralSites.length,
     noEventCallSites: noEventSites.length,
     distinctUsedCodes: usedCodes.size,
-    trueOrphans: trueOrphans.length,
+    newOrphans: newOrphans.length,
+    baselineAcknowledgedOrphans: baselineAcknowledged.length,
     hintedOrphans: hintedOrphans.length,
+    staleBaselineEntries: staleBaselineEntries.length,
+    baselineReasonMissing: baselineReasonMissing.length,
     missingFromCatalog: missing.length,
   };
 
@@ -529,8 +573,11 @@ function main() {
           summary,
           status,
           exitCode,
-          trueOrphans: trueOrphans.map((o) => o.code),
+          newOrphans: newOrphans.map((o) => o.code),
+          baselineAcknowledgedOrphans: baselineAcknowledged,
           hintedOrphans,
+          staleBaselineEntries,
+          baselineReasonMissing,
           missingFromCatalog: missing.map((code) => ({ code, sites: sites.filter((s) => s.codes?.includes(code)) })),
           nonLiteralFlagged: nonLiteralSites.map(({ fileSrc, ...s }) => s),
           noEventCallSites: noEventSites,
@@ -547,14 +594,29 @@ function main() {
         `${summary.nonLiteralFlagged} non-literal flagged, ${summary.noEventCallSites} pass no event) | distinct used codes: ${summary.distinctUsedCodes}\n`,
     );
 
-    if (trueOrphans.length > 0) {
-      console.log(`ORPHAN — catalog entry with no call site and no textual hint (${trueOrphans.length}):`);
-      for (const o of trueOrphans) console.log(`  ${o.code}`);
+    if (newOrphans.length > 0) {
+      console.log(`NEW ORPHAN — catalog entry with no call site, no textual hint, and not in the known-orphans baseline (${newOrphans.length}):`);
+      for (const o of newOrphans) console.log(`  ${o.code}`);
+      console.log('');
+    }
+    if (baselineAcknowledged.length > 0) {
+      console.log(`KNOWN ORPHAN — no call site, but acknowledged in scripts/notification-event-catalog-known-orphans.mjs, not scored (${baselineAcknowledged.length}):`);
+      for (const o of baselineAcknowledged) console.log(`  ${o.code}  — ${o.reason}`);
       console.log('');
     }
     if (hintedOrphans.length > 0) {
       console.log(`ORPHAN-BUT-HINTED — no literal call site, but the name appears inside a flagged non-literal below; read it to confirm (${hintedOrphans.length}):`);
       for (const o of hintedOrphans) console.log(`  ${o.code}  (hinted at ${o.hints.join(', ')})`);
+      console.log('');
+    }
+    if (staleBaselineEntries.length > 0) {
+      console.log(`STALE BASELINE ENTRY — listed as a known orphan but no longer one; consider removing it from the baseline file (${staleBaselineEntries.length}):`);
+      for (const code of staleBaselineEntries) console.log(`  ${code}`);
+      console.log('');
+    }
+    if (baselineReasonMissing.length > 0) {
+      console.log(`BASELINE DEFECT — accepted with an empty reason, which does not count as accepted (${baselineReasonMissing.length}):`);
+      for (const code of baselineReasonMissing) console.log(`  ${code}`);
       console.log('');
     }
     if (missing.length > 0) {
@@ -578,8 +640,15 @@ function main() {
       console.log('');
     }
 
-    console.log(`${status}: ${trueOrphans.length} orphan(s), ${hintedOrphans.length} hinted orphan(s), ${missing.length} missing-from-catalog code(s)`);
-    console.log(`\nexit ${exitCode} (0 OK, 1 DRIFT — a true orphan or a missing code; a non-literal or hinted-orphan flag alone does not raise this)`);
+    console.log(
+      `${status}: ${newOrphans.length} new orphan(s), ${baselineAcknowledged.length} known orphan(s), ${hintedOrphans.length} hinted orphan(s), ` +
+        `${staleBaselineEntries.length} stale baseline entr${staleBaselineEntries.length === 1 ? 'y' : 'ies'}, ${baselineReasonMissing.length} baseline defect(s), ` +
+        `${missing.length} missing-from-catalog code(s)`,
+    );
+    console.log(
+      `\nexit ${exitCode} (0 OK, 1 DRIFT — a NEW orphan, a missing code, or a baseline entry with no reason; a known/hinted orphan, a stale baseline note, ` +
+        `or a non-literal flag alone does not raise this)`,
+    );
   }
 
   process.exitCode = exitCode;
