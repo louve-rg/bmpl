@@ -430,9 +430,12 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     const pin = await pinOf(firstMile.id);
 
     // (a) Courier A's own route: the pre-existing driver-scoping refuses —
-    // A was never picked up, so ownedLeg refuses on profile mismatch alone.
+    // A was never picked up, so ownedLeg refuses on profile mismatch alone,
+    // BEFORE ever reaching verifyHandoffPin. The counter must NOT move here —
+    // this is a different gate, not a wrong-courier attempt against the PIN.
     const ownRoute = await post(courierA.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin, receivedByName: 'Courier A' });
     expect([400, 403, 404]).toContain(ownRoute.status);
+    expect((await legRow(firstMile.id)).handoffPinAttempts).toBe(0);
 
     // (b) Courier A, now ALSO holding logistics.operate, tries the admin
     // route with their own (still-real, still-current) driver profile — the
@@ -449,7 +452,18 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     const after = await legRow(firstMile.id);
     expect(after.status).not.toBe('COMPLETED');
     expect(after.assignedDriverProfileId).toBe(courierB.driverProfileId);
-    expect(after.handoffPinAttempts).toBeGreaterThan(0);
+    // The shared attempt counter moved by exactly one — the SAME accounting
+    // as test 2's unrelated impostor, so an ousted courier cannot probe the
+    // real code for free from a de-assigned account. And the audit record
+    // classifies it identically: wrongCourier: true, the one flag that tells
+    // this failure apart from a simple wrong code, same as any other impostor.
+    expect(after.handoffPinAttempts).toBe(1);
+    const failure = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'SHIPMENT_LEG_HANDOFF_PIN_FAILED', actorId: courierA.userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(failure).not.toBeNull();
+    expect((failure!.newValue as { wrongCourier: boolean }).wrongCourier).toBe(true);
 
     // And B, the courier the leg actually belongs to now, still succeeds —
     // the ousted attempts above changed nothing about B's own path.
