@@ -29,6 +29,8 @@ tags:
     description: Moderation (requires an admin permission).
   - name: Cart
     description: Authenticated customer's own shopping cart (self-scoped; no admin/vendor surface).
+  - name: Addresses
+    description: The signed-in customer's own saved address book (BMPL-181). Self-scoped throughout; a foreign address id 404s, never 403.
   - name: Orders
     description: Checkout + orders. Customer (self), Vendor (own vendor orders), Admin (read-only).
   - name: Payments
@@ -87,6 +89,27 @@ components:
     NotFound: { description: Not found or not owned }
     Conflict: { description: State/uniqueness conflict }
   schemas:
+    SavedAddress:
+      type: object
+      description: One entry in the customer's own address book (BMPL-181). Free-form district/city text, matching the delivery-address convention elsewhere — never a fabricated place list.
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        label: { type: string, maxLength: 60 }
+        fullName: { type: string, maxLength: 120 }
+        phone: { type: string }
+        email: { type: [string, "null"] }
+        company: { type: [string, "null"] }
+        addressLine1: { type: string, maxLength: 200 }
+        addressLine2: { type: [string, "null"] }
+        city: { type: string, maxLength: 120 }
+        district: { type: string, enum: [BELIZE, CAYO, COROZAL, ORANGE_WALK, STANN_CREEK, TOLEDO] }
+        instructions: { type: [string, "null"] }
+        latitude: { type: [number, "null"] }
+        longitude: { type: [number, "null"] }
+        isDefault: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     Category:
       type: object
       properties:
@@ -636,6 +659,77 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: The store has already started preparing this order }
+  /addresses:
+    get:
+      tags: [Addresses]
+      summary: My saved addresses (default first, then most recently updated)
+      security: [{ cookieAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/SavedAddress" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Addresses]
+      summary: Save a new address
+      description: The first address a customer saves becomes the default whether or not isDefault was set. Setting isDefault true on any other unsets it on the previous default.
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label, fullName, phone, addressLine1, city, district]
+              properties:
+                label: { type: string, maxLength: 60 }
+                fullName: { type: string, maxLength: 120 }
+                phone: { type: string }
+                email: { type: string }
+                company: { type: string }
+                addressLine1: { type: string, maxLength: 200 }
+                addressLine2: { type: string }
+                city: { type: string, maxLength: 120 }
+                district: { type: string, enum: [BELIZE, CAYO, COROZAL, ORANGE_WALK, STANN_CREEK, TOLEDO] }
+                instructions: { type: string, maxLength: 500 }
+                latitude: { type: number }
+                longitude: { type: number }
+                isDefault: { type: boolean, default: false }
+      responses:
+        "201": { description: The created address, content: { application/json: { schema: { $ref: "#/components/schemas/SavedAddress" } } } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /addresses/{id}:
+    patch:
+      tags: [Addresses]
+      summary: Update one of my saved addresses (partial)
+      description: Someone else's address id answers 404, exactly like a missing one — never 403, so the endpoint cannot be used to discover which ids exist.
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Every field from the create body, all optional
+      responses:
+        "200": { description: The updated address, content: { application/json: { schema: { $ref: "#/components/schemas/SavedAddress" } } } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Addresses]
+      summary: Delete one of my saved addresses
+      description: Deleting the current default promotes the next most-recently-updated address to default, so the address book never has zero defaults once it has any rows.
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "200": { description: Deleted, content: { application/json: { schema: { type: object, properties: { deleted: { type: boolean, const: true } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /vendor/orders:
     get:
       tags: [Orders]

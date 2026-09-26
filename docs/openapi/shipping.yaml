@@ -29,6 +29,18 @@ info:
     a label an operator typed), and reverse geocoding. Production currently has
     no configured transport network (hubs `[]`, modes `[]`), which these
     endpoints report truthfully.
+
+    ROUTE OPERATING-DAY CONFIGURATION (BMPL-186) is a real, live capability —
+    a carrier or admin can set a weekly OPERATING/REDUCED/NOT_OPERATING pattern
+    plus date exceptions per route (`/admin/logistics/routes/{id}/schedule`,
+    `/shipping/provider/routes/{id}/schedule`) — but as of this writing NOTHING
+    ELSE READS IT: quoting, `cheapestPath` route selection and leg
+    depart/start all ignore it. Setting a route to NOT_OPERATING has no effect
+    on what is offered, quoted or allowed to depart. Wiring the schedule into
+    planning/dispatch is a separate, unmerged change (BMPL-196) and is not
+    documented here as live. No carrier's real schedule data has been entered
+    either way — this is a configuration surface, not a claim that any route
+    has a schedule today.
 servers:
   - url: https://bmplapi-production.up.railway.app/api
     description: Production
@@ -355,9 +367,14 @@ paths:
       description: >-
         Strictly throttled — a code-verification endpoint. The PIN is held by
         whoever RECEIVES the parcel; 5 failed attempts lock the leg with an
-        admin alert. Verification, custody write and next-leg release are the
-        shipment layer's `completeLeg` — deliberately not a second
-        implementation.
+        admin alert. A correct code is necessary but not sufficient
+        (BMPL-174): the caller must also be the leg's own assigned courier,
+        though this route never reaches that branch on a wrong courier — the
+        route is already scoped to the caller's own jobs (`ownedLeg`), which
+        404s a non-owner before the PIN check runs; the wrong-courier 403 is
+        reachable only via the admin equivalent below. Verification, custody
+        write and next-leg release are the shipment layer's `completeLeg` —
+        deliberately not a second implementation.
       parameters: [ { $ref: "#/components/parameters/legId" } ]
       requestBody:
         required: true
@@ -377,6 +394,65 @@ paths:
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: "PIN attempts exhausted — an administrator has to confirm this handoff" }
+        "404": { description: "Not this driver's own job (ownedLeg)" }
+  /driver/shipping-jobs/{id}/pickup-photo/upload:
+    post:
+      tags: [DriverShippingJobs]
+      summary: Upload one pickup-evidence photo (raw bytes) and get back a storage key (BMPL-178)
+      description: >-
+        Strictly throttled. Mirrors the existing proof-of-delivery upload
+        (`uploadPod`) exactly: raw image bytes in the request body, sniffed
+        and stored privately, a storage key returned. The key must then be
+        passed to `/confirm` to actually attach it to a leg — uploading alone
+        does not change any leg.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          image/*: { schema: { type: string, format: binary } }
+      responses:
+        "201":
+          description: The stored image
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key: { type: string }
+                  contentType: { type: string }
+                  sizeBytes: { type: integer }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /driver/shipping-jobs/{id}/pickup-photo/confirm:
+    post:
+      tags: [DriverShippingJobs]
+      summary: Attach uploaded pickup-evidence photo(s) to this driver's own leg (BMPL-178)
+      description: >-
+        `ownedLeg` gates it, the same necessary-but-not-sufficient shape as
+        every other driver-side write on this leg (BMPL-174/187): holding a
+        driver profile is necessary, but it must be the profile THIS leg is
+        assigned to. Refused once the leg is COMPLETED or CANCELLED. Replaces
+        the leg's photo set (not additive across calls) with 1-6 keys
+        previously returned by `/upload`; a key from another shipment's
+        upload is refused.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [photoKeys]
+              properties:
+                photoKeys: { type: array, minItems: 1, maxItems: 6, items: { type: string } }
+      responses:
+        "201":
+          description: The job after attaching the photo(s)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverShippingJob" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   # ---- Admin logistics: the network as data ----
@@ -497,6 +573,96 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/routes/{id}/schedule:
+    get:
+      tags: [AdminLogistics]
+      summary: Read a route's weekly pattern and date exceptions (logistics.read) (BMPL-186)
+      description: >-
+        Admin acts on ANY route, under the same permission as the route CRUD
+        above — deciding who runs a route and deciding when it runs are the
+        same job. The carrier's own equivalent
+        (`/shipping/provider/routes/{id}/schedule`) calls the identical
+        `LogisticsNetworkService` methods, scoped to routes they operate. See
+        the CAPABILITY-VS-LIVE note at the top of this document: this
+        configuration does not yet affect planning, quoting or departure.
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      responses:
+        "200":
+          description: The schedule
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RouteSchedule" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [AdminLogistics]
+      summary: Replace a route's whole weekly pattern (logistics.manage; audited) (BMPL-186)
+      description: >-
+        Replaces the ENTIRE weekly pattern in one call — a day left out of the
+        submission is deleted, not left as a stale leftover from a previous
+        version. Each day of week (0=Sunday..6=Saturday) may appear at most
+        once.
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetRouteWeeklyScheduleRequest" }
+      responses:
+        "200":
+          description: The updated schedule
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RouteSchedule" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/routes/{id}/schedule/exceptions:
+    post:
+      tags: [AdminLogistics]
+      summary: Add (or replace) a date-specific override on a route (logistics.manage; audited) (BMPL-186)
+      description: Re-submitting the same date replaces its status/reason. No time-of-day component.
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, status]
+              properties:
+                date: { type: string, format: date }
+                status: { $ref: "#/components/schemas/ServiceOperatingStatus" }
+                reason: { type: string, maxLength: 300 }
+      responses:
+        "201":
+          description: The exception
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RouteScheduleException" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/routes/{id}/schedule/exceptions/{exceptionId}:
+    delete:
+      tags: [AdminLogistics]
+      summary: Remove a date-specific override on a route (logistics.manage; audited) (BMPL-186)
+      description: Falls back to the weekly default for that date, not to OPERATING.
+      parameters:
+        - { $ref: "#/components/parameters/routeId" }
+        - { name: exceptionId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { type: object, properties: { removed: { type: boolean, const: true } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: "Exception not found, or belongs to a different route" }
   /admin/logistics/courier-lanes:
     get:
       tags: [AdminLogistics]
@@ -798,6 +964,99 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/provider/routes:
+    get:
+      tags: [ShippingProvider]
+      summary: Every route my organization(s) operate — how a carrier finds a route id to configure (BMPL-186)
+      responses:
+        "200":
+          description: Routes
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ProviderRouteBrief" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /shipping/provider/routes/{id}/schedule:
+    get:
+      tags: [ShippingProvider]
+      summary: Read my route's weekly pattern and date exceptions (BMPL-186)
+      description: >-
+        See the CAPABILITY-VS-LIVE note at the top of this document: setting a
+        schedule here does not yet affect planning, quoting or departure.
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      responses:
+        "200":
+          description: The schedule
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RouteSchedule" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "Not a route any of my organizations operate (never distinguished from a nonexistent route id)" }
+    put:
+      tags: [ShippingProvider]
+      summary: Replace my route's whole weekly pattern (BMPL-186)
+      description: >-
+        Replaces the ENTIRE weekly pattern in one call — a day left out of the
+        submission is deleted, not left as a stale leftover from a previous
+        version. Each day of week (0=Sunday..6=Saturday) may appear at most
+        once.
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetRouteWeeklyScheduleRequest" }
+      responses:
+        "200":
+          description: The updated schedule
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RouteSchedule" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "Not a route any of my organizations operate" }
+  /shipping/provider/routes/{id}/schedule/exceptions:
+    post:
+      tags: [ShippingProvider]
+      summary: Add (or replace) a date-specific override on my route (BMPL-186)
+      description: Re-submitting the same date replaces its status/reason. No time-of-day component — a service-level exception is per calendar date.
+      parameters: [ { $ref: "#/components/parameters/routeId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, status]
+              properties:
+                date: { type: string, format: date }
+                status: { $ref: "#/components/schemas/ServiceOperatingStatus" }
+                reason: { type: string, maxLength: 300 }
+      responses:
+        "201":
+          description: The exception
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RouteScheduleException" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "Not a route any of my organizations operate" }
+  /shipping/provider/routes/{id}/schedule/exceptions/{exceptionId}:
+    delete:
+      tags: [ShippingProvider]
+      summary: Remove a date-specific override on my route (BMPL-186)
+      description: Falls back to the weekly default for that date, not to OPERATING.
+      parameters:
+        - { $ref: "#/components/parameters/routeId" }
+        - { name: exceptionId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { type: object, properties: { removed: { type: boolean, const: true } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "Exception not found, or its route is not one of my organizations'" }
   /admin/logistics/providers:
     get:
       tags: [AdminLogistics]
@@ -894,7 +1153,13 @@ paths:
       description: >-
         Sequence is authority — a leg whose predecessors have not completed is
         refused. Optional `x-operator-label` header records who physically
-        acted (truncated to 120 chars).
+        acted (truncated to 120 chars). If the leg has an assigned courier
+        (FIRST_MILE/LAST_MILE/DIRECT), the caller must be that courier's own
+        DriverProfile or 403 (BMPL-187) — without this check, staff with
+        `logistics.operate` could start, and custody-credit, any courier's
+        pickup on behalf of a driver who never touched the parcel. A
+        LINE_HAUL leg has no individual courier, so the check is a no-op
+        there.
       parameters:
         - { $ref: "#/components/parameters/legId" }
         - { name: x-operator-label, in: header, required: false, schema: { type: string, maxLength: 120 } }
@@ -906,7 +1171,7 @@ paths:
               schema: { $ref: "#/components/schemas/ShipmentView" }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { description: "Missing logistics.operate, or the caller is not this leg's assigned courier" }
         "404": { $ref: "#/components/responses/NotFound" }
   /admin/logistics/legs/{id}/depart:
     post:
@@ -982,7 +1247,18 @@ paths:
       description: >-
         Strictly throttled. The same PIN check, lockout (5 attempts, admin
         alert), custody write and next-leg release the driver path uses —
-        deliberately one implementation (`ShipmentService.completeLeg`).
+        deliberately one implementation (`ShipmentService.completeLeg`). A
+        correct code is necessary but not sufficient (BMPL-174): if the leg
+        has an assigned courier, the caller must also be that courier's own
+        DriverProfile — the ONE route (besides the driver's own, which
+        already 404s a non-owner via `ownedLeg`) where the wrong-courier 403
+        is actually reachable, since ops holding `logistics.operate` are not
+        otherwise scoped to a leg's assigned driver. Checks the LIVE assigned
+        courier, so a legitimate reassignment (before pickup) works for the
+        new driver automatically. A wrong-courier attempt still counts toward
+        the 5-attempt lockout. A LINE_HAUL leg has no individual courier, so
+        the check is a no-op and this is the only route that completes its
+        handoff.
       parameters: [ { $ref: "#/components/parameters/legId" } ]
       requestBody:
         required: true
@@ -997,7 +1273,7 @@ paths:
               schema: { $ref: "#/components/schemas/ShipmentView" }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { description: "PIN attempts exhausted — the leg is locked" }
+        "403": { description: "PIN attempts exhausted, or a correct code from someone other than the leg's assigned courier" }
         "404": { $ref: "#/components/responses/NotFound" }
   /admin/logistics/legs/{id}/exception:
     post:
@@ -1354,6 +1630,60 @@ components:
         originHub: { type: object, properties: { id: { type: string }, code: { type: string }, name: { type: string }, modes: { type: array, items: { $ref: "#/components/schemas/TransportMode" } } } }
         destinationHub: { type: object, properties: { id: { type: string }, code: { type: string }, name: { type: string }, modes: { type: array, items: { $ref: "#/components/schemas/TransportMode" } } } }
       additionalProperties: true
+    ServiceOperatingStatus:
+      type: string
+      enum: [OPERATING, REDUCED, NOT_OPERATING]
+      description: A route's configured status for one day or date. Unconfigured defaults to OPERATING (see resolveScheduleStatus, packages/shared/src/service-schedule.ts) — but nothing reads this yet; see the CAPABILITY-VS-LIVE note at the top of this document.
+    RouteSchedule:
+      type: object
+      description: A route's configured weekly pattern plus any date-specific overrides (BMPL-186). Configuration only — see the CAPABILITY-VS-LIVE note at the top of this document.
+      properties:
+        routeId: { type: string }
+        days:
+          type: array
+          items:
+            type: object
+            properties:
+              dayOfWeek: { type: integer, minimum: 0, maximum: 6, description: 0=Sunday .. 6=Saturday }
+              status: { $ref: "#/components/schemas/ServiceOperatingStatus" }
+              note: { type: [string, "null"] }
+        exceptions:
+          type: array
+          items: { $ref: "#/components/schemas/RouteScheduleException" }
+    RouteScheduleException:
+      type: object
+      description: One date-specific override. No time-of-day component.
+      properties:
+        id: { type: string }
+        date: { type: string, format: date }
+        status: { $ref: "#/components/schemas/ServiceOperatingStatus" }
+        reason: { type: [string, "null"] }
+    SetRouteWeeklyScheduleRequest:
+      type: object
+      required: [days]
+      description: Replaces the whole weekly pattern; each day of week may appear at most once.
+      properties:
+        days:
+          type: array
+          minItems: 1
+          maxItems: 7
+          items:
+            type: object
+            required: [dayOfWeek, status]
+            properties:
+              dayOfWeek: { type: integer, minimum: 0, maximum: 6, description: 0=Sunday .. 6=Saturday }
+              status: { $ref: "#/components/schemas/ServiceOperatingStatus" }
+              note: { type: string, maxLength: 300 }
+    ProviderRouteBrief:
+      type: object
+      description: One route a carrier's organization operates — enough to pick a route id to configure a schedule on.
+      properties:
+        id: { type: string }
+        mode: { $ref: "#/components/schemas/TransportMode" }
+        isActive: { type: boolean }
+        scheduleNote: { type: [string, "null"] }
+        origin: { type: object, properties: { id: { type: string }, code: { type: string }, name: { type: string }, city: { type: string } } }
+        destination: { type: object, properties: { id: { type: string }, code: { type: string }, name: { type: string }, city: { type: string } } }
     CourierLaneInput:
       type: object
       properties:
@@ -1496,6 +1826,37 @@ components:
           oneOf: [ { $ref: "#/components/schemas/CourierStatus" }, { type: "null" } ]
           description: Staff audience only; null for customers
         assignedDriverProfileId: { type: [string, "null"], description: Staff audience only; null for customers }
+        courier:
+          description: Who is showing up, once someone is assigned (BMPL-180). Null before a courier is assigned. Never legal name, phone or documents.
+          oneOf:
+            - type: "null"
+            - type: object
+              properties:
+                displayName: { type: string }
+                ratingAverage: { type: [number, "null"] }
+                completedDeliveries: { type: integer }
+                initials: { type: string }
+                avatarUrl: { type: [string, "null"] }
+        courierVehicle:
+          description: What they are driving (BMPL-180). Null before a courier is assigned. photoUrl is null unless the vehicle has cleared admin moderation (approvalStatus APPROVED).
+          oneOf:
+            - type: "null"
+            - type: object
+              properties:
+                type: { type: string }
+                make: { type: [string, "null"] }
+                model: { type: [string, "null"] }
+                color: { type: [string, "null"] }
+                licencePlate: { type: [string, "null"] }
+                photoUrl: { type: [string, "null"] }
+        pickupPhotoUrls:
+          type: array
+          items: { type: string }
+          description: >-
+            Signed download URLs for pickup-evidence photos the courier
+            attached to THIS leg (BMPL-178, driver/shipping-jobs/{id}/pickup-photo/*).
+            Empty until any are uploaded. Never present on the public
+            shipping/track/{token} view.
         scheduleNote: { type: [string, "null"], description: An operator-typed label, not a schedule }
         scheduledDepartureAt: { type: [string, "null"], format: date-time }
         departedAt: { type: [string, "null"], format: date-time }
