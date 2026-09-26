@@ -9,8 +9,12 @@ info:
     jobs. The multimodal shipping surface (/shipping/*, courier legs,
     hubs/modes, admin logistics) is documented separately in shipping.yaml in
     this directory, and the complete passenger surface (rider, driver,
-    operator, network, affiliation, admin) in passenger.yaml beside it. All
-    paths are under the `/api`
+    operator, network, affiliation, admin) in passenger.yaml beside it. The
+    DELIVERY_DRIVER's own profile/vehicle/service-area/availability surface
+    (`/driver/profile`, `/driver/vehicles`, `/driver/service-areas`,
+    `/driver/availability` — a different controller from the `/driver/jobs`
+    and `/driver/earnings` documented right here) is in driver.yaml beside it.
+    All paths are under the `/api`
     prefix. Money is integer minor units (BZD cents); wallet/ledger amounts
     are BigInt-backed and serialize as JSON strings on wallet surfaces, while
     delivery/shipping fee fields serialize as JSON numbers — verify per

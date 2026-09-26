@@ -1,0 +1,729 @@
+openapi: 3.1.0
+info:
+  title: BML Delivery Driver API
+  version: "1.0.0"
+  description: >
+    Belize Marketplace & Logistics — the delivery driver's own profile,
+    vehicle, service-area and availability surface (`DriverController` /
+    `DriverService`). Gated on the CUSTOMER role, which every user holds, so
+    an APPLICANT can build a profile and view their dashboard before their
+    DELIVERY_DRIVER role is approved; sensitive actions (going ONLINE) are
+    gated by eligibility in the service, not by the role. This is the
+    DELIVERY_DRIVER surface shared by marketplace delivery and shipping
+    courier legs alike (`assignmentEligibility` and
+    `eligibleDriversForDistrict` are called by both dispatch paths) — it is a
+    DIFFERENT role and profile from PASSENGER_DRIVER, documented separately in
+    passenger.yaml. This driver's job feed and earnings (`/driver/jobs`,
+    `/driver/earnings`, a different controller) are already documented in
+    marketplace.yaml; this file covers what was, until now, undocumented in
+    any OpenAPI file: profile, vehicles, service areas and availability. All
+    paths are under the `/api` prefix. Every endpoint here was documented from
+    its controller and service read at `origin/main` (`driver.controller.ts`,
+    `driver.service.ts`, `driver-operations.service.ts`) — nothing is
+    described that was not read.
+
+    MONEY: the only money-shaped fields on this surface are the
+    `operations.earnings.*Minor` figures in the dashboard response — integers
+    in BZD minor units (cents), serialized as JSON NUMBERS via `Number()` from
+    a stored `DriverEarning.netMinor` BigInt, the same convention as
+    marketplace-delivery and shipping fee fields, NOT the wallet's
+    BigInt-as-JSON-string convention. Nothing on this surface moves money;
+    these are read-only rollups of rows settlement already wrote elsewhere.
+
+    GEOGRAPHY: `homeDistrict` and a service area's `district` are one of the
+    six real Belize districts (`DISTRICTS`). A narrowed service area's `city`
+    is FREE TEXT the driver types, never a fabricated or enumerated place
+    list — the same convention `LogisticsHub.city` already uses (root
+    CLAUDE.md §5). City-level narrowing (BMPL-176) is stored but NOT YET
+    consulted by automatic dispatch, which still matches a driver to a job on
+    district alone (BMPL-194, unstarted) — see the `DriverServiceArea` schema
+    below and `docs/DISPATCH.md`.
+servers:
+  - url: https://bmplapi-production.up.railway.app/api
+    description: Production
+  - url: http://localhost:4000/api
+    description: Local
+tags:
+  - name: Driver
+    description: >-
+      The DELIVERY_DRIVER applicant/owner's own profile, vehicles, service
+      areas and availability. Requires the CUSTOMER role (held by every
+      user) — this is the same surface a pending APPLICANT uses before their
+      DELIVERY_DRIVER role is approved.
+security:
+  - cookieAuth: []
+
+paths:
+  /driver/dashboard:
+    get:
+      tags: [Driver]
+      summary: One-screen driver dashboard — profile, vehicles, areas, eligibility, live operations
+      description: >-
+        Safe to call before a profile exists (`hasProfile: false`), so a
+        pending applicant can open the same screen. With a profile, also
+        returns `operations` — a read-only rollup (current/pending/upcoming
+        deliveries, today/week/all-time counts, earnings, rating and
+        acceptance/completion rates) computed fresh on every call
+        (`DriverOperationsService.summary`); it duplicates nothing and writes
+        nothing, so it cannot disagree with `/driver/jobs` or
+        `/driver/earnings` in marketplace.yaml, which cover the same
+        deliveries in full.
+      responses:
+        "200":
+          description: Dashboard, shape depends on whether a profile exists yet
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/DriverDashboardNoProfile"
+                  - $ref: "#/components/schemas/DriverDashboardWithProfile"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /driver/profile:
+    get:
+      tags: [Driver]
+      summary: The caller's own driver profile, or null if never started
+      description: No profile is a `200` with a `null` body, never a `404` — the dashboard and this endpoint agree on that.
+      responses:
+        "200":
+          description: The profile, or null
+          content:
+            application/json:
+              schema: { oneOf: [{ $ref: "#/components/schemas/DriverProfile" }, { type: "null" }] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Driver]
+      summary: Create or replace the caller's driver profile/application (upsert)
+      description: >-
+        Available to any CUSTOMER — this is how an applicant first builds
+        their profile. Requires the WHOLE object (replace semantics, not a
+        partial update); `PATCH` below is for touching individual fields. A
+        client-supplied `profilePhotoKey` is re-validated server-side against
+        this user's own storage namespace before it is stored — it is never
+        trusted as-is, because it is later handed to a signed-download call.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverProfileRequest" }
+      responses:
+        "200":
+          description: The created or updated profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [Driver]
+      summary: Update individual fields of an existing driver profile
+      description: >-
+        Requires a profile to already exist (`404` with "Start your driver
+        application first." otherwise — use `PUT` to create one). Every field
+        is optional but at least one must be present, enforced server-side
+        ("No fields to update." on an empty body, a `400`). `profilePhotoKey`
+        gets the same server-side ownership re-validation as `PUT`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverProfileUpdateRequest" }
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /driver/profile/photo/presign:
+    post:
+      tags: [Driver]
+      summary: "Deprecated: presign a direct browser upload of the profile photo"
+      description: >-
+        DEPRECATED — superseded by `/driver/profile/photo/upload`. The
+        presigned URL points at the storage provider's own endpoint, so the
+        browser `PUT` is cross-origin; the bucket has no CORS policy for the
+        custom domain and the upload fails client-side as "Load failed".
+        Strictly throttled. `sizeBytes` is required by validation but is not
+        used by this call.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImagePresignRequest" }
+      responses:
+        "201":
+          description: A presigned upload URL (do not rely on it working — see deprecation note)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PresignedUpload" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /driver/profile/photo/upload:
+    post:
+      tags: [Driver]
+      summary: Upload the profile photo as raw bytes (server-side ingest)
+      description: >-
+        Strictly throttled. The request body IS the image (no JSON envelope);
+        the real media type is sniffed from the bytes, never trusted from a
+        client-declared Content-Type, and must be JPEG/PNG/WebP; the stored
+        size is capped at 8 MB. The returned `key` becomes the profile's
+        `profilePhotoKey` only once it is also submitted via `PUT`/`PATCH
+        /driver/profile` — uploading alone does not attach it to anything.
+      parameters:
+        - { name: filename, in: query, required: false, schema: { type: string }, description: Client-supplied original filename, used only for storage-key legibility }
+      requestBody:
+        required: true
+        content:
+          image/*: { schema: { type: string, format: binary } }
+      responses:
+        "201":
+          description: The stored image
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadedImage" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /driver/profile/photo:
+    get:
+      tags: [Driver]
+      summary: Short-lived signed URL for the caller's own profile photo
+      description: "`404` if no profile exists yet, or the profile has no photo on file."
+      responses:
+        "200":
+          description: A signed, short-lived download URL
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PresignedDownload" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /driver/vehicles:
+    get:
+      tags: [Driver]
+      summary: The caller's own vehicles, primary first
+      description: "`404` if no driver profile exists yet."
+      responses:
+        "200":
+          description: Vehicles, ordered primary-first then oldest-first
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/DriverVehicle" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Driver]
+      summary: Add a vehicle to the caller's fleet
+      description: >-
+        Requires a driver profile to already exist. Every new vehicle starts
+        `approvalStatus: PENDING` regardless of what came before — a vehicle
+        is never auto-approved. Any `photoKeys` supplied must already exist in
+        this driver's own vehicle-photo namespace (from `vehicles/photo/upload`
+        below) and be real, correctly-sized images, or the whole call is
+        refused. The FIRST vehicle a driver adds becomes primary by default,
+        but an explicit `isPrimary: false` on that first call is honored — the
+        default applies only when the field is omitted entirely. Setting
+        `isPrimary: true` demotes every other vehicle's `isPrimary` in the
+        same transaction, so at most one vehicle is ever primary.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverVehicleRequest" }
+      responses:
+        "200":
+          description: The created vehicle
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverVehicle" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /driver/vehicles/{id}:
+    patch:
+      tags: [Driver]
+      summary: Update one of the caller's own vehicles
+      description: >-
+        `404` (not distinguished from a nonexistent id) if the vehicle is not
+        found or belongs to a different driver. Editing any REGULATED field —
+        `licencePlate`, `registrationNumber`, `registrationExpiry` or
+        `insuranceExpiry` — resets `approvalStatus` to `PENDING` and clears
+        any prior `rejectionReason`, because a moderator's earlier approval no
+        longer speaks to the new values. Changing `insuranceProvider` or
+        `insurancePolicyNumber` alone does NOT trigger this reset — only the
+        four fields above do. Same `isPrimary`/`photoKeys` rules as create.
+      parameters: [ { $ref: "#/components/parameters/vehicleId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverVehicleUpdateRequest" }
+      responses:
+        "200":
+          description: The updated vehicle
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverVehicle" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Driver]
+      summary: Permanently remove one of the caller's own vehicles
+      description: >-
+        A hard delete, not a soft `isActive: false` — that field exists
+        separately for taking a vehicle out of service without losing its
+        record. `404` if not found or not owned.
+      parameters: [ { $ref: "#/components/parameters/vehicleId" } ]
+      responses:
+        "200":
+          description: "`{ ok: true }`"
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /driver/vehicles/photo/presign:
+    post:
+      tags: [Driver]
+      summary: "Deprecated: presign a direct browser upload of a vehicle photo"
+      description: Same deprecation and reason as `/driver/profile/photo/presign` — superseded by `vehicles/photo/upload`. Strictly throttled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImagePresignRequest" }
+      responses:
+        "201":
+          description: A presigned upload URL (do not rely on it working — see deprecation note)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PresignedUpload" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /driver/vehicles/photo/upload:
+    post:
+      tags: [Driver]
+      summary: Upload a vehicle photo as raw bytes (server-side ingest)
+      description: >-
+        Strictly throttled. Same raw-bytes/sniffed-type/8&nbsp;MB-cap contract
+        as `/driver/profile/photo/upload`. The returned `key` is only attached
+        to a vehicle once included in that vehicle's `photoKeys` on `POST
+        /driver/vehicles` or `PATCH /driver/vehicles/{id}` — uploading alone
+        attaches nothing.
+      parameters:
+        - { name: filename, in: query, required: false, schema: { type: string }, description: Client-supplied original filename, used only for storage-key legibility }
+      requestBody:
+        required: true
+        content:
+          image/*: { schema: { type: string, format: binary } }
+      responses:
+        "201":
+          description: The stored image
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadedImage" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /driver/service-areas:
+    put:
+      tags: [Driver]
+      summary: Replace the caller's whole set of served districts
+      description: >-
+        Requires a driver profile to already exist. Full replace, not a
+        merge: a district left out of the submission is removed, and an empty
+        list clears every district (the driver serves nowhere). Up to 6
+        districts (all of `DISTRICTS`). Removing a district also cascades to
+        that district's city narrowing rows (`DriverServiceCity`), by the
+        schema's own foreign key — there is nothing left to narrow once the
+        district itself is gone.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverServiceAreasRequest" }
+      responses:
+        "200":
+          description: The caller's service areas after the replace, all districts
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/DriverServiceArea" } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /driver/service-areas/{district}/cities:
+    put:
+      tags: [Driver]
+      summary: Narrow (or widen back) coverage of one already-served district to specific towns (BMPL-176)
+      description: >-
+        `district` is a path parameter, not part of the body, and is
+        validated against `DISTRICTS` here in the service (`400` "Unknown
+        district." if not one of the six). The district must already be one
+        the driver serves via `PUT /driver/service-areas` above, or the call
+        is refused with a `400` naming the district. An EMPTY `cities` list
+        widens the district back to unnarrowed (the driver serves the whole
+        district again, the same meaning `DriverServiceArea` alone has always
+        had); a non-empty list replaces the current narrowing for that
+        district only — other districts' narrowing rows are untouched. `city`
+        is free text the driver types, matched EXACTLY against a shipment or
+        delivery's own city string — never a fuzzy or fabricated match. As of
+        this writing this narrowing is stored only: automatic dispatch
+        (`DriverService.eligibleDriversForDistrict`, `assignmentEligibility`)
+        still matches a driver to a job on `district` alone and does not
+        consult these rows (BMPL-194, unstarted) — a driver narrowed to one
+        town is still offered every job anywhere in that district today.
+      parameters:
+        - { $ref: "#/components/parameters/district" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverServiceCitiesRequest" }
+      responses:
+        "200":
+          description: The caller's service areas after the narrowing, all districts
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/DriverServiceArea" } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /driver/availability:
+    patch:
+      tags: [Driver]
+      summary: Set the caller's own availability (OFFLINE / ONLINE / UNAVAILABLE)
+      description: >-
+        A driver may set any of `OFFLINE`, `ONLINE` or `UNAVAILABLE` on
+        themselves — `SUSPENDED` is admin-only and never accepted here.
+        Setting `ONLINE` is gated by eligibility, not by role: an approved
+        active role, an unexpired licence, and at least one approved active
+        vehicle with valid registration and insurance, or the call is refused
+        with a `400` naming every unmet reason
+        (`DriverService.eligibilityFor` exposes the same check read-only for
+        the dashboard to explain it in advance). Every change is audited
+        (`DRIVER_AVAILABILITY_CHANGED`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverAvailabilityRequest" }
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+    csrfToken:
+      type: apiKey
+      in: header
+      name: x-csrf-token
+  parameters:
+    vehicleId: { name: id, in: path, required: true, schema: { type: string }, description: Driver vehicle id }
+    district: { name: district, in: path, required: true, schema: { type: string, enum: [BELIZE, CAYO, COROZAL, ORANGE_WALK, STANN_CREEK, TOLEDO] }, description: One of the six Belize districts }
+  responses:
+    ValidationError:
+      description: Validation failed, or the operation is not legal in this state (plain-words message)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              errors:
+                type: array
+                items:
+                  type: object
+                  properties: { path: { type: string }, message: { type: string } }
+    Unauthorized: { description: Authentication required }
+    Forbidden: { description: Missing role/permission }
+    NotFound: { description: Not found or not owned (deliberately indistinguishable) }
+  schemas:
+    District:
+      type: string
+      enum: [BELIZE, CAYO, COROZAL, ORANGE_WALK, STANN_CREEK, TOLEDO]
+      description: One of the six real Belize districts. Never invented, never a seventh value.
+    ExpiryStatus:
+      type: [string, "null"]
+      enum: [VALID, EXPIRING_SOON, EXPIRED, null]
+      description: Derived from the date field beside it, relative to now; EXPIRING_SOON starts 30 days out (DOCUMENT_EXPIRY_SOON_DAYS). Null when no date is set.
+
+    DriverProfileRequest:
+      type: object
+      required: [legalName, displayName, phone, homeDistrict, licenceNumber, licenceExpiry, vehicleOwnership, termsAccepted]
+      properties:
+        legalName: { type: string, maxLength: 160 }
+        displayName: { type: string, maxLength: 80 }
+        phone: { type: string, minLength: 5, maxLength: 40 }
+        homeDistrict: { $ref: "#/components/schemas/District" }
+        homeAddress: { type: string, maxLength: 200 }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        emergencyContactName: { type: string, maxLength: 160 }
+        emergencyContactPhone: { type: string, maxLength: 40 }
+        licenceNumber: { type: string, maxLength: 60 }
+        licenceExpiry: { type: string, format: date-time }
+        vehicleOwnership: { type: string, enum: [OWNED, LEASED, BORROWED, NONE] }
+        termsAccepted: { type: boolean, description: "true records acceptance now (server timestamp); false/omitted-on-update clears it." }
+        applicantNotes: { type: string, maxLength: 1000 }
+        profilePhotoKey:
+          type: string
+          maxLength: 512
+          description: >-
+            A key previously returned by `/driver/profile/photo/upload`, in
+            this driver's own namespace. Re-validated server-side before
+            storage — a foreign or fabricated key is refused, never trusted.
+    DriverProfileUpdateRequest:
+      allOf:
+        - $ref: "#/components/schemas/DriverProfileRequest"
+      description: Every field from DriverProfileRequest, but all optional — at least one must be present (400 "No fields to update." on an empty object). required is not enforced here.
+
+    DriverProfile:
+      type: object
+      description: The driver's own audience — everything a driver may see about their own application/profile.
+      properties:
+        id: { type: string }
+        legalName: { type: string }
+        displayName: { type: string }
+        phone: { type: string }
+        homeDistrict: { $ref: "#/components/schemas/District" }
+        homeAddress: { type: [string, "null"] }
+        emergencyContactName: { type: [string, "null"] }
+        emergencyContactPhone: { type: [string, "null"] }
+        licenceNumber: { type: string }
+        licenceExpiry: { type: string, format: date-time }
+        licenceExpiryStatus: { $ref: "#/components/schemas/ExpiryStatus" }
+        vehicleOwnership: { type: string, enum: [OWNED, LEASED, BORROWED, NONE] }
+        termsAccepted: { type: boolean, description: "true when termsAcceptedAt is set; the timestamp itself is not exposed." }
+        applicantNotes: { type: [string, "null"] }
+        profilePhotoUrl: { type: [string, "null"], description: "Signed, short-lived; resolved fresh on every read. Null if storage is unavailable OR no photo is on file — see hasProfilePhoto to tell those apart." }
+        hasProfilePhoto: { type: boolean }
+        availability:
+          type: string
+          enum: [OFFLINE, ONLINE, UNAVAILABLE, SUSPENDED]
+          description: The full operational enum (unlike the request, which cannot set SUSPENDED — that is admin-only, set via role suspension).
+        isActive: { type: boolean }
+        ratingAverage: { type: number, description: "Placeholder — populated in a later phase; not money-moving." }
+        ratingCount: { type: integer }
+        completedDeliveries: { type: integer }
+        expiringSoonDays: { type: integer, description: "Always 30 (DOCUMENT_EXPIRY_SOON_DAYS) — a constant echoed on every response, not per-driver data." }
+
+    DriverVehicleRequest:
+      type: object
+      required: [type, make, model, licencePlate]
+      properties:
+        type: { type: string, enum: [CAR, MOTORCYCLE, SCOOTER, BICYCLE, VAN, TRUCK, OTHER] }
+        make: { type: string, maxLength: 80 }
+        model: { type: string, maxLength: 80 }
+        year: { type: integer, minimum: 1900, maximum: 2100 }
+        color: { type: string, maxLength: 40 }
+        licencePlate: { type: string, maxLength: 20 }
+        registrationNumber: { type: string, maxLength: 60 }
+        registrationExpiry: { type: string, format: date-time }
+        insuranceProvider: { type: string, maxLength: 120 }
+        insurancePolicyNumber: { type: string, maxLength: 80 }
+        insuranceExpiry: { type: string, format: date-time }
+        photoKeys:
+          type: array
+          maxItems: 8
+          items: { type: string, maxLength: 512 }
+          description: Keys previously returned by /driver/vehicles/photo/upload, in this driver's own namespace. Each is re-verified server-side (namespace, real image, size) before being stored.
+        isPrimary: { type: boolean, description: "Omit to get the default (first vehicle only); an explicit value is always honored." }
+    DriverVehicleUpdateRequest:
+      allOf:
+        - $ref: "#/components/schemas/DriverVehicleRequest"
+      description: Every field from DriverVehicleRequest plus isActive, all optional — at least one must be present (400 on an empty object). required is not enforced here.
+      properties:
+        isActive: { type: boolean, description: "Soft in-service flag — false takes the vehicle out of rotation without deleting it." }
+
+    DriverVehicle:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [CAR, MOTORCYCLE, SCOOTER, BICYCLE, VAN, TRUCK, OTHER] }
+        make: { type: string }
+        model: { type: string }
+        year: { type: [integer, "null"] }
+        color: { type: [string, "null"] }
+        licencePlate: { type: string }
+        registrationNumber: { type: [string, "null"] }
+        registrationExpiry: { type: [string, "null"], format: date-time }
+        registrationExpiryStatus: { $ref: "#/components/schemas/ExpiryStatus" }
+        insuranceProvider: { type: [string, "null"] }
+        insurancePolicyNumber: { type: [string, "null"] }
+        insuranceExpiry: { type: [string, "null"], format: date-time }
+        insuranceExpiryStatus: { $ref: "#/components/schemas/ExpiryStatus" }
+        photoUrls: { type: array, items: { type: string }, description: "Signed, short-lived; resolved fresh on every read. A key that fails to sign is silently dropped rather than erroring the whole response." }
+        isActive: { type: boolean }
+        isPrimary: { type: boolean }
+        approvalStatus: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        rejectionReason: { type: [string, "null"] }
+
+    DriverServiceAreasRequest:
+      type: object
+      required: [districts]
+      properties:
+        districts: { type: array, maxItems: 6, items: { $ref: "#/components/schemas/District" }, description: Full replacement set; duplicates are silently deduplicated. }
+    DriverServiceCitiesRequest:
+      type: object
+      required: [cities]
+      properties:
+        cities:
+          type: array
+          maxItems: 50
+          items: { type: string, minLength: 1, maxLength: 120 }
+          description: Free text town/city names, full replacement set for this one district; duplicates are silently deduplicated. Never validated against a place list — there isn't one.
+    DriverServiceArea:
+      type: object
+      properties:
+        id: { type: string }
+        district: { $ref: "#/components/schemas/District" }
+        isActive: { type: boolean }
+        cities:
+          type: array
+          description: "Empty means the driver serves the WHOLE district (the historic, still-current meaning). Non-empty means coverage in this district is narrowed to just these towns — see the /cities endpoint's dispatch caveat."
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              city: { type: string }
+              isActive: { type: boolean }
+
+    DriverAvailabilityRequest:
+      type: object
+      required: [availability]
+      properties:
+        availability: { type: string, enum: [OFFLINE, ONLINE, UNAVAILABLE], description: SUSPENDED is deliberately not a valid request value — admin-only, set via role suspension. }
+
+    ImagePresignRequest:
+      type: object
+      required: [fileName, contentType, sizeBytes]
+      properties:
+        fileName: { type: string, maxLength: 200 }
+        contentType: { type: string, maxLength: 120 }
+        sizeBytes: { type: integer, minimum: 1 }
+    PresignedUpload:
+      type: object
+      properties:
+        uploadUrl: { type: string }
+        key: { type: string }
+        expiresIn: { type: integer, description: Seconds until the URL expires. }
+    PresignedDownload:
+      type: object
+      properties:
+        url: { type: string }
+        expiresIn: { type: integer, description: Seconds until the URL expires. }
+    UploadedImage:
+      type: object
+      properties:
+        key: { type: string }
+        contentType: { type: string, description: The SNIFFED real type, never the client-declared one. }
+        sizeBytes: { type: integer }
+
+    DriverEligibility:
+      type: object
+      properties:
+        canGoOnline: { type: boolean }
+        reasons:
+          type: array
+          items: { type: string }
+          description: Plain-words reasons this driver cannot go ONLINE right now. Empty when canGoOnline is true.
+    DriverApplication:
+      type: [object, "null"]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [PENDING, MORE_INFO_REQUIRED, APPROVED, REJECTED, WITHDRAWN] }
+        message: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        reviewerNote: { type: [string, "null"], description: The most recent review note that has one, newest first; null if no review has left one yet. }
+
+    DriverDashboardNoProfile:
+      type: object
+      description: Returned when the caller has never started a driver application.
+      properties:
+        hasProfile: { type: boolean, enum: [false] }
+        roleStatus: { type: [string, "null"], enum: [PENDING, MORE_INFO_REQUIRED, APPROVED, REJECTED, SUSPENDED, REVOKED, null], description: The DELIVERY_DRIVER UserRole's own status, distinct from the application's status; null if no role row exists at all. }
+        application: { $ref: "#/components/schemas/DriverApplication" }
+        profile: { type: "null" }
+        vehicles: { type: array, maxItems: 0, items: {} }
+        serviceAreas: { type: array, maxItems: 0, items: {} }
+        eligibility:
+          type: object
+          properties:
+            canGoOnline: { type: boolean, enum: [false] }
+            reasons: { type: array, items: { type: string }, description: "Always [\"start your driver application\"] in this shape." }
+    DriverDashboardWithProfile:
+      type: object
+      description: Returned once a profile exists (applicant or approved driver alike).
+      properties:
+        hasProfile: { type: boolean, enum: [true] }
+        roleStatus: { type: [string, "null"], enum: [PENDING, MORE_INFO_REQUIRED, APPROVED, REJECTED, SUSPENDED, REVOKED, null] }
+        application: { $ref: "#/components/schemas/DriverApplication" }
+        profile: { $ref: "#/components/schemas/DriverProfile" }
+        vehicles: { type: array, items: { $ref: "#/components/schemas/DriverVehicle" } }
+        serviceAreas: { type: array, items: { $ref: "#/components/schemas/DriverServiceArea" } }
+        eligibility: { $ref: "#/components/schemas/DriverEligibility" }
+        operations: { $ref: "#/components/schemas/DriverOperationsSummary" }
+
+    DriverActiveDeliveryBrief:
+      type: object
+      description: A single marketplace delivery on this driver's plate right now; the same rows /driver/jobs in marketplace.yaml documents in full.
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [ASSIGNED, DRIVER_ACCEPTED, PICKUP_CONFIRMED, IN_TRANSIT, ARRIVING], description: Only the ACTIVE subset of DeliveryStatus can appear here — never PENDING_ASSIGNMENT, DRIVER_DECLINED, DELIVERED or CANCELLED. }
+        orderNumber: { type: string }
+        vendor: { type: string }
+        destination: { type: [string, "null"], description: "\"City, District\" from the order's first address, or null if the order has none." }
+        estimateLabel: { type: [string, "null"] }
+        assignedAt: { type: string, format: date-time }
+        acceptedAt: { type: [string, "null"], format: date-time }
+        offerExpiresAt: { type: [string, "null"], format: date-time, description: Drives the accept/decline countdown; null once accepted. }
+    DriverOperationsSummary:
+      type: object
+      description: >-
+        Read-only, computed fresh on every dashboard call
+        (DriverOperationsService.summary) — never cached, never a second
+        source of truth for earnings (DriverEarning rows) or eligibility
+        (DriverService), only a rollup of them for one round trip.
+      properties:
+        availability: { type: string, enum: [OFFLINE, ONLINE, UNAVAILABLE, SUSPENDED] }
+        currentDelivery: { oneOf: [{ $ref: "#/components/schemas/DriverActiveDeliveryBrief" }, { type: "null" }] }
+        pendingOffer: { oneOf: [{ $ref: "#/components/schemas/DriverActiveDeliveryBrief" }, { type: "null" }], description: An offer awaiting this driver's accept/decline. }
+        upcoming: { type: array, items: { $ref: "#/components/schemas/DriverActiveDeliveryBrief" }, description: Every other active delivery — excludes whichever one is currentDelivery or pendingOffer. }
+        counts:
+          type: object
+          properties:
+            activeNow: { type: integer }
+            deliveredToday: { type: integer }
+            deliveredThisWeek: { type: integer, description: Rolling 7 days, not calendar-week. }
+            completedAllTime: { type: integer }
+        earnings:
+          type: object
+          description: BZD minor units (cents) as JSON numbers — see the MONEY note at the top of this document.
+          properties:
+            todayMinor: { type: integer }
+            weekMinor: { type: integer, description: Rolling 7 days, not calendar-week. }
+            pendingPayoutMinor: { type: integer }
+        performance:
+          type: object
+          properties:
+            ratingAverage: { type: [number, "null"] }
+            ratingCount: { type: integer }
+            acceptanceRate: { type: [integer, "null"], description: "Percent, rounded. Null (never 0) when nothing has been offered yet — a new driver has no rate to show, not a bad one." }
+            completionRate: { type: [integer, "null"], description: "Percent, rounded. Null when nothing has been accepted yet." }
+        unreadNotifications: { type: integer }
