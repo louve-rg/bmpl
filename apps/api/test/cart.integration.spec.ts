@@ -324,3 +324,25 @@ describe('ownership isolation + auth + validation', () => {
     await addItem(customerA, { quantity: 1 }).expect(400);
   });
 });
+
+/**
+ * BMPL-222: bmpl-web's Belize Connect audit reported GET /api/cart as an
+ * "Internal server error" for an authenticated job seeker loading /jobs
+ * (the nav bar fetches a cart count on every authenticated page). Every
+ * registered account gets an approved CUSTOMER role at signup (auth.service.ts),
+ * so a job seeker is never blocked by @Roles('CUSTOMER') on the cart controller
+ * — if this reproduces, it is inside CartService itself, not a role gap.
+ */
+describe('a job seeker (no marketplace activity yet) hits the same cart route the nav bar calls (BMPL-222)', () => {
+  it('a freshly registered job seeker with a profile and résumé gets a clean empty cart, not a 500', async () => {
+    const s = `seek_cart_${Date.now()}`;
+    const cookies = await registerCustomer(`${s}@example.bz`);
+    const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email: `${s}@example.bz` } });
+    await ctx.prisma.userRole.create({ data: { userId: user.id, roleCode: 'JOB_SEEKER', status: 'APPROVED', approvedAt: new Date() } });
+    await request(ctx.server).put('/api/job-seeker/profile').set('Cookie', cookies).send({ preferredName: 'Seeker' }).expect(200);
+    const res = await getCart(cookies);
+    expect(res.status).toBe(200);
+    expect(res.body.vendors).toEqual([]);
+    expect(res.body.itemCount).toBe(0);
+  });
+});
