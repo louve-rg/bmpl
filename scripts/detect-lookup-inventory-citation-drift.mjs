@@ -135,9 +135,11 @@ function extractCitations(line) {
       mask(m.index, m.index + m[0].length);
     }
   }
-  // 2) bare `schema:N` — no backticks, always schema.prisma
+  // 2) bare `schema:N` or `schema.prisma:N` — no backticks, always schema.prisma.
+  // Two literal spellings occur in this doc ("schema:36" and "schema.prisma:922") and
+  // neither is inside backticks on its own, so pattern 1 above never sees either.
   {
-    const re = /\bschema:(\d+)\b/g;
+    const re = /\bschema(?:\.prisma)?:(\d+)\b/g;
     let m;
     while ((m = re.exec(masked)) !== null) {
       citations.push({ index: m.index, file: 'schema.prisma', lineSpec: m[1], kind: 'schema' });
@@ -274,10 +276,13 @@ function main() {
   const exitCode = drifted.length > 0 ? 2 : unknown.length > 0 ? 1 : 0;
   const status = exitCode === 2 ? 'DRIFTED' : exitCode === 1 ? 'UNKNOWN' : 'OK';
 
+  const scope = `checks ONLY ${rel(DOC_PATH)} — an exit-0 here says nothing about citations in any other document`;
+
   if (asJson) {
-    console.log(JSON.stringify({ docPath: rel(DOC_PATH), total: results.length, byVerdict: by, status, exitCode, results }, null, 2));
+    console.log(JSON.stringify({ docPath: rel(DOC_PATH), scope, total: results.length, byVerdict: by, status, exitCode, results }, null, 2));
   } else {
-    console.log(`detect-lookup-inventory-citation-drift — ${rel(DOC_PATH)}\n`);
+    console.log(`detect-lookup-inventory-citation-drift — ${rel(DOC_PATH)}`);
+    console.log(scope + '\n');
     console.log(`total citations found: ${results.length}`);
     console.log(by);
     console.log('');
