@@ -6,6 +6,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['{lib,components}/**/*.test.ts'],
+    // '*.test.mjs' (root only) covers next.config.mjs, which can't move into
+    // lib/ (Next loads it directly as plain Node ESM, not through the app's
+    // TS build) but still needs its own default-guard behavior under test.
+    include: ['{lib,components}/**/*.test.ts', '*.test.mjs'],
   },
 });
