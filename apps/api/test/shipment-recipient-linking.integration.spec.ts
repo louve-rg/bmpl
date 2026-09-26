@@ -171,6 +171,24 @@ describe('claiming the link', () => {
     expect(one.body.reference).toBe(s.reference);
   });
 
+  /**
+   * WHAT THIS PROVES, AND WHAT IT CANNOT: this is a PARITY check — the two
+   * views produce identical output. Parity proves the linked account's view
+   * and the anonymous view AGREE; it can never prove either one is
+   * RESTRICTED, because both call the SAME `recipientView()` serializer. If
+   * that serializer ever widened to include a field it should not — the
+   * sender's name, the parcel description, the handoff PIN — this test would
+   * still pass: the two sides would agree on the wider payload just as
+   * happily as they agree on the correct one today.
+   *
+   * THE REAL GUARD AGAINST THAT AGREEMENT HAPPENING TO BE WRONG lives
+   * elsewhere: recipient-tracking.integration.spec.ts, "never carries the
+   * sender, the money, the parcel description, the PIN, or the driver" — a
+   * sentinel scan of the RAW serialized response for concrete values that
+   * must never appear, regardless of which key they might surface under. Do
+   * not delete that test believing this one covers the same ground; do not
+   * assume this test alone is sufficient if `recipientView()` ever changes.
+   */
   it('the linked account sees EXACTLY the same allowlisted payload the anonymous link would — linking never widens it', async () => {
     const s = await book();
     const recipient = await registerUser(`rlparity_${uniq()}@example.com`);
