@@ -30,17 +30,22 @@ info:
     no configured transport network (hubs `[]`, modes `[]`), which these
     endpoints report truthfully.
 
-    ROUTE OPERATING-DAY CONFIGURATION (BMPL-186) is a real, live capability —
-    a carrier or admin can set a weekly OPERATING/REDUCED/NOT_OPERATING pattern
-    plus date exceptions per route (`/admin/logistics/routes/{id}/schedule`,
-    `/shipping/provider/routes/{id}/schedule`) — but as of this writing NOTHING
-    ELSE READS IT: quoting, `cheapestPath` route selection and leg
-    depart/start all ignore it. Setting a route to NOT_OPERATING has no effect
-    on what is offered, quoted or allowed to depart. Wiring the schedule into
-    planning/dispatch is a separate, unmerged change (BMPL-196) and is not
-    documented here as live. No carrier's real schedule data has been entered
-    either way — this is a configuration surface, not a claim that any route
-    has a schedule today.
+    ROUTE OPERATING-DAY CONFIGURATION (BMPL-186) is a real, live capability,
+    and BMPL-196 wired it into two enforcement points: a route resolving
+    `NOT_OPERATING` for the date is excluded from route planning
+    (`cheapestPath`, `route-planner.ts`), and confirming a `LINE_HAUL`
+    departure on such a route is refused with a 400
+    (`ShipmentService.departLeg`). `REDUCED` never blocks either check —
+    operations meant thinner, not stopped. Resolution is computed in BELIZE
+    LOCAL TIME (a fixed UTC−6 offset, no daylight saving —
+    `packages/shared/src/service-schedule.ts`), not UTC. An unconfigured
+    route — every real route today — resolves `OPERATING` and is unaffected,
+    which matters because no carrier's real schedule **data** has been
+    entered: this capability is live in code, but nothing has been configured
+    to use it. Set a weekly pattern plus date exceptions per route at
+    `/admin/logistics/routes/{id}/schedule` (admin) or
+    `/shipping/provider/routes/{id}/schedule` (carrier, scoped to routes their
+    organization operates).
 servers:
   - url: https://bmplapi-production.up.railway.app/api
     description: Production
@@ -584,7 +589,9 @@ paths:
         (`/shipping/provider/routes/{id}/schedule`) calls the identical
         `LogisticsNetworkService` methods, scoped to routes they operate. See
         the CAPABILITY-VS-LIVE note at the top of this document: this
-        configuration does not yet affect planning, quoting or departure.
+        configuration is live — it is consulted by route planning and by a
+        line-haul departure on this route (BMPL-196) — but no carrier's real
+        schedule data has been entered yet.
       parameters: [ { $ref: "#/components/parameters/routeId" } ]
       responses:
         "200":
@@ -982,7 +989,9 @@ paths:
       summary: Read my route's weekly pattern and date exceptions (BMPL-186)
       description: >-
         See the CAPABILITY-VS-LIVE note at the top of this document: setting a
-        schedule here does not yet affect planning, quoting or departure.
+        schedule here is live — it is consulted by route planning and by
+        confirming a line-haul departure on this route (BMPL-196) — but no
+        carrier's real schedule data has been entered yet.
       parameters: [ { $ref: "#/components/parameters/routeId" } ]
       responses:
         "200":
@@ -1633,10 +1642,10 @@ components:
     ServiceOperatingStatus:
       type: string
       enum: [OPERATING, REDUCED, NOT_OPERATING]
-      description: A route's configured status for one day or date. Unconfigured defaults to OPERATING (see resolveScheduleStatus, packages/shared/src/service-schedule.ts) — but nothing reads this yet; see the CAPABILITY-VS-LIVE note at the top of this document.
+      description: A route's configured status for one day or date. Unconfigured defaults to OPERATING (see resolveScheduleStatus, packages/shared/src/service-schedule.ts) — live and consulted by route planning and line-haul departure (BMPL-196); see the CAPABILITY-VS-LIVE note at the top of this document.
     RouteSchedule:
       type: object
-      description: A route's configured weekly pattern plus any date-specific overrides (BMPL-186). Configuration only — see the CAPABILITY-VS-LIVE note at the top of this document.
+      description: A route's configured weekly pattern plus any date-specific overrides (BMPL-186), consulted by route planning and line-haul departure (BMPL-196) — see the CAPABILITY-VS-LIVE note at the top of this document.
       properties:
         routeId: { type: string }
         days:
