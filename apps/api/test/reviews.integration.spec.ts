@@ -247,3 +247,31 @@ describe('the simulation boundary', () => {
     }
   });
 });
+
+/**
+ * Notification event codes (BMPL-149): a new review and a seller's response to
+ * it both used to reuse the marketplace's PRODUCT_MODERATED. The protected
+ * state is the stored `event` column, asserted directly.
+ */
+describe('notification event codes are review-specific, not PRODUCT_MODERATED (BMPL-149)', () => {
+  it('a new review tells the seller, and a response tells the reviewer, each with its own event', async () => {
+    const o = await seedFulfilled('PICKUP');
+    const created = await post(o.customerCookies, 'reviews', { subjectType: 'VENDOR', contextId: o.vendorOrderId, rating: 4, body: 'Good store' });
+    expect(created.status).toBe(201);
+    const vendorRow = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId: o.vendorUserId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    expect(vendorRow.notification.event).toBe('REVIEW_RECEIVED');
+
+    const reviewId = created.body.id;
+    expect((await post(o.vendorCookies, `vendor/reviews/${reviewId}/response`, { body: 'Thanks for your feedback!' })).status).toBe(201);
+    const reviewerRow = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId: o.customerId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    expect(reviewerRow.notification.event).toBe('REVIEW_RESPONSE_RECEIVED');
+  });
+});

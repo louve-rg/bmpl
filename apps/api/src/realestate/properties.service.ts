@@ -224,7 +224,7 @@ export class PropertiesService {
     if (!ctx.listing.district) throw new BadRequestException('Add the property district before submitting.');
     await this.transition(listingId, ctx.listing.status, 'SUBMITTED', actor.userId, null, { moderationReason: null });
     await this.audit.record({ action: 'PROPERTY_SUBMITTED', actorId: actor.userId, newValue: { listingId } });
-    await this.notifications.notifyAdmins('properties.read', { type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'Listing submitted for review', body: `"${ctx.listing.title}" was submitted for review.`, data: { listingId } });
+    await this.notifications.notifyAdmins('properties.read', { type: 'MARKETPLACE', category: 'PROPERTY', event: 'ADMIN_PROPERTY_LISTING_SUBMITTED', title: 'Listing submitted for review', body: `"${ctx.listing.title}" was submitted for review.`, data: { listingId } });
     return this.managedDetail(actor, listingId);
   }
 
@@ -489,7 +489,7 @@ export class PropertiesService {
       },
     });
     await this.audit.record({ action: 'PROPERTY_ASSIGNMENT_CHANGED', actorId: actor.userId, newValue: { listingId, assignmentId: assignment.id, agentProfileId: agent.id, status: 'PENDING' } });
-    await this.notifications.createInApp({ userId: agent.userId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'New listing assignment', body: `You were invited to manage "${ctx.listing.title}".`, data: { listingId, assignmentId: assignment.id } });
+    await this.notifications.createInApp({ userId: agent.userId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PROPERTY_ASSIGNMENT_INVITED', title: 'New listing assignment', body: `You were invited to manage "${ctx.listing.title}".`, data: { listingId, assignmentId: assignment.id } });
     return this.managedDetail(actor, listingId);
   }
 
@@ -507,7 +507,7 @@ export class PropertiesService {
       this.prisma.propertyListing.update({ where: { id: asn.listingId }, data: { agentProfileId: agent.id, agencyId: agent.agencyId ?? undefined } }),
     ]);
     await this.audit.record({ action: 'PROPERTY_ASSIGNMENT_CHANGED', actorId: actor.userId, newValue: { listingId: asn.listingId, assignmentId, status: 'ACCEPTED' } });
-    await this.notifications.createInApp({ userId: asn.listing.ownerProfile.userId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', title: 'Agent accepted assignment', body: `An agent accepted managing "${asn.listing.title}".`, data: { listingId: asn.listingId, assignmentId } });
+    await this.notifications.createInApp({ userId: asn.listing.ownerProfile.userId, type: 'MARKETPLACE', category: 'PROPERTY', event: 'PROPERTY_ASSIGNMENT_ACCEPTED', title: 'Agent accepted assignment', body: `An agent accepted managing "${asn.listing.title}".`, data: { listingId: asn.listingId, assignmentId } });
     return this.managedDetail(actor, asn.listingId);
   }
 
@@ -754,7 +754,7 @@ export class PropertiesService {
     const l = await this.prisma.propertyListing.findUnique({ where: { id: listingId }, include: { ownerProfile: { select: { userId: true } }, agentProfile: { select: { userId: true } } } });
     if (!l) return;
     const recipients = [l.ownerProfile.userId, l.agentProfile?.userId].filter((u) => u && u !== exceptUserId);
-    await this.notifications.notifyUsers(recipients, { type: 'MARKETPLACE', category: 'PROPERTY', event: 'PRODUCT_MODERATED', ...params });
+    await this.notifications.notifyUsers(recipients, { type: 'MARKETPLACE', category: 'PROPERTY', event: 'PROPERTY_LISTING_STATUS_CHANGED', ...params });
   }
 }
 

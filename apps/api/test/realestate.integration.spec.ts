@@ -11,6 +11,7 @@ import request from 'supertest';
 
 let ctx: TestContext;
 let admin: string[];
+let adminUserId: string;
 let seq = 0;
 const uniq = () => `${Date.now()}_${(seq += 1)}`;
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
@@ -66,6 +67,7 @@ beforeAll(async () => {
   await resetDb(ctx.prisma);
   await seedRoles(ctx.prisma);
   const a = await seedSuperAdmin(ctx.prisma);
+  adminUserId = a.id;
   admin = await login(a.email, a.password);
 });
 afterAll(async () => { await ctx.app.close(); });
@@ -441,5 +443,77 @@ describe('dead listing statuses stay dead (BMPL-163)', () => {
       { toStatus: { in: ['APPROVED', 'UNDER_REVIEW'] } },
       { fromStatus: { in: ['APPROVED', 'UNDER_REVIEW'] } },
     ] } })).toBe(0);
+  });
+});
+
+/**
+ * Notification event codes (BMPL-149): every one of these used to reuse the
+ * marketplace's PRODUCT_MODERATED, so notification analytics could not tell a
+ * real-estate event from a product one. The protected state is the stored
+ * `event` column on the notification row, asserted directly rather than the
+ * 200/201 the action already returns.
+ */
+describe('notification event codes are property-specific, not PRODUCT_MODERATED (BMPL-149)', () => {
+  async function latestEvent(userId: string) {
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    return row.notification.event;
+  }
+
+  it('submission tells admins, and moderation tells the owner, with their own events', async () => {
+    const owner = await makeOwner();
+    const create = await post(owner.cookies, 'property-owner/listings', {
+      purpose: 'FOR_SALE', propertyType: 'HOUSE', title: `Event Villa ${uniq()}`,
+      description: 'A wonderful family home with a garden and sea views, close to town.',
+      priceMinor: 25000000, district: 'BELIZE', locality: 'Belize City', exactAddress: '1 Event Lane',
+    });
+    expect(create.status).toBe(201);
+    expect((await post(owner.cookies, `property-owner/listings/${create.body.id}/submit`)).status).toBe(201);
+    expect(await latestEvent(adminUserId)).toBe('ADMIN_PROPERTY_LISTING_SUBMITTED');
+
+    const mod = await post(admin, `admin/properties/${create.body.id}/moderate`, { action: 'APPROVE' });
+    expect(mod.status).toBe(201);
+    // APPROVE routes through notifyListers -> PROPERTY_LISTING_STATUS_CHANGED
+    // for the admin-driven path (SUSPEND below is the same helper, no
+    // exceptUserId, so it also lands on the owner directly).
+    expect((await post(admin, `admin/properties/${create.body.id}/moderate`, { action: 'SUSPEND' })).status).toBe(201);
+    expect(await latestEvent(owner.userId)).toBe('PROPERTY_LISTING_STATUS_CHANGED');
+  });
+
+  it('an agent invitation and its acceptance each carry their own event', async () => {
+    const owner = await makeOwner();
+    const { id } = await publishListing(owner);
+    const agent = await makeAgent();
+
+    expect((await post(owner.cookies, `property-owner/listings/${id}/assign-agent`, { agentProfileId: agent.agentProfileId })).status).toBe(201);
+    expect(await latestEvent(agent.userId)).toBe('PROPERTY_ASSIGNMENT_INVITED');
+
+    const asg = await get(agent.cookies, 'real-estate-agent/assignments');
+    const asgId = asg.body[0].id;
+    expect((await post(agent.cookies, `real-estate-agent/assignments/${asgId}/accept`)).status).toBe(201);
+    expect(await latestEvent(owner.userId)).toBe('PROPERTY_ASSIGNMENT_ACCEPTED');
+  });
+
+  it('an enquiry, its closure, a viewing request and its update each carry their own event', async () => {
+    const owner = await makeOwner();
+    const { id } = await publishListing(owner);
+    const seeker = await register(`ev_seeker_${uniq()}@ex.bz`);
+
+    const enq = await post(seeker.cookies, 'property-seeker/enquiries', { listingId: id, type: 'PRICE', message: 'Is the price negotiable?' });
+    expect(enq.status).toBe(201);
+    expect(await latestEvent(owner.userId)).toBe('PROPERTY_ENQUIRY_CREATED');
+
+    expect((await post(owner.cookies, `property-owner/enquiries/${enq.body.id}/close`)).status).toBe(201);
+    expect(await latestEvent(seeker.userId)).toBe('PROPERTY_ENQUIRY_CLOSED');
+
+    const vr = await post(seeker.cookies, 'property-seeker/viewing-requests', { listingId: id, requestedDate: new Date(Date.now() + 86400000).toISOString(), requestedTime: '10:00' });
+    expect(vr.status).toBe(201);
+    expect(await latestEvent(owner.userId)).toBe('PROPERTY_VIEWING_REQUESTED');
+
+    expect((await post(owner.cookies, `property-owner/viewings/${vr.body.id}/transition`, { status: 'CONFIRMED', confirmedDate: new Date(Date.now() + 86400000).toISOString(), confirmedTime: '10:00' })).status).toBe(201);
+    expect(await latestEvent(seeker.userId)).toBe('PROPERTY_VIEWING_UPDATED');
   });
 });

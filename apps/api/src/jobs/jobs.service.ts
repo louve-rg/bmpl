@@ -140,7 +140,7 @@ export class JobsService {
     if (!EDITABLE.includes(job.status)) throw new BadRequestException('This job cannot be submitted from its current status.');
     await this.prisma.jobListing.update({ where: { id: jobId }, data: { status: 'SUBMITTED', moderationReason: null } });
     await this.audit.record({ action: 'JOB_SUBMITTED', actorId: actor.userId, newValue: { jobId } });
-    await this.notifications.notifyAdmins('jobs.read', { type: 'MARKETPLACE', event: 'PRODUCT_MODERATED', title: 'Job submitted for review', body: `"${job.title}" was submitted for review.`, data: { jobId } });
+    await this.notifications.notifyAdmins('jobs.read', { type: 'MARKETPLACE', event: 'ADMIN_JOB_LISTING_SUBMITTED', title: 'Job submitted for review', body: `"${job.title}" was submitted for review.`, data: { jobId } });
     return this.employerDetail(actor.userId, jobId);
   }
 
@@ -241,7 +241,7 @@ export class JobsService {
     if (!job) throw new NotFoundException('Job not found.');
     const reviewable = ['SUBMITTED', 'UNDER_REVIEW'];
     let status = job.status;
-    let event = 'PRODUCT_MODERATED';
+    let event = 'JOB_LISTING_MODERATED';
     let title = 'Job update';
     switch (dto.action) {
       case 'APPROVE':

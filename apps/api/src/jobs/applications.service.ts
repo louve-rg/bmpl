@@ -84,8 +84,8 @@ export class ApplicationsService {
       },
     });
     await this.audit.record({ action: 'JOB_APPLICATION_SUBMITTED', actorId: actor.userId, newValue: { applicationId: application.id, jobId: dto.jobId } });
-    await this.notifications.createInApp({ userId: job.employerProfile.userId, type: 'MARKETPLACE', category: 'JOB', event: 'PRODUCT_MODERATED', title: 'New application', body: `New application for "${job.title}".`, data: { applicationId: application.id, jobId: dto.jobId } });
-    await this.notifications.createInApp({ userId: actor.userId, type: 'MARKETPLACE', category: 'JOB', event: 'PRODUCT_MODERATED', title: 'Application submitted', body: `Your application for "${job.title}" was submitted.`, data: { applicationId: application.id } });
+    await this.notifications.createInApp({ userId: job.employerProfile.userId, type: 'MARKETPLACE', category: 'JOB', event: 'JOB_APPLICATION_RECEIVED', title: 'New application', body: `New application for "${job.title}".`, data: { applicationId: application.id, jobId: dto.jobId } });
+    await this.notifications.createInApp({ userId: actor.userId, type: 'MARKETPLACE', category: 'JOB', event: 'JOB_APPLICATION_SUBMITTED', title: 'Application submitted', body: `Your application for "${job.title}" was submitted.`, data: { applicationId: application.id } });
     await this.messaging.postJobApplicationSystem(application.id, actor.userId, job.employerProfile.userId, `Application submitted for "${job.title}".`);
     return this.getMine(actor.userId, application.id);
   }
@@ -115,7 +115,7 @@ export class ApplicationsService {
     if (!isActiveApplicationStatus(a.status)) throw new BadRequestException('This application can no longer be withdrawn.');
     await this.transition(a.id, a.status, 'WITHDRAWN', actor.userId, null, { withdrawnAt: new Date() });
     await this.audit.record({ action: 'JOB_APPLICATION_WITHDRAWN', actorId: actor.userId, newValue: { applicationId } });
-    await this.notifications.createInApp({ userId: a.job.employerProfile.userId, type: 'MARKETPLACE', category: 'JOB', event: 'PRODUCT_MODERATED', title: 'Applicant withdrew', body: `An applicant withdrew from "${a.jobTitleSnapshot}".`, data: { applicationId } });
+    await this.notifications.createInApp({ userId: a.job.employerProfile.userId, type: 'MARKETPLACE', category: 'JOB', event: 'JOB_APPLICATION_WITHDRAWN', title: 'Applicant withdrew', body: `An applicant withdrew from "${a.jobTitleSnapshot}".`, data: { applicationId } });
     await this.messaging.postJobApplicationSystem(a.id, actor.userId, a.job.employerProfile.userId, 'The applicant withdrew their application.');
     return this.getMine(actor.userId, applicationId);
   }
@@ -196,7 +196,7 @@ export class ApplicationsService {
       await this.transition(a.id, 'INTERVIEW_REQUESTED', 'INTERVIEW_SCHEDULED', actor.userId, 'Interview scheduled');
     }
     await this.audit.record({ action: 'JOB_INTERVIEW_SCHEDULED', actorId: actor.userId, newValue: { applicationId } });
-    await this.notifications.createInApp({ userId: a.applicantId, type: 'MARKETPLACE', category: 'JOB', event: 'PRODUCT_MODERATED', title: 'Interview scheduled', body: `An interview was scheduled for "${a.job.title}".`, data: { applicationId } });
+    await this.notifications.createInApp({ userId: a.applicantId, type: 'MARKETPLACE', category: 'JOB', event: 'JOB_INTERVIEW_SCHEDULED', title: 'Interview scheduled', body: `An interview was scheduled for "${a.job.title}".`, data: { applicationId } });
     await this.messaging.postJobApplicationSystem(a.id, a.applicantId, actor.userId, `Interview scheduled for ${dto.scheduledAt.toISOString()} (${dto.mode}).`);
     return this.employerGet(actor.userId, applicationId);
   }
@@ -215,7 +215,7 @@ export class ApplicationsService {
       },
     });
     await this.audit.record({ action: 'JOB_INTERVIEW_UPDATED', actorId: actor.userId, newValue: { interviewId, status: dto.status ?? null } });
-    await this.notifications.createInApp({ userId: iv.application.applicantId, type: 'MARKETPLACE', category: 'JOB', event: 'PRODUCT_MODERATED', title: 'Interview updated', body: `Your interview for "${iv.application.job.title}" was updated.`, data: { applicationId: iv.applicationId } });
+    await this.notifications.createInApp({ userId: iv.application.applicantId, type: 'MARKETPLACE', category: 'JOB', event: 'JOB_INTERVIEW_UPDATED', title: 'Interview updated', body: `Your interview for "${iv.application.job.title}" was updated.`, data: { applicationId: iv.applicationId } });
     return this.employerGet(actor.userId, iv.applicationId);
   }
 
@@ -241,7 +241,7 @@ export class ApplicationsService {
       UNDER_REVIEW: `Your application for "${jobTitle}" is under review.`,
     };
     const body = messages[to] ?? `Your application for "${jobTitle}" was updated.`;
-    await this.notifications.createInApp({ userId: a.applicantId, type: 'MARKETPLACE', category: 'JOB', event: 'PRODUCT_MODERATED', title: 'Application update', body, data: { applicationId } });
+    await this.notifications.createInApp({ userId: a.applicantId, type: 'MARKETPLACE', category: 'JOB', event: 'JOB_APPLICATION_STATUS_CHANGED', title: 'Application update', body, data: { applicationId } });
     await this.messaging.postJobApplicationSystem(applicationId, a.applicantId, a.job.employerProfile.userId, body);
   }
 
