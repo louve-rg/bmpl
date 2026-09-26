@@ -344,27 +344,36 @@ pnpm --filter @bmpl/api build && pnpm --filter @bmpl/web build && pnpm --filter 
 Do not "fix" any of these as a side effect of unrelated work. Each is tracked
 and each needs its own scoped change.
 
-### A workspace-package error that isn't a code defect
+### `pnpm --filter <pkg> typecheck` skips a guarantee `pnpm turbo run typecheck` has
 
-**An error naming a workspace package (`Cannot find module '@bmpl/...'` or a
-third-party dep like `@playwright/test`), or a type error that makes no sense
-against code you can actually see, means check your local tree before you
-believe either one.** Two different symptoms, same underlying cause — a
-worktree that doesn't match the lockfile or the current branch:
+**`typecheck` and `test` both declare `"dependsOn": ["^build"]` in
+`turbo.json`** — running either *through turbo* rebuilds every workspace
+package it depends on first, automatically, so a stale `dist` cannot pass
+silently. Running the same script directly with `pnpm --filter <pkg>
+typecheck` **skips that entirely**: pnpm invokes the package's script with no
+regard for `turbo.json`, so no upstream build happens, and `tsc` checks
+whatever `dist` already happens to be sitting on disk — current, stale, or
+mid-edit. Confirmed empirically (2026-09-26): breaking `packages/shared`'s
+own build (so `pnpm --filter @bmpl/shared build` itself fails) still leaves
+`pnpm --filter @bmpl/web typecheck` exiting 0 — clean, and wrong — while
+`pnpm turbo run typecheck --filter=@bmpl/web` correctly refuses, failing on
+`@bmpl/shared#build` before it ever reaches web's typecheck.
 
-- **The module doesn't exist.** `TS2307 Cannot find module` — a dependency is
-  in the lockfile but was never installed into *this* worktree's
-  `node_modules` (e.g. a teammate's branch added one and you haven't run
-  install since).
-- **The module exists and lies.** A type error that contradicts the source
-  you're looking at — a workspace package's compiled `dist` is stale from
-  before a branch switch, a schema change, or a shared-package edit, so its
-  types or values don't match what the current branch actually says.
+**Prefer `pnpm turbo run typecheck` (optionally `--filter=<pkg>`) over the
+per-package form whenever a shared package might have changed** — a branch
+switch, a schema edit, someone else's merge. The per-package form is fine
+once you already know every dependency is current; it just cannot tell you
+that on its own.
 
-Fix for either: `pnpm install --frozen-lockfile && pnpm --filter @bmpl/shared
-build && pnpm --filter @bmpl/validation build && pnpm db:generate` — then
-re-run whatever failed. This has fooled multiple agents on the same day; it
-is not your regression and not a reason to guess at a code fix.
+This is a *different* problem from a package that is missing outright — a
+dependency present in the lockfile but never installed into this worktree's
+`node_modules` (`TS2307 Cannot find module '@bmpl/...'` or a third-party
+package such as `@playwright/test`). `^build` builds source into `dist`; it
+does not install anything, so turbo does not catch that case either. Fix:
+`pnpm install --frozen-lockfile`, then re-run whatever failed. Two different
+gaps, two different fixes — a `dist` that's out of date needs a rebuild
+(prefer turbo), a `node_modules` that's out of date needs an install (turbo
+does not help).
 
 ### Running the integration suite locally
 
