@@ -22,6 +22,14 @@ import { FullScreenMapModal } from './FullScreenMapModal';
  * Selecting a stop — tapping its legend row, or tapping its marker — pans and
  * opens that stop's popup in whichever view is open; it never rebuilds the
  * map underneath a reader.
+ *
+ * Only one `MapPreview` is ever mounted at a time (BMPL-210): the embedded
+ * one is unmounted, not merely covered, while the full-screen modal is open,
+ * since the two are independent Leaflet instances — a second live map with
+ * its own tiles and handlers sitting behind the modal was pure waste, never
+ * reachable and never visible. `selected` lives here, in the parent, so
+ * closing and reopening loses nothing; each `MapPreview` only reads it as a
+ * prop.
  */
 export function ExpandableRouteMap({
   points,
@@ -81,7 +89,7 @@ export function ExpandableRouteMap({
         </div>
       </div>
 
-      {revealed && (
+      {revealed && !expanded && (
         <>
           <MapPreview points={stops} className="mt-2" selectedIndex={selected} onSelectIndex={setSelected} />
           <RouteLegend stops={stops} selected={selected} onSelect={setSelected} />
