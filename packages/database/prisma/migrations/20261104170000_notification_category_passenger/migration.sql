@@ -1,0 +1,26 @@
+-- Notification category mislabels, part 1 of the fix (BMPL-168).
+--
+-- All ten passenger call sites (seat requests, booking confirmations and
+-- cancellations, fleet invitations/requests/consent/termination, departure
+-- staffing) construct their notification with `type: 'ACCOUNT'` and no
+-- explicit category. NotificationsService.resolveCategory then falls back to
+-- NOTIFICATION_TYPE_TO_CATEGORY['ACCOUNT'] = 'ACCOUNT', so every one of these
+-- events files under the Account chip in the notification center rather than
+-- anywhere a rider or fleet operator would look for it. No passenger-shaped
+-- category existed to file them under instead.
+--
+-- This migration adds exactly that one value. It does not change what the
+-- deriver does for anything else, and it does not touch NotificationType (the
+-- legacy `type` column) at all — the ten call sites keep type: 'ACCOUNT' and
+-- gain an explicit `category: 'PASSENGER'`, bypassing the deriver for
+-- themselves without altering it for every other caller that still relies on
+-- it.
+--
+-- Enum value in its OWN migration, applied ahead of the code that writes it —
+-- the repo's established pattern (Postgres cannot add and use an enum value
+-- in one transaction, and Prisma wraps each migration in one; see
+-- 20261104160000_order_cancelled_audit for the identical shape one card ago).
+--
+-- Additive and idempotent; no table, no column, no backfill, and no existing
+-- enum value is touched.
+ALTER TYPE "NotificationCategory" ADD VALUE IF NOT EXISTS 'PASSENGER';

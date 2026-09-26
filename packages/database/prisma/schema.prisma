@@ -130,6 +130,12 @@ enum NotificationCategory {
   JOB
   PROPERTY
   PROMOTION
+  /// Passenger transportation events (seat requests, booking confirmations/
+  /// cancellations, fleet affiliation, departure staffing). Added BMPL-168:
+  /// every passenger call site previously fell back to ACCOUNT via the
+  /// type->category deriver, filing rider and fleet events under the Account
+  /// chip nobody would look for them in.
+  PASSENGER
 }
 
 enum AuditAction {

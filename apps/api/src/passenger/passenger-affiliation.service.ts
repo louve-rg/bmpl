@@ -137,6 +137,7 @@ export class PassengerAffiliationService {
     await this.notifications.createInApp({
       userId: driver.userId,
       type: 'ACCOUNT',
+      category: 'PASSENGER',
       title: 'Fleet invitation',
       body: `${provider.businessName} invited you to join their fleet.`,
       data: { affiliationId: row.id },
@@ -178,6 +179,7 @@ export class PassengerAffiliationService {
     await this.notifications.createInApp({
       userId: provider.userId,
       type: 'ACCOUNT',
+      category: 'PASSENGER',
       title: 'Fleet join request',
       body: `A driver asked to join your fleet.`,
       data: { affiliationId: row.id },
@@ -280,6 +282,7 @@ export class PassengerAffiliationService {
     await this.notifications.createInApp({
       userId: notifyUserId,
       type: 'ACCOUNT',
+      category: 'PASSENGER',
       title: 'Fleet affiliation active',
       body: 'The fleet affiliation was accepted. Departures can now be staffed.',
       data: { affiliationId: updated.id },
@@ -343,6 +346,7 @@ export class PassengerAffiliationService {
     await this.notifications.createInApp({
       userId: this.counterpartyUserId(asn, as),
       type: 'ACCOUNT',
+      category: 'PASSENGER',
       title: 'Fleet affiliation ended',
       body: 'The fleet affiliation has ended. Existing departures are unaffected.',
       data: { affiliationId: updated.id },

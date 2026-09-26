@@ -167,6 +167,7 @@ export class AdminDriverService {
     await this.notifications.createInApp({
       userId: v.driverProfile.userId,
       type: 'ACCOUNT',
+      category: 'DRIVER',
       title: decision === 'approve' ? 'Vehicle approved' : 'Vehicle needs attention',
       body:
         decision === 'approve'
