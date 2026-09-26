@@ -397,4 +397,55 @@ describe('shipment pickup photo (BMPL-178)', () => {
     // And the photographed leg itself still carries its own photo.
     expect(senderView.body.legs.find((l: { id: string }) => l.id === firstMile.id).pickupPhotoUrls).toHaveLength(1);
   });
+
+  /**
+   * BMPL-189: confirmPickupPhoto has no guard against being called more than
+   * once, and every call unconditionally wrote a SHIPMENT_LEG_PICKED_UP audit
+   * row — so a courier re-attaching or adding photos wrote a SECOND row
+   * asserting a pickup that did not happen again. The protected state is the
+   * audit row count for this leg, not the 201 the confirm action returns.
+   */
+  async function pickedUpAudits(legId: string) {
+    return (await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_PICKED_UP' } })).filter(
+      (x) => (x.newValue as { legId?: string }).legId === legId,
+    );
+  }
+
+  it('11 · re-attaching a photo on the same leg writes exactly one pickup-audit row, not two (BMPL-189)', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const firstMile = await assignedFirstMile(shipment.id, courier);
+
+    const key1 = await uploadPickupPhoto(courier, firstMile.id);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup-photo/confirm`, { photoKeys: [key1] })).status).toBe(201);
+    expect(await pickedUpAudits(firstMile.id)).toHaveLength(1);
+
+    // Re-attach: adds/replaces the evidence, but no second physical pickup occurred.
+    const key2 = await uploadPickupPhoto(courier, firstMile.id);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup-photo/confirm`, { photoKeys: [key1, key2] })).status).toBe(201);
+    expect(await pickedUpAudits(firstMile.id)).toHaveLength(1);
+    expect((await legRow(firstMile.id)).handoffPhotoKeys).toEqual([key1, key2]);
+  });
+
+  it('12 · attaching a photo before the official pickup confirmation still yields exactly one pickup-audit row (BMPL-189)', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const firstMile = await assignedFirstMile(shipment.id, courier);
+
+    // Photo attached FIRST, no /pickup call yet — this is the leg's only
+    // pickup record so far.
+    const key = await uploadPickupPhoto(courier, firstMile.id);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup-photo/confirm`, { photoKeys: [key] })).status).toBe(201);
+    expect(await pickedUpAudits(firstMile.id)).toHaveLength(1);
+
+    // The official pickup transition still fires normally (status, custody,
+    // notification) — it just does not ALSO write a second audit row for an
+    // event the photo already recorded.
+    const pickup = await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`);
+    expect(pickup.status).toBe(201);
+    expect((await legRow(firstMile.id)).courierStatus).toBe('PICKUP_CONFIRMED');
+    expect(await pickedUpAudits(firstMile.id)).toHaveLength(1);
+  });
 });
