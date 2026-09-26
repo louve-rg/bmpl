@@ -224,7 +224,7 @@ export class PropertiesService {
     if (!ctx.listing.district) throw new BadRequestException('Add the property district before submitting.');
     await this.transition(listingId, ctx.listing.status, 'SUBMITTED', actor.userId, null, { moderationReason: null });
     await this.audit.record({ action: 'PROPERTY_SUBMITTED', actorId: actor.userId, newValue: { listingId } });
-    await this.notifications.notifyAdmins('properties.read', { type: 'MARKETPLACE', category: 'PROPERTY', event: 'ADMIN_PROPERTY_LISTING_SUBMITTED', title: 'Listing submitted for review', body: `"${ctx.listing.title}" was submitted for review.`, data: { listingId } });
+    await this.notifications.notifyAdmins('properties.read', { type: 'MARKETPLACE', event: 'ADMIN_PROPERTY_LISTING_SUBMITTED', title: 'Listing submitted for review', body: `"${ctx.listing.title}" was submitted for review.`, data: { listingId } });
     return this.managedDetail(actor, listingId);
   }
 

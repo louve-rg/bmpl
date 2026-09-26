@@ -177,7 +177,7 @@ export class PromotionsService {
     });
     await this.audit.record({ action: 'PROMOTION_SUBMITTED', actorId: actor.userId, newValue: { promotionId } });
     await this.notifications.notifyAdmins('promotions.read', {
-      type: 'MARKETPLACE', category: 'PROMOTION', event: 'PROMOTION_SUBMITTED',
+      type: 'MARKETPLACE', event: 'PROMOTION_SUBMITTED',
       title: 'Promotion submitted for review', body: `"${promo.title}" was submitted for review.`, data: { promotionId },
     });
     return this.managedDetail(actor, promotionId);

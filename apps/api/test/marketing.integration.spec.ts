@@ -12,6 +12,7 @@ import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmi
 
 let ctx: TestContext;
 let admin: string[];
+let adminUserId: string;
 let categoryId: string;
 let seq = 0;
 const uniq = () => `${Date.now()}_${(seq += 1)}`;
@@ -70,6 +71,7 @@ beforeAll(async () => {
   await seedRoles(ctx.prisma);
   const a = await seedSuperAdmin(ctx.prisma);
   admin = await login(a.email, a.password);
+  adminUserId = a.id;
   const cat = await post(admin, 'admin/categories', { name: `Cat ${uniq()}` });
   categoryId = cat.body.id;
 });
@@ -221,5 +223,34 @@ describe('metrics, reports, and admin gating', () => {
     expect((await get(lc, 'admin/marketing/coupons')).status).toBe(403);
     expect((await get(lc, 'admin/marketing/promotions')).status).toBe(200);
     expect((await get(admin, 'admin/marketing/analytics')).status).toBe(200);
+  });
+});
+
+/**
+ * BMPL-212: the "promotion submitted for review" admin alert used to override
+ * notifyAdmins' own ADMIN_ALERT default to PROMOTION — a category the admin
+ * console's default "System & moderation" view (ADMIN_ALERT + SECURITY only)
+ * never shows, so the alert was invisible unless an admin manually switched to
+ * Marketing or All. The protected state is the stored `category` column,
+ * asserted directly rather than the 200/201 the submit action already returns.
+ */
+describe('admin alert categories are not silently overridden (BMPL-212)', () => {
+  it('a submitted promotion alerts admins under ADMIN_ALERT, not PROMOTION', async () => {
+    const vendor = await makeApprovedVendor();
+    const productId = await makeProduct(vendor);
+    const c = await post(vendor.cookies, 'business/marketing/promotions', {
+      type: 'FEATURED_PRODUCT', title: `Cat Promo ${uniq()}`,
+      placements: [{ placement: 'HOMEPAGE_FEATURED_PRODUCTS' }],
+      targets: [{ targetType: 'PRODUCT', productId }],
+    });
+    expect(c.status).toBe(201);
+    expect((await post(vendor.cookies, `business/marketing/promotions/${c.body.id}/submit`)).status).toBe(201);
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId: adminUserId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    expect(row.notification.event).toBe('PROMOTION_SUBMITTED');
+    expect(row.notification.category).toBe('ADMIN_ALERT');
   });
 });

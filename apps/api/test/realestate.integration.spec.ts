@@ -463,6 +463,15 @@ describe('notification event codes are property-specific, not PRODUCT_MODERATED 
     return row.notification.event;
   }
 
+  async function latestCategory(userId: string) {
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    return row.notification.category;
+  }
+
   it('submission tells admins, and moderation tells the owner, with their own events', async () => {
     const owner = await makeOwner();
     const create = await post(owner.cookies, 'property-owner/listings', {
@@ -473,6 +482,13 @@ describe('notification event codes are property-specific, not PRODUCT_MODERATED 
     expect(create.status).toBe(201);
     expect((await post(owner.cookies, `property-owner/listings/${create.body.id}/submit`)).status).toBe(201);
     expect(await latestEvent(adminUserId)).toBe('ADMIN_PROPERTY_LISTING_SUBMITTED');
+    // BMPL-212: this admin alert used to override its category to PROPERTY,
+    // which the admin console's default "System & moderation" view (ADMIN_ALERT
+    // + SECURITY only) never shows — the alert was invisible unless an admin
+    // manually switched to Property or All. notifyAdmins' own default is
+    // correct; the bug was overriding it, so this asserts the un-overridden
+    // value directly on the stored row, not just that the request succeeded.
+    expect(await latestCategory(adminUserId)).toBe('ADMIN_ALERT');
 
     const mod = await post(admin, `admin/properties/${create.body.id}/moderate`, { action: 'APPROVE' });
     expect(mod.status).toBe(201);
