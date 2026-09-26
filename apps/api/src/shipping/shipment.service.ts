@@ -853,21 +853,31 @@ export class ShipmentService {
       if (leg.status !== 'READY' && leg.status !== 'IN_PROGRESS') {
         throw new BadRequestException(`This leg is ${leg.status.toLowerCase()}, so it cannot depart.`);
       }
-      if (leg.routeId) {
-        const [days, exceptions] = await Promise.all([
-          tx.routeOperatingDay.findMany({ where: { routeId: leg.routeId } }),
-          tx.routeScheduleException.findMany({ where: { routeId: leg.routeId } }),
-        ]);
-        const resolution = resolveScheduleStatus(
-          this.travelDate(),
-          days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note })),
-          exceptions.map((e) => ({ date: e.date, status: e.status, reason: e.reason })),
+      // ShipmentLeg.routeId is nullable on the column, but a LINE_HAUL leg is
+      // only ever created by the route planner (route-planner.ts), which
+      // unconditionally sets it to the real route it planned — so this branch
+      // is structurally unreachable today. It stays a loud refusal rather
+      // than a silent skip on purpose: the schedule check just below cannot
+      // run without a route to look up, and a future second leg-creation path
+      // that forgot to set routeId would otherwise depart unchecked with
+      // nothing failing anywhere — a quiet way to disable BMPL-196 enforcement
+      // that nobody adding that path would have reason to suspect.
+      if (!leg.routeId) {
+        throw new BadRequestException('This transport leg has no route on record, so its schedule cannot be checked. Contact operations.');
+      }
+      const [days, exceptions] = await Promise.all([
+        tx.routeOperatingDay.findMany({ where: { routeId: leg.routeId } }),
+        tx.routeScheduleException.findMany({ where: { routeId: leg.routeId } }),
+      ]);
+      const resolution = resolveScheduleStatus(
+        this.travelDate(),
+        days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note })),
+        exceptions.map((e) => ({ date: e.date, status: e.status, reason: e.reason })),
+      );
+      if (resolution.status === 'NOT_OPERATING') {
+        throw new BadRequestException(
+          `This route is configured as not operating today${resolution.note ? ` (${resolution.note})` : ''}. Update the schedule before recording a departure, or contact operations.`,
         );
-        if (resolution.status === 'NOT_OPERATING') {
-          throw new BadRequestException(
-            `This route is configured as not operating today${resolution.note ? ` (${resolution.note})` : ''}. Update the schedule before recording a departure, or contact operations.`,
-          );
-        }
       }
       await tx.shipmentLeg.update({
         where: { id: leg.id },

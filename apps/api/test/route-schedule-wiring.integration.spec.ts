@@ -283,4 +283,33 @@ describe('departing a line-haul leg consults the schedule', () => {
     expect(leg.status).toBe('READY');
     expect(leg.startedAt).toBeNull();
   });
+
+  /**
+   * ShipmentLeg.routeId is nullable on the column, but the route planner is
+   * the ONLY place a LINE_HAUL leg is ever created and it always sets a real
+   * routeId — so this state is structurally unreachable through any product
+   * path today. The raw write below is the only way to construct it, exactly
+   * the same precedent other suites in this codebase use to exercise a
+   * defensive branch nothing legitimate can reach (e.g. the S2 review's F5,
+   * an isActive=false write no product path can produce).
+   *
+   * The point being pinned: departLeg must refuse this loudly rather than
+   * silently skip its BMPL-196 schedule check, so that a future second
+   * leg-creation path that forgets to set routeId fails LOUDLY the moment it
+   * tries to depart, instead of departing unchecked with nothing anywhere
+   * telling whoever wrote that path they had just disabled enforcement.
+   */
+  it('a LINE_HAUL leg with no route on record refuses to depart rather than skip its schedule check', async () => {
+    const { originHubId, destinationHubId } = await seedRoute();
+    const { legId } = await bookAndFundedCustomer(originHubId, destinationHubId);
+    await ctx.prisma.shipmentLeg.update({ where: { id: legId }, data: { routeId: null } });
+
+    const departed = await post(admin, `admin/logistics/legs/${legId}/depart`, {});
+    expect(departed.status).toBe(400);
+    expect(departed.body.message).toMatch(/no route on record/i);
+
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.status).toBe('READY');
+    expect(leg.departedAt).toBeNull();
+  });
 });
