@@ -20,6 +20,11 @@ const CATEGORY_TONE: Record<NotificationCategory, Tone> = {
   JOB: 'info',
   PROPERTY: 'brand',
   PROMOTION: 'brand',
+  // Passenger transportation is a sibling of DELIVERY/DRIVER, not a one-off —
+  // all three are BML physically moving something, so it takes the same
+  // 'brand' tone those two already carry (a deliberate grouping, not a copy
+  // of whichever entry happened to be nearby).
+  PASSENGER: 'brand',
 };
 
 const DOT: Record<Tone, string> = {
