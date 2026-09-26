@@ -297,6 +297,7 @@ export class PassengerOperationsService {
       await this.notifications.createInApp({
         userId: trip.providerProfile.userId,
         type: 'ACCOUNT',
+        category: 'PASSENGER',
         title: 'New seat request',
         body: `${dto.seats} seat(s) requested on ${trip.route.name} (${trip.reference}).`,
         data: { bookingId: booking.id, tripId: trip.id },
@@ -645,6 +646,7 @@ export class PassengerOperationsService {
       await this.notifications.createInApp({
         userId: b.passengerUserId,
         type: 'ACCOUNT',
+        category: 'PASSENGER',
         title: 'Seats confirmed',
         body: `Your booking ${b.reference} is confirmed (${b.seats} seat(s)).`,
         data: { bookingId: b.id },
@@ -694,6 +696,7 @@ export class PassengerOperationsService {
       await this.notifications.createInApp({
         userId: b.passengerUserId,
         type: 'ACCOUNT',
+        category: 'PASSENGER',
         title: 'Booking cancelled',
         body: `Your booking ${b.reference} was cancelled${reason ? `: ${reason}` : '.'}`,
         data: { bookingId: b.id },
@@ -718,6 +721,7 @@ export class PassengerOperationsService {
         await this.notifications.createInApp({
           userId: trip.providerProfile.userId,
           type: 'ACCOUNT',
+          category: 'PASSENGER',
           title: b.status === 'CONFIRMED' ? 'Rider cancelled — seats freed' : 'Seat request withdrawn',
           body:
             b.status === 'CONFIRMED'
@@ -831,6 +835,7 @@ export class PassengerOperationsService {
     await this.notifications.createInApp({
       userId: driver.userId,
       type: 'ACCOUNT',
+      category: 'PASSENGER',
       title: 'You have a departure',
       body: `${trip.route?.name ?? 'A route'} (${trip.reference}) — ${vehicle.make} ${vehicle.model}.`,
       data: { tripId: trip.id },

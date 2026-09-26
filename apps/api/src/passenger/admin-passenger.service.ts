@@ -155,6 +155,7 @@ export class AdminPassengerService {
       await this.notifications.createInApp({
         userId: ownerUserId,
         type: 'ACCOUNT',
+        category: 'PASSENGER',
         title: decision === 'approve' ? 'Vehicle approved' : 'Vehicle needs attention',
         body:
           decision === 'approve'
