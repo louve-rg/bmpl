@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { BrandLockup } from '../../../components/Logo';
 import { RecipientTracking } from '../../../components/shipping/RecipientTracking';
-import { Spinner } from '../../../components/ui';
+import { Alert, Button, Spinner } from '../../../components/ui';
+import type { ApiError } from '../../../lib/api';
 import { shippingApi, type RecipientTrackingView } from '../../../lib/shipping';
 
 /**
@@ -23,11 +24,14 @@ import { shippingApi, type RecipientTrackingView } from '../../../lib/shipping';
  */
 export default function RecipientTrackingPage() {
   const params = useParams<{ token: string }>();
+  const router = useRouter();
   const token = String(params.token ?? '');
 
   const [view, setView] = useState<RecipientTrackingView | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [claimState, setClaimState] = useState<'idle' | 'claiming' | 'claimed' | 'error'>('idle');
+  const [claimError, setClaimError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -51,6 +55,29 @@ export default function RecipientTrackingPage() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
+
+  /**
+   * "Save to my account" — the deliberate second step BMPL-179 added.
+   * Holding the link already showed the status above; this attaches it to a
+   * real signed-in account so it shows up again without the link. A 401 means
+   * "you need to sign in", not "this failed" — we bounce to login and back
+   * rather than showing an error for something that just needs a session.
+   */
+  const claim = useCallback(async () => {
+    setClaimState('claiming');
+    setClaimError(null);
+    try {
+      await shippingApi.claim(token);
+      setClaimState('claimed');
+    } catch (e) {
+      if ((e as ApiError).status === 401) {
+        router.push(`/login?next=${encodeURIComponent(`/track/${token}`)}`);
+        return;
+      }
+      setClaimState('error');
+      setClaimError((e as ApiError).message || 'Could not save this to your account. Try again in a moment.');
+    }
+  }, [router, token]);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -84,6 +111,29 @@ export default function RecipientTrackingPage() {
         {!loading && view && (
           <div className="mt-4">
             <RecipientTracking view={view} />
+
+            <div className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
+              {claimState === 'claimed' ? (
+                <p className="text-sm font-medium text-emerald-700">
+                  Saved. This parcel now shows up in your BML account too.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-700">
+                    Save this parcel to your BML account so you can find it again without the link.
+                  </p>
+                  {claimError && (
+                    <Alert tone="warning" className="mt-3">
+                      {claimError}
+                    </Alert>
+                  )}
+                  <Button onClick={() => void claim()} disabled={claimState === 'claiming'} className="mt-3 min-h-[44px]">
+                    {claimState === 'claiming' ? 'Saving…' : 'Save to my account'}
+                  </Button>
+                </>
+              )}
+            </div>
+
             <p className="mt-6 text-center text-xs text-slate-400">
               This link shows the status of one parcel. It doesn&rsquo;t need an account.
             </p>
