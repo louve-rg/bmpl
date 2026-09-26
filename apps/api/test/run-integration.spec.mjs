@@ -13,7 +13,7 @@
  *   shells out to `pnpm` with all-literal arguments.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { enforceWorkspaceBuild } from './run-integration.mjs';
+import { enforceWorkspaceBuild, ensureNodeModulesInstalled } from './run-integration.mjs';
 
 const TURBO_BIN = 'X:/repo/node_modules/turbo/bin/turbo';
 const NODE = 'X:/node/node.exe';
@@ -124,5 +124,46 @@ describe('enforceWorkspaceBuild', () => {
     enforceWorkspaceBuild(deps);
 
     expect(deps.spawn).toHaveBeenLastCalledWith('pnpm', PNPM_ARGS, expect.objectContaining({ shell: true }));
+  });
+});
+
+/**
+ * Unit spec for guard 4, the install-side gap (BMPL-220 follow-up): a
+ * package that builds cleanly can still be unresolvable if pnpm never
+ * linked it into node_modules — `pnpm install --frozen-lockfile` is the one
+ * authoritative check. No real pnpm runs here either.
+ */
+describe('ensureNodeModulesInstalled', () => {
+  function makeInstallDeps(spawnImpl) {
+    return { spawn: vi.fn(spawnImpl), cwd: 'X:/repo', log: vi.fn(), error: vi.fn(), exit: vi.fn() };
+  }
+
+  it('success: runs `pnpm install --frozen-lockfile` exactly once, never exits', () => {
+    const deps = makeInstallDeps(() => ({ status: 0 }));
+    const result = ensureNodeModulesInstalled(deps);
+
+    expect(result).toEqual({ ok: true });
+    expect(deps.spawn).toHaveBeenCalledTimes(1);
+    expect(deps.spawn).toHaveBeenCalledWith('pnpm', ['install', '--frozen-lockfile'], expect.objectContaining({ cwd: 'X:/repo', shell: true }));
+    expect(deps.exit).not.toHaveBeenCalled();
+    expect(deps.error).not.toHaveBeenCalled();
+  });
+
+  it('a mismatched lockfile refuses loudly and exits non-zero, before any test could run', () => {
+    const deps = makeInstallDeps(() => ({ status: 1 }));
+    const result = ensureNodeModulesInstalled(deps);
+
+    expect(result.ok).toBe(false);
+    expect(deps.error).toHaveBeenCalledTimes(1);
+    expect(deps.error.mock.calls[0][0]).toContain('pnpm install --frozen-lockfile` failed');
+    expect(deps.exit).toHaveBeenCalledWith(1);
+  });
+
+  it('a spawn-level error (no status) still exits non-zero, never zero', () => {
+    const deps = makeInstallDeps(() => ({ status: null, error: new Error('spawn ENOENT') }));
+    const result = ensureNodeModulesInstalled(deps);
+
+    expect(result.ok).toBe(false);
+    expect(deps.exit).toHaveBeenCalledWith(1);
   });
 });
