@@ -69,6 +69,38 @@ jobs:
       - name: Build web
         run: pnpm --filter @bmpl/web build
 
+      - name: Install Playwright's Chromium
+        run: pnpm --filter @bmpl/web exec playwright install --with-deps chromium
+
+      # INFORMATIONAL ON PURPOSE, same mechanism as Format check/Lint above:
+      # `continue-on-error: true` at the STEP level means a red result here
+      # cannot fail this job, and therefore cannot fail this job's check run
+      # — which matters because Railway's GitHub integration waits for check
+      # suites before deploying the API, so any job that CAN fail becomes
+      # part of that deploy gate whether or not it has anything to do with
+      # the API. A flaky browser suite is a classic source of exactly that
+      # kind of unrelated block (BMPL-217/BMPL-213). Needs no infrastructure
+      # of its own (no services: block) — apps/web never talks to Postgres/
+      # Redis/MinIO directly (root CLAUDE.md §2), confirmed by this same job
+      # already building @bmpl/web above with none running. `retries` is
+      # deliberately left at the config default of 0, not raised for CI: this
+      # job cannot block a deploy either way, so there is no gate to protect
+      # by retrying past a flake, and retrying until green would hide a real
+      # intermittent defect behind a false green — exactly the failure shape
+      # this floor spent 2026-09-26 finding five separate instances of.
+      - name: Browser tests (BMPL-217, informational)
+        id: e2e
+        continue-on-error: true
+        run: pnpm --filter @bmpl/web test:e2e
+
+      - name: Upload Playwright report (only when it failed)
+        if: steps.e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/test-results
+          retention-days: 7
+
       - name: Build admin
         run: pnpm --filter @bmpl/admin build
 
