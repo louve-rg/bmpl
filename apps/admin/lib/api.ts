@@ -2,9 +2,24 @@ export interface ApiError {
   status: number;
   message: string;
   errors?: Array<{ path: string; message: string }>;
+  /** Raw server message, kept for logs/debugging when `message` is a friendly fallback. */
+  detail?: string;
 }
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * Every caller across the admin console reads only `err.message` (never
+ * `.errors`, even though the field is right there) — so a validation failure
+ * with a generic top-level message ("Validation failed") showed nothing about
+ * which field was wrong. Same defect and same fix as apps/web/lib/api.ts
+ * (BMPL-141/9cc2028): fold the per-field detail into the message once, here,
+ * rather than hunting every call site (BMPL-224).
+ */
+function withFieldErrors(raw: string, errors: Array<{ path: string; message: string }> | undefined): string {
+  if (!errors || errors.length === 0) return raw;
+  return `${raw}: ${errors.map((e) => (e.path ? `${e.path} — ${e.message}` : e.message)).join('; ')}`;
+}
 
 function readCookie(name: string): string | undefined {
   if (typeof document === 'undefined') return undefined;
@@ -49,7 +64,9 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
-    throw { status: res.status, message: data?.message ?? 'Request failed', errors: data?.errors } as ApiError;
+    const raw = (data?.message as string) ?? 'Request failed';
+    const err: ApiError = { status: res.status, message: withFieldErrors(raw, data?.errors), errors: data?.errors, detail: raw };
+    throw err;
   }
   return data as T;
 }

@@ -1,8 +1,20 @@
 import { cookies } from 'next/headers';
 
-/** Normalize the API base to a valid absolute URL (see next.config.mjs apiBase). */
-function apiBase(raw?: string): string {
-  const v = (raw ?? 'https://bmplapi-production.up.railway.app').trim();
+/**
+ * Normalize the API base to a valid absolute URL (see next.config.mjs
+ * apiBase). Refuses to guess when the env var is absent rather than
+ * defaulting to the production API — the same hazard as the rewrite proxy,
+ * independently reachable here since server components call fetch directly
+ * rather than through the rewrite (BMPL-224).
+ */
+export function apiBase(raw?: string): string {
+  if (!raw) {
+    throw new Error(
+      'ADMIN_PUBLIC_API_URL is not set. Refusing to default to the production API — ' +
+        'set it explicitly, e.g. ADMIN_PUBLIC_API_URL=http://localhost:4000 for local development.',
+    );
+  }
+  const v = raw.trim();
   const withScheme = /^https?:\/\//i.test(v) ? v : `https://${v}`;
   return withScheme.replace(/\/+$/, '').replace(/\/api$/i, '');
 }
