@@ -358,6 +358,7 @@ enum AuditAction {
   PASSENGER_TRIP_COMPLETED
   PASSENGER_AFFILIATION_CHANGED
   SHIPMENT_LEG_EXCEPTION_RESOLVED
+  SHIPMENT_RECIPIENT_LINKED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -560,6 +561,7 @@ model User {
   avatarReviewedBy           User?                     @relation("AvatarReviewer", fields: [avatarReviewedById], references: [id], onDelete: SetNull)
   avatarReviewsMade          User[]                    @relation("AvatarReviewer")
   shipments                  Shipment[]                @relation("ShipmentCustomer")
+  shipmentsAsRecipient       Shipment[]                @relation("ShipmentRecipient")
   custodyEventsRecorded      CustodyEvent[]            @relation("CustodyActor")
   // Passenger transportation
   passengerDriverProfile     PassengerDriverProfile?   @relation("UserPassengerDriverProfile")
@@ -4582,6 +4584,19 @@ model Shipment {
   customerUserId String?
   customer       User?   @relation("ShipmentCustomer", fields: [customerUserId], references: [id], onDelete: SetNull)
 
+  /// The recipient's OWN account, once legitimately linked. Never set by
+  /// possessing `recipientToken` alone — that token only ever proves you may
+  /// READ the public tracking view (see `trackPublic`). Becoming the linked
+  /// recipient is a deliberate claim by a signed-in account (`claimAsRecipient`),
+  /// recorded here so a driver/vendor/anyone with a BML account — not only a
+  /// CUSTOMER — can see an incoming shipment without a second role. Null means
+  /// unclaimed; the shipment keeps working exactly as before for such rows.
+  recipientUserId   String?
+  recipientUser     User?     @relation("ShipmentRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
+  /// When the claim happened. Kept next to recipientUserId rather than only in
+  /// the audit log so a "linked since" fact is a plain column, not a query.
+  recipientClaimedAt DateTime?
+
   /// Set when the shipment fulfils a marketplace order. Null for a standalone
   /// courier booking, which is why it is optional rather than the parent.
   vendorOrderId String?      @unique
@@ -4647,6 +4662,7 @@ model Shipment {
   custodyEvents CustodyEvent[]
 
   @@index([customerUserId, createdAt])
+  @@index([recipientUserId, createdAt])
   @@index([status, isTest])
   @@map("shipments")
   payment Payment?

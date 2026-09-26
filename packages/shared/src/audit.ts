@@ -254,6 +254,10 @@ export const AUDIT_ACTIONS = [
   // carried in newValue — the PASSENGER_AFFILIATION_CHANGED precedent of one
   // code per lifecycle rather than one per verb.
   'SHIPMENT_LEG_EXCEPTION_RESOLVED',
+  // A recipient account deliberately claimed a shipment via its tracking
+  // token. Holding the token only ever authorised reading trackPublic(); this
+  // is the one action that turns that into an actual account link.
+  'SHIPMENT_RECIPIENT_LINKED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

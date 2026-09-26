@@ -80,6 +80,18 @@ const SHIPMENT_INCLUDE = {
 type ShipmentWithGraph = Prisma.ShipmentGetPayload<{ include: typeof SHIPMENT_INCLUDE }>;
 
 /**
+ * The recipient allowlist's data needs, shared by `trackPublic` (by token),
+ * `trackAsRecipient` and `listIncoming` (by `recipientUserId`) — one query
+ * shape for the one view, so the allowlist cannot drift between callers.
+ */
+const RECIPIENT_VIEW_INCLUDE = {
+  legs: { orderBy: { sequence: 'asc' } },
+  destinationHub: { select: { name: true, city: true, addressLine1: true, instructions: true } },
+} satisfies Prisma.ShipmentInclude;
+
+type RecipientViewGraph = Prisma.ShipmentGetPayload<{ include: typeof RECIPIENT_VIEW_INCLUDE }>;
+
+/**
  * Multi-leg shipment orchestration.
  *
  * The rule that governs everything here is that SEQUENCE IS AUTHORITY. A leg may
@@ -613,17 +625,21 @@ export class ShipmentService {
    *
    * A miss is one fixed 404 whatever the cause — wrong token, deleted row,
    * never existed — so a guessed URL cannot confirm a real shipment exists.
+   *
+   * This is the SAME allowlist a legitimately linked recipient sees in their
+   * own account (`trackAsRecipient`/`listIncoming`) — linking does not widen
+   * it, it only lets an account reach it without holding the raw token.
    */
   async trackPublic(token: string) {
     const s = await this.prisma.shipment.findUnique({
       where: { recipientToken: token },
-      include: {
-        legs: { orderBy: { sequence: 'asc' } },
-        destinationHub: { select: { name: true, city: true, addressLine1: true, instructions: true } },
-      },
+      include: RECIPIENT_VIEW_INCLUDE,
     });
     if (!s) throw new NotFoundException('No shipment for that link.');
+    return this.recipientView(s);
+  }
 
+  private recipientView(s: RecipientViewGraph) {
     const endsAtHub = !needsLastMile(s.service);
     const live = s.legs.filter((l) => l.status !== 'CANCELLED');
     const current = live.find((l) => l.status !== 'COMPLETED') ?? null;
@@ -658,6 +674,103 @@ export class ShipmentService {
         completedAt: l.completedAt,
       })),
     };
+  }
+
+  /**
+   * A legitimately linked recipient's own copy of the tracking view.
+   *
+   * Scoped by `recipientUserId`, never by reference or id alone — a reference
+   * is customer-facing and effectively guessable-adjacent (sequential-ish,
+   * shared at a collection desk out loud), so it must never double as a
+   * lookup key for someone else's shipment. A miss reads identically whether
+   * the reference does not exist or simply was never claimed by this
+   * account, for the same enumeration-resistance reason `trackPublic` uses
+   * one fixed 404.
+   */
+  async trackAsRecipient(reference: string, userId: string) {
+    const s = await this.prisma.shipment.findUnique({ where: { reference }, include: RECIPIENT_VIEW_INCLUDE });
+    if (!s || s.recipientUserId !== userId) throw new NotFoundException('No shipment with that reference.');
+    return this.recipientView(s);
+  }
+
+  /** Every shipment this account has claimed as recipient, newest first. */
+  async listIncoming(userId: string) {
+    const rows = await this.prisma.shipment.findMany({
+      where: { recipientUserId: userId },
+      orderBy: { createdAt: 'desc' },
+      include: RECIPIENT_VIEW_INCLUDE,
+      take: 50,
+    });
+    return rows.map((s) => this.recipientView(s));
+  }
+
+  /**
+   * The claim itself — the one action that turns "holds the tracking link"
+   * into "is the shipment's recipient of record".
+   *
+   * Deliberately keyed on the SAME unguessable `recipientToken` the public
+   * view uses, and on nothing else: no reference, no id, no email/phone
+   * match against the customer-typed destination contact fields (matching on
+   * those would let a claim probe whether a given email or phone belongs to
+   * an account — exactly the enumeration leak account linking was told to
+   * avoid). Holding the token still only ever proved you could READ the
+   * shipment; this is the deliberate, authenticated, audited step that
+   * proves you may claim it.
+   *
+   * Idempotent for the same account (a retried tap does not error), and
+   * race-safe against a second account: the write is a conditional
+   * `updateMany` guarded on `recipientUserId: null`, so only one of two
+   * concurrent claims can land — the lock-then-check-in-the-write-clause
+   * pattern already used by `resolveException`'s exception-claim race.
+   *
+   * ACCEPTED, NOT OVERLOOKED: a real-but-already-claimed token answers 400
+   * here, while a nonexistent one answers 404 above — a distinguishable
+   * failure that would normally be an oracle (BMPL-140's own standard is one
+   * fixed answer for "missing" and "not yours"). It is accepted as a
+   * deliberate tradeoff because it tells the caller nothing they could not
+   * already learn: anyone holding this token can call the anonymous
+   * `trackPublic` route right now and get back 200 with the shipment's live
+   * status, which already proves the shipment exists. The 400/404 split adds
+   * no information to a token holder that the read path does not already
+   * give away for free. REVISIT THIS if `recipientToken` ever stops being an
+   * independently unguessable, opaque value — e.g. if it is ever derived
+   * from the reference, a sequence, or anything else a caller could produce
+   * without having first received the real token — because at that point the
+   * split would tell an attacker "this token exists" without them needing
+   * the anonymous route to already know it.
+   */
+  async claimAsRecipient(token: string, userId: string) {
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      const s = await tx.shipment.findUnique({
+        where: { recipientToken: token },
+        select: { id: true, reference: true, isTest: true, recipientUserId: true },
+      });
+      if (!s) throw new NotFoundException('No shipment for that link.');
+      if (s.recipientUserId === userId) return { reference: s.reference, alreadyLinked: true };
+
+      const me = await tx.user.findUnique({ where: { id: userId }, select: { isTest: true } });
+      // Simulation and real shipments never mix, in either direction — the
+      // same boundary money, network and dispatch already enforce.
+      if (!me || me.isTest !== s.isTest) {
+        throw new BadRequestException('This shipment cannot be linked to this account.');
+      }
+
+      const claimed = await tx.shipment.updateMany({
+        where: { id: s.id, recipientUserId: null },
+        data: { recipientUserId: userId, recipientClaimedAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        throw new BadRequestException('This shipment has already been linked to another account.');
+      }
+      return { reference: s.reference, alreadyLinked: false };
+    });
+
+    await this.audit.record({
+      action: 'SHIPMENT_RECIPIENT_LINKED',
+      actorId: userId,
+      newValue: { reference: outcome.reference, alreadyLinked: outcome.alreadyLinked },
+    });
+    return { reference: outcome.reference, linked: true };
   }
 
   async listMine(userId: string) {

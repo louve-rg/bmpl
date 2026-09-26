@@ -1,0 +1,21 @@
+-- Audit vocabulary for recipient account linking (edward batch requirement 3),
+-- part 1 of 2.
+--
+-- Enum value in its OWN migration, applied before the migration that uses it:
+-- Postgres refuses to add an enum value and use it inside one transaction,
+-- and Prisma wraps each migration in one. Established pattern in this
+-- repository (20261103093000_passenger_trip_created_audit,
+-- 20261104103000_shipment_leg_exception_resolved_audit,
+-- 20261104140000_shipping_provider_audit) — followed, not reinvented.
+--
+-- SHIPMENT_RECIPIENT_LINKED: a signed-in account deliberately claimed a
+-- shipment via its recipient tracking token. Holding that token only ever
+-- authorised reading the anonymous, status-only tracking view — this is the
+-- one action that turns "can read the link" into "this account is the
+-- shipment's recipient of record", and it is privileged enough (it changes
+-- who may later be granted things like pickup-photo access) to land in the
+-- trail.
+--
+-- Additive and idempotent; no table, no column, no backfill, and no existing
+-- enum value is touched.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_RECIPIENT_LINKED';
