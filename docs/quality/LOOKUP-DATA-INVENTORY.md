@@ -63,7 +63,7 @@ listed at the bottom for completeness.
 | **Campaign statuses** | `CAMPAIGN_STATUSES` (`marketing.ts:192`) ↔ `CampaignStatus` (3467) | N/A | Always | `CAMPAIGN_STATUS_LABELS` + transition map | Yes (status control) | admin | Cannot be empty | OK |
 | **Coupon discount types / scopes / statuses** | `marketing.ts:217-231` | N/A | Always | labels | Yes (coupon editor) | admin (`coupons.manage`) | Cannot be empty | OK |
 | **Promotion report reasons** | `PROMOTION_REPORT_REASONS` (`marketing.ts:166`) | N/A | Always | labels | Yes | admin resolves | Cannot be empty | OK |
-| **Notification categories** | Prisma enum `NotificationCategory` (schema:109) | N/A | Always (15 values) | notification preferences UI | Yes — `/dashboard/notifications/preferences` | No | Cannot be empty | OK |
+| **Notification categories** | Prisma enum `NotificationCategory` | N/A | Always (15 values) | notification preferences UI | Yes — `/dashboard/notifications/preferences` | No | Cannot be empty | OK |
 | **Roles catalog** | `Role` table seeded from `ROLE_DEFINITIONS` (`roles.ts`) | **Yes** — `seed.ts seedRoles()` upserts every `ROLE_CODES` entry | Yes | via `/me` / role endpoints | Yes (role switcher, apply-for-role) | admin reviews applications | Role list empty (blocked by seed) | OK |
 | **Role required documents** | Label arrays on `ROLE_DEFINITIONS[].requiredDocuments` (`roles.ts:53-145`) | N/A (labels only, compiled-in) | Always | surfaced in `/dashboard/roles` apply flow | Yes — document-upload checklist | No | Cannot be empty | OK |
 | **Wallet account types** | `WALLET_ACCOUNT_TYPES` (shared) | **Yes** — `seed.ts seedSystemWalletAccounts()` creates each system account | Yes | internal | n/a | n/a | System counter-parties missing (blocked by seed) | OK |
