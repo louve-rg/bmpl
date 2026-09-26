@@ -138,5 +138,17 @@ export const NOTIFICATION_EVENTS = [
   'REVIEW_RECEIVED',
   'REVIEW_RESPONSE_RECEIVED',
   'REVIEW_REPORTED', // BMPL-214 — was ADMIN_ORDER_EXCEPTION
+  // Promotions (BMPL-219) — emitted in production since M26 but never added
+  // here; the catalog is what was wrong, not the emitted code.
+  'PROMOTION_REPORTED',
+  'PROMOTION_SUBMITTED',
+  'PROMOTION_MODERATED',
+  // Shipping (BMPL-219) — same gap, a whole vertical missing from the catalog.
+  'SHIPMENT_LEG_OFFERED',
+  'SHIPMENT_LEG_DISPATCH_EXHAUSTED',
+  'SHIPMENT_COURIER',
+  'SHIPMENT_LEG_CANCELLED',
+  'SHIPMENT_EXCEPTION',
+  'SHIPMENT_STATUS',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
