@@ -27,9 +27,16 @@ import { FullScreenMapModal } from './FullScreenMapModal';
  * one is unmounted, not merely covered, while the full-screen modal is open,
  * since the two are independent Leaflet instances — a second live map with
  * its own tiles and handlers sitting behind the modal was pure waste, never
- * reachable and never visible. `selected` lives here, in the parent, so
- * closing and reopening loses nothing; each `MapPreview` only reads it as a
- * prop.
+ * reachable and never visible. `selected` survives the round trip, since it
+ * lives here in the parent and each `MapPreview` only reads it as a prop —
+ * but the embedded map's own VIEWPORT does not: dragging and zoom are
+ * Leaflet defaults, nothing here disables them, so a reader who pans or
+ * zooms the embedded preview and then expands and collapses gets it back at
+ * its default fit-all-stops view, not where they left it. Deliberate
+ * trade, not an oversight — the embedded view's job is orientation, not
+ * exploration, and its bounds are Belize-wide, so the default view is
+ * always meaningful; preserving it would mean inventing viewport
+ * persistence, a bigger change than the waste this saves.
  */
 export function ExpandableRouteMap({
   points,
