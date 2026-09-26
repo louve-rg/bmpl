@@ -117,6 +117,58 @@ export class ShippingTrackController {
 }
 
 /**
+ * Claiming a shipment as its recipient (recipient account linking).
+ *
+ * A SEPARATE controller from `ShippingTrackController` above, on the same
+ * `shipping/track` prefix, precisely so it does NOT inherit that controller's
+ * `@Public()` — the pattern `ShippingProviderProfileController` /
+ * `ShippingProviderLegsController` already use for two different guards on
+ * one prefix. Holding the token proves you may read `trackPublic`; it must
+ * never also mean you may attach an account to the shipment, so claiming
+ * requires a genuine signed-in session. No `@Roles(...)` — the recipient is
+ * whoever the parcel is going to, who may hold no BML role at all (a driver,
+ * a vendor, someone who only ever signed up to receive one parcel), so any
+ * authenticated account is the audience.
+ */
+@Controller('shipping/track')
+export class ShippingClaimController {
+  constructor(private readonly shipments: ShipmentService) {}
+
+  @StrictThrottle()
+  @Post(':token/claim')
+  claim(@CurrentUser() u: AuthContext, @Param('token') token: string) {
+    return this.shipments.claimAsRecipient(token, u.userId);
+  }
+}
+
+/**
+ * The recipient's own account view of an incoming shipment (recipient
+ * account linking).
+ *
+ * Not gated on `@Roles('CUSTOMER')`, for the same reason the claim endpoint
+ * above is not: the recipient is not necessarily the customer, and account
+ * creation stays optional either way. Deliberately reuses the exact
+ * allowlist `trackPublic` already returns — linking an account changes WHERE
+ * the shipment can be read from, never WHAT is in it. Widening this to the
+ * full sender-facing payload (money, parcel description, sender identity) is
+ * a separate, larger decision this card does not make.
+ */
+@Controller('shipping/incoming')
+export class ShipmentRecipientController {
+  constructor(private readonly shipments: ShipmentService) {}
+
+  @Get()
+  mine(@CurrentUser() u: AuthContext) {
+    return this.shipments.listIncoming(u.userId);
+  }
+
+  @Get(':reference')
+  one(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
+    return this.shipments.trackAsRecipient(reference, u.userId);
+  }
+}
+
+/**
  * Customer-facing shipping.
  *
  * Quoting is deliberately a POST rather than a GET: the body carries two
