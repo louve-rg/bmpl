@@ -703,6 +703,22 @@ export class ShipmentService {
    * `updateMany` guarded on `recipientUserId: null`, so only one of two
    * concurrent claims can land — the lock-then-check-in-the-write-clause
    * pattern already used by `resolveException`'s exception-claim race.
+   *
+   * ACCEPTED, NOT OVERLOOKED: a real-but-already-claimed token answers 400
+   * here, while a nonexistent one answers 404 above — a distinguishable
+   * failure that would normally be an oracle (BMPL-140's own standard is one
+   * fixed answer for "missing" and "not yours"). It is accepted as a
+   * deliberate tradeoff because it tells the caller nothing they could not
+   * already learn: anyone holding this token can call the anonymous
+   * `trackPublic` route right now and get back 200 with the shipment's live
+   * status, which already proves the shipment exists. The 400/404 split adds
+   * no information to a token holder that the read path does not already
+   * give away for free. REVISIT THIS if `recipientToken` ever stops being an
+   * independently unguessable, opaque value — e.g. if it is ever derived
+   * from the reference, a sequence, or anything else a caller could produce
+   * without having first received the real token — because at that point the
+   * split would tell an attacker "this token exists" without them needing
+   * the anonymous route to already know it.
    */
   async claimAsRecipient(token: string, userId: string) {
     const outcome = await this.prisma.$transaction(async (tx) => {
