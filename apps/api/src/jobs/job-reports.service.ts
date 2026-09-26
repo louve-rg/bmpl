@@ -31,7 +31,7 @@ export class JobReportsService {
       throw e;
     }
     await this.audit.record({ action: 'JOB_REPORTED', actorId: actor.userId, newValue: { jobId, reason: dto.reason } });
-    await this.notifications.notifyAdmins('jobs.read', { type: 'SECURITY', event: 'ADMIN_ORDER_EXCEPTION', title: 'Job reported', body: `"${job.title}" was reported (${dto.reason.toLowerCase()}).`, data: { jobId } });
+    await this.notifications.notifyAdmins('jobs.read', { type: 'SECURITY', event: 'JOB_REPORTED', title: 'Job reported', body: `"${job.title}" was reported (${dto.reason.toLowerCase()}).`, data: { jobId } });
     return { ok: true };
   }
 

@@ -532,4 +532,12 @@ describe('notification event codes are property-specific, not PRODUCT_MODERATED 
     expect((await post(owner.cookies, `property-owner/viewings/${vr.body.id}/transition`, { status: 'CONFIRMED', confirmedDate: new Date(Date.now() + 86400000).toISOString(), confirmedTime: '10:00' })).status).toBe(201);
     expect(await latestEvent(seeker.userId)).toBe('PROPERTY_VIEWING_UPDATED');
   });
+
+  it('a reported listing tells admins under its own event, not the settlement-failure code (BMPL-214)', async () => {
+    const owner = await makeOwner();
+    const { id } = await publishListing(owner);
+    const reporter = await register(`ev_reporter_${uniq()}@ex.bz`);
+    expect((await post(reporter.cookies, `property-seeker/report/${id}`, { reason: 'SCAM' })).status).toBe(201);
+    expect(await latestEvent(adminUserId)).toBe('PROPERTY_LISTING_REPORTED');
+  });
 });
