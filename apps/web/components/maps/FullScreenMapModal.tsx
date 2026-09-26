@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { useDialogFocusTrap } from '../../lib/use-dialog-focus-trap';
 
 /**
  * The full-screen shell half of the BMPL-182 expandable-map pattern.
@@ -16,6 +17,10 @@ import { useEffect, useRef } from 'react';
  * Closes on the ✕ button, Escape, or the confirm action — never on a tap
  * inside the body, because on a map that tap is a pan or a marker select, not
  * a dismissal.
+ *
+ * Focus containment, background isolation and return-to-opener (BMPL-208)
+ * are `useDialogFocusTrap` — the same hook `EnlargeableImage` uses, so the
+ * two dialogs cannot drift apart on this again.
  */
 export function FullScreenMapModal({
   open,
@@ -30,7 +35,10 @@ export function FullScreenMapModal({
   confirmLabel?: string;
   children: React.ReactNode;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+
+  useDialogFocusTrap({ open, containerRef, initialFocusRef: closeRef });
 
   useEffect(() => {
     if (!open) return;
@@ -40,7 +48,6 @@ export function FullScreenMapModal({
     document.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    closeRef.current?.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
@@ -50,7 +57,7 @@ export function FullScreenMapModal({
   if (!open) return null;
 
   return (
-    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[100] flex flex-col bg-white">
+    <div ref={containerRef} role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[100] flex flex-col bg-white">
       <div className="flex min-h-[56px] shrink-0 items-center justify-between border-b border-slate-200 px-3">
         <p className="truncate text-sm font-semibold text-belize-navy">{title}</p>
         <button

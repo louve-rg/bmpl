@@ -1,11 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useDialogFocusTrap } from '../../lib/use-dialog-focus-trap';
 
 /**
  * A thumbnail that opens its image in a full-screen lightbox. The trigger keeps
  * the layout's (possibly cropped) framing; the lightbox shows the full image at
  * quality via object-contain. Closes on the ✕ button, backdrop click, or ESC.
+ *
+ * Focus containment, background isolation and return-to-opener (BMPL-208)
+ * are `useDialogFocusTrap` — the same hook `FullScreenMapModal` uses, so the
+ * two dialogs cannot drift apart on this again.
  */
 export function EnlargeableImage({
   src,
@@ -21,7 +26,10 @@ export function EnlargeableImage({
   imgClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+
+  useDialogFocusTrap({ open, containerRef, initialFocusRef: closeRef });
 
   useEffect(() => {
     if (!open) return;
@@ -31,7 +39,6 @@ export function EnlargeableImage({
     document.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    closeRef.current?.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
@@ -47,6 +54,7 @@ export function EnlargeableImage({
 
       {open && (
         <div
+          ref={containerRef}
           role="dialog"
           aria-modal="true"
           aria-label={label}
