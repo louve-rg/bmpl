@@ -132,6 +132,7 @@ interface Delivered {
   body: string;
   userId: string;
   data: Record<string, unknown>;
+  category: string;
 }
 
 async function capture(step: () => Promise<unknown>): Promise<Delivered[]> {
@@ -147,6 +148,11 @@ async function capture(step: () => Promise<unknown>): Promise<Delivered[]> {
     body: r.notification.body,
     userId: r.userId,
     data: (r.notification.data ?? {}) as Record<string, unknown>,
+    // The stored category column — BMPL-168. Every emission in this file used
+    // to fall back to ACCOUNT via the type->category deriver (type: 'ACCOUNT',
+    // no explicit category); asserting it here, on the PROTECTED STATE rather
+    // than the 201 the step already checks, is what actually pins the fix.
+    category: r.notification.category,
   }));
 }
 
@@ -196,6 +202,7 @@ describe('booking notifications', () => {
     const n = delivered[0]!;
     expect(n.userId).toBe(op.userId); // the operator, and nobody else — not the rider
     expect(n.title).toBe('New seat request');
+    expect(n.category).toBe('PASSENGER');
     expect(n.body).toContain('2 seat(s)');
     expect(n.body).toContain(routeName);
     expect(n.body).toContain(tripReference);
@@ -223,6 +230,7 @@ describe('booking notifications', () => {
     const n = delivered[0]!;
     expect(n.userId).toBe(rider.userId);
     expect(n.title).toBe('Seats confirmed');
+    expect(n.category).toBe('PASSENGER');
     expect(n.body).toContain(booking.body.reference);
     expect(n.body).toContain('2 seat(s)');
     expect(n.data.bookingId).toBe(booking.body.id);
@@ -244,6 +252,7 @@ describe('booking notifications', () => {
     const n = delivered[0]!;
     expect(n.userId).toBe(rider.userId);
     expect(n.title).toBe('Booking cancelled');
+    expect(n.category).toBe('PASSENGER');
     expect(n.body).toContain(booking.body.reference);
     expect(n.body).toContain('Vehicle out of service');
   });
@@ -270,6 +279,7 @@ describe('booking notifications', () => {
     const n = delivered[0]!;
     expect(n.userId).toBe(op.userId); // the operator — the rider gets no echo of their own action
     expect(n.title).toBe('Seat request withdrawn');
+    expect(n.category).toBe('PASSENGER');
     expect(n.body).toContain(booking.body.reference);
     expect(n.body).toContain(routeName);
     expect(n.body).toContain(tripReference);
@@ -302,6 +312,7 @@ describe('booking notifications', () => {
     const n = delivered[0]!;
     expect(n.userId).toBe(op.userId);
     expect(n.title).toBe('Rider cancelled — seats freed');
+    expect(n.category).toBe('PASSENGER');
     expect(n.body).toContain('2 seat(s) freed');
     expect(n.body).toContain(routeName);
     expect(n.body).toContain(tripReference);
@@ -326,6 +337,7 @@ describe('booking notifications', () => {
     const n = delivered[0]!;
     expect(n.userId).toBe(driver.userId); // the assigned driver — not the operator
     expect(n.title).toBe('You have a departure');
+    expect(n.category).toBe('PASSENGER');
     expect(n.body).toContain(routeName);
     expect(n.body).toContain(tripReference);
     expect(n.body).toContain('Toyota Hiace');
@@ -346,6 +358,7 @@ describe('affiliation notifications — each consent step tells the party it is 
     expect(delivered).toHaveLength(1);
     expect(delivered[0]!.userId).toBe(driver.userId);
     expect(delivered[0]!.title).toBe('Fleet invitation');
+    expect(delivered[0]!.category).toBe('PASSENGER');
     expect(delivered[0]!.body).toContain(op.businessName);
   });
 
@@ -361,6 +374,7 @@ describe('affiliation notifications — each consent step tells the party it is 
     expect(delivered).toHaveLength(1);
     expect(delivered[0]!.userId).toBe(op.userId);
     expect(delivered[0]!.title).toBe('Fleet join request');
+    expect(delivered[0]!.category).toBe('PASSENGER');
   });
 
   it('acceptance notifies the party who was WAITING: driver accepts → operator hears', async () => {
@@ -377,6 +391,7 @@ describe('affiliation notifications — each consent step tells the party it is 
     expect(delivered).toHaveLength(1);
     expect(delivered[0]!.userId).toBe(op.userId); // the inviter, not the actor
     expect(delivered[0]!.title).toBe('Fleet affiliation active');
+    expect(delivered[0]!.category).toBe('PASSENGER');
   });
 
   it('approval notifies the party who was WAITING: operator approves → driver hears', async () => {
@@ -393,6 +408,7 @@ describe('affiliation notifications — each consent step tells the party it is 
     expect(delivered).toHaveLength(1);
     expect(delivered[0]!.userId).toBe(driver.userId); // the requester, not the actor
     expect(delivered[0]!.title).toBe('Fleet affiliation active');
+    expect(delivered[0]!.category).toBe('PASSENGER');
   });
 
   it('ending notifies the counterparty: driver leaves → operator hears', async () => {
@@ -408,6 +424,7 @@ describe('affiliation notifications — each consent step tells the party it is 
     expect(delivered).toHaveLength(1);
     expect(delivered[0]!.userId).toBe(op.userId);
     expect(delivered[0]!.title).toBe('Fleet affiliation ended');
+    expect(delivered[0]!.category).toBe('PASSENGER');
   });
 });
 
@@ -426,6 +443,7 @@ describe('vehicle moderation notifications', () => {
     expect(delivered).toHaveLength(1);
     expect(delivered[0]!.userId).toBe(op.userId);
     expect(delivered[0]!.title).toBe('Vehicle approved');
+    expect(delivered[0]!.category).toBe('PASSENGER');
     expect(delivered[0]!.body).toContain('Toyota Hiace');
     expect(delivered[0]!.data.vehicleId).toBe(v.body.id);
   });
@@ -444,6 +462,7 @@ describe('vehicle moderation notifications', () => {
     expect(delivered).toHaveLength(1);
     expect(delivered[0]!.userId).toBe(op.userId);
     expect(delivered[0]!.title).toBe('Vehicle needs attention');
+    expect(delivered[0]!.category).toBe('PASSENGER');
     expect(delivered[0]!.body).toContain('Toyota Hiace');
     expect(delivered[0]!.body).toContain('Insurance document expired');
   });

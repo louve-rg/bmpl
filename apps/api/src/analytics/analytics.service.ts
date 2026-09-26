@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DEFAULT_ANALYTICS_DAYS, MAX_ANALYTICS_DAYS, toCsv } from '@bmpl/shared';
+import { belizeCalendarDate, DEFAULT_ANALYTICS_DAYS, MAX_ANALYTICS_DAYS, startOfBelizeDay, toCsv } from '@bmpl/shared';
 import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnershipService } from '../products/ownership.service';
@@ -43,9 +43,12 @@ export class AnalyticsService {
   private fillSeries(rows: Array<{ day: Date; orders: bigint | number; gross: bigint | number }>, days: number): SeriesPoint[] {
     const byDay = new Map(rows.map((r) => [new Date(r.day).toISOString().slice(0, 10), r]));
     const out: SeriesPoint[] = [];
-    const today = new Date();
+    // The business's "today" is a Belize calendar day (see BMPL-197) - the SQL
+    // side buckets `day` the same way (windowStart/the raw query below), so
+    // the keys line up.
+    const todayBelize = belizeCalendarDate(new Date());
     for (let i = days - 1; i >= 0; i -= 1) {
-      const d = new Date(today);
+      const d = new Date(todayBelize);
       d.setUTCDate(d.getUTCDate() - i);
       const key = d.toISOString().slice(0, 10);
       const row = byDay.get(key);
@@ -95,10 +98,9 @@ export class AnalyticsService {
     };
   }
 
-  /** Start-of-day UTC, `days-1` days before today (inclusive window of `days`). */
+  /** Start of the Belize calendar day, `days-1` Belize days before today (inclusive window of `days`). */
   private windowStart(days: number) {
-    const start = new Date();
-    start.setUTCHours(0, 0, 0, 0);
+    const start = startOfBelizeDay(new Date());
     start.setUTCDate(start.getUTCDate() - (days - 1));
     return start;
   }
@@ -106,8 +108,11 @@ export class AnalyticsService {
   async adminSales(days?: number) {
     const d = this.clampDays(days);
     const since = this.windowStart(d);
+    // Bucketed by BELIZE calendar day, not UTC (BMPL-197): createdAt is a
+    // TIMESTAMP(3) with no time zone, so this arithmetic is on the literal
+    // stored value, not a session-timezone conversion.
     const rows = await this.prisma.$queryRaw<Array<{ day: Date; orders: bigint; gross: bigint }>>`
-      SELECT date_trunc('day', p."createdAt") AS day, COUNT(*)::bigint AS orders, COALESCE(SUM(p."amountMinor"),0)::bigint AS gross
+      SELECT date_trunc('day', p."createdAt" - interval '6 hours') AS day, COUNT(*)::bigint AS orders, COALESCE(SUM(p."amountMinor"),0)::bigint AS gross
       FROM payments p
       WHERE p.status IN ${PAID} AND p."createdAt" >= ${since}
       GROUP BY day ORDER BY day`;
@@ -191,8 +196,9 @@ export class AnalyticsService {
     const vp = await this.ownership.vendorProfileId(userId);
     const d = this.clampDays(days);
     const since = this.windowStart(d);
+    // Belize calendar day, same reasoning as adminSales above (BMPL-197).
     const rows = await this.prisma.$queryRaw<Array<{ day: Date; orders: bigint; gross: bigint }>>`
-      SELECT date_trunc('day', vo."createdAt") AS day, COUNT(DISTINCT vo.id)::bigint AS orders, COALESCE(SUM(vo."subtotalMinor"),0)::bigint AS gross
+      SELECT date_trunc('day', vo."createdAt" - interval '6 hours') AS day, COUNT(DISTINCT vo.id)::bigint AS orders, COALESCE(SUM(vo."subtotalMinor"),0)::bigint AS gross
       FROM vendor_orders vo
       JOIN orders o ON o.id = vo."orderId"
       JOIN payments p ON p."orderId" = o.id

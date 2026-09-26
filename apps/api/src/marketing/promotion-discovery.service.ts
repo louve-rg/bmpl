@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { HOMEPAGE_PLACEMENTS, type PromotionPlacementType } from '@bmpl/shared';
+import { belizeCalendarDate, HOMEPAGE_PLACEMENTS, type PromotionPlacementType } from '@bmpl/shared';
 import type { PromotionReportInput, TrackPromotionEventInput } from '@bmpl/validation';
 import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
@@ -15,8 +15,13 @@ const EVENT_COLUMN: Record<TrackPromotionEventInput['event'], 'impressions' | 'v
   conversion: 'conversions',
 };
 
-/** UTC midnight for a @db.Date bucket key. */
-const dayBucket = (d = new Date()) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+/**
+ * The Belize calendar day, as a @db.Date bucket key, for a real instant.
+ * A UTC-midnight bucket would roll a promotion's daily metrics to the next
+ * day up to six hours before it is actually tomorrow in Belize - see
+ * BMPL-197.
+ */
+const dayBucket = (d = new Date()) => belizeCalendarDate(d);
 
 /**
  * Public promotion serving (M26). A promotion is served ONLY IF status===APPROVED AND

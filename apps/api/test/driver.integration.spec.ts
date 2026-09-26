@@ -304,6 +304,24 @@ describe('admin driver management', () => {
     expect(rej.body).toMatchObject({ approvalStatus: 'REJECTED', rejectionReason: 'Blurry photo' });
   });
 
+  it('BMPL-168: a vehicle decision files under the Driver chip, not Account — the stored category, not just a 200', async () => {
+    const { cookies, userId } = await registerCustomer('drv_veh_chip@example.bz');
+    await put(cookies, 'driver/profile', profilePayload());
+    const v = await post(cookies, 'driver/vehicles', vehiclePayload());
+    expect((await post(adminCookies, `admin/drivers/vehicles/${v.body.id}/approve`, {})).status).toBe(201);
+    // The protected state IS the persisted category column on the recipient's
+    // own notification row — asserting the 201 above proves nothing about
+    // which chip this files under, and filing under ACCOUNT was exactly the
+    // silent-mislabel defect this card exists to close.
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    expect(row.notification.title).toBe('Vehicle approved');
+    expect(row.notification.category).toBe('DRIVER');
+  });
+
   it('an admin without drivers permissions is forbidden', async () => {
     const limited = await seedLimitedAdmin(ctx.prisma, 'drv_limited_admin@example.bz', ['users.read']);
     const lc = await login(limited.email, limited.password);
