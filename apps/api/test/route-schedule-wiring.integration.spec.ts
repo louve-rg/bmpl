@@ -119,11 +119,22 @@ beforeEach(async () => {
 
 describe('route planning consults the schedule', () => {
   it('an unconfigured route - the state of every real route today - still quotes and books', async () => {
-    const { routeId: _routeId, originHubId, destinationHubId } = await seedRoute();
-    const customer = (await registerCustomer(`wire_${uniq()}@example.com`)).cookies;
-    const q = await post(customer, 'shipping/quote', quoteHubToHub(originHubId, destinationHubId));
+    const { originHubId, destinationHubId } = await seedRoute();
+    const customer = await registerCustomer(`wire_${uniq()}@example.com`);
+    const q = await post(customer.cookies, 'shipping/quote', quoteHubToHub(originHubId, destinationHubId));
     expect(q.status).toBe(201);
     expect(q.body.available).toBe(true);
+
+    // The test's own name claims "and books" — prove it, not just quote
+    // availability. A quote flag flipping true is not proof a real booking
+    // and a real LINE_HAUL leg follow from it.
+    await post(admin, 'admin/wallet/test-credit', { userId: customer.userId, amountMinor: 100_000, reason: 'Schedule-wiring test fixture.' });
+    const book = await post(customer.cookies, 'shipping', { ...quoteHubToHub(originHubId, destinationHubId), payWithWallet: true });
+    expect(book.status).toBe(201);
+    expect(book.body.legs).toHaveLength(1);
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: book.body.legs[0].id } });
+    expect(leg.kind).toBe('LINE_HAUL');
+    expect(leg.status).toBe('READY');
   });
 
   it('a route marked NOT_OPERATING for today, via a date exception, is not offered', async () => {
@@ -194,6 +205,22 @@ describe('departing a line-haul leg consults the schedule', () => {
     const { legId } = await bookAndFundedCustomer(originHubId, destinationHubId);
     const departed = await post(admin, `admin/logistics/legs/${legId}/depart`, {});
     expect(departed.status).toBe(201);
+
+    // THE LOAD-BEARING CASE, checked as state, not just an HTTP code (BMPL-140
+    // fresh-audit standard): a 201 alone would not distinguish a leg that
+    // genuinely departed from one where an unrelated regression short-circuits
+    // to a success response before the actual write. Every real route in
+    // production is unconfigured, so this is the path that must never be
+    // wrong.
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.status).toBe('IN_PROGRESS');
+    expect(leg.departedAt).not.toBeNull();
+    const custody = await ctx.prisma.custodyEvent.findFirst({
+      where: { shipmentLegId: legId, toHolder: 'CARRIER' },
+      orderBy: { occurredAt: 'desc' },
+    });
+    expect(custody).not.toBeNull();
+    expect(custody!.fromHolder).toBe('HUB');
   });
 
   it('refuses to depart a leg on a route marked NOT_OPERATING for today', async () => {
