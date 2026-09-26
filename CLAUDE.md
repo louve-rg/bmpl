@@ -375,6 +375,12 @@ gaps, two different fixes — a `dist` that's out of date needs a rebuild
 (prefer turbo), a `node_modules` that's out of date needs an install (turbo
 does not help).
 
+`pnpm --filter @bmpl/api test:integration` closes the install-side half of
+this automatically: its wrapper runs `pnpm install --frozen-lockfile` before
+anything else and refuses loudly if it fails, so this specific entry point
+needs no one to remember the fix above. Every other command in this file
+still does.
+
 ### Running the integration suite locally
 
 Docker is available on this machine and the suite runs here — **852 tests across

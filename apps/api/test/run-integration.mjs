@@ -51,9 +51,31 @@
  *    is the point. CI is untouched (its databases are already isolated per
  *    run); an explicitly custom TEST_DATABASE_URL is honoured as deliberate.
  *
+ * 4. THE INSTALL-SIDE GAP (bitten this floor three times as a confusing
+ *    "Cannot find module '@bmpl/...'"/TS2307 that looked like a real
+ *    regression). Guard 1 above proves every workspace package BUILDS —
+ *    `turbo run build` compiles `packages/X/dist` in place, which says
+ *    nothing about whether pnpm ever LINKED that package into a consumer's
+ *    node_modules. That link is created only by `pnpm install`, and nothing
+ *    about a package being added to the lockfile re-runs it in a worktree
+ *    that already existed. So before guard 1's build even starts,
+ *    `pnpm install --frozen-lockfile` runs unconditionally: it is the one
+ *    authoritative answer to "does node_modules match the lockfile" — pnpm
+ *    already computes this correctly, and re-deriving it via ad hoc symlink
+ *    checks would just be a worse copy of what pnpm does, missing classes of
+ *    drift like a changed peer-dependency hash key. Unlike a destructive
+ *    repair, there is no wrong-diagnosis risk in installing exactly what the
+ *    lockfile already commits to, so this runs as a matter of course rather
+ *    than being detected-then-left-for-a-human — and it is fast (seconds)
+ *    when nothing is missing, since --frozen-lockfile never touches
+ *    resolution. CI is exempt: its workflow already runs this exact command
+ *    explicitly before this script; repeating it here would only be a
+ *    slower no-op every time.
+ *
  * Env switches:
- *   BMPL_SKIP_WORKSPACE_BUILD=1  skip the dependency build (you manage
- *                                builds yourself and accept the risk)
+ *   BMPL_SKIP_WORKSPACE_BUILD=1  skip the install check AND the dependency
+ *                                build (you manage both yourself and accept
+ *                                the risk)
  *   BMPL_DRY_RUN=1               print what would run, run nothing
  *   BMPL_SHARED_TEST_DB=1        keep the shared bmpl_test (you are
  *                                coordinating serial runs yourself)
@@ -76,6 +98,30 @@ const BUILD_REFUSAL =
 /** The verified pnpm equivalent of the turbo build (BMPL-133). Every element
  *  is a literal — nothing user-supplied ever reaches the fallback spawn. */
 const PNPM_FALLBACK_ARGS = ['-r', '--filter=./packages/*', 'run', 'build'];
+
+/**
+ * Guard 4 (exported for the unit spec — no real install is spawned there),
+ * run BEFORE guard 1's build: is node_modules what the lockfile says it
+ * should be? `pnpm install --frozen-lockfile` never resolves or touches the
+ * lockfile — it only verifies/relinks against what is already committed —
+ * so this is safe and fast to run unconditionally rather than detected and
+ * left for a human to remember. See the header for the full account of the
+ * gap this closes.
+ *
+ * deps: { spawn, cwd, log, error, exit }
+ */
+export function ensureNodeModulesInstalled(deps) {
+  const { spawn, cwd, log, error, exit } = deps;
+  log('[run-integration] pnpm install --frozen-lockfile (node_modules vs. the lockfile)...');
+  const result = spawn('pnpm', ['install', '--frozen-lockfile'], { stdio: 'inherit', cwd, shell: true });
+  if (result.status === 0 && !result.error) return { ok: true };
+  error(
+    '[run-integration] refusing to run: `pnpm install --frozen-lockfile` failed. node_modules and the lockfile disagree, ' +
+      'and a test run against a mismatched tree can fail with a confusing "Cannot find module" that looks like a real regression rather than what it is.',
+  );
+  exit(result.status || 1);
+  return { ok: false };
+}
 
 /**
  * Guard 1, both paths (exported for the unit spec — no real build is spawned
@@ -207,10 +253,25 @@ async function main() {
   const vitestArgv = [vitestBin, 'run', '--config', 'vitest.integration.config.ts', ...args];
 
   if (dryRun) {
+    console.log(`[run-integration] dry run. install check: ${skipBuild ? 'SKIPPED' : '`pnpm install --frozen-lockfile` — refuses if node_modules and the lockfile disagree'}`);
     console.log(`[run-integration] dry run. build step: ${skipBuild ? 'SKIPPED (' + (process.env.CI ? 'CI builds packages explicitly' : 'BMPL_SKIP_WORKSPACE_BUILD') + ')' : 'turbo run build --filter=./packages/* — primary; if turbo itself cannot run, falls back to `pnpm -r --filter=./packages/* run build` (BMPL-133); refuses if both fail'}`);
     console.log(`[run-integration] test database: ${isolation ? `"${isolation.dbName}" (isolated, created on first use)` : 'TEST_DATABASE_URL as configured (CI, custom, or BMPL_SHARED_TEST_DB)'}`);
     console.log(`[run-integration] would exec: node ${vitestArgv.join(' ')}`);
     process.exit(0);
+  }
+
+  if (!skipBuild) {
+    // Guard 4 first: a package the build step (below) proves compiles cleanly
+    // can still be unresolvable if it was never linked into node_modules —
+    // see the header. `pnpm install --frozen-lockfile` fixes that, or refuses
+    // loudly if the lockfile and package.json themselves disagree.
+    ensureNodeModulesInstalled({
+      spawn: spawnSync,
+      cwd: repoRoot,
+      log: console.log,
+      error: console.error,
+      exit: (code) => process.exit(code),
+    });
   }
 
   if (!skipBuild) {
