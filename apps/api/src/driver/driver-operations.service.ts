@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { startOfBelizeDay } from '@bmpl/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Delivery states where the job is on a driver's plate right now. */
@@ -28,8 +29,10 @@ export class DriverOperationsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async summary(driverProfileId: string, userId: string, now: Date = new Date()) {
-    const startOfToday = new Date(now);
-    startOfToday.setHours(0, 0, 0, 0);
+    // "Today" is a Belize calendar day, not the host process's own local
+    // timezone (which a bare setHours(0,0,0,0) would use, and which is UTC on
+    // some deploys and something else entirely on others) - see BMPL-197.
+    const startOfToday = startOfBelizeDay(now);
     // Rolling 7 days rather than a calendar week: a driver checking earnings on
     // Monday morning wants the last week's work, not two hours of it.
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
