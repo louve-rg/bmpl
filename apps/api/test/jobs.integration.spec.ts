@@ -375,4 +375,12 @@ describe('notification event codes are job-specific, not PRODUCT_MODERATED (BMPL
     expect((await post(seeker.cookies, `job-seeker/applications/${appId}/withdraw`)).status).toBe(201);
     expect(await latestEvent(emp.userId)).toBe('JOB_APPLICATION_WITHDRAWN');
   });
+
+  it('a reported job tells admins under its own event, not the settlement-failure code (BMPL-214)', async () => {
+    const emp = await makeEmployer();
+    const { jobId } = await publishJob(emp);
+    const cust = await register(`c_${uniq()}@example.bz`);
+    expect((await post(cust.cookies, `job-seeker/report/${jobId}`, { reason: 'SCAM' })).status).toBe(201);
+    expect(await latestEvent(adminUserId)).toBe('JOB_REPORTED');
+  });
 });

@@ -318,7 +318,7 @@ export class ReviewsService {
       throw e;
     }
     await this.audit.record({ action: 'REVIEW_REPORTED', actorId: actor.userId, newValue: { reviewId, reason: dto.reason } });
-    await this.notifications.notifyAdmins('reviews.read', { type: 'SECURITY', category: 'ADMIN_ALERT', event: 'ADMIN_ORDER_EXCEPTION', title: 'Review reported', body: `A review was reported (${dto.reason.toLowerCase()}).`, data: { reviewId } });
+    await this.notifications.notifyAdmins('reviews.read', { type: 'SECURITY', category: 'ADMIN_ALERT', event: 'REVIEW_REPORTED', title: 'Review reported', body: `A review was reported (${dto.reason.toLowerCase()}).`, data: { reviewId } });
     return { ok: true };
   }
 

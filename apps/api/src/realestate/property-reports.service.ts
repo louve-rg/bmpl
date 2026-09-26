@@ -31,7 +31,7 @@ export class PropertyReportsService {
       throw e;
     }
     await this.audit.record({ action: 'PROPERTY_REPORTED', actorId: actor.userId, newValue: { listingId, reason: dto.reason } });
-    await this.notifications.notifyAdmins('properties.read', { type: 'SECURITY', event: 'ADMIN_ORDER_EXCEPTION', title: 'Listing reported', body: `"${listing.title}" was reported (${dto.reason.toLowerCase()}).`, data: { listingId } });
+    await this.notifications.notifyAdmins('properties.read', { type: 'SECURITY', event: 'PROPERTY_LISTING_REPORTED', title: 'Listing reported', body: `"${listing.title}" was reported (${dto.reason.toLowerCase()}).`, data: { listingId } });
     return { ok: true };
   }
 

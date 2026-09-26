@@ -11,6 +11,7 @@ import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContex
 
 let ctx: TestContext;
 let adminCookies: string[];
+let adminUserId: string;
 let categoryId: string;
 let seq = 0;
 const uniq = () => `${Date.now()}_${(seq += 1)}`;
@@ -79,6 +80,7 @@ beforeAll(async () => {
   await seedRoles(ctx.prisma);
   const admin = await seedSuperAdmin(ctx.prisma);
   adminCookies = await login(admin.email, admin.password);
+  adminUserId = admin.id;
   categoryId = (await post(adminCookies, 'admin/categories', { name: `Cat ${uniq()}` })).body.id;
 });
 afterAll(async () => {
@@ -273,5 +275,19 @@ describe('notification event codes are review-specific, not PRODUCT_MODERATED (B
       orderBy: { id: 'desc' },
     });
     expect(reviewerRow.notification.event).toBe('REVIEW_RESPONSE_RECEIVED');
+  });
+
+  it('a reported review tells admins under its own event, not the settlement-failure code (BMPL-214)', async () => {
+    const o = await seedFulfilled('PICKUP');
+    const created = await post(o.customerCookies, 'reviews', { subjectType: 'VENDOR', contextId: o.vendorOrderId, rating: 2, body: 'Not great' });
+    expect(created.status).toBe(201);
+    const other = await register(`reporter_${uniq()}@example.bz`);
+    expect((await post(other.cookies, `reviews/${created.body.id}/report`, { reason: 'SPAM' })).status).toBe(201);
+    const adminRow = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId: adminUserId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    expect(adminRow.notification.event).toBe('REVIEW_REPORTED');
   });
 });
