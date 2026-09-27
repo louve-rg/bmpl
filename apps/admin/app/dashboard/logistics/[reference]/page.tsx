@@ -95,6 +95,20 @@ export default function ShipmentOpsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [handoff, setHandoff] = useState<Record<string, { pin: string; who: string }>>({});
+  const [canOperate, setCanOperate] = useState(false);
+
+  // Every control on this screen — depart/arrive, confirm handover, flag a
+  // problem, record a hub collection — is drawn only for logistics.operate.
+  // /me returns the same grant rows the PermissionsGuard evaluates, so what
+  // this screen shows and what the API enforces cannot disagree. On any
+  // doubt (request fails, field absent) every control stays hidden: fail
+  // closed. This page only ever needed logistics.read to load (BMPL-270).
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanOperate((me.adminPermissions ?? []).includes('logistics.operate')))
+      .catch(() => setCanOperate(false));
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -209,9 +223,11 @@ export default function ShipmentOpsPage() {
               <p className="mt-1 text-sm text-emerald-800">
                 Record the collection when the recipient picks it up. Nothing else can close this shipment.
               </p>
-              <Button onClick={recordCollection} disabled={busy === 'collect'} className="mt-3">
-                {busy === 'collect' ? 'Recording…' : 'Record collection'}
-              </Button>
+              {canOperate && (
+                <Button onClick={recordCollection} disabled={busy === 'collect'} className="mt-3">
+                  {busy === 'collect' ? 'Recording…' : 'Record collection'}
+                </Button>
+              )}
             </Card>
           )}
 
@@ -249,7 +265,7 @@ export default function ShipmentOpsPage() {
                       </Badge>
                     </div>
 
-                    {(c.depart || c.arrive || c.handoff) && (
+                    {canOperate && (c.depart || c.arrive || c.handoff) && (
                       <div className="mt-3 border-t border-slate-100 pt-3">
                         <div className="flex flex-wrap gap-2">
                           {c.depart && (
@@ -293,7 +309,7 @@ export default function ShipmentOpsPage() {
                       </div>
                     )}
 
-                    {leg.status !== 'COMPLETED' && leg.status !== 'CANCELLED' && leg.status !== 'EXCEPTION' && (
+                    {canOperate && leg.status !== 'COMPLETED' && leg.status !== 'CANCELLED' && leg.status !== 'EXCEPTION' && (
                       <button
                         onClick={() => void flagException(leg.id)}
                         className="mt-2 text-xs font-medium text-amber-700 hover:underline"

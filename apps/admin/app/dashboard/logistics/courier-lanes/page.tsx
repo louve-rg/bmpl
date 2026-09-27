@@ -60,6 +60,20 @@ export default function CourierLanesPage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [canManage, setCanManage] = useState(false);
+
+  // Add/close/reprice a lane is drawn only for logistics.manage — /me returns
+  // the same grant rows the PermissionsGuard evaluates, so what this screen
+  // shows and what the API enforces cannot disagree. On any doubt (request
+  // fails, field absent) it stays hidden: fail closed. Same pattern as
+  // hubs/page.tsx and routes/page.tsx (BMPL-142/265/267) in the same
+  // logistics vertical — this screen just never had it (BMPL-268/270).
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanManage((me.adminPermissions ?? []).includes('logistics.manage')))
+      .catch(() => setCanManage(false));
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -152,6 +166,7 @@ export default function CourierLanesPage() {
         </Alert>
       )}
 
+      {canManage && (
       <Card className="p-4">
         <h2 className="text-sm font-semibold text-slate-900">Add a lane</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -247,6 +262,7 @@ export default function CourierLanesPage() {
           {saving ? 'Adding…' : 'Add lane'}
         </Button>
       </Card>
+      )}
 
       {loading ? (
         <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
@@ -285,20 +301,22 @@ export default function CourierLanesPage() {
                     </p>
                   )}
                 </div>
-                <div className="flex shrink-0 flex-wrap items-end gap-2">
-                  <Field label="Rate (BZ$)">
-                    <Input
-                      defaultValue={(l.priceMinor / 100).toFixed(2)}
-                      onBlur={(e) => void setPrice(l, e.target.value)}
-                      inputMode="decimal"
-                      className="w-28"
-                      aria-label={`Rate for ${l.originCity} to ${l.destinationCity}`}
-                    />
-                  </Field>
-                  <Button variant="outline" onClick={() => void toggle(l)}>
-                    {l.isActive ? 'Close lane' : 'Open lane'}
-                  </Button>
-                </div>
+                {canManage && (
+                  <div className="flex shrink-0 flex-wrap items-end gap-2">
+                    <Field label="Rate (BZ$)">
+                      <Input
+                        defaultValue={(l.priceMinor / 100).toFixed(2)}
+                        onBlur={(e) => void setPrice(l, e.target.value)}
+                        inputMode="decimal"
+                        className="w-28"
+                        aria-label={`Rate for ${l.originCity} to ${l.destinationCity}`}
+                      />
+                    </Field>
+                    <Button variant="outline" onClick={() => void toggle(l)}>
+                      {l.isActive ? 'Close lane' : 'Open lane'}
+                    </Button>
+                  </div>
+                )}
               </div>
             </Card>
           ))}

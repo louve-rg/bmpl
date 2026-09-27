@@ -114,12 +114,19 @@ interface Pins {
   deliveryVerificationStatus: string | null;
 }
 
+interface Permissions {
+  canAssignDriver: boolean;
+  canCancelDelivery: boolean;
+  canRevealPins: boolean;
+}
+
 export default function DispatchDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [detail, setDetail] = useState<DeliveryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [perms, setPerms] = useState<Permissions>({ canAssignDriver: false, canCancelDelivery: false, canRevealPins: false });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -138,6 +145,26 @@ export default function DispatchDetailPage() {
     void load();
   }, [load]);
 
+  // Assign/reassign, cancel and PIN-reveal are three DIFFERENT permissions
+  // (deliveries.assign, deliveries.manage, deliveries.verify) — not one
+  // boolean covering all three. /me returns the same grant rows the
+  // PermissionsGuard evaluates, so what this screen shows and what the API
+  // enforces cannot disagree. On any doubt (request fails, field absent)
+  // all three stay hidden: fail closed.
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => {
+        const held = me.adminPermissions ?? [];
+        setPerms({
+          canAssignDriver: held.includes('deliveries.assign'),
+          canCancelDelivery: held.includes('deliveries.manage'),
+          canRevealPins: held.includes('deliveries.verify'),
+        });
+      })
+      .catch(() => setPerms({ canAssignDriver: false, canCancelDelivery: false, canRevealPins: false }));
+  }, []);
+
   return (
     <div className="mx-auto max-w-4xl">
       <Link href="/dashboard/dispatch" className="text-sm font-medium text-belize-blue hover:underline">
@@ -154,12 +181,12 @@ export default function DispatchDetailPage() {
         <p className="mt-6 rounded-bmpl-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
       )}
 
-      {!loading && detail && <DetailView detail={detail} id={id} onChanged={load} />}
+      {!loading && detail && <DetailView detail={detail} id={id} onChanged={load} perms={perms} />}
     </div>
   );
 }
 
-function DetailView({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: string; onChanged: () => void }) {
+function DetailView({ detail: d, id, onChanged, perms }: { detail: DeliveryDetail; id: string; onChanged: () => void; perms: Permissions }) {
   return (
     <div>
       <PageHeader
@@ -253,9 +280,9 @@ function DetailView({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: 
         )}
       </InfoCard>
 
-      <AssignmentPanel detail={d} id={id} onChanged={onChanged} />
+      <AssignmentPanel detail={d} id={id} onChanged={onChanged} perms={perms} />
 
-      <PinPanel id={id} />
+      {perms.canRevealPins && <PinPanel id={id} />}
 
       <InfoCard title="Proof of delivery" className="mt-6">
         {d.podPhotoUrls && d.podPhotoUrls.length > 0 ? (
@@ -345,31 +372,35 @@ function DetailView({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: 
   );
 }
 
-function AssignmentPanel({ detail: d, id, onChanged }: { detail: DeliveryDetail; id: string; onChanged: () => void }) {
+function AssignmentPanel({ detail: d, id, onChanged, perms }: { detail: DeliveryDetail; id: string; onChanged: () => void; perms: Permissions }) {
   const [mode, setMode] = useState<'assign' | 'reassign' | 'cancel' | null>(null);
 
-  const assignAllowed = canAssign(d.status);
-  const reassignAllowed = canReassign(d.status);
+  // Status decides which actions are legal right now; permission decides
+  // which of THOSE this viewer may see at all. Assign and reassign both need
+  // deliveries.assign; cancel needs the separate deliveries.manage.
+  const showAssign = canAssign(d.status) && perms.canAssignDriver;
+  const showReassign = canReassign(d.status) && perms.canAssignDriver;
+  const showCancel = canReassign(d.status) && perms.canCancelDelivery;
 
-  if (!assignAllowed && !reassignAllowed) return null;
+  if (!showAssign && !showReassign && !showCancel) return null;
 
   return (
     <InfoCard title="Assignment" className="mt-6">
       <div className="flex flex-wrap gap-2">
-        {assignAllowed && (
+        {showAssign && (
           <Button size="sm" variant="primary" onClick={() => setMode('assign')}>
             Assign driver
           </Button>
         )}
-        {reassignAllowed && (
-          <>
-            <Button size="sm" variant="outline" onClick={() => setMode('reassign')}>
-              Reassign
-            </Button>
-            <Button size="sm" variant="destructive" onClick={() => setMode('cancel')}>
-              Cancel delivery
-            </Button>
-          </>
+        {showReassign && (
+          <Button size="sm" variant="outline" onClick={() => setMode('reassign')}>
+            Reassign
+          </Button>
+        )}
+        {showCancel && (
+          <Button size="sm" variant="destructive" onClick={() => setMode('cancel')}>
+            Cancel delivery
+          </Button>
         )}
       </div>
 

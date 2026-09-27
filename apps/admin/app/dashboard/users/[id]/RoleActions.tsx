@@ -5,15 +5,28 @@ import { useRouter } from 'next/navigation';
 import type { RoleCode } from '@bmpl/shared';
 import { api } from '../../../../lib/api';
 
-/** Per-role admin controls: suspend / restore / revoke. Reasons are required. */
+/**
+ * Per-role admin controls: suspend / restore / revoke. Reasons are required.
+ * Each control is drawn only for its own permission (roles.suspend/restore/
+ * revoke — three different permissions, passed down from the server
+ * component that already resolved them from GET /me; see users/[id]/
+ * page.tsx). Hidden rather than disabled, and hidden by default if a caller
+ * ever forgets to pass one — fail closed.
+ */
 export function RoleActions({
   userId,
   roleCode,
   status,
+  canSuspend = false,
+  canRestore = false,
+  canRevoke = false,
 }: {
   userId: string;
   roleCode: RoleCode;
   status: string;
+  canSuspend?: boolean;
+  canRestore?: boolean;
+  canRevoke?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -37,21 +50,35 @@ export function RoleActions({
 
   return (
     <div className="flex gap-2">
-      {status === 'APPROVED' && (
+      {status === 'APPROVED' && canSuspend && (
         <ActionBtn label="Suspend" onClick={() => run('suspend')} disabled={busy} />
       )}
-      {status === 'SUSPENDED' && (
+      {status === 'SUSPENDED' && canRestore && (
         <ActionBtn label="Restore" onClick={() => run('restore')} disabled={busy} />
       )}
-      {['APPROVED', 'SUSPENDED'].includes(status) && (
+      {['APPROVED', 'SUSPENDED'].includes(status) && canRevoke && (
         <ActionBtn label="Revoke" danger onClick={() => run('revoke')} disabled={busy} />
       )}
     </div>
   );
 }
 
-/** Account-level suspend / restore. */
-export function AccountActions({ userId, status }: { userId: string; status: string }) {
+/**
+ * Account-level suspend / restore. Each control is drawn only for its own
+ * permission (users.suspend / users.restore), passed down the same way as
+ * RoleActions above.
+ */
+export function AccountActions({
+  userId,
+  status,
+  canSuspend = false,
+  canRestore = false,
+}: {
+  userId: string;
+  status: string;
+  canSuspend?: boolean;
+  canRestore?: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
 
@@ -76,11 +103,8 @@ export function AccountActions({ userId, status }: { userId: string; status: str
     }
   }
 
-  return status === 'SUSPENDED' ? (
-    <ActionBtn label="Restore account" onClick={restore} disabled={busy} />
-  ) : (
-    <ActionBtn label="Suspend account" danger onClick={suspend} disabled={busy} />
-  );
+  if (status === 'SUSPENDED') return canRestore ? <ActionBtn label="Restore account" onClick={restore} disabled={busy} /> : null;
+  return canSuspend ? <ActionBtn label="Suspend account" danger onClick={suspend} disabled={busy} /> : null;
 }
 
 function ActionBtn({

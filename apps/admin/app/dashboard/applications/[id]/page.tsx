@@ -42,6 +42,17 @@ export default async function ApplicationDetailPage({ params }: { params: { id: 
   const app = res.data;
   const decided = !['PENDING', 'MORE_INFO_REQUIRED'].includes(app.status);
 
+  // Approve/reject/request-more-info is drawn only for role_applications.
+  // review — this is how a customer becomes a vendor, driver, employer or
+  // any other role, so it deserves the same fail-closed, server-resolved
+  // check as the rest of this round (BMPL-270): /me returns the same grant
+  // rows the PermissionsGuard evaluates, fetched before the page ever
+  // renders. This page only ever needed role_applications.read to load —
+  // until now, anyone who could view an application saw the full decision
+  // form, whether or not they held role_applications.review.
+  const me = await serverGet<{ adminPermissions?: string[] }>('/me');
+  const canReview = me.ok ? (me.data.adminPermissions ?? []).includes('role_applications.review') : false;
+
   return (
     <div className="mx-auto max-w-3xl">
       <Breadcrumbs
@@ -89,9 +100,11 @@ export default async function ApplicationDetailPage({ params }: { params: { id: 
         )}
       </Card>
 
-      <section className="mb-5">
-        <ReviewActions applicationId={app.id} decided={decided} />
-      </section>
+      {canReview && (
+        <section className="mb-5">
+          <ReviewActions applicationId={app.id} decided={decided} />
+        </section>
+      )}
 
       <Card className="p-5">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Review history</h2>
