@@ -18,9 +18,19 @@ export class HealthController {
     private readonly storage: StorageService,
   ) {}
 
-  /** Liveness — process is up. `commit` (Railway-injected git SHA) makes it
-   *  possible to confirm exactly which build is live during a deploy (and that
-   *  the pre-deploy migration hook ran, since a failed hook halts promotion).
+  /** Liveness — process is up. `commit` (Railway-injected git SHA, or
+   *  `GIT_COMMIT_SHA` set by hand for a local boot) makes it possible to
+   *  confirm exactly which build is live during a deploy (and that the
+   *  pre-deploy migration hook ran, since a failed hook halts promotion) — and,
+   *  same field, lets scripts/dev-server-check.mjs tell a dev server running
+   *  a stale commit (after a branch switch, restart forgotten) from one that
+   *  is current. `GIT_COMMIT_SHA` mirrors the fallback `main.ts` already uses
+   *  for the `X-BMPL-Api-Commit` header — this endpoint previously checked
+   *  only `RAILWAY_GIT_COMMIT_SHA`, so a local boot always reported `null`
+   *  even when a caller had set the variable by hand. Deliberately NOT
+   *  falling further to `APP_VERSION`/`'dev'` the way the header does: those
+   *  are not commits, and leaking one into this field would let an identity
+   *  check misread "no info available" as "a real, different commit".
    *  `startedAt` is when THIS container booted: together with `commit` it
    *  distinguishes "the deploy promoted a fresh build" from "an older container is
    *  still serving", which a commit SHA alone cannot show when a deploy is skipped.
@@ -30,7 +40,7 @@ export class HealthController {
   @Public()
   @Get()
   live() {
-    const sha = process.env.RAILWAY_GIT_COMMIT_SHA ?? null;
+    const sha = process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? null;
     const uptime = process.uptime();
     return {
       status: 'ok',
