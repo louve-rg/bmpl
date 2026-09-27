@@ -7,7 +7,6 @@ import {
   productSortSchema,
   productStatusSchema,
   slugSchema,
-  timeOfDaySchema,
   updateCategorySchema,
   vendorApprovalStatusSchema,
   vendorHoursSchema,
@@ -21,6 +20,7 @@ import {
   vendorQuerySchema,
   orderAddressSchema,
 } from './marketplace';
+import { timeOfDaySchema } from './common';
 import { UNLOCATABLE_ADDRESS_MESSAGE } from '@bmpl/shared';
 
 describe('slugSchema', () => {

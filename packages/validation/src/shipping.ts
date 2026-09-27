@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  HUB_HOURS_EXCEPTION_STATUSES,
   HUB_TYPES,
   isWithinBelize,
   LEG_KINDS,
@@ -11,7 +12,7 @@ import {
   TRANSPORT_MODES,
   UNLOCATABLE_ADDRESS_MESSAGE,
 } from '@bmpl/shared';
-import { cuidSchema, districtSchema, isLocatable, phoneSchema } from './common';
+import { cuidSchema, districtSchema, isLocatable, phoneSchema, timeOfDaySchema } from './common';
 
 /**
  * Multi-leg shipping input.
@@ -423,6 +424,64 @@ export const addRouteScheduleExceptionSchema = z.object({
   reason: z.string().trim().max(300).optional(),
 });
 export type AddRouteScheduleExceptionInput = z.infer<typeof addRouteScheduleExceptionSchema>;
+
+/**
+ * Hub weekly opening hours (BMPL-260/262/263). Same field shape as
+ * vendorHoursSchema (marketplace.ts) — a counter's hours are a continuous
+ * open/close window, not a route's run/reduced/not-run status, which is why
+ * hubs get this schema rather than routeOperatingDayInputSchema above. Same
+ * "replace the whole week in one call" reasoning too: a partial submission
+ * would leave a stale day sitting alongside new ones.
+ */
+const hubOpeningDayInputSchema = z
+  .object({
+    dayOfWeek: z.number().int().min(0, '0=Sunday .. 6=Saturday.').max(6, '0=Sunday .. 6=Saturday.'),
+    isClosed: z.boolean().default(false),
+    openTime: timeOfDaySchema.optional(),
+    closeTime: timeOfDaySchema.optional(),
+  })
+  .refine((h) => h.isClosed || (h.openTime && h.closeTime && h.openTime < h.closeTime), {
+    message: 'Open days need an open time earlier than the close time.',
+  });
+
+export const setHubWeeklyHoursSchema = z.object({
+  days: z
+    .array(hubOpeningDayInputSchema)
+    .max(7)
+    .refine((days) => new Set(days.map((d) => d.dayOfWeek)).size === days.length, {
+      message: 'Each day of the week may appear only once.',
+    }),
+});
+export type SetHubWeeklyHoursInput = z.infer<typeof setHubWeeklyHoursSchema>;
+
+/**
+ * A single hub hours exception (BMPL-262/263). MODIFIED needs BOTH an open
+ * and a close time, never one alone — the resolver (packages/shared/src/
+ * hub-hours.ts) requires both before it will compare an instant against
+ * them, and the database CHECK (hub_hours_exceptions_times_match_status)
+ * enforces the same rule. This refine exists so a caller gets a real
+ * validation message instead of a 500 from that constraint — it does not
+ * replace the constraint, which stays as the backstop for every writer that
+ * is not this endpoint.
+ */
+export const hubHoursExceptionStatusSchema = z.enum(HUB_HOURS_EXCEPTION_STATUSES);
+
+export const addHubHoursExceptionSchema = z
+  .object({
+    date: z.coerce.date(),
+    status: hubHoursExceptionStatusSchema,
+    openTime: timeOfDaySchema.optional(),
+    closeTime: timeOfDaySchema.optional(),
+    reason: z.string().trim().max(300).optional(),
+  })
+  .refine(
+    (e) =>
+      e.status === 'MODIFIED'
+        ? !!e.openTime && !!e.closeTime && e.openTime < e.closeTime
+        : e.openTime == null && e.closeTime == null,
+    { message: 'MODIFIED needs both an open time and a close time (open before close); CLOSED needs neither.' },
+  );
+export type AddHubHoursExceptionInput = z.infer<typeof addHubHoursExceptionSchema>;
 
 /** Admin adds (or reactivates) a member of a carrier organization. */
 export const addProviderMemberSchema = z.object({

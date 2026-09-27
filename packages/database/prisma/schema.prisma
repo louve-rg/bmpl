@@ -344,6 +344,9 @@ enum AuditAction {
   // exception added, exception removed) - the verb travels in newValue,
   // same precedent as the two actions immediately above.
   ROUTE_SCHEDULE_CHANGED
+  // BMPL-263: same shape as ROUTE_SCHEDULE_CHANGED immediately above, for the
+  // hub hours surface (weekly pattern set, exception added, exception removed).
+  HUB_HOURS_CHANGED
   WALLET_TOPUP_POSTED
   WALLET_ACCOUNT_STATUS_CHANGED
   WALLET_TEST_FUNDING_GRANTED

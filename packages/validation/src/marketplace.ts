@@ -12,7 +12,7 @@ import {
   VENDOR_APPROVAL_STATUSES,
   isWithinBelize,
 } from '@bmpl/shared';
-import { isLocatable } from './common';
+import { isLocatable, timeOfDaySchema } from './common';
 
 /**
  * Phase 2 marketplace validation building blocks.
@@ -54,11 +54,6 @@ export const moderationDecisionSchema = z.object({
   note: z.string().trim().max(2000).optional(),
 });
 export type ModerationDecision = z.infer<typeof moderationDecisionSchema>;
-
-/** HH:MM 24-hour time, used by vendor opening hours. */
-export const timeOfDaySchema = z
-  .string()
-  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use 24-hour HH:MM time.');
 
 // ---- Categories (M1) --------------------------------------------------------
 
