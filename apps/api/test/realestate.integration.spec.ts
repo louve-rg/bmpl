@@ -454,11 +454,18 @@ describe('dead listing statuses stay dead (BMPL-163)', () => {
  * 200/201 the action already returns.
  */
 describe('notification event codes are property-specific, not PRODUCT_MODERATED (BMPL-149)', () => {
-  async function latestEvent(userId: string) {
+  // `sinceId` (BMPL-242) narrows to a row created after a snapshot taken
+  // before the action under test, so a caller can prove ITS action produced
+  // the row rather than merely that a matching one exists somewhere in this
+  // user's history — see workflows.integration.spec.ts (BMPL-237) for why an
+  // `id: { gt }` comparison tracks creation order (cuid()) and for the
+  // discipline this follows. Omitted, this behaves exactly as before: every
+  // other call in this file is unaffected.
+  async function latestEvent(userId: string, sinceId?: string) {
     const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
-      where: { userId },
+      where: { userId, ...(sinceId ? { id: { gt: sinceId } } : {}) },
       include: { notification: true },
-      orderBy: { id: 'desc' },
+      orderBy: { id: sinceId ? 'asc' : 'desc' },
     });
     return row.notification.event;
   }
@@ -494,9 +501,17 @@ describe('notification event codes are property-specific, not PRODUCT_MODERATED 
     expect(mod.status).toBe(201);
     // APPROVE routes through notifyListers -> PROPERTY_LISTING_STATUS_CHANGED
     // for the admin-driven path (SUSPEND below is the same helper, no
-    // exceptUserId, so it also lands on the owner directly).
+    // exceptUserId, so it also lands on the owner directly). Both actions
+    // share that one event value (properties.service.ts's notifyListers),
+    // so an unscoped "latest" lookup after SUSPEND could not tell its own
+    // notification apart from APPROVE's leftover row above — snapshot
+    // before SUSPEND and require the row found to be newer (BMPL-242).
+    const beforeSuspend = await ctx.prisma.notificationRecipient.findFirst({
+      where: { userId: owner.userId },
+      orderBy: { id: 'desc' },
+    });
     expect((await post(admin, `admin/properties/${create.body.id}/moderate`, { action: 'SUSPEND' })).status).toBe(201);
-    expect(await latestEvent(owner.userId)).toBe('PROPERTY_LISTING_STATUS_CHANGED');
+    expect(await latestEvent(owner.userId, beforeSuspend?.id)).toBe('PROPERTY_LISTING_STATUS_CHANGED');
   });
 
   it('an agent invitation and its acceptance each carry their own event', async () => {
