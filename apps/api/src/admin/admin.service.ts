@@ -110,11 +110,20 @@ export class AdminService {
   }
 
   async applicationQueue(status?: 'PENDING' | 'MORE_INFO_REQUIRED') {
+    // isTest (BMPL-148): every role's applications share this one queue, and
+    // it had no way to tell a rehearsal applicant from a real one — a UAT
+    // audit walk left several permanent PENDING rows an admin could only
+    // identify by the applicant's own chosen email/name pattern. No new
+    // column: User.isTest already exists, is already admin-set, and this
+    // query already joins to `user` — this just selects a field that was
+    // already in reach. Every role type, not just EMPLOYER: the gap is
+    // identical for VENDOR/DELIVERY_DRIVER/etc., just never audited at this
+    // scale before.
     return this.prisma.roleApplication.findMany({
       where: { status: status ?? { in: ['PENDING', 'MORE_INFO_REQUIRED'] } },
       orderBy: { submittedAt: 'asc' },
       include: {
-        user: { select: { id: true, email: true, firstName: true, lastName: true } },
+        user: { select: { id: true, email: true, firstName: true, lastName: true, isTest: true } },
         documents: { select: { id: true, label: true } },
       },
     });
@@ -124,8 +133,11 @@ export class AdminService {
     const application = await this.prisma.roleApplication.findUnique({
       where: { id: applicationId },
       include: {
+        // isTest: same reasoning as applicationQueue above — the detail view
+        // an admin actually decides from should carry the same label the
+        // queue does.
         user: {
-          select: { id: true, email: true, firstName: true, lastName: true, district: true },
+          select: { id: true, email: true, firstName: true, lastName: true, district: true, isTest: true },
         },
         documents: true,
         reviews: {
