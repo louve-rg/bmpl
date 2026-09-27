@@ -587,16 +587,33 @@ export class VendorService {
         },
         tx,
       );
-      await this.notifications.createInApp(
-        {
-          userId: profile.userId,
-          type: 'MARKETPLACE',
-          title: plan.notifyTitle,
-          body: plan.notifyBody(profile.businessName, note),
-          data: { vendorProfileId: id, approvalStatus: plan.to },
-        },
-        tx,
-      );
+      // Approve/reject carry a catalog event (BMPL-230); suspend/restore have no
+      // catalog code of their own yet, so they keep the untagged notification
+      // rather than borrowing one that would misdescribe the transition.
+      if (kind === 'approve' || kind === 'reject') {
+        await this.notifications.createInApp(
+          {
+            userId: profile.userId,
+            type: 'MARKETPLACE',
+            event: kind === 'approve' ? 'VENDOR_APPROVED' : 'VENDOR_REJECTED',
+            title: plan.notifyTitle,
+            body: plan.notifyBody(profile.businessName, note),
+            data: { vendorProfileId: id, approvalStatus: plan.to },
+          },
+          tx,
+        );
+      } else {
+        await this.notifications.createInApp(
+          {
+            userId: profile.userId,
+            type: 'MARKETPLACE',
+            title: plan.notifyTitle,
+            body: plan.notifyBody(profile.businessName, note),
+            data: { vendorProfileId: id, approvalStatus: plan.to },
+          },
+          tx,
+        );
+      }
     });
     return this.adminGet(id);
   }
