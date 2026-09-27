@@ -124,7 +124,60 @@ The integration suite's `globalSetup` runs `prisma migrate deploy` against
 `TEST_DATABASE_URL`, so **the integration job is where a migration is really
 proven** before it reaches production. There is no substitute for running it.
 
-## 6. This package declares a `test` script and has no tests
+## 6. `migrate diff` / `migrate dev` will propose dropping real indexes — expected, not drift
+
+Migrations here are **hand-written** (§2). Prisma's auto-generated diff —
+whether from `prisma migrate dev` while authoring a new migration, or from
+`prisma migrate diff` run directly against a fully-migrated database — is a
+**draft to read, never a statement to apply as-is.** Against a completely
+correct, up-to-date database it will still propose `DROP INDEX`,
+`ALTER COLUMN ... DROP DEFAULT` and `RENAME INDEX` statements that must never
+be run. This has bitten the floor three times (July, a near-miss while
+authoring `20261104170100_hub_operating_hours`/BMPL-262, and a from-scratch
+`migrate diff` run for BMPL-264) because the reason was written down once,
+inside a migration file, where nobody not already reading that file could find
+it. It is written here now so the next person checks this section instead of
+treating the output as a regression.
+
+Three separate mechanisms produce this, each with its own fixability:
+
+1. **Objects Prisma's schema language cannot express at all.**
+   `products_search_idx` and `products_title_trgm_idx` are hand-written GIN
+   trigram indexes (`USING GIN (... gin_trgm_ops)`) on an `Unsupported`
+   tsvector column. Prisma cannot see them, so it proposes dropping them on
+   *every* diff, forever. This cannot be fixed by editing `schema.prisma` —
+   there is no representation for it. Original record:
+   `20260730120000_add_checkout_orders`'s own header comment, which named this
+   exactly and said the DROPs "are intentionally OMITTED here."
+2. **Objects Prisma could express but nobody declared.** `logistics_hubs_
+   isTest_isActive_idx`, `logistics_routes_isTest_isActive_idx` and `orders_
+   isTest_idx` are plain btree indexes, created by raw SQL directly in a
+   migration, never added to their models as `@@index`. Fixable in principle
+   — see the open question below — but not attempted, because the fix has its
+   own trap.
+3. **A Postgres identifier-length truncation, unrelated to the above.**
+   `courier_lanes`'s unique constraint name as written in
+   `20261102093000_courier_lanes` is 79 characters; Postgres's identifier
+   limit is 63 bytes, so the name actually stored is silently truncated while
+   Prisma still expects the name as literally written in the migration file.
+   `migrate diff` proposes a `RENAME INDEX` to reconcile them. Same
+   "expected, not drift" rule; a different, separate fix (shortening the
+   name) than either of the above.
+
+**Open question, deliberately not attempted:** could the three raw-SQL
+indexes in (2) be declared as `@@index` to shrink this trap to its
+irreducible GIN core? Likely yes, but it needs a migration Prisma believes is
+necessary — because as far as migration history is concerned, that index has
+never been declared — while being a **true no-op against every already-
+migrated database**, since the object already exists everywhere under that
+exact name from the original raw-SQL migration. That almost certainly means
+hand-writing `CREATE INDEX IF NOT EXISTS` under the *exact* pre-existing name
+(via `map:` in the `@@index`) rather than trusting `migrate dev`'s generated
+SQL, which would otherwise either create a duplicate differently-named index
+on a database that already has the old one, or error with "relation already
+exists." Not done this round.
+
+## 7. This package declares a `test` script and has no tests
 
 `pnpm turbo run test` therefore reports it as a failure, along with
 `@bmpl/authentication` and `@bmpl/notifications`. Pre-existing and tracked; CI
