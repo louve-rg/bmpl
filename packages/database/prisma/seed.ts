@@ -6,6 +6,8 @@
  *  * Creates a SUPER_ADMIN staff account (credentials from env).
  *  * Creates a few demo customers, including one pending VENDOR application,
  *    so the admin approval queue has something to review out of the box.
+ *  * Creates two permanent Belize Connect employer fixtures for apps/web/e2e
+ *    (BMPL-228) — see seedEmployerE2eFixtures() below before touching either.
  *
  * Run: pnpm db:seed   (after migrate)
  */
@@ -160,6 +162,101 @@ async function seedDemoData() {
     });
     console.info('✓ Seeded demo pending VENDOR application');
   }
+
+  await seedEmployerE2eFixtures();
+}
+
+/**
+ * Two permanent Belize Connect employer fixtures for apps/web/e2e (BMPL-228).
+ *
+ * Belize Connect has no isTest boundary (BMPL-148 is still open), and no API
+ * endpoint can delete an employer profile, a role application, or a job — so
+ * a committed browser test that created a fresh account every run would grow
+ * real, permanent, indistinguishable data forever. These two accounts exist
+ * so the journey can be re-run indefinitely against fixed, reusable state
+ * instead: seeded once, kept forever, same as maya/deshawn above.
+ *
+ * FIXTURE 1 mirrors an employer who already has a profile — safe to reuse
+ * for anything that needs one. Creating a job draft against it adds one
+ * permanent Job row per test run; that is accepted, bounded residue (visible
+ * in the admin jobs list, not queue-blocking — DRAFT has no moderation
+ * action available).
+ *
+ * FIXTURE 2 is the opposite, and it is a landmine BY DESIGN: its entire
+ * value to the empty-state regression test is that it has NEVER had a
+ * profile created. There is no way to undo a profile once created (no
+ * DELETE endpoint exists), so if any test — this one or a future,
+ * unrelated one — ever calls PUT /employer/profile for this account, the
+ * empty-state test breaks PERMANENTLY and silently: it will look like the
+ * page regressed, when actually the fixture was consumed. The account is
+ * named as a warning rather than an identifier for exactly this reason.
+ * DO NOT create a profile for it. DO NOT "fix" a failing empty-state test
+ * by giving this account a profile — that is the one action that cannot be
+ * undone here.
+ */
+async function seedEmployerE2eFixtures() {
+  const password = process.env.SEED_DEMO_PASSWORD ?? 'DemoPass123';
+
+  async function approveEmployerRole(userId: string) {
+    const userRole = await prisma.userRole.upsert({
+      where: { userId_roleCode: { userId, roleCode: 'EMPLOYER' } },
+      update: { status: 'APPROVED', approvedAt: new Date() },
+      create: { userId, roleCode: 'EMPLOYER', status: 'APPROVED', approvedAt: new Date() },
+    });
+    const existingApp = await prisma.roleApplication.findFirst({ where: { userId, roleCode: 'EMPLOYER' } });
+    if (!existingApp) {
+      await prisma.roleApplication.create({
+        data: {
+          userId,
+          roleCode: 'EMPLOYER',
+          userRoleId: userRole.id,
+          status: 'APPROVED',
+          decidedAt: new Date(),
+          message: 'BMPL-228 e2e fixture — pre-approved, not a real business.',
+          reviews: {
+            create: [
+              { action: 'SUBMITTED', toStatus: 'PENDING' },
+              { action: 'APPROVED', fromStatus: 'PENDING', toStatus: 'APPROVED' },
+            ],
+          },
+        },
+      });
+    }
+  }
+
+  // FIXTURE 1: approved employer WITH a profile already saved.
+  const withProfile = await createUser({
+    email: 'e2e-fixture.employer-with-profile@example.bz',
+    password,
+    firstName: 'E2E Fixture',
+    lastName: 'Employer (has a profile — BMPL-228, apps/web/e2e)',
+    verified: true,
+  });
+  await approveEmployerRole(withProfile.id);
+  await prisma.employerProfile.upsert({
+    where: { userId: withProfile.id },
+    update: {},
+    create: {
+      userId: withProfile.id,
+      companyName: 'BMPL-228 E2E Fixture Co.',
+      slug: 'bmpl-228-e2e-fixture-co',
+      contactEmail: 'e2e-fixture.employer-with-profile@example.bz',
+      approvalStatus: 'APPROVED',
+    },
+  });
+
+  // FIXTURE 2: approved employer that must NEVER have a profile. See the
+  // block comment above this function before touching anything here.
+  const noProfile = await createUser({
+    email: 'do-not-create-a-profile.e2e-fixture@example.bz',
+    password,
+    firstName: 'DO-NOT-GIVE-THIS-ACCOUNT-A-PROFILE',
+    lastName: '(e2e fixture — BMPL-228, see seed.ts)',
+    verified: true,
+  });
+  await approveEmployerRole(noProfile.id);
+
+  console.info('✓ Seeded Belize Connect e2e fixtures (BMPL-228): 1 with a profile, 1 permanently without');
 }
 
 /** Baseline Belize Connect job categories (managed reference data). Idempotent
