@@ -149,12 +149,12 @@ Three separate mechanisms produce this, each with its own fixability:
    there is no representation for it. Original record:
    `20260730120000_add_checkout_orders`'s own header comment, which named this
    exactly and said the DROPs "are intentionally OMITTED here."
-2. **Objects Prisma could express but nobody declared.** `logistics_hubs_
-   isTest_isActive_idx`, `logistics_routes_isTest_isActive_idx` and `orders_
-   isTest_idx` are plain btree indexes, created by raw SQL directly in a
-   migration, never added to their models as `@@index`. Fixable in principle
-   — see the open question below — but not attempted, because the fix has its
-   own trap.
+2. **Objects Prisma could express but nobody declared.**
+   `logistics_hubs_isTest_isActive_idx`, `logistics_routes_isTest_isActive_idx`
+   and `orders_isTest_idx` are plain btree indexes, created by raw SQL
+   directly in a migration, never added to their models as `@@index`. Fixable
+   in principle — see the open question below — but not attempted, because
+   the fix has its own trap.
 3. **A Postgres identifier-length truncation, unrelated to the above.**
    `courier_lanes`'s unique constraint name as written in
    `20261102093000_courier_lanes` is 79 characters; Postgres's identifier
@@ -168,9 +168,10 @@ Three separate mechanisms produce this, each with its own fixability:
 indexes in (2) be declared as `@@index` to shrink this trap to its
 irreducible GIN core? Likely yes, but it needs a migration Prisma believes is
 necessary — because as far as migration history is concerned, that index has
-never been declared — while being a **true no-op against every already-
-migrated database**, since the object already exists everywhere under that
-exact name from the original raw-SQL migration. That almost certainly means
+never been declared — while being a **true no-op against every
+already-migrated database**, since the object already exists everywhere
+under that exact name from the original raw-SQL migration. That almost
+certainly means
 hand-writing `CREATE INDEX IF NOT EXISTS` under the *exact* pre-existing name
 (via `map:` in the `@@index`) rather than trusting `migrate dev`'s generated
 SQL, which would otherwise either create a duplicate differently-named index
