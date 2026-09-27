@@ -195,6 +195,14 @@ describe('reservation concurrency (BMPL-256)', () => {
     // serialize favourably) even with the lock removed, then correctly
     // reddened on a second run. 50ms is comfortably inside A's 300ms hold
     // and comfortably longer than A's own reserve() call takes.
+    //
+    // The timing is load-bearing only for making this test REDDEN against
+    // unlocked code — not for the assertion itself. With the lock in place
+    // the outcome is order-independent: whichever racer's FOR UPDATE is
+    // granted first reserves the unit and the other is refused, regardless
+    // of who started first. Do not "simplify" this by removing the sleep or
+    // the head start — that would quietly destroy the ability to prove the
+    // lock does anything at all, while the assertions below would still pass.
     await new Promise((resolve) => setTimeout(resolve, 50));
     const racerB = ctx.prisma.$transaction(async (tx) => {
       await inventoryService.reserve(inv.id, 1, tx);
@@ -204,6 +212,16 @@ describe('reservation concurrency (BMPL-256)', () => {
     const outcomes = results.map((r) => r.status);
     expect(outcomes.filter((s) => s === 'fulfilled')).toHaveLength(1);
     expect(outcomes.filter((s) => s === 'rejected')).toHaveLength(1);
+
+    // Not just "one rejected" — for the RIGHT reason. A lock timeout, pool
+    // exhaustion, or a deadlock would satisfy the two assertions above just
+    // as well, and reserved === 1 below would still hold — that is exactly
+    // the family of defect this whole floor spent today removing. If a
+    // future change turned this clean refusal into some other failure, the
+    // customer would get a 500 instead of an out-of-stock message, and
+    // without this assertion the test would stay green through that.
+    const rejected = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')!;
+    expect((rejected.reason as Error).message).toBe('Insufficient stock to reserve.');
 
     // Not just "one refused" — the counter itself must land exactly right:
     // one unit reserved, none left, nothing double-booked.
