@@ -231,4 +231,89 @@ describe('admin hub hours', () => {
     const managerCookies = await loginAs(manager.email, manager.password);
     expect((await put(managerCookies, `admin/logistics/hubs/${hubId}/hours`, { days: [{ dayOfWeek: 0, isClosed: true }] })).status).toBe(200);
   });
+
+  // BMPL-271: read-only "is this terminal open" answer, composed from the
+  // already-merged resolveHoursStatus/nextOpenWindow. No call site anywhere
+  // else reads this endpoint - configuration in, an answer out, nothing
+  // gated by it.
+  describe('hub hours status (read-only)', () => {
+    /** Belize is a fixed UTC-6, no DST (belize-time.ts). Same convention as
+     *  packages/shared/src/hub-hours.test.ts: 2026-11-02 is a Monday. */
+    const belizeInstant = (year: number, month: number, day: number, hour = 12, minute = 0) =>
+      new Date(Date.UTC(year, month - 1, day, hour + 6, minute, 0)).toISOString();
+
+    it('an unconfigured hub is reported unconstrained, never open-by-schedule or closed', async () => {
+      const hubId = await makeHub();
+      const res = await get(admin, `admin/logistics/hubs/${hubId}/hours/status?at=${belizeInstant(2026, 11, 2, 14, 0)}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ configured: false, isOpen: true, openTime: null, closeTime: null, nextOpen: null });
+    });
+
+    it('reports open/closed against a configured weekly pattern, and the next open window while closed', async () => {
+      const hubId = await makeHub();
+      expect(
+        (
+          await put(admin, `admin/logistics/hubs/${hubId}/hours`, {
+            days: [{ dayOfWeek: 1, isClosed: false, openTime: '08:00', closeTime: '17:00' }],
+          })
+        ).status,
+      ).toBe(200);
+
+      const open = await get(admin, `admin/logistics/hubs/${hubId}/hours/status?at=${belizeInstant(2026, 11, 2, 14, 0)}`);
+      expect(open.status).toBe(200);
+      expect(open.body).toMatchObject({ configured: true, isOpen: true, openTime: '08:00', closeTime: '17:00' });
+
+      // Before opening: today's own window has not ended, so it is still next.
+      const beforeOpen = await get(admin, `admin/logistics/hubs/${hubId}/hours/status?at=${belizeInstant(2026, 11, 2, 6, 0)}`);
+      expect(beforeOpen.status).toBe(200);
+      expect(beforeOpen.body).toMatchObject({
+        configured: true,
+        isOpen: false,
+        nextOpen: { date: '2026-11-02', openTime: '08:00', closeTime: '17:00' },
+      });
+
+      // After closing: Tuesday has no configured row, so it is the next
+      // UNCONSTRAINED date - reported with null times, never invented hours.
+      const afterClose = await get(admin, `admin/logistics/hubs/${hubId}/hours/status?at=${belizeInstant(2026, 11, 2, 19, 0)}`);
+      expect(afterClose.status).toBe(200);
+      expect(afterClose.body).toMatchObject({
+        configured: true,
+        isOpen: false,
+        nextOpen: { date: '2026-11-03', openTime: null, closeTime: null },
+      });
+    });
+
+    it('a hub configured closed every day reports no next-open window within the horizon', async () => {
+      const hubId = await makeHub();
+      const days = [0, 1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({ dayOfWeek, isClosed: true }));
+      expect((await put(admin, `admin/logistics/hubs/${hubId}/hours`, { days })).status).toBe(200);
+      const res = await get(admin, `admin/logistics/hubs/${hubId}/hours/status?at=${belizeInstant(2026, 11, 2, 12, 0)}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ configured: true, isOpen: false, nextOpen: null });
+    });
+
+    it('defaults to the server clock when `at` is omitted', async () => {
+      const hubId = await makeHub();
+      const res = await get(admin, `admin/logistics/hubs/${hubId}/hours/status`);
+      expect(res.status).toBe(200);
+      expect(res.body.configured).toBe(false);
+      expect(Math.abs(new Date(res.body.at).getTime() - Date.now())).toBeLessThan(5000);
+    });
+
+    it('rejects an unparseable `at`', async () => {
+      const hubId = await makeHub();
+      expect((await get(admin, `admin/logistics/hubs/${hubId}/hours/status?at=not-a-date`)).status).toBe(400);
+    });
+
+    it('a missing hub 404s', async () => {
+      expect((await get(admin, `admin/logistics/hubs/nonexistent00000000000000/hours/status`)).status).toBe(404);
+    });
+
+    it('logistics.read may view status', async () => {
+      const hubId = await makeHub();
+      const reader = await seedLimitedAdmin(ctx.prisma, `hstatusreader_${uniq()}@example.bz`, ['logistics.read']);
+      const readerCookies = await loginAs(reader.email, reader.password);
+      expect((await get(readerCookies, `admin/logistics/hubs/${hubId}/hours/status`)).status).toBe(200);
+    });
+  });
 });

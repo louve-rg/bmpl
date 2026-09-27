@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
   assignShipmentLegSchema,
@@ -329,6 +329,25 @@ export class AdminLogisticsController {
   @Delete('hubs/:id/hours/exceptions/:exceptionId')
   removeHubHoursException(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('exceptionId') exceptionId: string) {
     return this.network.removeHubHoursException(id, exceptionId, u.userId);
+  }
+
+  /**
+   * Read-only: is this hub open right now, or at a supplied instant, and if
+   * not, when does it next open (BMPL-271). `at` is an optional explicit
+   * override for "what about at this time" — the default is always this
+   * server's own clock, never a client-supplied one. Nothing else in the
+   * system calls this: it answers a question for operations, it does not
+   * gate or warn about anything on its own.
+   */
+  @RequirePermission('logistics.read')
+  @Get('hubs/:id/hours/status')
+  hubHoursStatus(@Param('id') id: string, @Query('at') at?: string) {
+    let instant: Date | undefined;
+    if (at !== undefined) {
+      instant = new Date(at);
+      if (Number.isNaN(instant.getTime())) throw new BadRequestException('at must be a valid ISO date-time.');
+    }
+    return this.network.hubHoursStatus(id, instant);
   }
 
   /**
