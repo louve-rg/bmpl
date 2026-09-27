@@ -556,7 +556,9 @@ migrations were applied by CI against real Postgres before the merge.
 Everything about the fix is proven in CI against real Postgres, and it is live
 on production — but nobody has yet opened it in a phone browser and watched the
 pin drop. Edward reported the bug from a phone, so that is the test that
-settles it, and no session so far has had browser automation available.
+settles it. A real-browser Playwright harness exists now (`apps/web/e2e`) but
+is deliberately never pointed at deployed production — this walk touches real
+data and a real payment path — so this is waiting on a person, not on tooling.
 
 **The script to run is [`docs/quality/MARKETPLACE-ADDRESS-QA.md`](quality/MARKETPLACE-ADDRESS-QA.md)**
 — step by step, with what a pass looks like at each width, and a UAT account
