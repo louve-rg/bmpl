@@ -80,6 +80,9 @@ node -e "console.log('COOKIE_SECRET=' + require('crypto').randomBytes(48).toStri
 
 # 3. Start infrastructure (Postgres 5432, Redis 6379, MinIO 9000/9001)
 pnpm infra:up
+# If this fails pulling the MinIO image with an unauthorized/access-denied
+# error, see docs/PROJECT_STATUS.md §12 "Repository housekeeping" — it's a
+# vendor registry change (2026-09-27), not this repo's configuration.
 
 # 4. Build shared packages + generate the Prisma client
 pnpm db:generate
