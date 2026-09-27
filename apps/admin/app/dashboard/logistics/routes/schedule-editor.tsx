@@ -41,7 +41,7 @@ function fullWeek(configured: ScheduleDay[]): ScheduleDay[] {
   });
 }
 
-export function RouteScheduleEditor({ routeId }: { routeId: string }) {
+export function RouteScheduleEditor({ routeId, canManage }: { routeId: string; canManage: boolean }) {
   const [days, setDays] = useState<ScheduleDay[] | null>(null);
   const [exceptions, setExceptions] = useState<ScheduleException[]>([]);
   const [loading, setLoading] = useState(true);
@@ -131,37 +131,48 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
         {days.map((d, i) => (
           <div key={d.dayOfWeek} className="rounded-md border border-slate-200 p-2">
             <div className="text-xs font-semibold text-slate-700">{DAY_LABELS[d.dayOfWeek]}</div>
-            <Select
-              className="mt-1 text-xs"
-              value={d.status}
-              onChange={(e) => {
-                const next = [...days];
-                next[i] = { ...d, status: e.target.value as Status };
-                setDays(next);
-              }}
-            >
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-              ))}
-            </Select>
-            {d.status === 'REDUCED' && (
-              <Input
-                className="mt-1 text-xs"
-                placeholder="Why reduced?"
-                value={d.note ?? ''}
-                onChange={(e) => {
-                  const next = [...days];
-                  next[i] = { ...d, note: e.target.value };
-                  setDays(next);
-                }}
-              />
+            {canManage ? (
+              <>
+                <Select
+                  className="mt-1 text-xs"
+                  value={d.status}
+                  onChange={(e) => {
+                    const next = [...days];
+                    next[i] = { ...d, status: e.target.value as Status };
+                    setDays(next);
+                  }}
+                >
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                  ))}
+                </Select>
+                {d.status === 'REDUCED' && (
+                  <Input
+                    className="mt-1 text-xs"
+                    placeholder="Why reduced?"
+                    value={d.note ?? ''}
+                    onChange={(e) => {
+                      const next = [...days];
+                      next[i] = { ...d, note: e.target.value };
+                      setDays(next);
+                    }}
+                  />
+                )}
+              </>
+            ) : (
+              <p className="mt-1 text-xs text-slate-600">
+                {STATUS_LABELS[d.status]}
+                {d.status === 'REDUCED' && d.note ? ` (${d.note})` : ''}
+              </p>
             )}
           </div>
         ))}
       </div>
-      <Button size="sm" className="mt-2" onClick={() => void saveWeek()} disabled={savingWeek}>
-        {savingWeek ? 'Saving…' : 'Save weekly pattern'}
-      </Button>
+      {canManage && (
+        <Button size="sm" className="mt-2" onClick={() => void saveWeek()} disabled={savingWeek}>
+          {savingWeek ? 'Saving…' : 'Save weekly pattern'}
+        </Button>
+      )}
 
       <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Date-specific exceptions</h3>
       <p className="mt-1 text-xs text-slate-500">A known future closure, a carrier-observed holiday, a one-off reduced run — overrides the weekly pattern for that date only.</p>
@@ -175,36 +186,42 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
                 <strong>{e.date}</strong> — {STATUS_LABELS[e.status]}
                 {e.reason ? ` (${e.reason})` : ''}
               </span>
-              <Button variant="outline" size="sm" onClick={() => void removeException(e.id)}>Remove</Button>
+              {canManage && (
+                <Button variant="outline" size="sm" onClick={() => void removeException(e.id)}>Remove</Button>
+              )}
             </li>
           ))}
         </ul>
       )}
-      <div className="mt-2 grid gap-2 sm:grid-cols-4">
-        <Input
-          type="date"
-          value={newException.date}
-          onChange={(e) => setNewException({ ...newException, date: e.target.value })}
-        />
-        <Select
-          value={newException.status}
-          onChange={(e) => setNewException({ ...newException, status: e.target.value as Status })}
-        >
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-          ))}
-        </Select>
-        <Textarea
-          className="sm:col-span-2"
-          placeholder="Reason (the carrier's own words - never invented here)"
-          value={newException.reason}
-          onChange={(e) => setNewException({ ...newException, reason: e.target.value })}
-          rows={1}
-        />
-      </div>
-      <Button size="sm" className="mt-2" onClick={() => void addException()} disabled={addingException || !newException.date}>
-        {addingException ? 'Adding…' : 'Add exception'}
-      </Button>
+      {canManage && (
+        <>
+          <div className="mt-2 grid gap-2 sm:grid-cols-4">
+            <Input
+              type="date"
+              value={newException.date}
+              onChange={(e) => setNewException({ ...newException, date: e.target.value })}
+            />
+            <Select
+              value={newException.status}
+              onChange={(e) => setNewException({ ...newException, status: e.target.value as Status })}
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+              ))}
+            </Select>
+            <Textarea
+              className="sm:col-span-2"
+              placeholder="Reason (the carrier's own words - never invented here)"
+              value={newException.reason}
+              onChange={(e) => setNewException({ ...newException, reason: e.target.value })}
+              rows={1}
+            />
+          </div>
+          <Button size="sm" className="mt-2" onClick={() => void addException()} disabled={addingException || !newException.date}>
+            {addingException ? 'Adding…' : 'Add exception'}
+          </Button>
+        </>
+      )}
     </div>
   );
 }
