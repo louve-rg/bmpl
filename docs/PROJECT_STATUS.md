@@ -750,10 +750,14 @@ corrected 2026-09-26 against `cfc4d7a`:
     real locally: `pnpm infra:up && pnpm db:seed`, a running API, then
     `pnpm --filter @bmpl/web test:e2e`.
   `apps/admin` has no component-rendering test framework, but it is not
-  untested: 11 committed `vitest` spec files under `apps/admin/lib/` cover
-  pure-function logic (access control, dispatch assignment, hub editing, and
-  more) — the same pure-function-unit-test pattern the rest of this bullet
-  describes. No admin UI is verified by rendering it in a test. Every UI
+  untested: 11 committed `vitest` spec files cover pure-function logic (access
+  control, dispatch assignment, hub editing, and more) — ten under
+  `apps/admin/lib/`, plus `next.config.mjs`'s own default-guard test at the app
+  root, which `vitest.config.ts` deliberately includes with a second pattern
+  (`'*.test.mjs'`) because that file "can't move into `lib/` (Next loads it
+  directly as plain Node ESM, not through the app's TS build) but still needs
+  its own default-guard behavior under test." No admin UI is verified by
+  rendering it in a test. Every UI
   behaviour in both apps is verified by a pure-function unit test of the logic
   behind it, a real-browser Playwright spec (web only, and only where listed
   above), or a person.
