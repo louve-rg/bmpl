@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, type ApiError } from '../lib/api';
 import { Alert, Button, Card } from './ui';
 
@@ -21,10 +21,39 @@ const money = (c: number) => `$${(c / 100).toFixed(2)}`;
  * makes simulated money.
  */
 export function WalletOperations({ onChanged }: { onChanged?: () => void }) {
+  // Each card is drawn only for the specific permission its own write call
+  // needs — wallet.credit_test and wallet.reconcile are two different,
+  // HIGHLY RESTRICTED permissions (neither is in any standing bundle), not
+  // one boolean covering both. /me returns the same grant rows the
+  // PermissionsGuard evaluates, so what this screen shows and what the API
+  // enforces cannot disagree. On any doubt (request fails, field absent)
+  // both stay hidden: fail closed. Reaching this component only ever needed
+  // wallet.read (BMPL-270) — until now, anyone who could view the wallet
+  // page also saw both money-creation forms rendered, whether or not they
+  // held either restricted permission.
+  const [canCreditTest, setCanCreditTest] = useState(false);
+  const [canReconcile, setCanReconcile] = useState(false);
+
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => {
+        const perms = me.adminPermissions ?? [];
+        setCanCreditTest(perms.includes('wallet.credit_test'));
+        setCanReconcile(perms.includes('wallet.reconcile'));
+      })
+      .catch(() => {
+        setCanCreditTest(false);
+        setCanReconcile(false);
+      });
+  }, []);
+
+  if (!canCreditTest && !canReconcile) return null;
+
   return (
     <div className="mb-8 grid gap-3 lg:grid-cols-2">
-      <TestCreditCard onChanged={onChanged} />
-      <StaleHoldCard onChanged={onChanged} />
+      {canCreditTest && <TestCreditCard onChanged={onChanged} />}
+      {canReconcile && <StaleHoldCard onChanged={onChanged} />}
     </div>
   );
 }

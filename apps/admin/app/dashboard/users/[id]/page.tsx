@@ -34,6 +34,24 @@ export default async function UserDetailPage({ params }: { params: { id: string 
   }
   const u = res.data;
 
+  // Suspend/restore/revoke a role, and suspend/restore an account, are FIVE
+  // distinct permissions (roles.suspend/restore/revoke, users.suspend/
+  // restore) — not one boolean. /me returns the same grant rows the
+  // PermissionsGuard evaluates, so what this screen shows and what the API
+  // enforces cannot disagree. Fetched server-side, before the page ever
+  // renders, so there is no flash of a control that then disappears; on any
+  // doubt (request fails, field absent) every action stays hidden: fail
+  // closed. This page only ever needed users.read to load (BMPL-270) —
+  // until now, anyone who could view a user's detail page saw every one of
+  // these controls rendered, whether or not they held any of the five.
+  const me = await serverGet<{ adminPermissions?: string[] }>('/me');
+  const myPerms = me.ok ? (me.data.adminPermissions ?? []) : [];
+  const canSuspendRole = myPerms.includes('roles.suspend');
+  const canRestoreRole = myPerms.includes('roles.restore');
+  const canRevokeRole = myPerms.includes('roles.revoke');
+  const canSuspendAccount = myPerms.includes('users.suspend');
+  const canRestoreAccount = myPerms.includes('users.restore');
+
   return (
     <div className="mx-auto max-w-3xl">
       <Breadcrumbs items={adminCrumbs(['Users', '/dashboard/users'], `${u.firstName} ${u.lastName}`)} className="mb-3" />
@@ -55,7 +73,7 @@ export default async function UserDetailPage({ params }: { params: { id: string 
         </div>
         <div className="flex flex-col items-end gap-2">
           <StatusBadge status={u.status} />
-          <AccountActions userId={u.id} status={u.status} />
+          <AccountActions userId={u.id} status={u.status} canSuspend={canSuspendAccount} canRestore={canRestoreAccount} />
         </div>
       </header>
 
@@ -70,7 +88,14 @@ export default async function UserDetailPage({ params }: { params: { id: string 
               </div>
               <div className="flex items-center gap-3">
                 <StatusBadge status={r.status} />
-                <RoleActions userId={u.id} roleCode={r.roleCode} status={r.status} />
+                <RoleActions
+                  userId={u.id}
+                  roleCode={r.roleCode}
+                  status={r.status}
+                  canSuspend={canSuspendRole}
+                  canRestore={canRestoreRole}
+                  canRevoke={canRevokeRole}
+                />
               </div>
             </li>
           ))}

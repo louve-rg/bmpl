@@ -13,6 +13,13 @@ import { Button, Field, Select, Spinner, Textarea } from '../ui';
  * online, approved, in-district and driving an approved vehicle with valid
  * documents, and this screen does not re-rank, re-sort or invent any figure
  * (distance, ETA, capacity) the endpoint does not send.
+ *
+ * No permission check lives IN this modal (BMPL-270): its only trigger — the
+ * "Assign driver"/"Reassign" link on the logistics board — is itself gated
+ * on logistics.operate in logistics/page.tsx, the same permission every
+ * write below needs. A viewer without it never sees the trigger, so this
+ * component never mounts for them; there is no informational content here
+ * worth showing a non-operator the way, say, a rate or a schedule is.
  */
 
 interface EligibleVehicle {

@@ -75,6 +75,19 @@ export default function LogisticsOpsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<{ leg: OpsLeg; mode: 'assign' | 'reassign' } | null>(null);
   const [hiddenSimulation, setHiddenSimulation] = useState(0);
+  const [canOperate, setCanOperate] = useState(false);
+
+  // Assigning/reassigning a courier leg needs logistics.operate — the same
+  // permission LegAssignModal's own writes require, so the trigger below and
+  // the form it opens can never disagree. /me returns the same grant rows
+  // the PermissionsGuard evaluates; on any doubt it stays hidden: fail
+  // closed. This board only ever needed logistics.read to load (BMPL-270).
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanOperate((me.adminPermissions ?? []).includes('logistics.operate')))
+      .catch(() => setCanOperate(false));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -227,7 +240,7 @@ export default function LogisticsOpsPage() {
                       {state.label}
                     </Badge>
                     {leg.operator && <span className="ml-1.5 text-slate-500">{leg.operator}</span>}
-                    {mode && (
+                    {canOperate && mode && (
                       <button
                         type="button"
                         onClick={() => setAssigning({ leg, mode })}
