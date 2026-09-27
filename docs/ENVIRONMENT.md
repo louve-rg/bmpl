@@ -114,7 +114,7 @@ Setting a provider turns on automatic approval and rejection.
 
 | Name | App | Req? | Secret? | Purpose | Example |
 |---|---|---|---|---|---|
-| `ADMIN_PUBLIC_API_URL` | admin | ✅ | 🌐 | Proxy target for `/api/*` | `https://bmplapi-production.up.railway.app` |
+| `ADMIN_PUBLIC_API_URL` | admin | ✅(build) | 🌐 | Proxy target for `/api/*` — `next.config.mjs` throws while *building* if unset, so the build cannot even start without it, not just a runtime check | `https://bmplapi-production.up.railway.app` |
 | `ADMIN_SITE_URL` | admin,api | ⭕ | 🌐 | Canonical admin URL | `https://bmpl-admin.vercel.app` |
 | `NEXT_PUBLIC_SENTRY_DSN` | admin | ⭕ | 🌐 | Browser Sentry DSN | `https://«key»@o0.ingest.sentry.io/0` |
 

@@ -743,6 +743,19 @@ corrected 2026-09-26 against `cfc4d7a`:
   lockfile and the `.npmrc` `ignore-workspace-root-check` flag added alongside it
   were reverted; `.mcp.json` and the `.gstack/` gitignore entry were kept.
   `pnpm install --frozen-lockfile` passes.
+- **MinIO's public container images are gone (2026-09-27).** The image pinned
+  in `docker-compose.yml` (`quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`)
+  can no longer be pulled by anyone — the registry now refuses anonymous
+  access repo-wide and no public copy survives on any registry. Established
+  by bmpl-qa, confirmed independently. `pnpm infra:up` on a machine with no
+  cached copy of that image fails with an unauthorized/access-denied error
+  pulling it. **This is a vendor distribution change, not a problem with this
+  repo's configuration or credentials.** A machine that already has the image
+  cached keeps working, which is why it may work fine for a teammate.
+  **Production is unaffected**: deployed environments use Cloudflare R2
+  (`STORAGE_PROVIDER` defaults to `r2` — see `ENVIRONMENT.md`), and MinIO is a
+  local-and-CI stand-in only. The replacement is an open decision for the
+  owner, not an oversight — see BMPL-188.
 
 ---
 ## 13. Working on this repo
