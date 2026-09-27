@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { PlannerHub, PlannerLane, PlannerRoute, ScheduleException, WeeklyOperatingDay } from '@bmpl/shared';
+import { nextOpenWindow, resolveHoursStatus } from '@bmpl/shared';
+import type { HoursException, PlannerHub, PlannerLane, PlannerRoute, ScheduleException, WeeklyOperatingDay, WeeklyOpeningHours } from '@bmpl/shared';
 import type {
   AddHubHoursExceptionInput,
   AddRouteScheduleExceptionInput,
@@ -497,6 +498,57 @@ export class LogisticsNetworkService {
 
   private hubExceptionOut(e: { id: string; date: Date; status: string; openTime: string | null; closeTime: string | null; reason: string | null }) {
     return { id: e.id, date: e.date.toISOString().slice(0, 10), status: e.status, openTime: e.openTime, closeTime: e.closeTime, reason: e.reason };
+  }
+
+  /**
+   * Read-only: is this hub open at `at` (server clock if omitted), and if
+   * not, when does it next open (BMPL-271). Composes the two pure resolvers
+   * from packages/shared/src/hub-hours.ts — no resolution logic lives here,
+   * and nothing here writes anything or is called from anywhere but the one
+   * admin endpoint above.
+   *
+   * `configured` answers the exact question the admin console already had to
+   * get right: a hub with zero HubOpeningDay/HubHoursException rows is
+   * UNCONSTRAINED, not open-by-schedule and not closed. `isOpen` is still
+   * `true` for an unconfigured hub (unconstrained means nothing blocks it),
+   * but collapsing that into a bare boolean would teach operations the
+   * opposite of what the console's own UI already carefully distinguishes —
+   * `configured: false` is what lets a caller tell the two apart.
+   */
+  async hubHoursStatus(hubId: string, at?: Date) {
+    const hub = await this.prisma.logisticsHub.findUnique({ where: { id: hubId }, select: { id: true } });
+    if (!hub) throw new NotFoundException('Hub not found.');
+    const instant = at ?? new Date();
+    const [days, exceptions] = await Promise.all([
+      this.prisma.hubOpeningDay.findMany({ where: { hubId } }),
+      this.prisma.hubHoursException.findMany({ where: { hubId } }),
+    ]);
+    const weeklyPattern: WeeklyOpeningHours[] = days.map((d) => ({
+      dayOfWeek: d.dayOfWeek,
+      openTime: d.openTime,
+      closeTime: d.closeTime,
+      isClosed: d.isClosed,
+    }));
+    const hoursExceptions: HoursException[] = exceptions.map((e) => ({
+      date: e.date,
+      status: e.status as HoursException['status'],
+      openTime: e.openTime,
+      closeTime: e.closeTime,
+      reason: e.reason,
+    }));
+    const resolution = resolveHoursStatus(instant, weeklyPattern, hoursExceptions);
+    const next = resolution.isOpen ? null : nextOpenWindow(instant, weeklyPattern, hoursExceptions);
+    return {
+      hubId,
+      at: instant.toISOString(),
+      configured: days.length > 0 || exceptions.length > 0,
+      isOpen: resolution.isOpen,
+      openTime: resolution.openTime,
+      closeTime: resolution.closeTime,
+      isException: resolution.isException,
+      reason: resolution.reason,
+      nextOpen: next ? { date: next.date.toISOString().slice(0, 10), openTime: next.openTime, closeTime: next.closeTime } : null,
+    };
   }
 
   /* -------------------------------------------------------- courier lanes */
