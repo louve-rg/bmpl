@@ -32,14 +32,10 @@ jobs:
       # connected to (nothing in this job makes a network call), same as the
       # DATABASE_URL/DIRECT_URL dummies above.
       #
-      # FORWARD WARNING, same trap, not yet sprung: apps/web still silently
-      # defaults NEXT_PUBLIC_API_URL to the production API (BMPL-227 will fix
-      # that the same way BMPL-224 fixed admin). The moment it does, "Build
-      # web" below breaks in CI for the identical reason. Whoever lands
-      # BMPL-227 must add NEXT_PUBLIC_API_URL to this env block in the SAME
-      # commit — do not add it here pre-emptively, since setting it now would
-      # change what today's CI web build embeds.
+      # apps/web/next.config.mjs and apps/web/lib/server-api.ts do the same
+      # (BMPL-227) — "Build web" below equally cannot start without this.
       ADMIN_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
     steps:
       - uses: actions/checkout@v4
 
