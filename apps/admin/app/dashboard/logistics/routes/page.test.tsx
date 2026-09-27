@@ -29,6 +29,14 @@ const ROUTE = {
   isActive: true,
 };
 
+const SCHEDULE = {
+  days: [
+    { dayOfWeek: 1, status: 'REDUCED', note: 'Weather' },
+    { dayOfWeek: 2, status: 'NOT_OPERATING', note: null },
+  ],
+  exceptions: [{ id: 'exc_1', date: '2026-12-25', status: 'NOT_OPERATING', reason: 'Holiday' }],
+};
+
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
@@ -41,6 +49,7 @@ function stubFetch(adminPermissions: string[]) {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes('/api/admin/logistics/routes/route_1/schedule')) return jsonResponse(200, SCHEDULE);
       if (url.includes('/api/admin/logistics/routes')) return jsonResponse(200, [ROUTE]);
       if (url.includes('/api/admin/logistics/hubs')) return jsonResponse(200, [HUB]);
       if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
@@ -63,6 +72,23 @@ async function mount() {
 
 function buttonTexts(): string[] {
   return Array.from(document.body.querySelectorAll('button')).map((b) => b.textContent?.trim() ?? '');
+}
+
+/** Opens the Schedule panel the same way an operator would — clicking the
+ *  toggle — rather than asserting against whatever the page shows by
+ *  default. A test that never opens the panel would pass while everything
+ *  inside it regressed. */
+async function openSchedulePanel() {
+  const toggle = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(
+    (b) => b.textContent?.trim() === 'Schedule',
+  );
+  if (!toggle) throw new Error('Schedule toggle not found');
+  await act(async () => {
+    toggle.click();
+  });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
 }
 
 afterEach(() => {
@@ -102,5 +128,42 @@ describe('RoutesPage — write affordances gated on logistics.manage (BMPL-274)'
     expect(texts).toContain('Add route');
     expect(texts).toContain('Suspend');
     expect(document.body.querySelector('#route-mode')).not.toBeNull();
+  });
+});
+
+describe('RouteScheduleEditor — the toggle-revealed panel, where most of BMPL-267 actually lives (BMPL-277)', () => {
+  it('a logistics.read-only reader sees no write affordance inside the open panel, and the schedule still renders as text', async () => {
+    stubFetch(['logistics.read']);
+    await mount();
+    await openSchedulePanel();
+
+    const texts = buttonTexts();
+    expect(texts).not.toContain('Save weekly pattern');
+    expect(texts).not.toContain('Remove');
+    expect(texts).not.toContain('Add exception');
+    expect(document.body.querySelector('select')).toBeNull();
+    expect(document.body.querySelectorAll('button[disabled]').length).toBe(0);
+
+    // Report-not-form: every day and the exception are still information.
+    expect(document.body.textContent).toMatch(/Reduced/);
+    expect(document.body.textContent).toMatch(/Weather/);
+    expect(document.body.textContent).toMatch(/Not operating/);
+    expect(document.body.textContent).toMatch(/2026-12-25/);
+    expect(document.body.textContent).toMatch(/Holiday/);
+    // Days with no configured row at all still report their real default
+    // (operating), never a blank.
+    expect(document.body.textContent).toMatch(/Operating/);
+  });
+
+  it('a logistics.manage operator sees every write affordance inside the open panel', async () => {
+    stubFetch(['logistics.manage']);
+    await mount();
+    await openSchedulePanel();
+
+    const texts = buttonTexts();
+    expect(texts).toContain('Save weekly pattern');
+    expect(texts).toContain('Remove');
+    expect(texts).toContain('Add exception');
+    expect(document.body.querySelector('select')).not.toBeNull();
   });
 });
