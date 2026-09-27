@@ -56,6 +56,7 @@ export default function RoutesPage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [scheduleFor, setScheduleFor] = useState<string | null>(null);
+  const [canManage, setCanManage] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -76,6 +77,19 @@ export default function RoutesPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The edit affordance is drawn only for logistics.manage — /me returns the
+  // same grant rows the PermissionsGuard evaluates (BMPL-47), so what this
+  // screen shows and what the API enforces cannot disagree. On any doubt
+  // (request fails, field absent) it stays hidden: fail closed. Same pattern
+  // as hubs/page.tsx (BMPL-142), applied here (BMPL-267) after this page
+  // shipped without it.
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanManage((me.adminPermissions ?? []).includes('logistics.manage')))
+      .catch(() => setCanManage(false));
+  }, []);
 
   // Only offer terminals that can physically handle the chosen mode. The API
   // enforces this too — this just stops the operator discovering it via an error.
@@ -124,6 +138,13 @@ export default function RoutesPage() {
 
       {err && <Alert tone="warning" className="mb-4">{err}</Alert>}
 
+      {/* Every control in this card and the Suspend/Resume button below write
+          through logistics.manage-guarded routes, so for logistics.read the
+          whole screen reads as a report: no create form, no suspend control
+          — hidden like hubs/page.tsx's Edit button, not disabled (BMPL-142).
+          The server stays the authority; this only stops drawing buttons
+          that could never work. */}
+      {canManage && (
       <Card className="p-4">
         <h2 className="text-sm font-semibold text-slate-900">Add a route</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -174,6 +195,7 @@ export default function RoutesPage() {
           {saving ? 'Adding…' : 'Add route'}
         </Button>
       </Card>
+      )}
 
       {loading ? (
         <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
@@ -198,15 +220,20 @@ export default function RoutesPage() {
                   </p>
                 </div>
                 <div className="flex shrink-0 gap-2">
+                  {/* Visible to a reader too — GET .../schedule needs only
+                      logistics.read, the same permission this whole page
+                      already requires to load at all. */}
                   <Button variant="outline" onClick={() => setScheduleFor(scheduleFor === r.id ? null : r.id)}>
                     {scheduleFor === r.id ? 'Hide schedule' : 'Schedule'}
                   </Button>
-                  <Button variant="outline" onClick={() => void toggle(r)}>
-                    {r.isActive ? 'Suspend' : 'Resume'}
-                  </Button>
+                  {canManage && (
+                    <Button variant="outline" onClick={() => void toggle(r)}>
+                      {r.isActive ? 'Suspend' : 'Resume'}
+                    </Button>
+                  )}
                 </div>
               </div>
-              {scheduleFor === r.id && <RouteScheduleEditor routeId={r.id} />}
+              {scheduleFor === r.id && <RouteScheduleEditor routeId={r.id} canManage={canManage} />}
             </Card>
           ))}
         </div>
