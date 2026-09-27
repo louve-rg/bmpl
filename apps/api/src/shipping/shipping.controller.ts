@@ -12,9 +12,11 @@ import {
   legExceptionSchema,
   legHandoffSchema,
   reassignShipmentLegSchema,
+  addHubHoursExceptionSchema,
   addProviderMemberSchema,
   addRouteScheduleExceptionSchema,
   resolveLegExceptionSchema,
+  setHubWeeklyHoursSchema,
   setLegOperatorSchema,
   setRouteWeeklyScheduleSchema,
   shippingProviderProfileSchema,
@@ -35,9 +37,11 @@ import {
   type LegExceptionInput,
   type LegHandoffInput,
   type ReassignShipmentLegInput,
+  type AddHubHoursExceptionInput,
   type AddProviderMemberInput,
   type AddRouteScheduleExceptionInput,
   type ResolveLegExceptionInput,
+  type SetHubWeeklyHoursInput,
   type SetLegOperatorInput,
   type SetRouteWeeklyScheduleInput,
   type ShippingProviderProfileInput,
@@ -290,6 +294,41 @@ export class AdminLogisticsController {
   @Delete('routes/:id/schedule/exceptions/:exceptionId')
   removeRouteScheduleException(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('exceptionId') exceptionId: string) {
     return this.network.removeScheduleException(id, exceptionId, u.userId);
+  }
+
+  /**
+   * A terminal's structured opening hours and date exceptions (BMPL-260/262/
+   * 263). Under logistics.read/logistics.manage — the same permission that
+   * already governs hub configuration above, because hub hours are
+   * operations configuring a terminal, not a vendor's self-service surface.
+   * No consumer reads these rows yet — configuration only, this round.
+   */
+  @RequirePermission('logistics.read')
+  @Get('hubs/:id/hours')
+  hubHours(@Param('id') id: string) {
+    return this.network.hubHours(id);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Put('hubs/:id/hours')
+  setHubWeeklyHours(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(setHubWeeklyHoursSchema)) dto: SetHubWeeklyHoursInput) {
+    return this.network.setHubWeeklyHours(id, dto, u.userId);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Post('hubs/:id/hours/exceptions')
+  addHubHoursException(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(addHubHoursExceptionSchema)) dto: AddHubHoursExceptionInput,
+  ) {
+    return this.network.addHubHoursException(id, dto, u.userId);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Delete('hubs/:id/hours/exceptions/:exceptionId')
+  removeHubHoursException(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('exceptionId') exceptionId: string) {
+    return this.network.removeHubHoursException(id, exceptionId, u.userId);
   }
 
   /**

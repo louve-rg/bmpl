@@ -1,10 +1,12 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PlannerHub, PlannerLane, PlannerRoute, ScheduleException, WeeklyOperatingDay } from '@bmpl/shared';
 import type {
+  AddHubHoursExceptionInput,
   AddRouteScheduleExceptionInput,
   CreateCourierLaneInput,
   CreateHubInput,
   CreateRouteInput,
+  SetHubWeeklyHoursInput,
   SetRouteWeeklyScheduleInput,
   UpdateCourierLaneInput,
   UpdateHubInput,
@@ -392,6 +394,109 @@ export class LogisticsNetworkService {
 
   private exceptionOut(e: { id: string; date: Date; status: string; reason: string | null }) {
     return { id: e.id, date: e.date.toISOString().slice(0, 10), status: e.status, reason: e.reason };
+  }
+
+  /* ---------------------------------------------------------- hub hours */
+  //
+  // A terminal's structured opening hours and date exceptions (BMPL-260/
+  // 262/263) — configuration only. Nothing here, or anywhere else this
+  // round, reads these rows to gate or warn about anything: that is a
+  // separate, not-yet-decided consumer (BMPL-259 is still open on the
+  // business-hours side of that question, and the arrival side is a later
+  // card). Under logistics.manage/logistics.read, the same permission that
+  // already governs hub configuration above — hub hours are operations
+  // configuring a terminal, not a vendor's self-service surface, which is
+  // the whole reason HubOpeningDay has its own table rather than sharing
+  // VendorOpeningHours'.
+
+  async hubHours(hubId: string) {
+    const hub = await this.prisma.logisticsHub.findUnique({ where: { id: hubId }, select: { id: true } });
+    if (!hub) throw new NotFoundException('Hub not found.');
+    const [days, exceptions] = await Promise.all([
+      this.prisma.hubOpeningDay.findMany({ where: { hubId }, orderBy: { dayOfWeek: 'asc' } }),
+      this.prisma.hubHoursException.findMany({ where: { hubId }, orderBy: { date: 'asc' } }),
+    ]);
+    return {
+      hubId,
+      days: days.map((d) => ({ dayOfWeek: d.dayOfWeek, isClosed: d.isClosed, openTime: d.openTime, closeTime: d.closeTime })),
+      exceptions: exceptions.map((e) => this.hubExceptionOut(e)),
+    };
+  }
+
+  /**
+   * Replaces the ENTIRE weekly pattern in one transaction — deleting what is
+   * not resubmitted rather than patching day-by-day, the same reasoning as
+   * setWeeklySchedule above and vendor.service.ts's setHours (:271-273): a
+   * weekly pattern is a SET, not seven independently-edited rows, and a
+   * stale day from a previous version must never sit alongside new ones.
+   */
+  async setHubWeeklyHours(hubId: string, input: SetHubWeeklyHoursInput, actorId: string) {
+    const hub = await this.prisma.logisticsHub.findUnique({ where: { id: hubId }, select: { id: true } });
+    if (!hub) throw new NotFoundException('Hub not found.');
+    const before = await this.prisma.hubOpeningDay.findMany({ where: { hubId } });
+    await this.prisma.$transaction([
+      this.prisma.hubOpeningDay.deleteMany({ where: { hubId } }),
+      this.prisma.hubOpeningDay.createMany({
+        data: input.days.map((d) => ({
+          hubId,
+          dayOfWeek: d.dayOfWeek,
+          isClosed: d.isClosed,
+          openTime: d.isClosed ? null : (d.openTime ?? null),
+          closeTime: d.isClosed ? null : (d.closeTime ?? null),
+        })),
+      }),
+    ]);
+    await this.audit.record({
+      action: 'HUB_HOURS_CHANGED',
+      actorId,
+      previousValue: { hubId, verb: 'WEEKLY_PATTERN_SET', days: before.map((d) => ({ dayOfWeek: d.dayOfWeek, isClosed: d.isClosed })) },
+      newValue: { hubId, verb: 'WEEKLY_PATTERN_SET', days: input.days.map((d) => ({ dayOfWeek: d.dayOfWeek, isClosed: d.isClosed })) },
+    });
+    return this.hubHours(hubId);
+  }
+
+  /**
+   * One date-specific override. Re-submitting the same date replaces it.
+   * MODIFIED carries both openTime and closeTime, CLOSED carries neither —
+   * the Zod schema already refuses anything else, and this forces the same
+   * shape onto the write regardless, so the database CHECK
+   * (hub_hours_exceptions_times_match_status) is never the only thing
+   * standing between a malformed request and a stored row.
+   */
+  async addHubHoursException(hubId: string, input: AddHubHoursExceptionInput, actorId: string) {
+    const hub = await this.prisma.logisticsHub.findUnique({ where: { id: hubId }, select: { id: true } });
+    if (!hub) throw new NotFoundException('Hub not found.');
+    const date = new Date(Date.UTC(input.date.getUTCFullYear(), input.date.getUTCMonth(), input.date.getUTCDate()));
+    const openTime = input.status === 'MODIFIED' ? (input.openTime ?? null) : null;
+    const closeTime = input.status === 'MODIFIED' ? (input.closeTime ?? null) : null;
+    const exception = await this.prisma.hubHoursException.upsert({
+      where: { hubId_date: { hubId, date } },
+      create: { hubId, date, status: input.status, openTime, closeTime, reason: input.reason ?? null, createdByUserId: actorId },
+      update: { status: input.status, openTime, closeTime, reason: input.reason ?? null, createdByUserId: actorId },
+    });
+    await this.audit.record({
+      action: 'HUB_HOURS_CHANGED',
+      actorId,
+      newValue: { hubId, verb: 'EXCEPTION_SET', exceptionId: exception.id, date: date.toISOString(), status: exception.status },
+    });
+    return this.hubExceptionOut(exception);
+  }
+
+  /** Removing an exception falls back to the weekly default for that date, not to unconstrained. */
+  async removeHubHoursException(hubId: string, exceptionId: string, actorId: string) {
+    const exception = await this.prisma.hubHoursException.findUnique({ where: { id: exceptionId } });
+    if (!exception || exception.hubId !== hubId) throw new NotFoundException('Exception not found.');
+    await this.prisma.hubHoursException.delete({ where: { id: exceptionId } });
+    await this.audit.record({
+      action: 'HUB_HOURS_CHANGED',
+      actorId,
+      previousValue: { hubId, verb: 'EXCEPTION_REMOVED', exceptionId, date: exception.date.toISOString(), status: exception.status },
+    });
+    return { removed: true };
+  }
+
+  private hubExceptionOut(e: { id: string; date: Date; status: string; openTime: string | null; closeTime: string | null; reason: string | null }) {
+    return { id: e.id, date: e.date.toISOString().slice(0, 10), status: e.status, openTime: e.openTime, closeTime: e.closeTime, reason: e.reason };
   }
 
   /* -------------------------------------------------------- courier lanes */

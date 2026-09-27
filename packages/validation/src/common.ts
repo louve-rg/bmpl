@@ -33,6 +33,12 @@ export const roleStatusSchema = z.enum(ROLE_STATUSES);
 export const cuidSchema = z.string().cuid2().or(z.string().cuid());
 export const uuidSchema = z.string().uuid();
 
+/** HH:MM 24-hour time. Shared by vendor and hub opening hours — one format,
+ *  not two that could quietly drift apart. */
+export const timeOfDaySchema = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use 24-hour HH:MM time.');
+
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),

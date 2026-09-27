@@ -207,6 +207,9 @@ export const AUDIT_ACTIONS = [
   'SHIPPING_PROVIDER_MEMBER_CHANGED',
   // BMPL-186: route schedule surface (weekly pattern, date exceptions).
   'ROUTE_SCHEDULE_CHANGED',
+  // BMPL-263: hub hours surface (weekly pattern, date exceptions) — same
+  // shape as ROUTE_SCHEDULE_CHANGED immediately above.
+  'HUB_HOURS_CHANGED',
   // ---- Wallet activation ----
   'WALLET_TOPUP_POSTED',
   // One action for the wallet lock/unlock fraud control — direction and
