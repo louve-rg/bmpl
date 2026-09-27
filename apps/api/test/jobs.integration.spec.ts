@@ -353,6 +353,15 @@ describe('interviews: ownership, and which notes the candidate sees', () => {
  * — asserted directly, per the floor's state-not-shape standard.
  */
 describe('notification event codes are job-specific, not PRODUCT_MODERATED (BMPL-149)', () => {
+  // LATEST-ROW ASSUMPTION (BMPL-243): same shape as dispatch.integration.
+  // spec.ts's latestEvent -- see that comment for the full explanation and
+  // the real precedent. Here it covers two distinct fragile uses: the
+  // 4-step seeker chain below (JOB_APPLICATION_SUBMITTED -> STATUS_CHANGED ->
+  // JOB_INTERVIEW_SCHEDULED -> JOB_INTERVIEW_UPDATED, all mutually distinct
+  // today), and adminUserId being checked in two SEPARATE tests in this file
+  // (ADMIN_JOB_LISTING_SUBMITTED, then JOB_REPORTED) -- safe only as long as
+  // those two codes never collide with each other or with anything else this
+  // shared admin account gets notified about elsewhere in this file.
   async function latestEvent(userId: string) {
     const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
       where: { userId },

@@ -183,6 +183,14 @@ describe('the organization', () => {
     const row = await ctx.prisma.shippingProviderMember.findUniqueOrThrow({
       where: { providerProfileId_userId: { providerProfileId: carrier.profileId, userId: staff.userId } },
     });
+    // LATEST-ROW ASSUMPTION (BMPL-243): filtered by action only, not by
+    // staff.userId (the assertion below checks targetUserId, but the query
+    // itself does not) -- safe only because this is the only/first query for
+    // SHIPPING_PROVIDER_MEMBER_CHANGED in this file, and because this check
+    // runs before the end/reactivate calls further down produce their own
+    // rows for the same action. See categories.integration.spec.ts's
+    // CATEGORY_CREATED check for the full explanation and what would break
+    // it.
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'SHIPPING_PROVIDER_MEMBER_CHANGED' }, orderBy: { createdAt: 'desc' } });
     expect(audit?.targetUserId).toBe(staff.userId);
 

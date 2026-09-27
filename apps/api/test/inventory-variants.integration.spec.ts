@@ -66,6 +66,10 @@ describe('product-level inventory', () => {
 
     const hist = await request(ctx.server).get(`/api/vendor/products/${v.productId}/inventory/history`).set('Cookie', v.cookies);
     expect(hist.body.map((h: { reason: string }) => h.reason)).toEqual(expect.arrayContaining(['INITIAL', 'RESTOCK', 'CORRECTION']));
+    // LATEST-ROW ASSUMPTION (BMPL-243): no orderBy, no entity scope -- safe
+    // only because this is the only/first query for INVENTORY_ADJUSTED in
+    // this file. See categories.integration.spec.ts's CATEGORY_CREATED check
+    // for the full explanation and what would break it.
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'INVENTORY_ADJUSTED' } });
     expect(audit).toBeTruthy();
   });

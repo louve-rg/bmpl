@@ -52,6 +52,22 @@ describe('admin category CRUD + hierarchy', () => {
     expect(res.body.isVisible).toBe(true);
     electronicsId = res.body.id;
 
+    // LATEST-ROW ASSUMPTION (BMPL-243): this depends on being the ONLY/FIRST
+    // query for CATEGORY_CREATED in this file, not on any explicit ordering --
+    // there is no orderBy here, and Prisma's default findFirst order is
+    // UNSPECIFIED, not "oldest first". It is safe today only because nothing
+    // else in this file produces this action before this line runs. WHAT
+    // WOULD BREAK IT: a test added earlier in this file that also creates a
+    // category -- findFirst would then have no reason to prefer THIS test's
+    // row over an earlier one, and a real audit regression here would be
+    // masked by that earlier row instead of caught. Real precedent for this
+    // whole family, not hypothetical: realestate.integration.spec.ts's
+    // APPROVE/SUSPEND case (BMPL-242) is the sibling version of this same
+    // root problem -- a "latest matching row" standing in for "the row this
+    // action created" -- already caught producing a false pass. The other
+    // two audit checks below (CATEGORY_UPDATED, CATEGORY_DELETED) depend on
+    // the identical assumption; this comment is the full explanation for all
+    // three, not repeated per site.
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'CATEGORY_CREATED' } });
     expect(audit).toBeTruthy();
   });
@@ -88,6 +104,10 @@ describe('admin category CRUD + hierarchy', () => {
     expect(res.body.featured).toBe(true);
     expect(res.body.sortOrder).toBe(5);
 
+    // LATEST-ROW ASSUMPTION (BMPL-243): same dependency as CATEGORY_CREATED
+    // above (only/first query of this action in the file, unspecified
+    // default order) -- see that comment for the full explanation and what
+    // would break it.
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'CATEGORY_UPDATED' } });
     expect(audit).toBeTruthy();
   });
@@ -124,6 +144,9 @@ describe('admin category CRUD + hierarchy', () => {
 
     const gone = await ctx.prisma.category.findUnique({ where: { id: phonesId } });
     expect(gone).toBeNull();
+    // LATEST-ROW ASSUMPTION (BMPL-243): same dependency as CATEGORY_CREATED
+    // above -- see that comment for the full explanation and what would
+    // break it.
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'CATEGORY_DELETED' } });
     expect(audit).toBeTruthy();
   });

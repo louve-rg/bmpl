@@ -153,6 +153,12 @@ describe('operational metadata edits', () => {
     expect(row.isTest).toBe(true);
     expect(row.isActive).toBe(true);
 
+    // LATEST-ROW ASSUMPTION (BMPL-243): filtered by action only, not by this
+    // hub's id -- safe only because this is the only/first query for
+    // LOGISTICS_HUB_UPDATED in this file (multiple later PATCH calls in this
+    // file never re-check this way). See categories.integration.spec.ts's
+    // CATEGORY_CREATED check for the full explanation and what would break
+    // it -- here specifically, a hub-update test added earlier in this file.
     const audit = await ctx.prisma.auditLog.findFirst({
       where: { action: 'LOGISTICS_HUB_UPDATED' },
       orderBy: { createdAt: 'desc' },

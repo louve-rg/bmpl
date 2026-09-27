@@ -464,6 +464,21 @@ describe('driver job workflow + verification', () => {
  * The protected state is the stored `event` column, asserted directly.
  */
 describe('notification event codes cover the whole delivery lifecycle, not just DELIVER (BMPL-219)', () => {
+  // LATEST-ROW ASSUMPTION (BMPL-243): filtered by userId only, no event or
+  // action scope -- "latest for this user" stands in for "the row this
+  // specific step created". The first test below calls this SIX times in a
+  // row for the same order.customerId, once per lifecycle step. It is safe
+  // today only because every expected code in that chain (DELIVERY_DRIVER_
+  // ASSIGNED/ACCEPTED, PICKUP_CONFIRMED, IN_TRANSIT, ARRIVING, DELIVERED)
+  // differs from every other -- a missing notification at any step surfaces
+  // as a WRONG value, not a silent pass. WHAT WOULD BREAK IT: two adjacent
+  // steps in this chain (or a new step inserted between them) ever emitting
+  // the SAME event code to the same customer -- at that point a missing
+  // notification for the later step would be masked by the earlier step's
+  // leftover row. Not hypothetical: realestate.integration.spec.ts's
+  // APPROVE/SUSPEND case (BMPL-242) is exactly this happening for real, on
+  // the sibling helper in that file -- two adjacent actions sharing one
+  // event code for the same user.
   async function latestEvent(userId: string) {
     const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
       where: { userId },
