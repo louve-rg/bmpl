@@ -601,7 +601,7 @@ export class OrdersService {
           userId: v.userId,
           type: 'MARKETPLACE',
           category: 'ORDER',
-          event: 'ORDER_PLACED',
+          event: 'ORDER_CANCELLED',
           title: 'Order cancelled',
           body: `Order ${outcome.orderNumber} was cancelled by the customer${dto.reason ? `: ${dto.reason}` : '.'}`,
           data: { orderId },

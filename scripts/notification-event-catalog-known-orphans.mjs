@@ -2,7 +2,7 @@
  * Known, acknowledged orphans in NOTIFICATION_EVENTS — the baseline for
  * scripts/detect-notification-event-catalog-drift.mjs (BMPL-220 follow-up).
  *
- * These 11 catalog entries have zero call sites TODAY, on purpose, not by
+ * These 5 catalog entries have zero call sites TODAY, on purpose, not by
  * accident: calling an unused entry dead code and deleting it is a product
  * decision (BMPL-219's ruling), not something this checker gets to make. But
  * an orphan the checker reports EVERY SINGLE RUN, forever, trains whoever
@@ -31,22 +31,17 @@ export const KNOWN_ORPHANS = {
   DRIVER_DELIVERY_COMPLETED: "BMPL-219: same architectural fact as DRIVER_NEW_ASSIGNMENT — DELIVERY_DELIVERED already reaches the driver via the shared notify().",
   DRIVER_VEHICLE_MODERATED: "BMPL-219: same architectural fact — no separate driver-only channel exists for this event either.",
 
-  // The remaining 8 were confirmed ORPHANED on 2026-09-27 by
-  // detect-notification-event-catalog-drift.mjs and cross-checked by hand
-  // (each name grepped standalone across apps/api/src, zero hits, matching
-  // BMPL-215's own methodology) — but WHY each one has never been wired is
-  // NOT YET INVESTIGATED. Recorded honestly as unconfirmed rather than
-  // guessed at: inventing a reason here would be exactly the "invent a
-  // business rule" mistake root CLAUDE.md warns against. Whoever
-  // investigates one of these should replace its reason with the real
-  // answer, which then also serves as this file's own proof that the entry
-  // was looked at, not just carried forward by habit.
-  ORDER_CANCELLED: 'Orphaned as of 2026-09-27, cause not yet investigated. Confirmed zero call sites; not confirmed why.',
-  VENDOR_APPROVED: 'Orphaned as of 2026-09-27, cause not yet investigated. Confirmed zero call sites; not confirmed why.',
-  VENDOR_REJECTED: 'Orphaned as of 2026-09-27, cause not yet investigated. Confirmed zero call sites; not confirmed why.',
-  PRODUCT_MODERATED: 'Orphaned as of 2026-09-27, cause not yet investigated. Confirmed zero call sites; not confirmed why.',
-  ROLE_STATUS_CHANGED: 'Orphaned as of 2026-09-27, cause not yet investigated. Confirmed zero call sites; not confirmed why.',
-  ROLE_MORE_INFO_REQUESTED: 'Orphaned as of 2026-09-27, cause not yet investigated. Confirmed zero call sites; not confirmed why.',
-  ADMIN_SECURITY_ALERT: 'Orphaned as of 2026-09-27, cause not yet investigated. Confirmed zero call sites; not confirmed why.',
-  CONVERSATION_CLOSED: 'Orphaned as of 2026-09-27, cause not yet investigated. Confirmed zero call sites; not confirmed why.',
+  // The remaining 8 were confirmed ORPHANED on 2026-09-27 and investigated
+  // (BMPL-229): six turned out to be a fourth shape the original taxonomy
+  // didn't name — the right person WAS already notified with the right
+  // content, the call just never set an `event:` key (or, for
+  // ORDER_CANCELLED, set the WRONG one — a copy-paste of the order-placed
+  // literal onto the cancellation notification). None of that was an
+  // architectural fact, so none of it belonged in this file as one; BMPL-230
+  // added the missing/corrected literal at each call site instead, which is
+  // why those six are gone from this list rather than explained here.
+  // The two below could not be resolved that way — a real answer, not a
+  // reason to invent one.
+  ADMIN_SECURITY_ALERT: 'Investigated 2026-09-27 (BMPL-229): no security-detection logic of any kind exists anywhere in apps/api/src (no lockout, anomaly, fraud or permission-escalation alert) for this event to attach to. Added in the original M16 commit alongside ADMIN_FAILED_DELIVERY (which IS used) but never built. Naming a call site would mean inventing what "security alert" should detect — filed as a blocked product question, not fixed.',
+  CONVERSATION_CLOSED: 'Investigated 2026-09-27 (BMPL-229): messaging.service.ts close() audits the closure and posts a SYSTEM message into the thread, but never calls a notification method — unlike sendMessage(), which calls notifyOthers() for every real message. The other participant is never told the conversation closed. Genuine gap, not architecture; the fix (a notifyOthers() call in close(), same audience sendMessage already uses) is tracked as BMPL-231, not done here.',
 };

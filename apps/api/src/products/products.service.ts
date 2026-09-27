@@ -317,6 +317,7 @@ export class ProductsService {
           {
             userId: owner.userId,
             type: 'MARKETPLACE',
+            event: 'PRODUCT_MODERATED',
             title: plan.title,
             body: plan.body(p.title, note),
             data: { productId: id, status: plan.to },

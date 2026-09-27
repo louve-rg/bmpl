@@ -212,6 +212,7 @@ export class AdminService {
         {
           userId: application.userId,
           type: 'ROLE_STATUS',
+          event: 'ROLE_STATUS_CHANGED',
           title: tpl.title,
           body: tpl.body,
           data: { roleCode, applicationId },
@@ -266,6 +267,7 @@ export class AdminService {
         {
           userId: application.userId,
           type: 'ROLE_STATUS',
+          event: 'ROLE_STATUS_CHANGED',
           title: tpl.title,
           body: tpl.body,
           data: { roleCode, applicationId },
@@ -318,6 +320,7 @@ export class AdminService {
         {
           userId: application.userId,
           type: 'ROLE_APPLICATION',
+          event: 'ROLE_MORE_INFO_REQUESTED',
           title: tpl.title,
           body: tpl.body,
           data: { roleCode, applicationId },
@@ -374,7 +377,7 @@ export class AdminService {
       if (to === 'SUSPENDED') {
         const tpl = templates.roleSuspended(this.roleLabel(roleCode), reason ?? '');
         await this.notifications.createInApp(
-          { userId, type: 'ROLE_STATUS', title: tpl.title, body: tpl.body, data: { roleCode } },
+          { userId, type: 'ROLE_STATUS', event: 'ROLE_STATUS_CHANGED', title: tpl.title, body: tpl.body, data: { roleCode } },
           tx,
         );
       }

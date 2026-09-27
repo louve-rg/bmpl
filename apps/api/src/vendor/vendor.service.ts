@@ -587,16 +587,42 @@ export class VendorService {
         },
         tx,
       );
-      await this.notifications.createInApp(
-        {
-          userId: profile.userId,
-          type: 'MARKETPLACE',
-          title: plan.notifyTitle,
-          body: plan.notifyBody(profile.businessName, note),
-          data: { vendorProfileId: id, approvalStatus: plan.to },
-        },
-        tx,
-      );
+      // Approve/reject carry a catalog event (BMPL-230); suspend/restore have no
+      // catalog code of their own yet, so they keep the untagged notification
+      // rather than borrowing one that would misdescribe the transition.
+      //
+      // Kept as two calls rather than one with a nested ternary: tried the
+      // single-call form first (kind === 'approve' ? 'VENDOR_APPROVED' : kind
+      // === 'reject' ? 'VENDOR_REJECTED' : undefined) and the drift checker's
+      // own parser only resolves a plain two-literal ternary as real usage —
+      // a three-way nested one reads as NON-LITERAL, which demotes both codes
+      // from "resolved" to "orphan-but-hinted" (silent, exit 0, but no longer
+      // the thing this fix was for). Confirmed by running the checker against
+      // both versions rather than assuming either would work.
+      if (kind === 'approve' || kind === 'reject') {
+        await this.notifications.createInApp(
+          {
+            userId: profile.userId,
+            type: 'MARKETPLACE',
+            event: kind === 'approve' ? 'VENDOR_APPROVED' : 'VENDOR_REJECTED',
+            title: plan.notifyTitle,
+            body: plan.notifyBody(profile.businessName, note),
+            data: { vendorProfileId: id, approvalStatus: plan.to },
+          },
+          tx,
+        );
+      } else {
+        await this.notifications.createInApp(
+          {
+            userId: profile.userId,
+            type: 'MARKETPLACE',
+            title: plan.notifyTitle,
+            body: plan.notifyBody(profile.businessName, note),
+            data: { vendorProfileId: id, approvalStatus: plan.to },
+          },
+          tx,
+        );
+      }
     });
     return this.adminGet(id);
   }
