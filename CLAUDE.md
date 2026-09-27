@@ -340,6 +340,7 @@ pnpm --filter @bmpl/api build && pnpm --filter @bmpl/web build && pnpm --filter 
 | `pnpm format:check` | Fails repo-wide. Pre-existing. Informational in CI. |
 | `pnpm lint` | **No ESLint configuration exists anywhere in this repo.** Cannot pass. `continue-on-error` in CI. The 84 `eslint-disable` comments in the tree are inert. |
 | `pnpm test` (`turbo run test`) | Reports 3 failures — `@bmpl/authentication`, `@bmpl/notifications` and `@bmpl/database` declare a `test` script with no test files. Use `pnpm test:unit`. |
+| `-t "<name>"` against an integration spec whose tests share state | **A confident red-then-green proof run that means nothing.** `-t` *skips* every test it doesn't match, including an earlier test in the same file that sets state (`let` variables closed over by later `it`s) that the matched test reads. The run doesn't error in a way that points at the cause — it fails on state that's simply absent, or worse, **passes** — and reddening on the broken version first is exactly the outcome you were hoping for, so it's the one you don't examine. Different from the empty-match case below: the filter matches something real here. Run the **whole file** to verify a mutation. A file's own describe-block comment (e.g. `apps/api/test/wallet-authorization.integration.spec.ts`) may already name which of its tests chain this way — that comment is an example of the hazard, not the general rule. |
 
 Do not "fix" any of these as a side effect of unrelated work. Each is tracked
 and each needs its own scoped change.
