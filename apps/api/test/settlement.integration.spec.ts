@@ -200,6 +200,10 @@ describe('single-vendor settlement (balanced escrow release)', () => {
   it('splits escrow into vendor net, driver earning, and platform revenue with an exactly-balanced ledger', async () => {
     const o = await seedDelivered({ subtotal: 10000, deliveryFee: 500 });
     const escrowBefore = await acctBalance((await systemAcct('SYSTEM_ESCROW')).id);
+    // SYSTEM_PLATFORM_FEES is shared across every test in this file too — an
+    // absolute value below would only hold if this were the first settlement
+    // ever to post a fee (BMPL-249). Same fix shape as escrowBefore above.
+    const platformFeesBefore = await acctBalance((await systemAcct('SYSTEM_PLATFORM_FEES')).id);
     const res = await settle(o.vendorOrderId);
     expect(res.status).toBe(201);
     expect(res.body.settled).toBe(true);
@@ -221,7 +225,7 @@ describe('single-vendor settlement (balanced escrow release)', () => {
     expect(await acctBalance((await systemAcct('SYSTEM_ESCROW')).id)).toBe(escrowBefore - 10500n);
     expect(await acctBalance((await userAcct(o.vendorUserId))!.id)).toBe(9000n);
     expect(await acctBalance((await userAcct(o.driverUserId))!.id)).toBe(400n);
-    expect(await acctBalance((await systemAcct('SYSTEM_PLATFORM_FEES')).id)).toBe(1100n); // commission 1000 + platform delivery 100
+    expect(await acctBalance((await systemAcct('SYSTEM_PLATFORM_FEES')).id)).toBe(platformFeesBefore + 1100n); // commission 1000 + platform delivery 100, on top of whatever was already posted
     expect(await globalNet()).toBe(0n); // global ledger nets to zero
 
     // payment settled (single-vendor order)
