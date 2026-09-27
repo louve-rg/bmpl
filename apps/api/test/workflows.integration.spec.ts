@@ -275,6 +275,22 @@ describe('role switching', () => {
   });
 
   it('restores VENDOR → selectable again, and the affected user is notified (BMPL-231)', async () => {
+    // Snapshot the newest existing row for this user BEFORE the action, so the
+    // assertion below can prove this action created a row (id greater than the
+    // snapshot) rather than merely that some row exists (BMPL-237: an
+    // unscoped `orderBy: id desc` reads whatever the latest row happens to be —
+    // including a prior test's — and a coincidence of differing titles was
+    // masking that). `id: { gt: sinceId }` below only means "created after"
+    // because NotificationRecipient.id is @default(cuid()) — a fixed-width,
+    // timestamp-prefixed string whose lexical order matches creation order.
+    // The original unscoped `orderBy: id desc` depended on that same property,
+    // just less precisely; a uuid() id would silently break this comparison.
+    const before = await ctx.prisma.notificationRecipient.findFirst({
+      where: { userId: vendorUserId },
+      orderBy: { id: 'desc' },
+    });
+    const sinceId = before?.id ?? '';
+
     await request(ctx.server)
       .post('/api/admin/roles/restore')
       .set('Cookie', adminCookies)
@@ -290,17 +306,24 @@ describe('role switching', () => {
     // correct before BMPL-231. The protected behaviour is that the vendor is
     // actually told: changeRoleStatus() notified only inside its SUSPENDED
     // branch, so restore (and revoke, below) audited the change and told
-    // nobody. Assert the notification row itself, not the response code.
+    // nobody. Assert the notification row itself, not the response code —
+    // and assert it is NEW, not merely latest.
     const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
-      where: { userId: vendorUserId },
+      where: { userId: vendorUserId, id: { gt: sinceId } },
       include: { notification: true },
-      orderBy: { id: 'desc' },
+      orderBy: { id: 'asc' },
     });
     expect(row.notification.title).toBe('Vendor restored');
     expect(row.notification.event).toBe('ROLE_STATUS_CHANGED');
   });
 
   it('revokes VENDOR → cannot be activated via the API, and the affected user is notified (BMPL-231)', async () => {
+    const before = await ctx.prisma.notificationRecipient.findFirst({
+      where: { userId: vendorUserId },
+      orderBy: { id: 'desc' },
+    });
+    const sinceId = before?.id ?? '';
+
     await request(ctx.server)
       .post('/api/admin/roles/revoke')
       .set('Cookie', adminCookies)
@@ -315,9 +338,9 @@ describe('role switching', () => {
     // Same reasoning as restore above: revocation is the more severe action of
     // the two, and it was the one that stayed silent while suspension spoke.
     const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
-      where: { userId: vendorUserId },
+      where: { userId: vendorUserId, id: { gt: sinceId } },
       include: { notification: true },
-      orderBy: { id: 'desc' },
+      orderBy: { id: 'asc' },
     });
     expect(row.notification.title).toBe('Vendor revoked');
     expect(row.notification.event).toBe('ROLE_STATUS_CHANGED');
