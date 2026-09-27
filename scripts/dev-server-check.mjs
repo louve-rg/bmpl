@@ -28,7 +28,7 @@
  * build tooling disproportionate to the amount of logic involved. If the
  * duplicated logic here ever needs to change, change it in both places.
  *
- * VERDICTS:
+ * VERDICTS (freshness -- Next.js dev servers, i.e. web/admin):
  *   FRESH   the page loaded and its own referenced static JS chunk also
  *           loaded as real JavaScript
  *   STALE   the page loaded but its own chunk did not (bmpl-web's exact
@@ -38,7 +38,31 @@
  *           reports success is worse than no check (see BMPL-211's
  *           category-count checker, same convention, same reason)
  *
- * Exit codes: 0 nothing listening, or FRESH. 1 STALE. 2 UNKNOWN.
+ * VERDICTS (identity -- the API dev server, BMPL-226): freshness above
+ * answers "is this stale content" and cannot answer "is this even the
+ * commit I think it is" -- a server that survived a branch switch without a
+ * restart serves a healthy 200 from `/api/health` that is lying about which
+ * code is actually running, and nothing about that response looks wrong. So
+ * when a port answers `/api/health` in the expected shape, this script asks
+ * a different question instead of the freshness one, by comparing that
+ * response's `commit` field to local `git rev-parse HEAD`:
+ *   MATCH    the server's reported commit equals local HEAD
+ *   MISMATCH the server reports a DIFFERENT commit -- typically a branch
+ *            switch since the server was last started. NOT a dirty working
+ *            tree: HEAD does not move on uncommitted edits, only on commit
+ *            or checkout, so uncommitted local work is the normal case and
+ *            is never reported as a mismatch
+ *   UNKNOWN  the server reported no commit at all (an ordinary local
+ *            `pnpm dev` boot today never sets RAILWAY_GIT_COMMIT_SHA or
+ *            GIT_COMMIT_SHA, so this is the common case, not a failure of
+ *            this check), or local HEAD could not be determined -- a
+ *            MISMATCH and an UNKNOWN are different answers, and branding a
+ *            server wrong because it could not be asked is the same defect
+ *            as branding a booting server dead
+ *
+ * Exit codes: 0 nothing listening, or an all-clear verdict (FRESH / MATCH /
+ * identity not applicable). 1 a confirmed problem (STALE or MISMATCH). 2 an
+ * UNKNOWN on whichever dimension applied.
  *
  * NOT covered, and not worth building a detector for: two Next.js processes
  * (a `dev` and a `build`) writing the SAME `.next` directory concurrently.
@@ -100,6 +124,69 @@ function killPid(pid) {
   }
 }
 
+// A port answering `/api/health` in the expected shape is the API, not a
+// Next.js dev server -- returns the parsed body, or null if this port isn't
+// that (unreachable, non-JSON, or JSON missing the fields health.controller.ts
+// always includes). null means "try the freshness check instead", not UNKNOWN.
+async function tryFetchHealth(base) {
+  try {
+    const res = await fetch(`${base}/api/health`);
+    if (!res.ok) return null;
+    const body = await res.json();
+    if (!body || typeof body !== 'object' || !('status' in body) || !('commit' in body)) return null;
+    return body;
+  } catch {
+    return null;
+  }
+}
+
+function localHead() {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// health.commit is `null` (no RAILWAY_GIT_COMMIT_SHA / GIT_COMMIT_SHA) or a
+// 7-char slice of a real SHA (health.controller.ts). Never trust '' either.
+function evaluateIdentity(health) {
+  const serverCommit = health.commit || null;
+  if (!serverCommit) {
+    return {
+      identity: 'UNKNOWN',
+      identityReason:
+        'the server reported no commit (RAILWAY_GIT_COMMIT_SHA / GIT_COMMIT_SHA is unset -- the normal case for an ordinary local `pnpm dev` boot today, not a failure of this check)',
+    };
+  }
+  const head = localHead();
+  if (!head) {
+    return { identity: 'UNKNOWN', identityReason: '`git rev-parse HEAD` failed -- not a git checkout, or git is unavailable' };
+  }
+  const headShort = head.slice(0, serverCommit.length);
+  if (headShort === serverCommit) {
+    return {
+      identity: 'MATCH',
+      identityReason: `server commit ${serverCommit} matches local HEAD ${head} (uncommitted local changes, if any, do not affect this -- HEAD only moves on commit or checkout)`,
+    };
+  }
+  return {
+    identity: 'MISMATCH',
+    identityReason: `server reports commit ${serverCommit}, local HEAD is ${head.slice(0, 7)} -- a DIFFERENT COMMIT, the shape of a branch switch since the server was last started (not a dirty tree -- HEAD does not move on uncommitted edits)`,
+  };
+}
+
+function reportKill(pid) {
+  if (!doKill) return;
+  const currentPid = findPidOnPort(port);
+  if (currentPid) {
+    console.log(`Killing PID ${currentPid}...`);
+    killPid(currentPid);
+  }
+  const after = findPidOnPort(port);
+  console.log(after ? `Port ${port} is still bound to PID ${after} after the kill attempt.` : `Port ${port} is now free.`);
+}
+
 async function main() {
   const pid = findPidOnPort(port);
   if (!pid) {
@@ -109,10 +196,24 @@ async function main() {
   }
   console.log(`Port ${port} is bound to PID ${pid}.`);
 
+  const base = `http://localhost:${port}`;
+  const health = await tryFetchHealth(base);
+
+  if (health) {
+    const { identity, identityReason } = evaluateIdentity(health);
+    console.log(`Identity: ${identity} (${identityReason})`);
+    if (identity === 'MISMATCH') {
+      console.log(`Recipe to free it: taskkill /PID ${pid} /T /F`);
+    }
+    reportKill(pid);
+    process.exitCode = identity === 'MISMATCH' ? 1 : identity === 'UNKNOWN' ? 2 : 0;
+    return;
+  }
+
   let verdict = 'UNKNOWN';
   let reason = 'could not reach it';
   try {
-    const res = await fetch(`http://localhost:${port}${routePath}`);
+    const res = await fetch(`${base}${routePath}`);
     if (!res.ok) {
       reason = `${routePath} returned HTTP ${res.status}`;
     } else {
@@ -121,7 +222,7 @@ async function main() {
       if (!chunkMatch) {
         reason = `${routePath} responded but referenced no _next static chunk (not a Next.js page, or too early in startup)`;
       } else {
-        const chunkRes = await fetch(`http://localhost:${port}${chunkMatch[0]}`);
+        const chunkRes = await fetch(`${base}${chunkMatch[0]}`);
         const contentType = chunkRes.headers.get('content-type') ?? '';
         if (chunkRes.ok && contentType.includes('javascript')) {
           verdict = 'FRESH';
@@ -137,19 +238,11 @@ async function main() {
   }
 
   console.log(`Verdict: ${verdict} (${reason})`);
-  if (verdict !== 'FRESH') {
+  if (verdict === 'STALE') {
     console.log(`Recipe to free it: taskkill /PID ${pid} /T /F`);
   }
 
-  if (doKill) {
-    const currentPid = findPidOnPort(port);
-    if (currentPid) {
-      console.log(`Killing PID ${currentPid}...`);
-      killPid(currentPid);
-    }
-    const after = findPidOnPort(port);
-    console.log(after ? `Port ${port} is still bound to PID ${after} after the kill attempt.` : `Port ${port} is now free.`);
-  }
+  reportKill(pid);
 
   process.exitCode = verdict === 'FRESH' ? 0 : verdict === 'STALE' ? 1 : 2;
 }
