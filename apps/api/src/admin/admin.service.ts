@@ -374,13 +374,20 @@ export class AdminService {
         },
         tx,
       );
-      if (to === 'SUSPENDED') {
-        const tpl = templates.roleSuspended(this.roleLabel(roleCode), reason ?? '');
-        await this.notifications.createInApp(
-          { userId, type: 'ROLE_STATUS', event: 'ROLE_STATUS_CHANGED', title: tpl.title, body: tpl.body, data: { roleCode } },
-          tx,
-        );
-      }
+      // Every outcome here tells the affected user (BMPL-231) — SUSPENDED
+      // already did; REVOKED and RESTORED reached this same function and got
+      // an audit row but no notification, so a revocation (the more severe
+      // action) was silent while a suspension was not.
+      const tpl =
+        to === 'SUSPENDED'
+          ? templates.roleSuspended(this.roleLabel(roleCode), reason ?? '')
+          : to === 'REVOKED'
+            ? templates.roleRevoked(this.roleLabel(roleCode), reason ?? '')
+            : templates.roleRestored(this.roleLabel(roleCode));
+      await this.notifications.createInApp(
+        { userId, type: 'ROLE_STATUS', event: 'ROLE_STATUS_CHANGED', title: tpl.title, body: tpl.body, data: { roleCode } },
+        tx,
+      );
     });
 
     // If the suspended/revoked role was the user's active role, fall back to CUSTOMER.

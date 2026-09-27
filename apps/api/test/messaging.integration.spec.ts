@@ -208,6 +208,16 @@ describe('support + internal notes + close', () => {
     // close → customer can no longer send
     await post(adminCookies, `admin/support/${convId}/close`);
     expect((await post(cust.cookies, `conversations/${convId}/messages`, { body: 'one more' })).status).toBe(403);
+    // The 403 above only proves send is blocked — it was already correct
+    // before BMPL-231. close() audited the closure but never told the other
+    // participant, unlike sendMessage()'s notifyOthers() for every real
+    // message. Assert the customer was actually notified, not just that the
+    // thread is now closed.
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId: cust.userId, notification: { event: 'CONVERSATION_CLOSED' } },
+      include: { notification: true },
+    });
+    expect(row.notification.title).toBe('Conversation closed');
   });
 
   it('support endpoints require the support permission', async () => {
