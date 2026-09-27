@@ -5,6 +5,7 @@ import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
 import { hubEditFormValid, hubEditPatch, hubToForm, type EditableHub, type HubEditForm } from '../../../../lib/hub-edit';
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, Spinner } from '../../../../components/ui';
+import { HubHoursEditor } from './hours-editor';
 
 /**
  * Terminals, as data.
@@ -66,6 +67,7 @@ export default function HubsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [edit, setEdit] = useState<HubEditForm | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [hoursFor, setHoursFor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -307,7 +309,18 @@ export default function HubsPage() {
                     Courier rate <span className="font-semibold text-belize-navy">BZ${(h.courierFeeMinor / 100).toFixed(2)}</span>
                   </p>
                 )}
+                {/* Visible to a reader too — GET .../hours needs only
+                    logistics.read, the same permission this whole page
+                    already requires to load at all. Only the affordances
+                    INSIDE the panel are gated on canManage. */}
+                {editingId !== h.id && (
+                  <Button variant="outline" onClick={() => setHoursFor(hoursFor === h.id ? null : h.id)}>
+                    {hoursFor === h.id ? 'Hide hours' : 'Hours'}
+                  </Button>
+                )}
               </div>
+
+              {hoursFor === h.id && <HubHoursEditor hubId={h.id} canManage={canManage} />}
 
               {editingId === h.id && edit && (
                 <div className="mt-4 border-t border-slate-100 pt-4">
