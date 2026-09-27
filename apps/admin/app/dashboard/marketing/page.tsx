@@ -1627,8 +1627,21 @@ function PlacementsTab() {
   const [rows, setRows] = useState<PlacementAssignment[]>([]);
   const [approved, setApproved] = useState<PromotionListItem[]>([]);
   const [listState, setListState] = useState<ListState>('loading');
-  const [canManage, setCanManage] = useState(true);
+  const [canManage, setCanManage] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // The assign form and every row control are drawn only for promotions.manage
+  // — /me returns the same grant rows the PermissionsGuard evaluates, so what
+  // this screen shows and what the API enforces cannot disagree. On any doubt
+  // (request fails, field absent) it stays hidden: fail closed. Same pattern
+  // as hubs/page.tsx (BMPL-142/265), applied here (BMPL-269) in place of a
+  // flag that used to start permissive and only pull back after a 403.
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanManage((me.adminPermissions ?? []).includes('promotions.manage')))
+      .catch(() => setCanManage(false));
+  }, []);
 
   const load = useCallback(async () => {
     setListState('loading');
@@ -1694,13 +1707,7 @@ function PlacementsTab() {
         </Alert>
       )}
 
-      {canManage && (
-        <AssignPlacementForm
-          approved={approved}
-          onCreated={onCreated}
-          onForbidden={() => setCanManage(false)}
-        />
-      )}
+      {canManage && <AssignPlacementForm approved={approved} onCreated={onCreated} />}
 
       {listState === 'loading' ? (
         <div className="flex items-center gap-2 rounded-bmpl-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
@@ -1741,7 +1748,6 @@ function PlacementsTab() {
                       canManage={canManage}
                       onUpdated={onUpdated}
                       onRemoved={onRemoved}
-                      onForbidden={() => setCanManage(false)}
                     />
                   ))}
                 </ul>
@@ -1757,11 +1763,9 @@ function PlacementsTab() {
 function AssignPlacementForm({
   approved,
   onCreated,
-  onForbidden,
 }: {
   approved: PromotionListItem[];
   onCreated: (row: PlacementAssignment) => void;
-  onForbidden: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<AssignFormState>(() => emptyAssignForm());
@@ -1801,13 +1805,10 @@ function AssignPlacementForm({
       setForm(emptyAssignForm());
       setOpen(false);
     } catch (err) {
-      if (apiStatus(err) === 403) {
-        onForbidden();
-        setError("You don't have the promotions.manage permission to assign placements.");
-      } else {
-        // Surfaces the backend 400 (e.g. "Only an approved campaign can be assigned").
-        setError(apiMessage(err, 'Could not assign the placement. Please try again.'));
-      }
+      // Surfaces the backend 400 (e.g. "Only an approved campaign can be assigned").
+      // A 403 here would mean the proactive canManage check above was wrong,
+      // not a state this form should try to recover from by hiding itself.
+      setError(apiMessage(err, 'Could not assign the placement. Please try again.'));
     } finally {
       setBusy(false);
     }
@@ -1939,13 +1940,11 @@ function PlacementRow({
   canManage,
   onUpdated,
   onRemoved,
-  onForbidden,
 }: {
   row: PlacementAssignment;
   canManage: boolean;
   onUpdated: (row: PlacementAssignment) => void;
   onRemoved: (id: string) => void;
-  onForbidden: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -1956,13 +1955,11 @@ function PlacementRow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A 403 here would mean the proactive canManage check the parent already
+  // ran (BMPL-269) was wrong, not a state this row should try to recover
+  // from by hiding its own controls after the fact.
   function handleErr(err: unknown, fallback: string) {
-    if (apiStatus(err) === 403) {
-      onForbidden();
-      setError("You don't have the promotions.manage permission for this action.");
-    } else {
-      setError(apiMessage(err, fallback));
-    }
+    setError(apiMessage(err, fallback));
   }
 
   async function patch(body: { position?: number; device?: PlacementDevice; isActive?: boolean; startAt?: string | null; endAt?: string | null }) {

@@ -165,6 +165,22 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 export default function PassengersPage() {
   const [tab, setTab] = useState<Tab>('drivers');
+  const [canModerate, setCanModerate] = useState(false);
+
+  // Every write control across the three moderation tabs below is drawn only
+  // for passengers.moderate — /me returns the same grant rows the
+  // PermissionsGuard evaluates, so what this screen shows and what the API
+  // enforces cannot disagree. On any doubt (request fails, field absent) it
+  // stays hidden: fail closed. Fetched once here rather than per tab, since
+  // only one tab is ever mounted at a time. Same pattern as hubs/page.tsx
+  // (BMPL-142/265), replacing a flag that used to start permissive and only
+  // pull back after a 403 (BMPL-269).
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanModerate((me.adminPermissions ?? []).includes('passengers.moderate')))
+      .catch(() => setCanModerate(false));
+  }, []);
 
   return (
     <div>
@@ -190,10 +206,10 @@ export default function PassengersPage() {
       </div>
 
       {tab === 'drivers' && <DriversTab />}
-      {tab === 'providers' && <ProvidersTab />}
+      {tab === 'providers' && <ProvidersTab canModerate={canModerate} />}
       {tab === 'routes' && <RoutesTab />}
-      {tab === 'departures' && <DeparturesTab />}
-      {tab === 'bookings' && <BookingsTab />}
+      {tab === 'departures' && <DeparturesTab canModerate={canModerate} />}
+      {tab === 'bookings' && <BookingsTab canModerate={canModerate} />}
     </div>
   );
 }
@@ -327,11 +343,10 @@ function DriversTab() {
 
 /* ----------------------------------------------------------- providers */
 
-function ProvidersTab() {
+function ProvidersTab({ canModerate }: { canModerate: boolean }) {
   const [rows, setRows] = useState<ProviderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [canModerate, setCanModerate] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
@@ -363,9 +378,10 @@ function ProvidersTab() {
       setNote(`${p.businessName} is now a ${p.isTest ? 'real' : 'simulation'} operator.`);
       await load();
     } catch (e) {
-      const ex = e as ApiError;
-      if (ex.status === 403) setCanModerate(false);
-      else setErr(ex.message ?? 'Could not change test mode.');
+      // A 403 here would mean the proactive canModerate check the parent
+      // already ran (BMPL-269) was wrong, not a state to recover from by
+      // hiding the control after the fact.
+      setErr((e as ApiError).message ?? 'Could not change test mode.');
     } finally {
       setBusy(null);
     }
@@ -517,12 +533,11 @@ function RoutesTab() {
 
 /* ---------------------------------------------------------- departures */
 
-function DeparturesTab() {
+function DeparturesTab({ canModerate }: { canModerate: boolean }) {
   const [rows, setRows] = useState<TripRow[]>([]);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [canModerate, setCanModerate] = useState(true);
   const [assigning, setAssigning] = useState<TripRow | null>(null);
 
   const load = useCallback(async () => {
@@ -611,10 +626,6 @@ function DeparturesTab() {
             setAssigning(null);
             void load();
           }}
-          onForbidden={() => {
-            setAssigning(null);
-            setCanModerate(false);
-          }}
         />
       )}
     </div>
@@ -636,12 +647,10 @@ function AssignTripModal({
   trip,
   onClose,
   onDone,
-  onForbidden,
 }: {
   trip: TripRow;
   onClose: () => void;
   onDone: () => void;
-  onForbidden: () => void;
 }) {
   const [drivers, setDrivers] = useState<DriverRow[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -689,12 +698,11 @@ function AssignTripModal({
       await api.post(`/admin/passengers/trips/${trip.id}/assign`, { driverProfileId: driverId, vehicleId });
       onDone();
     } catch (e) {
-      const ex = e as ApiError;
-      if (ex.status === 403) onForbidden();
-      else {
-        setErr(ex.message ?? 'Could not assign.');
-        setBusy(false);
-      }
+      // A 403 here would mean the departures tab's proactive canModerate
+      // check (BMPL-269) was wrong, not a state this modal should try to
+      // recover from — it should never have opened in the first place.
+      setErr((e as ApiError).message ?? 'Could not assign.');
+      setBusy(false);
     }
   }
 
@@ -791,12 +799,11 @@ const BOOKING_TONE: Record<BookingRow['status'], 'info' | 'success' | 'neutral' 
   EXPIRED: 'neutral',
 };
 
-function BookingsTab() {
+function BookingsTab({ canModerate }: { canModerate: boolean }) {
   const [rows, setRows] = useState<BookingRow[]>([]);
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [canModerate, setCanModerate] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
@@ -830,9 +837,10 @@ function BookingsTab() {
       setNote(`${b.reference} ${action === 'confirm' ? 'confirmed' : 'cancelled'}.`);
       await load();
     } catch (e) {
-      const ex = e as ApiError;
-      if (ex.status === 403) setCanModerate(false);
-      else setErr(ex.message ?? 'Action failed.');
+      // A 403 here would mean the proactive canModerate check the parent
+      // already ran (BMPL-269) was wrong, not a state to recover from by
+      // hiding the control after the fact.
+      setErr((e as ApiError).message ?? 'Action failed.');
     } finally {
       setBusy(null);
     }

@@ -131,26 +131,33 @@ function accountLabel(type: string): string {
 /* ----------------------------------------------------------------- page */
 
 export default function AdminSettlementsPage() {
-  // `readOnly` becomes true if any manage action (fee-config PATCH / retry) is
-  // rejected with 403 — we then hide edit/retry controls for read-only admins.
-  const [readOnly, setReadOnly] = useState(false);
-  const onForbidden = useCallback(() => setReadOnly(true), []);
+  const [canManage, setCanManage] = useState(false);
+
+  // Fee-config editing and settlement retry are drawn only for
+  // settlements.manage — /me returns the same grant rows the
+  // PermissionsGuard evaluates, so what this screen shows and what the API
+  // enforces cannot disagree. On any doubt (request fails, field absent) it
+  // stays hidden: fail closed. This is the highest-consequence configuration
+  // in the product (commission and driver-payout rates), so a reader sees
+  // the numbers as a report and never an edit form for them — replacing a
+  // flag that used to start permissive and only pull back after the first
+  // PATCH 403'd (BMPL-269).
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanManage((me.adminPermissions ?? []).includes('settlements.manage')))
+      .catch(() => setCanManage(false));
+  }, []);
 
   return (
     <div className="space-y-8">
       <PageHeader breadcrumbs={adminCrumbs('Settlements')} eyebrow="Finance" title="Settlements & Escrow" description="Reconciliation, internal balances, settlement history and platform fee configuration. Money is read-only — no manual balance or ledger edits." />
 
-      {readOnly && (
-        <Alert tone="info" title="Read-only access">
-          You can view settlements but not change fee configuration or retry failed settlements.
-        </Alert>
-      )}
-
       <ReconciliationSection />
       <AccountsSection />
-      <FeeConfigSection readOnly={readOnly} onForbidden={onForbidden} />
+      <FeeConfigSection canManage={canManage} />
       <SettlementsSection />
-      <ExceptionsSection readOnly={readOnly} onForbidden={onForbidden} />
+      <ExceptionsSection canManage={canManage} />
     </div>
   );
 }
@@ -284,7 +291,7 @@ function AccountsSection() {
 
 /* --------------------------------------------------------- fee config */
 
-function FeeConfigSection({ readOnly, onForbidden }: { readOnly: boolean; onForbidden: () => void }) {
+function FeeConfigSection({ canManage }: { canManage: boolean }) {
   const [config, setConfig] = useState<FeeConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -307,7 +314,7 @@ function FeeConfigSection({ readOnly, onForbidden }: { readOnly: boolean; onForb
     <section>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-belize-navy">Fee configuration</h2>
-        {config && !editing && !readOnly && (
+        {config && !editing && canManage && (
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
             Edit rates
           </Button>
@@ -324,10 +331,6 @@ function FeeConfigSection({ readOnly, onForbidden }: { readOnly: boolean; onForb
         <FeeConfigForm
           config={config}
           onCancel={() => setEditing(false)}
-          onForbidden={() => {
-            setEditing(false);
-            onForbidden();
-          }}
           onSaved={async () => {
             setEditing(false);
             await load();
@@ -364,12 +367,10 @@ function FeeConfigForm({
   config,
   onCancel,
   onSaved,
-  onForbidden,
 }: {
   config: FeeConfig;
   onCancel: () => void;
   onSaved: () => Promise<void>;
-  onForbidden: () => void;
 }) {
   const [commissionPct, setCommissionPct] = useState((config.commissionBps / 100).toString());
   const [method, setMethod] = useState<FeeConfig['driverEarningMethod']>(config.driverEarningMethod);
@@ -401,10 +402,9 @@ function FeeConfigForm({
       });
       await onSaved();
     } catch (e) {
-      if (isForbidden(e)) {
-        onForbidden();
-        return;
-      }
+      // A 403 here would mean the proactive canManage check above
+      // (BMPL-269) was wrong, not a state this form should try to recover
+      // from — it should never have been reachable in the first place.
       setErr(errMessage(e));
     } finally {
       setBusy(false);
@@ -682,7 +682,7 @@ function DRow({ label, children, strong }: { label: string; children: React.Reac
 
 /* --------------------------------------------------------- exceptions */
 
-function ExceptionsSection({ readOnly, onForbidden }: { readOnly: boolean; onForbidden: () => void }) {
+function ExceptionsSection({ canManage }: { canManage: boolean }) {
   const [rows, setRows] = useState<Exception[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -723,7 +723,7 @@ function ExceptionsSection({ readOnly, onForbidden }: { readOnly: boolean; onFor
             </thead>
             <tbody>
               {rows.map((x) => (
-                <ExceptionRow key={x.id} exception={x} readOnly={readOnly} onForbidden={onForbidden} onRetried={load} />
+                <ExceptionRow key={x.id} exception={x} canManage={canManage} onRetried={load} />
               ))}
             </tbody>
           </table>
@@ -735,13 +735,11 @@ function ExceptionsSection({ readOnly, onForbidden }: { readOnly: boolean; onFor
 
 function ExceptionRow({
   exception: x,
-  readOnly,
-  onForbidden,
+  canManage,
   onRetried,
 }: {
   exception: Exception;
-  readOnly: boolean;
-  onForbidden: () => void;
+  canManage: boolean;
   onRetried: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
@@ -759,10 +757,9 @@ function ExceptionRow({
         setResult({ tone: 'warning', text: res.reason ?? 'Still failing.' });
       }
     } catch (e) {
-      if (isForbidden(e)) {
-        onForbidden();
-        return;
-      }
+      // A 403 here would mean the proactive canManage check above
+      // (BMPL-269) was wrong, not a state this row should try to recover
+      // from after the fact.
       setResult({ tone: 'error', text: errMessage(e) });
     } finally {
       setBusy(false);
@@ -782,7 +779,7 @@ function ExceptionRow({
       </td>
       <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(x.updatedAt)}</td>
       <td className="px-4 py-3 text-right">
-        {!readOnly && (
+        {canManage && (
           <Button size="sm" variant="outline" onClick={retry} disabled={busy}>
             {busy ? 'Retrying…' : 'Retry'}
           </Button>

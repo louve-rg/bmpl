@@ -83,9 +83,7 @@ export default function PassengerDriverDetailPage() {
   const [driver, setDriver] = useState<DriverDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Optimistic until a 403 proves the viewer holds passengers.read alone;
-  // /me carries no permission list, so the guard is the only oracle.
-  const [canModerate, setCanModerate] = useState(true);
+  const [canModerate, setCanModerate] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +101,19 @@ export default function PassengerDriverDetailPage() {
     void load();
   }, [load]);
 
+  // Approve/reject and test-mode below are drawn only for passengers.moderate
+  // — /me returns the same grant rows the PermissionsGuard evaluates, so what
+  // this screen shows and what the API enforces cannot disagree. On any doubt
+  // (request fails, field absent) it stays hidden: fail closed. Replacing a
+  // flag that used to start permissive and only pull back after a 403
+  // (BMPL-269).
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanModerate((me.adminPermissions ?? []).includes('passengers.moderate')))
+      .catch(() => setCanModerate(false));
+  }, []);
+
   return (
     <div className="mx-auto max-w-4xl">
       <Link href="/dashboard/passengers" className="text-sm font-medium text-belize-blue hover:underline">
@@ -119,14 +130,7 @@ export default function PassengerDriverDetailPage() {
         <p className="mt-6 rounded-bmpl-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
       )}
 
-      {!loading && driver && (
-        <DriverDetailView
-          driver={driver}
-          onChanged={load}
-          canModerate={canModerate}
-          onForbidden={() => setCanModerate(false)}
-        />
-      )}
+      {!loading && driver && <DriverDetailView driver={driver} onChanged={load} canModerate={canModerate} />}
     </div>
   );
 }
@@ -135,12 +139,10 @@ function DriverDetailView({
   driver: d,
   onChanged,
   canModerate,
-  onForbidden,
 }: {
   driver: DriverDetail;
   onChanged: () => void;
   canModerate: boolean;
-  onForbidden: () => void;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -154,9 +156,9 @@ function DriverDetailView({
       await api.patch(`/admin/passengers/drivers/${d.id}/test-mode`, { isTest: !d.isTest, reason });
       onChanged();
     } catch (e) {
-      const ex = e as ApiError;
-      if (ex.status === 403) onForbidden();
-      else window.alert(ex.message ?? 'Could not change test mode.');
+      // A 403 here would mean the proactive canModerate check above
+      // (BMPL-269) was wrong, not a state to recover from after the fact.
+      window.alert((e as ApiError).message ?? 'Could not change test mode.');
     } finally {
       setBusy(false);
     }
@@ -232,7 +234,7 @@ function DriverDetailView({
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {d.vehicles.map((v) => (
-            <VehicleCard key={v.id} vehicle={v} onChanged={onChanged} canModerate={canModerate} onForbidden={onForbidden} />
+            <VehicleCard key={v.id} vehicle={v} onChanged={onChanged} canModerate={canModerate} />
           ))}
         </div>
       )}
@@ -244,12 +246,10 @@ function VehicleCard({
   vehicle: v,
   onChanged,
   canModerate,
-  onForbidden,
 }: {
   vehicle: Vehicle;
   onChanged: () => void;
   canModerate: boolean;
-  onForbidden: () => void;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -264,9 +264,9 @@ function VehicleCard({
       await api.post(`/admin/passengers/vehicles/${v.id}/${action}`, reason ? { reason } : {});
       onChanged();
     } catch (e) {
-      const ex = e as ApiError;
-      if (ex.status === 403) onForbidden();
-      else window.alert(ex.message ?? 'Action failed.');
+      // A 403 here would mean the proactive canModerate check above
+      // (BMPL-269) was wrong, not a state to recover from after the fact.
+      window.alert((e as ApiError).message ?? 'Action failed.');
     } finally {
       setBusy(false);
     }
