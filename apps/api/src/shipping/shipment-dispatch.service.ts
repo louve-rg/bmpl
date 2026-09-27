@@ -13,10 +13,21 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DriverService } from '../driver/driver.service';
 import { DispatchEngineService } from '../dispatch/dispatch-engine.service';
+import { LogisticsNetworkService } from './logistics-network.service';
 
 export type LegDispatchOutcome =
   | { result: 'OFFERED'; driverProfileId: string }
   | { result: 'SKIPPED'; reason: string }
+  /**
+   * BMPL-273: an otherwise-dispatchable first-mile leg whose projected
+   * arrival at its destination terminal falls outside that terminal's
+   * configured hours. Distinct from SKIPPED (no eligible driver, leg not
+   * actionable yet, …) because a caller that only checks for OFFERED would
+   * otherwise not be able to tell "still waiting for a driver" apart from
+   * "waiting for the terminal to open" — see dispatchLeg's own comment for
+   * why no persisted "scheduled for" state is needed to make this self-correct.
+   */
+  | { result: 'DEFERRED'; reason: string }
   | { result: 'EXHAUSTED' };
 
 /**
@@ -48,6 +59,7 @@ export class ShipmentDispatchService {
     private readonly notifications: NotificationsService,
     private readonly drivers: DriverService,
     private readonly engine: DispatchEngineService,
+    private readonly network: LogisticsNetworkService,
   ) {}
 
   /**
@@ -56,9 +68,15 @@ export class ShipmentDispatchService {
    * Safe to call repeatedly: it re-reads state and no-ops when the leg is held,
    * not yet its turn, or past its retry budget. It is called when a shipment is
    * booked, when the previous leg completes, when a driver declines, and from the
-   * sweeper — so idempotence is the only workable contract.
+   * sweeper — so idempotence is the only workable contract. That same
+   * repeat-safety is what BMPL-273's hub-hours defer below relies on: it needs
+   * no scheduling mechanism of its own, only to be re-evaluated on the existing
+   * cadence.
+   *
+   * `now` defaults to the real clock and exists so a test can drive the
+   * projected-arrival check deterministically; no production caller passes it.
    */
-  async dispatchLeg(legId: string): Promise<LegDispatchOutcome> {
+  async dispatchLeg(legId: string, now: Date = new Date()): Promise<LegDispatchOutcome> {
     const cfg = await this.engine.settings();
     if (!cfg.automatic) return { result: 'SKIPPED', reason: 'automatic dispatch is disabled' };
 
@@ -73,6 +91,8 @@ export class ShipmentDispatchService {
         sequence: true,
         originHubId: true,
         originHub: { select: { district: true } },
+        destinationHubId: true,
+        durationMinutes: true,
         shipment: {
           select: {
             id: true,
@@ -107,6 +127,51 @@ export class ShipmentDispatchService {
     // dispatchable, however many times this is called.
     if (!isLegActionable(leg.shipment.legs as LegView[], leg.sequence)) {
       return { result: 'SKIPPED', reason: 'the parcel has not reached this leg yet' };
+    }
+
+    // BMPL-273 / BMPL-177: a first-mile leg ends by a driver handing the
+    // parcel to terminal staff. If the projected arrival would land outside
+    // that terminal's configured hours, the owner's ruling is warn and
+    // reschedule into a future open window — never refuse outright, and
+    // never silently proceed as if nothing were wrong. Concretely: this leg
+    // is simply left undispatched (DEFERRED, not EXHAUSTED — it costs no
+    // offer budget), and the sweeper that already re-evaluates every
+    // undispatched leg on a fixed interval (shipment-dispatch.scheduler.ts,
+    // every 20s) re-runs this same check on each tick. Since "now" advances
+    // in step with the projected arrival (now + this leg's own
+    // durationMinutes), it self-corrects the moment that instant falls
+    // inside a future open window — no new "scheduled for" state needs to be
+    // persisted anywhere for that to happen.
+    //
+    // Only FIRST_MILE has a hub as its destination (route-planner.ts sets
+    // destinationHubId to the origin-side terminal for FIRST_MILE, and null
+    // for both LAST_MILE and DIRECT) — a LAST_MILE leg ends at the
+    // recipient's door and DIRECT never touches a hub at all, so neither has
+    // an arrival-at-a-terminal instant to evaluate here. That asymmetry is
+    // the one BMPL-260 identified: a driver carrying something to a place has
+    // a computable arrival instant (this leg's own durationMinutes added to
+    // now); a person deciding when to walk in does not, which is exactly why
+    // customer-collection and PICKUP fulfilment are untouched by this card —
+    // neither one is a leg this method ever dispatches a driver for.
+    //
+    // A hub with no configured hours (every hub in production today) resolves
+    // isOpen:true via hubHoursStatus's own unconstrained default, so this
+    // changes nothing for any existing, unconfigured hub.
+    if (leg.kind === 'FIRST_MILE' && leg.destinationHubId) {
+      const projectedArrival = new Date(now.getTime() + leg.durationMinutes * 60_000);
+      const hours = await this.network.hubHoursStatus(leg.destinationHubId, projectedArrival);
+      if (!hours.isOpen) {
+        const nextOpen = hours.nextOpen
+          ? ` The terminal is next open ${hours.nextOpen.date}${hours.nextOpen.openTime ? ` at ${hours.nextOpen.openTime}` : ''}.`
+          : '';
+        this.logger.warn(
+          `leg ${leg.id} would arrive at hub ${leg.destinationHubId} around ${projectedArrival.toISOString()}, outside its configured hours — deferring dispatch.${nextOpen}`,
+        );
+        return {
+          result: 'DEFERRED',
+          reason: `the destination terminal is outside its configured hours at the projected arrival time.${nextOpen}`,
+        };
+      }
     }
 
     if (leg.offerCount >= cfg.maxOffers) {
