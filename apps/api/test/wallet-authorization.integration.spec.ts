@@ -89,6 +89,10 @@ afterAll(async () => {
 });
 
 describe('successful wallet authorization (customer → escrow)', () => {
+  // These four its share state set by the first (customer, walletId,
+  // productId, paymentId) and only make sense run in file order — none but
+  // the first can be run individually (e.g. via `-t`). Not fixed here; a
+  // separate question about this file's test style.
   let customer: string[];
   let walletId: string;
   let productId: string;
@@ -118,14 +122,10 @@ describe('successful wallet authorization (customer → escrow)', () => {
 
     // Ledger balances exactly (topup 2 entries + escrow 2 entries), global net 0
     expect(await globalLedgerNet()).toBe(0n);
-    // LATEST-ROW ASSUMPTION (BMPL-243): no orderBy, and no scope beyond the
-    // transaction type -- the widest filter in this cluster. Safe only
-    // because this is the first test in the first describe in this file, so
-    // no other ESCROW_HOLD transaction exists yet. See
-    // categories.integration.spec.ts's CATEGORY_CREATED check for the full
-    // explanation and what would break it -- here, any test moved or added
-    // earlier in this file that also authorizes a payment.
-    const escrowTx = await ctx.prisma.walletTransaction.findFirstOrThrow({ where: { type: 'ESCROW_HOLD' }, include: { entries: true } });
+    // Scoped to this payment's own reference on purpose (BMPL-244) — the
+    // same idiom the idempotency check below uses (`payment:${paymentId}:auth`).
+    // Does not depend on being the first ESCROW_HOLD transaction in the file.
+    const escrowTx = await ctx.prisma.walletTransaction.findFirstOrThrow({ where: { type: 'ESCROW_HOLD', reference: `payment:${paymentId}:auth` }, include: { entries: true } });
     const net = escrowTx.entries.reduce((s, e) => s + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
     expect(net).toBe(0n);
     expect(escrowTx.entries).toHaveLength(2);
