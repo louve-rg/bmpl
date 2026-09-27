@@ -26,12 +26,27 @@ const securityHeaders = [
 
 /**
  * Normalize the API base so the /api proxy destination is ALWAYS a valid
- * absolute URL: default to the production API when unset, prepend https:// when
- * there's no scheme (a schemeless value makes Next treat the rewrite as an
- * internal path → 404), and strip a trailing slash / accidental "/api".
+ * absolute URL. Without a scheme, Next treats the rewrite destination as an
+ * internal same-host path and returns a 404 (the exact failure we hit). We:
+ *  - REFUSE to guess when the env var is absent. This used to default to the
+ *    production API, which meant a missing NEXT_PUBLIC_API_URL silently
+ *    pointed a local dev server (or a misconfigured deploy) at production
+ *    instead of failing — a developer who typed the wrong variable name would
+ *    authenticate against production without any error telling them so. A
+ *    loud failure at build/start time is fixed in ten seconds; a silent one
+ *    to production is not (BMPL-227, same defect and fix as admin's BMPL-224).
+ *  - prepend https:// when the value has no scheme,
+ *  - strip a trailing slash and an accidental trailing "/api" (avoids /api/api).
  */
 function apiBase(raw) {
-  const v = (raw || 'https://bmplapi-production.up.railway.app').trim();
+  if (!raw) {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL is not set. Refusing to default to the production API — ' +
+        'set it explicitly, e.g. NEXT_PUBLIC_API_URL=http://localhost:4000 for local development ' +
+        '(see .env.example). This variable is required in every deployed environment (docs/ENVIRONMENT.md).',
+    );
+  }
+  const v = raw.trim();
   const withScheme = /^https?:\/\//i.test(v) ? v : `https://${v}`;
   return withScheme.replace(/\/+$/, '').replace(/\/api$/i, '');
 }

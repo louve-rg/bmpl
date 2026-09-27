@@ -18,6 +18,6 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['{lib,components,app}/**/*.test.{ts,tsx}'],
+    include: ['{lib,components,app}/**/*.test.{ts,tsx}', '*.test.mjs'],
   },
 });
