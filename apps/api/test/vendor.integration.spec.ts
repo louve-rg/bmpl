@@ -175,6 +175,11 @@ describe('vendor profile lifecycle', () => {
     expect(res.status).toBe(201);
     expect(res.body.profile.approvalStatus).toBe('PENDING');
 
+    // LATEST-ROW ASSUMPTION (BMPL-243): no orderBy, no entity scope -- safe
+    // only because this is the only/first query for VENDOR_PROFILE_SUBMITTED
+    // in this file. See categories.integration.spec.ts's CATEGORY_CREATED
+    // check for the full explanation and what would break it. VENDOR_APPROVED
+    // below depends on the identical assumption.
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'VENDOR_PROFILE_SUBMITTED' } });
     expect(audit).toBeTruthy();
     const review = await ctx.prisma.vendorModerationReview.findFirst({
@@ -197,6 +202,9 @@ describe('vendor profile lifecycle', () => {
     expect(approve.status).toBe(201);
     expect(approve.body.approvalStatus).toBe('APPROVED');
 
+    // LATEST-ROW ASSUMPTION (BMPL-243): same dependency as
+    // VENDOR_PROFILE_SUBMITTED above -- see that comment for the full
+    // explanation and what would break it.
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'VENDOR_APPROVED' } });
     expect(audit).toBeTruthy();
     const note = await request(ctx.server).get('/api/notifications').set('Cookie', vendorCookies);

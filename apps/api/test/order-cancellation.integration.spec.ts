@@ -151,6 +151,13 @@ describe('inside the window', () => {
     expect(await releaseTxnCount(payment.id)).toBe(0);
     const inv = await ctx.prisma.inventory.findFirstOrThrow({ where: { productId: vendor.productId } });
     expect(inv.reserved).toBe(0);
+    // LATEST-ROW ASSUMPTION (BMPL-243): filtered by action only, not by this
+    // order's id -- safe only because this is the FIRST cancellation test in
+    // a file whose entire subject is cancellation, which makes it the most
+    // likely file in this cluster to eventually gain an earlier-running test
+    // that also cancels an order. See categories.integration.spec.ts's
+    // CATEGORY_CREATED check for the full explanation and what would break
+    // it.
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'ORDER_CANCELLED' }, orderBy: { createdAt: 'desc' } });
     expect(audit?.actorId).toBe(customer.userId);
   });

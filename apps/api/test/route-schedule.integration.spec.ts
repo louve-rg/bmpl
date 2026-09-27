@@ -126,6 +126,12 @@ describe('admin route schedule', () => {
     expect(second.status).toBe(200);
     expect(second.body.days).toEqual([{ dayOfWeek: 1, status: 'OPERATING', note: null }]);
 
+    // LATEST-ROW ASSUMPTION (BMPL-243): filtered by action only, not by this
+    // route's id -- safe only because this is the only/first query for
+    // ROUTE_SCHEDULE_CHANGED in this file (existence-only assertion below
+    // limits the damage, but the assumption is the same). See
+    // categories.integration.spec.ts's CATEGORY_CREATED check for the full
+    // explanation and what would break it.
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'ROUTE_SCHEDULE_CHANGED' }, orderBy: { createdAt: 'desc' } });
     expect(audit).toBeTruthy();
   });

@@ -80,6 +80,10 @@ describe('product auto-publish + public visibility', () => {
     productId = res.body.id;
     productSlug = res.body.slug;
 
+    // LATEST-ROW ASSUMPTION (BMPL-243): no orderBy, no entity scope -- safe
+    // only because this is the only/first query for PRODUCT_CREATED in this
+    // file. See categories.integration.spec.ts's CATEGORY_CREATED check for
+    // the full explanation and what would break it.
     const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'PRODUCT_CREATED' } });
     expect(audit).toBeTruthy();
   });
