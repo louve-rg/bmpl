@@ -463,6 +463,25 @@ describe('notification event codes are property-specific, not PRODUCT_MODERATED 
     return row.notification.event;
   }
 
+  // Proves the row was created strictly after `sinceId`, rather than merely
+  // that it is the latest — for a caller checking two actions on the same
+  // user whose notifications can share an event value (BMPL-242: the
+  // SUSPEND-after-APPROVE case below). `sinceId` is a required string, not
+  // an optional one that falls back to the unscoped query above when
+  // nullish — the caller normalizes its own snapshot to '' (`before?.id ??
+  // ''`), exactly as workflows.integration.spec.ts (BMPL-237) does, so
+  // there is no nullish path here for the protection to silently disable
+  // itself through. See that file for why an `id: { gt }` comparison on a
+  // cuid() tracks creation order.
+  async function newEvent(userId: string, sinceId: string) {
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId, id: { gt: sinceId } },
+      include: { notification: true },
+      orderBy: { id: 'asc' },
+    });
+    return row.notification.event;
+  }
+
   async function latestCategory(userId: string) {
     const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
       where: { userId },
@@ -494,9 +513,17 @@ describe('notification event codes are property-specific, not PRODUCT_MODERATED 
     expect(mod.status).toBe(201);
     // APPROVE routes through notifyListers -> PROPERTY_LISTING_STATUS_CHANGED
     // for the admin-driven path (SUSPEND below is the same helper, no
-    // exceptUserId, so it also lands on the owner directly).
+    // exceptUserId, so it also lands on the owner directly). Both actions
+    // share that one event value (properties.service.ts's notifyListers),
+    // so an unscoped "latest" lookup after SUSPEND could not tell its own
+    // notification apart from APPROVE's leftover row above — snapshot
+    // before SUSPEND and require the row found to be newer (BMPL-242).
+    const beforeSuspend = await ctx.prisma.notificationRecipient.findFirst({
+      where: { userId: owner.userId },
+      orderBy: { id: 'desc' },
+    });
     expect((await post(admin, `admin/properties/${create.body.id}/moderate`, { action: 'SUSPEND' })).status).toBe(201);
-    expect(await latestEvent(owner.userId)).toBe('PROPERTY_LISTING_STATUS_CHANGED');
+    expect(await newEvent(owner.userId, beforeSuspend?.id ?? '')).toBe('PROPERTY_LISTING_STATUS_CHANGED');
   });
 
   it('an agent invitation and its acceptance each carry their own event', async () => {
