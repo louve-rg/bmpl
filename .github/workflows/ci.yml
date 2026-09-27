@@ -25,6 +25,21 @@ jobs:
       # satisfy schema env resolution in this DB-less job.
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
       DIRECT_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+      # apps/admin/next.config.mjs reads ADMIN_PUBLIC_API_URL while building its
+      # rewrites config, and throws if it is unset (BMPL-224) rather than
+      # defaulting to the production API — so "Build admin" below cannot even
+      # start without it, not just fail a runtime check. This dummy is never
+      # connected to (nothing in this job makes a network call), same as the
+      # DATABASE_URL/DIRECT_URL dummies above.
+      #
+      # FORWARD WARNING, same trap, not yet sprung: apps/web still silently
+      # defaults NEXT_PUBLIC_API_URL to the production API (BMPL-227 will fix
+      # that the same way BMPL-224 fixed admin). The moment it does, "Build
+      # web" below breaks in CI for the identical reason. Whoever lands
+      # BMPL-227 must add NEXT_PUBLIC_API_URL to this env block in the SAME
+      # commit — do not add it here pre-emptively, since setting it now would
+      # change what today's CI web build embeds.
+      ADMIN_PUBLIC_API_URL: http://localhost:4000
     steps:
       - uses: actions/checkout@v4
 
