@@ -51,7 +51,15 @@
  *       enumerable, not actually unknown, and treating it as opaque would
  *       falsely orphan both codes; found live in this codebase twice:
  *       driver-jobs.service.ts's IN_TRANSIT/ARRIVING split, and
- *       messaging.service.ts's ATTACHMENT/RECEIVED split)
+ *       messaging.service.ts's ATTACHMENT/RECEIVED split). Requires EXACTLY
+ *       one `?` in the raw text before this classification is even attempted
+ *       (BMPL-234) — a NESTED ternary (`a ? 'X' : b ? 'Y' : 'Z'`) has two,
+ *       and the naive regex used to backtrack past the first `?`, match the
+ *       second as if it were the only one, and confidently return 'Y'/'Z' —
+ *       silently dropping 'X' with no flag at all. That is worse than the
+ *       gap this card exists to close: a wrong, unflagged answer rather than
+ *       an unverifiable one. A nested ternary now correctly falls through to
+ *       NON-LITERAL below instead.
  *     - anything else (identifier, member access, `let` variable, etc.)      -> NON-LITERAL,
  *       always FLAGGED FOR MANUAL READ, never silently resolved or silently
  *       dropped — the same UNKNOWN-never-a-pass discipline as the other two
@@ -123,6 +131,30 @@
  * exit code past 0 — each is a "go read this", not a confirmed defect. The
  * report still lists all of them, because an exit-0 reader should not think
  * nothing needed a human's attention.)
+ *
+ * STATUS WORD vs. EXIT CODE (BMPL-234): exit 0 covers two genuinely different
+ * situations, and printing the same bare "OK" for both was the defect this
+ * follow-up fixes. A catalog entry with a hinted-but-non-literal call site is
+ * UNVERIFIED, not VERIFIED — this script never resolved it, it only noticed a
+ * name match nearby. A code that had a real literal/ternary call site (fully
+ * VERIFIED) and one whose only lead is a textual hint (an educated guess, not
+ * a check) are different claims, and BMPL-234's own trigger was exactly this:
+ * collapsing a two-branch ternary into a nested one silently demoted a
+ * verified code to a hinted one, the exit code stayed 0 either way, and
+ * nothing about the word "OK" would have told a reviewer to look. So the
+ * printed/JSON `status` now has THREE values, not two:
+ *   OK       clean, and every orphan is either baselined or has zero hints
+ *            needed (there are none) — nothing to read
+ *   REVIEW   still exit 0 — no NEW orphan, no missing code, no empty-reason
+ *            baseline entry — but at least one ORPHAN-BUT-HINTED exists: a
+ *            code this script could not verify, only guess about. Distinct
+ *            from OK on purpose. Still exit 0 on purpose: a hinted orphan is
+ *            genuinely ambiguous, and failing the build on ambiguity is the
+ *            same "always-red gets muted" trap the baseline exists to avoid,
+ *            one level up.
+ *   DRIFT    exit 1, unchanged
+ * `needsReview` (JSON: a boolean) is the same fact machine-readable, so a
+ * consumer doesn't have to re-derive it from array lengths.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -425,8 +457,21 @@ function classifyEventValue(raw) {
   if (raw == null) return { kind: 'NO-EVENT' };
   const lit = STRING_LITERAL_RE.exec(raw);
   if (lit) return { kind: 'LITERAL', codes: [lit[2]] };
-  const tern = TERNARY_TWO_LITERALS_RE.exec(raw);
-  if (tern) return { kind: 'TERNARY', codes: [tern[2], tern[4]] };
+  // BMPL-234: TERNARY_TWO_LITERALS_RE's leading `.+?` is unbounded, so on a
+  // NESTED ternary (`a ? 'X' : b ? 'Y' : 'Z'`) it backtracks straight past the
+  // first `?`, matches the SECOND `?` as if it were the only one, and returns
+  // 'Y'/'Z' as a confident two-literal TERNARY — silently dropping 'X' with
+  // NO flag at all, not even NON-LITERAL. That is worse than the demotion
+  // this card exists to make visible: it is a wrong, unflagged answer, not an
+  // unverifiable one. A single ternary can only ever contain exactly one `?`,
+  // so require that before trusting the regex at all — two or more means this
+  // is nested (or otherwise not a plain two-branch ternary) and must fall
+  // through to NON-LITERAL, where it gets flagged and hinted like any other
+  // unresolvable value, never silently misresolved.
+  if ((raw.match(/\?/g) ?? []).length === 1) {
+    const tern = TERNARY_TWO_LITERALS_RE.exec(raw);
+    if (tern) return { kind: 'TERNARY', codes: [tern[2], tern[4]] };
+  }
   return { kind: 'NON-LITERAL', raw };
 }
 
@@ -543,7 +588,14 @@ function main() {
 
   const drift = newOrphans.length > 0 || missing.length > 0 || baselineReasonMissing.length > 0;
   const exitCode = drift ? 1 : 0;
-  const status = drift ? 'DRIFT' : 'OK';
+  // A hinted orphan is UNVERIFIED — a name match nearby, not a resolved call
+  // site — and is a different claim from a code this script actually
+  // confirmed. Exit code does not change (see the header: turning ambiguity
+  // into a hard fail is the exact trap this checker family exists to avoid),
+  // but the STATUS WORD must, or "OK" silently covers both "fully verified"
+  // and "some of this is a guess" (BMPL-234).
+  const needsReview = hintedOrphans.length > 0;
+  const status = drift ? 'DRIFT' : needsReview ? 'REVIEW' : 'OK';
 
   const scope =
     `checks ONLY apps/api/src call sites against packages/shared/src/notifications.ts's NOTIFICATION_EVENTS — ` +
@@ -572,6 +624,7 @@ function main() {
           scope,
           summary,
           status,
+          needsReview,
           exitCode,
           newOrphans: newOrphans.map((o) => o.code),
           baselineAcknowledgedOrphans: baselineAcknowledged,
@@ -605,7 +658,10 @@ function main() {
       console.log('');
     }
     if (hintedOrphans.length > 0) {
-      console.log(`ORPHAN-BUT-HINTED — no literal call site, but the name appears inside a flagged non-literal below; read it to confirm (${hintedOrphans.length}):`);
+      console.log(
+        `ORPHAN-BUT-HINTED — UNVERIFIED, not the same claim as a confirmed use or an accepted known orphan: no literal call site, ` +
+          `only a name match inside a flagged non-literal below; read it to confirm (${hintedOrphans.length}):`,
+      );
       for (const o of hintedOrphans) console.log(`  ${o.code}  (hinted at ${o.hints.join(', ')})`);
       console.log('');
     }
@@ -645,9 +701,16 @@ function main() {
         `${staleBaselineEntries.length} stale baseline entr${staleBaselineEntries.length === 1 ? 'y' : 'ies'}, ${baselineReasonMissing.length} baseline defect(s), ` +
         `${missing.length} missing-from-catalog code(s)`,
     );
+    if (needsReview) {
+      console.log(
+        `REVIEW means exit 0 is NOT the same claim as OK: ${hintedOrphans.length} code(s) above are UNVERIFIED (a name match, not a resolved call site) — ` +
+          `read the ORPHAN-BUT-HINTED entries before treating this run as clean.`,
+      );
+    }
     console.log(
-      `\nexit ${exitCode} (0 OK, 1 DRIFT — a NEW orphan, a missing code, or a baseline entry with no reason; a known/hinted orphan, a stale baseline note, ` +
-        `or a non-literal flag alone does not raise this)`,
+      `\nexit ${exitCode} (0 OK/REVIEW, 1 DRIFT — a NEW orphan, a missing code, or a baseline entry with no reason; a known/hinted orphan, a stale baseline ` +
+        `note, or a non-literal flag alone does not raise this. REVIEW vs. OK is the status word above, not the exit code: REVIEW means at least one code ` +
+        `is UNVERIFIED, not confirmed either way — see BMPL-234)`,
     );
   }
 
