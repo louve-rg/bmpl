@@ -215,7 +215,13 @@ export class ShipmentDriverService {
     });
     // Records custody, moves the leg to IN_PROGRESS and recomputes the shipment.
     await this.shipments.startLeg(legId, { userId: actor.userId, label: 'Driver' });
-    await this.audit.record({ action: 'SHIPMENT_LEG_PICKED_UP', actorId: actor.userId, newValue: { legId, reference: leg.shipment.reference } });
+    // A photo attached before this call already recorded the pickup itself
+    // (BMPL-189) — this transition still applies (courierStatus, custody,
+    // notification), but the audit trail only gets one SHIPMENT_LEG_PICKED_UP
+    // row per leg, whichever path wrote it first.
+    if (leg.handoffPhotoKeys.length === 0) {
+      await this.audit.record({ action: 'SHIPMENT_LEG_PICKED_UP', actorId: actor.userId, newValue: { legId, reference: leg.shipment.reference } });
+    }
     await this.notifyCustomer(
       leg,
       leg.kind === 'FIRST_MILE' ? 'Your parcel has been collected.' : 'Your parcel is out for delivery.',
@@ -245,19 +251,33 @@ export class ShipmentDriverService {
    * `newValue`) rather than adding a new `AuditAction` enum value, which would
    * need its own migration — this card is scoped as additive-only, no schema
    * change.
+   *
+   * ONE ROW PER LEG (BMPL-189): this can be called any number of times — to
+   * attach the first evidence, or to replace/add photos later — and it can be
+   * called before OR after `confirmPickup` (test 2 in
+   * shipping-pickup-photo.integration.spec.ts exercises it with no prior
+   * `/pickup` call at all, so it must stand on its own as a pickup record).
+   * A second call on an already-recorded leg would otherwise write a second
+   * `SHIPMENT_LEG_PICKED_UP` row asserting a pickup that did not happen again.
+   * The audit row is written only the first time either path (a confirmed
+   * pickup, or a previously attached photo) has not yet recorded this leg's
+   * pickup; every later call still updates the stored photo keys.
    */
   async confirmPickupPhoto(actor: Actor, legId: string, dto: LegPickupPhotoInput) {
     const { leg } = await this.ownedLeg(actor.userId, legId);
     if (leg.status === 'COMPLETED' || leg.status === 'CANCELLED') {
       throw new BadRequestException('This leg is already finished.');
     }
+    const alreadyRecorded = leg.pickedUpAt !== null || leg.handoffPhotoKeys.length > 0;
     const keys = await this.resolvePickupPhotoKeys(actor.userId, dto.photoKeys);
     await this.prisma.shipmentLeg.update({ where: { id: legId }, data: { handoffPhotoKeys: keys } });
-    await this.audit.record({
-      action: 'SHIPMENT_LEG_PICKED_UP',
-      actorId: actor.userId,
-      newValue: { legId, reference: leg.shipment.reference, pickupPhotoCount: keys.length },
-    });
+    if (!alreadyRecorded) {
+      await this.audit.record({
+        action: 'SHIPMENT_LEG_PICKED_UP',
+        actorId: actor.userId,
+        newValue: { legId, reference: leg.shipment.reference, pickupPhotoCount: keys.length },
+      });
+    }
     return this.getJob(actor.userId, legId);
   }
 
