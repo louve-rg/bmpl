@@ -5,7 +5,7 @@
   "description": "BMPL backend API (NestJS) — the single source of authorization.",
   "scripts": {
     "build": "nest build",
-    "dev": "nest start --watch",
+    "dev": "node scripts/dev-with-commit.mjs",
     "start": "node dist/main.js",
     "start:prod": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\" --max-warnings 0",
