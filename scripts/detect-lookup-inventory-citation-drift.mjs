@@ -347,7 +347,7 @@ function main() {
     console.log(`detect-lookup-inventory-citation-drift — ${rel(DOC_PATH)}`);
     console.log(scope + '\n');
     console.log(`total citations found: ${results.length}`);
-    console.log(by);
+    console.log(`by verdict: ${Object.entries(by).map(([verdict, count]) => `${verdict} ${count}`).join(', ')}`);
     console.log('');
     for (const r of results.filter((x) => x.verdict === 'DRIFTED')) {
       console.log(
