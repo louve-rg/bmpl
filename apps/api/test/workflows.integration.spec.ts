@@ -274,7 +274,7 @@ describe('role switching', () => {
     expect(sw.status).toBe(403);
   });
 
-  it('restores VENDOR → selectable again', async () => {
+  it('restores VENDOR → selectable again, and the affected user is notified (BMPL-231)', async () => {
     await request(ctx.server)
       .post('/api/admin/roles/restore')
       .set('Cookie', adminCookies)
@@ -285,9 +285,22 @@ describe('role switching', () => {
       .set('Cookie', vendorCookies)
       .send({ roleCode: 'VENDOR' });
     expect(sw.status).toBe(201);
+
+    // The 201 above only proves the API accepted the request — it was already
+    // correct before BMPL-231. The protected behaviour is that the vendor is
+    // actually told: changeRoleStatus() notified only inside its SUSPENDED
+    // branch, so restore (and revoke, below) audited the change and told
+    // nobody. Assert the notification row itself, not the response code.
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId: vendorUserId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    expect(row.notification.title).toBe('Vendor restored');
+    expect(row.notification.event).toBe('ROLE_STATUS_CHANGED');
   });
 
-  it('revokes VENDOR → cannot be activated via the API', async () => {
+  it('revokes VENDOR → cannot be activated via the API, and the affected user is notified (BMPL-231)', async () => {
     await request(ctx.server)
       .post('/api/admin/roles/revoke')
       .set('Cookie', adminCookies)
@@ -298,6 +311,16 @@ describe('role switching', () => {
       .set('Cookie', vendorCookies)
       .send({ roleCode: 'VENDOR' });
     expect(sw.status).toBe(403);
+
+    // Same reasoning as restore above: revocation is the more severe action of
+    // the two, and it was the one that stayed silent while suspension spoke.
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId: vendorUserId },
+      include: { notification: true },
+      orderBy: { id: 'desc' },
+    });
+    expect(row.notification.title).toBe('Vendor revoked');
+    expect(row.notification.event).toBe('ROLE_STATUS_CHANGED');
   });
 
   it('rejects an invalid enum and a not-held role', async () => {

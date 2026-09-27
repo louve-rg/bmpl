@@ -602,6 +602,18 @@ export class MessagingService {
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { status: 'CLOSED', closedAt: new Date(), closedById: actor.userId } });
     await this.persistMessage(actor, conversationId, { body: 'Conversation closed.' }, 'SYSTEM');
     await this.audit.record({ action: 'CONVERSATION_CLOSED', actorId: actor.userId, newValue: { conversationId } });
+    // Same audience sendMessage() already tells about a new message (BMPL-231)
+    // — this was the one moment in the module that audited an action but told
+    // nobody: whoever didn't close it got nothing pushed.
+    const others = ctx.conv.participants.filter((p) => p.userId !== actor.userId).map((p) => p.userId);
+    await this.notifications.notifyUsers(others, {
+      type: 'MARKETPLACE',
+      category: 'MESSAGE',
+      event: 'CONVERSATION_CLOSED',
+      title: 'Conversation closed',
+      body: 'A conversation you were part of has been closed.',
+      data: { conversationId },
+    });
     return this.getConversation(actor, conversationId);
   }
 

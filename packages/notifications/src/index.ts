@@ -78,4 +78,16 @@ export const templates = {
       body: `Your ${roleLabel} role has been suspended. Reason: ${reason}`,
     };
   },
+  roleRevoked(roleLabel: string, reason: string): { title: string; body: string } {
+    return {
+      title: `${roleLabel} revoked`,
+      body: `Your ${roleLabel} role has been revoked. Reason: ${reason}`,
+    };
+  },
+  roleRestored(roleLabel: string): { title: string; body: string } {
+    return {
+      title: `${roleLabel} restored`,
+      body: `Your ${roleLabel} role has been restored. You can switch to it again from your account.`,
+    };
+  },
 } as const;
