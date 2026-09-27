@@ -730,9 +730,33 @@ corrected 2026-09-26 against `cfc4d7a`:
   it failed whenever the two signing calls straddled a second boundary. It now
   compares the object path. No product behaviour changed. Branch
   `fix/flaky-presigned-url-assertion`.
-- **There is no browser or end-to-end test** (no Playwright, no Cypress).
-  `apps/admin` has no test suite at all. Every UI behaviour is verified either by
-  a pure-function unit test of the logic behind it, or by a person.
+- **There is now a real-browser test suite** (BMPL-217/228): `apps/web/e2e`,
+  three committed Playwright specs, run with `pnpm --filter @bmpl/web test:e2e`.
+  - `dialog-focus-trap.spec.ts` proves what only a real browser can prove —
+    genuine `inert` enforcement and genuine pointer hit-testing. Its own scope
+    note is explicit that it "deliberately does NOT re-prove the 'opener
+    disconnected' fallback... that is already a committed jsdom test... since
+    it is ordinary DOM-connectivity logic, not a real-inert or real-hit-testing
+    question." It runs for real in CI, as the "Browser tests (BMPL-217,
+    informational)" step in `.github/workflows/ci.yml` —
+    `continue-on-error: true` so a flaky browser run cannot block the Railway
+    deploy gate, not because the step doesn't execute.
+  - `employer-empty-state.spec.ts` and `employer-job-draft-defaults.spec.ts`
+    prove the real request/response shape against a live API and the seeded
+    dev database. **These two do not run in CI today, on purpose**: CI's e2e
+    step deliberately provisions no Postgres/Redis (adding it would duplicate
+    the integration job), so `tryLogin` fails fast and each test reports
+    `test.skip(...)` with that reason instead of failing red. They run for
+    real locally: `pnpm infra:up && pnpm db:seed`, a running API, then
+    `pnpm --filter @bmpl/web test:e2e`.
+  `apps/admin` has no component-rendering test framework, but it is not
+  untested: 11 committed `vitest` spec files under `apps/admin/lib/` cover
+  pure-function logic (access control, dispatch assignment, hub editing, and
+  more) — the same pure-function-unit-test pattern the rest of this bullet
+  describes. No admin UI is verified by rendering it in a test. Every UI
+  behaviour in both apps is verified by a pure-function unit test of the logic
+  behind it, a real-browser Playwright spec (web only, and only where listed
+  above), or a person.
 - **Tooling drift resolved 2026-09-03.** An uncommitted `shadcn` devDependency
   had been added at the repo root, which pulled ~1,047 lines into
   `pnpm-lock.yaml` and — the reason it mattered — re-resolved `next@14.2.35` in
