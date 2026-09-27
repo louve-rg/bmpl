@@ -87,24 +87,44 @@ afterAll(async () => {
 
 describe('admin platform analytics (analytics.read)', () => {
   it('aggregates GMV, platform revenue, units, and top lists from paid+settled orders', async () => {
+    // gmvMinor/paidOrders/unitsSold/platformRevenueMinor/today.orders/
+    // today.grossMinor are platform-wide aggregates, shared across every test
+    // in this file — correct as absolute values today only because this
+    // happens to be the first test to seed a paid order. Snapshot before
+    // seeding and assert this test's own contribution as a delta, so the
+    // check does not depend on running first (BMPL-249). Delta rather than
+    // a range (toBeGreaterThanOrEqual): a range would still pass if a bad
+    // join double-counted this test's own orders, which is the more likely
+    // real defect on an aggregate endpoint.
+    const before = await get(adminCookies, 'admin/analytics/overview');
+    const salesBefore = await get(adminCookies, 'admin/analytics/sales?days=7');
+    const todayBefore = salesBefore.body.series[salesBefore.body.series.length - 1];
+
     const v = await makeVendor();
     const a = await seedPaidOrder(v, 2);
     const b = await seedPaidOrder(v, 3);
 
     const ov = await get(adminCookies, 'admin/analytics/overview');
     expect(ov.status).toBe(200);
-    expect(ov.body.gmvMinor).toBe(a.total + b.total);
-    expect(ov.body.paidOrders).toBe(2);
-    expect(ov.body.unitsSold).toBe(a.qty + b.qty);
-    expect(ov.body.platformRevenueMinor).toBe(a.platform + b.platform);
-    expect(ov.body.aovMinor).toBe(Math.round((a.total + b.total) / 2));
+    expect(ov.body.gmvMinor - before.body.gmvMinor).toBe(a.total + b.total);
+    expect(ov.body.paidOrders - before.body.paidOrders).toBe(2);
+    expect(ov.body.unitsSold - before.body.unitsSold).toBe(a.qty + b.qty);
+    expect(ov.body.platformRevenueMinor - before.body.platformRevenueMinor).toBe(a.platform + b.platform);
+    // aovMinor is an AVERAGE, not additive — subtracting the snapshot would
+    // produce a subtly wrong number that still happens to pass. Recompute it
+    // from the same before/after totals the server itself combines.
+    const gmvAfter = before.body.gmvMinor + a.total + b.total;
+    const paidOrdersAfter = before.body.paidOrders + 2;
+    expect(ov.body.aovMinor).toBe(Math.round(gmvAfter / paidOrdersAfter));
+    // Already correctly hedged (whoever wrote this knew for THIS one field) —
+    // left as-is.
     expect(ov.body.approvedVendors).toBeGreaterThanOrEqual(1);
 
     const sales = await get(adminCookies, 'admin/analytics/sales?days=7');
     expect(sales.body.series).toHaveLength(7);
     const today = sales.body.series[sales.body.series.length - 1];
-    expect(today.orders).toBe(2); // both payments are "today"
-    expect(today.grossMinor).toBe(a.total + b.total);
+    expect(today.orders - todayBefore.orders).toBe(2); // both payments are "today"
+    expect(today.grossMinor - todayBefore.grossMinor).toBe(a.total + b.total);
 
     const topP = await get(adminCookies, 'admin/analytics/top-products');
     expect(topP.body[0]).toMatchObject({ productId: v.productId, unitsSold: a.qty + b.qty });

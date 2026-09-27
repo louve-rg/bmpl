@@ -118,7 +118,11 @@ describe('successful wallet authorization (customer → escrow)', () => {
     // Escrow movement: customer 6000-5000=1000, escrow +5000
     const escrow = await escrowAccount();
     expect(await balanceOf(walletId)).toBe(1000n);
-    expect(await balanceOf(escrow.id)).toBe(5000n);
+    // SYSTEM_ESCROW is a shared account across every test in this file — an
+    // absolute value here only held because this was the first test to move
+    // money into it (BMPL-249). Matches the multi-vendor test's own fix for
+    // the same account, ~200 lines below.
+    expect(await balanceOf(escrow.id)).toBeGreaterThanOrEqual(5000n);
 
     // Ledger balances exactly (topup 2 entries + escrow 2 entries), global net 0
     expect(await globalLedgerNet()).toBe(0n);
