@@ -454,18 +454,30 @@ describe('dead listing statuses stay dead (BMPL-163)', () => {
  * 200/201 the action already returns.
  */
 describe('notification event codes are property-specific, not PRODUCT_MODERATED (BMPL-149)', () => {
-  // `sinceId` (BMPL-242) narrows to a row created after a snapshot taken
-  // before the action under test, so a caller can prove ITS action produced
-  // the row rather than merely that a matching one exists somewhere in this
-  // user's history — see workflows.integration.spec.ts (BMPL-237) for why an
-  // `id: { gt }` comparison tracks creation order (cuid()) and for the
-  // discipline this follows. Omitted, this behaves exactly as before: every
-  // other call in this file is unaffected.
-  async function latestEvent(userId: string, sinceId?: string) {
+  async function latestEvent(userId: string) {
     const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
-      where: { userId, ...(sinceId ? { id: { gt: sinceId } } : {}) },
+      where: { userId },
       include: { notification: true },
-      orderBy: { id: sinceId ? 'asc' : 'desc' },
+      orderBy: { id: 'desc' },
+    });
+    return row.notification.event;
+  }
+
+  // Proves the row was created strictly after `sinceId`, rather than merely
+  // that it is the latest — for a caller checking two actions on the same
+  // user whose notifications can share an event value (BMPL-242: the
+  // SUSPEND-after-APPROVE case below). `sinceId` is a required string, not
+  // an optional one that falls back to the unscoped query above when
+  // nullish — the caller normalizes its own snapshot to '' (`before?.id ??
+  // ''`), exactly as workflows.integration.spec.ts (BMPL-237) does, so
+  // there is no nullish path here for the protection to silently disable
+  // itself through. See that file for why an `id: { gt }` comparison on a
+  // cuid() tracks creation order.
+  async function newEvent(userId: string, sinceId: string) {
+    const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { userId, id: { gt: sinceId } },
+      include: { notification: true },
+      orderBy: { id: 'asc' },
     });
     return row.notification.event;
   }
@@ -511,7 +523,7 @@ describe('notification event codes are property-specific, not PRODUCT_MODERATED 
       orderBy: { id: 'desc' },
     });
     expect((await post(admin, `admin/properties/${create.body.id}/moderate`, { action: 'SUSPEND' })).status).toBe(201);
-    expect(await latestEvent(owner.userId, beforeSuspend?.id)).toBe('PROPERTY_LISTING_STATUS_CHANGED');
+    expect(await newEvent(owner.userId, beforeSuspend?.id ?? '')).toBe('PROPERTY_LISTING_STATUS_CHANGED');
   });
 
   it('an agent invitation and its acceptance each carry their own event', async () => {
