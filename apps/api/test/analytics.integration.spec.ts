@@ -126,10 +126,18 @@ describe('admin platform analytics (analytics.read)', () => {
     expect(today.orders - todayBefore.orders).toBe(2); // both payments are "today"
     expect(today.grossMinor - todayBefore.grossMinor).toBe(a.total + b.total);
 
+    // Platform-wide ranking, not a lookup or an absolute value on shared
+    // state — a THIRD shape (BMPL-250). Position depends on every other
+    // test's data (whichever product/vendor another test happened to sell
+    // more of ranks first), but membership and this entry's own value do
+    // not. Assert this test's own product/vendor is present with the right
+    // count, not that it ranks first.
     const topP = await get(adminCookies, 'admin/analytics/top-products');
-    expect(topP.body[0]).toMatchObject({ productId: v.productId, unitsSold: a.qty + b.qty });
+    const topPEntry = topP.body.find((p: { productId: string }) => p.productId === v.productId);
+    expect(topPEntry).toMatchObject({ productId: v.productId, unitsSold: a.qty + b.qty });
     const topV = await get(adminCookies, 'admin/analytics/top-vendors');
-    expect(topV.body[0]).toMatchObject({ vendorProfileId: v.vendorProfileId, orders: 2 });
+    const topVEntry = topV.body.find((x: { vendorProfileId: string }) => x.vendorProfileId === v.vendorProfileId);
+    expect(topVEntry).toMatchObject({ vendorProfileId: v.vendorProfileId, orders: 2 });
   });
 
   it('exports an orders CSV with the right content type + header', async () => {
