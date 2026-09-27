@@ -576,6 +576,7 @@ model User {
   shippingProviderProfile    ShippingProviderProfile?  @relation("UserShippingProviderProfile")
   shippingProviderMemberships ShippingProviderMember[] @relation("ShippingProviderMemberships")
   routeScheduleExceptionsMade RouteScheduleException[] @relation("RouteScheduleExceptionCreatedBy")
+  hubHoursExceptionsMade      HubHoursException[]      @relation("HubHoursExceptionCreatedBy")
 
   @@index([status])
   @@index([district])
@@ -4382,6 +4383,11 @@ model LogisticsHub {
   shipmentsFrom Shipment[]       @relation("ShipmentOriginHub")
   shipmentsTo   Shipment[]       @relation("ShipmentDestinationHub")
   custodyEvents CustodyEvent[]
+  // Structured hours (BMPL-260/262) — the CONFIGURATION half. `instructions`
+  // above stays a label nobody can check by machine, exactly like
+  // LogisticsRoute.scheduleNote next to RouteOperatingDay/RouteScheduleException.
+  openingDays     HubOpeningDay[]
+  hoursExceptions HubHoursException[]
 
   // Attaching a door to a terminal is always "active hubs in this district".
   @@index([district, isActive])
@@ -4506,6 +4512,103 @@ model RouteScheduleException {
   // would just be an opportunity for it to disagree with the first.
   @@unique([routeId, date])
   @@map("route_schedule_exceptions")
+}
+
+/// A terminal's weekly opening hours (BMPL-177/260) - the CONFIGURATION half.
+/// `LogisticsHub.instructions` stays a free-text label nobody can check by
+/// machine ("which counter, what hours"); this is what makes "is someone
+/// there right now" answerable, exactly as RouteOperatingDay does for a
+/// route's own weekly pattern.
+///
+/// Deliberately VendorOpeningHours's field shape (openTime/closeTime/
+/// isClosed), not RouteOperatingDay's (a status enum): a counter's hours
+/// answer "is someone there between two clock times" - a continuous window,
+/// the same question VendorOpeningHours already answers for a storefront -
+/// not "does a scheduled departure run today", which is a discrete
+/// yes/reduced/no a route needs and a counter does not. Deliberately its own
+/// table rather than sharing VendorOpeningHours's: a hub has no owning
+/// vendor user and is configured by operations under admin permission
+/// authorization, not a self-service dashboard under vendor ownership - the
+/// same reason RouteOperatingDay already stands apart from VendorOpeningHours
+/// despite both being "a weekly pattern for a business entity".
+///
+/// The DATA stays gated exactly like hubs, routes and courier lanes: this
+/// table ships empty in the migration that creates it, and a real row is
+/// entered by operations from verified information, never invented here.
+model HubOpeningDay {
+  id        String       @id @default(cuid())
+  hubId     String
+  hub       LogisticsHub @relation(fields: [hubId], references: [id], onDelete: Cascade)
+  /// 0=Sunday .. 6=Saturday, matching VendorOpeningHours/RouteOperatingDay -
+  /// resolved against Belize LOCAL time (belizeWeekday in
+  /// packages/shared/src/belize-time.ts), not JS Date#getUTCDay().
+  dayOfWeek Int
+  /// "HH:MM", Belize local - the same string shape and the same unstated
+  /// Belize-local meaning as VendorOpeningHours.openTime/closeTime. Null when
+  /// isClosed is true.
+  openTime  String?
+  closeTime String?
+  isClosed  Boolean      @default(false)
+
+  // One row per hub per weekday - a second row for the same day would just
+  // be an opportunity for it to disagree with the first.
+  @@unique([hubId, dayOfWeek])
+  @@map("hub_opening_days")
+}
+
+/// A date-specific override of a hub's weekly hours above - a known closure,
+/// a public holiday, a one-off change in hours. Absence of a row for a date
+/// means the weekly default applies (or unconstrained, absent that too - see
+/// packages/shared/src/hub-hours.ts's own stated default and why).
+///
+/// A full-day closure and an ordinary one-day closure are the SAME record
+/// here, distinguished only by `reason` (the operator's own words, recorded
+/// truthfully) - not by a different status or a second table. Only a
+/// genuinely DIFFERENT case - open, but not at the usual hours - needs the
+/// nullable time columns below; a closure never populates them.
+///
+/// Dates, reasons and holidays are entered by operations from verified
+/// information; nothing here invents a Belize holiday calendar (root
+/// CLAUDE.md sec 5 - no fabricated schedules), matching RouteScheduleException.
+model HubHoursException {
+  id     String                   @id @default(cuid())
+  hubId  String
+  hub    LogisticsHub             @relation(fields: [hubId], references: [id], onDelete: Cascade)
+  /// A calendar date, not a timestamp - a hub either has normal/modified
+  /// hours on 2026-12-25 or it is closed for the day; there is no separate
+  /// time-of-day component to WHICH DATE the exception is for (the modified
+  /// hours themselves, when there are any, live in openTime/closeTime below).
+  date   DateTime                 @db.Date
+  status HubHoursExceptionStatus
+  /// Only meaningful when status is MODIFIED; both stay null for CLOSED. Same
+  /// "HH:MM" Belize-local shape as HubOpeningDay's.
+  openTime        String?
+  closeTime       String?
+  /// Why - "Independence Day", "roof repair", "extended hours for the fair".
+  /// The operator's own words, recorded truthfully. Never populated with an
+  /// assumed public holiday.
+  reason          String?
+  /// Who entered it. SetNull: the exception is a fact about the hub that
+  /// outlives the account of whoever recorded it.
+  createdByUserId String?
+  createdBy       User?    @relation("HubHoursExceptionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One decision per hub per date - a second exception for the same day
+  // would just be an opportunity for it to disagree with the first.
+  @@unique([hubId, date])
+  @@map("hub_hours_exceptions")
+}
+
+enum HubHoursExceptionStatus {
+  /// No service this date - a public holiday, a one-off closure. Full day;
+  /// openTime/closeTime above stay unset.
+  CLOSED
+  /// Open, but not at the usual hours - "opens late", "closes early for a
+  /// public event". openTime/closeTime above carry the override; either may
+  /// be set alone (e.g. only closing early leaves openTime unset).
+  MODIFIED
 }
 
 /// Two towns one courier can drive between.
