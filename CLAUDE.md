@@ -328,7 +328,8 @@ pnpm turbo run typecheck                  # 19/19 expected
 pnpm test:unit                            # all seven test-bearing packages: wallet, authorization,
                                           # shared, validation, web, admin, api (since PR #86)
 pnpm --filter @bmpl/api test:integration  # needs TEST_DATABASE_URL + pnpm infra:up
-                                          # 852 tests / 66 spec files, ~12 min
+                                          # roughly 15 min — see "Running the integration
+                                          # suite locally" below
 pnpm --filter @bmpl/api build && pnpm --filter @bmpl/web build && pnpm --filter @bmpl/admin build
 ```
 
@@ -384,8 +385,12 @@ still does.
 
 ### Running the integration suite locally
 
-Docker is available on this machine and the suite runs here — **852 tests across
-66 spec files, ~12 minutes**, against real Postgres, Redis and MinIO.
+Docker is available on this machine and the suite runs here — **roughly 15
+minutes** against real Postgres, Redis and MinIO. (Deliberately no test/spec-file
+count here: it moves with every merge — 852 tests/66 files one day, 986/83 the
+next, measured a day apart — and a number that's wrong by tomorrow undermines
+the claims next to it. The suite's own run output states the current count if
+you need it.)
 
 ```bash
 pnpm infra:up            # postgres 5432, redis 6379, minio 9000/9001
