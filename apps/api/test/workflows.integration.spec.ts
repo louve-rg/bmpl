@@ -154,7 +154,39 @@ describe('administrator approval workflow', () => {
       .get('/api/admin/applications?status=PENDING')
       .set('Cookie', adminCookies);
     expect(res.status).toBe(200);
-    expect(res.body.some((a: { id: string }) => a.id === applicationId)).toBe(true);
+    const row = res.body.find((a: { id: string }) => a.id === applicationId);
+    expect(row).toBeTruthy();
+    // BMPL-148: the queue is shared by every role and had no way to tell a
+    // rehearsal applicant from a real one. No new column — User.isTest
+    // already exists and this query already joins to `user`.
+    expect(row.user.isTest).toBe(false);
+  });
+
+  it('surfaces a rehearsal applicant in the queue AND the detail view (BMPL-148)', async () => {
+    const flag = await request(ctx.server)
+      .post('/api/admin/users/test-flag')
+      .set('Cookie', adminCookies)
+      .send({ userId: vendorUserId, isTest: true, reason: 'BMPL-148 queue-label test.' });
+    expect(flag.status).toBe(201);
+    try {
+      const queue = await request(ctx.server)
+        .get('/api/admin/applications?status=PENDING')
+        .set('Cookie', adminCookies);
+      const row = queue.body.find((a: { id: string }) => a.id === applicationId);
+      expect(row?.user.isTest).toBe(true);
+
+      const detail = await request(ctx.server)
+        .get(`/api/admin/applications/${applicationId}`)
+        .set('Cookie', adminCookies);
+      expect(detail.body.user.isTest).toBe(true);
+    } finally {
+      // Restore: later tests in this file reuse vendorUserId and should not
+      // inherit a test-flagged account as a side effect of this one.
+      await request(ctx.server)
+        .post('/api/admin/users/test-flag')
+        .set('Cookie', adminCookies)
+        .send({ userId: vendorUserId, isTest: false, reason: 'BMPL-148 queue-label test cleanup.' });
+    }
   });
 
   it('serves a working signed document URL; the object is private otherwise', async () => {
