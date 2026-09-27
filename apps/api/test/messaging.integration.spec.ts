@@ -205,6 +205,16 @@ describe('support + internal notes + close', () => {
     // admin view DOES include the internal note
     const adminView = await get(adminCookies, `admin/support/${convId}`);
     expect(adminView.body.messages.some((m: { type: string }) => m.type === 'INTERNAL_NOTE')).toBe(true);
+    // Snapshot the newest existing row for this user BEFORE close(), so the
+    // assertion below can prove close() created a row (id greater than the
+    // snapshot) rather than merely that a matching row exists somewhere in
+    // this user's history (BMPL-237).
+    const before = await ctx.prisma.notificationRecipient.findFirst({
+      where: { userId: cust.userId },
+      orderBy: { id: 'desc' },
+    });
+    const sinceId = before?.id ?? '';
+
     // close → customer can no longer send
     await post(adminCookies, `admin/support/${convId}/close`);
     expect((await post(cust.cookies, `conversations/${convId}/messages`, { body: 'one more' })).status).toBe(403);
@@ -212,10 +222,11 @@ describe('support + internal notes + close', () => {
     // before BMPL-231. close() audited the closure but never told the other
     // participant, unlike sendMessage()'s notifyOthers() for every real
     // message. Assert the customer was actually notified, not just that the
-    // thread is now closed.
+    // thread is now closed — and assert it is NEW, not merely a match.
     const row = await ctx.prisma.notificationRecipient.findFirstOrThrow({
-      where: { userId: cust.userId, notification: { event: 'CONVERSATION_CLOSED' } },
+      where: { userId: cust.userId, notification: { event: 'CONVERSATION_CLOSED' }, id: { gt: sinceId } },
       include: { notification: true },
+      orderBy: { id: 'asc' },
     });
     expect(row.notification.title).toBe('Conversation closed');
   });
