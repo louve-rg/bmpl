@@ -22,8 +22,8 @@
 --
 --   hub_hours_exceptions: a date-specific override, mirroring
 --   route_schedule_exceptions' STRUCTURE (one row per hub+date, a status, a
---   truthful `reason`, an audit trail — see that table's own migration,
---   20261102120000-era route scheduling) rather than copying its ENUM: an
+--   truthful `reason`, an audit trail — see 20261104160000_carrier_route_
+--   schedule, that table's own migration) rather than copying its ENUM: an
 --   ordinary closure and a public holiday are the SAME row here, distinguished
 --   only by `reason`, so the status only needs to say CLOSED (full day, no
 --   override times) or MODIFIED (open, but not at the usual hours — openTime
