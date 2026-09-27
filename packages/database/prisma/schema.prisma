@@ -4580,8 +4580,12 @@ model HubHoursException {
   /// hours themselves, when there are any, live in openTime/closeTime below).
   date   DateTime                 @db.Date
   status HubHoursExceptionStatus
-  /// Only meaningful when status is MODIFIED; both stay null for CLOSED. Same
-  /// "HH:MM" Belize-local shape as HubOpeningDay's.
+  /// BOTH set for MODIFIED, BOTH null for CLOSED - never one alone. A
+  /// database CHECK (in the migration; Prisma has no @@check for this
+  /// version) enforces it, the same idiom Payment.orderId/shipmentId already
+  /// uses: the table is empty today, so the constraint is free, and it is
+  /// the backstop for every writer that is not the API, not a substitute for
+  /// API-level validation. Same "HH:MM" Belize-local shape as HubOpeningDay's.
   openTime        String?
   closeTime       String?
   /// Why - "Independence Day", "roof repair", "extended hours for the fair".
@@ -4606,8 +4610,12 @@ enum HubHoursExceptionStatus {
   /// openTime/closeTime above stay unset.
   CLOSED
   /// Open, but not at the usual hours - "opens late", "closes early for a
-  /// public event". openTime/closeTime above carry the override; either may
-  /// be set alone (e.g. only closing early leaves openTime unset).
+  /// public event". openTime/closeTime above carry the override - BOTH,
+  /// never one alone: a partial override (e.g. only a new open time) would
+  /// have to silently merge with the weekly row's close time to mean
+  /// anything, and a silent merge between two rows is a surprise generator.
+  /// If operations later wants a genuine partial override, that is a
+  /// deliberate feature to add, not a gap in this one.
   MODIFIED
 }
 

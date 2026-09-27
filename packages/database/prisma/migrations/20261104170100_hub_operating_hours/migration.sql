@@ -27,9 +27,21 @@
 --   ordinary closure and a public holiday are the SAME row here, distinguished
 --   only by `reason`, so the status only needs to say CLOSED (full day, no
 --   override times) or MODIFIED (open, but not at the usual hours — openTime
---   and/or closeTime below carry the override). There is no third value
---   because there is no case where recording "unchanged from the weekly
---   default" would mean anything an absent row does not already mean.
+--   AND closeTime below carry the override, both or neither, never one
+--   alone: a partial override would have to silently merge with the weekly
+--   row's close time to mean anything, and that is a surprise generator, not
+--   this design). There is no third value because there is no case where
+--   recording "unchanged from the weekly default" would mean anything an
+--   absent row does not already mean.
+--
+-- A CHECK enforces the both-or-neither rule at the database, the same idiom
+-- 20261024090000_shipment_payments and 20261024100000_shipment_driver_
+-- earnings already use for "exactly one of these must be set": the table is
+-- EMPTY today, so the constraint is free, and once even one row exists,
+-- adding it becomes a migration over live data with a possible backfill.
+-- The API will validate this too when it exists — that is the constraint's
+-- job for every writer that is the API; this is the backstop for every
+-- writer that is not, including a direct psql session or a future import.
 --
 -- Both tables SHIP EMPTY, exactly like courier_lanes and
 -- route_operating_days/route_schedule_exceptions before them: no hub gets a
@@ -85,3 +97,14 @@ ALTER TABLE "hub_hours_exceptions" ADD CONSTRAINT "hub_hours_exceptions_hubId_fk
 
 -- AddForeignKey
 ALTER TABLE "hub_hours_exceptions" ADD CONSTRAINT "hub_hours_exceptions_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- MODIFIED carries both openTime and closeTime; CLOSED carries neither. A
+-- MODIFIED row with only one time set would silently resolve to "open all
+-- day" (the resolver requires both to compare against), and a CLOSED row
+-- with times set would carry an override nothing ever reads — both are the
+-- same incoherence, a row claiming something it does not actually carry.
+ALTER TABLE "hub_hours_exceptions" ADD CONSTRAINT "hub_hours_exceptions_times_match_status"
+  CHECK (
+    (status = 'MODIFIED' AND num_nonnulls("openTime", "closeTime") = 2)
+    OR (status = 'CLOSED' AND num_nonnulls("openTime", "closeTime") = 0)
+  );
