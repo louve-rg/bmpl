@@ -208,7 +208,9 @@ describe('support + internal notes + close', () => {
     // Snapshot the newest existing row for this user BEFORE close(), so the
     // assertion below can prove close() created a row (id greater than the
     // snapshot) rather than merely that a matching row exists somewhere in
-    // this user's history (BMPL-237).
+    // this user's history (BMPL-237). Relies on NotificationRecipient.id
+    // (cuid()) sorting in creation order — see workflows.integration.spec.ts
+    // for why that holds.
     const before = await ctx.prisma.notificationRecipient.findFirst({
       where: { userId: cust.userId },
       orderBy: { id: 'desc' },

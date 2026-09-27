@@ -280,7 +280,11 @@ describe('role switching', () => {
     // snapshot) rather than merely that some row exists (BMPL-237: an
     // unscoped `orderBy: id desc` reads whatever the latest row happens to be —
     // including a prior test's — and a coincidence of differing titles was
-    // masking that).
+    // masking that). `id: { gt: sinceId }` below only means "created after"
+    // because NotificationRecipient.id is @default(cuid()) — a fixed-width,
+    // timestamp-prefixed string whose lexical order matches creation order.
+    // The original unscoped `orderBy: id desc` depended on that same property,
+    // just less precisely; a uuid() id would silently break this comparison.
     const before = await ctx.prisma.notificationRecipient.findFirst({
       where: { userId: vendorUserId },
       orderBy: { id: 'desc' },
