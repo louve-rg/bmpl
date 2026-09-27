@@ -6,10 +6,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { InventoryService } from '../src/products/inventory.service';
 
 let ctx: TestContext;
 let adminCookies: string[];
 let categoryId: string;
+let inventoryService: InventoryService;
 
 async function login(email: string, password: string): Promise<string[]> {
   const res = await request(ctx.server).post('/api/auth/login').send({ email, password });
@@ -39,6 +41,7 @@ beforeAll(async () => {
   adminCookies = await login(admin.email, admin.password);
   const cat = await request(ctx.server).post('/api/admin/categories').set('Cookie', adminCookies).send({ name: 'Apparel' });
   categoryId = cat.body.id;
+  inventoryService = ctx.app.get(InventoryService);
 });
 afterAll(async () => {
   await ctx.app.close();
@@ -161,5 +164,51 @@ describe('inventory/variant authorization', () => {
     const customer = cookiesOf(reg);
     await request(ctx.server).get(`/api/vendor/products/${a.productId}/inventory`).set('Cookie', customer).expect(403);
     await request(ctx.server).get(`/api/vendor/products/${a.productId}/inventory`).expect(401);
+  });
+});
+
+describe('reservation concurrency (BMPL-256)', () => {
+  it('two racers for the last unit: exactly one reserves, the other is refused', async () => {
+    const v = await makeVendorWithProduct('inv_race@example.bz', 'Race');
+    await request(ctx.server)
+      .post(`/api/vendor/products/${v.productId}/inventory/adjust`)
+      .set('Cookie', v.cookies)
+      .send({ delta: 1, reason: 'RESTOCK' })
+      .expect(201);
+    const inv = await ctx.prisma.inventory.findFirstOrThrow({ where: { productId: v.productId, variantId: null } });
+
+    // Racer A reserves, then holds ITS OWN transaction open for a controlled
+    // window before committing — this deterministically widens the race
+    // window instead of hoping two Promise.all calls happen to interleave
+    // (they often don't reliably: see self-service-funding.integration.spec.ts's
+    // own "D" test and its comment on exactly this). Racer B fires at the same
+    // moment with no delay of its own.
+    const racerA = ctx.prisma.$transaction(async (tx) => {
+      await inventoryService.reserve(inv.id, 1, tx);
+      await tx.$executeRaw`SELECT pg_sleep(0.3)`;
+    });
+    // A deliberate head start: without it, whether B's own read happens
+    // before or after A's (uncommitted) write depends on which of the two
+    // `$transaction` calls happens to acquire a pool connection first — that
+    // ordering is not guaranteed, and running this without the head start
+    // showed exactly that: it passed once by luck (both racers happened to
+    // serialize favourably) even with the lock removed, then correctly
+    // reddened on a second run. 50ms is comfortably inside A's 300ms hold
+    // and comfortably longer than A's own reserve() call takes.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const racerB = ctx.prisma.$transaction(async (tx) => {
+      await inventoryService.reserve(inv.id, 1, tx);
+    });
+
+    const results = await Promise.allSettled([racerA, racerB]);
+    const outcomes = results.map((r) => r.status);
+    expect(outcomes.filter((s) => s === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((s) => s === 'rejected')).toHaveLength(1);
+
+    // Not just "one refused" — the counter itself must land exactly right:
+    // one unit reserved, none left, nothing double-booked.
+    const after = await ctx.prisma.inventory.findUniqueOrThrow({ where: { id: inv.id } });
+    expect(after.reserved).toBe(1);
+    expect(after.quantity - after.reserved).toBe(0);
   });
 });

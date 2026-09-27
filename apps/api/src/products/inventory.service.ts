@@ -192,7 +192,23 @@ export class InventoryService {
     return tx.inventory.findFirst({ where: { productId, variantId: variantId ?? null } });
   }
 
+  /**
+   * Serialises concurrent reservations against the same row (BMPL-256): the
+   * lock is taken BEFORE the availability check is read, matching
+   * wallet.service.ts's selfServiceTestCredit and passenger-operations.
+   * service.ts's confirmBooking — a plain "read, check, write" is
+   * check-then-act, and a concurrent writer committing between the read and
+   * the write is invisible to it, so the read cannot be trusted without the
+   * lock. Two customers racing for the last unit could otherwise both pass
+   * the check and both have their reservation accepted.
+   *
+   * Meaningful only when `tx` is already inside a transaction the caller
+   * controls — true for every call site except orders.service.ts's
+   * reconcileTerminalReservations (maintenance tooling, not concurrency-
+   * sensitive; see its own comment for why that's safe without one).
+   */
   async reserve(inventoryId: string, qty: number, tx: Tx = this.prisma): Promise<void> {
+    await tx.$queryRaw`SELECT id FROM inventory WHERE id = ${inventoryId} FOR UPDATE`;
     const inv = await tx.inventory.findUniqueOrThrow({ where: { id: inventoryId } });
     if (!inv.unlimited && !inv.allowBackorders && inv.quantity - inv.reserved < qty) {
       throw new BadRequestException('Insufficient stock to reserve.');
@@ -200,7 +216,13 @@ export class InventoryService {
     await tx.inventory.update({ where: { id: inventoryId }, data: { reserved: inv.reserved + qty } });
   }
 
+  /** Same lock as reserve() above. The `Math.max(0, ...)` floor guard stays
+   *  exactly as it was — once the row is locked for the whole read-then-write,
+   *  a plain literal is exactly as safe as an atomic decrement, and swapping
+   *  to `{ decrement: qty }` would silently drop the clamp (a release larger
+   *  than the outstanding reservation would drive `reserved` negative). */
   async release(inventoryId: string, qty: number, tx: Tx = this.prisma): Promise<void> {
+    await tx.$queryRaw`SELECT id FROM inventory WHERE id = ${inventoryId} FOR UPDATE`;
     const inv = await tx.inventory.findUniqueOrThrow({ where: { id: inventoryId } });
     await tx.inventory.update({
       where: { id: inventoryId },
@@ -217,6 +239,9 @@ export class InventoryService {
    * only under prior backorder oversell (an accepted "owed stock" state).
    */
   async finalizeReservation(inventoryId: string, qty: number, actorId: string | null, tx: Tx = this.prisma): Promise<void> {
+    // Same lock as reserve()/release() above — this decrements both
+    // `quantity` and `reserved` and has the identical exposure (BMPL-256).
+    await tx.$queryRaw`SELECT id FROM inventory WHERE id = ${inventoryId} FOR UPDATE`;
     const inv = await tx.inventory.findUniqueOrThrow({ where: { id: inventoryId } });
     if (inv.unlimited) return; // nothing was reserved for an unlimited row
     const newQty = inv.quantity - qty;
