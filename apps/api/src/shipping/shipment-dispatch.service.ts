@@ -756,6 +756,20 @@ export class ShipmentDispatchService {
    * `cause` field of `extra`, never a second SHIPMENT_LEG_DISPATCH_DEFERRED-
    * shaped action that would need to be kept in the transition-detection
    * query above alongside the first.
+   *
+   * A KNOWN, DELIBERATE LIMITATION OF THAT SAME DESIGN: the dedup keys on
+   * the LEG, not on the cause, so if a leg defers for one cause and then —
+   * within the SAME undispatched episode, before it ever reaches OFFERED —
+   * defers for the OTHER cause instead, no second row is written. The
+   * audit trail keeps the reason of the FIRST deferral in the episode
+   * while the current obstacle is actually the second one; an operator
+   * reading it would see a stale cause. NOT a bug to fix here: one row per
+   * episode is exactly the property this method exists to guarantee, and
+   * the operational conclusion is identical either way — the leg is
+   * waiting. Recorded because nothing in production can reach this today
+   * (it needs a configured hub AND a configured window on the same leg),
+   * which is exactly the condition under which a limitation like this is
+   * easiest to leave undocumented and hardest to remember later.
    */
   private async recordDeferralIfNew(
     legId: string,
