@@ -27,7 +27,12 @@ const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '.turbo', 'build', '
 const ALLOWED_BMPL = [
   /BMPL_HUB/, // persisted HUB_TYPES enum value
   /X-BMPL-/, // HTTP response headers read by deployment tooling
-  /BMPL_BUILD_COMMIT/, // env var wired into Vercel; the /health endpoints and deploy-status read it
+  /BMPL_BUILD_COMMIT/, // NOT a configured env var -- apps/admin and apps/web each synthesize it
+  // at build time, in their own next.config.mjs `env` block, from
+  // VERCEL_GIT_COMMIT_SHA (Vercel-injected) or NEXT_PUBLIC_COMMIT_SHA
+  // (fallback). Next inlines that value; each app's /health route reads
+  // the inlined `process.env.BMPL_BUILD_COMMIT`. deploy-status.mjs never
+  // reads the env var either -- it reads /health's HTTP response.
   /BMPL-THEME/, // a real filename on disk
   // Ticket ids (BMPL-112, BMPL-128…) are identifiers into the tracker, not
   // product copy — the same convention docs/ already follows. Without this
