@@ -602,6 +602,7 @@ model User {
   shippingProviderMemberships ShippingProviderMember[] @relation("ShippingProviderMemberships")
   routeScheduleExceptionsMade RouteScheduleException[] @relation("RouteScheduleExceptionCreatedBy")
   hubHoursExceptionsMade      HubHoursException[]      @relation("HubHoursExceptionCreatedBy")
+  vendorHoursExceptionsMade   VendorHoursException[]   @relation("VendorHoursExceptionCreatedBy")
 
   @@index([status])
   @@index([district])
@@ -1163,6 +1164,7 @@ model VendorProfile {
   settings         VendorSettings?
   locations        VendorLocation[]
   openingHours     VendorOpeningHours[]
+  hoursExceptions  VendorHoursException[]
   reviews          VendorModerationReview[]
   products         Product[]
   cartItems        CartItem[]
@@ -1326,6 +1328,93 @@ model VendorOpeningHours {
 
   @@unique([vendorProfileId, dayOfWeek])
   @@map("vendor_opening_hours")
+}
+
+/// A date-specific override of a vendor's weekly hours above (BMPL-334) - a
+/// known closure, a public holiday, a one-off change in hours. Absence of a
+/// row for a date means the weekly default applies (or unconstrained, absent
+/// that too - see packages/shared/src/hub-hours.ts's own stated default and
+/// why). Mirrors HubHoursException's STRUCTURE deliberately - same columns,
+/// same CHECK discipline (see the migration) - rather than sharing its table
+/// or its Postgres enum type: hub hours and vendor hours already stand as
+/// separate tables despite an identical field shape
+/// (20261104170100_hub_operating_hours's own header explains why - different
+/// permission surfaces, a hub has no owning vendor user), and that same
+/// reasoning applies to their exceptions.
+///
+/// A full-day closure and an ordinary one-day closure are the SAME record
+/// here, distinguished only by `reason` (the vendor's own words, recorded
+/// truthfully) - not by a different status or a second table. Only a
+/// genuinely DIFFERENT case - open, but not at the usual hours - needs the
+/// nullable time columns below; a closure never populates them.
+///
+/// UNCONFIGURED-EXCEPT-ONE-DATE, DECIDED HERE, NOT LEFT TO THE RESOLVER'S
+/// ACCIDENT: a vendor with ONE exception row and ZERO VendorOpeningHours
+/// rows is UNCONSTRAINED on every date except the excepted one - the shared
+/// resolver (resolveHoursStatus/effectiveHoursForDate) checks the exception
+/// for the target date FIRST, independently of whether any weekly pattern
+/// exists at all, and only falls through to the weekly pattern (then to
+/// unconstrained) when there is no exception for that specific date. A
+/// vendor who has only ever recorded "closed 2026-12-25" is therefore open
+/// on every other day exactly as an unconfigured vendor is - this is not a
+/// new rule, it is the existing resolver's existing behaviour, asserted by
+/// a test rather than left implicit.
+///
+/// Self-service, not admin-authorized: this table is written through the
+/// vendor's own PUT/POST vendor/profile/hours* routes, the same surface
+/// VendorOpeningHours already uses, and (deliberately, matching setHours'
+/// own existing precedent) writes no audit row - self-service vendor writes
+/// to a vendor's own resource are not audited elsewhere in this file either.
+///
+/// Dates and reasons are entered by the vendor from their own real
+/// schedule; nothing here invents a Belize holiday calendar (root CLAUDE.md
+/// sec 5 - no fabricated schedules), matching HubHoursException.
+model VendorHoursException {
+  id              String                     @id @default(cuid())
+  vendorProfileId String
+  vendorProfile   VendorProfile              @relation(fields: [vendorProfileId], references: [id], onDelete: Cascade)
+  /// A calendar date, not a timestamp - same reasoning as
+  /// HubHoursException.date.
+  date            DateTime                   @db.Date
+  status          VendorHoursExceptionStatus
+  /// BOTH set for MODIFIED, BOTH null for CLOSED - never one alone. A
+  /// database CHECK (in the migration; Prisma has no @@check for this
+  /// version) enforces it - the backstop for every writer that is not the
+  /// API, not a substitute for API-level validation. Same "HH:MM"
+  /// Belize-local shape as VendorOpeningHours.openTime/closeTime.
+  openTime        String?
+  closeTime       String?
+  /// Why - "Independence Day", "family emergency", "extended hours for the
+  /// fair". The vendor's own words, recorded truthfully. Never populated
+  /// with an assumed public holiday.
+  reason          String?
+  /// Who entered it. SetNull: the exception is a fact about the vendor that
+  /// outlives the account of whoever recorded it (normally the vendor
+  /// themselves, but SetNull rather than a hard requirement for the same
+  /// reason HubHoursException uses it).
+  createdByUserId String?
+  createdBy       User?                      @relation("VendorHoursExceptionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+
+  // One decision per vendor per date - a second exception for the same day
+  // would just be an opportunity for it to disagree with the first.
+  @@unique([vendorProfileId, date])
+  @@map("vendor_hours_exceptions")
+}
+
+enum VendorHoursExceptionStatus {
+  /// No service this date - a public holiday, a one-off closure. Full day;
+  /// openTime/closeTime above stay unset.
+  CLOSED
+  /// Open, but not at the usual hours - "opens late for a family event".
+  /// openTime/closeTime above carry the override - BOTH, never one alone:
+  /// a partial override would have to silently merge with the weekly row's
+  /// close time to mean anything, and a silent merge between two rows is a
+  /// surprise generator. Same two values, same meaning, as
+  /// HubHoursExceptionStatus - kept as a separate Postgres enum type rather
+  /// than sharing it, matching the separate-tables reasoning above.
+  MODIFIED
 }
 
 model VendorModerationReview {

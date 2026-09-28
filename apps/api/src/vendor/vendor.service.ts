@@ -14,6 +14,7 @@ import {
 } from '@bmpl/shared';
 import type { HoursException, WeeklyOpeningHours } from '@bmpl/shared';
 import type {
+  AddVendorHoursExceptionInput,
   CreateVendorProfileInput,
   UpdateVendorProfileInput,
   VendorHoursInput,
@@ -68,6 +69,7 @@ export class VendorService {
         settings: true,
         locations: { orderBy: { createdAt: 'asc' } },
         openingHours: { orderBy: { dayOfWeek: 'asc' } },
+        hoursExceptions: { orderBy: { date: 'asc' } },
       },
     });
     if (!profile) return { profile: null };
@@ -96,7 +98,7 @@ export class VendorService {
         storeStatus: 'CLOSED',
         settings: { create: {} }, // sensible defaults from the schema
       },
-      include: { settings: true, locations: true, openingHours: true },
+      include: { settings: true, locations: true, openingHours: true, hoursExceptions: true },
     });
     return this.serializeOwn(profile);
   }
@@ -288,6 +290,42 @@ export class VendorService {
   }
 
   /**
+   * One date-specific override (BMPL-334). Re-submitting the same date
+   * replaces it — mirrors LogisticsNetworkService.addHubHoursException
+   * exactly, except this write is SELF-SERVICE (scoped to the caller's own
+   * profile via ownProfileOrThrow, `@Roles('VENDOR')` at the controller, no
+   * admin permission), and writes no audit row: setHours above — the
+   * weekly-pattern write this mirrors — writes none either, and a vendor
+   * changing their own posted hours is not the kind of action this file
+   * audits anywhere else. MODIFIED carries both openTime and closeTime,
+   * CLOSED carries neither — the Zod schema already refuses anything else,
+   * and this forces the same shape onto the write regardless, so the
+   * database CHECK (vendor_hours_exceptions_times_match_status) is never the
+   * only thing standing between a malformed request and a stored row.
+   */
+  async addHoursException(userId: string, dto: AddVendorHoursExceptionInput) {
+    const profile = await this.ownProfileOrThrow(userId);
+    const date = new Date(Date.UTC(dto.date.getUTCFullYear(), dto.date.getUTCMonth(), dto.date.getUTCDate()));
+    const openTime = dto.status === 'MODIFIED' ? (dto.openTime ?? null) : null;
+    const closeTime = dto.status === 'MODIFIED' ? (dto.closeTime ?? null) : null;
+    await this.prisma.vendorHoursException.upsert({
+      where: { vendorProfileId_date: { vendorProfileId: profile.id, date } },
+      create: { vendorProfileId: profile.id, date, status: dto.status, openTime, closeTime, reason: dto.reason ?? null, createdByUserId: userId },
+      update: { status: dto.status, openTime, closeTime, reason: dto.reason ?? null, createdByUserId: userId },
+    });
+    return this.getOwn(userId);
+  }
+
+  /** Removing an exception falls back to the weekly default for that date, not to unconstrained. */
+  async removeHoursException(userId: string, exceptionId: string) {
+    const profile = await this.ownProfileOrThrow(userId);
+    const exception = await this.prisma.vendorHoursException.findUnique({ where: { id: exceptionId } });
+    if (!exception || exception.vendorProfileId !== profile.id) throw new NotFoundException('Exception not found.');
+    await this.prisma.vendorHoursException.delete({ where: { id: exceptionId } });
+    return this.getOwn(userId);
+  }
+
+  /**
    * Read-only: is this vendor open at `at` (server clock if omitted), and if
    * not, when does it next open (BMPL-177 business half). Composes the same
    * two pure resolvers from packages/shared/src/hub-hours.ts that
@@ -295,42 +333,55 @@ export class VendorService {
    * file's own header says the resolution shape applies "by the same shape,
    * a vendor" — so this is not a second resolver, just a second caller.
    *
-   * KNOWN GAP, reported rather than built: unlike HubOpeningDay/
-   * HubHoursException, VendorOpeningHours has no matching date-exception
-   * table. A vendor cannot record "closed this one Sunday for a holiday" the
-   * way a hub can — only the recurring weekly pattern. `exceptions` is
-   * always `[]` below for exactly that reason; this is a real, load-bearing
-   * limitation, not an oversight, and was reported (not added) per the
-   * BMPL-177 dispatch's explicit instruction that any schema gap comes back
-   * for migration review rather than being added on the agent's own
-   * judgement.
+   * BMPL-334: `exceptions` now reads real VendorHoursException rows —
+   * BMPL-177's own `[]` here was a reported, not silent, gap, and this
+   * closes it. A vendor with ONE exception row and ZERO VendorOpeningHours
+   * rows is UNCONSTRAINED on every date except the excepted one: the shared
+   * resolver checks the exception for the target date FIRST, independently
+   * of whether any weekly pattern exists, and only falls through to the
+   * weekly pattern (then to unconstrained) when there is none for that
+   * date — see VendorHoursException's own schema comment for the full
+   * reasoning, and vendor.integration.spec.ts for the test that asserts it
+   * rather than leaving it to the resolver's accident.
    *
    * `configured` distinguishes "open because nothing constrains it" from
-   * "open because today's configured window says so" — same reasoning as
-   * hubHoursStatus's own `configured` field, and the same default: a vendor
-   * with zero VendorOpeningHours rows (every vendor before this card, and
-   * every vendor who never sets hours after it) is UNCONSTRAINED, not
-   * closed, so configuring nothing changes nothing for any existing vendor.
+   * "open because today's configured window (weekly or exception) says so"
+   * — same reasoning as hubHoursStatus's own `configured` field, and the
+   * same default: a vendor with zero rows of either kind (every vendor
+   * before BMPL-177, and every vendor who never sets hours after it) is
+   * UNCONSTRAINED, not closed, so configuring nothing changes nothing for
+   * any existing vendor.
    */
   async vendorHoursStatus(vendorProfileId: string, at?: Date) {
     const instant = at ?? new Date();
-    const days = await this.prisma.vendorOpeningHours.findMany({ where: { vendorProfileId } });
+    const [days, exceptionRows] = await Promise.all([
+      this.prisma.vendorOpeningHours.findMany({ where: { vendorProfileId } }),
+      this.prisma.vendorHoursException.findMany({ where: { vendorProfileId } }),
+    ]);
     const weeklyPattern: WeeklyOpeningHours[] = days.map((d) => ({
       dayOfWeek: d.dayOfWeek,
       openTime: d.openTime,
       closeTime: d.closeTime,
       isClosed: d.isClosed,
     }));
-    const exceptions: HoursException[] = [];
+    const exceptions: HoursException[] = exceptionRows.map((e) => ({
+      date: e.date,
+      status: e.status as HoursException['status'],
+      openTime: e.openTime,
+      closeTime: e.closeTime,
+      reason: e.reason,
+    }));
     const resolution = resolveHoursStatus(instant, weeklyPattern, exceptions);
     const next = resolution.isOpen ? null : nextOpenWindow(instant, weeklyPattern, exceptions);
     return {
       vendorProfileId,
       at: instant.toISOString(),
-      configured: days.length > 0,
+      configured: days.length > 0 || exceptionRows.length > 0,
       isOpen: resolution.isOpen,
       openTime: resolution.openTime,
       closeTime: resolution.closeTime,
+      isException: resolution.isException,
+      reason: resolution.reason,
       nextOpen: next ? { date: next.date.toISOString().slice(0, 10), openTime: next.openTime, closeTime: next.closeTime } : null,
     };
   }
@@ -750,6 +801,7 @@ export class VendorService {
       settings: unknown;
       locations: unknown;
       openingHours: unknown;
+      hoursExceptions: unknown;
     },
   ) {
     return {
@@ -764,6 +816,7 @@ export class VendorService {
       settings: settingsShape(p.settings as Parameters<typeof settingsShape>[0]),
       locations: p.locations,
       openingHours: p.openingHours,
+      hoursExceptions: p.hoursExceptions,
     };
   }
 }

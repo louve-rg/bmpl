@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   DELIVERY_METHODS,
   DISTRICTS,
+  HUB_HOURS_EXCEPTION_STATUSES,
   INVENTORY_CHANGE_REASONS,
   MODERATION_ACTIONS,
   OUT_OF_BOUNDS_MESSAGE,
@@ -225,6 +226,39 @@ export const vendorHoursSchema = z.object({
     }),
 });
 export type VendorHoursInput = z.infer<typeof vendorHoursSchema>;
+
+/**
+ * A single vendor hours exception (BMPL-334). MODIFIED needs BOTH an open
+ * and a close time, never one alone — the resolver (packages/shared/src/
+ * hub-hours.ts, the same one hub hours already use) requires both before it
+ * will compare an instant against them, and the database CHECK
+ * (vendor_hours_exceptions_times_match_status) enforces the same rule. This
+ * refine exists so a caller gets a real validation message instead of a 500
+ * from that constraint — it does not replace the constraint, which stays as
+ * the backstop for every writer that is not this endpoint. Reuses
+ * HUB_HOURS_EXCEPTION_STATUSES rather than re-typing the same two literal
+ * strings a second time — a value-shape choice only, independent of the
+ * separate Postgres enum types the two tables use (see the schema comment
+ * on VendorHoursException for why those stay separate).
+ */
+export const vendorHoursExceptionStatusSchema = z.enum(HUB_HOURS_EXCEPTION_STATUSES);
+
+export const addVendorHoursExceptionSchema = z
+  .object({
+    date: z.coerce.date(),
+    status: vendorHoursExceptionStatusSchema,
+    openTime: timeOfDaySchema.optional(),
+    closeTime: timeOfDaySchema.optional(),
+    reason: z.string().trim().max(300).optional(),
+  })
+  .refine(
+    (e) =>
+      e.status === 'MODIFIED'
+        ? !!e.openTime && !!e.closeTime && e.openTime < e.closeTime
+        : e.openTime == null && e.closeTime == null,
+    { message: 'MODIFIED needs both an open time and a close time (open before close); CLOSED needs neither.' },
+  );
+export type AddVendorHoursExceptionInput = z.infer<typeof addVendorHoursExceptionSchema>;
 
 // ---- Marketplace image upload (public bucket): shared by M2 (logo/banner) and M5 --
 
