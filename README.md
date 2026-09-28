@@ -80,9 +80,11 @@ node -e "console.log('COOKIE_SECRET=' + require('crypto').randomBytes(48).toStri
 
 # 3. Start infrastructure (Postgres 5432, Redis 6379, MinIO 9000/9001)
 pnpm infra:up
-# If this fails pulling the MinIO image with an unauthorized/access-denied
-# error, see docs/PROJECT_STATUS.md §12 "Repository housekeeping" — it's a
-# vendor registry change (2026-09-27), not this repo's configuration.
+# MinIO pulls from this repo's own GHCR mirror (ghcr.io/louve-rg/minio-mirror,
+# pinned by digest in docker-compose.yml) rather than quay.io, which MinIO
+# Inc. discontinued on 2026-09-24 — see the MinIO entry in
+# docs/PROJECT_STATUS.md §12 (BMPL-188/294). The mirror is public, so this
+# needs no login and no token.
 
 # 4. Build shared packages + generate the Prisma client
 pnpm db:generate
