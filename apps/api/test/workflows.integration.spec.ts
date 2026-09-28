@@ -436,6 +436,40 @@ describe('account suspension', () => {
   });
 });
 
+describe('admin permission changes (BMPL-232)', () => {
+  it('changing a permission set is audited and alerts every admin.manage holder', async () => {
+    const target = await seedLimitedAdmin(ctx.prisma, 'wf_permtarget@example.bz', ['users.read']);
+
+    const res = await request(ctx.server)
+      .post('/api/admin/permissions')
+      .set('Cookie', adminCookies)
+      .send({ userId: target.id, permissions: ['users.read', 'vendors.read'] })
+      .expect(201);
+    expect(res.body.permissions.sort()).toEqual(['users.read', 'vendors.read']);
+
+    const audit = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'ADMIN_PERMISSION_GRANTED', targetUserId: target.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(audit.previousValue).toEqual({ permissions: ['users.read'] });
+    expect(audit.newValue).toEqual({ permissions: ['users.read', 'vendors.read'] });
+
+    // Real security event, no heuristic: restated to every admin.manage
+    // holder (SUPER_ADMIN only), including the actor who made the change.
+    const alert = await ctx.prisma.notificationRecipient.findFirstOrThrow({
+      where: { notification: { event: 'ADMIN_SECURITY_ALERT', title: 'Admin permissions changed' } },
+      include: { notification: true },
+      orderBy: { notification: { createdAt: 'desc' } },
+    });
+    expect(alert.notification.category).toBe('SECURITY');
+    expect(alert.notification.data).toMatchObject({
+      targetUserId: target.id,
+      previousPermissions: ['users.read'],
+      newPermissions: ['users.read', 'vendors.read'],
+    });
+  });
+});
+
 describe('authorization & abuse', () => {
   it('forbids a customer from admin endpoints', async () => {
     await request(ctx.server).get('/api/admin/summary').set('Cookie', vendorCookies).expect(403);

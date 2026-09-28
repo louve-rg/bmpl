@@ -40,10 +40,14 @@ export const KNOWN_ORPHANS = {
   // architectural fact, so none of it belonged in this file as one; BMPL-230
   // added the missing/corrected literal at each call site instead, which is
   // why those six are gone from this list rather than explained here.
-  // ADMIN_SECURITY_ALERT could not be resolved that way — a real answer, not
-  // a reason to invent one. CONVERSATION_CLOSED, the other entry BMPL-229
-  // left here, is gone from this list as of BMPL-231: close() now calls
-  // notifyUsers() (the same audience sendMessage() already notifies), so the
-  // event has a real call site and the checker resolves it on its own.
-  ADMIN_SECURITY_ALERT: 'Investigated 2026-09-27 (BMPL-229): no security-detection logic of any kind exists anywhere in apps/api/src (no lockout, anomaly, fraud or permission-escalation alert) for this event to attach to. Added in the original M16 commit alongside ADMIN_FAILED_DELIVERY (which IS used) but never built. Naming a call site would mean inventing what "security alert" should detect — filed as a blocked product question, not fixed.',
+  // CONVERSATION_CLOSED, the other entry BMPL-229 left here, is gone from
+  // this list as of BMPL-231: close() now calls notifyUsers() (the same
+  // audience sendMessage() already notifies), so the event has a real call
+  // site and the checker resolves it on its own. ADMIN_SECURITY_ALERT is
+  // gone from this list as of BMPL-232, once owner ruling 4 drew the actual
+  // line: not a detector on invented heuristics, but a restatement of two
+  // security events BMPL already asserts with certainty — an admin locking
+  // or unlocking a wallet (wallet.service.ts setUserWalletLock) and an
+  // admin's own permission set changing (admin.service.ts setPermissions).
+  // Both fire ADMIN_SECURITY_ALERT with a real call site now.
 };
