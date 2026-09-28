@@ -71,7 +71,7 @@ describe('operations overview (ops.read)', () => {
 
 describe('automatic dispatch status (BMPL-293)', () => {
   /** A marketplace delivery in exactly the state DispatchEngineService.sweepUndispatched acts on. */
-  async function waitingDelivery() {
+  async function waitingDelivery(deliveryStatus: 'PENDING_ASSIGNMENT' | 'DRIVER_DECLINED' = 'PENDING_ASSIGNMENT') {
     const s = uniq();
     const cat = await ctx.prisma.category.create({ data: { name: `Cat ${s}`, slug: `cat-${s}`, isVisible: true } });
     const { userId: vendorUserId } = await register(`v293_${s}@example.bz`);
@@ -97,7 +97,7 @@ describe('automatic dispatch status (BMPL-293)', () => {
             orderNumber: `ORD293-${s}-1`, vendorProfileId: vp.id, status: 'READY_FOR_PICKUP', readyForPickupAt: new Date(),
             deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 1000n,
             items: { create: { productId: product.id, productTitle: 'Prod', unitPriceMinor: 1000n, quantity: 1, subtotalMinor: 1000n } },
-            delivery: { create: { status: 'PENDING_ASSIGNMENT', feeMinor: 500n, readyForDispatchAt: new Date() } },
+            delivery: { create: { status: deliveryStatus, feeMinor: 500n, readyForDispatchAt: new Date() } },
           },
         },
       },
@@ -153,6 +153,22 @@ describe('automatic dispatch status (BMPL-293)', () => {
     expect(on.body.dispatch.waitingShipmentLegs).toBe(waitingWhenOff + 1);
 
     await ctx.prisma.platformSetting.update({ where: { id: settingId }, data: { dispatchAutomatic: false } });
+  });
+
+  it('counts a DRIVER_DECLINED delivery in queues.deliveriesPendingAssignment (BMPL-295) — it was excluded before, even though the dispatch console it links to already listed it', async () => {
+    const before = await get(adminCookies, 'admin/ops/overview');
+    expect(before.status).toBe(200);
+    const base = before.body.queues.deliveriesPendingAssignment;
+    const baseWaiting = before.body.dispatch.waitingDeliveries;
+
+    await waitingDelivery('DRIVER_DECLINED');
+
+    const after = await get(adminCookies, 'admin/ops/overview');
+    // The fix: a declined delivery is real pending work and must show up
+    // here, same as it already does in dispatch.waitingDeliveries and in
+    // the admin dispatch console's own list.
+    expect(after.body.queues.deliveriesPendingAssignment).toBe(base + 1);
+    expect(after.body.dispatch.waitingDeliveries).toBe(baseWaiting + 1);
   });
 });
 
