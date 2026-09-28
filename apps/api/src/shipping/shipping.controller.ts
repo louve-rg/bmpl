@@ -16,6 +16,7 @@ import {
   addProviderMemberSchema,
   addRouteScheduleExceptionSchema,
   resolveLegExceptionSchema,
+  setAvailabilityWindowsSchema,
   setHubWeeklyHoursSchema,
   setLegOperatorSchema,
   setRouteWeeklyScheduleSchema,
@@ -41,6 +42,7 @@ import {
   type AddProviderMemberInput,
   type AddRouteScheduleExceptionInput,
   type ResolveLegExceptionInput,
+  type SetAvailabilityWindowsInput,
   type SetHubWeeklyHoursInput,
   type SetLegOperatorInput,
   type SetRouteWeeklyScheduleInput,
@@ -166,6 +168,20 @@ export class ShippingController {
   @Post(':id/cancel')
   cancel(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(cancelShipmentSchema)) dto: CancelShipmentInput) {
     return this.shipments.cancel(id, dto, { userId: u.userId, isStaff: false });
+  }
+
+  /**
+   * BMPL-285: the sender's own write surface for pickup/delivery
+   * availability windows — replace-all, same shape as the admin hub-hours
+   * PUT. No consumer reads this yet; see ShipmentService.setAvailabilityWindows.
+   */
+  @Put(':id/availability-windows')
+  setAvailabilityWindows(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(setAvailabilityWindowsSchema)) dto: SetAvailabilityWindowsInput,
+  ) {
+    return this.shipments.setAvailabilityWindows(id, dto, { userId: u.userId });
   }
 }
 

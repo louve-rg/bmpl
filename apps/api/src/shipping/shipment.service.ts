@@ -29,6 +29,7 @@ import type {
   LegExceptionInput,
   LegHandoffInput,
   ResolveLegExceptionInput,
+  SetAvailabilityWindowsInput,
   ShipmentQuoteInput,
 } from '@bmpl/validation';
 import type { CustodyHolder, LegStatus, Prisma, ShipmentStatus } from '@bmpl/database';
@@ -75,6 +76,10 @@ const SHIPMENT_INCLUDE = {
     },
   },
   custodyEvents: { orderBy: { occurredAt: 'asc' } },
+  // BMPL-285: storage and the sender write surface only — nothing reads
+  // this list to gate or warn about anything yet, so it rides along in the
+  // same include as everything else the shipment owner already sees.
+  availabilityWindows: { orderBy: [{ role: 'asc' }, { startTime: 'asc' }] },
 } satisfies Prisma.ShipmentInclude;
 
 type ShipmentWithGraph = Prisma.ShipmentGetPayload<{ include: typeof SHIPMENT_INCLUDE }>;
@@ -1567,6 +1572,70 @@ export class ShipmentService {
     return this.serialize(shipment, { audience: actor.isStaff ? 'STAFF' : 'CUSTOMER' });
   }
 
+  /**
+   * BMPL-284/285: replace the whole set of sender/recipient availability
+   * windows in one call — same "replace all, not patch one row" shape as
+   * setHubWeeklyHours: a window the sender no longer submits is gone, never
+   * a stale row sitting beside new ones. The sender only; the recipient has
+   * no write surface today (BMPL-184/BMPL-179).
+   *
+   * GATING, per BMPL-284's own authorization finding: a role's windows may
+   * only be set or changed while the leg that role governs has not started
+   * (SENDER -> FIRST_MILE or, on a door-to-door DIRECT leg, that leg;
+   * RECIPIENT -> LAST_MILE or that same DIRECT leg). Once a driver is
+   * actually en route, a window nobody can act on any more is not a real
+   * constraint, and changing it would tell the sender the window did
+   * something it no longer can. CLEARING is exempt from this: dropping a
+   * role from the submitted set only widens back toward "no constraint",
+   * which is always safe, so a role whose leg has already started may still
+   * be cleared (by simply not including it), just never newly set.
+   *
+   * NO CONSUMER YET. Nothing reads this table to decide anything this
+   * round — the absence of a gating check anywhere else is the entire
+   * point: this card is storage and the write surface only.
+   */
+  async setAvailabilityWindows(id: string, input: SetAvailabilityWindowsInput, actor: { userId: string }) {
+    const shipment = await this.prisma.shipment.findUnique({ where: { id }, include: { legs: true } });
+    if (!shipment) throw new NotFoundException('Shipment not found.');
+    if (shipment.customerUserId !== actor.userId) throw new NotFoundException('Shipment not found.');
+
+    const NOT_STARTED: LegStatus[] = ['PENDING', 'READY'];
+    const direct = shipment.legs.find((l) => l.kind === 'DIRECT');
+    const firstMile = shipment.legs.find((l) => l.kind === 'FIRST_MILE');
+    const lastMile = shipment.legs.find((l) => l.kind === 'LAST_MILE');
+
+    const submittedRoles = new Set(input.windows.map((w) => w.role));
+    if (submittedRoles.has('SENDER')) {
+      const leg = direct ?? firstMile;
+      if (!leg) throw new BadRequestException('This shipment has no pickup leg for a sender window to apply to.');
+      if (!NOT_STARTED.includes(leg.status)) {
+        throw new BadRequestException('The pickup has already started; its window can no longer be changed.');
+      }
+    }
+    if (submittedRoles.has('RECIPIENT')) {
+      const leg = direct ?? lastMile;
+      if (!leg) throw new BadRequestException('This shipment has no delivery leg for a recipient window to apply to.');
+      if (!NOT_STARTED.includes(leg.status)) {
+        throw new BadRequestException('The delivery has already started; its window can no longer be changed.');
+      }
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.shipmentAvailabilityWindow.deleteMany({ where: { shipmentId: id } }),
+      this.prisma.shipmentAvailabilityWindow.createMany({
+        data: input.windows.map((w) => ({ shipmentId: id, role: w.role, startTime: w.startTime, endTime: w.endTime })),
+      }),
+    ]);
+    await this.audit.record({
+      action: 'SHIPMENT_AVAILABILITY_WINDOWS_SET',
+      actorId: actor.userId,
+      newValue: { shipmentId: id, reference: shipment.reference, windows: input.windows },
+    });
+
+    const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
+    return this.serialize(fresh, { audience: 'CUSTOMER' });
+  }
+
   /* ------------------------------------------------------------- reading */
 
   /**
@@ -1681,6 +1750,16 @@ export class ShipmentService {
         note: c.note,
         verification: c.verification,
         occurredAt: c.occurredAt,
+      })),
+      // BMPL-285: empty means unconstrained — attempt pickup/delivery at any
+      // time, exactly as every shipment behaves today. Not a default this
+      // serializer invents: the absence of a row already means that with no
+      // code change here at all, the same way an absent field always has.
+      availabilityWindows: s.availabilityWindows.map((w) => ({
+        id: w.id,
+        role: w.role,
+        startTime: w.startTime,
+        endTime: w.endTime,
       })),
     };
   }

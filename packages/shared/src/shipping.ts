@@ -116,6 +116,20 @@ export const LEG_KIND_LABELS: Record<LegKind, string> = {
 export const COURIER_LEG_KINDS: readonly LegKind[] = ['DIRECT', 'FIRST_MILE', 'LAST_MILE'];
 export const isCourierLeg = (k: LegKind): boolean => COURIER_LEG_KINDS.includes(k);
 
+/* ------------------------------------------------- availability windows */
+
+/**
+ * BMPL-284/285: which door-touching attempt a sender/recipient availability
+ * window governs. SENDER governs the FIRST_MILE pickup; RECIPIENT governs
+ * the LAST_MILE delivery. No resolver lives here (yet) — this is storage
+ * and validation only, no consumer reads it this round — so this is just
+ * the string-literal source of truth @bmpl/validation and @bmpl/database's
+ * generated Prisma enum agree on, the same role this file already plays
+ * for LEG_KINDS.
+ */
+export const AVAILABILITY_WINDOW_ROLES = ['SENDER', 'RECIPIENT'] as const;
+export type AvailabilityWindowRole = (typeof AVAILABILITY_WINDOW_ROLES)[number];
+
 /* --------------------------------------------------------- leg statuses */
 
 export const LEG_STATUSES = [
