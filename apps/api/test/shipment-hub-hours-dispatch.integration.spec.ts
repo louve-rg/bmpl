@@ -158,6 +158,13 @@ afterAll(async () => { await ctx.app.close(); });
 beforeEach(async () => {
   await enableDispatch();
   await ctx.prisma.driverProfile.updateMany({ data: { availability: 'OFFLINE' } });
+  // The two hubs are created once in beforeAll and reused by every test, so
+  // any hours a test configures must not leak into the next one — a test
+  // relying on "unconfigured" would otherwise pass or fail depending on
+  // what ran before it rather than on its own setup.
+  const hubIds = Object.values(hub);
+  await ctx.prisma.hubHoursException.deleteMany({ where: { hubId: { in: hubIds } } });
+  await ctx.prisma.hubOpeningDay.deleteMany({ where: { hubId: { in: hubIds } } });
 });
 
 describe('shipping dispatch — hub arrival feasibility (BMPL-273)', () => {
@@ -226,5 +233,100 @@ describe('shipping dispatch — hub arrival feasibility (BMPL-273)', () => {
     await ctx.prisma.shipmentLeg.update({ where: { id: firstMileId }, data: { durationMinutes: 60 } });
     const early = await dispatch.dispatchLeg(firstMileId, belizeInstant(2026, 11, 2, 7, 30));
     expect(early.result).toBe('OFFERED');
+  });
+});
+
+/**
+ * BMPL-275: the deferral above is invisible today — a return value nobody
+ * persists or reads. This makes it visible to OPERATIONS via an audit
+ * record of the decision, written on the TRANSITION into deferred only
+ * (never once per 20s sweeper tick), with the transition back out already
+ * covered by the pre-existing SHIPMENT_LEG_OFFERED row.
+ */
+describe('shipping dispatch — hub-hours deferral is visible to operations (BMPL-275)', () => {
+  const deferralRowsFor = (legId: string) =>
+    ctx.prisma.auditLog.findMany({
+      where: { action: 'SHIPMENT_LEG_DISPATCH_DEFERRED', newValue: { path: ['legId'], equals: legId } },
+    });
+  const offeredRowsFor = (legId: string) =>
+    ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_OFFERED', newValue: { path: ['legId'], equals: legId } } });
+
+  it('an UNCONFIGURED hub writes no deferral audit row at all, across repeated dispatch attempts', async () => {
+    const sender = await fundedSender();
+    const { firstMileId } = await bookUndispatched(sender.cookies);
+    await onlineDriver(['STANN_CREEK']);
+
+    // Three "sweeps" — the first dispatches for real, the rest are no-ops
+    // because the leg is already assigned. Not one of them should ever
+    // write a deferral row: the hub has zero configured rows.
+    await dispatch.dispatchLeg(firstMileId);
+    await dispatch.dispatchLeg(firstMileId);
+    await dispatch.dispatchLeg(firstMileId);
+
+    expect(await deferralRowsFor(firstMileId)).toHaveLength(0);
+  });
+
+  it('a configured hub that defers writes exactly ONE audit row across repeated sweeps, and no second row once it clears', async () => {
+    await setHubHours(hub.PHH!, '08:00', '17:00');
+    const sender = await fundedSender();
+    const { firstMileId } = await bookUndispatched(sender.cookies);
+    const courier = await onlineDriver(['STANN_CREEK']);
+
+    // Three consecutive sweeps at the SAME outside-hours instant — exactly
+    // what a hub closed overnight looks like to a 20s sweeper. A naive
+    // "record on every deferral" implementation would write three rows here.
+    const outsideHours = belizeInstant(2026, 11, 2, 19, 0);
+    expect((await dispatch.dispatchLeg(firstMileId, outsideHours)).result).toBe('DEFERRED');
+    expect((await dispatch.dispatchLeg(firstMileId, outsideHours)).result).toBe('DEFERRED');
+    expect((await dispatch.dispatchLeg(firstMileId, outsideHours)).result).toBe('DEFERRED');
+
+    const afterThreeSweeps = await deferralRowsFor(firstMileId);
+    expect(afterThreeSweeps).toHaveLength(1);
+    expect(afterThreeSweeps[0]!.reason).toMatch(/outside its configured hours/);
+    expect(afterThreeSweeps[0]!.reason).toMatch(/next open/);
+
+    // It clears: a later sweep lands inside the window and dispatches.
+    const insideHours = belizeInstant(2026, 11, 3, 9, 0);
+    const cleared = await dispatch.dispatchLeg(firstMileId, insideHours);
+    expect(cleared.result).toBe('OFFERED');
+    expect((cleared as { driverProfileId: string }).driverProfileId).toBe(courier.driverProfileId);
+
+    // No second deferral row was written to mark the clearing — the
+    // SHIPMENT_LEG_OFFERED row that dispatch always writes already is that
+    // event in the trail.
+    expect(await deferralRowsFor(firstMileId)).toHaveLength(1);
+    expect(await offeredRowsFor(firstMileId)).toBe(1);
+  });
+
+  it('a new deferral episode after a prior dispatch gets its own row, not folded into the old one', async () => {
+    // First episode: hub unconfigured, dispatches immediately for real —
+    // this is the genuine SHIPMENT_LEG_OFFERED row a later deferral must
+    // be told apart from.
+    const sender = await fundedSender();
+    const { firstMileId } = await bookUndispatched(sender.cookies);
+    await onlineDriver(['STANN_CREEK']);
+    expect((await dispatch.dispatchLeg(firstMileId)).result).toBe('OFFERED');
+    expect(await offeredRowsFor(firstMileId)).toBe(1);
+
+    // Simulate the driver declining without going through the real decline
+    // endpoint's own auto-redispatch (which would race against the real
+    // wall clock) — the leg becomes eligible for dispatch again, same as a
+    // real decline leaves it.
+    await ctx.prisma.shipmentLeg.update({
+      where: { id: firstMileId },
+      data: { courierStatus: 'DRIVER_DECLINED', assignedDriverProfileId: null, assignedVehicleId: null, offerExpiresAt: null },
+    });
+
+    // Only now does the hub get hours configured, and the retry lands
+    // outside them.
+    await setHubHours(hub.PHH!, '08:00', '17:00');
+    const deferred = await dispatch.dispatchLeg(firstMileId, belizeInstant(2026, 11, 2, 19, 0));
+    expect(deferred.result).toBe('DEFERRED');
+
+    // The most recent event for this leg was OFFERED, not DEFERRED, so this
+    // is correctly recognised as a NEW episode and gets its own row — the
+    // leg now has one OFFERED row and one DEFERRED row, not zero.
+    expect(await deferralRowsFor(firstMileId)).toHaveLength(1);
+    expect(await offeredRowsFor(firstMileId)).toBe(1);
   });
 });

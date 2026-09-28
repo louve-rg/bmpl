@@ -332,6 +332,13 @@ enum AuditAction {
   SHIPMENT_LEG_OFFERED
   SHIPMENT_LEG_OFFER_EXPIRED
   SHIPMENT_LEG_DISPATCH_EXHAUSTED
+  /// BMPL-275: a first-mile leg's projected arrival fell outside its
+  /// destination terminal's configured hours, so dispatch was deferred
+  /// rather than offered. Written on the TRANSITION into deferred only
+  /// (dispatchLeg reads the most recent OFFERED/DEFERRED row for the leg
+  /// before writing), never once per 20s sweeper tick — see
+  /// ShipmentDispatchService.recordDeferralIfNew.
+  SHIPMENT_LEG_DISPATCH_DEFERRED
   SHIPMENT_LEG_ACCEPTED
   SHIPMENT_LEG_DECLINED
   SHIPMENT_LEG_PICKED_UP
