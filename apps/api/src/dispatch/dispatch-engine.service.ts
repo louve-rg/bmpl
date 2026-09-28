@@ -96,7 +96,7 @@ export class DispatchEngineService {
             order: {
               // userId is the requesting customer — needed so the candidate
               // search can leave them out of their own delivery.
-              select: { orderNumber: true, isTest: true, userId: true, addresses: { select: { district: true } } },
+              select: { orderNumber: true, isTest: true, userId: true, addresses: { select: { district: true, city: true } } },
             },
           },
         },
@@ -131,13 +131,14 @@ export class DispatchEngineService {
 
     const district = this.districtOf(delivery.vendorOrder.order.addresses);
     if (!district) return { result: 'SKIPPED', reason: 'delivery has no destination district' };
+    const city = this.cityOf(delivery.vendorOrder.order.addresses);
 
     // Simulation boundary: a test order's pool is test drivers, a real order's
     // pool is real drivers. Narrowed in the candidate query AND re-asserted by
     // assignmentEligibility at assignment time.
     const isTest = delivery.vendorOrder.order.isTest;
     const requesterUserId = delivery.vendorOrder.order.userId;
-    const ranked = await this.rankFor(deliveryId, district, cfg, isTest, requesterUserId);
+    const ranked = await this.rankFor(deliveryId, district, city, cfg, isTest, requesterUserId);
     if (ranked.length === 0) {
       // Not exhausted — nobody is online right now. The sweeper retries, so a
       // quiet hour resolves itself once a driver comes online.
@@ -146,7 +147,7 @@ export class DispatchEngineService {
       // database by hand to find out whether the district was wrong, everyone
       // was offline, or the only driver in range was the customer. The counts
       // below answer that without naming anybody or touching an address.
-      const why = await this.explainEmptyPool(district, isTest, requesterUserId);
+      const why = await this.explainEmptyPool(district, city, isTest, requesterUserId);
       this.logger.warn(
         `dispatch: no candidate for delivery ${deliveryId} — district=${district} isTest=${isTest} ` +
           `online=${why.online} inDistrict=${why.inDistrict} selfExcluded=${why.selfExcluded} eligible=0`,
@@ -165,7 +166,7 @@ export class DispatchEngineService {
     // offline or had a document lapse in between. systemAssign re-checks too;
     // this loop just moves on to the next candidate instead of failing the batch.
     for (const candidate of ranked) {
-      const vehicleId = await this.pickVehicle(candidate.driverProfileId, district, isTest);
+      const vehicleId = await this.pickVehicle(candidate.driverProfileId, district, city, isTest);
       if (!vehicleId) continue;
       try {
         await this.assignments.systemAssign(deliveryId, candidate.driverProfileId, vehicleId);
@@ -296,12 +297,25 @@ export class DispatchEngineService {
    * "the only driver in range was the customer", which look identical from the
    * outside and need completely different responses.
    */
-  private async explainEmptyPool(district: string, isTest: boolean, requesterUserId?: string) {
+  private async explainEmptyPool(district: string, city: string | null, isTest: boolean, requesterUserId?: string) {
     const base = { availability: 'ONLINE', isActive: true, isTest } as const;
+    // BMPL-194: inDistrict now means "in district AND, if narrowed, in city" —
+    // the same test rankFor's pool query applies — so this count agrees with
+    // the pool that actually ran, rather than a wider, district-only number
+    // that would make "no driver in this district has a usable vehicle" a
+    // false explanation when the real reason is nobody serves this town.
+    const cityFilter = city
+      ? {
+          OR: [
+            { serviceCities: { none: { district: district as never, isActive: true } } },
+            { serviceCities: { some: { district: district as never, isActive: true, city: { equals: city, mode: 'insensitive' as const } } } },
+          ],
+        }
+      : {};
     const [online, inDistrict, selfExcluded] = await Promise.all([
       this.prisma.driverProfile.count({ where: base }),
       this.prisma.driverProfile.count({
-        where: { ...base, serviceAreas: { some: { district: district as never, isActive: true } } },
+        where: { ...base, serviceAreas: { some: { district: district as never, isActive: true } }, ...cityFilter },
       }),
       requesterUserId
         ? this.prisma.driverProfile.count({
@@ -309,13 +323,16 @@ export class DispatchEngineService {
               ...base,
               userId: requesterUserId,
               serviceAreas: { some: { district: district as never, isActive: true } },
+              ...cityFilter,
             },
           })
         : Promise.resolve(0),
     ]);
     const summary =
       inDistrict === 0
-        ? 'no driver is online in this district'
+        ? city
+          ? `no driver serves ${city} in this district`
+          : 'no driver is online in this district'
         : selfExcluded > 0 && inDistrict === selfExcluded
           ? 'the only driver in range is the customer, who cannot deliver their own order'
           : 'no driver in this district currently has a usable vehicle';
@@ -325,11 +342,12 @@ export class DispatchEngineService {
   private async rankFor(
     deliveryId: string,
     district: string,
+    city: string | null,
     cfg: DispatchSettings,
     isTest = false,
     requesterUserId?: string,
   ) {
-    const pool = await this.drivers.eligibleDriversForDistrict(district, { isTest, excludeUserId: requesterUserId });
+    const pool = await this.drivers.eligibleDriversForDistrict(district, { isTest, excludeUserId: requesterUserId, city });
     if (pool.length === 0) return [];
     const ids = pool.map((d) => d.driverProfileId);
 
@@ -378,8 +396,8 @@ export class DispatchEngineService {
   }
 
   /** The driver's primary usable vehicle for this district, if any. */
-  private async pickVehicle(driverProfileId: string, district: string, isTest = false): Promise<string | null> {
-    const e = await this.drivers.assignmentEligibility(driverProfileId, district, undefined, { isTestDelivery: isTest });
+  private async pickVehicle(driverProfileId: string, district: string, city: string | null, isTest = false): Promise<string | null> {
+    const e = await this.drivers.assignmentEligibility(driverProfileId, district, undefined, { isTestDelivery: isTest, city });
     if (!e.eligible || e.usableVehicles.length === 0) return null;
     return (e.usableVehicles.find((v) => v.isPrimary) ?? e.usableVehicles[0])!.id;
   }
@@ -448,5 +466,10 @@ export class DispatchEngineService {
    */
   private districtOf(addresses: Array<{ district: string }>): string | null {
     return addresses[0]?.district ?? null;
+  }
+
+  /** Destination city, same address, same "first one wins" as districtOf. */
+  private cityOf(addresses: Array<{ city?: string | null }>): string | null {
+    return addresses[0]?.city ?? null;
   }
 }

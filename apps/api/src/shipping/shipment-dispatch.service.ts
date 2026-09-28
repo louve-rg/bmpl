@@ -92,7 +92,7 @@ export class ShipmentDispatchService {
         offerCount: true,
         sequence: true,
         originHubId: true,
-        originHub: { select: { district: true } },
+        originHub: { select: { district: true, city: true } },
         destinationHubId: true,
         destinationHub: { select: { name: true } },
         durationMinutes: true,
@@ -105,6 +105,7 @@ export class ShipmentDispatchService {
             // own parcel, on both the first mile and the last.
             customerUserId: true,
             originDistrict: true,
+            originCity: true,
             quotedTotalMinor: true,
             payment: { select: { status: true } },
             legs: { select: { sequence: true, kind: true, mode: true, status: true } },
@@ -241,14 +242,18 @@ export class ShipmentDispatchService {
 
     // Where the driver has to BE to start: a first mile and a door-to-door run
     // both collect from the sender's district; a last mile collects from the
-    // arrival terminal.
+    // arrival terminal. BMPL-194: the city that goes with whichever of those
+    // is in play — same location, same choice, just the finer grain of it.
     const district =
       leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originDistrict : leg.originHub?.district;
     if (!district) return { result: 'SKIPPED', reason: 'no district to search for drivers in' };
+    const city =
+      (leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originCity : leg.originHub?.city) ?? null;
 
     const ranked = await this.rankFor(
       leg.id,
       district,
+      city,
       cfg.maxConcurrentPerDriver,
       leg.shipment.isTest,
       leg.shipment.customerUserId,
@@ -275,7 +280,7 @@ export class ShipmentDispatchService {
       return { result: 'SKIPPED', reason: 'the only candidate was the sender, who cannot courier their own parcel' };
     }
 
-    const vehicleId = await this.pickVehicle(chosen.driverProfileId, district, leg.shipment.isTest);
+    const vehicleId = await this.pickVehicle(chosen.driverProfileId, district, city, leg.shipment.isTest);
     const expiresAt = new Date(Date.now() + cfg.offerTimeoutSeconds * 1000);
 
     const won = await this.prisma.$transaction(async (tx) => {
@@ -330,11 +335,12 @@ export class ShipmentDispatchService {
   private async rankFor(
     legId: string,
     district: string,
+    city: string | null,
     maxConcurrent: number,
     isTest: boolean,
     requesterUserId?: string | null,
   ) {
-    const pool = await this.drivers.eligibleDriversForDistrict(district, { isTest, excludeUserId: requesterUserId });
+    const pool = await this.drivers.eligibleDriversForDistrict(district, { isTest, excludeUserId: requesterUserId, city });
     if (pool.length === 0) return [];
     const ids = pool.map((d) => d.driverProfileId);
 
@@ -405,8 +411,8 @@ export class ShipmentDispatchService {
     return rankDrivers(candidates, new Date());
   }
 
-  private async pickVehicle(driverProfileId: string, district: string, isTest: boolean): Promise<string | null> {
-    const e = await this.drivers.assignmentEligibility(driverProfileId, district, undefined, { isTestDelivery: isTest });
+  private async pickVehicle(driverProfileId: string, district: string, city: string | null, isTest: boolean): Promise<string | null> {
+    const e = await this.drivers.assignmentEligibility(driverProfileId, district, undefined, { isTestDelivery: isTest, city });
     if (!e.eligible || e.usableVehicles.length === 0) return null;
     return (e.usableVehicles.find((v) => v.isPrimary) ?? e.usableVehicles[0])!.id;
   }
@@ -425,6 +431,7 @@ export class ShipmentDispatchService {
     return this.drivers.eligibleDriversForDistrict(district, {
       isTest: leg.shipment.isTest,
       excludeUserId: leg.shipment.customerUserId,
+      city: this.cityFor(leg),
     });
   }
 
@@ -519,6 +526,7 @@ export class ShipmentDispatchService {
     const district = this.districtFor(leg);
     const e = await this.drivers.assignmentEligibility(driverProfileId, district, vehicleId, {
       isTestDelivery: leg.shipment.isTest,
+      city: this.cityFor(leg),
     });
     if (!e.eligible) throw new BadRequestException(`Driver is not eligible: ${e.reasons.join('; ')}.`);
 
@@ -602,7 +610,7 @@ export class ShipmentDispatchService {
         status: true,
         courierStatus: true,
         sequence: true,
-        originHub: { select: { district: true } },
+        originHub: { select: { district: true, city: true } },
         shipment: {
           select: {
             id: true,
@@ -610,6 +618,7 @@ export class ShipmentDispatchService {
             isTest: true,
             customerUserId: true,
             originDistrict: true,
+            originCity: true,
             quotedTotalMinor: true,
             payment: { select: { status: true } },
             legs: { select: { sequence: true, kind: true, mode: true, status: true } },
@@ -627,6 +636,11 @@ export class ShipmentDispatchService {
       leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originDistrict : leg.originHub?.district;
     if (!district) throw new BadRequestException('This leg has no district to find a driver in.');
     return district;
+  }
+
+  /** Same location as districtFor, the city half — optional, unlike the district. */
+  private cityFor(leg: { kind: string; originHub: { city: string } | null; shipment: { originCity: string | null } }): string | null {
+    return (leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originCity : leg.originHub?.city) ?? null;
   }
 
   /* ---------------------------------------------------------- the sweeper */
