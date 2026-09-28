@@ -29,6 +29,8 @@ tags:
     description: Unauthenticated marketplace browse/search.
   - name: Vendor
     description: Owner-scoped storefront management (requires an APPROVED VENDOR role).
+  - name: Products
+    description: Vendor product brand-image role (M6.2) — marks/clears which image represents the product's brand. A small, separate feature from the ordinary image CRUD under Vendor above.
   - name: Admin
     description: Moderation (requires an admin permission).
   - name: Cart
@@ -49,6 +51,24 @@ tags:
       movement is a balanced double-entry transaction between internal
       accounts — customer↔escrow at authorization, escrow→vendor/driver/platform
       fees at settlement. No external money rail exists.
+  - name: Dispatch
+    description: >-
+      Marketplace dispatch & delivery execution (M15). Admin assignment,
+      reassignment and cancellation; the driver's own job feed and delivery
+      lifecycle; read-only PIN/proof/timeline views for admin, driver, vendor
+      and customer, each scoped to their own relationship to the delivery.
+  - name: Notifications
+    description: In-app notifications & event system (M16). Own-account only; read/unread state and delivery preferences.
+  - name: Messaging
+    description: >-
+      Order/delivery conversations and platform support threads (M17).
+      Self-scoped for customer/vendor/driver; admin support queue join,
+      respond and internal notes.
+  - name: Settlement
+    description: >-
+      Settlement & earnings (M18 — internal, no payouts). Vendor and driver
+      settlement history, admin reconciliation and fee configuration.
+      Releases escrow internally; never moves money externally.
   - name: Reviews
     description: Verified reviews & ratings (M19) tied to completed transactions. Public reads; customer writes; vendor responses; admin moderation.
   - name: Engagement
@@ -461,6 +481,8 @@ paths:
     get: { tags: [Vendor], summary: Own storefront, security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "401": { $ref: "#/components/responses/Unauthorized" }, "403": { $ref: "#/components/responses/Forbidden" } } }
     post: { tags: [Vendor], summary: Create profile, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Created }, "409": { $ref: "#/components/responses/Conflict" } } }
     patch: { tags: [Vendor], summary: Update profile, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /vendor/profile/preview:
+    get: { tags: [Vendor], summary: Owner preview of own storefront (any approval status), security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
   /vendor/profile/submit:
     post: { tags: [Vendor], summary: Submit for review, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: PENDING }, "409": { $ref: "#/components/responses/Conflict" } } }
   /vendor/settings:
@@ -472,10 +494,14 @@ paths:
     delete: { tags: [Vendor], summary: Delete location, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
   /vendor/profile/hours:
     put: { tags: [Vendor], summary: Replace opening hours, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" } } }
+  /vendor/profile/logo/upload:
+    post: { tags: [Vendor], summary: Server-side logo upload (rate-limited), security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "Raw file bytes as the request body, not JSON — the caller-side alternative to presign/confirm below" }
   /vendor/profile/logo/presign:
     post: { tags: [Vendor], summary: Presign logo upload (rate-limited), security: [{ cookieAuth: [], csrfToken: [] }], requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ImagePresign" } } } }, responses: { "201": { description: presigned URL }, "503": { description: storage not configured } } }
   /vendor/profile/logo/confirm:
     post: { tags: [Vendor], summary: Confirm logo upload, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" } } }
+  /vendor/profile/banner/upload:
+    post: { tags: [Vendor], summary: Server-side banner upload (rate-limited), security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "Raw file bytes as the request body, not JSON — the caller-side alternative to presign/confirm below" }
   /vendor/profile/banner/presign:
     post: { tags: [Vendor], summary: Presign banner upload (rate-limited), security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: presigned URL }, "503": { description: storage not configured } } }
   /vendor/profile/banner/confirm:
@@ -493,12 +519,18 @@ paths:
     post: { tags: [Vendor], summary: Unarchive to DRAFT, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: DRAFT } } }
   /vendor/products/{productId}/images:
     get: { tags: [Vendor], summary: List images, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+  /vendor/products/{productId}/images/upload:
+    post: { tags: [Vendor], summary: Server-side image upload (rate-limited), parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "Raw file bytes as the request body, not JSON; variantId/width/height/altText ride the query string since the body is binary — the caller-side alternative to presign/confirm below" }
+  /vendor/products/{productId}/images/{imageId}/replace-file:
+    post: { tags: [Vendor], summary: Server-side in-place file replace (rate-limited), parameters: [ { $ref: "#/components/parameters/productId" }, { name: imageId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "Raw file bytes as the request body, same transport as upload above" }
   /vendor/products/{productId}/images/presign:
     post: { tags: [Vendor], summary: Presign image upload (rate-limited), parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ImagePresign" } } } }, responses: { "201": { description: presigned URL }, "400": { $ref: "#/components/responses/ValidationError" }, "503": { description: storage not configured } } }
   /vendor/products/{productId}/images/confirm:
     post: { tags: [Vendor], summary: Confirm image (headObject verify), parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" } } }
   /vendor/products/{productId}/images/reorder:
     post: { tags: [Vendor], summary: Reorder images, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } } }
+  /vendor/products/{productId}/images/{imageId}/replace:
+    post: { tags: [Vendor], summary: Replace an image by storage key (JSON, not raw bytes), parameters: [ { $ref: "#/components/parameters/productId" }, { name: imageId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "body { key, width?, height? }" }
   /vendor/products/{productId}/images/{imageId}/primary:
     post: { tags: [Vendor], summary: Set primary image, parameters: [ { $ref: "#/components/parameters/productId" }, { name: imageId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } } }
   /vendor/products/{productId}/images/{imageId}:
@@ -507,6 +539,8 @@ paths:
   /vendor/products/{productId}/variants:
     get: { tags: [Vendor], summary: Options + variants, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
     post: { tags: [Vendor], summary: Create variant, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/CreateVariant" } } } }, responses: { "201": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" }, "409": { $ref: "#/components/responses/Conflict" } } }
+  /vendor/products/{productId}/variants/generate:
+    post: { tags: [Vendor], summary: Generate variants from every option-value combination, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "400": { description: "Every option needs at least one value first" } }, description: "body { quantity? } (default 0); skips combinations that already have a variant" }
   /vendor/products/{productId}/options:
     post: { tags: [Vendor], summary: Create option, parameters: [ { $ref: "#/components/parameters/productId" } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } } }
   /vendor/products/{productId}/options/{optionId}/values:
@@ -514,6 +548,7 @@ paths:
   /vendor/products/{productId}/options/{optionId}:
     delete: { tags: [Vendor], summary: Delete option, parameters: [ { $ref: "#/components/parameters/productId" }, { name: optionId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } } }
   /vendor/products/{productId}/option-values/{valueId}:
+    patch: { tags: [Vendor], summary: Rename an option value, parameters: [ { $ref: "#/components/parameters/productId" }, { name: valueId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } }, description: "body { value }" }
     delete: { tags: [Vendor], summary: Delete option value, parameters: [ { $ref: "#/components/parameters/productId" }, { name: valueId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
   /vendor/products/{productId}/variants/{variantId}:
     patch: { tags: [Vendor], summary: Update variant, parameters: [ { $ref: "#/components/parameters/productId" }, { name: variantId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
@@ -525,6 +560,15 @@ paths:
     post: { tags: [Vendor], summary: Adjust stock (transactional + history), parameters: [ { $ref: "#/components/parameters/productId" }, { $ref: "#/components/parameters/variantIdQuery" } ], security: [{ cookieAuth: [], csrfToken: [] }], requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/InventoryAdjust" } } } }, responses: { "201": { description: OK }, "400": { $ref: "#/components/responses/ValidationError" } } }
   /vendor/products/{productId}/inventory/history:
     get: { tags: [Vendor], summary: Inventory change history, parameters: [ { $ref: "#/components/parameters/productId" }, { $ref: "#/components/parameters/variantIdQuery" } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+  /vendor/delivery:
+    get: { tags: [Vendor], summary: Own delivery configuration (zones + estimate), security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Operational settings (deliveryEnabled etc.) live under PATCH /vendor/settings, not here" }
+  /vendor/delivery/zones:
+    post: { tags: [Vendor], summary: Create a delivery zone, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Created } }, description: "body { name, districts, feeMinor, isActive? }" }
+  /vendor/delivery/zones/{id}:
+    patch: { tags: [Vendor], summary: Update a delivery zone, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }, description: "body: any subset of name, districts, feeMinor, isActive; at least one required" }
+    delete: { tags: [Vendor], summary: Delete a delivery zone, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
+  /vendor/delivery/estimate:
+    put: { tags: [Vendor], summary: Replace the estimated delivery time window, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "400": { description: "maxHours must be >= minHours" } }, description: "body { minHours, maxHours, label? } (hours)" }
   /admin/categories:
     get: { tags: [Admin], summary: List categories, security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires categories.manage" }
     post: { tags: [Admin], summary: Create category, security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } }, description: "Requires categories.manage" }
