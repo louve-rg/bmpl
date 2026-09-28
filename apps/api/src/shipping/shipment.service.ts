@@ -672,7 +672,11 @@ export class ShipmentService {
       include: SHIPMENT_INCLUDE,
       take: 50,
     });
-    return Promise.all(rows.map((s) => this.serialize(s, { audience: 'CUSTOMER' })));
+    // One lookup for every leg across every shipment in the page, not one per
+    // shipment (`serialize` would otherwise re-run it per call) and not one per
+    // leg — up to 50 shipments here, each with several legs.
+    const conversationIds = await this.legConversationIds(rows.flatMap((s) => s.legs.map((l) => l.id)));
+    return Promise.all(rows.map((s) => this.serialize(s, { audience: 'CUSTOMER', conversationIds })));
   }
 
   /**
@@ -1645,10 +1649,14 @@ export class ShipmentService {
    * appears for a customer except on the leg that ends at their own door — that
    * is the code THEY hold, and the driver has to produce it.
    */
-  private async serialize(s: ShipmentWithGraph, opts: { audience: 'CUSTOMER' | 'STAFF' }) {
+  private async serialize(s: ShipmentWithGraph, opts: { audience: 'CUSTOMER' | 'STAFF'; conversationIds?: Map<string, string> }) {
     const endsAtHub = !needsLastMile(s.service);
     const live = s.legs.filter((l) => l.status !== 'CANCELLED');
     const current = live.find((l) => l.status !== 'COMPLETED') ?? null;
+    // Callers serving a LIST (listMine) resolve this once across every shipment
+    // on the page and pass it in; a single-shipment caller has none to pass, so
+    // it is resolved here, bounded to this one shipment's own legs.
+    const conversationIds = opts.conversationIds ?? (await this.legConversationIds(s.legs.map((l) => l.id)));
     // The sender and staff both already see the whole story here (ownership /
     // permission was checked before `serialize` was ever called) — the pickup
     // photo needs no extra gate on top, same as every other leg field below.
@@ -1678,6 +1686,14 @@ export class ShipmentService {
         // name, phone, or documents. Null before a courier is assigned.
         courier: this.courierSummary(l.assignedDriver),
         courierVehicle: await this.courierVehicleSummary(l.assignedVehicle),
+        // BMPL-290: the customer<->courier thread for THIS leg, or null before
+        // one exists (the driver hasn't accepted yet). Resolved on the same
+        // compound key ensureShipmentLegThread writes on — SHIPMENT_LEG plus
+        // this leg's own id plus the CUSTOMER_DRIVER pairing — never matched on
+        // context alone, which would silently pick the wrong thread the day a
+        // second pairing exists on a leg. Never a fabricated id: a leg with no
+        // thread yet returns null, not a placeholder a link could follow.
+        conversationId: conversationIds.get(l.id) ?? null,
         scheduleNote: l.route?.scheduleNote ?? null,
         scheduledDepartureAt: l.scheduledDepartureAt,
         departedAt: l.departedAt,
@@ -1762,6 +1778,22 @@ export class ShipmentService {
         endTime: w.endTime,
       })),
     };
+  }
+
+  /**
+   * BMPL-290: legId -> conversation id, for every SHIPMENT_LEG/CUSTOMER_DRIVER
+   * thread among the given legs. One query for however many legs are passed in
+   * — callers serving a list batch across every shipment's legs up front rather
+   * than calling this per shipment. A leg with no accepted driver yet simply
+   * has no row and is absent from the map; the caller reads that as null.
+   */
+  private async legConversationIds(legIds: string[]): Promise<Map<string, string>> {
+    if (legIds.length === 0) return new Map();
+    const rows = await this.prisma.conversation.findMany({
+      where: { contextType: 'SHIPMENT_LEG', contextId: { in: legIds }, pairing: 'CUSTOMER_DRIVER' },
+      select: { id: true, contextId: true },
+    });
+    return new Map(rows.map((r) => [r.contextId, r.id]));
   }
 
   /**

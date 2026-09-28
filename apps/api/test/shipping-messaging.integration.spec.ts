@@ -426,3 +426,68 @@ describe('a driver who is no longer carrying it cannot keep talking', () => {
     expect(after.status).toBe(403);
   });
 });
+
+describe('the shipment payload names each leg\'s own conversation (BMPL-290)', () => {
+  it('is null before a driver accepts, and becomes the thread id once they do', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+
+    const before = await get(customer, `shipping/${s.reference}`);
+    expect(before.body.legs.find((l: { id: string }) => l.id === first.id).conversationId).toBeNull();
+
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    const thread = (await threadFor(first.id))!;
+
+    const after = await get(customer, `shipping/${s.reference}`);
+    expect(after.body.legs.find((l: { id: string }) => l.id === first.id).conversationId).toBe(thread.id);
+  });
+
+  it('never puts one leg\'s thread on another leg', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const last = (await legsOf(s.id)).find((l) => l.kind === 'LAST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    const thread = (await threadFor(first.id))!;
+
+    const read = await get(customer, `shipping/${s.reference}`);
+    const byId = Object.fromEntries(read.body.legs.map((l: { id: string; conversationId: string | null }) => [l.id, l.conversationId]));
+    expect(byId[first.id]).toBe(thread.id);
+    // The last-mile leg is not actionable until the first-mile leg completes,
+    // so no driver has accepted it yet and it must have no thread of its own —
+    // never the first leg's thread borrowed by matching on the wrong key.
+    expect(byId[last.id]).toBeNull();
+  });
+
+  it('resolves every shipment\'s own legs correctly in the list view, not just the last one queried', async () => {
+    // listMine batches this in one query across every shipment on the page —
+    // this proves the batch keeps each leg's answer scoped to its own leg,
+    // not just that it avoids N+1.
+    const driver = await makeDriver();
+    const withThread = await book();
+    const withoutThread = await book();
+    const firstOfWithThread = (await legsOf(withThread.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${firstOfWithThread.id}/accept`);
+    const thread = (await threadFor(firstOfWithThread.id))!;
+
+    const list = await get(customer, 'shipping');
+    expect(list.status).toBe(200);
+    const a = list.body.find((s: { id: string }) => s.id === withThread.id);
+    const b = list.body.find((s: { id: string }) => s.id === withoutThread.id);
+    expect(a.legs.find((l: { id: string }) => l.id === firstOfWithThread.id).conversationId).toBe(thread.id);
+    expect(b.legs.every((l: { conversationId: string | null }) => l.conversationId === null)).toBe(true);
+  });
+
+  it('gives staff the same field on the admin tracking view', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    const thread = (await threadFor(first.id))!;
+
+    const staffRead = await get(admin, `admin/logistics/shipments/${s.reference}`);
+    expect(staffRead.status).toBe(200);
+    expect(staffRead.body.legs.find((l: { id: string }) => l.id === first.id).conversationId).toBe(thread.id);
+  });
+});
