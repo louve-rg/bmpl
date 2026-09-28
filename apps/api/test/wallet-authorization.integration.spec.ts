@@ -266,6 +266,18 @@ describe('the admin wallet lock control', () => {
     expect(audits.map((a) => (a.newValue as { reason?: string }).reason)).toEqual(['Suspicious activity report 47', 'Cleared by review']);
     expect(audits.every((a) => a.actorId !== null)).toBe(true);
 
+    // BMPL-232: both directions also fire ADMIN_SECURITY_ALERT to every
+    // wallet.lock holder (the SUPER_ADMIN who acted, here) — the fraud/
+    // security lever restated to oversight, not a guessed heuristic.
+    const alerts = await ctx.prisma.notificationRecipient.findMany({
+      where: { notification: { event: 'ADMIN_SECURITY_ALERT', data: { path: ['targetUserId'], equals: u.id } } },
+      include: { notification: true },
+      orderBy: { notification: { createdAt: 'asc' } },
+    });
+    expect(alerts).toHaveLength(2);
+    expect(alerts.map((a) => a.notification.title)).toEqual(['Wallet locked', 'Wallet unlocked']);
+    expect(alerts.every((a) => a.notification.category === 'SECURITY')).toBe(true);
+
     // Unlocked, the wallet spends again — the control is a gate, not a scar.
     await addToCart(customer, { productId, quantity: 1 }).expect(201);
     await checkout(customer).expect(201);

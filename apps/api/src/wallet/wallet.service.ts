@@ -3,6 +3,7 @@ import { assertBalanced, assertMoneyMovementEnabled, signedAmount, type DraftTra
 import type { Currency, Prisma, WalletAccount, WalletAccountType } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | PrismaService;
@@ -26,6 +27,7 @@ export class WalletService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** Derived balance (minor units) = Σ signed ledger entries. The source of truth. */
@@ -516,6 +518,24 @@ export class WalletService {
           reason,
           previousValue: { status: from },
           newValue: { status: to, action, reason, walletAccountsChanged: changed.count },
+        },
+        tx,
+      );
+      // BMPL-232 (owner ruling 4): this is a real, auditable security event —
+      // a fraud/security lever already flipped by an admin, not a heuristic
+      // guess — so it is exactly what ADMIN_SECURITY_ALERT exists for. Every
+      // holder of wallet.lock (SUPER_ADMIN only) is told, including the actor:
+      // the point is that no lock/unlock happens without every other holder
+      // of the same lever knowing it occurred.
+      await this.notifications.notifyAdmins(
+        'wallet.lock',
+        {
+          type: 'SECURITY',
+          category: 'SECURITY',
+          event: 'ADMIN_SECURITY_ALERT',
+          title: action === 'lock' ? 'Wallet locked' : 'Wallet unlocked',
+          body: `A user's wallet was ${action === 'lock' ? 'locked' : 'unlocked'} as a fraud/security control. Reason: ${reason}`,
+          data: { targetUserId, action, reason },
         },
         tx,
       );

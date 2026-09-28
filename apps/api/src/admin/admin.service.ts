@@ -540,6 +540,23 @@ export class AdminService {
         },
         tx,
       );
+      // BMPL-232 (owner ruling 4): a change to what an admin account can do is
+      // one of the concrete, auditable security events the ruling names —
+      // no heuristic, no threshold, just restating a change that already
+      // happened. admin.manage is SUPER_ADMIN-only, so this reaches every
+      // other holder of that power, including the actor.
+      await this.notifications.notifyAdmins(
+        'admin.manage',
+        {
+          type: 'SECURITY',
+          category: 'SECURITY',
+          event: 'ADMIN_SECURITY_ALERT',
+          title: 'Admin permissions changed',
+          body: 'An admin permission set was changed. Check the audit log for the before/after and who made the change.',
+          data: { targetUserId: userId, previousPermissions: previous, newPermissions: permissions },
+        },
+        tx,
+      );
     });
     return { permissions };
   }
