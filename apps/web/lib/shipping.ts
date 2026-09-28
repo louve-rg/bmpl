@@ -206,11 +206,33 @@ export type ShipmentQuote =
       totalMinor: number;
       transportMinutes: number;
       explanation: string;
+      /** "YYYY-MM-DD", Belize calendar — the date this quote actually priced. */
+      requestedDate: string;
       pricingIncomplete: boolean;
       pricingNote: string | null;
       legs: QuoteLeg[];
     }
-  | { available: false; reason: string; message: string; useLocalDelivery: boolean };
+  | {
+      available: false;
+      reason: string;
+      message: string;
+      useLocalDelivery: boolean;
+      requestedDate: string;
+      /**
+       * True when the requested date is specifically why this failed — the
+       * route/network otherwise works. False means nothing about the date
+       * would help (no hub, no route, no mode at all).
+       */
+      dateUnavailable: boolean;
+      /**
+       * "YYYY-MM-DD", or null. Only ever a date the API itself confirmed
+       * would actually work by re-running the real planner against it — never
+       * guessed from partial schedule data. Null means the configured
+       * schedule did not provide enough information to name one; that is not
+       * the same as "never runs".
+       */
+      nextAvailableDate: string | null;
+    };
 
 export const shippingApi = {
   hubs: () => api.get<ShippingHub[]>('/shipping/hubs'),

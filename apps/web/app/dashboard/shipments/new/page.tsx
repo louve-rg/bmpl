@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  belizeCalendarDateKey,
   needsFirstMile,
   needsLastMile,
   SHIPPING_SERVICE_LABELS,
@@ -50,8 +51,20 @@ function quotable(service: ShippingService, origin: EndpointValue, destination: 
   return originOk && destOk;
 }
 
+/** Today, Belize calendar — the default travel date and the picker's floor. */
+function todayKey(): string {
+  return belizeCalendarDateKey(new Date());
+}
+
 /** The request body both quoting and booking use, so they cannot disagree. */
-function toRequest(service: ShippingService, mode: Mode, origin: EndpointValue, destination: EndpointValue, parcel: { description: string; pieces: string }) {
+function toRequest(
+  service: ShippingService,
+  mode: Mode,
+  origin: EndpointValue,
+  destination: EndpointValue,
+  parcel: { description: string; pieces: string },
+  travelDate: string,
+) {
   const end = (v: EndpointValue, door: boolean) =>
     door
       ? {
@@ -75,6 +88,10 @@ function toRequest(service: ShippingService, mode: Mode, origin: EndpointValue, 
     preferredMode: mode === 'ANY' ? undefined : mode,
     description: parcel.description || undefined,
     pieces: Number(parcel.pieces) || 1,
+    // Always sent, never omitted: an empty picker already shows today, so
+    // sending it explicitly changes nothing the API would otherwise default
+    // to — it just makes what the quote priced against visible end to end.
+    requestedDate: travelDate,
   };
 }
 
@@ -88,6 +105,7 @@ export default function NewShipmentPage() {
   const [origin, setOrigin] = useState<EndpointValue>(emptyEndpoint());
   const [destination, setDestination] = useState<EndpointValue>(emptyEndpoint());
   const [parcel, setParcel] = useState({ description: '', pieces: '1' });
+  const [travelDate, setTravelDate] = useState<string>(todayKey);
 
   const [quote, setQuote] = useState<ShipmentQuote | null>(null);
   const [wallet, setWallet] = useState<WalletSummary | null>(null);
@@ -119,8 +137,8 @@ export default function NewShipmentPage() {
   }, [mode, modes]);
 
   const request = useMemo(
-    () => toRequest(service, mode, origin, destination, parcel),
-    [service, mode, origin, destination, parcel],
+    () => toRequest(service, mode, origin, destination, parcel, travelDate),
+    [service, mode, origin, destination, parcel, travelDate],
   );
   const ready = quotable(service, origin, destination);
 
@@ -246,6 +264,16 @@ export default function NewShipmentPage() {
               className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base"
             />
           </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Travel date</span>
+            <input
+              type="date"
+              value={travelDate}
+              min={todayKey()}
+              onChange={(e) => setTravelDate(e.target.value || todayKey())}
+              className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base"
+            />
+          </label>
         </div>
       </fieldset>
 
@@ -265,11 +293,36 @@ export default function NewShipmentPage() {
 
         {quote && !quote.available && (
           <Alert tone="warning">
-            {/* The planner's own words, which are already customer-facing. */}
+            {/* The planner's own words. When the date is the reason, this already
+                names the next confirmed date, because the API only ever includes
+                one it verified itself by re-running the real planner against it —
+                never a guess from partial schedule rows. */}
             {quote.message}
             {quote.useLocalDelivery && (
               <span className="mt-1 block">
                 For a delivery inside one town, order through the marketplace and choose delivery at checkout.
+              </span>
+            )}
+            {quote.dateUnavailable && quote.nextAvailableDate && (
+              <span className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTravelDate(quote.nextAvailableDate!)}
+                  className="min-h-[36px] rounded-full border border-belize-blue px-3 text-sm font-medium text-belize-blue hover:bg-belize-blue hover:text-white"
+                >
+                  Use {quote.nextAvailableDate}
+                </button>
+              </span>
+            )}
+            {/* The owner's own prohibition, made visible rather than left to a
+                silent gap: when the schedule cannot confirm a next date, the UI
+                says so plainly instead of quietly showing nothing — the customer
+                is left with a date to try again, not a dead end that looks like
+                one more error. */}
+            {quote.dateUnavailable && !quote.nextAvailableDate && (
+              <span className="mt-1 block">
+                We could not confirm a date this route runs within the next two weeks. Try a different date, or
+                contact us.
               </span>
             )}
           </Alert>
@@ -324,6 +377,7 @@ export default function NewShipmentPage() {
             <Line label="To" value={[destination.city, destination.district.replace(/_/g, ' ')].filter(Boolean).join(', ') || '—'} />
             <Line label="Parcel" value={`${parcel.pieces || 1} × ${parcel.description || 'parcel'}`} />
             <Line label="Transport" value={mode === 'ANY' ? 'Best available' : TRANSPORT_MODE_LABELS[mode as TransportMode]} />
+            <Line label="Travel date" value={quote.requestedDate} />
           </dl>
 
           <div className="mt-3 border-t border-slate-100 pt-3">
