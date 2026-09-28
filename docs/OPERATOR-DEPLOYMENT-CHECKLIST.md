@@ -33,15 +33,19 @@ does not have.
   migration fails the deploy rather than half-applying (81 migrations as of
   2026-09-18). Health check: `/api/health` (reports the commit being served);
   readiness: `/api/health/ready`. `/api/health/live` does not exist.
-- **`pnpm deploy:status` answers "is production current?"** by comparing the
-  commit `/api/health` reports against `origin/main` read live:
-  **CURRENT** (exit 0) · **NOTHING_TO_DELIVER** (0 — main moved, but only in
-  paths Railway does not watch) · **BEHIND** (1) · **UNKNOWN** (2 —
-  unreachable is not the same as behind) · **DIVERGED** (3). `--web` also
-  measures the deployed web build (ancestry verdicts only — Vercel's rebuild
-  rules are not in this repo, so NOTHING_TO_DELIVER is never claimed for
-  web); `--web-route <path>` probes one route; `--assume-production <commit>`
-  is a what-if lever that classifies a hypothetical production commit without
+- **`pnpm deploy:status` answers "is production current?" for ALL THREE
+  services, by default** (BMPL-316 — web and admin used to be an opt-in
+  flag, which is how a check-the-API-only habit outlasted its own tool): API
+  commit vs `origin/main` **CURRENT** (exit 0) · **NOTHING_TO_DELIVER** (0 —
+  main moved, but only in paths Railway does not watch) · **BEHIND** (1) ·
+  **UNKNOWN** (2 — unreachable is not the same as behind) · **DIVERGED** (3).
+  Web and admin builds are measured the same way and always reported
+  alongside it (never scored — exit code stays the API's), each with its own
+  real NOTHING_TO_DELIVER: `turbo query affected --base=<deployed>
+  --packages @bmpl/web|@bmpl/admin` — the identical query each app's own
+  `vercel.json` `ignoreCommand` runs, not a guess about Vercel's rules.
+  `--web-route <path>` probes one route; `--assume-production <commit>` is a
+  what-if lever that classifies a hypothetical production commit without
   asking production.
 - **Live hosts:** `www.bzemarketplace.com` (web, and `/api/*` proxy to the
   API), `bmpl-admin.vercel.app` (admin), `bmplapi-production.up.railway.app`
