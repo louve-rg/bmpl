@@ -100,7 +100,33 @@ See root `CLAUDE.md` §4 — all of it applies. API-specific:
 - `src/payments`, `src/settlement` and `src/wallet` deliberately have **no**
   capture, refund, payout or withdrawal endpoints. Do not add one.
 
-## 6. Audit
+## 6. Guarding a write that must not fire once a lifecycle has ended
+
+A guard that asks **"is something currently active?"** is not the same
+question as **"is this thing still changeable?"** — they agree in the middle
+of a lifecycle and diverge at the end. A negative check ("nothing is in
+progress") reads true again once a lifecycle reaches its terminal state,
+because nothing is active there either, so the guard silently lets through the
+exact write it existed to block. A **positive allow-list** ("this status is
+one of the specific ones still eligible") cannot make that mistake, because a
+terminal status was never a member of the set to begin with.
+
+Real instance (BMPL-300): `ShipmentService.cancel()`'s only guard checked
+whether a leg was currently `IN_PROGRESS`. Once every leg reached its own
+terminal `COMPLETED` state, none were `IN_PROGRESS`, so the guard read
+"nothing is moving" and let a customer — or staff — cancel a shipment that
+had already delivered and settled, writing a false `CANCELLED` status and
+audit row over one that had legitimately finished.
+
+**Reuse an existing allow-list before writing a new check.**
+`packages/shared/src/dispatch.ts`'s `DELIVERY_ACTIONS` is the pattern to
+follow: each action states its own explicit list of statuses it may fire
+from, a terminal status is never in any list, and `canPerform()` is the one
+place that checks it — every delivery/courier-leg write path shares that
+single table rather than re-deriving "is this still open" for itself. A
+second, hand-written status list is how two sources for one fact drift apart.
+
+## 7. Audit
 
 Privileged and money-touching actions are recorded through `AuditService.record()`,
 which accepts an optional Prisma transaction client:
@@ -116,7 +142,7 @@ await this.audit.record({ action, actorId, targetUserId, previousValue, newValue
   `packages/database/CLAUDE.md`).
 - **Never delete or rewrite an audit record.**
 
-## 7. Tests
+## 8. Tests
 
 Two suites, two configs:
 
@@ -139,7 +165,7 @@ routing and validation changes land with an *integration* test.
 `typecheck` covers both source and tests:
 `tsc --noEmit && tsc --noEmit -p tsconfig.test.json`.
 
-## 8. Configuration
+## 9. Configuration
 
 Environment is parsed and validated once by a Zod schema in `src/config/env.ts`
 and injected as `ENV`. **Never read `process.env` directly in a service** — add
@@ -152,7 +178,7 @@ security-relevant flags must default to **off** when absent.
 Dev-only modules (`src/dev`) are excluded at runtime when `NODE_ENV=production`.
 Keep it that way.
 
-## 9. Deployment
+## 10. Deployment
 
 Railway, from `apps/api/Dockerfile`, configured by the root `railway.json`.
 
