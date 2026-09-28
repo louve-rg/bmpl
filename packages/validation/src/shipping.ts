@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  AVAILABILITY_WINDOW_ROLES,
   HUB_HOURS_EXCEPTION_STATUSES,
   HUB_TYPES,
   isWithinBelize,
@@ -287,6 +288,39 @@ export const createShipmentSchema = endpointsMatchService(quoteBase)
     path: ['destination', 'name'],
   });
 export type CreateShipmentInput = QuoteShape;
+
+/* ------------------------------------------------- availability windows */
+
+/**
+ * BMPL-284/285: one time range for one door-touching attempt. Deliberately
+ * not a weekly pattern — a shipment is a one-time event, so there is no
+ * day-of-week to attach this to, only the range itself.
+ */
+export const availabilityWindowRoleSchema = z.enum(AVAILABILITY_WINDOW_ROLES);
+
+const availabilityWindowInputSchema = z
+  .object({
+    role: availabilityWindowRoleSchema,
+    startTime: timeOfDaySchema,
+    endTime: timeOfDaySchema,
+  })
+  .refine((w) => w.startTime < w.endTime, {
+    message: 'A window needs a start time earlier than its end time.',
+    path: ['endTime'],
+  });
+
+/**
+ * The whole set, replaced in one call — same "replace all, not patch one
+ * row" shape as setHubWeeklyHoursSchema below: a window the sender no
+ * longer submits is a window that no longer applies, never a stale row
+ * sitting beside new ones. Up to 10 across both roles together — "9-12,
+ * 2-5" per party is the shape the card describes; ten is room for that
+ * twice over with margin, not a number anyone is expected to reach.
+ */
+export const setAvailabilityWindowsSchema = z.object({
+  windows: z.array(availabilityWindowInputSchema).max(10),
+});
+export type SetAvailabilityWindowsInput = z.infer<typeof setAvailabilityWindowsSchema>;
 
 /* ------------------------------------------------------- operating a leg */
 

@@ -322,6 +322,10 @@ enum AuditAction {
   COURIER_LANE_UPDATED
   SHIPMENT_CREATED
   SHIPMENT_CANCELLED
+  /// BMPL-285: the sender replaced their shipment's availability windows.
+  /// Same "the whole set, in one action" shape as HUB_HOURS_CHANGED — a
+  /// replace-all write, not one action per row changed.
+  SHIPMENT_AVAILABILITY_WINDOWS_SET
   SHIPMENT_LEG_STARTED
   SHIPMENT_LEG_DEPARTED
   SHIPMENT_LEG_ARRIVED
@@ -4770,13 +4774,61 @@ model Shipment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  legs          ShipmentLeg[]
-  custodyEvents CustodyEvent[]
+  legs                ShipmentLeg[]
+  custodyEvents       CustodyEvent[]
+  availabilityWindows ShipmentAvailabilityWindow[]
 
   @@index([customerUserId, createdAt])
   @@index([status, isTest])
   @@map("shipments")
   payment Payment?
+}
+
+/// BMPL-284/285: when the sender or recipient is available for their leg's
+/// door-touching attempt (a FIRST_MILE pickup for SENDER, a LAST_MILE
+/// delivery for RECIPIENT). Deliberately NOT the weekly-pattern-plus-
+/// exception shape hub/vendor/route hours use — those entities operate
+/// indefinitely across recurring days; a shipment is a ONE-TIME event with
+/// no day-of-week dimension. "9-12, 2-5" is two ranges for the one
+/// occasion, not Monday versus Tuesday, so this is a short, flat list, one
+/// row per range, with no weekly or date-exception axis to resolve.
+///
+/// Lives on the SHIPMENT, not the leg, matching the existing convention
+/// that a door-touching leg's location detail already lives on the parent
+/// shipment (originAddress/destinationAddress above) rather than being
+/// duplicated onto ShipmentLeg, which carries no address fields of its own.
+///
+/// Ships EMPTY (BMPL-285 scope): no shipment gets a window, and nothing
+/// backfills one. Absence means "attempt at any time" — see the write
+/// service for the reasoning, which must travel with the default rather
+/// than living only here.
+///
+/// NO CONSUMER YET: nothing in dispatch, quoting or leg scheduling reads
+/// this table this round. That is deliberate, not an oversight — the
+/// consumer surface is wider than hub hours (FIRST_MILE and LAST_MILE
+/// symmetrically, plus DIRECT needing both parties checked at two
+/// different instants within one leg) and is its own card.
+model ShipmentAvailabilityWindow {
+  id         String                  @id @default(cuid())
+  shipmentId String
+  shipment   Shipment                @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  role       AvailabilityWindowRole
+  /// "HH:MM", 24-hour — same format and same shared schema
+  /// (packages/validation's timeOfDaySchema) as hub/vendor opening hours.
+  startTime  String
+  endTime    String
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+
+  @@index([shipmentId, role])
+  @@map("shipment_availability_windows")
+}
+
+enum AvailabilityWindowRole {
+  /// Governs the FIRST_MILE pickup attempt.
+  SENDER
+  /// Governs the LAST_MILE delivery attempt.
+  RECIPIENT
 }
 
 /// One step of a journey.
