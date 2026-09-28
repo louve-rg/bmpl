@@ -27,7 +27,7 @@
     "db:studio": "pnpm --filter @bmpl/database studio",
     "db:reset": "pnpm --filter @bmpl/database reset",
     "infra:up": "docker compose up -d",
-    "infra:down": "docker compose down",
+    "infra:down": "node scripts/infra-down-guard.mjs",
     "setup": "pnpm install && pnpm db:generate && pnpm infra:up && pnpm db:migrate && pnpm db:seed"
   },
   "devDependencies": {

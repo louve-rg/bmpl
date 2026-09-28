@@ -116,6 +116,15 @@ MinIO (`pnpm infra:up`). **If you cannot run it, say so explicitly in your
 report** — do not silently omit it, and do not present unit tests as though they
 covered the same ground.
 
+**That Postgres/Redis/MinIO is shared, on purpose, by every worktree on this
+host** (BMPL-297) — `pnpm infra:up` is safe to run any time (idempotent), but
+`pnpm infra:down` stops it for every other worktree too, and asks for
+confirmation before doing that; on a non-interactive agent it refuses outright
+rather than hanging on a prompt nobody can answer (pass `-- --yes` if you
+genuinely mean to stop it). See `docker-compose.yml`'s own top comment before
+touching this infra directly with `docker` commands instead of the `pnpm`
+scripts.
+
 > **Docker is installed and the suite runs on this machine** — 691 tests across
 > 55 spec files, about 8 minutes, against real Postgres, Redis and MinIO.
 > Verified 2026-09-03.

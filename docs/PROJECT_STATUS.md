@@ -788,6 +788,31 @@ corrected 2026-09-26 against `cfc4d7a`:
   and BMPL-294 (local dev) — both closed. **Production is unaffected**:
   deployed environments use Cloudflare R2 (`STORAGE_PROVIDER` defaults to
   `r2` — see `ENVIRONMENT.md`), and MinIO is a local-and-CI stand-in only.
+- **Local dev Postgres/Redis/MinIO is shared on purpose, and was silently
+  forking (2026-09-28, BMPL-297).** `docker-compose.yml`'s `container_name`
+  is fixed, not project-namespaced, so every git worktree on this machine
+  intentionally points at the SAME three containers — deliberate, not
+  incidental: platform config and admin actions here are meant to be
+  dev-wide (see BMPL-292/293 for a real example), the same way a team would
+  share one dev database. This is the opposite of the integration suite's
+  test database, which is deliberately ISOLATED per worktree
+  (`bmpl_test_<worktree>`, see "Running the integration suite locally"
+  below) because concurrent truncation there caused false-green results —
+  both are intentional, in different directions, for different reasons.
+  Without a pinned Compose project name, though, each worktree's directory
+  name became its own project, so `docker compose up` from different
+  worktrees silently created DIFFERENT named volumes for the same
+  containers — found live: Postgres/Redis were on the main checkout's
+  volumes, MinIO was on a different worktree's, after one worktree recreated
+  it alone. Fixed by pinning `name: bmpl` at the top of `docker-compose.yml`,
+  so every worktree's compose invocation now resolves to the same volumes.
+  `pnpm infra:down` (not `infra:up`, which is idempotent and runs
+  non-interactively inside `pnpm setup`) now asks for confirmation before
+  stopping infra every other worktree may be using — and refuses outright,
+  rather than hanging on a prompt, when run without a terminal attached
+  (`scripts/infra-down-guard.mjs`). Does not prevent a raw `docker rm`/
+  `docker compose down` run outside the `pnpm` script — that remains a
+  process question, not a technical one, at this layer.
 
 ---
 ## 13. Working on this repo
