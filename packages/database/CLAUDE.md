@@ -134,12 +134,16 @@ correct, up-to-date database it will still propose `DROP INDEX`,
 `ALTER COLUMN ... DROP DEFAULT` and `RENAME INDEX` statements that must never
 be run. This has bitten the floor three times (July, a near-miss while
 authoring `20261104170100_hub_operating_hours`/BMPL-262, and a from-scratch
-`migrate diff` run for BMPL-264) because the reason was written down once,
+`migrate diff` run for BMPL-264) — including a near-miss that would have
+dropped five production indexes — because the reason was written down once,
 inside a migration file, where nobody not already reading that file could find
 it. It is written here now so the next person checks this section instead of
-treating the output as a regression.
+treating the output as a regression. `migrate diff` against this schema
+reports **four** items today, not seven — mechanism (2) below closed in
+BMPL-309.
 
-Three separate mechanisms produce this, each with its own fixability:
+Three separate mechanisms produce this; two remain live, one is closed and
+kept here as the record of how:
 
 1. **Objects Prisma's schema language cannot express at all.**
    `products_search_idx` and `products_title_trgm_idx` are hand-written GIN
@@ -149,12 +153,39 @@ Three separate mechanisms produce this, each with its own fixability:
    there is no representation for it. Original record:
    `20260730120000_add_checkout_orders`'s own header comment, which named this
    exactly and said the DROPs "are intentionally OMITTED here."
-2. **Objects Prisma could express but nobody declared.**
+2. **CLOSED (BMPL-309). Objects Prisma could express but nobody declared.**
    `logistics_hubs_isTest_isActive_idx`, `logistics_routes_isTest_isActive_idx`
-   and `orders_isTest_idx` are plain btree indexes, created by raw SQL
-   directly in a migration, never added to their models as `@@index`. Fixable
-   in principle — see the open question below — but not attempted, because
-   the fix has its own trap.
+   and `orders_isTest_idx` were plain btree indexes, created by raw SQL
+   directly in a migration, never added to their models as `@@index` — so
+   the schema under-declared what every real database, including production,
+   already had. That is not cosmetic: the *next* unrelated schema change
+   would have run its own `migrate dev` against a diff that also proposed
+   dropping these three, and on this repo that migration auto-applies to
+   production on merge (§1) — a loaded gun aimed at whoever touched the
+   schema next, not a stale comment.
+   **This section used to leave an open question here; it is answered now,
+   and its own prediction was wrong.** It predicted the fix "almost certainly" needed hand-written
+   `CREATE INDEX IF NOT EXISTS` under the exact pre-existing name via `map:`,
+   to avoid either a duplicate index or a "relation already exists" error.
+   That assumed the raw SQL had used some name Prisma's default naming
+   wouldn't reproduce. It hadn't — all three raw `CREATE INDEX` statements
+   already used exactly the name `@@index([...])` generates by default
+   (`<table>_<col1>_<col2>_idx`), same column order, plain btree, no `WHERE`
+   predicate. So the actual fix was three declarations and nothing else: no
+   `map:`, no `IF NOT EXISTS`, no migration file at all.
+   **How that was known before merging, not assumed** (BMPL-308/309) — this
+   is the reusable part, worth more than the specific result, for whoever
+   next takes on mechanism (3) below: run `prisma migrate diff` against a
+   throwaway shadow database (created and dropped locally, never a shared
+   database) twice. First a **control pass against the unmodified schema** —
+   it must reproduce the known trap exactly, proving the tool actually
+   detects the gap. Only then a **confirming pass** against the candidate
+   change — a genuine no-op reports zero DDL for the fixed object(s), not
+   merely "the command didn't error." Re-run the confirming pass against the
+   real edited file before committing, not just a scratch rehearsal copy —
+   they are different files even when the content should be identical.
+   `--exit-code` turns both passes into a check a script (or a person) can
+   gate on instead of eyeballing output.
 3. **A Postgres identifier-length truncation, unrelated to the above.**
    `courier_lanes`'s unique constraint name as written in
    `20261102093000_courier_lanes` is 79 characters; Postgres's identifier
@@ -162,21 +193,7 @@ Three separate mechanisms produce this, each with its own fixability:
    Prisma still expects the name as literally written in the migration file.
    `migrate diff` proposes a `RENAME INDEX` to reconcile them. Same
    "expected, not drift" rule; a different, separate fix (shortening the
-   name) than either of the above.
-
-**Open question, deliberately not attempted:** could the three raw-SQL
-indexes in (2) be declared as `@@index` to shrink this trap to its
-irreducible GIN core? Likely yes, but it needs a migration Prisma believes is
-necessary — because as far as migration history is concerned, that index has
-never been declared — while being a **true no-op against every
-already-migrated database**, since the object already exists everywhere
-under that exact name from the original raw-SQL migration. That almost
-certainly means
-hand-writing `CREATE INDEX IF NOT EXISTS` under the *exact* pre-existing name
-(via `map:` in the `@@index`) rather than trusting `migrate dev`'s generated
-SQL, which would otherwise either create a duplicate differently-named index
-on a database that already has the old one, or error with "relation already
-exists." Not done this round.
+   name) than either of the above, not attempted.
 
 ## 7. This package declares a `test` script and has no tests
 
