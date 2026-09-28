@@ -204,6 +204,30 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 export default function JobsPage() {
   const [tab, setTab] = useState<Tab>('moderation');
+  const [perms, setPerms] = useState({ canModerateJobs: false, canModerateEmployers: false, canManageCategories: false });
+
+  // THREE different permissions, not two: jobs.moderate (listing moderation +
+  // report resolution), employers.moderate (employer suspend/restore) and
+  // job_categories.manage (create/rename/hide-show a category — found while
+  // reading this file; not named in the original scoping, and gated here for
+  // the same reason the other two are). Only one tab is ever mounted at a
+  // time, so fetched once here rather than per tab. /me returns the same
+  // grant rows the PermissionsGuard evaluates, so what this screen shows and
+  // what the API enforces cannot disagree. On any doubt (request fails,
+  // field absent) every action stays hidden: fail closed.
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => {
+        const held = me.adminPermissions ?? [];
+        setPerms({
+          canModerateJobs: held.includes('jobs.moderate'),
+          canModerateEmployers: held.includes('employers.moderate'),
+          canManageCategories: held.includes('job_categories.manage'),
+        });
+      })
+      .catch(() => setPerms({ canModerateJobs: false, canModerateEmployers: false, canManageCategories: false }));
+  }, []);
 
   return (
     <div>
@@ -236,10 +260,10 @@ export default function JobsPage() {
         })}
       </div>
 
-      {tab === 'moderation' && <ModerationTab />}
-      {tab === 'reports' && <ReportsTab />}
-      {tab === 'employers' && <EmployersTab />}
-      {tab === 'categories' && <CategoriesTab />}
+      {tab === 'moderation' && <ModerationTab canModerate={perms.canModerateJobs} />}
+      {tab === 'reports' && <ReportsTab canModerate={perms.canModerateJobs} />}
+      {tab === 'employers' && <EmployersTab canModerate={perms.canModerateEmployers} />}
+      {tab === 'categories' && <CategoriesTab canManage={perms.canManageCategories} />}
       {tab === 'analytics' && <AnalyticsTab />}
     </div>
   );
@@ -254,7 +278,7 @@ const STATUS_OPTIONS: Array<{ value: JobStatus | ''; label: string }> = [
   ...JOB_STATUSES.map((s) => ({ value: s, label: JOB_STATUS_LABELS[s] })),
 ];
 
-function ModerationTab() {
+function ModerationTab({ canModerate }: { canModerate: boolean }) {
   const [status, setStatus] = useState<JobStatus | ''>('');
   const [reportedOnly, setReportedOnly] = useState(false);
   const [items, setItems] = useState<JobListItem[]>([]);
@@ -392,7 +416,7 @@ function ModerationTab() {
         </div>
 
         {selectedId ? (
-          <JobDetailPanel key={selectedId} id={selectedId} onModerated={onModerated} />
+          <JobDetailPanel key={selectedId} id={selectedId} onModerated={onModerated} canModerate={canModerate} />
         ) : (
           listState === 'ready' && (
             <div className="rounded-bmpl-xl border border-slate-200 bg-white p-6">
@@ -433,7 +457,7 @@ function availableActions(status: JobStatus): ModerateAction[] {
   return actions;
 }
 
-function JobDetailPanel({ id, onModerated }: { id: string; onModerated: (j: JobDetail) => void }) {
+function JobDetailPanel({ id, onModerated, canModerate }: { id: string; onModerated: (j: JobDetail) => void; canModerate: boolean }) {
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [state, setState] = useState<ListState>('loading');
   const [pending, setPending] = useState<ModerateAction | null>(null);
@@ -621,6 +645,7 @@ function JobDetailPanel({ id, onModerated }: { id: string; onModerated: (j: JobD
       )}
 
       {/* Moderation actions */}
+      {canModerate && (
       <div className="border-t border-slate-100 p-4">
         {actions.length === 0 ? (
           <p className="text-sm text-slate-400">No moderation actions available for this status.</p>
@@ -688,6 +713,7 @@ function JobDetailPanel({ id, onModerated }: { id: string; onModerated: (j: JobD
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -719,7 +745,7 @@ const REPORT_STATUS_OPTIONS: Array<{ value: JobReportStatus; label: string }> = 
   { value: 'DISMISSED', label: 'Dismissed' },
 ];
 
-function ReportsTab() {
+function ReportsTab({ canModerate }: { canModerate: boolean }) {
   const [status, setStatus] = useState<JobReportStatus>('OPEN');
   const [items, setItems] = useState<JobReportItem[]>([]);
   const [listState, setListState] = useState<ListState>('loading');
@@ -792,7 +818,7 @@ function ReportsTab() {
       ) : (
         <ul className="space-y-4">
           {items.map((rep) => (
-            <ReportCard key={rep.id} report={rep} resolvable={status === 'OPEN'} onResolved={onResolved} />
+            <ReportCard key={rep.id} report={rep} resolvable={status === 'OPEN' && canModerate} onResolved={onResolved} />
           ))}
         </ul>
       )}
@@ -929,7 +955,7 @@ const EMPLOYER_STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'REJECTED', label: 'Rejected' },
 ];
 
-function EmployersTab() {
+function EmployersTab({ canModerate }: { canModerate: boolean }) {
   const [status, setStatus] = useState('');
   const [items, setItems] = useState<EmployerListItem[]>([]);
   const [listState, setListState] = useState<ListState>('loading');
@@ -1058,7 +1084,7 @@ function EmployersTab() {
         </div>
 
         {selectedId ? (
-          <EmployerDetailPanel key={selectedId} id={selectedId} onChanged={onChanged} />
+          <EmployerDetailPanel key={selectedId} id={selectedId} onChanged={onChanged} canModerate={canModerate} />
         ) : (
           listState === 'ready' && (
             <div className="rounded-bmpl-xl border border-slate-200 bg-white p-6">
@@ -1071,7 +1097,7 @@ function EmployersTab() {
   );
 }
 
-function EmployerDetailPanel({ id, onChanged }: { id: string; onChanged: (e: EmployerDetail) => void }) {
+function EmployerDetailPanel({ id, onChanged, canModerate }: { id: string; onChanged: (e: EmployerDetail) => void; canModerate: boolean }) {
   const [detail, setDetail] = useState<EmployerDetail | null>(null);
   const [state, setState] = useState<ListState>('loading');
   const [pending, setPending] = useState<'suspend' | 'restore' | null>(null);
@@ -1196,6 +1222,7 @@ function EmployerDetailPanel({ id, onChanged }: { id: string; onChanged: (e: Emp
         </div>
       )}
 
+      {canModerate && (
       <div className="border-t border-slate-100 p-4">
         {pending ? (
           <div className="space-y-2">
@@ -1261,6 +1288,7 @@ function EmployerDetailPanel({ id, onChanged }: { id: string; onChanged: (e: Emp
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -1269,7 +1297,7 @@ function EmployerDetailPanel({ id, onChanged }: { id: string; onChanged: (e: Emp
 /* Categories                                                          */
 /* ------------------------------------------------------------------ */
 
-function CategoriesTab() {
+function CategoriesTab({ canManage }: { canManage: boolean }) {
   const [items, setItems] = useState<JobCategory[]>([]);
   const [listState, setListState] = useState<ListState>('loading');
   const [notice, setNotice] = useState<string | null>(null);
@@ -1343,6 +1371,7 @@ function CategoriesTab() {
         </Alert>
       )}
 
+      {canManage && (
       <div className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
         <p className="mb-2 text-sm font-semibold text-belize-navy">Add category</p>
         <div className="flex flex-wrap items-end gap-3">
@@ -1373,6 +1402,7 @@ function CategoriesTab() {
           </div>
         )}
       </div>
+      )}
 
       {listState === 'loading' ? (
         <div className="flex items-center gap-2 rounded-bmpl-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
@@ -1390,7 +1420,7 @@ function CategoriesTab() {
       ) : (
         <ul className="space-y-2">
           {items.map((c) => (
-            <CategoryRow key={c.id} category={c} onUpdated={onUpdated} />
+            <CategoryRow key={c.id} category={c} onUpdated={onUpdated} canManage={canManage} />
           ))}
         </ul>
       )}
@@ -1401,9 +1431,11 @@ function CategoriesTab() {
 function CategoryRow({
   category,
   onUpdated,
+  canManage,
 }: {
   category: JobCategory;
   onUpdated: (rows: JobCategory[], message: string) => void;
+  canManage: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(category.name);
@@ -1501,6 +1533,7 @@ function CategoryRow({
             <Badge tone={category.isVisible ? 'success' : 'neutral'}>{category.isVisible ? 'Visible' : 'Hidden'}</Badge>
             <span className="text-xs text-slate-400">Order {category.sortOrder}</span>
           </div>
+          {canManage && (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing(true)}>
               Rename
@@ -1509,6 +1542,7 @@ function CategoryRow({
               {category.isVisible ? 'Hide' : 'Show'}
             </Button>
           </div>
+          )}
         </div>
       )}
       {!editing && error && (

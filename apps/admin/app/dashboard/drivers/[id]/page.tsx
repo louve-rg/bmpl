@@ -75,6 +75,7 @@ export default function DriverDetailPage() {
   const [driver, setDriver] = useState<DriverDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [canModerate, setCanModerate] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,6 +93,17 @@ export default function DriverDetailPage() {
     void load();
   }, [load]);
 
+  // Vehicle approve/reject is drawn only for drivers.moderate — /me returns
+  // the same grant rows the PermissionsGuard evaluates, so what this screen
+  // shows and what the API enforces cannot disagree. On any doubt (request
+  // fails, field absent) it stays hidden: fail closed.
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanModerate((me.adminPermissions ?? []).includes('drivers.moderate')))
+      .catch(() => setCanModerate(false));
+  }, []);
+
   return (
     <div className="mx-auto max-w-4xl">
       <Link href="/dashboard/drivers" className="text-sm font-medium text-belize-blue hover:underline">
@@ -108,12 +120,12 @@ export default function DriverDetailPage() {
         <p className="mt-6 rounded-bmpl-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
       )}
 
-      {!loading && driver && <DriverDetailView driver={driver} onChanged={load} />}
+      {!loading && driver && <DriverDetailView driver={driver} onChanged={load} canModerate={canModerate} />}
     </div>
   );
 }
 
-function DriverDetailView({ driver: d, onChanged }: { driver: DriverDetail; onChanged: () => void }) {
+function DriverDetailView({ driver: d, onChanged, canModerate }: { driver: DriverDetail; onChanged: () => void; canModerate: boolean }) {
   return (
     <div>
       <PageHeader
@@ -187,7 +199,7 @@ function DriverDetailView({ driver: d, onChanged }: { driver: DriverDetail; onCh
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {d.vehicles.map((v) => (
-            <VehicleCard key={v.id} vehicle={v} onChanged={onChanged} />
+            <VehicleCard key={v.id} vehicle={v} onChanged={onChanged} canModerate={canModerate} />
           ))}
         </div>
       )}
@@ -207,7 +219,7 @@ function DriverDetailView({ driver: d, onChanged }: { driver: DriverDetail; onCh
   );
 }
 
-function VehicleCard({ vehicle: v, onChanged }: { vehicle: Vehicle; onChanged: () => void }) {
+function VehicleCard({ vehicle: v, onChanged, canModerate }: { vehicle: Vehicle; onChanged: () => void; canModerate: boolean }) {
   const [busy, setBusy] = useState(false);
 
   async function approve() {
@@ -289,7 +301,7 @@ function VehicleCard({ vehicle: v, onChanged }: { vehicle: Vehicle; onChanged: (
         </div>
       )}
 
-      {v.approvalStatus === 'PENDING' && (
+      {canModerate && v.approvalStatus === 'PENDING' && (
         <div className="mt-4 flex flex-wrap gap-2">
           <Button size="sm" variant="primary" onClick={approve} disabled={busy}>
             Approve

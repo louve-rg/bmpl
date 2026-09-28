@@ -90,6 +90,21 @@ const REPORT_STATUS_OPTIONS: Array<{ value: ReportStatus; label: string }> = [
 
 export default function ReviewsPage() {
   const [tab, setTab] = useState<Tab>('reviews');
+  const [canModerate, setCanModerate] = useState(false);
+
+  // Hide/unhide/reject a review and resolve a report both need
+  // reviews.moderate — the same one permission for both tabs, so fetched
+  // once here rather than per tab (only one tab is ever mounted at a time).
+  // /me returns the same grant rows the PermissionsGuard evaluates, so what
+  // this screen shows and what the API enforces cannot disagree. On any
+  // doubt (request fails, field absent) every action stays hidden: fail
+  // closed.
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanModerate((me.adminPermissions ?? []).includes('reviews.moderate')))
+      .catch(() => setCanModerate(false));
+  }, []);
 
   return (
     <div>
@@ -127,7 +142,7 @@ export default function ReviewsPage() {
         })}
       </div>
 
-      {tab === 'reviews' ? <ReviewsTab /> : <ReportsTab />}
+      {tab === 'reviews' ? <ReviewsTab canModerate={canModerate} /> : <ReportsTab canModerate={canModerate} />}
     </div>
   );
 }
@@ -136,7 +151,7 @@ export default function ReviewsPage() {
 /* Reviews tab                                                         */
 /* ------------------------------------------------------------------ */
 
-function ReviewsTab() {
+function ReviewsTab({ canModerate }: { canModerate: boolean }) {
   const [status, setStatus] = useState<ReviewStatus | ''>('');
   const [subjectType, setSubjectType] = useState<SubjectType | ''>('');
   const [reportedOnly, setReportedOnly] = useState(false);
@@ -237,7 +252,7 @@ function ReviewsTab() {
       ) : (
         <ul className="space-y-4">
           {items.map((r) => (
-            <ReviewCard key={r.id} review={r} onModerated={onModerated} />
+            <ReviewCard key={r.id} review={r} onModerated={onModerated} canModerate={canModerate} />
           ))}
         </ul>
       )}
@@ -258,7 +273,7 @@ function Stars({ rating }: { rating: number }) {
   );
 }
 
-function ReviewCard({ review, onModerated }: { review: Review; onModerated: (r: Review) => void }) {
+function ReviewCard({ review, onModerated, canModerate }: { review: Review; onModerated: (r: Review) => void; canModerate: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [pending, setPending] = useState<ModerateAction | null>(null);
   const [reason, setReason] = useState('');
@@ -364,6 +379,7 @@ function ReviewCard({ review, onModerated }: { review: Review; onModerated: (r: 
       )}
 
       {/* Actions */}
+      {canModerate && (
       <div className="mt-4 border-t border-slate-100 pt-3">
         {pending ? (
           <div className="space-y-2">
@@ -421,6 +437,7 @@ function ReviewCard({ review, onModerated }: { review: Review; onModerated: (r: 
           </div>
         )}
       </div>
+      )}
     </li>
   );
 }
@@ -429,7 +446,7 @@ function ReviewCard({ review, onModerated }: { review: Review; onModerated: (r: 
 /* Reports tab                                                         */
 /* ------------------------------------------------------------------ */
 
-function ReportsTab() {
+function ReportsTab({ canModerate }: { canModerate: boolean }) {
   const [status, setStatus] = useState<ReportStatus>('OPEN');
   const [items, setItems] = useState<ReportListItem[]>([]);
   const [listState, setListState] = useState<'loading' | 'ready' | 'error' | 'forbidden'>('loading');
@@ -505,7 +522,7 @@ function ReportsTab() {
       ) : (
         <ul className="space-y-4">
           {items.map((rep) => (
-            <ReportCard key={rep.id} report={rep} resolvable={status === 'OPEN'} onResolved={onResolved} />
+            <ReportCard key={rep.id} report={rep} resolvable={status === 'OPEN' && canModerate} onResolved={onResolved} />
           ))}
         </ul>
       )}
