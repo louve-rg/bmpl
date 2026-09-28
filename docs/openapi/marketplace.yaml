@@ -487,8 +487,6 @@ paths:
     get: { tags: [Vendor], summary: Own product detail, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
     patch: { tags: [Vendor], summary: Update product, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } } }
     delete: { tags: [Vendor], summary: Delete a DRAFT product, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK }, "409": { $ref: "#/components/responses/Conflict" } } }
-  /vendor/products/{id}/submit:
-    post: { tags: [Vendor], summary: Submit product for review, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: PENDING_REVIEW } } }
   /vendor/products/{id}/archive:
     post: { tags: [Vendor], summary: Archive product, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: ARCHIVED } } }
   /vendor/products/{id}/unarchive:
