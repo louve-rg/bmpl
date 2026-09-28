@@ -53,7 +53,21 @@ export class OpsService {
       this.prisma.reviewReport.count({ where: { status: 'OPEN' } }),
       this.prisma.conversation.count({ where: { contextType: 'SUPPORT_CASE', status: 'OPEN' } }),
       this.prisma.vendorSettlement.count({ where: { status: 'FAILED' } }),
-      this.prisma.orderDelivery.count({ where: { status: 'PENDING_ASSIGNMENT' } }),
+      // BMPL-295: was `status: 'PENDING_ASSIGNMENT'` only, which silently
+      // excluded a delivery a driver just declined. That is wrong by this
+      // tile's OWN navigation, not by its label: this tile links straight to
+      // the admin dispatch console (apps/admin/.../dashboard/dispatch), and
+      // that console's list includes DRIVER_DECLINED — so the tile was
+      // reporting a smaller number than the very list it sends an operator
+      // to. There was also no separate DRIVER_DECLINED tile, so a declined
+      // delivery was real, pending work that appeared on NO tile at all, on
+      // a page whose entire job is "roughly how much of each kind of work
+      // exists". THIS CHANGES A NUMBER OPERATORS ALREADY WATCH: the tile
+      // will read higher immediately after this deploys, with no new work
+      // having arrived — that is this fix taking effect, not a regression.
+      // See waitingDeliveries below for a DIFFERENT question this tile does
+      // not answer and was never meant to.
+      this.prisma.orderDelivery.count({ where: { status: { in: ['PENDING_ASSIGNMENT', 'DRIVER_DECLINED'] } } }),
       this.prisma.vendorOrder.count({ where: { status: 'READY_FOR_PICKUP' } }),
       this.prisma.user.count({ where: { status: 'SUSPENDED' } }),
       this.prisma.userRole.count({ where: { status: 'SUSPENDED' } }),
@@ -117,6 +131,21 @@ export class OpsService {
    * offers…), so an operator must be able to see the count either way — a
    * board that only shows this while the switch is off would teach them,
    * wrongly, that its absence means nothing is waiting.
+   *
+   * BMPL-295: "waiting" is the word doing the misleading work if you set
+   * this beside `queues.deliveriesPendingAssignment` above. Ask each one out
+   * loud and they answer different questions: deliveriesPendingAssignment
+   * asks "roughly how big is the pending-assignment status bucket" (a plain
+   * status count, same shape as every other tile on the ops overview);
+   * waitingDeliveries asks "how many would the automatic engine ATTEMPT ON
+   * ITS VERY NEXT SWEEP" — the sweeper's own predicate, which deliberately
+   * EXCLUDES an exhausted delivery, because the engine has already given up
+   * on one of those. A third question, "does a HUMAN need to act on this
+   * ONE right now", already has its own correct, older answer elsewhere —
+   * `needsManualAssignment` per row in apps/api/src/dispatch/dispatch.service.ts
+   * — which INCLUDES an exhausted delivery, since that is exactly when a
+   * human is needed most. Same underlying rows, three legitimate questions,
+   * on purpose: do not collapse these into one number.
    */
   private async dispatchStatus() {
     const [cfg, waitingShipmentLegs, waitingDeliveries] = await Promise.all([
