@@ -1,6 +1,8 @@
 import { randomInt } from 'node:crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  belizeCalendarDateKey,
+  belizeMidday,
   deriveShipmentStatus,
   isLegActionable,
   needsFirstMile,
@@ -16,10 +18,14 @@ import {
   SHIPPING_SERVICE_LABELS,
   TRANSPORT_MODE_LABELS,
   type Endpoint,
+  type PlannerHub,
   type PlannerLane,
+  type PlannerPricing,
+  type PlannerRoute,
   type LegView,
   type PlannedLeg,
-  type PlannerHub,
+  type PlanRequest,
+  type PlanResult,
 } from '@bmpl/shared';
 import type {
   CancelShipmentInput,
@@ -129,29 +135,37 @@ export class ShipmentService {
     // Price the door legs BEFORE planning, because the planner sums what it is
     // given rather than working out what a courier costs.
     const fees = await this.courierFees(input, origin, destination, hubs, lanes, simulated);
-    const plan = planRoute(
-      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null, date: this.travelDate() },
-      hubs,
-      routes,
-      {
-        firstMileMinor: fees.firstMileMinor,
-        lastMileMinor: fees.lastMileMinor,
-        firstMileMinutes: 0,
-        lastMileMinutes: 0,
-        directMinor: fees.directMinor,
-        directMinutes: fees.directMinutes,
-      },
-      lanes,
-    );
+    const requestedDate = this.travelDate(input.requestedDate);
+    const journey: PlanRequest = {
+      origin,
+      destination,
+      service: input.service,
+      preferredMode: input.preferredMode ?? null,
+      date: requestedDate,
+    };
+    const pricing: PlannerPricing = {
+      firstMileMinor: fees.firstMileMinor,
+      lastMileMinor: fees.lastMileMinor,
+      firstMileMinutes: 0,
+      lastMileMinutes: 0,
+      directMinor: fees.directMinor,
+      directMinutes: fees.directMinutes,
+    };
+    const plan = planRoute(journey, hubs, routes, pricing, lanes);
 
     if (!plan.ok) {
+      const availability = this.dateAvailability(journey, hubs, routes, pricing, lanes, plan);
       return {
         available: false,
         reason: plan.reason,
-        // The planner's own words. LOCAL_DELIVERY is not a failure the customer
-        // caused — it means the ordinary courier flow already covers this.
-        message: plan.explanation,
+        // The planner's own words, extended with the date finding when one
+        // applies. LOCAL_DELIVERY is not a failure the customer caused — it
+        // means the ordinary courier flow already covers this.
+        message: availability.message,
         useLocalDelivery: plan.reason === 'LOCAL_DELIVERY',
+        requestedDate: belizeCalendarDateKey(requestedDate),
+        dateUnavailable: availability.dateUnavailable,
+        nextAvailableDate: availability.nextAvailableDate,
       };
     }
 
@@ -164,6 +178,7 @@ export class ShipmentService {
       totalMinor: plan.totalMinor,
       transportMinutes: plan.totalMinutes,
       explanation: plan.explanation,
+      requestedDate: belizeCalendarDateKey(requestedDate),
       // Flagged, not hidden: an operator has to set these before this is sellable.
       pricingIncomplete: unpriced.length > 0,
       pricingNote: unpriced.length > 0 ? `No courier fee is configured for ${unpriced.join(' or ')}.` : null,
@@ -186,18 +201,87 @@ export class ShipmentService {
   }
 
   /**
-   * The date a journey being quoted or booked right now would travel on
-   * (BMPL-196).
+   * The date a journey being quoted or booked right now would travel on.
    *
-   * There is no requested/scheduled travel date anywhere on a shipment yet
-   * (BMPL-184 is the open card for that) - booking is always "as soon as
-   * possible" - so "now" is the only date planning can honestly mean. A
-   * route's schedule is resolved per calendar day, not per instant, so the
-   * few milliseconds between a quote's dry-run fee calculation and its real
-   * plan can never land on different days in practice.
+   * BMPL-283: the customer may now name one (`requestedDate` on the shared
+   * quote/create schema). When they do not, "as soon as possible" is still
+   * the only honest default, so an omitted date falls back to now exactly as
+   * it always has — this method's contract to every existing caller is
+   * unchanged. A route's schedule is resolved per calendar day, not per
+   * instant, so the few milliseconds between a quote's dry-run fee
+   * calculation and its real plan can never land on different days in
+   * practice.
+   *
+   * `requested` arrives as a PURE calendar date (`z.coerce.date()` on the
+   * customer's "YYYY-MM-DD" picker value, UTC-midnight-normalized) — it must
+   * be re-anchored via `belizeMidday` before reaching `resolveScheduleStatus`
+   * downstream, which treats its date argument as a real instant and derives
+   * the Belize calendar day by shifting it. Handed the raw midnight value,
+   * that shift walks it onto the PREVIOUS calendar day — confirmed the wrong
+   * way empirically before this landed, not assumed from the docs.
    */
-  private travelDate(): Date {
-    return new Date();
+  private travelDate(requested?: Date): Date {
+    return requested ? belizeMidday(requested) : new Date();
+  }
+
+  /**
+   * When a plan fails, say whether the REQUESTED DATE is the reason, and —
+   * only when the configured schedule can answer without guessing — name the
+   * next date this exact journey is confirmed to work (BMPL-283, owner
+   * ruling: never hide the route as though it does not exist, never pretend
+   * it operates, offer a next date only when the schedule really supports
+   * one).
+   *
+   * NEVER FABRICATES A DATE: the "next" date offered is not derived from the
+   * schedule rows by this method — it is the first later date for which
+   * `planRoute`, run for real against the same origin/destination/service/
+   * mode/pricing/lanes, itself comes back `ok`. So nothing is ever claimed
+   * that the planner has not independently verified.
+   *
+   * Two checks, in order:
+   *  1. Re-run the SAME journey with schedule filtering switched off (no
+   *     `date`). If it still fails, the date was never the problem — no hub,
+   *     no route, no mode — and naming a "next date" would misdirect the
+   *     customer toward a wait that would not fix anything. `dateUnavailable`
+   *     is false and the planner's own explanation is returned unchanged.
+   *  2. Otherwise the requested date is genuinely why this failed. Search
+   *     forward one calendar day at a time, for real, up to a fixed horizon.
+   *     A corridor that cannot be shown to run again within two schedule
+   *     cycles has not "provided enough information" to name a date — the
+   *     owner was explicit that a confident wrong date is worse than none, so
+   *     this degrades cleanly to plain unavailability instead of guessing
+   *     further out.
+   */
+  private dateAvailability(
+    journey: PlanRequest,
+    hubs: readonly PlannerHub[],
+    routes: readonly PlannerRoute[],
+    pricing: PlannerPricing,
+    lanes: readonly PlannerLane[],
+    datedFailure: Extract<PlanResult, { ok: false }>,
+  ): { dateUnavailable: boolean; nextAvailableDate: string | null; message: string } {
+    const undated = planRoute({ ...journey, date: undefined }, hubs, routes, pricing, lanes);
+    if (!undated.ok) {
+      return { dateUnavailable: false, nextAvailableDate: null, message: datedFailure.explanation };
+    }
+
+    const requestedDate = journey.date ?? new Date();
+    const SEARCH_HORIZON_DAYS = 14;
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    for (let offset = 1; offset <= SEARCH_HORIZON_DAYS; offset++) {
+      const candidate = new Date(requestedDate.getTime() + offset * ONE_DAY_MS);
+      const attempt = planRoute({ ...journey, date: candidate }, hubs, routes, pricing, lanes);
+      if (attempt.ok) {
+        const key = belizeCalendarDateKey(candidate);
+        return {
+          dateUnavailable: true,
+          nextAvailableDate: key,
+          message: `${datedFailure.explanation} The next date this route is confirmed to run is ${key}.`,
+        };
+      }
+    }
+
+    return { dateUnavailable: true, nextAvailableDate: null, message: datedFailure.explanation };
   }
 
   /** Turn a validated endpoint into what the planner understands. */
@@ -245,9 +329,9 @@ export class ShipmentService {
       destination,
       service: input.service,
       preferredMode: input.preferredMode ?? null,
-      // Same date as the real plan below (BMPL-196), so a hub this dry run
+      // Same date as the real plan below (BMPL-196/283), so a hub this dry run
       // attaches a door to is one the actual plan can still reach.
-      date: this.travelDate(),
+      date: this.travelDate(input.requestedDate),
     };
 
     /**
@@ -344,7 +428,7 @@ export class ShipmentService {
     const destination = this.toEndpoint(input, 'destination');
     const fees = await this.courierFees(input, origin, destination, hubs, lanes, simulated);
     const plan = planRoute(
-      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null, date: this.travelDate() },
+      { origin, destination, service: input.service, preferredMode: input.preferredMode ?? null, date: this.travelDate(input.requestedDate) },
       hubs,
       routes,
       {

@@ -206,6 +206,13 @@ const quoteBase = z.object({
   // Booking only. Quoting ignores it, which is the point: asking the price must
   // never move money.
   payWithWallet: z.boolean().optional().default(false),
+  // The date this journey should travel on (BMPL-283). Optional, and omitting
+  // it means "as soon as possible" — shipment.service.ts's travelDate() falls
+  // back to now exactly as it always has. A pure calendar date; time-of-day is
+  // ignored, matching RouteScheduleException. Shared by quote and create (both
+  // derive from this base), so a date checked at quote time is the same date
+  // booking plans against.
+  requestedDate: z.coerce.date().optional(),
 });
 
 type QuoteShape = z.infer<typeof quoteBase>;

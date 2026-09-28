@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { belizeCalendarDate, belizeCalendarDateKey, belizeWeekday, startOfBelizeDay } from './belize-time';
+import { belizeCalendarDate, belizeCalendarDateKey, belizeMidday, belizeWeekday, startOfBelizeDay } from './belize-time';
 
 // Belize local -> UTC instant, for building unambiguous fixtures.
 const belizeInstant = (y: number, m: number, d: number, hour: number, min = 0) => new Date(Date.UTC(y, m - 1, d, hour + 6, min));
@@ -48,5 +48,27 @@ describe('startOfBelizeDay', () => {
   it('is idempotent-safe: an instant already at the start of a Belize day maps to itself', () => {
     const startOfDay = belizeInstant(2026, 9, 26, 0);
     expect(startOfBelizeDay(startOfDay).toISOString()).toBe(startOfDay.toISOString());
+  });
+});
+
+describe('belizeMidday (BMPL-283)', () => {
+  it('round-trips through belizeCalendarDateKey to the SAME calendar day the input encodes', () => {
+    // The exact shape z.coerce.date() produces from a "YYYY-MM-DD" customer
+    // input: UTC-midnight-normalized, with no instant meaning of its own.
+    const pureCalendarDate = new Date('2026-10-03T00:00:00.000Z');
+    const instant = belizeMidday(pureCalendarDate);
+    expect(belizeCalendarDateKey(instant)).toBe('2026-10-03');
+  });
+
+  it('the naive approach this replaces is wrong: feeding the raw UTC-midnight value straight into belizeCalendarDateKey walks it onto the PREVIOUS day', () => {
+    const pureCalendarDate = new Date('2026-10-03T00:00:00.000Z');
+    // This is exactly the bug belizeMidday exists to prevent - documented here
+    // as a negative control so nobody "fixes" belizeMidday back into this.
+    expect(belizeCalendarDateKey(pureCalendarDate)).toBe('2026-10-02');
+  });
+
+  it('lands at 18:00 UTC (Belize noon), nowhere near either midnight boundary', () => {
+    const instant = belizeMidday(new Date('2026-10-03T00:00:00.000Z'));
+    expect(instant.toISOString()).toBe('2026-10-03T18:00:00.000Z');
   });
 });

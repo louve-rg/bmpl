@@ -78,3 +78,23 @@ export const startOfBelizeDay = (d: Date): Date => {
   const calendarDate = belizeCalendarDate(d);
   return new Date(calendarDate.getTime() - BELIZE_UTC_OFFSET_MINUTES * 60_000);
 };
+
+/**
+ * The opposite direction from every other function in this file: those all
+ * take a real INSTANT and derive a Belize calendar fact from it. This takes a
+ * PURE calendar date - the UTC-midnight-normalized shape `z.coerce.date()`
+ * produces from a "YYYY-MM-DD" input, and the shape `belizeCalendarDate`
+ * itself returns - and returns a real instant safely inside that same
+ * Belize calendar day, for handing to a function (like
+ * `resolveScheduleStatus`) that expects "the moment in question" and derives
+ * the calendar day itself by shifting through `toBelizeLocal`.
+ *
+ * Handing one of those functions a UTC-midnight calendar date directly walks
+ * it onto the PREVIOUS Belize calendar day: midnight UTC on the 3rd, shifted
+ * back six hours, reads as 6pm Belize time on the 2nd. Belize noon (18:00 UTC
+ * the same day) is never within six hours of either midnight boundary, so it
+ * is the deliberately boring anchor here - any other framework-free way of
+ * picking "safely the same day" would do, this is just the most obvious one.
+ */
+export const belizeMidday = (calendarDate: Date): Date =>
+  new Date(Date.UTC(calendarDate.getUTCFullYear(), calendarDate.getUTCMonth(), calendarDate.getUTCDate(), 18, 0, 0));

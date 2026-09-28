@@ -54,6 +54,8 @@ const BELIZE_OFFSET_MS = -6 * 60 * 60 * 1000;
 const isoToday = () => new Date(Date.now() + BELIZE_OFFSET_MS).toISOString().slice(0, 10);
 /** Today's weekday, 0=Sunday..6=Saturday, in Belize local time, matching the weekly-pattern column. */
 const todayWeekday = () => new Date(Date.now() + BELIZE_OFFSET_MS).getUTCDay();
+/** `n` calendar days from today, Belize local, as an isoToday()-shaped string (BMPL-283). */
+const isoOffset = (n: number) => new Date(Date.now() + BELIZE_OFFSET_MS + n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 async function registerCustomer(email: string) {
   const reg = await request(ctx.server)
@@ -183,6 +185,137 @@ describe('route planning consults the schedule', () => {
 
     expect((await del(admin, `admin/logistics/routes/${routeId}/schedule/exceptions/${added.body.id}`)).status).toBe(200);
     expect((await post(customer, 'shipping/quote', quoteHubToHub(originHubId, destinationHubId))).body.available).toBe(true);
+  });
+});
+
+/**
+ * BMPL-283: the customer may now name a `requestedDate` (previously the
+ * quote always priced "today", hardcoded). The owner's ruling this pins:
+ * never hide an unavailable route as though it does not exist, never
+ * pretend it operates, and offer the next confirmed operating date only
+ * when the configured schedule can actually name one - never invented.
+ *
+ * No real schedule data appears anywhere in this file, per the convention
+ * already stated at the top of it.
+ */
+describe('a customer-requested travel date (BMPL-283)', () => {
+  it('a date the customer picks is what gets priced, not always today', async () => {
+    const { routeId, originHubId, destinationHubId } = await seedRoute();
+    // Closed TODAY only. If the quote still defaulted to "now" (the pre-BMPL-283
+    // behaviour), this would come back unavailable.
+    await post(admin, `admin/logistics/routes/${routeId}/schedule/exceptions`, {
+      date: isoToday(), status: 'NOT_OPERATING', reason: 'Synthetic test closure - today only',
+    });
+    const customer = (await registerCustomer(`reqdate_${uniq()}@example.com`)).cookies;
+    const q = await post(customer, 'shipping/quote', { ...quoteHubToHub(originHubId, destinationHubId), requestedDate: isoOffset(3) });
+    expect(q.status).toBe(201);
+    expect(q.body.available).toBe(true);
+    expect(q.body.requestedDate).toBe(isoOffset(3));
+  });
+
+  it('omitting requestedDate still means "as soon as possible", unchanged from before BMPL-283', async () => {
+    const { originHubId, destinationHubId } = await seedRoute();
+    const customer = (await registerCustomer(`reqdate_${uniq()}@example.com`)).cookies;
+    const q = await post(customer, 'shipping/quote', quoteHubToHub(originHubId, destinationHubId));
+    expect(q.body.available).toBe(true);
+    expect(q.body.requestedDate).toBe(isoToday());
+  });
+
+  it('a route closed only on the requested date is reported unavailable FOR THAT DATE, not hidden as nonexistent', async () => {
+    const { routeId, originHubId, destinationHubId } = await seedRoute();
+    const target = isoOffset(5);
+    await post(admin, `admin/logistics/routes/${routeId}/schedule/exceptions`, {
+      date: target, status: 'NOT_OPERATING', reason: 'Synthetic test closure - one date only',
+    });
+    const customer = (await registerCustomer(`reqdate_${uniq()}@example.com`)).cookies;
+    const q = await post(customer, 'shipping/quote', { ...quoteHubToHub(originHubId, destinationHubId), requestedDate: target });
+    expect(q.body.available).toBe(false);
+    expect(q.body.requestedDate).toBe(target);
+    // Distinctly a DATE problem, not "no route configured at all" - the owner's
+    // "do not hide the route as though it does not exist" half of the ruling.
+    expect(q.body.dateUnavailable).toBe(true);
+  });
+
+  it('offers the next date the route is CONFIRMED to run - never a guess', async () => {
+    const { routeId, originHubId, destinationHubId } = await seedRoute();
+    const target = isoOffset(2);
+    // Only the requested date is closed. Every other date resolves OPERATING
+    // (no weekly pattern configured), so tomorrow-relative-to-target is the
+    // one and only honest answer.
+    await post(admin, `admin/logistics/routes/${routeId}/schedule/exceptions`, {
+      date: target, status: 'NOT_OPERATING', reason: 'Synthetic test closure - one date only',
+    });
+    const customer = (await registerCustomer(`reqdate_${uniq()}@example.com`)).cookies;
+    const q = await post(customer, 'shipping/quote', { ...quoteHubToHub(originHubId, destinationHubId), requestedDate: target });
+    expect(q.body.available).toBe(false);
+    expect(q.body.dateUnavailable).toBe(true);
+    expect(q.body.nextAvailableDate).toBe(isoOffset(3));
+
+    // Proof, not assertion: the offered date must itself actually quote,
+    // through the real endpoint - not merely a plausible-looking value.
+    const confirm = await post(customer, 'shipping/quote', { ...quoteHubToHub(originHubId, destinationHubId), requestedDate: q.body.nextAvailableDate });
+    expect(confirm.body.available).toBe(true);
+  });
+
+  it('degrades to plain unavailability, with NO invented date, when nothing in the schedule can confirm one', async () => {
+    const { routeId, originHubId, destinationHubId } = await seedRoute();
+    // Every day of the week closed. No date within any horizon could ever
+    // work, so the honest answer is "we cannot confirm one" - never a guess.
+    const weeklySet = await put(admin, `admin/logistics/routes/${routeId}/schedule`, {
+      days: [0, 1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({ dayOfWeek, status: 'NOT_OPERATING' })),
+    });
+    expect(weeklySet.status).toBe(200);
+    const customer = (await registerCustomer(`reqdate_${uniq()}@example.com`)).cookies;
+    const q = await post(customer, 'shipping/quote', quoteHubToHub(originHubId, destinationHubId));
+    expect(q.body.available).toBe(false);
+    expect(q.body.dateUnavailable).toBe(true);
+    expect(q.body.nextAvailableDate).toBeNull();
+  });
+
+  it('a structurally impossible journey is never reported as a date problem, even with a date requested', async () => {
+    // Two real hubs, deliberately with NO route between them - a schedule
+    // problem cannot exist for a route that was never configured, so this
+    // must come back dateUnavailable: false, not a date suggestion.
+    const suffix = uniq();
+    const o = await post(admin, 'admin/logistics/hubs', {
+      code: `NR${suffix}`.slice(0, 12), name: `No Route Origin ${suffix}`, type: 'AIRSTRIP',
+      district: 'BELIZE', city: 'No Route Origin Town', modes: ['LAND', 'AIR'], courierFeeMinor: 500,
+    });
+    const d = await post(admin, 'admin/logistics/hubs', {
+      code: `ND${suffix}`.slice(0, 12), name: `No Route Destination ${suffix}`, type: 'AIRSTRIP',
+      district: 'STANN_CREEK', city: 'No Route Destination Town', modes: ['LAND', 'AIR'], courierFeeMinor: 500,
+    });
+    expect(o.status).toBe(201);
+    expect(d.status).toBe(201);
+    const customer = (await registerCustomer(`reqdate_${uniq()}@example.com`)).cookies;
+    const q = await post(customer, 'shipping/quote', {
+      ...quoteHubToHub(o.body.id, d.body.id),
+      requestedDate: isoOffset(3),
+    });
+    expect(q.body.available).toBe(false);
+    expect(q.body.reason).toBe('NO_ROUTE');
+    expect(q.body.dateUnavailable).toBe(false);
+    expect(q.body.nextAvailableDate).toBeNull();
+  });
+
+  it('booking honours the requested date exactly like quoting, and refuses on the same unavailable date', async () => {
+    const { routeId, originHubId, destinationHubId } = await seedRoute();
+    const target = isoOffset(4);
+    await post(admin, `admin/logistics/routes/${routeId}/schedule/exceptions`, {
+      date: target, status: 'NOT_OPERATING', reason: 'Synthetic test closure - one date only',
+    });
+    const customer = await registerCustomer(`reqdate_${uniq()}@example.com`);
+    await post(admin, 'admin/wallet/test-credit', { userId: customer.userId, amountMinor: 100_000, reason: 'BMPL-283 test fixture.' });
+
+    const blocked = await post(customer.cookies, 'shipping', {
+      ...quoteHubToHub(originHubId, destinationHubId), requestedDate: target, payWithWallet: true,
+    });
+    expect(blocked.status).toBe(400);
+
+    const booked = await post(customer.cookies, 'shipping', {
+      ...quoteHubToHub(originHubId, destinationHubId), requestedDate: isoOffset(3), payWithWallet: true,
+    });
+    expect(booked.status).toBe(201);
   });
 });
 
