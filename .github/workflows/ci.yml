@@ -251,9 +251,9 @@ jobs:
       # incident; it would silently report the one checkout it can see as
       # clean, every time, while LOOKING like floor-wide coverage from inside
       # a throwaway clone — worse than not running it at all. It belongs
-      # after a real merge on a real host instead: see AGENT-WORKFLOW.md and
-      # docs/PROJECT_STATUS.md for the incident (2026-09-28) this was written
-      # to prevent a repeat of.
+      # after a real merge on a real host instead: see docs/AGENT-WORKFLOW.md
+      # §6, which names the 2026-09-28 incident this was written to prevent a
+      # repeat of and says exactly when to run it.
 
   secret-scan:
     name: Secret scan

@@ -214,7 +214,29 @@ curl -sI https://www.bzemarketplace.com/ | grep -i x-bmpl-commit
 curl -sI https://bmpl-admin.vercel.app/  | grep -i x-bmpl-commit
 ```
 
-Then delete the branch and remove the worktree.
+**Do not delete the branch, and do not remove the worktree — return it to a
+detached HEAD at `origin/main` instead.** A remote branch left undeleted
+costs nothing. Why this matters: `gh pr merge --delete-branch` tries to
+remove the *worktree* along with the branch when that branch is still
+checked out there, and on this host the removal can die partway through a
+long path, leaving the worktree half-stripped and unregistered rather than
+cleanly gone (2026-09-28: this exact sequence destroyed three long-lived
+worktrees — bmpl-qa, bmpl-web and bmpl-docs — the same morning; all three
+were repaired the same day). A worktree left at a detached HEAD, with no
+branch checked out, has nothing for a future `--delete-branch` to chase.
+
+Immediately after a merge, on the host, run:
+
+```bash
+node scripts/detect-tracked-deletions.mjs
+```
+
+This runs after a merge, by hand, rather than in CI, because it checks `git
+status` across every worktree linked to this repo **on the machine it runs
+on** — a GitHub Actions runner is one fresh, ephemeral clone with no
+visibility into any other checkout, so the question this script answers has
+no meaning there (see that job's own comment in `.github/workflows/ci.yml`
+for why it is deliberately excluded).
 
 ---
 
