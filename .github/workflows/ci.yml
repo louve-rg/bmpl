@@ -208,6 +208,53 @@ jobs:
         # globalSetup runs `prisma migrate deploy` against TEST_DATABASE_URL.
         run: pnpm --filter @bmpl/api test:integration
 
+  repo-drift-checks:
+    name: Repo drift checks (docs, notification & permission catalogs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      # Four read-only, re-runnable checkers (BMPL-211/BMPL-220/BMPL-304),
+      # wired here because each is ALREADY GREEN on main today — wiring a
+      # check that is currently failing would make main red on every
+      # unrelated merge until someone resolves the underlying finding, the
+      # same harm BMPL-235 caused for an unrelated reason (BMPL-310/BMPL-312).
+      # No `pnpm install` step exists in this job on purpose: all four import
+      # nothing but node:fs/node:path/node:url and their own local baseline
+      # file — zero npm dependencies, confirmed before wiring this.
+      - name: Notification event catalog drift (BMPL-220)
+        run: node scripts/detect-notification-event-catalog-drift.mjs
+
+      - name: Permission catalog drift (BMPL-304)
+        run: node scripts/detect-permission-catalog-drift.mjs
+
+      - name: Lookup data inventory citation drift (BMPL-211 follow-up)
+        run: node scripts/detect-lookup-inventory-citation-drift.mjs
+
+      - name: Notification category count drift (BMPL-211)
+        run: node scripts/detect-notification-category-count-drift.mjs
+
+      # scripts/detect-tracked-deletions.mjs is DELIBERATELY NOT WIRED HERE,
+      # and must not be added later without re-reading this comment first
+      # (BMPL-310/BMPL-312): it checks `git status` across every checkout
+      # linked to this repo on the HOST it runs on — every long-lived agent
+      # worktree, not just the tree being built. A GitHub Actions runner is a
+      # single fresh, ephemeral clone with no visibility into any other
+      # checkout, so the question this script answers ("did a DIFFERENT
+      # long-lived checkout just lose tracked files?") has no meaning here.
+      # Running it in this job would not fail loudly and safely on a real
+      # incident; it would silently report the one checkout it can see as
+      # clean, every time, while LOOKING like floor-wide coverage from inside
+      # a throwaway clone — worse than not running it at all. It belongs
+      # after a real merge on a real host instead: see docs/AGENT-WORKFLOW.md
+      # §6, which names the 2026-09-28 incident this was written to prevent a
+      # repeat of and says exactly when to run it.
+
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-latest
