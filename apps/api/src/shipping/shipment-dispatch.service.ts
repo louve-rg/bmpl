@@ -92,6 +92,7 @@ export class ShipmentDispatchService {
         originHubId: true,
         originHub: { select: { district: true } },
         destinationHubId: true,
+        destinationHub: { select: { name: true } },
         durationMinutes: true,
         shipment: {
           select: {
@@ -161,16 +162,17 @@ export class ShipmentDispatchService {
       const projectedArrival = new Date(now.getTime() + leg.durationMinutes * 60_000);
       const hours = await this.network.hubHoursStatus(leg.destinationHubId, projectedArrival);
       if (!hours.isOpen) {
+        const hubName = leg.destinationHub?.name ?? 'the destination terminal';
+        // BMPL-275: named per god's stated preference — the next open window
+        // is exactly what an operator would otherwise have to go and look
+        // up themselves, and the resolver already computed it.
         const nextOpen = hours.nextOpen
-          ? ` The terminal is next open ${hours.nextOpen.date}${hours.nextOpen.openTime ? ` at ${hours.nextOpen.openTime}` : ''}.`
-          : '';
-        this.logger.warn(
-          `leg ${leg.id} would arrive at hub ${leg.destinationHubId} around ${projectedArrival.toISOString()}, outside its configured hours — deferring dispatch.${nextOpen}`,
-        );
-        return {
-          result: 'DEFERRED',
-          reason: `the destination terminal is outside its configured hours at the projected arrival time.${nextOpen}`,
-        };
+          ? ` It is next open ${hours.nextOpen.date}${hours.nextOpen.openTime ? ` at ${hours.nextOpen.openTime}` : ''}.`
+          : ' No open window is configured within the next two weeks.';
+        const reason = `${hubName} is outside its configured hours at the projected arrival time (${projectedArrival.toISOString()}).${nextOpen}`;
+        this.logger.warn(`leg ${leg.id} deferred — ${reason}`);
+        await this.recordDeferralIfNew(leg.id, leg.shipment.id, leg.shipment.reference, leg.destinationHubId, reason);
+        return { result: 'DEFERRED', reason };
       }
     }
 
@@ -653,6 +655,60 @@ export class ShipmentDispatchService {
       title: `Shipment ${reference} needs a driver`,
       body: 'Automatic dispatch ran out of drivers for a courier leg. Assign one by hand.',
       data: { legId, reference },
+    });
+  }
+
+  /**
+   * BMPL-275: make a hub-hours deferral visible to OPERATIONS, without
+   * flooding the audit log. `dispatchLeg` runs every 20s per waiting leg
+   * (the sweeper) — an audit row on every call would write hundreds of rows
+   * for a hub closed overnight. A test that only checked "a row exists"
+   * would pass on that flooding version too.
+   *
+   * The fix is to record only on the TRANSITION into deferred, which needs
+   * to know the leg's previous state. BMPL-273 deliberately keeps no
+   * persisted "deferred until T" state anywhere — inventing one just to
+   * detect this transition would be exactly the state shape that card
+   * avoided, and a flag nothing re-checks is how a leg gets stuck. So this
+   * READS the most recent SHIPMENT_LEG_OFFERED/SHIPMENT_LEG_DISPATCH_DEFERRED
+   * audit row for this leg instead: a read is not a mechanism a leg can get
+   * stuck behind, it is just looking at what already happened. If that row
+   * is itself a DEFERRED, this episode is already recorded and nothing is
+   * written; otherwise (never offered before, or the last event was an
+   * OFFERED) this is a new episode and gets its own row.
+   *
+   * The transition back OUT of deferred needs no new action of its own: the
+   * moment this leg actually dispatches, the existing SHIPMENT_LEG_OFFERED
+   * row already IS that "cleared" event in the trail — a second
+   * "deferral cleared" action would only duplicate what OFFERED already
+   * says. (Flagged to Michael in the PR in case the intent was a dedicated
+   * clearing event instead.)
+   *
+   * Filtered by `action IN (...)` first, which uses the existing
+   * `@@index([action])` on AuditLog — the JSON-path match on `legId` then
+   * only has to scan within that already-small subset, not the whole audit
+   * log.
+   */
+  private async recordDeferralIfNew(
+    legId: string,
+    shipmentId: string,
+    reference: string,
+    hubId: string,
+    reason: string,
+  ): Promise<void> {
+    const latest = await this.prisma.auditLog.findFirst({
+      where: {
+        action: { in: ['SHIPMENT_LEG_OFFERED', 'SHIPMENT_LEG_DISPATCH_DEFERRED'] },
+        newValue: { path: ['legId'], equals: legId },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { action: true },
+    });
+    if (latest?.action === 'SHIPMENT_LEG_DISPATCH_DEFERRED') return;
+    await this.audit.record({
+      action: 'SHIPMENT_LEG_DISPATCH_DEFERRED',
+      newValue: { legId, shipmentId, reference, hubId },
+      reason,
     });
   }
 
