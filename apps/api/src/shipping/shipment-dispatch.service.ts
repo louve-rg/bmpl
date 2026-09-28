@@ -9,6 +9,7 @@ import {
   type LegView,
 } from '@bmpl/shared';
 import type { AssignShipmentLegInput, ReassignShipmentLegInput } from '@bmpl/validation';
+import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -658,16 +659,27 @@ export class ShipmentDispatchService {
     return { expired, reoffered };
   }
 
+  /**
+   * BMPL-293: the exact predicate `sweepUndispatched` acts on, factored out so
+   * anything that wants to say how many legs are waiting for a driver — the
+   * ops board, in particular — reads it from here rather than writing a
+   * second where-clause that merely resembles this one today and quietly
+   * stops matching it the next time either is edited alone.
+   */
+  private waitingLegsWhere(): Prisma.ShipmentLegWhereInput {
+    return {
+      kind: { in: ['DIRECT', 'FIRST_MILE', 'LAST_MILE'] },
+      status: 'READY',
+      assignedDriverProfileId: null,
+      dispatchExhaustedAt: null,
+      OR: [{ courierStatus: null }, { courierStatus: 'PENDING_ASSIGNMENT' }, { courierStatus: 'DRIVER_DECLINED' }],
+    };
+  }
+
   /** Courier legs whose turn has come but which nobody has been offered yet. */
   async sweepUndispatched(): Promise<number> {
     const waiting = await this.prisma.shipmentLeg.findMany({
-      where: {
-        kind: { in: ['DIRECT', 'FIRST_MILE', 'LAST_MILE'] },
-        status: 'READY',
-        assignedDriverProfileId: null,
-        dispatchExhaustedAt: null,
-        OR: [{ courierStatus: null }, { courierStatus: 'PENDING_ASSIGNMENT' }, { courierStatus: 'DRIVER_DECLINED' }],
-      },
+      where: this.waitingLegsWhere(),
       select: { id: true },
       take: 50,
     });
@@ -676,6 +688,15 @@ export class ShipmentDispatchService {
       if ((await this.dispatchLeg(leg.id)).result === 'OFFERED') offered += 1;
     }
     return offered;
+  }
+
+  /**
+   * How many legs `sweepUndispatched` would act on right now — the WHOLE
+   * count, not the 50-per-tick slice it actually processes, so a backlog
+   * bigger than one sweep reads as itself rather than as "50 or fewer".
+   */
+  async waitingCount(): Promise<number> {
+    return this.prisma.shipmentLeg.count({ where: this.waitingLegsWhere() });
   }
 
   private async expireOffer(legId: string, driverProfileId: string | null): Promise<boolean> {

@@ -4,6 +4,8 @@ import type { UpdatePlatformSettingsInput } from '@bmpl/validation';
 import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { DispatchEngineService } from '../dispatch/dispatch-engine.service';
+import { ShipmentDispatchService } from '../shipping/shipment-dispatch.service';
 
 export interface Actor {
   userId: string;
@@ -21,6 +23,8 @@ export class OpsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly dispatchEngine: DispatchEngineService,
+    private readonly shipmentDispatch: ShipmentDispatchService,
   ) {}
 
   // ===========================================================================
@@ -97,7 +101,30 @@ export class OpsService {
       pendingJobModeration + openJobReports +
       pendingPropertyModeration + openPropertyReports +
       pendingPromotionModeration + openPromotionReports;
-    return { queues, totalActionable, settings: await this.getSettings() };
+    return { queues, totalActionable, settings: await this.getSettings(), dispatch: await this.dispatchStatus() };
+  }
+
+  /**
+   * BMPL-293: what the automatic-dispatch switch is set to, and how many
+   * shipment legs and marketplace deliveries are actually waiting on it right
+   * now — the same predicate each sweeper acts on
+   * (ShipmentDispatchService.waitingCount / DispatchEngineService.waitingCount),
+   * not a second approximation of it built here.
+   *
+   * Computed and returned UNCONDITIONALLY, whether automatic is on or off. A
+   * leg or delivery can sit waiting for reasons that have nothing to do with
+   * the switch (no eligible driver online, a hub outside its hours, exhausted
+   * offers…), so an operator must be able to see the count either way — a
+   * board that only shows this while the switch is off would teach them,
+   * wrongly, that its absence means nothing is waiting.
+   */
+  private async dispatchStatus() {
+    const [cfg, waitingShipmentLegs, waitingDeliveries] = await Promise.all([
+      this.dispatchEngine.settings(),
+      this.shipmentDispatch.waitingCount(),
+      this.dispatchEngine.waitingCount(),
+    ]);
+    return { automatic: cfg.automatic, waitingShipmentLegs, waitingDeliveries };
   }
 
   // ===========================================================================
