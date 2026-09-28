@@ -579,6 +579,8 @@ paths:
     get: { tags: [Admin], summary: Vendor moderation queue, parameters: [ { name: status, in: query, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires vendors.read" }
   /admin/vendors/{id}:
     get: { tags: [Admin], summary: Vendor detail, parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires vendors.read" }
+  /admin/vendors/{id}/test-mode:
+    patch: { tags: [Admin], summary: "Mark a storefront as SIMULATION, or back to real", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } }, description: "Requires vendors.moderate; body { isTest, reason? }. This is the root of test isolation — checkout derives an order's isTest from the storefront, never from the request, so flagging a store here is what makes rehearsal orders possible at all." }
   /admin/vendors/{id}/{action}:
     post:
       tags: [Admin]
@@ -660,6 +662,8 @@ paths:
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /checkout/delivery-quote:
+    post: { tags: [Orders], summary: "Pre-checkout delivery quote for the active cart", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } }, description: "body { district, vendors?: [{ vendorProfileId, deliveryMethod }] }. A DIFFERENT controller from POST /checkout above (same CUSTOMER role) — filed under Orders as a checkout-flow read, even though it queries each vendor's own delivery-zone configuration internally." }
   /orders:
     get:
       tags: [Orders]
@@ -789,6 +793,10 @@ paths:
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
       security: [{ cookieAuth: [] }]
       responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/VendorOrder" } } } }, "404": { $ref: "#/components/responses/NotFound" } }
+  /vendor/orders/{id}/start-preparing:
+    post: { tags: [Orders], summary: "Vendor: begin preparing an order (idempotent)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: PREPARING }, "409": { description: "Order is not PENDING" } } }
+  /vendor/orders/{id}/ready:
+    post: { tags: [Orders], summary: "Vendor: mark an order ready (works for both PICKUP and DELIVERY)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "READY_FOR_PICKUP, or starts automatic dispatch for a DELIVERY order" }, "409": { description: "Order has no delivery attached, or is not PENDING/PREPARING" } }, description: "Preferred over the deprecated ready-for-pickup below — this is the one route for both delivery methods" }
   /admin/orders:
     get: { tags: [Orders], summary: All orders (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires orders.read" }
   /admin/orders/{id}:
@@ -832,6 +840,8 @@ paths:
     get: { tags: [Payments], summary: All payments (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires payments.read" }
   /admin/payments/{id}:
     get: { tags: [Payments], summary: Payment detail (read-only, + holds/events/ledger refs), parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Requires payments.read" }
+  /admin/payments/expire-stale-holds:
+    post: { tags: [Payments], summary: "Release soft holds whose payment never authorized", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ examined, expired: [...] }" } }, description: "Requires wallet.reconcile (not a payments.* permission). Can only give a reservation back to the person it was taken from — no path through it moves money anywhere. Runs on a schedule too; this is for when an operator needs it now. body { olderThanHours? } (default 24)" }
   /payments/{id}/authorize:
     post:
       tags: [Wallet]
@@ -944,6 +954,8 @@ paths:
     get: { tags: [Dispatch], summary: "Delivery detail (timeline, assignment history, POD, current-driver eligibility, read-only payment)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.read" }
   /admin/deliveries/{id}/eligible-drivers:
     get: { tags: [Dispatch], summary: "Eligible drivers for the delivery district", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires deliveries.assign" }
+  /admin/deliveries/{id}/auto-assign-preview:
+    get: { tags: [Dispatch], summary: "Preview what automatic dispatch would do right now", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: "{ implemented: true, message, candidateCount, candidates }" } }, description: "Requires deliveries.assign; read-only — does not assign anything" }
   /admin/deliveries/{id}/assign:
     post: { tags: [Dispatch], summary: "Assign an eligible driver + vehicle (eligibility re-checked)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Assigned }, "400": { description: "Ineligible driver / illegal transition" }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.assign; body { driverProfileId, vehicleId }" }
   /admin/deliveries/{id}/reassign:
@@ -960,6 +972,11 @@ paths:
     get: { tags: [Dispatch], summary: "Reveal pickup + delivery PINs (admin override)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK } }, description: "Requires deliveries.verify; PINs never appear in general payloads" }
   /driver/jobs:
     get: { tags: [Dispatch], summary: "The driver's own assigned jobs (scope=active|completed|all)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires APPROVED DELIVERY_DRIVER role" }
+  /driver/jobs/counts:
+    get: { tags: [Dispatch], summary: "Per-view job counts for the feed's tab badges", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+  /driver/jobs/queue:
+    get: { tags: [Dispatch], summary: "The actionable queue plus a recommended running order", security: [{ cookieAuth: [] }], responses: { "200": { description: OK } } }
+    put: { tags: [Dispatch], summary: "Set the driver's own display order for the queue", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } }, description: "body { deliveryIds }; writes display sequence only — cannot reassign, re-status or skip a step" }
   /driver/jobs/{id}:
     get: { tags: [Dispatch], summary: "Own job detail (404 for another driver's job)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
   /driver/jobs/{id}/accept:
@@ -976,6 +993,8 @@ paths:
     post: { tags: [Dispatch], summary: "Complete delivery with the recipient PIN + recipient name (rate-limited)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Delivered }, "400": { description: "Wrong/locked PIN or illegal transition" } }, description: "body { pin, recipientName, notes?, podPhotoKeys? }" }
   /driver/jobs/{id}/pod/presign:
     post: { tags: [Dispatch], summary: "Presigned private PUT for a proof-of-delivery photo (rate-limited)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "body { fileName, contentType, sizeBytes }" }
+  /driver/jobs/{id}/pod/upload:
+    post: { tags: [Dispatch], summary: "Server-side POD photo upload (rate-limited)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ storageKey }" } }, description: "Raw file bytes as the request body, not JSON — the caller-side alternative to presign/confirm above" }
   /driver/jobs/{id}/pod/confirm:
     post: { tags: [Dispatch], summary: "Attach uploaded POD photo keys before completion", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK } }, description: "body { photoKeys }" }
   /deliveries/{id}:
@@ -1011,6 +1030,8 @@ paths:
     get: { tags: [Messaging], summary: "The caller's conversations (context-scoped) with unread counts", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "401": { $ref: "#/components/responses/Unauthorized" } } }
   /conversations/unread-count:
     get: { tags: [Messaging], summary: "Total unread message count", security: [{ cookieAuth: [] }], responses: { "200": { description: "{ count }" } } }
+  /conversations/attachments/upload:
+    post: { tags: [Messaging], summary: "Server-side message attachment upload (rate-limited)", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ storageKey }" } }, description: "Raw file bytes as the request body, not JSON — the caller-side alternative to presign below" }
   /conversations/attachments/presign:
     post: { tags: [Messaging], summary: "Presigned private PUT for a message attachment (rate-limited)", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "400": { description: "Disallowed type" } }, description: "images + PDF only, no executables; body { fileName, contentType, sizeBytes }" }
   /conversations/vendor-order/{id}:
@@ -1039,6 +1060,10 @@ paths:
     post: { tags: [Messaging], summary: "Reply to the requester", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Sent } }, description: "Requires support.respond" }
   /admin/support/{id}/notes:
     post: { tags: [Messaging], summary: "Add an INTERNAL note (never shown to the requester)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Added } }, description: "Requires support.respond" }
+  /admin/support/{id}/close:
+    post: { tags: [Messaging], summary: "Close a support case (admin side)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Closed } }, description: "Requires support.respond" }
+  /admin/support/{id}/reopen:
+    post: { tags: [Messaging], summary: "Reopen a support case (admin side)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: Reopened } }, description: "Requires support.respond" }
   # ---- Settlement & Earnings (Phase 3 · M18 — internal, no payouts) ----
   /orders/{id}/settlement:
     get: { tags: [Settlement], summary: "Settlement status of an own order", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
@@ -1073,7 +1098,7 @@ paths:
     delete: { tags: [Products], summary: "Remove the Brand Image designation (returns to the general gallery)", parameters: [ { name: productId, in: path, required: true, schema: { type: string } }, { name: imageId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "Full image list" } } }
   # ---- Pickup fulfilment (Phase 3 · M18.1) ----
   /vendor/orders/{id}/ready-for-pickup:
-    post: { tags: [Orders], summary: "Vendor: mark a PICKUP order ready + issue the customer a collection PIN", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "READY_FOR_PICKUP" }, "400": { description: "Not a pickup order / bad state" }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Requires VENDOR ownership" }
+    post: { tags: [Orders], summary: "Vendor: mark a PICKUP order ready + issue the customer a collection PIN", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "READY_FOR_PICKUP" }, "400": { description: "Not a pickup order / bad state" }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Requires VENDOR ownership. Deprecated — prefer POST .../ready above, which handles both PICKUP and DELIVERY" }
   /vendor/orders/{id}/confirm-pickup:
     post: { tags: [Orders], summary: "Vendor: confirm collection with the customer's PIN (attempt-capped; finalizes inventory once)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "PICKED_UP" }, "400": { description: "Wrong/locked PIN or bad state" } }, description: "Requires VENDOR ownership; body { pin }" }
   /orders/vendor-orders/{vendorOrderId}/pickup-pin:
@@ -1122,6 +1147,8 @@ paths:
     delete: { tags: [Engagement], summary: "Clear the caller's recently-viewed history", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: "{ ok: true }" } } }
   /recently-viewed/{productId}:
     post: { tags: [Engagement], summary: "Record a product view (upsert; prunes to newest 50)", parameters: [ { name: productId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ ok: true }" }, "404": { description: "Product not viewable" } } }
+  /cart/items/{itemId}/move-to-wishlist:
+    post: { tags: [Engagement], summary: "Move a cart line to the wishlist (atomic)", parameters: [ { name: itemId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: "{ ...cart, movedToWishlist: true, alreadySaved, productId, variantId }" }, "404": { $ref: "#/components/responses/NotFound" } }, description: "Physically a Cart route (POST /cart/items/{itemId}/move-to-wishlist), tagged Engagement here because that is its effect — saves the exact variant, then removes the cart line only once the save is guaranteed; alreadySaved:true if that variant was already wishlisted." }
   # ---- Discovery & Recommendations (Phase 4 · M21) ----
   /marketplace/discovery:
     get: { tags: [Discovery], summary: "Homepage discovery bundle", responses: { "200": { description: "{ featured, topRated, newArrivals, popular (Card[]), categories: [{id,name,slug,iconName,productCount}] }" } }, description: "Public; PUBLISHED/APPROVED only; popular = units sold with cold-start fallback (top-rated→featured→newest)" }
