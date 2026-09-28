@@ -301,6 +301,33 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 export default function PropertiesPage() {
   const [tab, setTab] = useState<Tab>('moderation');
+  const [perms, setPerms] = useState({ canModerateProperties: false, canModerateOwners: false, canModerateAgents: false });
+
+  // Three DIFFERENT permissions, not one boolean: properties.moderate (listing
+  // moderation + report resolution), property_owners.moderate (owner suspend/
+  // restore) and real_estate_agents.moderate (agent suspend/restore). Only
+  // one tab is ever mounted at a time, so fetched once here rather than per
+  // tab. /me returns the same grant rows the PermissionsGuard evaluates, so
+  // what this screen shows and what the API enforces cannot disagree. On any
+  // doubt (request fails, field absent) every action stays hidden: fail
+  // closed. NOTE: this page has no agencies moderation UI at all today — the
+  // agency shown on a property is a read-only badge, and no admin/properties
+  // endpoint exists for agencies.moderate/agencies.read (checked the
+  // controller directly) — so there is nothing to gate for it, and adding a
+  // check would be dead code.
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => {
+        const held = me.adminPermissions ?? [];
+        setPerms({
+          canModerateProperties: held.includes('properties.moderate'),
+          canModerateOwners: held.includes('property_owners.moderate'),
+          canModerateAgents: held.includes('real_estate_agents.moderate'),
+        });
+      })
+      .catch(() => setPerms({ canModerateProperties: false, canModerateOwners: false, canModerateAgents: false }));
+  }, []);
 
   return (
     <div>
@@ -333,11 +360,11 @@ export default function PropertiesPage() {
         })}
       </div>
 
-      {tab === 'moderation' && <ListingsTab key="moderation" queue />}
-      {tab === 'listings' && <ListingsTab key="listings" queue={false} />}
-      {tab === 'reports' && <ReportsTab />}
-      {tab === 'owners' && <OwnersTab />}
-      {tab === 'agents' && <AgentsTab />}
+      {tab === 'moderation' && <ListingsTab key="moderation" queue canModerate={perms.canModerateProperties} />}
+      {tab === 'listings' && <ListingsTab key="listings" queue={false} canModerate={perms.canModerateProperties} />}
+      {tab === 'reports' && <ReportsTab canModerate={perms.canModerateProperties} />}
+      {tab === 'owners' && <OwnersTab canModerate={perms.canModerateOwners} />}
+      {tab === 'agents' && <AgentsTab canModerate={perms.canModerateAgents} />}
       {tab === 'analytics' && <AnalyticsTab />}
     </div>
   );
@@ -359,7 +386,7 @@ const ALL_STATUS_OPTIONS: Array<{ value: PropertyStatus | ''; label: string }> =
   ...PROPERTY_STATUSES.map((s) => ({ value: s, label: PROPERTY_STATUS_LABELS[s] })),
 ];
 
-function ListingsTab({ queue }: { queue: boolean }) {
+function ListingsTab({ queue, canModerate }: { queue: boolean; canModerate: boolean }) {
   const [status, setStatus] = useState<PropertyStatus | ''>('');
   const [reportedOnly, setReportedOnly] = useState(false);
   const [items, setItems] = useState<PropertyListItem[]>([]);
@@ -515,7 +542,7 @@ function ListingsTab({ queue }: { queue: boolean }) {
         </div>
 
         {selectedId ? (
-          <PropertyDetailPanel key={selectedId} id={selectedId} onModerated={onModerated} />
+          <PropertyDetailPanel key={selectedId} id={selectedId} onModerated={onModerated} canModerate={canModerate} />
         ) : (
           listState === 'ready' && (
             <div className="rounded-bmpl-xl border border-slate-200 bg-white p-6">
@@ -559,7 +586,7 @@ function availableActions(status: PropertyStatus): ModerateAction[] {
   return actions;
 }
 
-function PropertyDetailPanel({ id, onModerated }: { id: string; onModerated: (p: PropertyDetail) => void }) {
+function PropertyDetailPanel({ id, onModerated, canModerate }: { id: string; onModerated: (p: PropertyDetail) => void; canModerate: boolean }) {
   const [detail, setDetail] = useState<PropertyDetail | null>(null);
   const [state, setState] = useState<ListState>('loading');
   const [pending, setPending] = useState<ModerateAction | null>(null);
@@ -763,6 +790,7 @@ function PropertyDetailPanel({ id, onModerated }: { id: string; onModerated: (p:
       )}
 
       {/* Moderation actions */}
+      {canModerate && (
       <div className="border-t border-slate-100 p-4">
         {actions.length === 0 ? (
           <p className="text-sm text-slate-400">No moderation actions available for this status.</p>
@@ -830,6 +858,7 @@ function PropertyDetailPanel({ id, onModerated }: { id: string; onModerated: (p:
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -954,7 +983,7 @@ const REPORT_STATUS_OPTIONS: Array<{ value: PropertyReportStatus; label: string 
   { value: 'DISMISSED', label: 'Dismissed' },
 ];
 
-function ReportsTab() {
+function ReportsTab({ canModerate }: { canModerate: boolean }) {
   const [status, setStatus] = useState<PropertyReportStatus>('OPEN');
   const [items, setItems] = useState<PropertyReportItem[]>([]);
   const [listState, setListState] = useState<ListState>('loading');
@@ -1027,7 +1056,7 @@ function ReportsTab() {
       ) : (
         <ul className="space-y-4">
           {items.map((rep) => (
-            <ReportCard key={rep.id} report={rep} resolvable={status === 'OPEN'} onResolved={onResolved} />
+            <ReportCard key={rep.id} report={rep} resolvable={status === 'OPEN' && canModerate} onResolved={onResolved} />
           ))}
         </ul>
       )}
@@ -1163,7 +1192,7 @@ const PRINCIPAL_STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'SUSPENDED', label: 'Suspended' },
 ];
 
-function OwnersTab() {
+function OwnersTab({ canModerate }: { canModerate: boolean }) {
   const [status, setStatus] = useState('');
   const [items, setItems] = useState<OwnerListItem[]>([]);
   const [listState, setListState] = useState<ListState>('loading');
@@ -1281,7 +1310,7 @@ function OwnersTab() {
         </div>
 
         {selectedId ? (
-          <PrincipalDetailPanel<OwnerDetail> key={selectedId} kind="owners" id={selectedId} onChanged={onChanged} />
+          <PrincipalDetailPanel<OwnerDetail> key={selectedId} kind="owners" id={selectedId} onChanged={onChanged} canModerate={canModerate} />
         ) : (
           listState === 'ready' && (
             <div className="rounded-bmpl-xl border border-slate-200 bg-white p-6">
@@ -1298,7 +1327,7 @@ function OwnersTab() {
 /* Agents                                                             */
 /* ------------------------------------------------------------------ */
 
-function AgentsTab() {
+function AgentsTab({ canModerate }: { canModerate: boolean }) {
   const [status, setStatus] = useState('');
   const [items, setItems] = useState<AgentListItem[]>([]);
   const [listState, setListState] = useState<ListState>('loading');
@@ -1416,7 +1445,7 @@ function AgentsTab() {
         </div>
 
         {selectedId ? (
-          <PrincipalDetailPanel<AgentDetail> key={selectedId} kind="agents" id={selectedId} onChanged={onChanged} />
+          <PrincipalDetailPanel<AgentDetail> key={selectedId} kind="agents" id={selectedId} onChanged={onChanged} canModerate={canModerate} />
         ) : (
           listState === 'ready' && (
             <div className="rounded-bmpl-xl border border-slate-200 bg-white p-6">
@@ -1444,10 +1473,12 @@ function PrincipalDetailPanel<T extends OwnerDetail | AgentDetail>({
   kind,
   id,
   onChanged,
+  canModerate,
 }: {
   kind: PrincipalKind;
   id: string;
   onChanged: (p: T) => void;
+  canModerate: boolean;
 }) {
   const [detail, setDetail] = useState<T | null>(null);
   const [state, setState] = useState<ListState>('loading');
@@ -1583,6 +1614,7 @@ function PrincipalDetailPanel<T extends OwnerDetail | AgentDetail>({
         </div>
       )}
 
+      {canModerate && (
       <div className="border-t border-slate-100 p-4">
         {pending ? (
           <div className="space-y-2">
@@ -1648,6 +1680,7 @@ function PrincipalDetailPanel<T extends OwnerDetail | AgentDetail>({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

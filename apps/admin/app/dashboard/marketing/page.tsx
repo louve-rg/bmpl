@@ -602,6 +602,32 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
   const [prioBusy, setPrioBusy] = useState(false);
   const [prioError, setPrioError] = useState<string | null>(null);
 
+  // TWO different permissions on this one panel: promotions.moderate gates
+  // approve/reject/pause/expire/archive/restore below; promotions.manage
+  // gates the priority/feature control above it — the SAME permission
+  // PlacementsTab's canManage already checks (BMPL-269), but a separate
+  // component tree, so it gets its own independent /me fetch here rather
+  // than trying to share that tab's state. /me returns the same grant rows
+  // the PermissionsGuard evaluates, so what this screen shows and what the
+  // API enforces cannot disagree. On any doubt (request fails, field
+  // absent) both stay hidden: fail closed.
+  const [canModerate, setCanModerate] = useState(false);
+  const [canManagePriority, setCanManagePriority] = useState(false);
+
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => {
+        const held = me.adminPermissions ?? [];
+        setCanModerate(held.includes('promotions.moderate'));
+        setCanManagePriority(held.includes('promotions.manage'));
+      })
+      .catch(() => {
+        setCanModerate(false);
+        setCanManagePriority(false);
+      });
+  }, []);
+
   const load = useCallback(async () => {
     setState('loading');
     try {
@@ -783,6 +809,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
       </div>
 
       {/* Priority / feature control */}
+      {canManagePriority && (
       <div className="border-t border-slate-100 p-4">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Priority &amp; feature</p>
         <div className="flex flex-wrap items-end gap-3">
@@ -818,6 +845,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
           </div>
         )}
       </div>
+      )}
 
       {error && (
         <div className="px-4">
@@ -826,6 +854,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
       )}
 
       {/* Moderation actions */}
+      {canModerate && (
       <div className="border-t border-slate-100 p-4">
         {actions.length === 0 ? (
           <p className="text-sm text-slate-400">No moderation actions available for this status.</p>
@@ -893,6 +922,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

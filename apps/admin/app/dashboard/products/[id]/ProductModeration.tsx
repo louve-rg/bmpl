@@ -1,14 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../lib/api';
 import { Button } from '../../../../components/ui';
 
-/** Approve / reject / suspend / restore a product (server-guarded by products.moderate). */
+/**
+ * Approve / reject / suspend / restore a product, guarded server-side by
+ * products.moderate. Drawn only for that permission — /me returns the same
+ * grant rows the PermissionsGuard evaluates, so what this screen shows and
+ * what the API enforces cannot disagree. On any doubt (request fails,
+ * field absent) it stays hidden: fail closed.
+ */
 export function ProductModeration({ id, status }: { id: string; status: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [canModerate, setCanModerate] = useState(false);
+
+  useEffect(() => {
+    api
+      .get<{ adminPermissions?: string[] }>('/me')
+      .then((me) => setCanModerate((me.adminPermissions ?? []).includes('products.moderate')))
+      .catch(() => setCanModerate(false));
+  }, []);
 
   async function run(action: 'approve' | 'reject' | 'suspend' | 'restore') {
     let note = '';
@@ -29,16 +43,16 @@ export function ProductModeration({ id, status }: { id: string; status: string }
 
   return (
     <div className="mt-4 flex flex-wrap gap-2">
-      {status === 'PENDING_REVIEW' && (
+      {canModerate && status === 'PENDING_REVIEW' && (
         <>
           <Button variant="primary" onClick={() => run('approve')} disabled={busy}>Approve</Button>
           <Button variant="destructive" onClick={() => run('reject')} disabled={busy}>Reject</Button>
         </>
       )}
-      {status === 'PUBLISHED' && (
+      {canModerate && status === 'PUBLISHED' && (
         <Button variant="destructive" onClick={() => run('suspend')} disabled={busy}>Suspend</Button>
       )}
-      {status === 'SUSPENDED' && (
+      {canModerate && status === 'SUSPENDED' && (
         <Button variant="primary" onClick={() => run('restore')} disabled={busy}>Restore</Button>
       )}
       {(status === 'DRAFT' || status === 'REJECTED' || status === 'ARCHIVED') && (
