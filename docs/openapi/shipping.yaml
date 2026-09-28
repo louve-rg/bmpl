@@ -524,6 +524,128 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /admin/logistics/hubs/{id}/hours:
+    get:
+      tags: [AdminLogistics]
+      summary: Read a hub's weekly opening hours and date exceptions (logistics.read) (BMPL-260/262/263)
+      description: >-
+        Same permission as the hub CRUD above — hub hours are operations
+        configuring a terminal, not a vendor's self-service surface. Both
+        tables ship empty for every hub until an operator enters real,
+        verified hours; no consumer besides the status endpoint below reads
+        these rows yet.
+      parameters: [ { $ref: "#/components/parameters/hubId" } ]
+      responses:
+        "200":
+          description: The weekly pattern and any date-specific overrides
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubHours" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [AdminLogistics]
+      summary: Replace a hub's whole weekly opening-hours pattern (logistics.manage; audited) (BMPL-260/262/263)
+      description: >-
+        Replaces the ENTIRE weekly pattern in one call — a day left out of the
+        submission is deleted, not left as a stale leftover from a previous
+        version. Each day of week (0=Sunday..6=Saturday) may appear at most
+        once. An open day needs an open time strictly earlier than its close
+        time.
+      parameters: [ { $ref: "#/components/parameters/hubId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetHubWeeklyHoursRequest" }
+      responses:
+        "200":
+          description: The updated hours (same shape as GET)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubHours" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/hubs/{id}/hours/exceptions:
+    post:
+      tags: [AdminLogistics]
+      summary: Add (or replace) a date-specific override on a hub's hours (logistics.manage; audited) (BMPL-262/263)
+      description: >-
+        Re-submitting the same date replaces it. THE RULE A CLIENT MUST KNOW
+        BEFORE SENDING: a MODIFIED override requires BOTH openTime and
+        closeTime (open strictly before close); a CLOSED override requires
+        NEITHER. This is enforced twice — by this endpoint's own validation,
+        and by the database CHECK constraint
+        `hub_hours_exceptions_times_match_status` on every writer that is not
+        this endpoint — so a request that gets one time without the other, or
+        any time at all on a CLOSED day, is refused with 400 rather than
+        silently coerced.
+      parameters: [ { $ref: "#/components/parameters/hubId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddHubHoursExceptionRequest" }
+      responses:
+        "201":
+          description: The exception
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubHoursException" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/hubs/{id}/hours/exceptions/{exceptionId}:
+    delete:
+      tags: [AdminLogistics]
+      summary: Remove a date-specific override on a hub's hours (logistics.manage; audited) (BMPL-262/263)
+      description: Falls back to the weekly default for that date, not to unconstrained.
+      parameters:
+        - { $ref: "#/components/parameters/hubId" }
+        - { name: exceptionId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { type: object, properties: { removed: { type: boolean, const: true } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: "Exception not found, or belongs to a different hub" }
+  /admin/logistics/hubs/{id}/hours/status:
+    get:
+      tags: [AdminLogistics]
+      summary: Is this hub open right now, or at a supplied instant (logistics.read) (BMPL-271)
+      description: >-
+        Read-only: answers a question for operations, does not gate or warn
+        about anything on its own — nothing else in the system calls it.
+        `at` defaults to this server's own clock; a supplied `at` is an
+        explicit override for "what about at this time", never a
+        client-trusted substitute for it. THE FIELD A CLIENT MUST NOT READ
+        ALONE: `configured` distinguishes "nothing has been entered for this
+        hub" from "the schedule says open". An unconfigured hub — every real
+        hub in production today — returns `configured: false` and
+        `isOpen: true`, meaning UNCONSTRAINED (nothing blocks it), not
+        open-by-schedule. Reading `isOpen` without `configured` will tell you
+        every hub is open and give no signal that nobody has actually set its
+        hours.
+      parameters:
+        - { $ref: "#/components/parameters/hubId" }
+        - { name: at, in: query, required: false, schema: { type: string, format: date-time }, description: "ISO instant to check instead of the server's own clock" }
+      responses:
+        "200":
+          description: The resolved status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubHoursStatus" }
+        "400": { description: "at is not a valid ISO date-time" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /admin/logistics/routes:
     get:
       tags: [AdminLogistics]
@@ -1613,6 +1735,92 @@ components:
         isActive: { type: boolean }
         isTest: { type: boolean }
       additionalProperties: true
+    HubHoursExceptionStatus:
+      type: string
+      enum: [CLOSED, MODIFIED]
+      description: CLOSED carries no openTime/closeTime; MODIFIED carries both. There is no third value — an absent row already means "unchanged from the weekly default".
+    HubHours:
+      type: object
+      description: A hub's configured weekly opening-hours pattern plus any date-specific overrides (BMPL-260/262/263). No consumer besides the status endpoint reads these rows yet; both tables ship empty for every hub until an operator enters real hours.
+      properties:
+        hubId: { type: string }
+        days:
+          type: array
+          items:
+            type: object
+            properties:
+              dayOfWeek: { type: integer, minimum: 0, maximum: 6, description: 0=Sunday .. 6=Saturday }
+              isClosed: { type: boolean }
+              openTime: { type: [string, "null"], description: "HH:MM, Belize local; null when isClosed" }
+              closeTime: { type: [string, "null"], description: "HH:MM, Belize local; null when isClosed" }
+        exceptions:
+          type: array
+          items: { $ref: "#/components/schemas/HubHoursException" }
+    HubHoursException:
+      type: object
+      description: One date-specific override. MODIFIED always carries both openTime and closeTime; CLOSED always carries neither — see hub_hours_exceptions_times_match_status.
+      properties:
+        id: { type: string }
+        date: { type: string, format: date }
+        status: { $ref: "#/components/schemas/HubHoursExceptionStatus" }
+        openTime: { type: [string, "null"], description: "HH:MM, Belize local; set only when status is MODIFIED" }
+        closeTime: { type: [string, "null"], description: "HH:MM, Belize local; set only when status is MODIFIED" }
+        reason: { type: [string, "null"] }
+    SetHubWeeklyHoursRequest:
+      type: object
+      required: [days]
+      description: Replaces the whole weekly pattern; each day of week may appear at most once. An open day (isClosed false) needs an openTime strictly earlier than closeTime.
+      properties:
+        days:
+          type: array
+          maxItems: 7
+          items:
+            type: object
+            required: [dayOfWeek]
+            properties:
+              dayOfWeek: { type: integer, minimum: 0, maximum: 6, description: 0=Sunday .. 6=Saturday }
+              isClosed: { type: boolean, default: false }
+              openTime: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", description: "HH:MM 24-hour; required with closeTime unless isClosed" }
+              closeTime: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", description: "HH:MM 24-hour; required with openTime unless isClosed" }
+    AddHubHoursExceptionRequest:
+      type: object
+      required: [date, status]
+      description: >-
+        MODIFIED requires BOTH openTime and closeTime (open before close);
+        CLOSED requires NEITHER — rejected with 400 otherwise, and backstopped
+        at the database by hub_hours_exceptions_times_match_status for every
+        writer that is not this endpoint. Re-submitting the same date replaces
+        it.
+      properties:
+        date: { type: string, format: date }
+        status: { $ref: "#/components/schemas/HubHoursExceptionStatus" }
+        openTime: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", description: "Required (with closeTime) when status is MODIFIED; must be absent when CLOSED" }
+        closeTime: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", description: "Required (with openTime) when status is MODIFIED; must be absent when CLOSED" }
+        reason: { type: string, maxLength: 300 }
+    HubHoursStatus:
+      type: object
+      description: >-
+        Resolved is-it-open answer for one hub at one instant (BMPL-271).
+        `configured` distinguishes "nothing entered" from "the schedule says
+        open" — an unconfigured hub returns configured:false and isOpen:true
+        (unconstrained, not open-by-schedule). Read configured alongside
+        isOpen, never isOpen alone.
+      properties:
+        hubId: { type: string }
+        at: { type: string, format: date-time, description: "The instant actually checked — the server's own clock unless the request supplied at" }
+        configured: { type: boolean, description: "false when the hub has zero weekly-hours rows and zero exceptions — isOpen is then true because nothing constrains it, not because a schedule says so" }
+        isOpen: { type: boolean }
+        openTime: { type: [string, "null"], description: "The effective window's open time for this date, if any is configured" }
+        closeTime: { type: [string, "null"], description: "The effective window's close time for this date, if any is configured" }
+        isException: { type: boolean, description: "True when a date-specific exception decided this, not the weekly default" }
+        reason: { type: [string, "null"] }
+        nextOpen:
+          type: [object, "null"]
+          description: Only computed when isOpen is false; null on both times when the next open date is unconstrained (open all day, nothing specifically configured)
+          properties:
+            date: { type: string, format: date }
+            openTime: { type: [string, "null"] }
+            closeTime: { type: [string, "null"] }
     RouteInput:
       type: object
       properties:
