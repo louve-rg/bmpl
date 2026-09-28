@@ -438,10 +438,22 @@ export class ShipmentDispatchService {
   /**
    * An administrator assigns a courier leg by hand.
    *
-   * This is THE production path: `dispatchAutomatic` is deliberately OFF in
-   * production, so `dispatchLeg` always skips and the dispatch-exhausted alert's
-   * "Assign one by hand" was, until this method, an instruction with no endpoint
-   * behind it. Mirrors DispatchService.assignInternal for deliveries: the same
+   * Needed regardless of `dispatchAutomatic`'s current value, not only while it
+   * is off: even with automatic dispatch on, a leg that exhausts its offer
+   * budget (EXHAUSTED) or that automatic simply cannot fill still needs a human
+   * able to close the gap — this method is what the dispatch-exhausted alert's
+   * "Assign one by hand" points at.
+   *
+   * IT WAS ALSO, ONCE, THE ONLY PATH THAT EVER RAN: `dispatchAutomatic` was off
+   * in production when this method was first written, so `dispatchLeg` always
+   * skipped and this was every leg's only route to a driver. THAT IS NO LONGER
+   * TRUE — the owner turned it on in production on 2026-09-13. Read
+   * `PlatformSetting.dispatchAutomatic` (`GET admin/ops/settings`) for the
+   * current value rather than trusting a claim in this comment about it, which
+   * will itself go stale the next time the setting changes. (Noted 2026-09-28,
+   * BMPL-292 — this paragraph was the stale claim being corrected.)
+   *
+   * Mirrors DispatchService.assignInternal for deliveries: the same
    * state-machine vocabulary (courierStatus reuses DeliveryStatus, so
    * DELIVERY_ACTIONS.ASSIGN/REASSIGN apply unchanged), the same assignment-time
    * eligibility re-check, the same append-only offer history, the same
