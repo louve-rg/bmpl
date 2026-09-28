@@ -19,11 +19,13 @@ name: BMPL-188 — mirror pre-lockout MinIO image to GHCR (one-time)
 # recurring sync: quay.io is not the source of truth for anything after
 # this runs, this repo's GHCR package is.
 #
-# Digest is verified twice: once against the known-good source digest right
-# after `docker load`, and once more against a genuinely fresh pull of the
-# pushed package (local tags removed first, so the second pull cannot be
-# served from anything cached earlier in this same job). Either mismatch
-# fails the job — it does not warn and continue.
+# Provenance of the staged bytes is checked by SHA-256 of the archive itself
+# (below) — `docker load` does not populate RepoDigests, so a manifest-digest
+# comparison isn't meaningful until AFTER a real registry round-trip. That
+# round-trip is the actual digest gate: once pushed, this job removes every
+# local tag and does a genuinely fresh pull of the pushed package, then
+# compares ITS digest against the known-good source digest. A mismatch fails
+# the job — it does not warn and continue.
 
 on:
   workflow_dispatch:
@@ -61,16 +63,21 @@ jobs:
         run: sha256sum -c "${STAGING_ASSET}.sha256"
 
       - name: Load image
+        id: load
         run: |
           gunzip -k "$STAGING_ASSET"
-          docker load -i "${STAGING_ASSET%.gz}"
-
-      - name: Verify loaded image matches the known-good source digest
-        run: |
-          LOADED=$(docker image inspect quay.io/minio/minio:${DEST_TAG} --format '{{index .RepoDigests 0}}' | cut -d'@' -f2)
-          echo "loaded:   $LOADED"
-          echo "expected: $SOURCE_DIGEST"
-          test "$LOADED" = "$SOURCE_DIGEST" || { echo "::error::staged archive digest does not match the known-good source digest"; exit 1; }
+          docker load -i "${STAGING_ASSET%.gz}" | tee load.log
+          # `docker save` was done BY DIGEST on the staging machine, so the tar
+          # carries no RepoTags — `docker load` restores an untagged image, and
+          # RepoDigests is never populated by `load` regardless (that field is
+          # only set by an actual registry pull/push round-trip, which is
+          # exactly why the meaningful digest check below happens AFTER the
+          # push, not here). Tag by the image ID `load` itself reports, not a
+          # name that may not exist.
+          LOADED_ID=$(grep -oE 'sha256:[0-9a-f]{64}' load.log | head -1)
+          test -n "$LOADED_ID" || { echo "::error::could not parse an image id out of docker load's output"; exit 1; }
+          echo "loaded image id: $LOADED_ID"
+          echo "id=$LOADED_ID" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -81,7 +88,7 @@ jobs:
 
       - name: Tag and push mirror
         run: |
-          docker tag quay.io/minio/minio:${DEST_TAG} ${DEST_IMAGE}:${DEST_TAG}
+          docker tag "${{ steps.load.outputs.id }}" ${DEST_IMAGE}:${DEST_TAG}
           docker push ${DEST_IMAGE}:${DEST_TAG}
 
       - name: Prove the mirror is genuinely pullable, and its digest matches the source
