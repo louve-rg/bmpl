@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
   "buildCommand": "cd ../.. && pnpm turbo run build --filter=@bmpl/web",
-  "ignoreCommand": "cd ../.. && turbo ls @bmpl/web >/dev/null 2>&1 && turbo query affected --base=$VERCEL_GIT_PREVIOUS_SHA --packages @bmpl/web --exit-code",
+  "ignoreCommand": "cd ../.. && turbo ls @bmpl/web >/dev/null 2>&1 && turbo query affected --base=\"$VERCEL_GIT_PREVIOUS_SHA\" --packages @bmpl/web --exit-code; code=$?; if [ \"$code\" -eq 0 ]; then exit 0; else exit 1; fi",
   "outputDirectory": ".next",
   "github": { "silent": true }
 }
