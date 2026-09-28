@@ -331,6 +331,84 @@ describe('cancelling before anybody has done any work', () => {
   });
 });
 
+describe('cancelling after delivery (BMPL-300)', () => {
+  /**
+   * Books a local DIRECT parcel, then drives its single leg all the way
+   * through the real staff machinery (start -> handoff) so the shipment
+   * reaches DELIVERED exactly the way production does — and
+   * settleShipment() fires for real, the same way it fires in production.
+   *
+   * The PIN is read straight from the database rather than through
+   * GET .../handoff-pin: that endpoint deliberately refuses to reveal a
+   * DIRECT/LAST_MILE leg's code to staff at all (it belongs to the
+   * recipient, not a desk) — same pattern as carrier-org-access's own
+   * `pinOf` helper.
+   */
+  async function deliverDirectShipment() {
+    await fund(customerId, 10_000);
+    const r = await post(customer, 'shipping', { ...localParcel(), payWithWallet: true });
+    expect(r.status).toBe(201);
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+
+    expect((await post(admin, `admin/logistics/legs/${leg.id}/start`)).status).toBe(201);
+    const { handoffPin } = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id }, select: { handoffPin: true } });
+    const handoff = await post(admin, `admin/logistics/legs/${leg.id}/handoff`, {
+      pin: handoffPin,
+      receivedByName: 'Recipient Sentinelname',
+    });
+    expect(handoff.status).toBe(201);
+    return r.body.id as string;
+  }
+
+  it('refuses a customer cancelling a shipment that already delivered and settled — the money stays where it was paid out', async () => {
+    const shipmentId = await deliverDirectShipment();
+    const settled = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, include: { payment: true } });
+    expect(settled.status).toBe('DELIVERED');
+    expect(settled.payment!.status).toBe('SETTLED');
+
+    const cancel = await post(customer, `shipping/${shipmentId}/cancel`, { reason: 'Too late now.' });
+    expect(cancel.status).toBe(400);
+
+    // The record was NOT falsified: still DELIVERED, still SETTLED, never cancelled.
+    const after = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, include: { payment: true } });
+    expect(after.status).toBe('DELIVERED');
+    expect(after.cancelledAt).toBeNull();
+    expect(after.payment!.status).toBe('SETTLED');
+  });
+
+  it('refuses a STAFF cancellation of the same delivered, settled shipment — nothing about being staff makes it correct to relabel it', async () => {
+    const shipmentId = await deliverDirectShipment();
+
+    const cancel = await request(ctx.server)
+      .post(`/api/admin/logistics/shipments/${shipmentId}/cancel`)
+      .set('Cookie', admin)
+      .send({ reason: 'Ops trying to undo a delivered shipment.' });
+    expect(cancel.status).toBe(400);
+
+    const after = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+    expect(after.status).toBe('DELIVERED');
+    expect(after.cancelledAt).toBeNull();
+  });
+
+  it('does not touch a shipment that has not delivered yet — the pre-custody cancellation path this guard must not break', async () => {
+    // Same booking, but the leg is left exactly as booking leaves it: READY,
+    // nobody has started it. This is the path real customers rely on, and it
+    // must keep working exactly as the existing "cancelling before anybody
+    // has done any work" describe block above already proves in detail.
+    await fund(customerId, 10_000);
+    const r = await post(customer, 'shipping', { ...localParcel(), payWithWallet: true });
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+    expect(leg.status).toBe('READY');
+
+    const cancel = await post(customer, `shipping/${r.body.id}/cancel`, { reason: 'Changed my mind before it moved.' });
+    expect(cancel.status).toBe(201);
+
+    const after = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: r.body.id } });
+    expect(after.status).toBe('CANCELLED');
+    expect(after.cancelledAt).not.toBeNull();
+  });
+});
+
 describe('test money stays test money', () => {
   it('a shipment paid with test credit posts test-marked ledger movements', async () => {
     await post(admin, 'admin/users/test-flag', { userId: customerId, isTest: true, reason: 'Isolation test.' });

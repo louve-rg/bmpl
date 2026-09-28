@@ -1313,7 +1313,7 @@ export class ShipmentService {
     // transaction keyed by a reference unique to the shipment, so a retry is
     // absorbed by the ledger rather than needing this one to succeed or fail
     // as a unit with the leg transition.
-    if (result.status === 'DELIVERED' || result.status === 'AWAITING_COLLECTION') {
+    if (this.isDelivered(result.status)) {
       await this.settlement.settleShipment(result.shipmentId, actor.userId);
     }
 
@@ -1350,6 +1350,19 @@ export class ShipmentService {
 
   private statusFrom(legs: Array<{ sequence: number; kind: string; mode: string; status: string }>, endsAtHub: boolean): ShipmentStatus {
     return deriveShipmentStatus(legs as LegView[], endsAtHub) as ShipmentStatus;
+  }
+
+  /**
+   * BMPL-300: true once the journey has actually finished — the same
+   * predicate `transition()` uses to decide whether to call
+   * `settlement.settleShipment()`, reused (not re-derived) by `cancel()` so
+   * the two can never disagree. `status` here is always what `recompute()`
+   * last wrote from `deriveShipmentStatus()` — the schema's own single
+   * source for this fact ("never set independently") — never a second,
+   * hand-written list of terminal statuses.
+   */
+  private isDelivered(status: ShipmentStatus): boolean {
+    return status === 'DELIVERED' || status === 'AWAITING_COLLECTION';
   }
 
   private async appendCustody(
@@ -1453,7 +1466,11 @@ export class ShipmentService {
   /**
    * Cancel what has not happened yet. Completed legs stay completed — a parcel
    * that genuinely flew to San Pedro did fly to San Pedro, and rewriting that to
-   * tidy up a cancellation would put a lie in the custody chain.
+   * tidy up a cancellation would put a lie in the custody chain. A shipment
+   * that has already reached DELIVERED/AWAITING_COLLECTION is refused
+   * outright (BMPL-300) — by then every leg finished and it has already been
+   * settled, so "cancelling" it would falsify a delivered, paid shipment's
+   * own record rather than stop anything.
    *
    * The DRIVER's half of every live courier job closes with the shipment's
    * half. A leg row carries two views of one fact — `status` for the shipment,
@@ -1471,6 +1488,16 @@ export class ShipmentService {
       if (!s) throw new NotFoundException('Shipment not found.');
       if (!actor.isStaff && s.customerUserId !== actor.userId) throw new NotFoundException('Shipment not found.');
       if (s.cancelledAt) throw new BadRequestException('That shipment is already cancelled.');
+      // BMPL-300: a shipment that has already delivered has already been
+      // settled (see `transition()` below) — drivers and the platform were
+      // already paid out of escrow. Refusing here for staff too: nothing
+      // about being staff makes it correct to relabel a delivered, paid
+      // shipment as cancelled. `s.status` is `isDelivered`'s only input, and
+      // it is always what the last `recompute()` wrote — this can never
+      // disagree with the fact that decided whether settlement already ran.
+      if (this.isDelivered(s.status)) {
+        throw new BadRequestException('This shipment has already been delivered and cannot be cancelled.');
+      }
       // An exception on a leg that had STARTED is a moving shipment with a
       // problem, not a stationary one: the parcel is in somebody's hands and a
       // self-service cancellation would release the full escrow while it is.
