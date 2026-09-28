@@ -1,3 +1,37 @@
+# `name:` pins the Compose project explicitly (BMPL-297). Without it, Compose
+# names the project after the invoking directory, and this repo's multiple
+# git worktrees (bmpl-api, bmpl-qa, bmpl-web, ...) each have a DIFFERENT
+# directory name — so the SAME `docker compose up`, run from two different
+# worktrees, silently created two different sets of named volumes even
+# though every `container_name` below is identical. Whichever set happened
+# to be attached when a container was last (re)created is "the" data; the
+# others sit orphaned on disk. Pinning the project name means every
+# worktree's compose invocation always resolves to the SAME volumes, so a
+# recreate from any worktree reattaches to the one everyone already depends
+# on instead of forking a new one. This already happened once — see
+# docs/PROJECT_STATUS.md.
+#
+# THIS INFRA IS SHARED ON PURPOSE ACROSS EVERY BMPL WORKTREE ON THIS HOST —
+# not a coincidence, and not something to "fix" by giving each worktree its
+# own isolated containers. Every worktree's `.env` points at the same
+# Postgres/Redis/MinIO by design, the same way a team would share one dev
+# database: a real admin action or a piece of platform config here is meant
+# to be visible to every worktree, not scoped to whichever one made it (see
+# CLAUDE.md and docs/PROJECT_STATUS.md). The one place this project
+# deliberately does the OPPOSITE is the test database, which is isolated
+# PER WORKTREE (`bmpl_test_<worktree>`, not this file — see CLAUDE.md
+# "Running the integration suite locally") because concurrent test runs
+# truncating one shared database caused false-green results. Both are
+# intentional; neither is a bug in the other.
+#
+# `docker compose down` (or a raw `docker rm`) run from ANY worktree stops
+# ALL of this for EVERY worktree at once — whoever else is mid-test sees
+# failing tests, not an outage. `pnpm infra:down` runs through
+# scripts/infra-down-guard.mjs, which asks for confirmation before doing
+# that. `pnpm infra:up` is intentionally NOT gated — it is idempotent and
+# is chained into `pnpm setup`, which runs non-interactively.
+name: bmpl
+
 services:
   postgres:
     image: postgres:16-alpine

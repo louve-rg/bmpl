@@ -155,7 +155,7 @@ where Docker is available.
 | `pnpm db:migrate`     | Create/apply a dev migration                    |
 | `pnpm db:studio`      | Open Prisma Studio                              |
 | `pnpm db:reset`       | Drop + recreate + re-seed the dev database      |
-| `pnpm infra:up/down`  | Start/stop Postgres + Redis + MinIO             |
+| `pnpm infra:up/down`  | Start/stop Postgres + Redis + MinIO — **shared across every worktree on this machine, not just this one**; `infra:down` asks for confirmation (`-- --yes` to skip) |
 
 The **integration suite** — **691 tests across 55 spec files**, covering auth,
 marketplace, checkout, wallet and settlement, dispatch, shipping, jobs, real
