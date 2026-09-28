@@ -77,6 +77,26 @@ jobs:
       - name: Build API
         run: pnpm --filter @bmpl/api build
 
+      # BMPL-325: a variable genuinely configured on Vercel but never declared
+      # in turbo.json is invisible to the Vercel build (turbo's own strict env
+      # mode filters it out before the app ever sees it) — the exact shape
+      # that left ADMIN_PUBLIC_API_URL unset for 63 days and broke every
+      # admin build for 90 commits (BMPL-224/BMPL-323), with nothing here
+      # catching it because "Build admin"/"Build web" below run the app's own
+      # `build` script directly, bypassing turbo (and its env filtering)
+      # entirely. `eslint-plugin-turbo`'s `no-undeclared-env-vars` rule
+      # statically finds every `process.env.X` read in apps/admin and
+      # apps/web and checks it against turbo.json, so this catches the class
+      # of bug before a build ever runs, on every PR, without needing Vercel
+      # account access (which GitHub Actions has no route to; see
+      # eslint.turbo-env-vars.config.mjs for the two known exceptions and why
+      # each is real, not guessed). It does not, and cannot, catch a variable
+      # with a fallback that degrades quietly instead of throwing — no static
+      # check can fail on a value that's merely wrong, only on one that's
+      # provably undeclared.
+      - name: Undeclared env vars in apps/admin and apps/web (BMPL-325)
+        run: pnpm run lint:turbo-env-vars
+
       - name: Build web
         run: pnpm --filter @bmpl/web build
 
