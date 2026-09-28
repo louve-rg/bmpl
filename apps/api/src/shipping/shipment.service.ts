@@ -839,7 +839,24 @@ export class ShipmentService {
     };
   }
 
-  /** Terminals expecting a parcel, for the hub handoff desk. */
+  /**
+   * Terminals expecting a parcel, for the hub handoff desk.
+   *
+   * BMPL-247: this used to also select and return the courier's personal
+   * application phone (`DriverProfile.phone`) — visible to every holder of
+   * `logistics.read`, a platform-wide, cross-hub permission, with no scoping
+   * to "staff at this terminal" and no narrower gate of its own. The owner's
+   * ruling: that number is sensitive identity data and stays private by
+   * default; least privilege applies to whatever staff access legitimately
+   * remains. `broughtBy` (display name) already identifies who is bringing
+   * the parcel — the same minimum-operational-identity line this codebase
+   * already draws for a customer's own tracking view (BMPL-180,
+   * `courierSummary()` below) applies here too, for a different audience.
+   * The desk display never used the phone as a tel: link or otherwise acted
+   * on it — plain text only — so nothing operational is lost by not
+   * selecting it in the first place; the fix belongs at the query, not at
+   * hiding a returned field in the UI.
+   */
   async expectedAtHub(hubId: string) {
     const legs = await this.prisma.shipmentLeg.findMany({
       where: {
@@ -851,7 +868,7 @@ export class ShipmentService {
       include: {
         shipment: { select: { reference: true, description: true, pieces: true, destinationName: true } },
         originHub: { select: { name: true } },
-        assignedDriver: { select: { displayName: true, phone: true } },
+        assignedDriver: { select: { displayName: true } },
       },
     });
     return legs.map((l) => ({
@@ -860,7 +877,6 @@ export class ShipmentService {
       kind: l.kind,
       // Who is bringing it: a BML driver on a first mile, a carrier on a flight.
       broughtBy: l.assignedDriver?.displayName ?? l.carrierName ?? 'Carrier',
-      contactPhone: l.assignedDriver?.phone ?? null,
       from: l.originHub?.name ?? 'Door collection',
       parcel: l.shipment.description || `${l.shipment.pieces} ${l.shipment.pieces === 1 ? 'parcel' : 'parcels'}`,
       // Whether it is actually here yet, or still on its way.
