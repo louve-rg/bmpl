@@ -32,6 +32,29 @@ interface Actor {
   sessionId?: string | null;
 }
 
+/**
+ * Same convention route-planner.ts already uses for comparing a free-text
+ * place name against another (trim + case-fold) — reused here rather than
+ * invented, so a driver's declared "San Pedro" and an address's "san pedro "
+ * are the same place for BOTH the shipment planner and dispatch.
+ *
+ * KNOWN LIMITATION, stated rather than silently absorbed (BMPL-194): this is
+ * exact-match-after-normalizing, not fuzzy matching. "San Pedro" and "San
+ * Pedro Town" are two different strings and will NOT match each other, even
+ * though a human reads them as the same place. Building fuzzy matching would
+ * mean this code deciding which spellings count as "the same place" — that
+ * is inventing geography by the back door, the exact thing root CLAUDE.md §5
+ * forbids. The real fix is a driver and an address agreeing on one spelling,
+ * which is a data-entry/UX question, not a matching-algorithm one. Until
+ * then: a driver whose declared spelling drifts from how addresses are
+ * typed silently stops being offered work there, and the system looks like
+ * it is working the whole time. Nothing today surfaces that drift to anyone
+ * — it is a real, open gap, not a false claim of correctness.
+ */
+function sameCity(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
 @Injectable()
 export class DriverService {
   constructor(
@@ -398,11 +421,11 @@ export class DriverService {
     driverProfileId: string,
     district: string,
     vehicleId?: string,
-    opts: { isTestDelivery?: boolean } = {},
+    opts: { isTestDelivery?: boolean; city?: string | null } = {},
   ) {
     const p = await this.prisma.driverProfile.findUnique({
       where: { id: driverProfileId },
-      include: { vehicles: true, serviceAreas: true },
+      include: { vehicles: true, serviceAreas: true, serviceCities: true },
     });
     if (!p) throw new NotFoundException('Driver not found.');
     const status = await this.roleStatus(p.userId);
@@ -419,6 +442,36 @@ export class DriverService {
     if (isExpiredOrMissing(p.licenceExpiry)) reasons.push("driver's licence expired");
     const servesDistrict = p.serviceAreas.some((s) => s.isActive && s.district === district);
     if (!servesDistrict) reasons.push(`driver does not serve ${String(district).replace('_', ' ')}`);
+    // BMPL-194: a district a driver serves may be NARROWED to specific
+    // towns/cities (DriverServiceCity — BMPL-176, declared but never checked
+    // here until now). No active narrowing rows for this district means the
+    // old meaning still holds: the driver serves the whole district. Rows
+    // present means ONLY those places, so a San Pedro-only courier is no
+    // longer offered a Belize City job just because both share a district.
+    //
+    // DELIBERATE CHOICE: an ABSENT destination city (opts.city null/empty) is
+    // treated as UNCONSTRAINED, not as a non-match — the narrowing check is
+    // skipped entirely rather than failing every narrowed driver. The
+    // alternative (no city means nothing can match) would silently shrink the
+    // pool exactly for the drivers who bothered to configure their areas,
+    // triggered by a missing field on the OTHER side of the match. Narrowing
+    // exists to give a driver MORE targeted work, so it must never give them
+    // LESS because of somebody else's incomplete data.
+    //
+    // THE SAME ANSWER, THREE PLACES: no configured hub hours means
+    // unconstrained, not closed (the owner's own ruling,
+    // shipment-dispatch.service.ts). No declared DriverServiceCity rows means
+    // the whole district, not zero places (BMPL-176, above). No supplied
+    // destination city means no narrowing, not a non-match (here). Absence
+    // means unconstrained, every time — one principle applied three times,
+    // not three separate rules that happen to agree today.
+    const city = opts.city?.trim() || null;
+    if (servesDistrict && city) {
+      const narrowing = p.serviceCities.filter((c) => c.isActive && c.district === district);
+      if (narrowing.length > 0 && !narrowing.some((c) => sameCity(c.city, city))) {
+        reasons.push(`driver does not serve ${city} within ${String(district).replace('_', ' ')}`);
+      }
+    }
     const usableVehicles = p.vehicles.filter(
       (v) => v.approvalStatus === 'APPROVED' && v.isActive && !isExpiredOrMissing(v.registrationExpiry) && !isExpiredOrMissing(v.insuranceExpiry),
     );
@@ -454,13 +507,37 @@ export class DriverService {
    * rule. Both exist deliberately — this one keeps the requester out of sight,
    * that one refuses the write no matter who asks.
    */
-  async eligibleDriversForDistrict(district: string, opts: { isTest?: boolean; excludeUserId?: string | null } = {}) {
+  async eligibleDriversForDistrict(
+    district: string,
+    opts: { isTest?: boolean; excludeUserId?: string | null; city?: string | null } = {},
+  ) {
+    // Trimmed, same as every free-text place comparison in this codebase
+    // (route-planner.ts). An empty/whitespace-only value is the same as no
+    // city at all — nothing to compare against.
+    const city = opts.city?.trim() || null;
     const candidates = await this.prisma.driverProfile.findMany({
       where: {
         availability: 'ONLINE',
         isActive: true,
         isTest: opts.isTest ?? false,
         serviceAreas: { some: { district: district as never, isActive: true } },
+        // BMPL-194: same narrowing rule as assignmentEligibility, applied to
+        // the pool query instead of a single candidate — including the same
+        // deliberate choice about an absent city (see the comment there):
+        // unconstrained, not a non-match, so a missing destination city never
+        // silently shrinks the pool of narrowed drivers.
+        ...(city
+          ? {
+              OR: [
+                { serviceCities: { none: { district: district as never, isActive: true } } },
+                {
+                  serviceCities: {
+                    some: { district: district as never, isActive: true, city: { equals: city, mode: 'insensitive' } },
+                  },
+                },
+              ],
+            }
+          : {}),
         ...(opts.excludeUserId ? { userId: { not: opts.excludeUserId } } : {}),
       },
       include: {

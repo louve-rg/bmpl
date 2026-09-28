@@ -110,6 +110,7 @@ export class DispatchService {
       if (district) {
         const e = await this.drivers.assignmentEligibility(d.assignedDriverProfileId, district, d.assignedVehicleId ?? undefined, {
           isTestDelivery: d.vendorOrder.order.isTest,
+          city: d.vendorOrder.order.addresses[0]?.city ?? null,
         });
         currentDriverEligibility = { eligible: e.eligible, reasons: e.reasons };
       }
@@ -143,6 +144,7 @@ export class DispatchService {
     return this.drivers.eligibleDriversForDistrict(district, {
       isTest: d.vendorOrder.order.isTest,
       excludeUserId: d.vendorOrder.order.userId,
+      city: this.cityOf(d),
     });
   }
 
@@ -248,6 +250,7 @@ export class DispatchService {
 
     const e = await this.drivers.assignmentEligibility(driverProfileId, district, vehicleId, {
       isTestDelivery: current.vendorOrder.order.isTest,
+      city: this.cityOf(current),
     });
     if (!e.eligible) throw new BadRequestException(`Driver is not eligible: ${e.reasons.join('; ')}.`);
 
@@ -346,5 +349,11 @@ export class DispatchService {
     const district = d.vendorOrder.order.addresses[0]?.district;
     if (!district) throw new BadRequestException('This delivery has no destination district; cannot assign.');
     return district;
+  }
+
+  /** Same address as districtOrThrow, the city half. Optional — a missing city
+   *  falls back to district-only eligibility, not a thrown error. */
+  private cityOf(d: { vendorOrder: { order: { addresses: Array<{ city?: string | null }> } } }): string | null {
+    return d.vendorOrder.order.addresses[0]?.city ?? null;
   }
 }
