@@ -4808,6 +4808,17 @@ model Shipment {
 /// consumer surface is wider than hub hours (FIRST_MILE and LAST_MILE
 /// symmetrically, plus DIRECT needing both parties checked at two
 /// different instants within one leg) and is its own card.
+///
+/// OVERNIGHT WINDOWS ARE STORABLE (endTime < startTime, e.g. 22:00-02:00) —
+/// only a zero-duration window is rejected, deliberately not startTime <
+/// endTime, the same shape Michael already refused for hub exceptions on
+/// BMPL-263. Permitting storage OBLIGATES WHOEVER BUILDS THE FUTURE
+/// CONSUMER: the first membership check written against this table will
+/// reach for `startTime <= t && t < endTime`, and every overnight row will
+/// silently never match. Decide explicitly how to interpret one — do not
+/// assume a simple range comparison. Same warning repeated in the
+/// migration (20261104170400_shipment_availability_windows) and in
+/// packages/validation/src/shipping.ts.
 model ShipmentAvailabilityWindow {
   id         String                  @id @default(cuid())
   shipmentId String
@@ -4815,6 +4826,9 @@ model ShipmentAvailabilityWindow {
   role       AvailabilityWindowRole
   /// "HH:MM", 24-hour — same format and same shared schema
   /// (packages/validation's timeOfDaySchema) as hub/vendor opening hours.
+  /// May describe an overnight window (endTime < startTime) — see the
+  /// model's own doc comment above before writing anything that compares
+  /// these two fields.
   startTime  String
   endTime    String
   createdAt  DateTime                @default(now())

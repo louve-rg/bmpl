@@ -25,9 +25,9 @@
 -- role SENDER governs the FIRST_MILE pickup attempt; role RECIPIENT governs
 -- the LAST_MILE delivery attempt. Multiple rows per role are expected and
 -- normal (the "9-12, 2-5" case) — nothing here deduplicates or merges
--- adjacent/overlapping ranges; that validation, same as start-before-end,
--- lives at the API layer (packages/validation) with this CHECK as the
--- backstop, the same layering BMPL-263 established for hub hours.
+-- adjacent/overlapping ranges, at this layer or the API's; that is
+-- deliberately out of scope for BMPL-285, which asked for start/end
+-- validation only.
 --
 -- SHIPS EMPTY. No shipment gets a window, and nothing backfills one — this
 -- is new, additive, optional data, the same "a new table changes nothing
@@ -62,11 +62,33 @@ ALTER TABLE "shipment_availability_windows" ADD CONSTRAINT "shipment_availabilit
 -- timeOfDaySchema hub/vendor hours use), so plain text comparison sorts
 -- identically to clock order — the same reasoning that lets hub hours'
 -- resolver compare these strings directly without parsing them into a time
--- type. Start-before-end is the ONLY thing this constraint enforces:
--- overlap between multiple rows of the same role is deliberately NOT a
--- database concern, same scope the API validation keeps to (BMPL-285).
-ALTER TABLE "shipment_availability_windows" ADD CONSTRAINT "shipment_availability_windows_start_before_end"
-    CHECK ("startTime" < "endTime");
+-- type.
+--
+-- DELIBERATELY "!=", NOT "<". A strict startTime < endTime CHECK would
+-- permanently forbid an overnight window (22:00-02:00) — the EXACT shape
+-- Michael already refused for hub_hours_exceptions on BMPL-263, for the
+-- same reason: it would convert "not supported yet" into "structurally
+-- impossible", and there is no evidence anywhere in this codebase that an
+-- overnight pickup/delivery attempt is actually excluded — no
+-- delivery-hours concept exists, DriverAvailability has no time-of-day
+-- axis, and the dispatch sweeper runs on a flat interval with no time
+-- gating at all. "!=" only forbids the one genuinely meaningless input in
+-- either direction: a zero-duration window.
+--
+-- PERMITTING STORAGE OBLIGATES THE FUTURE CONSUMER. There is no consumer
+-- yet (BMPL-285 scope), which is exactly why this has to be said HERE,
+-- before one exists: the first membership check written against this table
+-- will reach for `startTime <= t && t < endTime`, and EVERY OVERNIGHT ROW
+-- WILL SILENTLY NEVER MATCH — reintroducing hub-hours' own documented
+-- limitation in a new place, by someone who never knew they were choosing
+-- it. Whoever builds that consumer must decide EXPLICITLY how an overnight
+-- window (endTime < startTime) is interpreted, not assume a simple range
+-- comparison. Same warning is repeated where the window is validated
+-- (packages/validation/src/shipping.ts) and where the model is declared
+-- (schema.prisma), so it is waiting at every point a future author might
+-- reach for this table without reading the others first.
+ALTER TABLE "shipment_availability_windows" ADD CONSTRAINT "shipment_availability_windows_not_zero_duration"
+    CHECK ("startTime" != "endTime");
 
 -- The sender replaced their shipment's availability windows — one audit
 -- action per replace-all write, the same "whole set, one action" shape

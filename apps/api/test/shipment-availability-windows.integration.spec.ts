@@ -186,21 +186,28 @@ describe('shipment availability windows — storage and write surface (BMPL-285)
     expect(audit!.actorId).toBe(sender.userId);
   });
 
-  it('rejects end-before-start and end-equals-start before either reaches the database', async () => {
+  it('rejects only a zero-duration window; an overnight window (end before start) is valid', async () => {
     const sender = await fundedSender();
     const shipment = await book(sender.cookies, doorToDoor());
 
-    const endBeforeStart = await put(sender.cookies, `shipping/${shipment.id}/availability-windows`, {
-      windows: [{ role: 'SENDER', startTime: '14:00', endTime: '09:00' }],
-    });
-    expect(endBeforeStart.status).toBe(400);
-
+    // Zero duration is the only thing start/end validation forbids.
     const equal = await put(sender.cookies, `shipping/${shipment.id}/availability-windows`, {
       windows: [{ role: 'SENDER', startTime: '09:00', endTime: '09:00' }],
     });
     expect(equal.status).toBe(400);
-
     expect(await ctx.prisma.shipmentAvailabilityWindow.count({ where: { shipmentId: shipment.id } })).toBe(0);
+
+    // Overnight (endTime < startTime) is a real, storable window — the same
+    // shape Michael already refused to forbid for hub exceptions on
+    // BMPL-263. A strict "before" rule would have made a night-shift
+    // recipient's 22:00-02:00 unstorable, not merely unsupported.
+    const overnight = await put(sender.cookies, `shipping/${shipment.id}/availability-windows`, {
+      windows: [{ role: 'SENDER', startTime: '22:00', endTime: '02:00' }],
+    });
+    expect(overnight.status).toBe(200);
+    expect(overnight.body.availabilityWindows).toEqual([
+      expect.objectContaining({ role: 'SENDER', startTime: '22:00', endTime: '02:00' }),
+    ]);
   });
 
   it('refuses a role with no leg for it to govern', async () => {

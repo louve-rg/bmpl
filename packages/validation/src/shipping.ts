@@ -295,6 +295,20 @@ export type CreateShipmentInput = QuoteShape;
  * BMPL-284/285: one time range for one door-touching attempt. Deliberately
  * not a weekly pattern — a shipment is a one-time event, so there is no
  * day-of-week to attach this to, only the range itself.
+ *
+ * startTime !== endTime, DELIBERATELY not startTime < endTime: a strict
+ * "before" rule would permanently forbid an overnight window (22:00-02:00)
+ * — the same shape Michael already refused for hub exceptions on BMPL-263,
+ * because there is no evidence a night-shift sender or recipient is an
+ * invalid case, only that nothing consumes this table yet. Only a
+ * zero-duration window is rejected.
+ *
+ * PERMITTING STORAGE OBLIGATES WHOEVER BUILDS THE CONSUMER: an overnight
+ * row (endTime < startTime) IS storable, and a future membership check
+ * that reaches for `startTime <= t && t < endTime` will silently never
+ * match one. Whoever builds that consumer must decide explicitly how to
+ * interpret it — same warning repeated in the migration
+ * (20261104170400_shipment_availability_windows) and on the Prisma model.
  */
 export const availabilityWindowRoleSchema = z.enum(AVAILABILITY_WINDOW_ROLES);
 
@@ -304,8 +318,8 @@ const availabilityWindowInputSchema = z
     startTime: timeOfDaySchema,
     endTime: timeOfDaySchema,
   })
-  .refine((w) => w.startTime < w.endTime, {
-    message: 'A window needs a start time earlier than its end time.',
+  .refine((w) => w.startTime !== w.endTime, {
+    message: 'A window needs a start time different from its end time.',
     path: ['endTime'],
   });
 
