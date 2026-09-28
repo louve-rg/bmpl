@@ -307,6 +307,17 @@ enum AuditAction {
   DELIVERY_AUTO_ASSIGNED
   DELIVERY_OFFER_EXPIRED
   DELIVERY_DISPATCH_EXHAUSTED
+  /// BMPL-177 (business half): a marketplace delivery's projected pickup
+  /// instant fell outside the vendor's configured opening hours, so
+  /// automatic dispatch was deferred rather than offered. Written on the
+  /// TRANSITION into deferred only (dispatch() reads the most recent
+  /// DELIVERY_AUTO_ASSIGNED/DELIVERY_DISPATCH_DEFERRED row for the
+  /// delivery before writing), never once per 20s sweeper tick -- see
+  /// DispatchEngineService.recordDeferralIfNew. Same operational shape as
+  /// SHIPMENT_LEG_DISPATCH_DEFERRED (BMPL-275/287); a separate value
+  /// because the dedup lookup is keyed per-table (deliveryId vs legId) and
+  /// sharing one action would make that lookup ambiguous between them.
+  DELIVERY_DISPATCH_DEFERRED
   // ---- Profile pictures ----
   AVATAR_SUBMITTED
   AVATAR_AUTO_APPROVED

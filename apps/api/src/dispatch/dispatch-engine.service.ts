@@ -9,6 +9,7 @@ import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { DriverService } from '../driver/driver.service';
+import { VendorService } from '../vendor/vendor.service';
 import { DispatchService } from './dispatch.service';
 import { DeliveryCoreService } from './delivery-core.service';
 
@@ -26,7 +27,16 @@ export type DispatchOutcome =
   // district, or the only driver in range being the customer themselves.
   | { result: 'NO_CANDIDATES'; reason?: string }
   | { result: 'EXHAUSTED' }
-  | { result: 'SKIPPED'; reason: string };
+  | { result: 'SKIPPED'; reason: string }
+  /**
+   * BMPL-177 (business half): a delivery whose projected pickup would reach
+   * the vendor while it is outside its configured opening hours. Distinct
+   * from SKIPPED — same reasoning ShipmentDispatchService's own DEFERRED
+   * comment gives for a hub — so a caller checking only for ASSIGNED cannot
+   * mistake "still waiting for a driver" for "waiting for the vendor to
+   * open".
+   */
+  | { result: 'DEFERRED'; reason: string };
 
 /**
  * Automatic dispatch (M26.3 · Part 4).
@@ -56,6 +66,7 @@ export class DispatchEngineService {
     private readonly drivers: DriverService,
     private readonly assignments: DispatchService,
     private readonly core: DeliveryCoreService,
+    private readonly vendor: VendorService,
   ) {}
 
   /** Effective settings, falling back to the tested defaults when unset. */
@@ -78,8 +89,15 @@ export class DispatchEngineService {
    * Safe to call repeatedly: it re-reads state and no-ops when the delivery is
    * already held, not yet ready, or past its retry budget. That matters because
    * it is called from a vendor action, from the sweeper, and after a decline.
+   * That same repeat-safety is what the vendor-hours defer below relies on
+   * (BMPL-177 business half): it needs no scheduling mechanism of its own,
+   * only to be re-evaluated on the existing sweeper cadence.
+   *
+   * `now` defaults to the real clock and exists so a test can drive the
+   * vendor-hours check deterministically; no production caller passes it —
+   * same contract as ShipmentDispatchService.dispatchLeg.
    */
-  async dispatch(deliveryId: string): Promise<DispatchOutcome> {
+  async dispatch(deliveryId: string, now: Date = new Date()): Promise<DispatchOutcome> {
     const cfg = await this.settings();
     if (!cfg.automatic) return { result: 'SKIPPED', reason: 'automatic dispatch is disabled' };
 
@@ -93,6 +111,7 @@ export class DispatchEngineService {
         vendorOrder: {
           select: {
             status: true,
+            vendorProfileId: true,
             order: {
               // userId is the requesting customer — needed so the candidate
               // search can leave them out of their own delivery.
@@ -124,6 +143,40 @@ export class DispatchEngineService {
         reason: `vendor order is ${delivery.vendorOrder.status}, not ready for collection`,
       };
     }
+
+    // BMPL-177 (business half) / BMPL-259 ruling 10: a driver's pickup ends
+    // at the vendor's own counter. If that counter is outside its configured
+    // hours at the projected pickup instant, the ruling is warn and
+    // reschedule into a future open window — never refuse outright, never
+    // silently proceed as if nothing were wrong. Concretely: this delivery
+    // is simply left unoffered (DEFERRED, not EXHAUSTED — it costs no offer
+    // budget), and the sweeper that already re-evaluates every undispatched
+    // delivery on a fixed interval re-runs this same check on each tick.
+    // Since "now" advances with real time, it self-corrects the moment the
+    // vendor's configured window opens — no new "scheduled for" state needs
+    // to be persisted anywhere for that to happen. Exact same shape as
+    // ShipmentDispatchService's FIRST_MILE hub-hours check.
+    //
+    // The projected pickup instant is `now` itself, not `now` plus some
+    // travel estimate: no travel-to-vendor duration is modelled anywhere on
+    // OrderDelivery (unlike a shipment leg's own durationMinutes) — same
+    // honest reasoning BMPL-287 already used for a shipment's SENDER check.
+    //
+    // A vendor with no configured hours (every vendor before this card, and
+    // any vendor who never sets hours) resolves isOpen:true via
+    // vendorHoursStatus's own unconstrained default, so this changes nothing
+    // for any existing, unconfigured vendor.
+    const hours = await this.vendor.vendorHoursStatus(delivery.vendorOrder.vendorProfileId, now);
+    if (!hours.isOpen) {
+      const nextOpen = hours.nextOpen
+        ? ` It is next open ${hours.nextOpen.date}${hours.nextOpen.openTime ? ` at ${hours.nextOpen.openTime}` : ''}.`
+        : ' No open window is configured within the next two weeks.';
+      const reason = `the vendor is outside its configured hours at the projected pickup time (${now.toISOString()}).${nextOpen}`;
+      this.logger.warn(`delivery ${deliveryId} deferred — ${reason}`);
+      await this.recordDeferralIfNew(deliveryId, reason);
+      return { result: 'DEFERRED', reason };
+    }
+
     if (delivery.offerCount >= cfg.maxOffers) {
       await this.markExhausted(deliveryId, delivery.offerCount);
       return { result: 'EXHAUSTED' };
@@ -437,6 +490,41 @@ export class DispatchEngineService {
         tx,
       );
       return true;
+    });
+  }
+
+  /**
+   * BMPL-177 (business half): make a vendor-hours deferral visible to
+   * OPERATIONS without flooding the audit log — the exact same problem, and
+   * the exact same fix, as ShipmentDispatchService.recordDeferralIfNew
+   * (BMPL-275). `dispatch` runs every 20s per waiting delivery (the
+   * sweeper); an audit row on every call would write hundreds of rows for a
+   * vendor closed overnight.
+   *
+   * Deliberately keeps no persisted "deferred until T" state, for the same
+   * reason the shipment side doesn't: reads the most recent
+   * DELIVERY_AUTO_ASSIGNED/DELIVERY_DISPATCH_DEFERRED audit row for this
+   * delivery instead — a read cannot get a delivery stuck behind it, it is
+   * just looking at what already happened. If that row is itself a
+   * DEFERRED, this episode is already recorded and nothing is written;
+   * otherwise (never offered before, or the last event was an ASSIGNED)
+   * this is a new episode and gets its own row.
+   */
+  private async recordDeferralIfNew(deliveryId: string, reason: string): Promise<void> {
+    const latest = await this.prisma.auditLog.findFirst({
+      where: {
+        action: { in: ['DELIVERY_AUTO_ASSIGNED', 'DELIVERY_DISPATCH_DEFERRED'] },
+        newValue: { path: ['deliveryId'], equals: deliveryId },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { action: true },
+    });
+    if (latest?.action === 'DELIVERY_DISPATCH_DEFERRED') return;
+    await this.audit.record({
+      action: 'DELIVERY_DISPATCH_DEFERRED',
+      actorId: null,
+      newValue: { deliveryId },
+      reason,
     });
   }
 
