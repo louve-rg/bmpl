@@ -121,6 +121,9 @@ jobs:
   integration:
     name: Integration tests (Postgres + Redis + MinIO)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     services:
       postgres:
         image: postgres:16-alpine
@@ -158,11 +161,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # quay.io/minio/minio and docker.io/minio/minio were both discontinued/
+      # privatized by MinIO Inc. around 2026-09-24 — every client, including a
+      # fresh runner, now gets a zero-scope anonymous token from quay.io for
+      # this repository. BMPL-188 mirrored the exact, content-identical image
+      # into this repo's own GHCR namespace (see
+      # .github/workflows/mirror-minio.yml for how, and how that was proven —
+      # the manifest digest differs from the original quay.io digest because
+      # `docker save`/`load` re-serialises the manifest, but the image config
+      # digest and every layer diffID, in order, were confirmed identical).
+      # Pinned by GHCR's own digest, which is immutable and cannot be re-tagged.
+      - name: Log in to GHCR (pull our own MinIO mirror)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
       - name: Start MinIO
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=bmpl -e MINIO_ROOT_PASSWORD=bmpl_ci_password \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            ghcr.io/louve-rg/minio-mirror@sha256:52dfd5c0bbd38d3219f2058c7af216d9f9a27a994b7b5baad09bbd38866015ff server /data
           # Wait until MinIO answers (the API auto-creates its buckets on boot).
           for i in $(seq 1 30); do
             if curl -sf http://localhost:9000/minio/health/ready >/dev/null; then echo "minio ready"; break; fi
