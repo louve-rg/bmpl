@@ -237,6 +237,19 @@ kept here as the record of how, one remains live and always will:
    was checked rather than assumed — then confirmed a true no-op by the same
    control-then-confirm method. Zero DDL, no migration file.
 
+   **Declared on purpose, not dropped — and that asymmetry needs to survive,
+   not just the fix.** One column out of seventy still carries a database
+   default that the other sixty-nine don't, and it now has an attribute pair
+   no other field in this schema uses. That is visible, and visible-but-odd
+   invites a well-meaning cleanup: a migration that `DROP DEFAULT`s it "to
+   match the other 69." Don't write that migration. Prisma sets `updatedAt`
+   on every write regardless of what the database default is — the default
+   only ever matters for a row inserted outside Prisma — so dropping it is
+   real production DDL, on a repo where merging deploys it automatically, for
+   zero behavioural change. The bug was leaving a needless default in place;
+   the accident this section exists to prevent would now come from removing
+   it, not from the default itself.
+
 ## 7. This package declares a `test` script and has no tests
 
 `pnpm turbo run test` therefore reports it as a failure, along with

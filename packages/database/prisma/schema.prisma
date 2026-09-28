@@ -4104,6 +4104,10 @@ model PromotionPlacement {
   // already-migrated database, including production, since that migration —
   // verified as a true no-op against the replayed migration history, see
   // packages/database/CLAUDE.md §6 — and ships with no migration.
+  // Declared on purpose, not dropped: Prisma sets updatedAt on every write
+  // regardless, so this default only ever matters for a row inserted outside
+  // Prisma. Dropping it would be real DDL against a live table for zero
+  // behavioural change. Do NOT "finish the job" with a migration that drops it.
   updatedAt    DateTime               @default(now()) @updatedAt
 
   @@unique([promotionId, placement, categoryId])
