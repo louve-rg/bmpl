@@ -1,0 +1,101 @@
+name: BMPL-188 — mirror pre-lockout MinIO image to GHCR (one-time)
+
+# quay.io/minio/minio and docker.io/minio/minio were both discontinued/
+# privatized by MinIO Inc. around 2026-09-24. Every client — including a
+# fresh GitHub-hosted runner — now gets a zero-scope anonymous token from
+# quay.io for this repository (confirmed empirically: the auth server issues
+# a token with "actions":[] even for an anonymous pull), so a workflow that
+# tries to pull-then-push in the same job cannot work: the source is not
+# reachable from anywhere anymore, not just from this repo's runners.
+#
+# The only known-good copy left is the byte-identical image this project's
+# own docker-compose.yml has always pinned by digest, cached locally on a
+# machine that pulled it before the lockout. That copy was `docker save`d,
+# checksummed, and staged as a temporary GitHub Release asset
+# (bmpl-188-minio-mirror-source) so this workflow — running with the
+# repo's own GITHUB_TOKEN, which has package-publish rights — can load it
+# and push it into this repo's own GHCR namespace without ever touching the
+# now-locked-out registry. This is a one-time migration step, not a
+# recurring sync: quay.io is not the source of truth for anything after
+# this runs, this repo's GHCR package is.
+#
+# Digest is verified twice: once against the known-good source digest right
+# after `docker load`, and once more against a genuinely fresh pull of the
+# pushed package (local tags removed first, so the second pull cannot be
+# served from anything cached earlier in this same job). Either mismatch
+# fails the job — it does not warn and continue.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type MIRROR to run this one-time push'
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  SOURCE_DIGEST: sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+  STAGING_RELEASE: bmpl-188-minio-mirror-source
+  STAGING_ASSET: minio-mirror.tar.gz
+  DEST_IMAGE: ghcr.io/${{ github.repository_owner }}/minio-mirror
+  DEST_TAG: RELEASE.2025-09-07T16-13-09Z
+
+jobs:
+  mirror:
+    if: github.event.inputs.confirm == 'MIRROR'
+    name: Mirror to GHCR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download staged image archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$STAGING_RELEASE" \
+            --repo "${{ github.repository }}" \
+            --pattern "$STAGING_ASSET" --pattern "${STAGING_ASSET}.sha256"
+
+      - name: Verify staged archive checksum
+        run: sha256sum -c "${STAGING_ASSET}.sha256"
+
+      - name: Load image
+        run: |
+          gunzip -k "$STAGING_ASSET"
+          docker load -i "${STAGING_ASSET%.gz}"
+
+      - name: Verify loaded image matches the known-good source digest
+        run: |
+          LOADED=$(docker image inspect quay.io/minio/minio:${DEST_TAG} --format '{{index .RepoDigests 0}}' | cut -d'@' -f2)
+          echo "loaded:   $LOADED"
+          echo "expected: $SOURCE_DIGEST"
+          test "$LOADED" = "$SOURCE_DIGEST" || { echo "::error::staged archive digest does not match the known-good source digest"; exit 1; }
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Tag and push mirror
+        run: |
+          docker tag quay.io/minio/minio:${DEST_TAG} ${DEST_IMAGE}:${DEST_TAG}
+          docker push ${DEST_IMAGE}:${DEST_TAG}
+
+      - name: Prove the mirror is genuinely pullable, and its digest matches the source
+        run: |
+          docker rmi quay.io/minio/minio:${DEST_TAG} minio/minio:latest ${DEST_IMAGE}:${DEST_TAG} 2>/dev/null || true
+          docker pull ${DEST_IMAGE}:${DEST_TAG}
+          PULLED=$(docker image inspect ${DEST_IMAGE}:${DEST_TAG} --format '{{index .RepoDigests 0}}' | cut -d'@' -f2)
+          echo "source (quay.io):      $SOURCE_DIGEST"
+          echo "destination (ghcr.io): $PULLED"
+          test "$PULLED" = "$SOURCE_DIGEST" || { echo "::error::destination digest differs from the source digest — do not treat this as the same image, report the exact difference"; exit 1; }
+
+      - name: Report package visibility (informational)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "/users/${{ github.repository_owner }}/packages/container/minio-mirror" --jq '{name, visibility, package_type}' || \
+          echo "could not query package visibility via API with this token — check manually in the repo's Packages tab"
