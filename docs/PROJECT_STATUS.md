@@ -217,13 +217,19 @@ curl -s https://bmpl-admin.vercel.app/health
 
 `/api/health/live` does not exist — do not look for it.
 
-**`pnpm deploy:status`** (`scripts/deploy-status.mjs`, #48) compares the
-commit production's `/api/health` reports against `origin/main` read live
-from the remote and answers **CURRENT / BEHIND / UNKNOWN / DIVERGED** with
-distinct exit codes, both commits named. It is scoped to API-affecting paths
-(#51), so a web-only or docs-only merge does not read as BEHIND for a
-deployment Railway rightly did not rebuild; unreachable is UNKNOWN, never
-BEHIND.
+**`pnpm deploy:status`** (`scripts/deploy-status.mjs`, #48, extended by
+BMPL-316) compares the commit EACH of the API, web and admin origins reports
+against `origin/main` read live from the remote and answers **CURRENT /
+NOTHING_TO_DELIVER / BEHIND / UNKNOWN / DIVERGED** with distinct exit codes
+(the API's alone — web/admin are always reported, never scored), both
+commits named. Web and admin were an opt-in flag until BMPL-316; they are
+checked by default now, because the opt-in was itself how two customer-facing
+apps went unwatched. Each service is scoped to what actually rebuilds it — API:
+railway.json watchPatterns (#51); web/admin: `turbo query affected` against
+that app's own package, the identical query each app's `vercel.json`
+`ignoreCommand` runs — so a merge outside that app's dependency graph does
+not read as BEHIND for a deployment its own platform rightly did not rebuild;
+unreachable is UNKNOWN, never BEHIND.
 
 CI (`.github/workflows/ci.yml`): build + typecheck + `pnpm test:unit`, then
 integration tests against real Postgres/Redis/MinIO. `format:check` and `lint`
