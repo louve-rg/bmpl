@@ -69,6 +69,93 @@ describe('operations overview (ops.read)', () => {
   });
 });
 
+describe('automatic dispatch status (BMPL-293)', () => {
+  /** A marketplace delivery in exactly the state DispatchEngineService.sweepUndispatched acts on. */
+  async function waitingDelivery() {
+    const s = uniq();
+    const cat = await ctx.prisma.category.create({ data: { name: `Cat ${s}`, slug: `cat-${s}`, isVisible: true } });
+    const { userId: vendorUserId } = await register(`v293_${s}@example.bz`);
+    const vp = await ctx.prisma.vendorProfile.create({
+      data: {
+        userId: vendorUserId, businessName: `Store ${s}`, slug: `store-${s}`, contactEmail: `v293${s}@x.bz`,
+        approvalStatus: 'APPROVED', storeStatus: 'OPEN',
+        settings: { create: { deliveryEnabled: true, pickupEnabled: true } },
+        locations: { create: { label: 'Main', addressLine1: '1 St', city: 'Belize City', district: 'BELIZE', isPrimary: true } },
+      },
+    });
+    const product = await ctx.prisma.product.create({
+      data: { vendorProfileId: vp.id, categoryId: cat.id, title: `Prod ${s}`, slug: `prod-${s}`, sku: `SKU293-${s}`, status: 'PUBLISHED', priceMinor: 1000n, currency: 'BZD', inventory: { create: { quantity: 10, reserved: 0 } } },
+    });
+    const { userId: customerId } = await register(`c293_${s}@example.bz`);
+    const order = await ctx.prisma.order.create({
+      data: {
+        orderNumber: `ORD293-${s}`, userId: customerId, status: 'PENDING', itemCount: 1,
+        subtotalMinor: 1000n, deliveryFeeMinor: 500n, totalMinor: 1500n,
+        addresses: { create: { type: 'SHIPPING', fullName: 'Cust Omer', addressLine1: '5 Ave', city: 'Belize City', district: 'BELIZE' } },
+        vendorOrders: {
+          create: {
+            orderNumber: `ORD293-${s}-1`, vendorProfileId: vp.id, status: 'READY_FOR_PICKUP', readyForPickupAt: new Date(),
+            deliveryMethod: 'DELIVERY', itemCount: 1, subtotalMinor: 1000n,
+            items: { create: { productId: product.id, productTitle: 'Prod', unitPriceMinor: 1000n, quantity: 1, subtotalMinor: 1000n } },
+            delivery: { create: { status: 'PENDING_ASSIGNMENT', feeMinor: 500n, readyForDispatchAt: new Date() } },
+          },
+        },
+      },
+      include: { vendorOrders: { include: { delivery: true } } },
+    });
+    return order.vendorOrders[0]!.delivery!.id;
+  }
+
+  /** A shipment leg in exactly the state ShipmentDispatchService.sweepUndispatched acts on. */
+  async function waitingLeg() {
+    const s = uniq();
+    const shipment = await ctx.prisma.shipment.create({ data: { reference: `BML293-${s}`, service: 'DOOR_TO_DOOR' } });
+    const leg = await ctx.prisma.shipmentLeg.create({
+      data: { shipmentId: shipment.id, sequence: 1, kind: 'FIRST_MILE', mode: 'LAND', status: 'READY' },
+    });
+    return leg.id;
+  }
+
+  it('counts exactly the rows the sweepers themselves would act on, whichever way the switch is set', async () => {
+    const before = await get(adminCookies, 'admin/ops/overview');
+    expect(before.status).toBe(200);
+    expect(before.body.dispatch).toHaveProperty('automatic');
+    const baseLegs = before.body.dispatch.waitingShipmentLegs;
+    const baseDeliveries = before.body.dispatch.waitingDeliveries;
+
+    await waitingLeg();
+    await waitingDelivery();
+
+    const after = await get(adminCookies, 'admin/ops/overview');
+    expect(after.status).toBe(200);
+    // Exactly one more of each — proves the count tracks the real predicate
+    // rather than being coincidentally nonzero.
+    expect(after.body.dispatch.waitingShipmentLegs).toBe(baseLegs + 1);
+    expect(after.body.dispatch.waitingDeliveries).toBe(baseDeliveries + 1);
+  });
+
+  it('reports the same counts whether automatic dispatch is on or off — absence of the flag must not read as absence of work', async () => {
+    const row = await ctx.prisma.platformSetting.findFirst();
+    const settingId = row?.id ?? (await ctx.prisma.platformSetting.create({ data: {} })).id;
+
+    await ctx.prisma.platformSetting.update({ where: { id: settingId }, data: { dispatchAutomatic: false } });
+    const off = await get(adminCookies, 'admin/ops/overview');
+    expect(off.body.dispatch.automatic).toBe(false);
+    const waitingWhenOff = off.body.dispatch.waitingShipmentLegs;
+
+    await waitingLeg();
+
+    await ctx.prisma.platformSetting.update({ where: { id: settingId }, data: { dispatchAutomatic: true } });
+    const on = await get(adminCookies, 'admin/ops/overview');
+    expect(on.body.dispatch.automatic).toBe(true);
+    // The new leg is still waiting and still counted — turning automatic ON
+    // does not make the fact disappear, and it was never conditional on OFF.
+    expect(on.body.dispatch.waitingShipmentLegs).toBe(waitingWhenOff + 1);
+
+    await ctx.prisma.platformSetting.update({ where: { id: settingId }, data: { dispatchAutomatic: false } });
+  });
+});
+
 describe('announcement / maintenance banner', () => {
   it('lets ops.manage edit the banner and surfaces active notices publicly (display-only)', async () => {
     // initially nothing active

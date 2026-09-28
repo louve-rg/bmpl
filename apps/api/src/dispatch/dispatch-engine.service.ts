@@ -5,6 +5,7 @@ import {
   rankDrivers,
   type DriverCandidate,
 } from '@bmpl/shared';
+import type { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { DriverService } from '../driver/driver.service';
@@ -233,16 +234,26 @@ export class DispatchEngineService {
     return { expired, reassigned };
   }
 
+  /**
+   * BMPL-293: the exact predicate `sweepUndispatched` acts on, factored out so
+   * a count of "how many are waiting" — the ops board, in particular — reads
+   * it from here rather than a second where-clause that merely resembles this
+   * one today and drifts the moment either is edited alone.
+   */
+  private waitingDeliveriesWhere(): Prisma.OrderDeliveryWhereInput {
+    return {
+      status: { in: ['PENDING_ASSIGNMENT', 'DRIVER_DECLINED'] },
+      readyForDispatchAt: { not: null },
+      dispatchExhaustedAt: null,
+    };
+  }
+
   /** Pick up deliveries that are ready but unheld — a safety net for missed triggers. */
   async sweepUndispatched(): Promise<number> {
     const cfg = await this.settings();
     if (!cfg.automatic) return 0;
     const waiting = await this.prisma.orderDelivery.findMany({
-      where: {
-        status: { in: ['PENDING_ASSIGNMENT', 'DRIVER_DECLINED'] },
-        readyForDispatchAt: { not: null },
-        dispatchExhaustedAt: null,
-      },
+      where: this.waitingDeliveriesWhere(),
       select: { id: true },
       take: 50,
     });
@@ -255,6 +266,17 @@ export class DispatchEngineService {
       }
     }
     return assigned;
+  }
+
+  /**
+   * How many deliveries `sweepUndispatched` would act on right now — the
+   * WHOLE count, not the 50-per-tick slice it actually processes. Counted
+   * regardless of `dispatchAutomatic`: the predicate describes readiness for
+   * a driver, not whether the switch that offers one is on, so this answers
+   * the same question whether automatic dispatch is on or off.
+   */
+  async waitingCount(): Promise<number> {
+    return this.prisma.orderDelivery.count({ where: this.waitingDeliveriesWhere() });
   }
 
   // ---- internals ------------------------------------------------------------
