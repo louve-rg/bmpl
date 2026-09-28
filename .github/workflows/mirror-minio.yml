@@ -20,12 +20,24 @@ name: BMPL-188 — mirror pre-lockout MinIO image to GHCR (one-time)
 # this runs, this repo's GHCR package is.
 #
 # Provenance of the staged bytes is checked by SHA-256 of the archive itself
-# (below) — `docker load` does not populate RepoDigests, so a manifest-digest
-# comparison isn't meaningful until AFTER a real registry round-trip. That
-# round-trip is the actual digest gate: once pushed, this job removes every
-# local tag and does a genuinely fresh pull of the pushed package, then
-# compares ITS digest against the known-good source digest. A mismatch fails
-# the job — it does not warn and continue.
+# (below). The manifest digest is EXPECTED to differ from the source after
+# this round-trip and is not asserted: `docker save`/`docker load` is
+# Docker's own archive format, not the registry's, and does not carry the
+# original registry manifest JSON — `docker push` builds a brand-new
+# manifest from the loaded config+layers, which gets a new digest even when
+# every byte of the actual image is unchanged (confirmed empirically on the
+# first real run of this workflow: manifest digests differed while the
+# image itself did not). A manifest-digest comparison here tests the
+# transport, not the image, and would fail forever regardless of content.
+#
+# What's actually asserted is CONTENT identity, which is stronger, not
+# weaker: the image CONFIG DIGEST and the ORDERED LIST OF LAYER diffIDs of
+# the freshly loaded original, captured before push, against the same two
+# things from a genuinely fresh pull of the pushed package (local tag
+# removed first). If the config digest and every layer match in order, the
+# filesystem, entrypoint and everything a test can observe are identical —
+# the only difference is the manifest wrapper. Either mismatch fails the
+# job — it does not warn and continue.
 
 on:
   workflow_dispatch:
@@ -76,8 +88,11 @@ jobs:
           # name that may not exist.
           LOADED_ID=$(grep -oE 'sha256:[0-9a-f]{64}' load.log | head -1)
           test -n "$LOADED_ID" || { echo "::error::could not parse an image id out of docker load's output"; exit 1; }
-          echo "loaded image id: $LOADED_ID"
+          LOADED_LAYERS=$(docker image inspect "$LOADED_ID" --format '{{json .RootFS.Layers}}')
+          echo "loaded image config digest: $LOADED_ID"
+          echo "loaded image layer diffIDs: $LOADED_LAYERS"
           echo "id=$LOADED_ID" >> "$GITHUB_OUTPUT"
+          echo "layers=$LOADED_LAYERS" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -91,14 +106,33 @@ jobs:
           docker tag "${{ steps.load.outputs.id }}" ${DEST_IMAGE}:${DEST_TAG}
           docker push ${DEST_IMAGE}:${DEST_TAG}
 
-      - name: Prove the mirror is genuinely pullable, and its digest matches the source
+      - name: Prove content identity (config digest + ordered layer diffIDs), then pin our own digest
+        env:
+          ORIGINAL_ID: ${{ steps.load.outputs.id }}
+          ORIGINAL_LAYERS: ${{ steps.load.outputs.layers }}
         run: |
-          docker rmi quay.io/minio/minio:${DEST_TAG} minio/minio:latest ${DEST_IMAGE}:${DEST_TAG} 2>/dev/null || true
+          docker rmi ${DEST_IMAGE}:${DEST_TAG} 2>/dev/null || true
           docker pull ${DEST_IMAGE}:${DEST_TAG}
-          PULLED=$(docker image inspect ${DEST_IMAGE}:${DEST_TAG} --format '{{index .RepoDigests 0}}' | cut -d'@' -f2)
+          PULLED_ID=$(docker image inspect ${DEST_IMAGE}:${DEST_TAG} --format '{{.Id}}')
+          PULLED_LAYERS=$(docker image inspect ${DEST_IMAGE}:${DEST_TAG} --format '{{json .RootFS.Layers}}')
+          PULLED_DIGEST=$(docker image inspect ${DEST_IMAGE}:${DEST_TAG} --format '{{index .RepoDigests 0}}' | cut -d'@' -f2)
+
+          echo "== manifest digest (expected to differ — save/load re-serialises the manifest, not asserted) =="
           echo "source (quay.io):      $SOURCE_DIGEST"
-          echo "destination (ghcr.io): $PULLED"
-          test "$PULLED" = "$SOURCE_DIGEST" || { echo "::error::destination digest differs from the source digest — do not treat this as the same image, report the exact difference"; exit 1; }
+          echo "destination (ghcr.io): $PULLED_DIGEST"
+
+          echo "== image config digest (asserted) =="
+          echo "original:    $ORIGINAL_ID"
+          echo "ghcr mirror: $PULLED_ID"
+
+          echo "== ordered layer diffIDs (asserted) =="
+          echo "original:    $ORIGINAL_LAYERS"
+          echo "ghcr mirror: $PULLED_LAYERS"
+
+          test "$PULLED_ID" = "$ORIGINAL_ID" || { echo "::error::config digest differs — this is a real content difference, not a transport artifact. Stop."; exit 1; }
+          test "$PULLED_LAYERS" = "$ORIGINAL_LAYERS" || { echo "::error::layer diffIDs differ or are out of order — this is a real content difference, not a transport artifact. Stop."; exit 1; }
+
+          echo "CONTENT IDENTITY PROVEN: identical config and identical ordered layers. The manifest digest differs only because docker save/load re-serialises the manifest — the image itself is unchanged. Pin ghcr.io by $PULLED_DIGEST."
 
       - name: Report package visibility (informational)
         env:
