@@ -15,6 +15,21 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
+    "@bmpl/admin#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "env": ["ADMIN_PUBLIC_API_URL"]
+    },
+    "@bmpl/shared#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "env": ["ADMIN_PUBLIC_API_URL"]
+    },
+    "@bmpl/validation#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "env": ["ADMIN_PUBLIC_API_URL"]
+    },
     "dev": {
       "cache": false,
       "persistent": true
