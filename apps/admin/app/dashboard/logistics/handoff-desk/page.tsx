@@ -28,8 +28,12 @@ interface ExpectedLeg {
   legId: string;
   reference: string;
   kind: 'FIRST_MILE' | 'LINE_HAUL' | 'LAST_MILE';
+  // BMPL-247: the API deliberately no longer returns the courier's personal
+  // phone here — logistics.read is a platform-wide, cross-hub permission
+  // with no scoping to "staff at this terminal", and the owner ruled that
+  // number private by default. broughtBy (display name) is the minimum
+  // operational identity the desk needs.
   broughtBy: string;
-  contactPhone: string | null;
   from: string;
   parcel: string;
   arrived: boolean;
@@ -211,10 +215,7 @@ export default function HandoffDeskPage() {
                         <Badge tone="neutral">{r.kind.replace(/_/g, ' ').toLowerCase()}</Badge>
                       </div>
                       <p className="mt-1 break-words text-sm text-slate-700">{r.parcel}</p>
-                      <p className="mt-0.5 break-words text-sm text-slate-600">
-                        From {r.from} · brought by {r.broughtBy}
-                        {r.contactPhone ? ` · ${r.contactPhone}` : ''}
-                      </p>
+                      <p className="mt-0.5 break-words text-sm text-slate-600">From {r.from} · brought by {r.broughtBy}</p>
                       {r.forRecipient && (
                         <p className="mt-0.5 text-xs text-slate-500">For {r.forRecipient}</p>
                       )}
