@@ -97,10 +97,21 @@ export function PlaceholderBadge({ children }: { children: ReactNode }) {
 
 /* ------------------------------------------------------------------ surfaces */
 
-/** Elevated content surface (24px radius, hairline border, soft shadow). */
-export function Card({ className = '', children, ...props }: ComponentProps<'div'>) {
+/**
+ * Elevated content surface (24px radius, hairline border, soft shadow).
+ *
+ * `title` is destructured out on purpose: `ComponentProps<'div'>` already
+ * allows it (it's a valid, if pointless, HTML attribute), so TypeScript
+ * cannot catch a caller passing it and expecting a heading — it would
+ * otherwise silently reach the div as the native `title` attribute (a hover
+ * tooltip) instead of rendering. Heading style matches the one already
+ * hand-written at call sites that build their own Card heading, e.g.
+ * `app/checkout/page.tsx`'s "Order summary".
+ */
+export function Card({ className = '', title, children, ...props }: ComponentProps<'div'>) {
   return (
     <div className={`bmpl-card ${className}`} {...props}>
+      {title && <h2 className="mb-3 text-lg font-semibold text-belize-navy">{title}</h2>}
       {children}
     </div>
   );
