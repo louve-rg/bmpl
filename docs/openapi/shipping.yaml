@@ -1639,6 +1639,7 @@ components:
         pieces: { type: integer, minimum: 1, maximum: 500, default: 1 }
         description: { type: string, maxLength: 500 }
         payWithWallet: { type: boolean, default: false, description: "Booking only; quoting ignores it — asking the price never moves money" }
+        requestedDate: { type: string, format: date, description: "BMPL-283. Omit for 'as soon as possible' — the existing default. A pure calendar date (YYYY-MM-DD); time of day is ignored." }
     CreateShipmentRequest:
       allOf: [ { $ref: "#/components/schemas/QuoteRequest" } ]
       description: >-
@@ -1655,6 +1656,7 @@ components:
         totalMinor: { $ref: "#/components/schemas/Money" }
         transportMinutes: { type: integer }
         explanation: { type: string }
+        requestedDate: { type: string, format: date, description: "BMPL-283. The date (YYYY-MM-DD, Belize calendar) this plan travels on — the requested date, or today when none was given." }
         pricingIncomplete: { type: boolean, description: "True when a hub on the journey has no courier fee configured — flagged, not hidden" }
         pricingNote: { type: [string, "null"] }
         legs:
@@ -1677,8 +1679,11 @@ components:
       properties:
         available: { type: boolean, const: false }
         reason: { type: string }
-        message: { type: string }
+        message: { type: string, description: "The planner's own words, extended with a next-available-date finding (BMPL-283) when one applies." }
         useLocalDelivery: { type: boolean, description: "True when the refusal is LOCAL_DELIVERY — the ordinary courier flow already covers this journey" }
+        requestedDate: { type: string, format: date, description: "BMPL-283. The date (YYYY-MM-DD, Belize calendar) that was checked — the requested date, or today when none was given." }
+        dateUnavailable: { type: boolean, description: "BMPL-283. True when the SAME journey plans fine without a date — so the requested date, specifically, is why this failed. False means the date was never the problem (no route/hub/mode at all)." }
+        nextAvailableDate: { type: [string, "null"], format: date, description: "BMPL-283. The next date the real planner itself confirms this journey would work, found by searching forward up to 14 days — never a guess from partial schedule rows. Null when dateUnavailable is false, or when nothing within the horizon is confirmed (degrades to plain unavailability rather than a guess)." }
     HubBrief:
       type: [object, "null"]
       properties:
@@ -2149,12 +2154,16 @@ components:
                     needsDriver: { type: boolean }
     ExpectedParcel:
       type: object
+      description: >-
+        BMPL-247: no courier contact phone here, on purpose — `broughtBy`
+        (display name) is the deliberate ceiling on driver identity shown to
+        the hub handoff desk, the same minimum `courierSummary()` already
+        draws for a customer's own tracking view.
       properties:
         legId: { type: string }
         reference: { type: string }
         kind: { $ref: "#/components/schemas/LegKind" }
         broughtBy: { type: string }
-        contactPhone: { type: [string, "null"] }
         from: { type: string }
         parcel: { type: string }
         arrived: { type: boolean }

@@ -34,10 +34,11 @@ info:
     six real Belize districts (`DISTRICTS`). A narrowed service area's `city`
     is FREE TEXT the driver types, never a fabricated or enumerated place
     list — the same convention `LogisticsHub.city` already uses (root
-    CLAUDE.md §5). City-level narrowing (BMPL-176) is stored but NOT YET
-    consulted by automatic dispatch, which still matches a driver to a job on
-    district alone (BMPL-194, unstarted) — see the `DriverServiceArea` schema
-    below and `docs/DISPATCH.md`.
+    CLAUDE.md §5). City-level narrowing (BMPL-176) is now consulted by
+    automatic dispatch (BMPL-194): a destination city, when known, is matched
+    against a driver's declared cities exactly after trim+lowercase, not
+    fuzzily — see the `DriverServiceArea` schema below and `docs/DISPATCH.md`
+    for the known spelling-drift limitation.
 servers:
   - url: https://bmplapi-production.up.railway.app/api
     description: Production
@@ -371,12 +372,12 @@ paths:
         had); a non-empty list replaces the current narrowing for that
         district only — other districts' narrowing rows are untouched. `city`
         is free text the driver types, matched EXACTLY against a shipment or
-        delivery's own city string — never a fuzzy or fabricated match. As of
-        this writing this narrowing is stored only: automatic dispatch
-        (`DriverService.eligibleDriversForDistrict`, `assignmentEligibility`)
-        still matches a driver to a job on `district` alone and does not
-        consult these rows (BMPL-194, unstarted) — a driver narrowed to one
-        town is still offered every job anywhere in that district today.
+        delivery's own city string — never a fuzzy or fabricated match.
+        Automatic dispatch (`DriverService.eligibleDriversForDistrict`,
+        `assignmentEligibility`) now consults these rows when a destination
+        city is known (BMPL-194) — exact match after trim+lowercase, not
+        fuzzy, so a declared spelling that drifts from how an address is
+        typed silently stops matching (see `docs/DISPATCH.md`).
       parameters:
         - { $ref: "#/components/parameters/district" }
       requestBody:

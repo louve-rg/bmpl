@@ -153,7 +153,12 @@ extended `AuditAction` (16 `PROPERTY_*`/profile actions), `NotificationCategory`
 (`PROMOTION`); reuses `VendorApprovalStatus` (target liveness) and BZD minor-unit `BigInt`
 money. Permissions: `promotions.read/moderate/manage`, `campaigns.manage`, `coupons.manage`,
 `marketing.analytics`, `homepage.manage`. There is **no** `Business` entity — promotions
-target existing profiles/listings via `PromotionTarget` typed FKs.
+target existing profiles/listings via `PromotionTarget` typed FKs. **BMPL-332** later added
+enum `PromotionEventKind` (`IMPRESSION`/`VIEW`/`CLICK`) and model `PromotionEvent`
+(`@@map("promotion_events")`) — a still-anonymous, event-level row carrying each
+impression/view/click's real instant, written in the same transaction as the existing
+`promotion_metrics_daily` upsert so the two can never independently drift.
+`promotion_metrics_daily` is untouched and remains the permanent read path for reports.
 
 ## Indexes (beyond primary/unique keys)
 - Category: `(parentId, sortOrder)`, `(isVisible)`
