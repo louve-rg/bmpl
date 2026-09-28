@@ -34,8 +34,19 @@ services:
 
   # Local S3-compatible object storage for documents/images in development.
   # Production uses Cloudflare R2 / Amazon S3 / Supabase Storage via the same S3 API.
+  #
+  # quay.io/minio/minio (and docker.io/minio/minio) were discontinued by
+  # MinIO Inc. on 2026-09-24 — the registry now refuses every pull, so this
+  # image is pinned to this repo's own GHCR mirror instead (BMPL-188/294).
+  # It's the byte-identical image: config digest and every layer diffID
+  # match the original, in order (see .github/workflows/mirror-minio.yml for
+  # how that was proven; the manifest digest itself differs because a
+  # docker-save/load round trip re-serialises the manifest, not the image).
+  # The mirror package is public, so this pulls with no login and no token —
+  # same as the original always did. Pinned by digest, not a tag: this repo's
+  # own package cannot be silently moved or re-tagged out from under you.
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: ghcr.io/louve-rg/minio-mirror@sha256:52dfd5c0bbd38d3219f2058c7af216d9f9a27a994b7b5baad09bbd38866015ff
     container_name: bmpl-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
