@@ -1727,6 +1727,9 @@ model Order {
 
   @@index([userId, createdAt])
   @@index([status])
+  // BMPL-309: matches orders_isTest_idx, already created by
+  // 20261014120000_simulation_isolation — see LogisticsHub's identical note.
+  @@index([isTest])
   @@map("orders")
 }
 
@@ -4405,6 +4408,11 @@ model LogisticsHub {
 
   // Attaching a door to a terminal is always "active hubs in this district".
   @@index([district, isActive])
+  // BMPL-309: the raw-SQL migration 20261024110000_simulation_network already
+  // created logistics_hubs_isTest_isActive_idx — this declaration matches it
+  // exactly (verified as a true no-op against the replayed migration history,
+  // see packages/database/CLAUDE.md §6) and ships with no migration.
+  @@index([isTest, isActive])
   @@map("logistics_hubs")
 }
 
@@ -4448,6 +4456,9 @@ model LogisticsRoute {
 
   @@index([originHubId, isActive])
   @@index([destinationHubId, isActive])
+  // BMPL-309: matches logistics_routes_isTest_isActive_idx, already created by
+  // 20261024110000_simulation_network — see LogisticsHub's identical note.
+  @@index([isTest, isActive])
   @@map("logistics_routes")
 }
 
