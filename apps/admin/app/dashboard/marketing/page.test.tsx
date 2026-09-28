@@ -30,6 +30,74 @@ const PLACEMENT_ROW = {
   category: null,
 };
 
+/**
+ * BMPL-281: the promotion-detail panel (BMPL-270 part B) is the one piece of
+ * the whole fourteen-screen gating sweep never observed rendering live —
+ * this dev environment has zero promotions (bmpl-web, part B's PR). A
+ * stubbed fetch returning one promotion is a test fixture standing in for
+ * that gap, not invented business data: the shape mirrors the documented
+ * GET /admin/marketing/promotions response, and no price, rate or geography
+ * is fabricated. The promotion is SUBMITTED so the moderation actions
+ * (Approve & publish / Request info / Reject) are status-eligible.
+ *
+ * TWO independent permissions gate this one panel: promotions.moderate
+ * (moderation actions) and promotions.manage (the separate priority/feature
+ * control). promotions.manage is the SAME permission PlacementsTab's
+ * canManage already checks above (BMPL-269/274), but a deliberately separate
+ * component tree with its own /me fetch (the page's own comment) — so this
+ * test exercises it independently rather than assuming the two must agree,
+ * and its overlap with the placements assertions above is that comment's
+ * documented relationship, not this test's framing being redundant.
+ */
+const PROMOTION_LIST_ITEM = {
+  id: 'promo_1',
+  type: 'BANNER',
+  title: 'Founders Week Sale',
+  subtitle: 'Storewide discount',
+  priority: 5,
+  startAt: null,
+  endAt: null,
+  assets: [],
+  placements: [],
+  target: null,
+  targets: [],
+  publishedAt: null,
+  status: 'SUBMITTED',
+  isActive: false,
+  campaignId: null,
+  updatedAt: new Date().toISOString(),
+  createdAt: new Date().toISOString(),
+  moderationReason: null,
+  ownerEmail: null,
+  reportCount: 0,
+};
+
+const PROMOTION_DETAIL = {
+  id: 'promo_1',
+  type: 'BANNER',
+  title: 'Founders Week Sale',
+  subtitle: 'Storewide discount',
+  description: 'A storewide promotional banner.',
+  status: 'SUBMITTED',
+  priority: 5,
+  isActive: false,
+  startAt: null,
+  endAt: null,
+  timezone: 'America/Belize',
+  campaign: null,
+  assets: [],
+  placements: [],
+  targets: [],
+  publishedAt: null,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  moderationReason: null,
+  moderatedById: null,
+  submittedAt: new Date().toISOString(),
+  approvedAt: null,
+  expiredAt: null,
+};
+
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
@@ -37,17 +105,22 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function stubFetch(adminPermissions: string[]) {
+function stubFetch(adminPermissions: string[], opts: { withPromotion?: boolean } = {}) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
       if (url.includes('/api/admin/marketing/placements')) return jsonResponse(200, [PLACEMENT_ROW]);
+      if (url.includes('/api/admin/marketing/promotions/promo_1')) {
+        return opts.withPromotion ? jsonResponse(200, PROMOTION_DETAIL) : jsonResponse(404, { message: 'not found' });
+      }
       // Moderation tab (mounted by default) and the placements form's
       // approved-campaign lookup both hit this — an empty list is enough for
-      // both, since neither is what this test asserts on.
-      if (url.includes('/api/admin/marketing/promotions')) return jsonResponse(200, []);
+      // both, unless a test asks for the promotion fixture to be listed.
+      if (url.includes('/api/admin/marketing/promotions')) {
+        return jsonResponse(200, opts.withPromotion ? [PROMOTION_LIST_ITEM] : []);
+      }
       return jsonResponse(404, { message: 'not mocked: ' + url });
     }),
   );
@@ -70,6 +143,27 @@ async function mount() {
   if (!placementsTab) throw new Error('Ad Placements tab not found');
   await act(async () => {
     placementsTab.click();
+  });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
+}
+
+/**
+ * Stays on the default "Moderation queue" tab — where PromotionDetailPanel
+ * mounts once the (stubbed) list resolves and auto-selects its one item.
+ * Two settle ticks: list fetch resolves and selects an id, THEN the detail
+ * panel mounts and fires its own fetch.
+ */
+async function mountModerationTab() {
+  document.body.innerHTML = '<div id="root"></div>';
+  container = document.getElementById('root') as HTMLDivElement;
+  root = createRoot(container);
+  await act(async () => {
+    root!.render(<MarketingPage />);
+  });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
   });
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
@@ -115,5 +209,52 @@ describe('MarketingPage — ad-placement write affordances gated on promotions.m
     expect(texts).toContain('Pause');
     expect(texts).toContain('Edit');
     expect(texts).toContain('Remove');
+  });
+});
+
+describe('MarketingPage — promotion-detail panel, two independent permissions (BMPL-281)', () => {
+  it('a reader with neither permission sees no moderation action and no priority control, and the promotion facts still render', async () => {
+    stubFetch(['promotions.read'], { withPromotion: true });
+    await mountModerationTab();
+
+    const texts = buttonTexts();
+    expect(texts.some((t) => t === 'Approve & publish')).toBe(false);
+    expect(texts.some((t) => t === 'Reject')).toBe(false);
+    expect(texts.some((t) => t === 'Save priority')).toBe(false);
+    expect(texts.some((t) => t === 'Feature (serve)')).toBe(false);
+    expect(document.body.querySelectorAll('button[disabled]').length).toBe(0);
+
+    expect(document.body.textContent).toMatch(/Founders Week Sale/);
+    expect(document.body.textContent).toMatch(/Storewide discount/);
+  });
+
+  it('promotions.moderate alone shows moderation actions but not the priority control', async () => {
+    stubFetch(['promotions.moderate'], { withPromotion: true });
+    await mountModerationTab();
+
+    const texts = buttonTexts();
+    expect(texts).toContain('Approve & publish');
+    expect(texts).toContain('Reject');
+    expect(texts.some((t) => t === 'Save priority')).toBe(false);
+  });
+
+  it('promotions.manage alone shows the priority control but not the moderation actions', async () => {
+    stubFetch(['promotions.manage'], { withPromotion: true });
+    await mountModerationTab();
+
+    const texts = buttonTexts();
+    expect(texts).toContain('Save priority');
+    expect(texts.some((t) => t === 'Approve & publish')).toBe(false);
+    expect(texts.some((t) => t === 'Reject')).toBe(false);
+  });
+
+  it('holding both shows every write affordance on the panel', async () => {
+    stubFetch(['promotions.moderate', 'promotions.manage'], { withPromotion: true });
+    await mountModerationTab();
+
+    const texts = buttonTexts();
+    expect(texts).toContain('Approve & publish');
+    expect(texts).toContain('Reject');
+    expect(texts).toContain('Save priority');
   });
 });
