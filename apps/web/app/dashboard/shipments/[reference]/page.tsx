@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { shippingApi, type ShipmentView } from '../../../../lib/shipping';
 import { ShipmentJourney } from '../../../../components/shipping/ShipmentJourney';
 import { ShareTrackingLink } from '../../../../components/shipping/ShareTrackingLink';
+import { AvailabilityWindows } from '../../../../components/shipping/AvailabilityWindows';
 import { Alert, Button, Spinner } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
 
@@ -96,6 +97,8 @@ export default function TrackShipmentPage() {
           {shipment.recipientTrackingToken && !shipment.cancelledAt && (
             <ShareTrackingLink token={shipment.recipientTrackingToken} reference={shipment.reference} />
           )}
+
+          {!shipment.cancelledAt && <AvailabilityWindows shipment={shipment} onUpdated={setShipment} />}
 
           {canCancel && (
             <div className="mt-4">

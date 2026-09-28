@@ -58,7 +58,7 @@ export interface ShipmentCourierVehicle {
 export interface ShipmentLegView {
   id: string;
   sequence: number;
-  kind: 'FIRST_MILE' | 'LINE_HAUL' | 'LAST_MILE';
+  kind: 'DIRECT' | 'FIRST_MILE' | 'LINE_HAUL' | 'LAST_MILE';
   mode: 'LAND' | 'AIR' | 'SEA';
   modeLabel: string;
   status: 'PENDING' | 'READY' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'EXCEPTION';
@@ -94,6 +94,20 @@ export interface ShipmentEndpoint {
   instructions: string | null;
 }
 
+/**
+ * BMPL-284/285: one time range for one door-touching attempt, sender or
+ * recipient. `startTime`/`endTime` are "HH:MM" Belize local and may describe
+ * an overnight window (endTime < startTime) — see the shared `isAvailable`
+ * for how that's read. Absence of a role's rows means unconstrained, not
+ * incomplete: every shipment behaves this way until a window is set.
+ */
+export interface AvailabilityWindowView {
+  id: string;
+  role: 'SENDER' | 'RECIPIENT';
+  startTime: string;
+  endTime: string;
+}
+
 export interface CustodyEntry {
   id: string;
   fromHolder: string | null;
@@ -126,6 +140,7 @@ export interface ShipmentView {
   currentLegSequence: number | null;
   legs: ShipmentLegView[];
   custody: CustodyEntry[];
+  availabilityWindows: AvailabilityWindowView[];
   /**
    * Capability token for the recipient's public tracking link — the sender
    * shares it (`GET /shipping/track/{token}`). Null on shipments booked before
@@ -198,6 +213,15 @@ export const shippingApi = {
   mine: () => api.get<ShipmentView[]>('/shipping'),
   track: (reference: string) => api.get<ShipmentView>(`/shipping/${encodeURIComponent(reference)}`),
   cancel: (id: string, reason: string) => api.post<ShipmentView>(`/shipping/${id}/cancel`, { reason }),
+  /**
+   * Replace-all, same shape as the admin hub-hours PUT: every window the
+   * sender still wants must be in `windows`, for both roles at once — one
+   * omitted from the array is one that no longer applies. The API refuses a
+   * role whose leg has already started; see AvailabilityWindows.tsx for why
+   * that's never a reason to include it anyway.
+   */
+  setAvailabilityWindows: (id: string, windows: Array<{ role: 'SENDER' | 'RECIPIENT'; startTime: string; endTime: string }>) =>
+    api.put<ShipmentView>(`/shipping/${id}/availability-windows`, { windows }),
   /**
    * The recipient's public tracking view — no session required. The token is a
    * server-minted capability from the sender's shipment; a bad, expired or
