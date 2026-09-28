@@ -4095,7 +4095,20 @@ model PromotionPlacement {
   endAt        DateTime?
   assignedById String?
   createdAt    DateTime               @default(now())
-  updatedAt    DateTime               @updatedAt
+  // BMPL-319: 20260925123000_admin_ad_placement added this column to an
+  // already-populated table with DEFAULT CURRENT_TIMESTAMP — required at the
+  // time to satisfy NOT NULL on existing rows — and never dropped it
+  // afterward. Every other @updatedAt field in this schema has no DB-level
+  // default (Prisma manages it client-side); this one alone kept its
+  // backfill default. Declaring it here matches what has been in every
+  // already-migrated database, including production, since that migration —
+  // verified as a true no-op against the replayed migration history, see
+  // packages/database/CLAUDE.md §6 — and ships with no migration.
+  // Declared on purpose, not dropped: Prisma sets updatedAt on every write
+  // regardless, so this default only ever matters for a row inserted outside
+  // Prisma. Dropping it would be real DDL against a live table for zero
+  // behavioural change. Do NOT "finish the job" with a migration that drops it.
+  updatedAt    DateTime               @default(now()) @updatedAt
 
   @@unique([promotionId, placement, categoryId])
   @@index([placement])
@@ -4693,7 +4706,15 @@ model CourierLane {
   /// whole rule: the planner reads a lane in both directions and folds case, so
   /// the reverse and re-cased duplicates it cannot see are refused in
   /// LogisticsNetworkService.assertPairIsFree. This is the backstop.
-  @@unique([originDistrict, originCity, destinationDistrict, destinationCity])
+  // BMPL-319: 20261102093000_courier_lanes named this constraint with a
+  // 79-character literal; Postgres silently stores only the first 63 bytes
+  // under every already-migrated database, including production. `map:`
+  // declares that stored (truncated) name explicitly instead of leaving
+  // Prisma to compute its own — different — 63-character default (see
+  // packages/database/CLAUDE.md §6 for why the two truncations disagree).
+  // Verified as a true no-op against the replayed migration history; ships
+  // with no migration.
+  @@unique([originDistrict, originCity, destinationDistrict, destinationCity], map: "courier_lanes_originDistrict_originCity_destinationDistrict_des")
   @@index([isTest, isActive])
   @@map("courier_lanes")
 }
