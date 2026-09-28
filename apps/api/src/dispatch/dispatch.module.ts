@@ -4,6 +4,7 @@ import { ProductsModule } from '../products/products.module';
 import { DriverModule } from '../driver/driver.module';
 import { MessagingModule } from '../messaging/messaging.module';
 import { SettlementModule } from '../settlement/settlement.module';
+import { VendorModule } from '../vendor/vendor.module';
 import { DeliveryCoreService } from './delivery-core.service';
 import { DispatchService } from './dispatch.service';
 import { DispatchEngineService } from './dispatch-engine.service';
@@ -20,12 +21,16 @@ import { CustomerDeliveryController, VendorDeliveryStatusController } from './de
  * orders and runs the operational lifecycle (assign → accept → pickup → transit →
  * arriving → delivered, + decline / reassignment / pre-pickup cancellation).
  *
- * Reuses InventoryService + OwnershipService (ProductsModule) and driver
- * assignment-eligibility (DriverModule). Storage/Audit/Notifications are @Global().
- * NO GPS/tracking/routing/ETA/earnings/wallets/payouts/settlement.
+ * Reuses InventoryService + OwnershipService (ProductsModule), driver
+ * assignment-eligibility (DriverModule) and vendor opening hours
+ * (VendorModule, BMPL-177 business half — DispatchEngineService.dispatch
+ * defers rather than offers a delivery while the vendor is closed, the same
+ * shape ShipmentDispatchService already uses for terminal hours). Storage/
+ * Audit/Notifications are @Global(). NO GPS/tracking/routing/ETA/earnings/
+ * wallets/payouts/settlement.
  */
 @Module({
-  imports: [PrismaModule, ProductsModule, DriverModule, MessagingModule, SettlementModule],
+  imports: [PrismaModule, ProductsModule, DriverModule, MessagingModule, SettlementModule, VendorModule],
   controllers: [AdminDispatchController, DriverJobsController, CustomerDeliveryController, VendorDeliveryStatusController],
   providers: [
     DeliveryCoreService,

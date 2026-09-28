@@ -1,0 +1,15 @@
+-- One audit action for making a marketplace-delivery dispatch deferral
+-- visible to operations (BMPL-177 business half), the same observability
+-- shape SHIPMENT_LEG_DISPATCH_DEFERRED already gives shipment legs
+-- (BMPL-275) -- extended here to OrderDelivery rather than reused directly,
+-- because the dedup this action's own consumer relies on reads the most
+-- recent audit row FOR THAT TABLE'S ROW, and a shipment leg and an order
+-- delivery are different rows in different tables with different id spaces;
+-- sharing one action value would make that lookup ambiguous between the two.
+-- Written on the TRANSITION into deferred only, never once per 20s sweeper
+-- tick -- see DispatchEngineService.recordDeferralIfNew, which reads the
+-- delivery's most recent DELIVERY_AUTO_ASSIGNED/DELIVERY_DISPATCH_DEFERRED
+-- row rather than persisting a "deferred until T" flag anywhere. No new
+-- column, no new table: the audit row itself is the whole feature, exactly
+-- as it was for the hub-hours case.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'DELIVERY_DISPATCH_DEFERRED';

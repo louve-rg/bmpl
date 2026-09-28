@@ -7,9 +7,12 @@ import {
 import {
   isAllowedProductImageMime,
   MAX_PRODUCT_IMAGE_BYTES,
+  nextOpenWindow,
+  resolveHoursStatus,
   slugify,
   STORAGE_PREFIX,
 } from '@bmpl/shared';
+import type { HoursException, WeeklyOpeningHours } from '@bmpl/shared';
 import type {
   CreateVendorProfileInput,
   UpdateVendorProfileInput,
@@ -282,6 +285,54 @@ export class VendorService {
       }
     });
     return this.getOwn(userId);
+  }
+
+  /**
+   * Read-only: is this vendor open at `at` (server clock if omitted), and if
+   * not, when does it next open (BMPL-177 business half). Composes the same
+   * two pure resolvers from packages/shared/src/hub-hours.ts that
+   * LogisticsNetworkService.hubHoursStatus already uses for terminals — that
+   * file's own header says the resolution shape applies "by the same shape,
+   * a vendor" — so this is not a second resolver, just a second caller.
+   *
+   * KNOWN GAP, reported rather than built: unlike HubOpeningDay/
+   * HubHoursException, VendorOpeningHours has no matching date-exception
+   * table. A vendor cannot record "closed this one Sunday for a holiday" the
+   * way a hub can — only the recurring weekly pattern. `exceptions` is
+   * always `[]` below for exactly that reason; this is a real, load-bearing
+   * limitation, not an oversight, and was reported (not added) per the
+   * BMPL-177 dispatch's explicit instruction that any schema gap comes back
+   * for migration review rather than being added on the agent's own
+   * judgement.
+   *
+   * `configured` distinguishes "open because nothing constrains it" from
+   * "open because today's configured window says so" — same reasoning as
+   * hubHoursStatus's own `configured` field, and the same default: a vendor
+   * with zero VendorOpeningHours rows (every vendor before this card, and
+   * every vendor who never sets hours after it) is UNCONSTRAINED, not
+   * closed, so configuring nothing changes nothing for any existing vendor.
+   */
+  async vendorHoursStatus(vendorProfileId: string, at?: Date) {
+    const instant = at ?? new Date();
+    const days = await this.prisma.vendorOpeningHours.findMany({ where: { vendorProfileId } });
+    const weeklyPattern: WeeklyOpeningHours[] = days.map((d) => ({
+      dayOfWeek: d.dayOfWeek,
+      openTime: d.openTime,
+      closeTime: d.closeTime,
+      isClosed: d.isClosed,
+    }));
+    const exceptions: HoursException[] = [];
+    const resolution = resolveHoursStatus(instant, weeklyPattern, exceptions);
+    const next = resolution.isOpen ? null : nextOpenWindow(instant, weeklyPattern, exceptions);
+    return {
+      vendorProfileId,
+      at: instant.toISOString(),
+      configured: days.length > 0,
+      isOpen: resolution.isOpen,
+      openTime: resolution.openTime,
+      closeTime: resolution.closeTime,
+      nextOpen: next ? { date: next.date.toISOString().slice(0, 10), openTime: next.openTime, closeTime: next.closeTime } : null,
+    };
   }
 
   // ---- Images (public bucket) ----
