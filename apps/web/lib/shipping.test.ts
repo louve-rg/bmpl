@@ -51,6 +51,7 @@ const shipment = (over: Partial<ShipmentView> = {}): ShipmentView => ({
   currentLegSequence: 1,
   legs: [],
   custody: [],
+  availabilityWindows: [],
   ...over,
 });
 
