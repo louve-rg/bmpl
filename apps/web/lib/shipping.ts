@@ -81,6 +81,14 @@ export interface ShipmentLegView {
   /** Null until a courier is actually assigned to this leg. */
   courier: ShipmentCourier | null;
   courierVehicle: ShipmentCourierVehicle | null;
+  /**
+   * BMPL-290: this leg's own customer<->courier thread, or null before one
+   * exists — a driver has to accept the leg before there is anyone to talk to
+   * or anything to open. Never a placeholder: null means no thread, full stop.
+   * One leg, one thread — a shipment with two courier legs has two separate
+   * conversationIds, never one shared id.
+   */
+  conversationId: string | null;
 }
 
 export interface ShipmentEndpoint {

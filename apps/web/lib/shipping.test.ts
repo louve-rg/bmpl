@@ -25,6 +25,7 @@ const leg = (over: Partial<ShipmentLegView> = {}): ShipmentLegView => ({
   handoffPin: null,
   courier: null,
   courierVehicle: null,
+  conversationId: null,
   ...over,
 });
 
