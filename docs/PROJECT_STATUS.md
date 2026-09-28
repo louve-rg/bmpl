@@ -61,13 +61,15 @@ Belize Marketplace & Logistics: a multi-role commerce and logistics platform for
 Belize. One account, many roles — a person can be a customer, a vendor and a
 delivery driver at once, and switch between them.
 
-Active business areas, in the order they matter right now. Where an item
-below is tagged **on `main`** vs **in production**, that split is real and
-worth tracking separately, not a formality: as of 2026-09-26, production is
-still serving `1f23e9a` (2026-09-22) while `main` has moved thirteen merges
-further, and the owner holds the deploy decision. Read `pnpm deploy:status`
-for the live gap rather than trusting this note's date — a status document
-that reads as though `main` equals production is its own kind of false claim.
+Active business areas, in the order they matter right now. Below, some items
+are tagged **on `main`** vs **in production** — read that split with caution.
+It was written on the assumption that a CI gate held a merge back from
+deploying; that assumption was **false**. Merging to `main` deploys the API to
+production immediately (`railway.json` watches `apps/api` and every shared
+package, and runs migrations as part of the deploy) — there is no held-back
+gap to report a commit count for. Whether each surface (API, web, admin) is
+actually at `main`'s current tip right now is **under review** (BMPL-298),
+not asserted here. `pnpm deploy:status` is the live source; this note is not.
 
 1. **Marketplace** — vendors, products, cart, checkout, orders. **On `main`,
    not yet in production**: a customer can cancel an order until the store
