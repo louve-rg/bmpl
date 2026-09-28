@@ -4057,6 +4057,7 @@ model Promotion {
   assets      PromotionAsset[]
   targets     PromotionTarget[]
   metrics     PromotionMetricDaily[]
+  events      PromotionEvent[]
   redemptions PromotionRedemption[]
   reports     PromotionReport[]
 
@@ -4190,6 +4191,39 @@ model PromotionMetricDaily {
   @@unique([promotionId, day, placement])
   @@index([promotionId, day])
   @@map("promotion_metrics_daily")
+}
+
+/// BMPL-332: impression/view/click, only — CONVERSION is deliberately absent.
+/// BMPL-330 found the daily rollup's UTC-day bucketing had irreversibly
+/// discarded each event's real instant; this table keeps it going forward.
+/// `promotion_metrics_daily` is not replaced — BMPL-332 measured that its
+/// rollup shape is the right PERMANENT read path (bounded by promotions x
+/// days x placements, not by traffic) — `track()` writes both, in one
+/// transaction, so there is never a window where the two counts could
+/// disagree (see `PromotionDiscoveryService.track()`).
+///
+/// WILL NOT STORE, on purpose (root CLAUDE.md sec 5 — "an event row is not
+/// an invitation to log a session"): no IP address, user agent, session id,
+/// device id or referrer. No `userId` on an impression/view/click row either
+/// — those stay exactly as anonymous as they are today; keeping a real
+/// instant is not a reason to start attaching identity to them.
+enum PromotionEventKind {
+  IMPRESSION
+  VIEW
+  CLICK
+}
+
+model PromotionEvent {
+  id          String                  @id @default(cuid())
+  promotionId String
+  promotion   Promotion               @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  kind        PromotionEventKind
+  placement   PromotionPlacementType?
+  occurredAt  DateTime                @default(now())
+
+  @@index([promotionId, occurredAt])
+  @@index([promotionId, kind, occurredAt])
+  @@map("promotion_events")
 }
 
 /// A recorded conversion/redemption event attributed to a promotion.

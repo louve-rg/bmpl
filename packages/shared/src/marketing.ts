@@ -250,6 +250,17 @@ export const DEFAULT_MARKETING_TIMEZONE = 'America/Belize';
 export const PROMOTION_SORTS = ['newest', 'priority', 'ending_soon', 'most_viewed'] as const;
 export type PromotionSort = (typeof PROMOTION_SORTS)[number];
 
+/**
+ * BMPL-332: the Belize calendar day `PromotionEvent` rows started being
+ * written on. Not a query filter and nothing reads it to decide what's
+ * "legacy" — the absence of `PromotionEvent` rows for a bucket already IS
+ * that fact, and it cannot disagree with reality the way a separately
+ * stored flag could. This constant exists only for a human-facing label
+ * ("detailed data available from …") that would otherwise have to restate
+ * the same date from memory somewhere else.
+ */
+export const PROMOTION_EVENTS_CUTOVER_DATE = '2026-11-04';
+
 /** Compute click-through rate (clicks/impressions) as a 0–1 ratio; 0 when no impressions. */
 export const computeCtr = (impressions: number, clicks: number): number =>
   impressions > 0 ? clicks / impressions : 0;
