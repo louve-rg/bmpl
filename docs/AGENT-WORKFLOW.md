@@ -202,7 +202,14 @@ CI must be green: build + typecheck + unit, the integration job, and the
 gitleaks secret scan. (`format:check` and `lint` are `continue-on-error` and are
 expected to be red.)
 
-**Merging is a production release and requires human approval** — see §7.
+**Merging is not a separate deployment decision to make later** — merging to
+`main` deploys the API automatically and runs its migrations (§2), so there is
+no staging pause between a merge and real users. The product owner has
+delegated approval for merging an ordinary implementation pull request to
+Michael — a recorded decision, not new latitude. A pull request that runs a
+database migration is not covered by that delegation: it still needs
+Michael's own personal safety review before it merges, and stays gated under
+the human-approval rules in §7.
 
 After a merge, confirm all three services are actually serving the new commit
 rather than assuming it:
@@ -244,7 +251,12 @@ for why it is deliberately excluded).
 
 An agent must **stop and ask**, every time, for:
 
-- **Merging to `main`**, opening a PR for merge, or anything that deploys
+- **Merging to `main`**, opening a PR for merge, or anything that deploys —
+  except an ordinary implementation pull request, whose merge Michael may now
+  do without the owner's separate sign-off (a delegated decision, not new
+  latitude; see §6). A pull request that runs a database migration is not
+  part of that exception: it stays gated under "any production database
+  operation," below, exactly as it was.
 - **Any production database operation**, including running a migration against
   production and any read that requires production credentials
 - **Enabling, wiring or scaffolding real-money movement** — payment provider,
@@ -259,8 +271,10 @@ An agent must **stop and ask**, every time, for:
 - **A repo-wide mechanical change** such as formatting or a rename
 - **Spending money** or signing up for a third-party service
 
-Michael holds these gates and asks the human directly. An agent that believes a
-gate should open writes the request; it does not open it.
+Michael holds these gates and asks the human directly, except the ordinary-
+implementation-merge exception noted above, which the owner has delegated to
+Michael outright. An agent that believes a gate should open writes the
+request; it does not open it.
 
 When blocked on the human, the task moves to `blocked` on the board with the ask
 recorded on the card. Work continues on everything that does not depend on the
