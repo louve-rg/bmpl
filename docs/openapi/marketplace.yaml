@@ -851,6 +851,10 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "Rejected (insufficient balance / currency mismatch / wallet locked or suspended) — order rolled back" }
+  /wallet:
+    get: { tags: [Wallet], summary: "Own wallet summary: available, on hold, and the two together", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "401": { $ref: "#/components/responses/Unauthorized" } } }
+  /wallet/transactions:
+    get: { tags: [Wallet], summary: The caller's own wallet transactions, security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "401": { $ref: "#/components/responses/Unauthorized" } } }
   /wallet/transactions/{id}:
     get:
       tags: [Wallet]
@@ -858,10 +862,81 @@ paths:
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
       security: [{ cookieAuth: [] }]
       responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }
+  /wallet/top-up:
+    post:
+      tags: [Wallet]
+      summary: Put money into a SIMULATION wallet (rate-limited)
+      description: >
+        BML has no external payment rail — this is the only honest way to
+        exercise the wallet engine end to end: bookkeeping over money that
+        does not represent anything real. Gated on the CALLER'S OWN
+        `isTest` flag, which is admin-set only and never derived from the
+        request — a non-test customer gets a 403 with a plain-language
+        explanation rather than a generic Forbidden. Posts through the same
+        ledger as every other movement (a balanced TOPUP, clearing account
+        debited), and the transaction is marked `isTest` so real reporting
+        and settlement exclude it.
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201": { description: OK }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "403": { description: "Not a test account — BML does not have a card or bank payment method connected" }
+  /wallet/test-funding:
+    get:
+      tags: [Wallet]
+      summary: Whether the caller can still self-issue test funds, and for how much
+      description: >
+        Drives the wallet page's self-service button. Gated on
+        `ENABLE_SELF_SERVICE_TEST_FUNDING` (defaults OFF, not derived from
+        `NODE_ENV`) plus an optional expiry, both evaluated per request —
+        `{ enabled: false }` when off, otherwise
+        `{ enabled: true, amountMinor, capMinor, grantedMinor, remainingMinor, claimed }`.
+        `capMinor` is a hard ceiling per person, cumulative, that nothing
+        outside this feature can raise; spending does not restore headroom.
+      security: [{ cookieAuth: [] }]
+      responses: { "200": { description: OK } }
+  /wallet/test-fund:
+    post:
+      tags: [Wallet]
+      summary: Issue simulation funds to the caller's OWN wallet (rate-limited)
+      description: >
+        Takes no body at all, deliberately — the amount comes from server
+        configuration (capped at BZ$250 cumulative, see test-funding above)
+        and the recipient is always the caller; anything sent is ignored.
+        Answers 404 (not 403) when `ENABLE_SELF_SERVICE_TEST_FUNDING` is off,
+        so the feature does not advertise its own existence once disabled.
+        Still test money moving through the ordinary ledger, under the same
+        session/role/CSRF protection as every other wallet mutation.
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201": { description: OK }
+        "404": { description: "Self-service test funding is not enabled" }
+        "409": { description: "This person's test credit has already been fully issued" }
   /admin/wallet/transactions:
     get: { tags: [Wallet], summary: All wallet transactions (read-only, each balances to net 0), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read" }
   /admin/wallet/accounts:
     get: { tags: [Wallet], summary: System / escrow account balances (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read" }
+  /admin/wallet/test-credit:
+    post:
+      tags: [Wallet]
+      summary: Post simulation credit to somebody's wallet (rate-limited; audited)
+      description: >
+        Requires wallet.credit_test; body { userId, amountMinor (100–100000),
+        reason (3–500 chars) }. Every safeguard the self-service route has,
+        this keeps: the money moves through a balanced TOPUP, the transaction
+        is marked as test money whoever receives it, and the audit row names
+        the administrator and their reason. The recipient's own account is
+        not reclassified — a real customer stays a real customer, and only
+        the credit is simulated. Not a manual balance adjustment.
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201": { description: OK }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/wallet/users/{userId}/lock:
+    post: { tags: [Wallet], summary: Lock a person's wallet (fraud/security control; audited), parameters: [ { name: userId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.lock; body { reason }; addressed by user id, not wallet id; never touches an amount" }
+  /admin/wallet/users/{userId}/unlock:
+    post: { tags: [Wallet], summary: Unlock a person's wallet, parameters: [ { name: userId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [], csrfToken: [] }], responses: { "201": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.lock; body { reason }" }
   # ---- Dispatch & Delivery Execution (Phase 4 · M15) ----
   /admin/deliveries:
     get: { tags: [Dispatch], summary: "List/filter deliveries (status, district, vendorProfileId, unassigned)", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires deliveries.read. Returns the envelope { automaticDispatch: boolean, items: [...] }; each row carries needsManualAssignment = ready AND unassigned AND automatic dispatch off — the deliveries a human must assign or they never move." }
