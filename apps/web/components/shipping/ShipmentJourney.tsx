@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import {
   formatTransitTime,
   headlineFor,
@@ -25,6 +26,19 @@ import { DriverCard } from '../DeliveryTracker';
  */
 
 const MODE_ICON: Record<string, string> = { LAND: '🚚', AIR: '✈️', SEA: '⛴️' };
+
+/**
+ * BMPL-289/290: one link per leg, straight into the existing inbox
+ * (/dashboard/messages already deep-links and preselects via ?c=) — never a
+ * single "contact your courier" button for the whole shipment. A first-mile
+ * and a last-mile driver hold separate threads and cannot see each other's;
+ * picking one for a combined button would quietly contradict that.
+ */
+function messageCourierLabel(kind: ShipmentLegView['kind']): string {
+  if (kind === 'FIRST_MILE') return 'Message your courier about pickup';
+  if (kind === 'LAST_MILE') return 'Message your courier about delivery';
+  return 'Message your courier';
+}
 
 function LegRow({ leg, isLast }: { leg: ShipmentLegView; isLast: boolean }) {
   const phase = legPhase(leg);
@@ -72,6 +86,20 @@ function LegRow({ leg, isLast }: { leg: ShipmentLegView; isLast: boolean }) {
           <div className="mt-2">
             <DriverCard driver={leg.courier} vehicle={leg.courierVehicle} />
           </div>
+        )}
+
+        {/* Only once a driver has accepted and a thread actually exists — a
+            null conversationId means nobody to message yet, so nothing renders. */}
+        {leg.conversationId && (
+          <Link
+            href={`/dashboard/messages?c=${leg.conversationId}`}
+            className="mt-2 inline-flex min-h-[36px] items-center gap-1.5 text-sm font-medium text-belize-blue hover:underline"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-4 w-4" aria-hidden>
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" />
+            </svg>
+            {messageCourierLabel(leg.kind)}
+          </Link>
         )}
 
         {/* What actually happened, once it has. */}
