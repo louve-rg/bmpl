@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
+  addVendorHoursExceptionSchema,
   createVendorProfileSchema,
   imageConfirmSchema,
   imagePresignSchema,
@@ -9,6 +10,7 @@ import {
   vendorHoursSchema,
   vendorLocationSchema,
   vendorSettingsSchema,
+  type AddVendorHoursExceptionInput,
   type CreateVendorProfileInput,
   type ImageConfirmInput,
   type ImagePresignInput,
@@ -108,6 +110,20 @@ export class VendorController {
     @Body(ZodBody(vendorHoursSchema)) body: VendorHoursInput,
   ) {
     return this.vendor.setHours(user.userId, body);
+  }
+
+  // ---- Opening hours: date-specific exceptions (BMPL-334) ----
+  @Post('profile/hours/exceptions')
+  addHoursException(
+    @CurrentUser() user: AuthContext,
+    @Body(ZodBody(addVendorHoursExceptionSchema)) body: AddVendorHoursExceptionInput,
+  ) {
+    return this.vendor.addHoursException(user.userId, body);
+  }
+
+  @Delete('profile/hours/exceptions/:id')
+  removeHoursException(@CurrentUser() user: AuthContext, @Param('id') id: string) {
+    return this.vendor.removeHoursException(user.userId, id);
   }
 
   // ---- Logo / banner (public bucket) ----

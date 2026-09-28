@@ -27,8 +27,13 @@
  * omission. Out of scope, deliberately: the customer-facing "closed / may
  * close before arrival" badge is the web half and is held separately so it
  * does not ship before this behaviour is live (root CLAUDE.md's
- * no-fabricated-capability rule). No checkout gating, no schema change
- * beyond the audit-action enum value, no UI.
+ * no-fabricated-capability rule). No checkout gating, no UI.
+ *
+ * BMPL-334 adds a second describe block below: dated exceptions
+ * (VendorHoursException), driving dispatch through the real self-service
+ * write endpoint rather than a direct Prisma write, and asserting the
+ * "unconfigured-except-one-date" property explicitly rather than leaving it
+ * to the shared resolver's accident (per the dispatch's own instruction).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -333,5 +338,76 @@ describe('automatic dispatch — vendor-hours deferral is visible to operations 
     // row — one ASSIGNED row and one DEFERRED row, not zero.
     expect(await deferralRowsFor(deliveryId)).toHaveLength(1);
     expect(await assignedRowsFor(deliveryId)).toBe(1);
+  });
+});
+
+/**
+ * BMPL-334: dated exceptions. Driven through the real self-service write
+ * endpoint (`POST vendor/profile/hours/exceptions`), the same discipline
+ * setVendorHours above already applies to the weekly pattern — proves the
+ * write surface actually reaches dispatch, not just a hand-written row.
+ */
+describe('automatic dispatch — vendor dated exceptions (BMPL-334)', () => {
+  async function addException(cookies: string[], date: string, body: Record<string, unknown>) {
+    const res = await post(cookies, 'vendor/profile/hours/exceptions', { date, ...body });
+    expect(res.status).toBe(201);
+  }
+
+  it('a CLOSED exception defers dispatch on that date, and self-corrects the next day', async () => {
+    const vendor = await makeVendor();
+    // 2026-12-25 is a Friday; a synthetic test date, never a real Belize holiday.
+    await addException(vendor.cookies, '2026-12-25', { status: 'CLOSED', reason: 'Synthetic test closure' });
+    const { deliveryId } = await readyDelivery(vendor);
+    const driver = await makeDriver();
+
+    const onClosedDate = await engine.dispatch(deliveryId, belizeInstant(2026, 12, 25, 12, 0));
+    expect(onClosedDate.result).toBe('DEFERRED');
+    expect((onClosedDate as { reason: string }).reason).toMatch(/outside its configured hours/);
+
+    const nextDay = await engine.dispatch(deliveryId, belizeInstant(2026, 12, 26, 12, 0));
+    expect(nextDay.result).toBe('ASSIGNED');
+    expect((nextDay as { driverProfileId: string }).driverProfileId).toBe(driver.driverProfileId);
+  });
+
+  it('a MODIFIED exception constrains dispatch to the override window, not the (absent) weekly pattern', async () => {
+    const vendor = await makeVendor();
+    await addException(vendor.cookies, '2026-12-25', { status: 'MODIFIED', openTime: '10:00', closeTime: '13:00', reason: 'Synthetic: reduced hours' });
+    const { deliveryId } = await readyDelivery(vendor);
+    await makeDriver();
+
+    const beforeWindow = await engine.dispatch(deliveryId, belizeInstant(2026, 12, 25, 9, 0));
+    expect(beforeWindow.result).toBe('DEFERRED');
+
+    const insideWindow = await engine.dispatch(deliveryId, belizeInstant(2026, 12, 25, 11, 0));
+    expect(insideWindow.result).toBe('ASSIGNED');
+  });
+
+  /**
+   * THE PROPERTY god asked to be decided in code and asserted by a test,
+   * not left to the resolver's accident: a vendor with ONLY an exception
+   * row and ZERO VendorOpeningHours rows is unconstrained on every OTHER
+   * date — the exception check wins for its own date regardless of whether
+   * a weekly pattern exists at all, and dispatch falls through to
+   * unconstrained (identical to a fully unconfigured vendor) everywhere
+   * else. Two deliveries, same vendor, same exception, two different
+   * dates either side of it.
+   */
+  it('unconfigured-except-one-date: no weekly pattern at all, one exception — every OTHER date dispatches exactly like an unconfigured vendor', async () => {
+    const vendor = await makeVendor();
+    await addException(vendor.cookies, '2026-12-25', { status: 'CLOSED', reason: 'Synthetic test closure' });
+
+    // The excepted date itself: deferred, exactly as the test above proves.
+    const onException = await readyDelivery(vendor);
+    const driverA = await makeDriver();
+    expect((await engine.dispatch(onException.deliveryId, belizeInstant(2026, 12, 25, 12, 0))).result).toBe('DEFERRED');
+
+    // A different date, same vendor, same (still-empty) weekly pattern: no
+    // exception row matches, so this is UNCONSTRAINED — dispatches exactly
+    // as an unconfigured vendor would, not "closed by default" and not
+    // "blocked because SOME exception exists for this vendor".
+    const onOrdinaryDate = await readyDelivery(vendor);
+    const outcome = await engine.dispatch(onOrdinaryDate.deliveryId, belizeInstant(2026, 12, 10, 3, 0));
+    expect(outcome.result).toBe('ASSIGNED');
+    expect((outcome as { driverProfileId: string }).driverProfileId).toBe(driverA.driverProfileId);
   });
 });
