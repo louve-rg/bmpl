@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { belizeCalendarDate, HOMEPAGE_PLACEMENTS, type PromotionPlacementType } from '@bmpl/shared';
 import type { PromotionReportInput, TrackPromotionEventInput } from '@bmpl/validation';
-import { Prisma } from '@bmpl/database';
+import { Prisma, PromotionEventKind } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -13,6 +13,21 @@ const EVENT_COLUMN: Record<TrackPromotionEventInput['event'], 'impressions' | 'v
   view: 'views',
   click: 'clicks',
   conversion: 'conversions',
+};
+
+/**
+ * Which `PromotionEvent` row kind a public event also writes (BMPL-332).
+ * `conversion` is deliberately absent: BMPL-332 requirement 9 is on hold —
+ * no existing mechanism ties a completed Order back to a Promotion (unlike
+ * Coupon/CouponUsage, which is real), and the owner has not yet ruled on
+ * what authoritative activity should count as a conversion. Conversions
+ * keep today's behavior exactly: the daily counter only, no event row,
+ * until that is decided.
+ */
+const EVENT_KIND: Partial<Record<TrackPromotionEventInput['event'], PromotionEventKind>> = {
+  impression: PromotionEventKind.IMPRESSION,
+  view: PromotionEventKind.VIEW,
+  click: PromotionEventKind.CLICK,
 };
 
 /**
@@ -104,24 +119,47 @@ export class PromotionDiscoveryService {
     return this.promotions.detail(p.id);
   }
 
-  /** Best-effort daily metric increment. NEVER throws to the client (204). */
+  /**
+   * Best-effort daily metric increment. NEVER throws to the client (204).
+   *
+   * BMPL-332: for impression/view/click, this also writes a `PromotionEvent`
+   * row carrying the real instant — both in the SAME transaction as the
+   * daily-counter upsert. Do not build two sources for one fact and hope
+   * they agree; make one write produce both (apps/api/CLAUDE.md sec 6, the
+   * same guard-shape lesson arriving from the write side). A separate,
+   * independent write to each table would leave a window where a failure
+   * after the first and before the second could make them disagree; one
+   * transaction cannot.
+   */
   async track(promotionId: string, dto: TrackPromotionEventInput) {
     try {
       const promo = await this.prisma.promotion.findUnique({ where: { id: promotionId }, select: { id: true } });
       if (!promo) return;
-      const day = dayBucket();
+      // One captured instant feeds both the event's occurredAt and the daily
+      // bucket, rather than letting occurredAt fall back to the database's own
+      // DEFAULT CURRENT_TIMESTAMP — the two would otherwise be evaluated by
+      // two different clocks (app vs. DB) microseconds apart, and only one of
+      // them would be capturable by a test that pins the clock.
+      const now = new Date();
+      const day = dayBucket(now);
       const placement = dto.placement ?? null;
       const column = EVENT_COLUMN[dto.event];
+      const kind = EVENT_KIND[dto.event];
       const create: Prisma.PromotionMetricDailyCreateInput = {
         promotion: { connect: { id: promotionId } }, day, placement, impressions: 0, views: 0, clicks: 0, conversions: 0,
       };
       create[column] = 1;
-      await this.prisma.promotionMetricDaily.upsert({
-        // placement is a nullable member of the compound unique; Prisma accepts null at
-        // runtime though its generated type narrows to the enum — cast to satisfy TS.
-        where: { promotionId_day_placement: { promotionId, day, placement: placement as never } },
-        create,
-        update: { [column]: { increment: 1 } } as Prisma.PromotionMetricDailyUpdateInput,
+      await this.prisma.$transaction(async (tx) => {
+        if (kind) {
+          await tx.promotionEvent.create({ data: { promotion: { connect: { id: promotionId } }, kind, placement, occurredAt: now } });
+        }
+        await tx.promotionMetricDaily.upsert({
+          // placement is a nullable member of the compound unique; Prisma accepts null at
+          // runtime though its generated type narrows to the enum — cast to satisfy TS.
+          where: { promotionId_day_placement: { promotionId, day, placement: placement as never } },
+          create,
+          update: { [column]: { increment: 1 } } as Prisma.PromotionMetricDailyUpdateInput,
+        });
       });
     } catch {
       // best-effort; tracking must never surface an error to the caller.
