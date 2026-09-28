@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import {
   canPerform,
   DELIVERY_STATUS_LABELS,
+  isAvailable,
   isLegActionable,
   rankDrivers,
   type DriverCandidate,
@@ -106,6 +107,7 @@ export class ShipmentDispatchService {
             quotedTotalMinor: true,
             payment: { select: { status: true } },
             legs: { select: { sequence: true, kind: true, mode: true, status: true } },
+            availabilityWindows: { select: { role: true, startTime: true, endTime: true } },
           },
         },
       },
@@ -171,8 +173,63 @@ export class ShipmentDispatchService {
           : ' No open window is configured within the next two weeks.';
         const reason = `${hubName} is outside its configured hours at the projected arrival time (${projectedArrival.toISOString()}).${nextOpen}`;
         this.logger.warn(`leg ${leg.id} deferred — ${reason}`);
-        await this.recordDeferralIfNew(leg.id, leg.shipment.id, leg.shipment.reference, leg.destinationHubId, reason);
+        await this.recordDeferralIfNew(leg.id, leg.shipment.id, leg.shipment.reference, reason, {
+          cause: 'HUB_HOURS',
+          hubId: leg.destinationHubId,
+        });
         return { result: 'DEFERRED', reason };
+      }
+    }
+
+    // BMPL-284/285/287: the SENDER's or RECIPIENT's own configured
+    // availability window — a different constraint from a hub's opening
+    // hours, and NOT hub-hours-shaped, per BMPL-284's own finding: no
+    // weekly pattern, no date exceptions, just a flat set of time-of-day
+    // ranges (packages/shared/src/availability-windows.ts). Same ruling,
+    // same mechanism, same audit action as the hub-hours check just above
+    // — reused deliberately, not duplicated: DEFERRED, no persisted
+    // "scheduled for" state, the sweeper's existing cadence is what makes
+    // it self-correct, and recordDeferralIfNew's dedup already covers
+    // BOTH causes because it keys on the leg, not on which check deferred it.
+    //
+    // UNLIKE hub hours, this applies to BOTH ends of the journey — a hub is
+    // never a LAST_MILE destination, but a recipient's own door always is
+    // — and DIRECT touches both parties within the SAME leg, checked at
+    // two different instants: the sender at `now` (no travel-to-sender
+    // estimator exists — same honest reasoning BMPL-273 already used for
+    // "now" as the base of a hub-arrival projection — so `now` IS the
+    // projected pickup instant), the recipient at `now + durationMinutes`
+    // (the projected delivery instant, exactly like the hub-arrival check
+    // above uses for FIRST_MILE).
+    //
+    // A shipment with no configured windows at all (every shipment in
+    // production today) resolves isAvailable():true for both roles via its
+    // own unconstrained default, so this changes nothing for any existing
+    // shipment.
+    if (leg.kind === 'FIRST_MILE' || leg.kind === 'LAST_MILE' || leg.kind === 'DIRECT') {
+      const windows = leg.shipment.availabilityWindows;
+      if (leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT') {
+        if (!isAvailable(now, windows, 'SENDER')) {
+          const reason = `the sender is outside their configured availability window at the projected pickup time (${now.toISOString()}).`;
+          this.logger.warn(`leg ${leg.id} deferred — ${reason}`);
+          await this.recordDeferralIfNew(leg.id, leg.shipment.id, leg.shipment.reference, reason, {
+            cause: 'AVAILABILITY_WINDOW',
+            role: 'SENDER',
+          });
+          return { result: 'DEFERRED', reason };
+        }
+      }
+      if (leg.kind === 'LAST_MILE' || leg.kind === 'DIRECT') {
+        const projectedDelivery = new Date(now.getTime() + leg.durationMinutes * 60_000);
+        if (!isAvailable(projectedDelivery, windows, 'RECIPIENT')) {
+          const reason = `the recipient is outside their configured availability window at the projected delivery time (${projectedDelivery.toISOString()}).`;
+          this.logger.warn(`leg ${leg.id} deferred — ${reason}`);
+          await this.recordDeferralIfNew(leg.id, leg.shipment.id, leg.shipment.reference, reason, {
+            cause: 'AVAILABILITY_WINDOW',
+            role: 'RECIPIENT',
+          });
+          return { result: 'DEFERRED', reason };
+        }
       }
     }
 
@@ -689,12 +746,23 @@ export class ShipmentDispatchService {
    * only has to scan within that already-small subset, not the whole audit
    * log.
    */
+  /**
+   * BMPL-287: the same audit action, and the same dedup, now feeds TWO
+   * causes — a hub outside its configured hours (BMPL-273) and a party
+   * outside their configured availability window (BMPL-287). Deliberately
+   * ONE action value, not two: "a window deferral and an hours deferral
+   * are the same operational event from an operator's point of view" —
+   * the distinction, when it matters, travels in `reason` and in the
+   * `cause` field of `extra`, never a second SHIPMENT_LEG_DISPATCH_DEFERRED-
+   * shaped action that would need to be kept in the transition-detection
+   * query above alongside the first.
+   */
   private async recordDeferralIfNew(
     legId: string,
     shipmentId: string,
     reference: string,
-    hubId: string,
     reason: string,
+    extra: Record<string, unknown> = {},
   ): Promise<void> {
     const latest = await this.prisma.auditLog.findFirst({
       where: {
@@ -707,7 +775,7 @@ export class ShipmentDispatchService {
     if (latest?.action === 'SHIPMENT_LEG_DISPATCH_DEFERRED') return;
     await this.audit.record({
       action: 'SHIPMENT_LEG_DISPATCH_DEFERRED',
-      newValue: { legId, shipmentId, reference, hubId },
+      newValue: { legId, shipmentId, reference, ...extra },
       reason,
     });
   }
