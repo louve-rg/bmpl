@@ -139,11 +139,12 @@ dropped five production indexes — because the reason was written down once,
 inside a migration file, where nobody not already reading that file could find
 it. It is written here now so the next person checks this section instead of
 treating the output as a regression. `migrate diff` against this schema
-reports **four** items today, not seven — mechanism (2) below closed in
-BMPL-309.
+reports **two** items today, not seven — mechanisms (2), (3) and (4) below
+are all closed now, in BMPL-309 and BMPL-319. What's left is the one
+mechanism below that cannot be closed by editing `schema.prisma`, ever.
 
-Three separate mechanisms produce this; two remain live, one is closed and
-kept here as the record of how:
+Four separate mechanisms have produced this over time; three are closed and
+kept here as the record of how, one remains live and always will:
 
 1. **Objects Prisma's schema language cannot express at all.**
    `products_search_idx` and `products_title_trgm_idx` are hand-written GIN
@@ -174,8 +175,9 @@ kept here as the record of how:
    predicate. So the actual fix was three declarations and nothing else: no
    `map:`, no `IF NOT EXISTS`, no migration file at all.
    **How that was known before merging, not assumed** (BMPL-308/309) — this
-   is the reusable part, worth more than the specific result, for whoever
-   next takes on mechanism (3) below: run `prisma migrate diff` against a
+   is the reusable part, worth more than the specific result. It was reused
+   twice more the same day, closing mechanisms (3) and (4) below (BMPL-318/319):
+   run `prisma migrate diff` against a
    throwaway shadow database (created and dropped locally, never a shared
    database) twice. First a **control pass against the unmodified schema** —
    it must reproduce the known trap exactly, proving the tool actually
@@ -186,14 +188,54 @@ kept here as the record of how:
    they are different files even when the content should be identical.
    `--exit-code` turns both passes into a check a script (or a person) can
    gate on instead of eyeballing output.
-3. **A Postgres identifier-length truncation, unrelated to the above.**
-   `courier_lanes`'s unique constraint name as written in
-   `20261102093000_courier_lanes` is 79 characters; Postgres's identifier
-   limit is 63 bytes, so the name actually stored is silently truncated while
-   Prisma still expects the name as literally written in the migration file.
-   `migrate diff` proposes a `RENAME INDEX` to reconcile them. Same
-   "expected, not drift" rule; a different, separate fix (shortening the
-   name) than either of the above, not attempted.
+3. **CLOSED (BMPL-319). A Postgres identifier-length truncation, unrelated to
+   the above.** `courier_lanes`'s unique constraint as written in
+   `20261102093000_courier_lanes` names a 79-character index. Postgres's
+   identifier limit is 63 bytes and it truncates silently — every
+   already-migrated database, including production, actually stored
+   `courier_lanes_originDistrict_originCity_destinationDistrict_des` (63
+   characters, a dumb prefix cut, mid-word). `migrate diff` proposed a
+   `RENAME INDEX` to reconcile the two, on every run, forever.
+
+   **The mismatch is sharper than "the name got cut off."** With no `map:`,
+   Prisma computes its *own* default name for an over-long constraint, and
+   Prisma's truncation is not Postgres's: it trims the field-name content and
+   keeps the trailing `_key` suffix intact, landing on
+   `courier_lanes_originDistrict_originCity_destinationDistrict_key` — also
+   exactly 63 characters, but a *different* 63-character string than what
+   Postgres actually stored. Two truncation algorithms, the same limit, the
+   same input, different output — that disagreement, not merely "the name is
+   too long," is the entire cause of the `RENAME INDEX`. Found by running the
+   diff and reading its output, not derived from either engine's
+   documentation (BMPL-318) — the plan going in assumed Prisma's "expected"
+   name was the untruncated 79-character literal; it wasn't.
+
+   Fix: `map:` on the `@@unique`, naming the exact 63-character string
+   Postgres actually stored — not the untruncated 79-character literal, and
+   not Prisma's own default truncation either. Same control-then-confirm
+   method as mechanism (2) above; BMPL-318 ran it end to end for this object,
+   including confirming Prisma passes an at-the-limit 63-character `map:`
+   value through completely unchanged (observed from the diff output, not
+   assumed from the string's length). Zero DDL, no migration file.
+4. **CLOSED (BMPL-319). A leftover backfill default, unrelated to Prisma
+   representation at all.** `promotion_placements.updatedAt` had no
+   DB-level default when the table was created — matching every other
+   `@updatedAt` field in this schema (69 of them): Prisma manages `updatedAt`
+   client-side and writes no DB-level default for it. But
+   `20260925123000_admin_ad_placement` later added `updatedAt` to that
+   *already-populated* table as `NOT NULL`, which Postgres cannot do without
+   a value for existing rows — so the migration added
+   `DEFAULT CURRENT_TIMESTAMP` to satisfy the backfill, and nothing ever
+   dropped it afterward. `migrate diff` proposed
+   `ALTER COLUMN "updatedAt" DROP DEFAULT` on every run since, matching what
+   the schema has always claimed (no default) against the one table that
+   still has one.
+
+   Fix: declare `@default(now()) @updatedAt` together on the field. Confirmed
+   valid by `prisma validate` first — the two attributes are not mutually
+   exclusive, despite no other field in this schema combining them, so this
+   was checked rather than assumed — then confirmed a true no-op by the same
+   control-then-confirm method. Zero DDL, no migration file.
 
 ## 7. This package declares a `test` script and has no tests
 
