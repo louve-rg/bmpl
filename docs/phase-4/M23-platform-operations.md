@@ -27,7 +27,7 @@ one call, so an operator sees the whole platform's pending work at a glance:
 | `openReviewReports` | `ReviewReport` OPEN |
 | `openSupportCases` | `Conversation` SUPPORT_CASE + OPEN |
 | `failedSettlements` | `VendorSettlement` FAILED |
-| `deliveriesPendingAssignment` | `OrderDelivery` PENDING_ASSIGNMENT |
+| `deliveriesPendingAssignment` | `OrderDelivery` PENDING_ASSIGNMENT or DRIVER_DECLINED (BMPL-295: a declined delivery used to appear on no tile at all) |
 | `awaitingPickupCollection` | `VendorOrder` READY_FOR_PICKUP |
 | `suspendedUsers` / `suspendedRoles` | `User` / `UserRole` SUSPENDED (informational) |
 

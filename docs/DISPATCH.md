@@ -196,16 +196,21 @@ matching side of the `isTest` boundary. The console shows each candidate's
 current live-job count and sorts by it; without that, manual mode reliably piles
 every job onto whoever happens to sort first.
 
-## Driver job preferences — not built
+## Driver job preferences — a richer model is not built
 
 Drivers can set service areas (districts), narrow a served district to
-specific towns (BMPL-176), and go online or offline. Assignment itself still
-matches on district alone: `DriverService.eligibleDriversForDistrict` and
-`assignmentEligibility`'s own `servesDistrict` check both compare only
-`district`, never a driver's narrower town-level rows, so a driver narrowed to
-one town is still offered every job anywhere in that district today. Town-
-level matching is unwired (BMPL-194). That district-level match is the only
-driver-side input to assignment today.
+specific towns (BMPL-176), and go online or offline. Assignment now honours
+that narrowing (BMPL-194): `DriverService.eligibleDriversForDistrict` and
+`assignmentEligibility` apply it when a destination city is known, matching
+exactly after trim+lowercase — the same convention `route-planner.ts` uses
+for free-text place names — so a driver narrowed to San Pedro is no longer
+offered Belize City work just because both share the Belize District. An
+absent destination city is treated as unconstrained, not a non-match.
+**Known limitation, not a false claim of correctness**: the match is exact
+after normalizing, not fuzzy — "San Pedro" and "San Pedro Town" will not
+match each other, and nothing today surfaces that drift to a driver whose
+declared spelling stops matching an address's (see the `sameCity` comment in
+`apps/api/src/driver/driver.service.ts`).
 
 A richer preference model — parcel size or weight limits, preferred vendors,
 shift windows, maximum travel distance — is a plausible future option and is
