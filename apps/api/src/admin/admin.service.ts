@@ -517,6 +517,24 @@ export class AdminService {
   /** Set a user's admin permissions (SUPER_ADMIN only). Fully audited. */
   async setPermissions(actor: Actor, userId: string, permissions: Permission[]) {
     const previous = await this.getPermissions(userId);
+    // BMPL-336: this is a full-set REPLACE, not a single grant or a single
+    // revoke, so one call can do both at once (e.g. swap 'orders.read' for
+    // 'orders.manage' in the same save). ADMIN_PERMISSION_GRANTED and
+    // ADMIN_PERMISSION_REVOKED already exist as two SEPARATE audit actions
+    // (unlike HUB_HOURS_CHANGED/ROUTE_SCHEDULE_CHANGED, which deliberately
+    // fold every verb for their surface into ONE action with the verb
+    // travelling in newValue) — so folding a mixed call into a single
+    // ADMIN_PERMISSION_GRANTED row, as the code did before this fix, isn't a
+    // simplification, it's a false statement: an admin who had every
+    // permission REVOKED reads "GRANTED" on their own audit row. The
+    // before/after arrays being present doesn't rescue this — the action
+    // field is what a reader scans first, and it is what BMPL-232's own
+    // ADMIN_SECURITY_ALERT sits right next to in the same investigation.
+    // Fix: write one row per direction that actually happened (added,
+    // removed, or both — two rows for a mixed call), and write NONE when the
+    // set didn't actually change, because a no-op save is not a grant either.
+    const added = permissions.filter((p) => !previous.includes(p));
+    const removed = previous.filter((p) => !permissions.includes(p));
     await this.prisma.$transaction(async (tx) => {
       await tx.adminPermissionGrant.deleteMany({ where: { userId } });
       if (permissions.length > 0) {
@@ -528,35 +546,55 @@ export class AdminService {
           })),
         });
       }
-      await this.audit.record(
-        {
-          action: 'ADMIN_PERMISSION_GRANTED',
-          actorId: actor.userId,
-          targetUserId: userId,
-          previousValue: { permissions: previous },
-          newValue: { permissions },
-          ipAddress: actor.ipAddress,
-          sessionId: actor.sessionId,
-        },
-        tx,
-      );
+      if (added.length > 0) {
+        await this.audit.record(
+          {
+            action: 'ADMIN_PERMISSION_GRANTED',
+            actorId: actor.userId,
+            targetUserId: userId,
+            previousValue: { permissions: previous },
+            newValue: { permissions, added },
+            ipAddress: actor.ipAddress,
+            sessionId: actor.sessionId,
+          },
+          tx,
+        );
+      }
+      if (removed.length > 0) {
+        await this.audit.record(
+          {
+            action: 'ADMIN_PERMISSION_REVOKED',
+            actorId: actor.userId,
+            targetUserId: userId,
+            previousValue: { permissions: previous },
+            newValue: { permissions, removed },
+            ipAddress: actor.ipAddress,
+            sessionId: actor.sessionId,
+          },
+          tx,
+        );
+      }
       // BMPL-232 (owner ruling 4): a change to what an admin account can do is
       // one of the concrete, auditable security events the ruling names —
       // no heuristic, no threshold, just restating a change that already
       // happened. admin.manage is SUPER_ADMIN-only, so this reaches every
-      // other holder of that power, including the actor.
-      await this.notifications.notifyAdmins(
-        'admin.manage',
-        {
-          type: 'SECURITY',
-          category: 'SECURITY',
-          event: 'ADMIN_SECURITY_ALERT',
-          title: 'Admin permissions changed',
-          body: 'An admin permission set was changed. Check the audit log for the before/after and who made the change.',
-          data: { targetUserId: userId, previousPermissions: previous, newPermissions: permissions },
-        },
-        tx,
-      );
+      // other holder of that power, including the actor. Skipped on a true
+      // no-op (added and removed both empty) — nothing changed, so there is
+      // nothing to alert anyone about.
+      if (added.length > 0 || removed.length > 0) {
+        await this.notifications.notifyAdmins(
+          'admin.manage',
+          {
+            type: 'SECURITY',
+            category: 'SECURITY',
+            event: 'ADMIN_SECURITY_ALERT',
+            title: 'Admin permissions changed',
+            body: 'An admin permission set was changed. Check the audit log for the before/after and who made the change.',
+            data: { targetUserId: userId, previousPermissions: previous, newPermissions: permissions, added, removed },
+          },
+          tx,
+        );
+      }
     });
     return { permissions };
   }

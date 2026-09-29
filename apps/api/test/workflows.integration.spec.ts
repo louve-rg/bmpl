@@ -452,7 +452,9 @@ describe('admin permission changes (BMPL-232)', () => {
       orderBy: { createdAt: 'desc' },
     });
     expect(audit.previousValue).toEqual({ permissions: ['users.read'] });
-    expect(audit.newValue).toEqual({ permissions: ['users.read', 'vendors.read'] });
+    expect(audit.newValue).toEqual({ permissions: ['users.read', 'vendors.read'], added: ['vendors.read'] });
+    // A pure grant writes no REVOKED row at all (BMPL-336).
+    expect(await ctx.prisma.auditLog.count({ where: { action: 'ADMIN_PERMISSION_REVOKED', targetUserId: target.id } })).toBe(0);
 
     // Real security event, no heuristic: restated to every admin.manage
     // holder (SUPER_ADMIN only), including the actor who made the change.
@@ -466,7 +468,67 @@ describe('admin permission changes (BMPL-232)', () => {
       targetUserId: target.id,
       previousPermissions: ['users.read'],
       newPermissions: ['users.read', 'vendors.read'],
+      added: ['vendors.read'],
+      removed: [],
     });
+  });
+
+  it('a pure revoke is audited as REVOKED, never GRANTED (BMPL-336)', async () => {
+    const target = await seedLimitedAdmin(ctx.prisma, 'wf_permrevoke@example.bz', ['users.read', 'vendors.read']);
+
+    await request(ctx.server)
+      .post('/api/admin/permissions')
+      .set('Cookie', adminCookies)
+      .send({ userId: target.id, permissions: ['users.read'] })
+      .expect(201);
+
+    // The exact failure this card exists to prevent: an admin who lost a
+    // permission must never read "GRANTED" on their own audit row.
+    expect(await ctx.prisma.auditLog.count({ where: { action: 'ADMIN_PERMISSION_GRANTED', targetUserId: target.id } })).toBe(0);
+    const audit = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'ADMIN_PERMISSION_REVOKED', targetUserId: target.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(audit.previousValue).toEqual({ permissions: ['users.read', 'vendors.read'] });
+    expect(audit.newValue).toEqual({ permissions: ['users.read'], removed: ['vendors.read'] });
+  });
+
+  it('a call that both adds and removes writes one row per direction, and a no-op writes neither (BMPL-336)', async () => {
+    const target = await seedLimitedAdmin(ctx.prisma, 'wf_permmixed@example.bz', ['users.read', 'vendors.read']);
+
+    // Mixed: drop vendors.read, pick up orders.read, keep users.read.
+    await request(ctx.server)
+      .post('/api/admin/permissions')
+      .set('Cookie', adminCookies)
+      .send({ userId: target.id, permissions: ['users.read', 'orders.read'] })
+      .expect(201);
+
+    const granted = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'ADMIN_PERMISSION_GRANTED', targetUserId: target.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(granted.newValue).toMatchObject({ added: ['orders.read'] });
+    const revoked = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'ADMIN_PERMISSION_REVOKED', targetUserId: target.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(revoked.newValue).toMatchObject({ removed: ['vendors.read'] });
+
+    const countBefore = await ctx.prisma.auditLog.count({ where: { targetUserId: target.id } });
+
+    // No-op: re-submit the exact same set. Nothing changed, so nothing is
+    // recorded and nobody is alerted — a no-op save is not a grant either.
+    await request(ctx.server)
+      .post('/api/admin/permissions')
+      .set('Cookie', adminCookies)
+      .send({ userId: target.id, permissions: ['users.read', 'orders.read'] })
+      .expect(201);
+    expect(await ctx.prisma.auditLog.count({ where: { targetUserId: target.id } })).toBe(countBefore);
+    expect(
+      await ctx.prisma.notificationRecipient.count({
+        where: { notification: { event: 'ADMIN_SECURITY_ALERT', data: { path: ['targetUserId'], equals: target.id } } },
+      }),
+    ).toBe(1); // only the one alert from the mixed change above, none from the no-op
   });
 });
 
