@@ -46,7 +46,11 @@ engineering rules and the invariants that must not regress. Scoped rules live in
 [`apps/api/CLAUDE.md`](../apps/api/CLAUDE.md) and
 [`packages/database/CLAUDE.md`](../packages/database/CLAUDE.md). How work gets
 branched, verified, reviewed and integrated is
-[`AGENT-WORKFLOW.md`](./AGENT-WORKFLOW.md).
+[`AGENT-WORKFLOW.md`](./AGENT-WORKFLOW.md). Standing owner rulings on
+logistics privacy, addresses and ETAs that answer no single open card — most
+importantly that a tracking link proves possession, not identity or
+authorization — are [`OWNER-RULINGS.md`](./OWNER-RULINGS.md); check there
+before treating one of those questions as unanswered.
 
 Superseded status documents from earlier phases are archived in
 [`history/`](./history/README.md). **Nothing in there is current** — in
