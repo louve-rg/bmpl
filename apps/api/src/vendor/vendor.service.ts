@@ -44,6 +44,17 @@ const STOREFRONT_INCLUDE = {
   settings: true,
   locations: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
   openingHours: { orderBy: { dayOfWeek: 'asc' } },
+  // BMPL-335: the customer-facing "closed now" badge needs to know WHETHER a
+  // vendor is open, not WHY they are shut. Named at the select, not fixed up
+  // later in buildStorefront() — a field never fetched cannot leak under a
+  // later careless spread, where a field fetched-then-dropped is one rename
+  // away from the wire. Deliberately never `reason` (the vendor's own private
+  // note — "family emergency", "hospital") or `createdByUserId` (identifies a
+  // person) — neither is customer-facing information.
+  hoursExceptions: {
+    select: { date: true, status: true, openTime: true, closeTime: true },
+    orderBy: { date: 'asc' },
+  },
 } satisfies Prisma.VendorProfileInclude;
 
 @Injectable()
@@ -536,6 +547,14 @@ export class VendorService {
         isClosed: h.isClosed,
         openTime: h.openTime,
         closeTime: h.closeTime,
+      })),
+      // Exactly the four fields STOREFRONT_INCLUDE selected — see its own
+      // comment for what is deliberately absent and why.
+      hoursExceptions: p.hoursExceptions.map((e) => ({
+        date: e.date.toISOString().slice(0, 10),
+        status: e.status,
+        openTime: e.openTime,
+        closeTime: e.closeTime,
       })),
       featuredProducts,
       categories: catRows.map((c) => c.category),

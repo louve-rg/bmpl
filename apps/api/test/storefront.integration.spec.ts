@@ -88,6 +88,43 @@ describe('public storefront visibility', () => {
     await request(ctx.server).get('/api/marketplace/vendors/does-not-exist').expect(404);
   });
 
+  /**
+   * BMPL-335: the public storefront now also carries the vendor's dated
+   * hours exceptions (BMPL-334), so the customer-facing "closed now" badge
+   * can read real exceptions instead of only the weekly pattern — a
+   * normally-closed day with a MODIFIED exception would otherwise show a
+   * FALSE "closed" state for a vendor who is actually open right now.
+   *
+   * Pinned exactly as strictly as STOREFRONT_INCLUDE's own select: only
+   * date/status/openTime/closeTime ever cross the wire. `reason` is the
+   * vendor's own private note and `createdByUserId` identifies a person —
+   * neither is customer-facing, and this test would catch either leaking
+   * back in via a careless spread just as easily as via the include itself.
+   */
+  it('exposes exactly four fields of an hours exception, never reason or createdByUserId', async () => {
+    const secretReason = 'Family emergency — must never reach a customer';
+    const added = await request(ctx.server)
+      .post('/api/vendor/profile/hours/exceptions')
+      .set('Cookie', approved.cookies)
+      .send({ date: '2026-12-25', status: 'CLOSED', reason: secretReason });
+    expect(added.status).toBe(201);
+
+    const res = await request(ctx.server).get(`/api/marketplace/vendors/${approved.slug}`);
+    expect(res.status).toBe(200);
+    expect(res.body.hoursExceptions).toHaveLength(1);
+    const exception = res.body.hoursExceptions[0];
+    expect(Object.keys(exception).sort()).toEqual(['closeTime', 'date', 'openTime', 'status']);
+    expect(exception.date).toBe('2026-12-25');
+    expect(exception.status).toBe('CLOSED');
+    expect(exception.openTime).toBeNull();
+    expect(exception.closeTime).toBeNull();
+
+    // Belt-and-suspenders: the secret text must not appear ANYWHERE in the
+    // public response, not just absent from the one object we inspected.
+    expect(JSON.stringify(res.body)).not.toContain(secretReason);
+    expect(JSON.stringify(res.body)).not.toContain('createdByUserId');
+  });
+
   it('never serves a simulation storefront to a real shopper — directory, slug, or product page', async () => {
     // The harm path this closes: a real shopper finds a test store in the public
     // directory (or holds a direct link), browses it, checks out — and the order

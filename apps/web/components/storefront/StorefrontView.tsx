@@ -1,9 +1,10 @@
 import Link from 'next/link';
-import { Badge as UiBadge, EmptyState } from '../ui';
+import { Alert, Badge as UiBadge, EmptyState } from '../ui';
 import { EnlargeableImage } from './EnlargeableImage';
 import { StarRating } from '../reviews/StarRating';
 import { ReviewList } from '../reviews/ReviewList';
 import { SaveButton } from '../saved/SaveButton';
+import { vendorClosedBadge, type VendorHoursExceptionPublic, type VendorWeeklyHour } from '../../lib/vendor-hours';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
@@ -25,7 +26,10 @@ export interface Storefront {
   logoUrl: string | null;
   bannerUrl: string | null;
   locations: Array<{ label: string; addressLine1: string; addressLine2: string | null; city: string; district: string; isPrimary: boolean }>;
-  openingHours: Array<{ dayOfWeek: number; isClosed: boolean; openTime: string | null; closeTime: string | null }>;
+  openingHours: VendorWeeklyHour[];
+  /** BMPL-335: exactly the four fields the API selects — never `reason` or
+   *  `createdByUserId`, see vendor.service.ts's STOREFRONT_INCLUDE. */
+  hoursExceptions: VendorHoursExceptionPublic[];
   featuredProducts: Array<{ id: string; title: string; slug: string; priceMinor: number; salePriceMinor: number | null; category: { name: string }; primaryImageUrl: string | null }>;
   categories: Array<{ name: string; slug: string }>;
 }
@@ -36,6 +40,14 @@ export interface Storefront {
  * only — callers provide their own page chrome (header/footer or dashboard shell).
  */
 export function StorefrontView({ store }: { store: Storefront }) {
+  // Ruling 10 (BMPL-259/BMPL-335): configured hours CONSTRAIN DISPATCH, they
+  // do not block ordering. Computed from BOTH the weekly pattern AND the
+  // exception rows — either alone can give the wrong answer on an excepted
+  // date, which is exactly the case this card was held all evening to avoid.
+  // null (no configured hours at all, or currently open) means no badge —
+  // not "hours unknown", nothing.
+  const closedBadge = vendorClosedBadge(store.openingHours, store.hoursExceptions);
+
   return (
     <>
       <div className="h-40 w-full bg-gradient-to-r from-belize-navy to-belize-blue sm:h-56">
@@ -83,6 +95,16 @@ export function StorefrontView({ store }: { store: Storefront }) {
           {store.pickupEnabled && <UiBadge tone="brand">Pickup</UiBadge>}
           {store.deliveryEnabled && <UiBadge tone="brand">Delivery</UiBadge>}
         </div>
+
+        {/* Posted opening hours, not storeStatus above — a different fact.
+            Never implies the order cannot be placed (ruling 10): it always
+            says when the order WILL be dispatched, never that it cannot be
+            placed now. */}
+        {closedBadge && (
+          <Alert tone="warning" className="mt-3 max-w-2xl">
+            {closedBadge.message}
+          </Alert>
+        )}
 
         {store.description && <p className="mt-5 max-w-2xl text-slate-600">{store.description}</p>}
 
