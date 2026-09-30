@@ -29,10 +29,12 @@ import {
   type PlannerPricing,
   type PlannerRoute,
   type LegView,
+  type LegKind,
   type PlannedLeg,
   type PlanRequest,
   type PlanResult,
   type ShipmentEtaResult,
+  type ShippingService,
 } from '@bmpl/shared';
 import type {
   CancelShipmentInput,
@@ -43,6 +45,7 @@ import type {
   LegHandoffInput,
   LegScheduleInput,
   ResolveLegExceptionInput,
+  ReturnToSenderInput,
   SetAvailabilityWindowsInput,
   ShipmentQuoteInput,
 } from '@bmpl/validation';
@@ -73,6 +76,55 @@ const PIN_LENGTH = 4;
  * laundered by registering a fresh account for each guess.
  */
 const MAX_RECIPIENT_CLAIM_ATTEMPTS = 5;
+
+/**
+ * Which exceptional legs a return-to-sender applies to (BMPL-183/343).
+ *
+ * Owner Ruling 1 speaks only to a leg that becomes exceptional AFTER custody
+ * has transferred, and — in the same breath — says explicitly that "who pays
+ * for a leg interrupted mid-carry" is NOT settled by it. A FIRST_MILE or
+ * LINE_HAUL exception is exactly that unsettled case: the parcel is stuck
+ * somewhere mid-journey, not failing at its delivery attempt, and inventing
+ * an answer here is exactly what the fare-gate rule (resolveException's own
+ * RELEASE_DRIVER comment) forbids. LAST_MILE and DIRECT are the two kinds
+ * that attempt an actual door delivery — a "return to sender" only means
+ * something once that attempt is the thing that failed.
+ *
+ * A hub-ending service (DOOR_TO_HUB, HUB_TO_HUB) never plans a LAST_MILE leg
+ * at all (see `needsLastMile`) — the recipient collects on their own time,
+ * which is a different failure mode with no delivery attempt to fail.
+ */
+const RETURNABLE_LEG_KINDS: readonly LegKind[] = ['LAST_MILE', 'DIRECT'];
+
+/**
+ * A return trip swaps which end is a door and which is a terminal, not just
+ * the addresses — HUB_TO_DOOR (collected at a hub, delivered to a door)
+ * reverses to DOOR_TO_HUB (collected from that same door, returned to that
+ * same hub for the sender to reclaim), never back to HUB_TO_DOOR again.
+ * DOOR_TO_DOOR and HUB_TO_HUB are their own mirror image.
+ */
+const REVERSED_SERVICE: Record<ShippingService, ShippingService> = {
+  DOOR_TO_DOOR: 'DOOR_TO_DOOR',
+  DOOR_TO_HUB: 'HUB_TO_DOOR',
+  HUB_TO_DOOR: 'DOOR_TO_HUB',
+  HUB_TO_HUB: 'HUB_TO_HUB',
+};
+
+/**
+ * god's review, BMPL-183/343: the price for a FIRST_MILE/LINE_HAUL exception
+ * is not merely unconfigured, it is not derivable from this feature's own
+ * reversal formula at all (see `previewReturn`'s comment) — but the owner's
+ * own answer for "no valid configured price" is PENDING_MANUAL, not a
+ * refusal that leaves no trail: "if BMPL cannot calculate a valid configured
+ * return price, the return should remain PENDING/MANUAL rather than
+ * guessing." A flat 400 here would be the same silent dead-end for a parcel
+ * genuinely stuck mid-journey that the owner's ruling exists to prevent —
+ * it decides nothing about who pays for a leg interrupted mid-carry (Ruling
+ * 1 leaves that open on purpose), it only puts a human on notice that this
+ * one needs a decision instead of hiding that the case exists.
+ */
+const MID_CARRY_RETURN_MESSAGE =
+  'This leg is still mid-journey, not at a delivery attempt — a return from wherever the parcel currently sits is a different movement than a shipment-level reverse quote, so pricing it needs a human decision, not a guess.';
 
 /** Case/whitespace only — an account's own email is not typed twice. */
 function normalizeEmail(email: string | null | undefined): string | null {
@@ -142,6 +194,52 @@ const RECIPIENT_VIEW_INCLUDE = {
 } satisfies Prisma.ShipmentInclude;
 
 type RecipientViewGraph = Prisma.ShipmentGetPayload<{ include: typeof RECIPIENT_VIEW_INCLUDE }>;
+
+/**
+ * Everything `reversedReturnInput` (BMPL-183/343) needs to reconstruct the
+ * original booking's endpoints in reverse, plus what tells the return path
+ * whether it is even allowed to run: `vendorOrderId` (the marketplace scope
+ * fence) and `returnShipment` (has this one already been returned?).
+ */
+const RETURN_SHIPMENT_SELECT = {
+  id: true,
+  reference: true,
+  service: true,
+  isTest: true,
+  vendorOrderId: true,
+  customerUserId: true,
+  preferredMode: true,
+  weightGrams: true,
+  pieces: true,
+  description: true,
+  originHubId: true,
+  originName: true,
+  originPhone: true,
+  originEmail: true,
+  originCompany: true,
+  originAddress: true,
+  originAddress2: true,
+  originCity: true,
+  originDistrict: true,
+  originLatitude: true,
+  originLongitude: true,
+  originInstructions: true,
+  destinationHubId: true,
+  destinationName: true,
+  destinationPhone: true,
+  destinationEmail: true,
+  destinationCompany: true,
+  destinationAddress: true,
+  destinationAddress2: true,
+  destinationCity: true,
+  destinationDistrict: true,
+  destinationLatitude: true,
+  destinationLongitude: true,
+  destinationInstructions: true,
+  returnShipment: { select: { id: true, reference: true } },
+} satisfies Prisma.ShipmentSelect;
+
+type ReturnableShipment = Prisma.ShipmentGetPayload<{ select: typeof RETURN_SHIPMENT_SELECT }>;
 
 /**
  * Multi-leg shipment orchestration.
@@ -1786,6 +1884,227 @@ export class ShipmentService {
 
     const shipment = await this.prisma.shipment.findUniqueOrThrow({ where: { id: outcome.shipmentId }, include: SHIPMENT_INCLUDE });
     return this.serialize(shipment, { audience: 'STAFF' });
+  }
+
+  /**
+   * Swaps origin and destination (and, with them, which end is a door and
+   * which is a terminal — see `REVERSED_SERVICE`) to describe the return
+   * trip: FROM wherever the parcel actually sits (the original destination —
+   * true for LAST_MILE/DIRECT, the only kinds a return applies to, since by
+   * the time either can be EXCEPTION every earlier leg has already
+   * completed) BACK TO the original sender. `payWithWallet: true` — a return
+   * is never booked unpaid; see `returnToSender`'s own "never invented,
+   * never silent" comment for why that charge is always real.
+   */
+  private reversedReturnInput(shipment: ReturnableShipment): CreateShipmentInput {
+    return {
+      service: REVERSED_SERVICE[shipment.service],
+      origin: {
+        hubId: shipment.destinationHubId ?? undefined,
+        name: shipment.destinationName ?? undefined,
+        phone: shipment.destinationPhone ?? undefined,
+        email: shipment.destinationEmail ?? undefined,
+        company: shipment.destinationCompany ?? undefined,
+        address: shipment.destinationAddress ?? undefined,
+        address2: shipment.destinationAddress2 ?? undefined,
+        city: shipment.destinationCity ?? undefined,
+        district: shipment.destinationDistrict ?? undefined,
+        latitude: shipment.destinationLatitude ?? undefined,
+        longitude: shipment.destinationLongitude ?? undefined,
+        instructions: shipment.destinationInstructions ?? undefined,
+      },
+      destination: {
+        hubId: shipment.originHubId ?? undefined,
+        name: shipment.originName ?? undefined,
+        phone: shipment.originPhone ?? undefined,
+        email: shipment.originEmail ?? undefined,
+        company: shipment.originCompany ?? undefined,
+        address: shipment.originAddress ?? undefined,
+        address2: shipment.originAddress2 ?? undefined,
+        city: shipment.originCity ?? undefined,
+        district: shipment.originDistrict ?? undefined,
+        latitude: shipment.originLatitude ?? undefined,
+        longitude: shipment.originLongitude ?? undefined,
+        instructions: shipment.originInstructions ?? undefined,
+      },
+      preferredMode: shipment.preferredMode ?? undefined,
+      weightGrams: shipment.weightGrams ?? undefined,
+      pieces: shipment.pieces,
+      description: shipment.description ? `Return to sender: ${shipment.description}` : 'Return to sender',
+      payWithWallet: true,
+    };
+  }
+
+  /**
+   * A leg eligible for return-to-sender, or a thrown reason why not — the one
+   * gate both `previewReturn` (read-only) and `returnToSender` (the charge)
+   * share, so "what may be returned" cannot drift between asking the price
+   * and paying it.
+   *
+   * Deliberately does NOT refuse a FIRST_MILE/LINE_HAUL exception here — that
+   * is not "you are asking the wrong question" the way an un-exceptional leg
+   * or a marketplace shipment is. See `MID_CARRY_RETURN_MESSAGE` and each
+   * caller's own handling of `RETURNABLE_LEG_KINDS` for why it gets a
+   * different, non-throwing shape instead (god's review, BMPL-183/343: a
+   * flat refusal here would leave ops with no record at all for a parcel
+   * genuinely stuck mid-journey).
+   */
+  private async loadReturnableLeg(legId: string) {
+    const leg = await this.prisma.shipmentLeg.findUnique({
+      where: { id: legId },
+      select: { id: true, kind: true, status: true, shipment: { select: RETURN_SHIPMENT_SELECT } },
+    });
+    if (!leg) throw new NotFoundException('Leg not found.');
+    if (leg.status !== 'EXCEPTION') {
+      throw new BadRequestException('This leg is not in exception, so there is nothing to return.');
+    }
+    // The scope fence (owner ruling): non-vendor courier shipments only. A
+    // marketplace order's return is a Marketplace/VendorOrder concern with
+    // its own policy, never this path — vendorOrderId is exactly what
+    // distinguishes the two at the data-model level (see its own field
+    // comment on the Shipment model).
+    if (leg.shipment.vendorOrderId != null) {
+      throw new BadRequestException('A marketplace order is returned through the marketplace, not here.');
+    }
+    return leg;
+  }
+
+  /**
+   * Shows what a return would cost, WITHOUT moving anything — same rule the
+   * schema states for `quote()` itself ("asking the price must never move
+   * money"). Zero new pricing logic: the reversed trip is priced by the same
+   * `quote()` every other shipment is, so an unconfigured reverse lane comes
+   * back exactly as any other unpriced route does (`available: false` and a
+   * reason), never a guess.
+   *
+   * A FIRST_MILE/LINE_HAUL exception never reaches `quote()` at all here —
+   * `reversedReturnInput` swaps the SHIPMENT's own origin and destination,
+   * which prices a full-journey return. For a parcel still mid-carry that is
+   * the WRONG movement, not merely an unpriced one, and a "successful" quote
+   * against it would silently overcharge. The same shaped "no price" reply
+   * `quote()` itself would give is returned instead, without ever computing
+   * one, so a caller cannot mistake "no lane configured" for "this number is
+   * safe to book."
+   */
+  async previewReturn(legId: string) {
+    const leg = await this.loadReturnableLeg(legId);
+    if (!RETURNABLE_LEG_KINDS.includes(leg.kind)) {
+      return { available: false as const, reason: 'MID_CARRY' as const, message: MID_CARRY_RETURN_MESSAGE };
+    }
+    return this.quote(this.reversedReturnInput(leg.shipment), { isTest: leg.shipment.isTest });
+  }
+
+  /**
+   * The confirmation step — and the only one of the two that may cost
+   * anything, which is why it is a separate action gated on `logistics.manage`
+   * rather than a third `resolveLegExceptionSchema` resolution (owner Ruling
+   * 2: a shipment action that creates a customer charge needs the stricter
+   * permission; RESUME/RELEASE_DRIVER create none).
+   *
+   * THE NAMED RULE (owner ruling, BMPL-183/343): a return after custody is a
+   * NEW transport service, priced with BML's normal configured pricing for
+   * that return movement — calculated, shown, explicitly confirmed, then
+   * charged through the existing payment flow. Never a silent reversal of
+   * the original charge, never an invented number, never a direct wallet
+   * mutation. THIS METHOD IS THE CONFIRMATION: calling it IS the explicit
+   * confirmation, exactly as calling `create()` already is for an ordinary
+   * booking — a caller who only wants the number calls `previewReturn`
+   * first, which touches nothing.
+   *
+   * The price is recomputed FRESH here, never taken from whatever a caller
+   * saw from `previewReturn` — the same "never trust an echoed price" rule
+   * `create()` already applies to every shipment, now applied to this one
+   * too, in case the network configuration changed in between.
+   *
+   * IF NO VALID CONFIGURED PRICE CAN BE CALCULATED, THE RETURN STAYS PENDING
+   * OR MANUAL RATHER THAN GUESSING (owner ruling, verbatim) — nothing is
+   * charged and no shipment is created; `SHIPMENT_RETURN_PENDING_MANUAL` is
+   * a supported, audited, tested outcome, not an error swallowed silently.
+   * That covers two distinct reasons, both landing in the same outcome
+   * (god's review): an unconfigured reverse lane (quote() genuinely has no
+   * rate), and a FIRST_MILE/LINE_HAUL exception (the price is not merely
+   * unconfigured — the reversal this feature uses is the wrong movement for
+   * a leg that has not reached its delivery attempt, so it is never even
+   * computed). Either way a human, not a refusal, is what's left behind.
+   */
+  async returnToSender(legId: string, input: ReturnToSenderInput, actor: { userId: string }) {
+    const leg = await this.loadReturnableLeg(legId);
+    const shipment = leg.shipment;
+    if (shipment.returnShipment) {
+      throw new BadRequestException(`This shipment was already returned (${shipment.returnShipment.reference}).`);
+    }
+    if (!shipment.customerUserId) {
+      throw new BadRequestException('This shipment has no customer account to charge for a return.');
+    }
+
+    if (!RETURNABLE_LEG_KINDS.includes(leg.kind)) {
+      // Never computed via reversedReturnInput()/quote() — see
+      // MID_CARRY_RETURN_MESSAGE's own comment for why that reversal answers
+      // the wrong question for a leg that has not reached its delivery
+      // attempt. Routed to the SAME supported outcome an unconfigured lane
+      // gets below, for a different reason: no price, audited, nothing
+      // charged, nothing booked.
+      await this.audit.record({
+        action: 'SHIPMENT_RETURN_PENDING_MANUAL',
+        actorId: actor.userId,
+        reason: input.note,
+        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: 'MID_CARRY' },
+      });
+      return { outcome: 'PENDING_MANUAL' as const, reason: MID_CARRY_RETURN_MESSAGE };
+    }
+
+    const reversed = this.reversedReturnInput(shipment);
+    const quote = await this.quote(reversed, { isTest: shipment.isTest });
+
+    if (!quote.available) {
+      await this.audit.record({
+        action: 'SHIPMENT_RETURN_PENDING_MANUAL',
+        actorId: actor.userId,
+        reason: input.note,
+        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: quote.reason },
+      });
+      return { outcome: 'PENDING_MANUAL' as const, reason: quote.message ?? 'This return route cannot be priced yet.' };
+    }
+    // ZERO IS NOT A PRICE — the same rule create() enforces on every booking,
+    // applied here too: an unconfigured courier fee on an otherwise-planned
+    // reverse route must not silently ship for free. Captured into a plain
+    // local rather than read repeatedly off `quote`: quote()'s inferred
+    // return type does not discriminate cleanly on `available`, so a
+    // property read stays "possibly undefined" past the guard above even
+    // though the runtime value never is.
+    const totalMinor = quote.totalMinor ?? 0;
+    if (totalMinor <= 0) {
+      await this.audit.record({
+        action: 'SHIPMENT_RETURN_PENDING_MANUAL',
+        actorId: actor.userId,
+        reason: input.note,
+        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: 'ZERO_PRICE' },
+      });
+      return { outcome: 'PENDING_MANUAL' as const, reason: quote.pricingNote ?? 'This return route has not been priced yet.' };
+    }
+
+    // The existing, approved booking + payment machinery — its own quote,
+    // its own plan, its own Payment and escrow — reused verbatim rather than
+    // a second, parallel way to charge a customer. The sender's own account
+    // pays, exactly as it did for the original shipment.
+    const returnShipment = await this.create(shipment.customerUserId, reversed, shipment.isTest);
+    await this.prisma.shipment.update({ where: { id: returnShipment.id }, data: { returnOfShipmentId: shipment.id } });
+
+    await this.audit.record({
+      action: 'SHIPMENT_RETURN_INITIATED',
+      actorId: actor.userId,
+      reason: input.note,
+      newValue: {
+        legId,
+        shipmentId: shipment.id,
+        reference: shipment.reference,
+        returnShipmentId: returnShipment.id,
+        returnReference: returnShipment.reference,
+        priceMinor: totalMinor,
+      },
+    });
+
+    return { outcome: 'INITIATED' as const, returnShipment };
   }
 
   /**
