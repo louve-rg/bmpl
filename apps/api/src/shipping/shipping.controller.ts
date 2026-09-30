@@ -11,6 +11,7 @@ import {
   legDepartSchema,
   legExceptionSchema,
   legHandoffSchema,
+  legScheduleSchema,
   reassignShipmentLegSchema,
   addHubHoursExceptionSchema,
   addProviderMemberSchema,
@@ -37,6 +38,7 @@ import {
   type LegDepartInput,
   type LegExceptionInput,
   type LegHandoffInput,
+  type LegScheduleInput,
   type ReassignShipmentLegInput,
   type AddHubHoursExceptionInput,
   type AddProviderMemberInput,
@@ -551,6 +553,13 @@ export class AdminLogisticsController {
     return this.shipments.arriveLeg(id, { userId: u.userId });
   }
 
+  /** Recording (or correcting) a real carrier-committed schedule — same gate as depart/arrive. */
+  @RequirePermission('logistics.operate')
+  @Post('legs/:id/schedule')
+  schedule(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legScheduleSchema)) dto: LegScheduleInput) {
+    return this.shipments.scheduleLeg(id, dto, { userId: u.userId });
+  }
+
   /**
    * Deliberate, audited reveal of a leg's handoff code for the receiving desk.
    *
@@ -689,6 +698,11 @@ export class ShippingProviderLegsController {
   @Post('legs/:id/arrive')
   arrive(@CurrentUser() u: AuthContext, @Param('id') id: string) {
     return this.providers.arrive(u.userId, id);
+  }
+
+  @Post('legs/:id/schedule')
+  schedule(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legScheduleSchema)) dto: LegScheduleInput) {
+    return this.providers.schedule(u.userId, id, dto);
   }
 }
 

@@ -343,6 +343,10 @@ enum AuditAction {
   SHIPMENT_LEG_HANDOFF
   SHIPMENT_LEG_HANDOFF_PIN_FAILED
   SHIPMENT_LEG_EXCEPTION
+  /// BMPL-346: a carrier or staff recorded (or corrected) a real scheduled
+  /// departure/arrival for a transport leg — the only writer for
+  /// ShipmentLeg.scheduledDepartureAt/scheduledArrivalAt.
+  SHIPMENT_LEG_SCHEDULED
   SHIPMENT_HANDOFF_PIN_REVEALED
   SHIPMENT_LEG_OFFERED
   SHIPMENT_LEG_OFFER_EXPIRED
