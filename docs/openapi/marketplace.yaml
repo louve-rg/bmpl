@@ -435,6 +435,77 @@ components:
         events:
           type: array
           items: { type: object, properties: { type: { type: string }, fromStatus: { type: [string, "null"] }, toStatus: { type: [string, "null"] }, createdAt: { type: string, format: date-time } } }
+    VendorOpeningHour:
+      type: object
+      description: One weekly recurring day. A day missing from the array is unconstrained, not closed — the resolver's own documented default.
+      properties:
+        dayOfWeek: { type: integer, minimum: 0, maximum: 6, description: 0=Sunday .. 6=Saturday }
+        isClosed: { type: boolean }
+        openTime: { type: [string, "null"], description: "HH:MM, Belize local; null when isClosed" }
+        closeTime: { type: [string, "null"], description: "HH:MM, Belize local; null when isClosed" }
+    VendorHoursException:
+      type: object
+      description: >-
+        A date-specific override of the weekly pattern above (a holiday, a
+        one-off closure, a changed schedule). Exactly these four fields —
+        never `reason` or `createdByUserId`, both of which exist on the
+        underlying row but are deliberately excluded from the select that
+        produces this (BMPL-338/#255). A vendor's reason for closing is their
+        own; the client needs to know whether they are open, not why they
+        are shut. Absence of an exception for a date means the weekly
+        pattern above applies unchanged.
+      properties:
+        date: { type: string, format: date, description: "YYYY-MM-DD, Belize calendar date" }
+        status: { type: string, enum: [CLOSED, MODIFIED] }
+        openTime: { type: [string, "null"], description: "HH:MM, Belize local; set only when status is MODIFIED" }
+        closeTime: { type: [string, "null"], description: "HH:MM, Belize local; set only when status is MODIFIED" }
+    DeliveryQuoteVendor:
+      type: object
+      description: One cart vendor's delivery quote, or its PICKUP placeholder when the customer chose pickup for that storefront.
+      properties:
+        vendorProfileId: { type: string }
+        businessName: { type: string }
+        deliveryMethod: { type: string, enum: [PICKUP, DELIVERY] }
+        deliverable: { type: boolean }
+        reason:
+          type: [string, "null"]
+          enum: [PICKUP_ONLY, BELOW_MINIMUM, DISTRICT_NOT_SERVED, null]
+          description: Why deliverable is false. Null when deliverable is true, or whenever deliveryMethod is PICKUP.
+        feeMinor: { type: integer, description: "0 when deliveryMethod is PICKUP or deliverable is false" }
+        freeApplied: { type: boolean }
+        estimate:
+          type: [object, "null"]
+          description: Null when this vendor has configured no delivery estimate, or deliveryMethod is PICKUP.
+          properties:
+            minHours: { type: integer }
+            maxHours: { type: integer }
+            label: { type: [string, "null"] }
+        minimumOrderMinor: { type: [integer, "null"] }
+        openingHours:
+          type: array
+          items: { $ref: "#/components/schemas/VendorOpeningHour" }
+          description: >-
+            Edward REQ 5 (#255). Empty when deliveryMethod is PICKUP, or when
+            this vendor has configured no weekly hours at all — never
+            omitted, so a client can tell "no hours configured" (empty
+            array) from "closed today" (a configured day with isClosed
+            true) without a separate flag. Powers the web client's own
+            "may close before your order arrives" warning, computed there
+            from this data and the estimate above — never a second
+            server-side calculation.
+        hoursExceptions:
+          type: array
+          items: { $ref: "#/components/schemas/VendorHoursException" }
+          description: Edward REQ 5 (#255). Empty under the same two conditions as openingHours above.
+    DeliveryQuote:
+      type: object
+      description: Pre-checkout delivery quote for the active cart — one entry per vendor represented in the cart.
+      properties:
+        district: { type: string, enum: [BELIZE, CAYO, COROZAL, ORANGE_WALK, STANN_CREEK, TOLEDO] }
+        vendors: { type: array, items: { $ref: "#/components/schemas/DeliveryQuoteVendor" } }
+        subtotalMinor: { type: integer }
+        deliveryFeeMinor: { type: integer, description: Sum of every deliverable vendor's feeMinor above. }
+        totalMinor: { type: integer }
 paths:
   /marketplace/categories:
     get:
@@ -663,7 +734,20 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
   /checkout/delivery-quote:
-    post: { tags: [Orders], summary: "Pre-checkout delivery quote for the active cart", security: [{ cookieAuth: [], csrfToken: [] }], responses: { "200": { description: OK } }, description: "body { district, vendors?: [{ vendorProfileId, deliveryMethod }] }. A DIFFERENT controller from POST /checkout above (same CUSTOMER role) — filed under Orders as a checkout-flow read, even though it queries each vendor's own delivery-zone configuration internally." }
+    post:
+      tags: [Orders]
+      summary: Pre-checkout delivery quote for the active cart
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      description: >-
+        body { district, vendors?: [{ vendorProfileId, deliveryMethod }] }. A
+        DIFFERENT controller from POST /checkout above (same CUSTOMER role) —
+        filed under Orders as a checkout-flow read, even though it queries
+        each vendor's own delivery-zone configuration internally. Edward REQ 5
+        (#255): each DELIVERY vendor's `openingHours`/`hoursExceptions` ride
+        along on this same response now, batched in one query rather than one
+        per vendor — see `DeliveryQuoteVendor` for what is and is not in them.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DeliveryQuote" } } } }
   /orders:
     get:
       tags: [Orders]
