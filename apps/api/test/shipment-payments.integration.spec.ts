@@ -409,6 +409,61 @@ describe('cancelling after delivery (BMPL-300)', () => {
   });
 });
 
+describe('cancelling after custody has actually transferred (BMPL-183 — owner rule)', () => {
+  /**
+   * "Acceptance is not pickup; cancellation before actual custody does not
+   * incur the delivery fee" — given by the owner, not derived. The other
+   * half follows from it without needing to be stated separately: ONCE
+   * custody has genuinely transferred, the fee already earned is not
+   * refunded. A courier merely accepting the job writes no custody row and
+   * leaves the leg READY, so that alone still refunds in full — proven
+   * already, in detail, by "cancelling before anybody has done any work"
+   * above. This block proves the other side: a real transfer (`startLeg`)
+   * stops the refund.
+   */
+  it('does not refund the fee once a driver has actually taken the parcel, even though the shipment can still be stopped', async () => {
+    await fund(customerId, 10_000);
+    const r = await post(customer, 'shipping', { ...localParcel(), payWithWallet: true });
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+    const payment = await ctx.prisma.payment.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+
+    // A real custody transfer, not merely an accepted offer — the driver
+    // now actually holds the parcel.
+    expect((await post(admin, `admin/logistics/legs/${leg.id}/start`)).status).toBe(201);
+    expect(
+      await ctx.prisma.custodyEvent.count({ where: { shipmentId: r.body.id, fromHolder: { not: null } } }),
+    ).toBe(1);
+
+    // The existing "already moving" guard still applies to self-service —
+    // this card does not touch who may cancel, only what it costs.
+    const selfCancel = await post(customer, `shipping/${r.body.id}/cancel`, { reason: 'Trying anyway.' });
+    expect(selfCancel.status).toBe(400);
+
+    // Staff can still stop it — but the fee already earned is not given back.
+    const cancel = await request(ctx.server)
+      .post(`/api/admin/logistics/shipments/${r.body.id}/cancel`)
+      .set('Cookie', admin)
+      .send({ reason: 'Recipient unreachable; stopping the run.' });
+    expect(cancel.status).toBe(201);
+
+    const holds = await holdsFor(payment.id);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]!.status).toBe('AUTHORIZED'); // never released
+
+    const after = await balanceOf(customerId);
+    expect(after.onHoldMinor).toBe(PRICE); // the fee is still held, not refunded
+
+    const shipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: r.body.id } });
+    expect(shipment.status).toBe('CANCELLED');
+    expect(shipment.cancelledAt).not.toBeNull();
+
+    const audit = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'SHIPMENT_CANCELLED', newValue: { path: ['shipmentId'], equals: r.body.id } },
+    });
+    expect((audit.newValue as { custodyTransferred: boolean }).custodyTransferred).toBe(true);
+  });
+});
+
 describe('test money stays test money', () => {
   it('a shipment paid with test credit posts test-marked ledger movements', async () => {
     await post(admin, 'admin/users/test-flag', { userId: customerId, isTest: true, reason: 'Isolation test.' });
