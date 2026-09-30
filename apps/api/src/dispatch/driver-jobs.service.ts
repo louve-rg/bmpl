@@ -466,7 +466,16 @@ export class DriverJobService {
           if (!item.productId) continue; // product deleted — nothing tracked
           const inv = await this.inventory.rowFor(item.productId, item.variantId, tx);
           if (!inv) continue; // untracked
-          await this.inventory.finalizeReservation(inv.id, item.quantity, actor.userId, tx);
+          // BMPL-175: finalize against the SAME row reserve() used — see
+          // OrdersService.releaseReservationsInTx's identical comment.
+          const locRow = d.vendorOrder.originLocationId
+            ? await this.inventory.rowForLocation(inv.id, d.vendorOrder.originLocationId, tx)
+            : null;
+          if (locRow) {
+            await this.inventory.finalizeLocationReservation(inv, locRow.id, item.quantity, actor.userId, tx);
+          } else {
+            await this.inventory.finalizeReservation(inv.id, item.quantity, actor.userId, tx);
+          }
         }
       }
       await tx.orderDelivery.update({

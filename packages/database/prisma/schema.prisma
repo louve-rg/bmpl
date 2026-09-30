@@ -1313,6 +1313,15 @@ model VendorLocation {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
+  inventoryLocations InventoryLocation[]
+  // Only rows logged as a location-scoped adjustment (InventoryChange.locationId
+  // set) — see that model's own comment (BMPL-175).
+  inventoryChanges   InventoryChange[]
+  // VendorOrders this location fulfilled (BMPL-175). SetNull on delete — see
+  // VendorOrder.originLocationId's own comment for why losing the pointer on
+  // deletion is correct rather than blocked.
+  originOrders       VendorOrder[]       @relation("VendorOrderOrigin")
+
   @@index([vendorProfileId])
   @@map("vendor_locations")
 }
@@ -1643,12 +1652,64 @@ model Inventory {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
   changes           InventoryChange[]
+  // Per-location stock (BMPL-175). Empty for every product that never adopts
+  // location tracking — see InventoryLocation's own comment for the full
+  // reasoning. This row stays the identity/settings anchor
+  // (unlimited/allowBackorders/lowStockThreshold) even once adopted; only
+  // quantity/reserved move to the child rows.
+  locations         InventoryLocation[]
 
   // A product-level row has variantId = null; a partial unique index in the
   // migration enforces at most ONE such row per product. Variant rows are unique
   // via variantId @unique above.
   @@index([productId])
   @@map("inventory")
+}
+
+/// Per-location stock for a purchasable whose vendor tracks inventory by shop
+/// (BMPL-175 / Edward req 1). The parent Inventory row above stays the
+/// identity and SETTINGS anchor (unlimited/allowBackorders/lowStockThreshold)
+/// for every product, tracked-by-location or not. A product that never
+/// adopts per-location tracking has ZERO rows here, and every existing query
+/// (rowFor, the checkout reservation path, the partial unique index on the
+/// parent) keeps behaving exactly as before — this table is purely additive.
+///
+/// WHY A CHILD TABLE RATHER THAN A locationId COLUMN ON Inventory ITSELF:
+/// putting locationId directly on Inventory would force
+/// inventory_product_default_key (the partial unique index guaranteeing one
+/// product-level row) and Inventory.variantId's unique constraint to grow a
+/// dimension, and would make "the inventory row for productId+variantId"
+/// ambiguous everywhere it is queried today. A child table instead extends
+/// the SAME sum-across-rows fan-out publicAvailability/summaryFor/inStockMap
+/// already perform one level up (across sibling Inventory rows per
+/// productId) rather than inventing a new aggregation shape.
+///
+/// RESERVATION DISCIPLINE: reserve()/release()/finalizeReservation() on the
+/// parent Inventory row take a lock (`SELECT ... FOR UPDATE`) before reading
+/// availability (BMPL-256) — a plain read-check-write is check-then-act and
+/// can oversell under concurrent requests. The mirrored methods for this
+/// table (reserveAtLocation/releaseAtLocation/finalizeLocationReservation)
+/// use the IDENTICAL lock-then-check-then-write discipline against THIS
+/// table's own row, never the parent's — exactly one reservation decision is
+/// ever made per checkout line, against exactly one row (chosen BEFORE
+/// reserving), so there is still only one path that can accept or refuse a
+/// reservation, never two competing for the same unit of stock.
+model InventoryLocation {
+  id          String         @id @default(cuid())
+  inventoryId String
+  inventory   Inventory      @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  locationId  String
+  location    VendorLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  quantity    Int            @default(0) // on-hand AT THIS LOCATION
+  reserved    Int            @default(0) // allocated AT THIS LOCATION; available = quantity - reserved
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // One row per (product-or-variant, shop) — a second row for the same pair
+  // would just split one location's stock across two numbers that could drift.
+  @@unique([inventoryId, locationId])
+  @@index([locationId])
+  @@map("inventory_locations")
 }
 
 model InventoryChange {
@@ -1662,6 +1723,15 @@ model InventoryChange {
   actorId     String?
   actor       User?                 @relation("InventoryActor", fields: [actorId], references: [id], onDelete: SetNull)
   note        String?
+  // Set only when this change was a location-scoped adjustment (BMPL-175):
+  // previousQty/newQty above then describe THAT location's own quantity, not
+  // the parent product's. Null (every row before this card, and every
+  // product-level adjustment after it) means exactly what it always meant —
+  // a change to the parent row. SetNull, not a hard FK requirement, matching
+  // every other "who/where did this" pointer in this file: the history row
+  // is a fact that outlives the location being removed later.
+  locationId  String?
+  location    VendorLocation?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
   createdAt   DateTime              @default(now())
 
   @@index([inventoryId, createdAt])
@@ -1861,6 +1931,21 @@ model VendorOrder {
   pickupPin            String?
   pickupPinAttempts    Int               @default(0)
   inventoryFinalizedAt DateTime?
+  // Which of the vendor's locations fulfils this order (BMPL-175). NULL for
+  // every order placed before this shipped, PERMANENTLY — no backfill is
+  // attempted, because a vendor's CURRENT primary location is not evidence
+  // of which location fulfilled a PAST order (vendors add, remove and
+  // re-flag isPrimary over time), so a guessed origin would be a fabricated
+  // fact in the record, indistinguishable from a real one forever. NULL also
+  // for any order whose product(s) never adopted per-location tracking —
+  // there was nothing to choose between. Chosen by AVAILABILITY ONLY, tied
+  // broken by VendorLocation.isPrimary: DeliveryPricingService.quote()
+  // carries no locationId and does no routing, so "most efficient origin"
+  // is not a capability this system has (see that service's own header).
+  // SetNull on delete: an order's history outlives a location the vendor
+  // later removes, same as every other "where/who" pointer in this file.
+  originLocationId     String?
+  originLocation       VendorLocation?   @relation("VendorOrderOrigin", fields: [originLocationId], references: [id], onDelete: SetNull)
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 

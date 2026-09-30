@@ -23,9 +23,15 @@ export interface ActorContext {
 const money = (v: bigint) => Number(v);
 const CHECKOUT_SCOPE = 'checkout';
 
-/** A validated, priced, reserved line grouped under its vendor during checkout. */
+/** A validated, priced, reserved line grouped under its vendor (and, since
+ *  BMPL-175, its chosen fulfilment origin) during checkout. */
 interface CheckoutLine {
   vendorProfileId: string;
+  // Which vendor location this line reserved against — null for a product
+  // that has not adopted per-location tracking (the overwhelming majority
+  // today; see InventoryService.chooseLocation). Lines sharing one
+  // (vendorProfileId, originLocationId) pair become ONE VendorOrder.
+  originLocationId: string | null;
   productId: string;
   variantId: string | null;
   productTitle: string;
@@ -35,6 +41,10 @@ interface CheckoutLine {
   quantity: number;
   subtotalMinor: bigint;
 }
+
+/** One VendorOrder-to-be: every line sharing a (vendor, origin) pair. */
+const groupKey = (vendorProfileId: string, originLocationId: string | null) =>
+  `${vendorProfileId}::${originLocationId ?? ''}`;
 
 @Injectable()
 export class OrdersService {
@@ -101,7 +111,7 @@ export class OrdersService {
         : null;
 
       // ---- Validate every line, recompute price, reserve inventory ----
-      const linesByVendor = new Map<string, CheckoutLine[]>();
+      const linesByGroup = new Map<string, CheckoutLine[]>();
       for (const item of cart.items) {
         const product = await tx.product.findUnique({
           where: { id: item.productId },
@@ -146,16 +156,30 @@ export class OrdersService {
         const inv = item.variantId
           ? await this.inventory.rowFor(item.productId, item.variantId, tx)
           : await this.inventory.rowFor(item.productId, null, tx);
+        // BMPL-175: which location (if any) this line reserved against —
+        // chosen BEFORE reserving, exactly once, against exactly one row.
+        let originLocationId: string | null = null;
         if (inv && !inv.unlimited) {
-          const a = this.inventory.availability(inv);
-          if (!a.allowBackorders && a.available !== null && a.available < item.quantity) {
-            throw new ConflictException(`Not enough stock for "${product.title}".`);
+          const pick = await this.inventory.chooseLocation(inv, item.quantity, tx);
+          if (!pick.adopted) {
+            // Legacy single-bucket path — byte-for-byte what this did before BMPL-175.
+            const a = this.inventory.availability(inv);
+            if (!a.allowBackorders && a.available !== null && a.available < item.quantity) {
+              throw new ConflictException(`Not enough stock for "${product.title}".`);
+            }
+            await this.inventory.reserve(inv.id, item.quantity, tx); // rolls back with the tx on any later failure
+          } else {
+            if (!pick.choice) {
+              throw new ConflictException(`Not enough stock for "${product.title}".`);
+            }
+            await this.inventory.reserveAtLocation(inv, pick.choice.inventoryLocationId, item.quantity, tx);
+            originLocationId = pick.choice.locationId;
           }
-          await this.inventory.reserve(inv.id, item.quantity, tx); // rolls back with the tx on any later failure
         }
 
         const line: CheckoutLine = {
           vendorProfileId: product.vendorProfileId,
+          originLocationId,
           productId: item.productId,
           variantId: item.variantId,
           productTitle: product.title,
@@ -165,15 +189,28 @@ export class OrdersService {
           quantity: item.quantity,
           subtotalMinor: unitPriceMinor * BigInt(item.quantity),
         };
-        const list = linesByVendor.get(product.vendorProfileId) ?? [];
+        const key = groupKey(product.vendorProfileId, originLocationId);
+        const list = linesByGroup.get(key) ?? [];
         list.push(line);
-        linesByVendor.set(product.vendorProfileId, list);
+        linesByGroup.set(key, list);
       }
+      const vendorProfileIds = [...new Set([...linesByGroup.values()].map((lines) => lines[0]!.vendorProfileId))];
 
-      // ---- Delivery (M13): validate method offered + price per vendor ----
+      // ---- Delivery (M13): validate method offered + price per resulting VendorOrder ----
+      //
+      // BMPL-175: priced per (vendor, origin) GROUP now, not per vendor — a
+      // customer chooses ONE deliveryMethod per STORE (choiceByVendor is
+      // still keyed by vendorProfileId; that choice applies identically to
+      // every group under that vendor), but each group becomes its own
+      // VendorOrder with its own OrderDelivery, so each is quoted on its OWN
+      // subtotal. NAMED CONSEQUENCE, not an oversight: if one vendor's cart
+      // splits across two locations, a vendor-wide free-delivery threshold
+      // is evaluated against each group's share rather than the pooled
+      // total — the overwhelming majority of vendors (0-1 locations, or a
+      // cart that never actually splits) sees no difference at all.
       const address = dto.deliveryAddress;
-      const anyDelivery = [...linesByVendor.keys()].some(
-        (vpId) => (choiceByVendor.get(vpId)?.deliveryMethod ?? 'PICKUP') === 'DELIVERY',
+      const anyDelivery = [...linesByGroup.values()].some(
+        (lines) => (choiceByVendor.get(lines[0]!.vendorProfileId)?.deliveryMethod ?? 'PICKUP') === 'DELIVERY',
       );
       if (anyDelivery && !address) {
         throw new BadRequestException('A delivery address is required for delivery orders.');
@@ -186,9 +223,10 @@ export class OrdersService {
         appliedZoneId: string | null;
         instructions: string | null;
       }
-      const deliveryByVendor = new Map<string, VendorDelivery>();
+      const deliveryByGroup = new Map<string, VendorDelivery>();
       let deliveryFeeMinor = 0n;
-      for (const [vpId, lines] of linesByVendor) {
+      for (const [key, lines] of linesByGroup) {
+        const vpId = lines[0]!.vendorProfileId;
         const choice = choiceByVendor.get(vpId);
         const method = choice?.deliveryMethod ?? 'PICKUP';
         const settings = await tx.vendorSettings.findUnique({ where: { vendorProfileId: vpId } });
@@ -207,7 +245,7 @@ export class OrdersService {
                 : `This store does not deliver to ${address!.district.replace('_', ' ')}.`;
           throw new BadRequestException(msg);
         }
-        deliveryByVendor.set(vpId, {
+        deliveryByGroup.set(key, {
           feeMinor: q.feeMinor,
           freeApplied: q.freeApplied,
           estimate: q.estimate,
@@ -230,7 +268,7 @@ export class OrdersService {
       // answer would be wrong: false would let a rehearsal delivery be offered to
       // a real driver, true would hide a genuine purchase from revenue.
       const vendorFlags = await tx.vendorProfile.findMany({
-        where: { id: { in: [...linesByVendor.keys()] } },
+        where: { id: { in: vendorProfileIds } },
         select: { id: true, isTest: true, businessName: true },
       });
       const testVendors = vendorFlags.filter((v) => v.isTest);
@@ -243,7 +281,7 @@ export class OrdersService {
 
       // ---- Create the order graph ----
       const orderNumber = genOrderNumber();
-      const allLines = [...linesByVendor.values()].flat();
+      const allLines = [...linesByGroup.values()].flat();
       const subtotalMinor = allLines.reduce((s, l) => s + l.subtotalMinor, 0n);
       const itemCount = allLines.reduce((s, l) => s + l.quantity, 0);
 
@@ -280,15 +318,18 @@ export class OrdersService {
       }
 
       let idx = 0;
-      for (const [vpId, lines] of linesByVendor) {
+      for (const [key, lines] of linesByGroup) {
         idx += 1;
+        const vpId = lines[0]!.vendorProfileId;
+        const originLocationId = lines[0]!.originLocationId;
         const choice = choiceByVendor.get(vpId);
-        const dv = deliveryByVendor.get(vpId);
+        const dv = deliveryByGroup.get(key);
         await tx.vendorOrder.create({
           data: {
             orderNumber: `${orderNumber}-${idx}`,
             orderId: order.id,
             vendorProfileId: vpId,
+            originLocationId,
             status: 'PENDING',
             deliveryMethod: choice?.deliveryMethod ?? 'PICKUP',
             customerNotes: choice?.customerNotes ?? null,
@@ -358,9 +399,12 @@ export class OrdersService {
         },
         tx,
       );
-      // Vendor new-order notification, one per storefront in the order (M16).
+      // Vendor new-order notification, one per storefront in the order (M16)
+      // — still one per VENDOR even if BMPL-175 split it into two
+      // VendorOrders across origins; both are visible the moment the vendor
+      // opens their dashboard.
       const vendorProfiles = await tx.vendorProfile.findMany({
-        where: { id: { in: [...linesByVendor.keys()] } },
+        where: { id: { in: vendorProfileIds } },
         select: { id: true, userId: true, businessName: true },
       });
       for (const vp of vendorProfiles) {
@@ -481,7 +525,19 @@ export class OrdersService {
           if (!item.productId) continue; // product deleted — nothing tracked to release
           const inv = await this.inventory.rowFor(item.productId, item.variantId, tx);
           if (!inv) continue; // untracked inventory — nothing reserved
-          await this.inventory.release(inv.id, item.quantity, tx);
+          // BMPL-175: release against the SAME row reserve() used. A
+          // vendor-order with an origin reserved against that location's
+          // child row (never the parent); one without reserved against the
+          // parent, exactly as before this card. Falls back to the parent
+          // only if the child row is somehow gone despite the pointer still
+          // being set — SetNull on location delete means that should never
+          // happen in practice (see VendorOrder.originLocationId's comment).
+          const locRow = vo.originLocationId ? await this.inventory.rowForLocation(inv.id, vo.originLocationId, tx) : null;
+          if (locRow) {
+            await this.inventory.releaseAtLocation(locRow.id, item.quantity, tx);
+          } else {
+            await this.inventory.release(inv.id, item.quantity, tx);
+          }
           itemsReleased += 1;
         }
       }
@@ -650,7 +706,14 @@ export class OrdersService {
         for (const item of vo.items) {
           if (!item.productId) continue;
           const inv = await this.inventory.rowFor(item.productId, item.variantId);
-          if (inv && inv.reserved > 0) {
+          if (!inv) continue;
+          // BMPL-175: reconcile the SAME row reserve() would have used — see
+          // releaseReservationsInTx's identical comment.
+          const locRow = vo.originLocationId ? await this.inventory.rowForLocation(inv.id, vo.originLocationId) : null;
+          if (locRow && locRow.reserved > 0) {
+            await this.inventory.releaseAtLocation(locRow.id, item.quantity);
+            corrected += 1;
+          } else if (!locRow && inv.reserved > 0) {
             await this.inventory.release(inv.id, item.quantity);
             corrected += 1;
           }

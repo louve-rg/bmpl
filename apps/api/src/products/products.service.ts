@@ -355,11 +355,21 @@ export class ProductsService {
     const featuredFilter = query.featured ? Prisma.sql`AND p.featured = TRUE` : Prisma.empty;
     const priceMinFilter = query.priceMin != null ? Prisma.sql`AND p."priceMinor" >= ${query.priceMin}` : Prisma.empty;
     const priceMaxFilter = query.priceMax != null ? Prisma.sql`AND p."priceMinor" <= ${query.priceMax}` : Prisma.empty;
+    // BMPL-175: "purchasable" for a row i is (i.quantity - i.reserved) UNLESS
+    // i has adopted per-location tracking, in which case its own columns go
+    // stale and the SUM across its inventory_locations children is the real
+    // count — a scalar SUM over zero matching rows is NULL, so COALESCE
+    // falls back to the untouched parent row exactly when no children exist.
+    // Same rule as InventoryService.effectiveFromMap, expressed in SQL
+    // because this query runs outside Prisma/that service entirely.
+    const purchasableExpr = Prisma.sql`(i.unlimited OR i."allowBackorders" OR COALESCE(
+      (SELECT SUM(il.quantity) - SUM(il.reserved) FROM inventory_locations il WHERE il."inventoryId" = i.id),
+      i.quantity - i.reserved
+    ) > 0)`;
     const inStockFilter = query.inStock
       ? Prisma.sql`AND (
           NOT EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id)
-          OR EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id
-            AND (i.unlimited OR i."allowBackorders" OR (i.quantity - i.reserved) > 0)))`
+          OR EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id AND ${purchasableExpr}))`
       : Prisma.empty;
     const searchFilter = q
       ? Prisma.sql`AND (p."searchVector" @@ websearch_to_tsquery('english', ${q}) OR p.title ILIKE ${`%${q}%`})`
@@ -369,8 +379,7 @@ export class ProductsService {
     const hideOosFilter = Prisma.sql`AND (
         vs."hideOutOfStock" IS NOT TRUE
         OR NOT EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id)
-        OR EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id
-          AND (i.unlimited OR i."allowBackorders" OR (i.quantity - i.reserved) > 0)))`;
+        OR EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id AND ${purchasableExpr}))`;
     const rankExpr = q
       ? Prisma.sql`ts_rank(p."searchVector", websearch_to_tsquery('english', ${q}))`
       : Prisma.sql`0`;

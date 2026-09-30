@@ -122,7 +122,14 @@ export class PickupService {
           if (!item.productId) continue; // product deleted — nothing tracked
           const inv = await this.inventory.rowFor(item.productId, item.variantId, tx);
           if (!inv) continue; // untracked inventory
-          await this.inventory.finalizeReservation(inv.id, item.quantity, actorId, tx);
+          // BMPL-175: finalize against the SAME row reserve() used — see
+          // OrdersService.releaseReservationsInTx's identical comment.
+          const locRow = vo.originLocationId ? await this.inventory.rowForLocation(inv.id, vo.originLocationId, tx) : null;
+          if (locRow) {
+            await this.inventory.finalizeLocationReservation(inv, locRow.id, item.quantity, actorId, tx);
+          } else {
+            await this.inventory.finalizeReservation(inv.id, item.quantity, actorId, tx);
+          }
         }
       }
       await tx.vendorOrder.update({ where: { id: vendorOrderId }, data: { status: 'PICKED_UP', pickedUpAt: new Date(), inventoryFinalizedAt: fresh.inventoryFinalizedAt ?? new Date() } });

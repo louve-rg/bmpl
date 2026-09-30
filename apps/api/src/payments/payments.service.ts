@@ -359,7 +359,15 @@ export class PaymentsService {
           for (const item of vo.items) {
             if (!item.productId) continue;
             const inv = await this.inventory.rowFor(item.productId, item.variantId, tx);
-            if (inv) await this.inventory.release(inv.id, item.quantity, tx);
+            if (!inv) continue;
+            // BMPL-175: release against the SAME row reserve() used — see
+            // OrdersService.releaseReservationsInTx's identical comment.
+            const locRow = vo.originLocationId ? await this.inventory.rowForLocation(inv.id, vo.originLocationId, tx) : null;
+            if (locRow) {
+              await this.inventory.releaseAtLocation(locRow.id, item.quantity, tx);
+            } else {
+              await this.inventory.release(inv.id, item.quantity, tx);
+            }
           }
         }
         await tx.order.update({ where: { id: orderId }, data: { status: 'CANCELLED', reservationsReleasedAt: new Date() } });
