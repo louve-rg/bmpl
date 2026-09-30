@@ -89,6 +89,40 @@ export interface ShipmentLegView {
    * conversationIds, never one shared id.
    */
   conversationId: string | null;
+  /**
+   * BMPL-340 (Edward req 12): this leg's own projected finish, or null for a
+   * cancelled leg (excluded from the ETA walk entirely) or one that was never
+   * reached because an earlier leg is EXCEPTION/UNKNOWN. See {@link ShipmentEtaSummary}.
+   */
+  eta: ShipmentLegEta | null;
+}
+
+/**
+ * BMPL-340 (Edward req 12): a shipment's own multi-leg ETA, derived ONLY
+ * from configured data (packages/shared/src/shipment-eta.ts carries the
+ * full reasoning). `UNKNOWN` is a normal, PERMANENT state on this system
+ * today — almost nothing writes a LINE_HAUL leg's scheduled departure yet
+ * — never a transient "still loading" to be waited out. Always read
+ * `confidence`; never infer UNKNOWN from `estimatedArrivalAt` being null,
+ * even though the API's own invariant keeps the two in step.
+ */
+export type EtaConfidence = 'KNOWN' | 'PROJECTED' | 'UNKNOWN';
+
+export interface ShipmentEtaSummary {
+  confidence: EtaConfidence;
+  /** Null exactly when confidence is UNKNOWN. */
+  estimatedArrivalAt: string | null;
+}
+
+export interface ShipmentLegEta {
+  sequence: number;
+  confidence: EtaConfidence;
+  /** Null exactly when confidence is UNKNOWN. */
+  estimatedCompletionAt: string | null;
+  /** A human-readable reason FROM THE API — never invented client-side. Null
+   *  when none is needed (a completed leg, a carrier's own commitment, or
+   *  the very first live leg starting right away with nothing to wait on). */
+  reason: string | null;
 }
 
 export interface ShipmentEndpoint {
@@ -155,6 +189,16 @@ export interface ShipmentView {
    * the token existed; absent until the API that mints it is deployed.
    */
   recipientTrackingToken?: string | null;
+  /**
+   * BMPL-340 (Edward req 12): the journey's own overall ETA. Optional like
+   * `recipientTrackingToken` above and for the same reason — web and api
+   * deploy independently (Vercel vs. Railway, which runs `prisma migrate
+   * deploy` first and is therefore slower), so there is a real window where
+   * this page is live against an API that does not send the field yet.
+   * Absence means the same thing `confidence: 'UNKNOWN'` means — read it
+   * through {@link etaLine}, never dereferenced directly.
+   */
+  eta?: ShipmentEtaSummary;
 }
 
 /**
@@ -185,6 +229,20 @@ export interface RecipientTrackingView {
   /** Present only while the shipment is AWAITING_COLLECTION at a terminal. */
   collectionHub: { name: string; city: string; address: string | null; instructions: string | null } | null;
   steps: RecipientTrackingStep[];
+  /**
+   * BMPL-340 (Edward req 12): the journey's own overall ETA — confidence and
+   * arrival only, never the per-leg reasons `ShipmentView` carries. This
+   * type is pinned byte-identical across `trackPublic`/`trackAsRecipient`/
+   * `listIncoming` (the BMPL-179 parity test), so `eta` must stay exactly
+   * this shape on all three.
+   *
+   * Optional, same reason as `ShipmentView.eta` above: web and api deploy
+   * independently, and `trackPublic` in particular is UNAUTHENTICATED — a
+   * crash there is a blank page visible to anyone holding the link, not
+   * just a signed-in customer. Absence means the same thing UNKNOWN means;
+   * read it through {@link etaLine}, never dereferenced directly.
+   */
+  eta?: ShipmentEtaSummary;
 }
 
 /**
@@ -332,6 +390,54 @@ export function legPhase(leg: ShipmentLegView): LegPhase {
   if (leg.status === 'EXCEPTION' || leg.status === 'CANCELLED') return 'stopped';
   if (leg.status === 'IN_PROGRESS' || leg.isCurrent) return 'current';
   return 'upcoming';
+}
+
+/**
+ * Once a parcel is delivered or cancelled there is nothing left to estimate
+ * — the journey already ended, one way or the other. Shared by every
+ * surface that carries `eta` (sender, recipient, incoming list) so they
+ * agree on when to show it at all, not just what it says while shown.
+ */
+export function showsEta(status: string): boolean {
+  return status !== 'DELIVERED' && status !== 'CANCELLED';
+}
+
+/**
+ * The one line a customer reads for "when will this arrive" — driven
+ * ENTIRELY by `eta.confidence`, never by whether `estimatedArrivalAt`
+ * happens to be null (BMPL-340). UNKNOWN is common and permanent on this
+ * system today, not a loading state: say so in plain words, never a blank
+ * or a spinner that never resolves.
+ *
+ * `eta` itself is optional — a real, non-hypothetical case, not just a
+ * defensive type: web and api deploy independently, so a response can
+ * legitimately arrive with no `eta` field at all while api is still
+ * rolling out. Absence is read exactly like UNKNOWN, never a crash.
+ *
+ * `formattedDate` is passed in already localized — this function has no
+ * opinion on date formatting, only on what the confidence means.
+ */
+export function etaLine(eta: ShipmentEtaSummary | undefined, formattedDate: string | null): string {
+  if (!eta || eta.confidence === 'UNKNOWN' || !formattedDate) {
+    return 'We don’t have an estimate for this yet';
+  }
+  // KNOWN: a carrier's own commitment, or the leg already finished — not a
+  // projection at all. PROJECTED: computed from configured duration and
+  // hours/windows, still entirely from configured data, but said as the
+  // estimate it is.
+  return eta.confidence === 'KNOWN' ? `Arriving ${formattedDate}` : `Estimated to arrive ${formattedDate}`;
+}
+
+/**
+ * The one extra line a leg gets, explaining WHY its own timing looks the
+ * way it does — always the exact reason the API sent, never invented here.
+ * Skipped for a leg already showing its own `exceptionReason`: an
+ * EXCEPTION leg's ETA reason ("this leg needs attention…") would otherwise
+ * say almost the same thing a second time, in a second box.
+ */
+export function legEtaNote(leg: ShipmentLegView): string | null {
+  if (leg.exceptionReason) return null;
+  return leg.eta?.reason ?? null;
 }
 
 /**

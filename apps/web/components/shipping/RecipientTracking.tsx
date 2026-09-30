@@ -1,6 +1,6 @@
 'use client';
 
-import type { RecipientTrackingView } from '../../lib/shipping';
+import { etaLine, showsEta, type RecipientTrackingView } from '../../lib/shipping';
 import { destinationLine, recipientHeadline, stepTone } from '../../lib/recipient-tracking';
 
 /**
@@ -46,6 +46,13 @@ export function RecipientTracking({ view }: { view: RecipientTrackingView }) {
 
         {view.deliveredAt && (
           <p className="mt-3 text-sm text-emerald-700">Delivered {formatDate(view.deliveredAt)}</p>
+        )}
+
+        {/* BMPL-340 (Edward req 12): shown whenever there is still something
+            to arrive, including an honest "we don't know yet" — never a
+            blank, never a spinner. Hidden once delivered or cancelled. */}
+        {showsEta(view.status) && (
+          <p className="mt-3 text-sm text-slate-600">{etaLine(view.eta, formatDate(view.eta?.estimatedArrivalAt ?? null))}</p>
         )}
       </div>
 

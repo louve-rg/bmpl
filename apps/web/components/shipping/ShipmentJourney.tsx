@@ -2,10 +2,13 @@
 
 import Link from 'next/link';
 import {
+  etaLine,
   formatTransitTime,
   headlineFor,
+  legEtaNote,
   legPhase,
   shippingMoney,
+  showsEta,
   type ShipmentLegView,
   type ShipmentView,
 } from '../../lib/shipping';
@@ -26,6 +29,12 @@ import { DriverCard } from '../DeliveryTracker';
  */
 
 const MODE_ICON: Record<string, string> = { LAND: '🚚', AIR: '✈️', SEA: '⛴️' };
+
+function formatDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' });
+}
 
 /**
  * BMPL-289/290: one link per leg, straight into the existing inbox
@@ -109,6 +118,7 @@ function LegRow({ leg, isLast }: { leg: ShipmentLegView; isLast: boolean }) {
         {leg.exceptionReason && (
           <p className="mt-1 rounded-bmpl-md bg-amber-50 px-2 py-1 text-xs text-amber-800">{leg.exceptionReason}</p>
         )}
+        {legEtaNote(leg) && <p className="mt-1 text-xs text-slate-500">{legEtaNote(leg)}</p>}
         {leg.destinationHub?.instructions && phase === 'current' && (
           <p className="mt-1 text-xs text-slate-600">{leg.destinationHub.instructions}</p>
         )}
@@ -140,6 +150,16 @@ export function ShipmentJourney({ shipment }: { shipment: ShipmentView }) {
             <dt className="text-xs text-slate-500">Service</dt>
             <dd className="text-slate-900">{shipment.serviceLabel}</dd>
           </div>
+          {/* BMPL-340: shown whenever there is still something to arrive —
+              UNKNOWN included, since that is itself an honest answer, not
+              nothing to say. Hidden once delivered or cancelled, same as the
+              recipient's own view — by then there is nothing left to estimate. */}
+          {showsEta(shipment.status) && (
+            <div className="col-span-2">
+              <dt className="text-xs text-slate-500">Arrival</dt>
+              <dd className="text-slate-900">{etaLine(shipment.eta, formatDate(shipment.eta?.estimatedArrivalAt ?? null))}</dd>
+            </div>
+          )}
         </dl>
       </div>
 

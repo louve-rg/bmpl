@@ -19,6 +19,7 @@ function view(overrides: Partial<RecipientTrackingView> = {}): RecipientTracking
     destination: { city: 'San Pedro', district: 'BELIZE' },
     collectionHub: null,
     steps: [],
+    eta: { confidence: 'UNKNOWN', estimatedArrivalAt: null },
     ...overrides,
   };
 }

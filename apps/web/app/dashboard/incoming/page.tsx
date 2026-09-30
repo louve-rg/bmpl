@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { destinationLine, recipientHeadline } from '../../../lib/recipient-tracking';
-import { shippingApi, type RecipientTrackingView } from '../../../lib/shipping';
+import { etaLine, shippingApi, showsEta, type RecipientTrackingView } from '../../../lib/shipping';
 import type { ApiError } from '../../../lib/api';
 import { PageHeader, Alert, Badge, EmptyState, Spinner, type Tone } from '../../../components/ui';
 
@@ -25,6 +25,12 @@ const TONE_FOR: Record<string, Tone> = {
   CANCELLED: 'neutral',
   EXCEPTION: 'warning',
 };
+
+function formatDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' });
+}
 
 export default function IncomingShipmentsPage() {
   const router = useRouter();
@@ -83,6 +89,9 @@ export default function IncomingShipmentsPage() {
                   <Badge tone={TONE_FOR[s.status] ?? 'info'}>{s.serviceLabel}</Badge>
                 </div>
                 {destinationLine(s) && <p className="mt-2 break-words text-xs text-slate-600">Going to {destinationLine(s)}</p>}
+                {showsEta(s.status) && (
+                  <p className="mt-1 break-words text-xs text-slate-500">{etaLine(s.eta, formatDate(s.eta?.estimatedArrivalAt ?? null))}</p>
+                )}
               </Link>
             </li>
           ))}
