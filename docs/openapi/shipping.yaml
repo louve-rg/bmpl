@@ -50,6 +50,18 @@ info:
     `/admin/logistics/routes/{id}/schedule` (admin) or
     `/shipping/provider/routes/{id}/schedule` (carrier, scoped to routes their
     organization operates).
+
+    MULTI-LEG ETA (BMPL-340, merged `f1bbfce`) is a real, live capability on
+    `main`: every tracking payload below — customer/staff `ShipmentView` and
+    the recipient-facing `RecipientTrackingView` alike, public link included
+    — carries a journey-level `eta` derived only from configured data (leg
+    duration, terminal hours, sender/recipient availability windows, and a
+    carrier's own scheduled commitment where one exists), via one shared
+    `EtaConfidence`/`ShipmentEta` shape documented below. It is never a map
+    service, an average, or an invented timetable — where nothing configured
+    anchors a leg, the answer is `UNKNOWN`, not a guess. This describes the
+    CONTRACT on `main`, not what is currently deployed; whether the running
+    API has caught up is `pnpm deploy:status`'s question, not this file's.
 servers:
   - url: https://bmplapi-production.up.railway.app/api
     description: Production
@@ -210,8 +222,12 @@ paths:
         Anyone holding the link is the audience, so the payload is a
         deliberate ALLOWLIST (`ShipmentService.trackPublic`): reference,
         status and step progress in customer language, the destination town,
-        and the collection terminal once (and only while) the parcel is
-        waiting there. It NEVER carries the sender's identity or address, any
+        the collection terminal once (and only while) the parcel is waiting
+        there, and — since BMPL-340 — a journey-level `eta` (confidence +
+        estimated arrival only, never the per-leg detail; see
+        `RecipientTrackingView`). This UNAUTHENTICATED response explicitly
+        includes that `eta`, the same as every other field in this allowlist.
+        The payload NEVER carries the sender's identity or address, any
         money, the parcel description, a handoff PIN, custody actors, driver
         identity, or operator-typed exception/cancellation reasons. The token
         is a server-minted 24-character capability (~120 bits) — never derived
@@ -1782,6 +1798,68 @@ components:
     LegStatus:
       type: string
       enum: [PENDING, READY, IN_PROGRESS, COMPLETED, CANCELLED, EXCEPTION]
+    EtaConfidence:
+      type: string
+      enum: [KNOWN, PROJECTED, UNKNOWN]
+      description: >-
+        BMPL-340. `KNOWN` — the leg/journey has already finished, or rests on
+        a carrier's own scheduled arrival commitment: not a projection at
+        all. `PROJECTED` — computed from configured leg duration plus
+        terminal hours and sender/recipient availability windows; a
+        best-effort estimate, still entirely from configured data, never a
+        map service, an average or an invented timetable. `UNKNOWN` — no
+        configured signal anchors a start or arrival time — today, most
+        commonly a `LINE_HAUL` leg: nothing on this surface yet writes a
+        carrier's own scheduled departure or arrival, so an unstarted
+        `LINE_HAUL` leg is honestly UNKNOWN rather than guessed. UNKNOWN
+        propagates forward from the first leg that cannot be
+        anchored, since every later leg's own start depends on it. A client
+        must render this as "cannot be estimated yet" and never substitute a
+        guess.
+    ShipmentEta:
+      type: object
+      description: >-
+        A shipment's remaining-journey estimate (`estimateShipmentEta`,
+        `packages/shared/src/shipment-eta.ts`), derived only from configured
+        data. The sender/recipient availability-window gates this estimator
+        applies are the exact same `isAvailable`/`nextAvailableInstant`
+        functions `shipment-dispatch.service.ts` calls to decide whether to
+        offer a leg to a driver — one shared function, not two
+        implementations kept in sync by hand — so this estimate and the
+        dispatcher can never disagree about where a window's edge falls,
+        by construction.
+      properties:
+        confidence: { $ref: "#/components/schemas/EtaConfidence" }
+        estimatedArrivalAt:
+          type: [string, "null"]
+          format: date-time
+          description: The last live leg's estimated completion. Null exactly when confidence is UNKNOWN, or the journey has no live leg left to finish.
+    ShipmentLegEta:
+      type: object
+      description: >-
+        Per-leg detail behind the journey-level `ShipmentEta` above.
+        Customer/staff audience only (`ShipmentView.legs[].eta`) — never on
+        any recipient-facing view (`RecipientTrackingView`, `GET
+        /shipping/track/{token}`, `GET /shipping/incoming*`), because a
+        leg's own `reason` names a terminal's configured hours or someone's
+        availability window: one step more operational detail than those
+        views deliberately carry.
+      properties:
+        sequence: { type: integer }
+        confidence: { $ref: "#/components/schemas/EtaConfidence" }
+        estimatedCompletionAt:
+          type: [string, "null"]
+          format: date-time
+          description: Null exactly when confidence is UNKNOWN.
+        reason:
+          type: [string, "null"]
+          description: >-
+            Null when confidence is KNOWN, or when this is the first live
+            leg starting immediately with nothing to wait on. Otherwise a
+            short customer-facing phrase — e.g. "waiting for the destination
+            terminal to open", "waiting for the recipient's configured
+            availability window", "no carrier departure has been confirmed
+            for this leg yet".
     ShipmentStatus:
       type: string
       enum: [DRAFT, AWAITING_PICKUP, FIRST_MILE, AT_ORIGIN_HUB, IN_TRANSIT, AT_DESTINATION_HUB, OUT_FOR_DELIVERY, AWAITING_COLLECTION, DELIVERED, EXCEPTION, CANCELLED]
@@ -2163,6 +2241,7 @@ components:
         origin: { $ref: "#/components/schemas/ShipmentEnd" }
         destination: { $ref: "#/components/schemas/ShipmentEnd" }
         currentLegSequence: { type: [integer, "null"] }
+        eta: { $ref: "#/components/schemas/ShipmentEta" }
         legs:
           type: array
           items: { $ref: "#/components/schemas/ShipmentLegView" }
@@ -2174,7 +2253,12 @@ components:
       description: >-
         The recipient's public, status-only view — an allowlist, built by hand
         and never derived from `ShipmentView` (see the endpoint description
-        for what is deliberately excluded, and why).
+        for what is deliberately excluded, and why). Carries `eta` as a
+        privacy-minimal confidence + arrival summary only (BMPL-340) — never
+        the per-leg detail `ShipmentView` carries, because a leg's own wait
+        `reason` would name a terminal's hours or someone's availability
+        window: one step more operational detail than this allowlist
+        otherwise carries.
       properties:
         reference: { type: string }
         status: { $ref: "#/components/schemas/ShipmentStatus" }
@@ -2182,6 +2266,7 @@ components:
         serviceLabel: { type: string }
         bookedAt: { type: [string, "null"], format: date-time }
         deliveredAt: { type: [string, "null"], format: date-time }
+        eta: { $ref: "#/components/schemas/ShipmentEta" }
         destination:
           type: object
           properties:
@@ -2276,6 +2361,14 @@ components:
         arrivedAt: { type: [string, "null"], format: date-time }
         startedAt: { type: [string, "null"], format: date-time }
         completedAt: { type: [string, "null"], format: date-time }
+        eta:
+          description: >-
+            Null for a CANCELLED leg (excluded from the ETA walk entirely) or
+            one never reached because an earlier leg is EXCEPTION/UNKNOWN —
+            never a guess standing in for a real gap.
+          oneOf:
+            - $ref: "#/components/schemas/ShipmentLegEta"
+            - type: "null"
         handoffReceivedByName: { type: [string, "null"] }
         exceptionReason: { type: [string, "null"] }
         handoffPin:
