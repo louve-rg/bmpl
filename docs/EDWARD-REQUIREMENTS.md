@@ -10,13 +10,15 @@ schema and the shipping service in 2026-09-25 and split the batch into cards
 — but it produced only eleven, BMPL-174 through BMPL-184, one per
 requirement 1–11. Requirement 12 (multi-leg ETA, material ETA-change
 notification, terminal hold/reroute, and carrier schedule date exceptions)
-never got a card of its own; only its last slice, carrier schedule date
-exceptions, was ever built, and it shipped folded into BMPL-184, where it
-reads as part of requirement 11. Counting the cards and counting the owner's
-requirements gave two different totals, and the gap between them is exactly
-how an entire requirement went unbuilt without anyone noticing — a
-requirement with no card is invisible to every process this floor runs.
-Recorded properly now as BMPL-340.
+never got a card of its own until this document's own count disagreed with
+the card set; its last slice, carrier schedule date exceptions, had already
+shipped folded into BMPL-184, where it reads as part of requirement 11, and
+the gap between the two totals is exactly how an entire requirement went
+unbuilt without anyone noticing — a requirement with no card is invisible to
+every process this floor runs. Recorded properly now as BMPL-340, which has
+since shipped its multi-leg-ETA slice (`f1bbfce`); two of the requirement's
+four pieces are done, two remain open as BMPL-345 and BMPL-343 — see
+requirement 12 below.
 
 **The rule this document follows:** every status below is a claim about the
 code, and those are the sentences that rot. Every row marked **Done** names
@@ -43,7 +45,7 @@ card believed open turned out to already be shipped).
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
 | 10 | Cancellation before custody, failed delivery, return-to-sender | **Blocked** | Pre-custody half already correct in shipped code; the rest is designed, nothing built |
 | 11 | Recipient availability windows & updates | **Mostly done, one piece open** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`; see below for what's missing |
-| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **Never carded until today; not started except one slice** | Schedule-exceptions slice only: `fcc3592`, folded into BMPL-184. Everything else: BMPL-340, no branch |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **Two of four pieces done** | ETA: `f1bbfce` (BMPL-340 phase 1). Schedule exceptions: `fcc3592`, folded into BMPL-184. Open: ETA-change notice (BMPL-345), hold/reroute (BMPL-343) |
 
 ---
 
@@ -332,32 +334,38 @@ exists.
 
 ## 12. Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions
 
-**Status: not started, except one slice — and this requirement never had a
-card until BMPL-340 was opened today.**
+**Status: in progress — two of four pieces now done, and this requirement
+never had a card until BMPL-340 was opened.**
 
-Four distinct pieces, per the owner's original requirement, none of them
-built except the last:
+Four distinct pieces, per the owner's original requirement:
 
 - **A multi-leg ETA derived only from actually configured schedules,
   operating hours, exceptions and current shipment state** — never a guess,
-  a map service, or an invented average. **Does not exist.** Confirmed by
-  search: `transportMinutes` (`shipment.service.ts:179`) is a quote-time
-  planner total produced once at booking, not a live, updating ETA. The rest
-  of the codebase is explicit about the same absence rather than silent
-  about it — `dispatch.module.ts`'s own module comment states "NO
-  GPS/tracking/routing/ETA/…", `delivery.pricing.ts` documents "NO routing,
-  geocoding, ETA-from-maps, or dispatch", and the one driver-facing route
-  estimate that exists (`driver-jobs.service.ts`) carries its own comment,
-  "Never presented as a live ETA — there is no traffic data behind it."
+  a map service, or an invented average. **Done (`f1bbfce`, BMPL-340 phase
+  1).** `estimateShipmentEta` (`packages/shared/src/shipment-eta.ts`) walks a
+  shipment's live legs, anchoring each to a carrier's own scheduled
+  commitment, a terminal's configured hours, or a sender/recipient
+  availability window — never a fabricated timetable — and reports `UNKNOWN`
+  rather than guess the moment nothing configured can anchor a leg. Exposed
+  as `eta` on every tracking payload: customer/staff (`ShipmentView`, full
+  per-leg detail) and the public/recipient views (`RecipientTrackingView` —
+  `trackPublic`, `trackAsRecipient`, `listIncoming` — journey-level
+  confidence + arrival only). Documented in `docs/openapi/shipping.yaml`
+  (`EtaConfidence`, `ShipmentEta`, `ShipmentLegEta`). One real gap carried
+  forward, found and reported rather than built around: nothing anywhere yet
+  writes a `LINE_HAUL` leg's own `scheduledDepartureAt`/`scheduledArrivalAt`,
+  so a multi-hub shipment's overall ETA still reads `UNKNOWN` today even
+  though its `FIRST_MILE`/`LAST_MILE` legs resolve correctly — tracked as
+  BMPL-346, in progress, not yet merged.
 - **Material ETA-change notification, on the owner's already-approved
   30-minute threshold** ([Ruling 11](./OWNER-RULINGS.md#ruling-11--recipient-availability-and-eta-changes)).
-  **Does not exist.** There is no ETA-change event in the notification
-  catalog, and — see above — nothing computes an ETA to change in the first
-  place.
+  **Does not exist.** Split out as BMPL-345 (needs a persisted previous-ETA
+  value to compare against and hasn't been built).
 - **Terminal hold / reroute / return for a recipient known to be
   unavailable.** **Does not exist.** No status represents it. Adjacent to
   requirement 10 but proactive (before dispatch reaches the recipient)
-  rather than reactive (after a failed delivery attempt).
+  rather than reactive (after a failed delivery attempt). Tracked as
+  BMPL-343.
 - **Date-specific carrier schedule exceptions.** **The one slice that is
   done** — `RouteOperatingDay` + `RouteScheduleException` (BMPL-186, merged
   `fcc3592`) already provide the weekly default and date-specific overrides,
@@ -366,19 +374,26 @@ built except the last:
   boundary, not a requirement boundary; it belongs here on the owner's own
   list.
 
-**Why this matters more than a missing row:** this requirement was never
+**Why this mattered more than a missing row:** this requirement was never
 carded by the BMPL-185 dependency-mapping pass that produced BMPL-174
 through BMPL-184, so no agent was ever assigned to build it, no PR was ever
 expected against it, and nothing on any board flagged it as outstanding. It
 surfaced only because this document counted the owner's requirements
-independently of the card set and the two totals disagreed. Tracked now as
-BMPL-340, queued behind requirement 1 (BMPL-175).
+independently of the card set and the two totals disagreed. The first piece
+above is the corrective work; the remaining two pieces stay open, tracked
+as BMPL-345 and BMPL-343.
+
+**On `main`, not yet in production:** `f1bbfce` is merged but is not yet an
+ancestor of the currently deployed API (as of this writing, production is
+at `371439e`) — the contract above exists in the repository; whether it is
+live is a deployment question this document does not answer.
 
 ---
 
 *Sources: kanban cards BMPL-174 through BMPL-190, BMPL-201, BMPL-247,
-BMPL-283 through BMPL-288, BMPL-337, BMPL-338, BMPL-340, and the owner
-rulings in [`OWNER-RULINGS.md`](./OWNER-RULINGS.md). Every commit cited above
-was confirmed to be an ancestor of `origin/main` before this document was
-written. If a status here and a dependent card's own notes ever disagree,
-the code — not either document — is the tiebreaker.*
+BMPL-283 through BMPL-288, BMPL-337, BMPL-338, BMPL-340, BMPL-343, BMPL-345,
+BMPL-346, and the owner rulings in [`OWNER-RULINGS.md`](./OWNER-RULINGS.md).
+Every commit cited above was confirmed to be an ancestor of `origin/main`
+before this document was written. If a status here and a dependent card's
+own notes ever disagree, the code — not either document — is the
+tiebreaker.*

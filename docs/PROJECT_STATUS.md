@@ -99,9 +99,15 @@ not asserted here. `pnpm deploy:status` is the live source; this note is not.
    driver's service-area coverage narrowed from a whole district to specific
    towns (`3950db0`); a private, sender/courier/staff-scoped pickup photo
    (`682b501`); the real multi-leg journey map with lettered stops,
-   replacing a placeholder (`4eac6e8`, `c99a596`); and route operating-day
+   replacing a placeholder (`4eac6e8`, `c99a596`); route operating-day
    scheduling, now actually consulted by route planning and line-haul
-   departure rather than merely configurable (`fcc3592`, `509d664`).
+   departure rather than merely configurable (`fcc3592`, `509d664`); and a
+   multi-leg ETA on every tracking payload — customer, staff and the
+   public/recipient link alike — derived only from configured data, never
+   a guess, with `UNKNOWN` where nothing configured can anchor a leg
+   (`f1bbfce`, Edward requirement 12 phase 1). This describes the contract
+   on `main`, not the deployed API — see the note at the top of this
+   section.
 3. **Delivery driver** — the courier who actually moves it.
 4. **Passenger Transportation** — moving people rather than parcels. Formally
    authorized by the product owner and now a working vertical end to end,
