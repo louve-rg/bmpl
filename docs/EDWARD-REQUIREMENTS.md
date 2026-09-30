@@ -41,9 +41,9 @@ and found it on requirements 1, 3 and 11 at once.
 | # | Requirement | Status | Evidence |
 | - | --- | --- | --- |
 | 1 | Vendor location-level inventory & fulfilment origin | **API done; no UI** | `bad7b3f` (BMPL-175, PR #259) touches zero `apps/web`/`apps/admin` files; UI tracked as BMPL-354 |
-| 2 | Package pickup/handoff photo | **API done; no web UI** | `682b501` (PR #127); no screen anywhere shows or uploads it — see below |
+| 2 | Package pickup/handoff photo | **API done; no web UI** | `682b501` (PR #127); no screen anywhere shows or uploads it; UI tracked as BMPL-352 |
 | 3 | Recipient account linking & incoming-shipment tracking | **Done** | `a6b7d97` (BMPL-179, PR #135); two policy questions open (BMPL-119), see below |
-| 4 | Granular driver service areas (district → city) | **API done; no UI** | `3950db0` (PR #126) touches zero `apps/web`/`apps/admin` files for the city dimension; see below |
+| 4 | Granular driver service areas (district → city) | **API done; no UI** | `3950db0` (PR #126) touches zero `apps/web`/`apps/admin` files for the city dimension; UI tracked as BMPL-353 |
 | 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255) |
 | 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
 | 7 | Courier & vehicle identification once assigned | **Done** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247 |
@@ -58,12 +58,13 @@ separate ones: each has a real, merged, tested API and no user-facing
 screen at all.** Confirmed for each by diffing its own merge commit for
 `apps/web`/`apps/admin` files (`bad7b3f`, `682b501`, `3950db0` — every one
 touches zero) rather than inferring it from the commit message. This batch
-was built API-first, and the web half of these three was never scheduled —
-not blocked on a decision, not attempted and abandoned, simply never carded.
-Recording each as its own isolated status invites fixing them one at a time
-without anyone asking why there were three. Requirement 1's UI is tracked as
-BMPL-354; requirement 2's recipient-photo wiring and requirement 4's
-city-picker UI are both real gaps with no card yet.
+was built API-first, and the web half of all three was never scheduled — not
+blocked on a decision, not attempted and abandoned. Recording each as its
+own isolated status invites fixing them one at a time without anyone asking
+why there were three. All three are now carded — requirement 1 as BMPL-354,
+requirement 2 as BMPL-352, requirement 4 as BMPL-353 — which is the
+difference between a document that records a gap and one a reader can act
+on.
 
 ---
 
@@ -157,9 +158,11 @@ exactly for the three audiences that exist today.
 **What remains:** the owner approved recipient access to the photo in
 principle (Ruling 7). Requirement 3 has since landed, so a real "recipient"
 audience now exists — but nothing has wired `pickupPhotoUrls` into
-`trackAsRecipient`/`listIncoming`/`trackPublic` for it yet. No card exists
-for this specific wiring; it is a real, uncarded follow-up, not a dependency
-still waiting on something else to ship.
+`trackAsRecipient`/`listIncoming`/`trackPublic` for it yet, nor built any
+screen for sender, staff or courier. Tracked as BMPL-352, which names the
+same cause: this piece was recorded as blocked on requirement 3, requirement
+3 merged, and nothing fired to unblock it — a dependency that clears itself
+is how work goes missing.
 
 ## 3. Recipient account linking & incoming-shipment tracking
 
@@ -221,7 +224,7 @@ already has a screen (`apps/web/app/dashboard/driver/service-areas/page.tsx`,
 zero-hit grep for `DriverServiceCity`/`serviceCities` across `apps/web` and
 `apps/admin` source. A driver today cannot narrow a district to specific
 cities from any screen; only dispatch matching benefits, and only for a row
-nothing lets anyone create. No card exists yet for this UI gap.
+nothing lets anyone create. Tracked as BMPL-353.
 
 ## 5. Operating hours & closed/soon-closing handling
 
@@ -486,7 +489,8 @@ cannot hold that current; asking a running-API source (e.g.
 
 *Sources: kanban cards BMPL-119, BMPL-174 through BMPL-190, BMPL-201,
 BMPL-247, BMPL-283 through BMPL-288, BMPL-337, BMPL-338, BMPL-340, BMPL-343,
-BMPL-344, BMPL-345, BMPL-346, BMPL-351, BMPL-354, and the owner rulings in
+BMPL-344, BMPL-345, BMPL-346, BMPL-351, BMPL-352, BMPL-353, BMPL-354, and
+the owner rulings in
 [`OWNER-RULINGS.md`](./OWNER-RULINGS.md).
 Every commit cited above was confirmed to be an ancestor of `origin/main`
 before this document was written. If a status here and a dependent card's
