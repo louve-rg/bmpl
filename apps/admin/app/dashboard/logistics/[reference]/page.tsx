@@ -37,6 +37,13 @@ interface Leg {
   exceptionReason: string | null;
   originHub: { name: string } | null;
   destinationHub: { name: string } | null;
+  /**
+   * BMPL-178/352 (Edward req 2): the courier's own pickup evidence for THIS
+   * leg. Optional — web and api deploy independently, so a required field
+   * read unguarded is how a screen crashes on the API side lagging behind
+   * a merge (BMPL-349); absence means nothing attached yet, same as empty.
+   */
+  pickupPhotoUrls?: string[];
 }
 
 interface Custody {
@@ -258,6 +265,19 @@ export default function ShipmentOpsPage() {
                         </div>
                         {leg.exceptionReason && (
                           <p className="mt-1 break-words text-xs font-medium text-amber-800">{leg.exceptionReason}</p>
+                        )}
+                        {leg.pickupPhotoUrls && leg.pickupPhotoUrls.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {leg.pickupPhotoUrls.map((url, i) => (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                key={i}
+                                src={url}
+                                alt={`Pickup photo ${i + 1}`}
+                                className="h-14 w-14 rounded-bmpl-md border border-slate-200 object-cover"
+                              />
+                            ))}
+                          </div>
                         )}
                       </div>
                       <Badge tone={leg.status === 'COMPLETED' ? 'success' : leg.status === 'EXCEPTION' ? 'warning' : 'info'}>

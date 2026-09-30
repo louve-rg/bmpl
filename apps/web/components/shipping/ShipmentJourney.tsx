@@ -115,6 +115,23 @@ function LegRow({ leg, isLast }: { leg: ShipmentLegView; isLast: boolean }) {
         {leg.completedAt && leg.handoffReceivedByName && (
           <p className="mt-1 text-xs text-emerald-700">Handed over to {leg.handoffReceivedByName}</p>
         )}
+        {/* BMPL-178/352 (Edward req 2): the courier's own pickup-evidence
+            photo(s) for THIS leg — never a sibling leg's. Absent means
+            nothing attached yet, same as empty; never rendered as a
+            placeholder that would reveal a photo exists before it does. */}
+        {leg.pickupPhotoUrls && leg.pickupPhotoUrls.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {leg.pickupPhotoUrls.map((url, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={i}
+                src={url}
+                alt={`Pickup photo ${i + 1}`}
+                className="h-16 w-16 rounded-bmpl-md border border-slate-200 object-cover"
+              />
+            ))}
+          </div>
+        )}
         {leg.exceptionReason && (
           <p className="mt-1 rounded-bmpl-md bg-amber-50 px-2 py-1 text-xs text-amber-800">{leg.exceptionReason}</p>
         )}

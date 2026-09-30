@@ -95,6 +95,15 @@ export interface ShipmentLegView {
    * reached because an earlier leg is EXCEPTION/UNKNOWN. See {@link ShipmentEtaSummary}.
    */
   eta: ShipmentLegEta | null;
+  /**
+   * BMPL-178/BMPL-352 (Edward req 2): pickup evidence the assigned courier
+   * attached to THIS leg — never pooled onto a sibling leg of the same
+   * shipment. Optional: web and api deploy independently, and a required
+   * field read unguarded is how /store/[slug] nearly showed a stranger an
+   * error page (BMPL-349) — absence here just means "nothing to show yet",
+   * same as an empty array, never a crash.
+   */
+  pickupPhotoUrls?: string[];
 }
 
 /**

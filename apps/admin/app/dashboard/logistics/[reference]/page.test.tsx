@@ -129,3 +129,42 @@ describe('ShipmentOpsPage — write affordances gated on logistics.operate (BMPL
     expect(document.body.textContent).toMatch(/Report a problem with this leg/);
   });
 });
+
+/**
+ * BMPL-178/352 (Edward req 2): pickupPhotoUrls is optional on the web type —
+ * web and api deploy independently, so a required field read unguarded is
+ * how a screen crashes on the api side lagging behind a merge (BMPL-349).
+ */
+describe('ShipmentOpsPage — pickup photo (BMPL-178/352)', () => {
+  it('shows the courier-attached pickup photo for its own leg', async () => {
+    stubFetch(['logistics.read']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.read'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          return jsonResponse(200, {
+            ...SHIPMENT,
+            legs: [{ ...SHIPMENT.legs[0], pickupPhotoUrls: ['https://example.com/pickup.jpg'] }],
+          });
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    const imgs = Array.from(document.body.querySelectorAll('img'));
+    expect(imgs.some((img) => img.getAttribute('src') === 'https://example.com/pickup.jpg')).toBe(true);
+  });
+
+  it('does not crash when pickupPhotoUrls is absent from the leg entirely', async () => {
+    stubFetch(['logistics.read']);
+    await mount();
+
+    // SHIPMENT's own fixture leg carries no pickupPhotoUrls key at all — the
+    // page rendered without throwing and the rest of the leg still shows.
+    expect(document.body.textContent).toMatch(/Tropic Air/);
+    expect(document.body.querySelectorAll('img[alt^="Pickup photo"]').length).toBe(0);
+  });
+});
