@@ -115,9 +115,11 @@ const REVERSED_SERVICE: Record<ShippingService, ShippingService> = {
  * is not merely unconfigured, it is not derivable from this feature's own
  * reversal formula at all (see `previewReturn`'s comment) — but the owner's
  * own answer for "no valid configured price" is PENDING_MANUAL, not a
- * refusal that leaves no trail: "if BML cannot calculate a valid configured
- * return price, the return should remain PENDING/MANUAL rather than
- * guessing." A flat 400 here would be the same silent dead-end for a parcel
+ * refusal that leaves no trail — the ruling's own rule, in different words
+ * from its exact wording (which belongs verbatim in docs/OWNER-RULINGS.md,
+ * not re-typed here): a return whose configured price cannot be calculated
+ * stays pending or manual rather than being guessed at. A flat 400 here
+ * would be the same silent dead-end for a parcel
  * genuinely stuck mid-journey that the owner's ruling exists to prevent —
  * it decides nothing about who pays for a leg interrupted mid-carry (Ruling
  * 1 leaves that open on purpose), it only puts a human on notice that this
