@@ -128,6 +128,53 @@ async function pinOf(legId: string) {
   return leg.handoffPin!;
 }
 
+/**
+ * BMPL-348: `JSON.stringify(body)` then `.not.toContain(pin)` flattens the
+ * whole document into one string first — and a flattened document has
+ * substrings that exist in no actual value, manufactured across field
+ * boundaries and punctuation. That is exactly how this assertion once
+ * failed on real, correct code: a fixture phone number ending
+ * `...2223333` collided with a CI run whose random PIN happened to be
+ * `2223`, four digits sitting inside one field's value, not leaked from
+ * anywhere. Walking the PARSED body and checking real leaf values avoids
+ * both directions of the mistake:
+ *
+ * 1. Every leaf, compared to the PIN as a string, must not be an exact
+ *    match — this is what actually does the work: it finds the PIN under a
+ *    key nobody thought to name, and it catches one serialized as a NUMBER
+ *    (`String(2223) === '2223'`), which a substring search on stringified
+ *    JSON would miss (`2223` with no surrounding quotes never appears as a
+ *    substring of `"2223"`).
+ * 2. A string leaf must not contain the PIN as a STANDALONE TOKEN — bounded
+ *    by a non-alphanumeric character (or the start/end of the string) on
+ *    both sides — which is what preserves "your code is 2223" inside a
+ *    notification body or an echoed error. A bare `\b` is not enough: it
+ *    still fires inside a cuid like `cmuoid2223x`. `501-2223333` does not
+ *    match because the run is followed by another digit; `cmuoid2223x`
+ *    does not match because it is preceded by a letter.
+ *
+ * RESIDUAL, not pretended away: a prose field that legitimately contains a
+ * standalone four-digit run equal to this run's real PIN would still fire.
+ * Far rarer than an arbitrary digit run landing inside an unrelated field,
+ * and when it fires it is at least pointing at something shaped like a
+ * code — rule that out first if this ever goes red, rather than assuming
+ * the assertion itself regressed.
+ */
+function findPinLeak(value: unknown, pin: string, path = '$'): string | null {
+  if (value == null) return null;
+  if (typeof value === 'object') {
+    const entries = Array.isArray(value) ? value.map((v, i) => [i, v] as const) : Object.entries(value as Record<string, unknown>);
+    for (const [key, child] of entries) {
+      const hit = findPinLeak(child, pin, `${path}.${key}`);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (String(value) === pin) return path;
+  if (typeof value === 'string' && new RegExp(`(?<![0-9A-Za-z])${pin}(?![0-9A-Za-z])`).test(value)) return path;
+  return null;
+}
+
 const assign = (legId: string, d: { driverProfileId: string; vehicleId: string }) =>
   post(admin, `admin/logistics/legs/${legId}/assign`, { driverProfileId: d.driverProfileId, vehicleId: d.vehicleId });
 
@@ -349,7 +396,7 @@ describe('the complete chain, sender to recipient, every handoff proven (Edward 
     // not carry it in any form.
     const ownJob = await request(ctx.server).get(`/api/driver/shipping-jobs/${firstMile.id}`).set('Cookie', driver1.cookies);
     expect(ownJob.status).toBe(200);
-    expect(JSON.stringify(ownJob.body)).not.toContain(firstMilePin);
+    expect(findPinLeak(ownJob.body, firstMilePin)).toBeNull();
 
     // The one legitimate way anyone reads it: staff deliberately reveal it.
     const revealed = await request(ctx.server).get(`/api/admin/logistics/legs/${firstMile.id}/handoff-pin`).set('Cookie', admin);
@@ -451,7 +498,7 @@ describe('the complete chain, sender to recipient, every handoff proven (Edward 
     // — never carries it, at the exact moment the code is live and real.
     const publicView = await request(ctx.server).get(`/api/shipping/track/${s.recipientTrackingToken}`);
     expect(publicView.status).toBe(200);
-    expect(JSON.stringify(publicView.body)).not.toContain(lastMilePin);
+    expect(findPinLeak(publicView.body, lastMilePin)).toBeNull();
 
     // (b) Wrong code, refused and counted; then the right one, from the right
     // courier, completes the chain.

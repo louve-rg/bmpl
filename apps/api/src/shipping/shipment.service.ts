@@ -4,6 +4,7 @@ import {
   belizeCalendarDateKey,
   belizeMidday,
   deriveShipmentStatus,
+  estimateShipmentEta,
   isLegActionable,
   needsFirstMile,
   needsLastMile,
@@ -17,8 +18,12 @@ import {
   SHIPPING_SERVICE_DESCRIPTIONS,
   SHIPPING_SERVICE_LABELS,
   TRANSPORT_MODE_LABELS,
+  type AvailabilityWindow,
   type AvailabilityWindowRole,
   type Endpoint,
+  type EtaConfidence,
+  type EtaLegInput,
+  type HubHoursByHub,
   type PlannerHub,
   type PlannerLane,
   type PlannerPricing,
@@ -27,6 +32,7 @@ import {
   type PlannedLeg,
   type PlanRequest,
   type PlanResult,
+  type ShipmentEtaResult,
 } from '@bmpl/shared';
 import type {
   CancelShipmentInput,
@@ -128,6 +134,10 @@ type ShipmentWithGraph = Prisma.ShipmentGetPayload<{ include: typeof SHIPMENT_IN
 const RECIPIENT_VIEW_INCLUDE = {
   legs: { orderBy: { sequence: 'asc' } },
   destinationHub: { select: { name: true, city: true, addressLine1: true, instructions: true } },
+  // BMPL-340: availability windows are role/time-of-day only (no PII), and
+  // computing an honest ETA for the recipient's own view needs them the
+  // same way the dispatch engine already does.
+  availabilityWindows: true,
 } satisfies Prisma.ShipmentInclude;
 
 type RecipientViewGraph = Prisma.ShipmentGetPayload<{ include: typeof RECIPIENT_VIEW_INCLUDE }>;
@@ -708,6 +718,46 @@ export class ShipmentService {
 
   /* ------------------------------------------------------------- tracking */
 
+  /**
+   * A shipment's ETA (BMPL-340), derived ONLY from configured data — see
+   * packages/shared/src/shipment-eta.ts's own header for the full
+   * reasoning and the hard line it holds. Batches hub-hours for every
+   * FIRST_MILE leg's destination terminal in ONE pair of queries
+   * regardless of leg count (LogisticsNetworkService.hubHoursConfig),
+   * never per-leg.
+   */
+  private async etaFor(
+    legs: readonly EtaLegInput[],
+    windows: readonly AvailabilityWindow[],
+    now: Date = new Date(),
+  ): Promise<ShipmentEtaResult> {
+    const hubHours = await this.hubHoursForLegs([legs]);
+    return estimateShipmentEta(legs, now, hubHours, windows);
+  }
+
+  /** Batch hub-hours across MULTIPLE shipments' legs in ONE pair of queries
+   *  — the list-view counterpart to `etaFor`'s single-shipment fetch, so a
+   *  caller serving N shipments (`listIncoming`) never turns into an N+1
+   *  the way a naive per-item `etaFor` call would. */
+  private async hubHoursForLegs(legsByShipment: readonly (readonly EtaLegInput[])[]): Promise<HubHoursByHub> {
+    const hubIds = legsByShipment.flat().map((l) => l.destinationHubId).filter((id): id is string => !!id);
+    return this.network.hubHoursConfig(hubIds);
+  }
+
+  private toEtaLegInputs(legs: readonly { sequence: number; kind: string; status: string; durationMinutes: number; destinationHubId: string | null; startedAt: Date | null; completedAt: Date | null; scheduledDepartureAt: Date | null; scheduledArrivalAt: Date | null }[]): EtaLegInput[] {
+    return legs.map((l) => ({
+      sequence: l.sequence,
+      kind: l.kind as EtaLegInput['kind'],
+      status: l.status as EtaLegInput['status'],
+      durationMinutes: l.durationMinutes,
+      destinationHubId: l.destinationHubId,
+      startedAt: l.startedAt,
+      completedAt: l.completedAt,
+      scheduledDepartureAt: l.scheduledDepartureAt,
+      scheduledArrivalAt: l.scheduledArrivalAt,
+    }));
+  }
+
   /** One journey, whoever is asking. Customers see their own; staff see any. */
   async track(reference: string, viewer: { userId: string; isStaff: boolean }) {
     const shipment = await this.prisma.shipment.findUnique({ where: { reference }, include: SHIPMENT_INCLUDE });
@@ -755,7 +805,26 @@ export class ShipmentService {
       include: RECIPIENT_VIEW_INCLUDE,
     });
     if (!s) throw new NotFoundException('No shipment for that link.');
-    return this.recipientView(s);
+    const hubHours = await this.hubHoursForLegs([this.toEtaLegInputs(s.legs)]);
+    return { ...this.recipientView(s), eta: this.recipientEtaSummary(s, hubHours) };
+  }
+
+  /** Just confidence + arrival, nothing per-leg — the recipient view is a
+   *  deliberate minimal allowlist (this file's own header above); a leg's
+   *  own wait-reason names a terminal's hours or an availability window,
+   *  which is already one step more operational detail than this view
+   *  otherwise carries. `hubHours` is pre-fetched by the caller — single
+   *  shipment (`trackPublic`/`trackAsRecipient`) or batched across a whole
+   *  list (`listIncoming`), so this stays a pure, synchronous merge with no
+   *  query of its own, and can never reintroduce a per-item N+1. */
+  private recipientEtaSummary(s: RecipientViewGraph, hubHours: HubHoursByHub): { confidence: EtaConfidence; estimatedArrivalAt: Date | null } {
+    const eta = estimateShipmentEta(
+      this.toEtaLegInputs(s.legs),
+      new Date(),
+      hubHours,
+      s.availabilityWindows.map((w) => ({ role: w.role, startTime: w.startTime, endTime: w.endTime })),
+    );
+    return { confidence: eta.confidence, estimatedArrivalAt: eta.estimatedArrivalAt };
   }
 
   private recipientView(s: RecipientViewGraph) {
@@ -809,10 +878,19 @@ export class ShipmentService {
   async trackAsRecipient(reference: string, userId: string) {
     const s = await this.prisma.shipment.findUnique({ where: { reference }, include: RECIPIENT_VIEW_INCLUDE });
     if (!s || s.recipientUserId !== userId) throw new NotFoundException('No shipment with that reference.');
-    return this.recipientView(s);
+    const hubHours = await this.hubHoursForLegs([this.toEtaLegInputs(s.legs)]);
+    return { ...this.recipientView(s), eta: this.recipientEtaSummary(s, hubHours) };
   }
 
-  /** Every shipment this account has claimed as recipient, newest first. */
+  /**
+   * Every shipment this account has claimed as recipient, newest first.
+   *
+   * Must stay byte-identical, per shipment, to what `trackPublic`/
+   * `trackAsRecipient` return for that SAME shipment (the parity a
+   * BMPL-179 test pins) — including `eta`, which is why this batches hub
+   * hours ONCE across every shipment on the page rather than reusing
+   * `trackPublic`'s per-shipment fetch N times.
+   */
   async listIncoming(userId: string) {
     const rows = await this.prisma.shipment.findMany({
       where: { recipientUserId: userId },
@@ -820,7 +898,9 @@ export class ShipmentService {
       include: RECIPIENT_VIEW_INCLUDE,
       take: 50,
     });
-    return rows.map((s) => this.recipientView(s));
+    const legsByShipment = rows.map((s) => this.toEtaLegInputs(s.legs));
+    const hubHours = await this.hubHoursForLegs(legsByShipment);
+    return rows.map((s) => ({ ...this.recipientView(s), eta: this.recipientEtaSummary(s, hubHours) }));
   }
 
   /**
@@ -2149,6 +2229,11 @@ export class ShipmentService {
     // on the page and pass it in; a single-shipment caller has none to pass, so
     // it is resolved here, bounded to this one shipment's own legs.
     const conversationIds = opts.conversationIds ?? (await this.legConversationIds(s.legs.map((l) => l.id)));
+    const eta = await this.etaFor(
+      this.toEtaLegInputs(s.legs),
+      s.availabilityWindows.map((w) => ({ role: w.role, startTime: w.startTime, endTime: w.endTime })),
+    );
+    const etaBySequence = new Map(eta.legs.map((l) => [l.sequence, l]));
     // The sender and staff both already see the whole story here (ownership /
     // permission was checked before `serialize` was ever called) — the pickup
     // photo needs no extra gate on top, same as every other leg field below.
@@ -2192,6 +2277,10 @@ export class ShipmentService {
         arrivedAt: l.arrivedAt,
         startedAt: l.startedAt,
         completedAt: l.completedAt,
+        // BMPL-340: null for a CANCELLED leg (excluded from the ETA walk
+        // entirely) or one that was never reached because an earlier leg
+        // is EXCEPTION/UNKNOWN — never a guess standing in for a real gap.
+        eta: etaBySequence.get(l.sequence) ?? null,
         handoffReceivedByName: l.handoffReceivedByName,
         exceptionReason: l.exceptionReason,
         // The customer's own door code, and nothing else.
@@ -2248,6 +2337,10 @@ export class ShipmentService {
         instructions: s.destinationInstructions,
       },
       currentLegSequence: current?.sequence ?? null,
+      // BMPL-340: the journey's own ETA, same confidence/reason shape each
+      // leg below carries. UNKNOWN whenever any live leg cannot be honestly
+      // anchored to configured data — never a guess.
+      eta: { confidence: eta.confidence, estimatedArrivalAt: eta.estimatedArrivalAt },
       legs,
       custody: s.custodyEvents.map((c) => ({
         id: c.id,

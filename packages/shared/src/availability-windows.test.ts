@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAvailable, type AvailabilityWindow } from './availability-windows';
+import { isAvailable, nextAvailableInstant, type AvailabilityWindow } from './availability-windows';
 
 /** An instant at Belize local `hour`:`minute` (fixed UTC-6, no DST). */
 const belizeInstant = (year: number, month: number, day: number, hour = 12, minute = 0): Date =>
@@ -72,5 +72,44 @@ describe('isAvailable', () => {
     const overnight: AvailabilityWindow[] = [{ role: 'SENDER', startTime: '22:00', endTime: '02:00' }];
     expect(isAvailable(instant, daytime, 'SENDER')).toBe(false);
     expect(isAvailable(instant, overnight, 'SENDER')).toBe(true);
+  });
+});
+
+describe('nextAvailableInstant (BMPL-340)', () => {
+  it('already available — returns `from` unchanged, not a later instant', () => {
+    const windows: AvailabilityWindow[] = [{ role: 'SENDER', startTime: '09:00', endTime: '12:00' }];
+    const from = belizeInstant(2026, 11, 2, 10, 0);
+    expect(nextAvailableInstant(from, windows, 'SENDER')).toEqual(from);
+  });
+
+  it('no windows for the role — unconstrained, returns `from` unchanged', () => {
+    expect(nextAvailableInstant(belizeInstant(2026, 11, 2, 3, 0), [], 'SENDER')).toEqual(belizeInstant(2026, 11, 2, 3, 0));
+  });
+
+  it('later today — jumps to the window\'s own start, same calendar day', () => {
+    const windows: AvailabilityWindow[] = [{ role: 'SENDER', startTime: '09:00', endTime: '12:00' }];
+    const from = belizeInstant(2026, 11, 2, 3, 0); // 03:00, before the window opens
+    expect(nextAvailableInstant(from, windows, 'SENDER')).toEqual(belizeInstant(2026, 11, 2, 9, 0));
+  });
+
+  it('today\'s window already closed — rolls to tomorrow\'s occurrence, not an earlier miss', () => {
+    const windows: AvailabilityWindow[] = [{ role: 'SENDER', startTime: '09:00', endTime: '12:00' }];
+    const from = belizeInstant(2026, 11, 2, 13, 0); // after close
+    expect(nextAvailableInstant(from, windows, 'SENDER')).toEqual(belizeInstant(2026, 11, 3, 9, 0));
+  });
+
+  it('two windows — picks the EARLIEST reachable start, not just the first in the list', () => {
+    const windows: AvailabilityWindow[] = [
+      { role: 'SENDER', startTime: '14:00', endTime: '17:00' },
+      { role: 'SENDER', startTime: '09:00', endTime: '12:00' },
+    ];
+    const from = belizeInstant(2026, 11, 2, 3, 0);
+    expect(nextAvailableInstant(from, windows, 'SENDER')).toEqual(belizeInstant(2026, 11, 2, 9, 0));
+  });
+
+  it('an overnight window not yet open today rolls forward to its own start, not its end', () => {
+    const windows: AvailabilityWindow[] = [{ role: 'SENDER', startTime: '22:00', endTime: '02:00' }];
+    const from = belizeInstant(2026, 11, 2, 15, 0); // mid-afternoon, outside the window either side
+    expect(nextAvailableInstant(from, windows, 'SENDER')).toEqual(belizeInstant(2026, 11, 2, 22, 0));
   });
 });

@@ -18,7 +18,7 @@
 /// agree on this, and a rule stated twice is a rule that will eventually
 /// disagree with itself.
 
-import { toBelizeLocal } from './belize-time';
+import { startOfBelizeDay, toBelizeLocal } from './belize-time';
 import type { AvailabilityWindowRole } from './shipping';
 
 export interface AvailabilityWindow {
@@ -80,4 +80,30 @@ export function isAvailable(instant: Date, windows: readonly AvailabilityWindow[
     const end = parseMinutes(w.endTime);
     return start < end ? t >= start && t < end : t >= start || t < end;
   });
+}
+
+/**
+ * The next instant at/after `from` when `role` becomes available (BMPL-340)
+ * - composes on top of `isAvailable` rather than re-deriving membership.
+ * Unlike `nextOpenWindow` (hub-hours.ts), this never needs a multi-day
+ * bounded search and never returns null: a window is a pure time-of-day
+ * range with no calendar axis (this file's own header), so it repeats
+ * every day and its next occurrence is always within 24 hours of `from` -
+ * and `relevant.length === 0` (no configured window for this role) already
+ * returns `true` from `isAvailable` above, so this function is only ever
+ * reached when at least one window exists to search.
+ */
+export function nextAvailableInstant(from: Date, windows: readonly AvailabilityWindow[], role: AvailabilityWindowRole): Date {
+  if (isAvailable(from, windows, role)) return from;
+  const relevant = windows.filter((w) => w.role === role);
+  if (relevant.length === 0) return from; // unreachable given isAvailable's own default above; kept explicit rather than assumed
+  const fromMinutes = minutesOfDayBelize(from);
+  const dayStart = startOfBelizeDay(from);
+  const nextOffset = Math.min(
+    ...relevant.map((w) => {
+      const start = parseMinutes(w.startTime);
+      return start > fromMinutes ? start : start + 24 * 60; // today if still ahead, else tomorrow's occurrence
+    }),
+  );
+  return new Date(dayStart.getTime() + nextOffset * 60_000);
 }
