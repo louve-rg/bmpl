@@ -46,10 +46,11 @@ engineering rules and the invariants that must not regress. Scoped rules live in
 [`apps/api/CLAUDE.md`](../apps/api/CLAUDE.md) and
 [`packages/database/CLAUDE.md`](../packages/database/CLAUDE.md). How work gets
 branched, verified, reviewed and integrated is
-[`AGENT-WORKFLOW.md`](./AGENT-WORKFLOW.md). Standing owner rulings on
-logistics privacy, addresses and ETAs that answer no single open card — most
+[`AGENT-WORKFLOW.md`](./AGENT-WORKFLOW.md). All twelve of the owner's
+2026-09-28 rulings on logistics privacy, addresses and ETAs — most
 importantly that a tracking link proves possession, not identity or
-authorization — are [`OWNER-RULINGS.md`](./OWNER-RULINGS.md); check there
+authorization — are [`OWNER-RULINGS.md`](./OWNER-RULINGS.md), each against
+the card it answered (if any) and what it has settled since; check there
 before treating one of those questions as unanswered. Where the production
 UAT batch's twelve requirements actually stand, each against a named commit
 or an honest "not built" — including the twelfth, which was never even
