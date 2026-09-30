@@ -1,10 +1,26 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { InventoryAdjustInput, InventorySettingsInput } from '@bmpl/validation';
-import type { Inventory, Prisma } from '@bmpl/database';
+import type { Inventory, InventoryLocation, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { OwnershipService } from './ownership.service';
 import { BackInStockService } from './back-in-stock.service';
+
+/** A checkout-time choice of which vendor location fulfils a line (BMPL-175). */
+export interface LocationChoice {
+  inventoryLocationId: string;
+  locationId: string;
+}
+
+/**
+ * `adopted: false` — the product has no InventoryLocation child rows at all;
+ * the caller's existing single-bucket path applies, byte-for-byte unchanged.
+ * `adopted: true, choice: null` — child rows exist but none can cover the
+ * requested quantity. `adopted: true, choice: {...}` — the chosen row.
+ */
+export type LocationPick = { adopted: false } | { adopted: true; choice: LocationChoice | null };
+
+type LocRow = Pick<InventoryLocation, 'inventoryId' | 'quantity' | 'reserved'>;
 
 export interface ActorContext {
   userId: string;
@@ -89,13 +105,17 @@ export class InventoryService {
       where: { productId, variantId: { not: null } },
       include: { variant: { select: { id: true, sku: true } } },
     });
+    // BMPL-175: a row that has adopted per-location tracking reports the SUM
+    // across its locations here, not its own (stale once adopted) columns —
+    // see effectiveFromMap's own comment.
+    const locMap = await this.locationMapFor([productInv.id, ...variantRows.map((r) => r.id)]);
     return {
-      product: { inventoryId: productInv.id, ...this.availability(productInv) },
+      product: { inventoryId: productInv.id, ...this.effectiveFromMap(productInv, locMap) },
       variants: variantRows.map((r) => ({
         inventoryId: r.id,
         variantId: r.variantId,
         sku: r.variant?.sku ?? null,
-        ...this.availability(r),
+        ...this.effectiveFromMap(r, locMap),
       })),
     };
   }
@@ -262,6 +282,268 @@ export class InventoryService {
     });
   }
 
+  // ---- Per-location inventory (BMPL-175 · Edward req 1) --------------------
+  //
+  // A product that never adopts per-location tracking has ZERO rows in
+  // inventory_locations and every method above behaves exactly as it did
+  // before this section existed. Everything below is additive: a SECOND
+  // table the same lock-check-write discipline (BMPL-256) is mirrored onto,
+  // never a second way to reserve against the SAME row. Exactly one
+  // reservation decision is made per checkout line, against exactly one row
+  // — chosen by chooseLocation() BEFORE reserving, never both.
+
+  /**
+   * Pick which location fulfils one checkout line, by AVAILABILITY ONLY,
+   * VendorLocation.isPrimary then createdAt as the tie-break — the same
+   * order vendor.service.ts's STOREFRONT_INCLUDE already lists locations in.
+   * DeliveryPricingService.quote() carries no locationId and does no
+   * routing, so "most efficient origin" is not a capability this system
+   * has; availability is the only honest signal. Never splits one line's
+   * quantity across two locations — a line is reserved whole, against
+   * whichever single location can cover it, or refused.
+   */
+  async chooseLocation(inv: Inventory, qty: number, tx: Tx = this.prisma): Promise<LocationPick> {
+    const rows = await tx.inventoryLocation.findMany({
+      where: { inventoryId: inv.id },
+      include: { location: { select: { isPrimary: true, createdAt: true } } },
+    });
+    if (rows.length === 0) return { adopted: false };
+    const eligible = rows.filter((r) => {
+      const a = this.availability({ ...inv, quantity: r.quantity, reserved: r.reserved });
+      return a.allowBackorders || (a.available !== null && a.available >= qty);
+    });
+    if (eligible.length === 0) return { adopted: true, choice: null };
+    eligible.sort((a, b) => {
+      if (a.location.isPrimary !== b.location.isPrimary) return a.location.isPrimary ? -1 : 1;
+      return a.location.createdAt.getTime() - b.location.createdAt.getTime();
+    });
+    const chosen = eligible[0]!;
+    return { adopted: true, choice: { inventoryLocationId: chosen.id, locationId: chosen.locationId } };
+  }
+
+  /**
+   * Same lock discipline as reserve() above (BMPL-256): the lock is taken
+   * before the availability check is read. `inv` is the PARENT row, passed
+   * in by the caller (who already has it from chooseLocation) rather than
+   * re-queried here, since settings (unlimited/allowBackorders) live there,
+   * not on the child row being locked.
+   */
+  async reserveAtLocation(inv: Inventory, inventoryLocationId: string, qty: number, tx: Tx = this.prisma): Promise<void> {
+    await tx.$queryRaw`SELECT id FROM inventory_locations WHERE id = ${inventoryLocationId} FOR UPDATE`;
+    const row = await tx.inventoryLocation.findUniqueOrThrow({ where: { id: inventoryLocationId } });
+    if (!inv.unlimited && !inv.allowBackorders && row.quantity - row.reserved < qty) {
+      throw new BadRequestException('Insufficient stock to reserve.');
+    }
+    await tx.inventoryLocation.update({ where: { id: inventoryLocationId }, data: { reserved: row.reserved + qty } });
+  }
+
+  /** Same lock and floor-clamp reasoning as release() above — no parent-row
+   *  settings dependency, so no `inv` parameter needed. */
+  async releaseAtLocation(inventoryLocationId: string, qty: number, tx: Tx = this.prisma): Promise<void> {
+    await tx.$queryRaw`SELECT id FROM inventory_locations WHERE id = ${inventoryLocationId} FOR UPDATE`;
+    const row = await tx.inventoryLocation.findUniqueOrThrow({ where: { id: inventoryLocationId } });
+    await tx.inventoryLocation.update({
+      where: { id: inventoryLocationId },
+      data: { reserved: Math.max(0, row.reserved - qty) },
+    });
+  }
+
+  /** Same lock/shape as finalizeReservation() above, against the child row;
+   *  `inv.unlimited` (parent setting) still short-circuits identically. */
+  async finalizeLocationReservation(
+    inv: Inventory,
+    inventoryLocationId: string,
+    qty: number,
+    actorId: string | null,
+    tx: Tx = this.prisma,
+  ): Promise<void> {
+    await tx.$queryRaw`SELECT id FROM inventory_locations WHERE id = ${inventoryLocationId} FOR UPDATE`;
+    const row = await tx.inventoryLocation.findUniqueOrThrow({ where: { id: inventoryLocationId } });
+    if (inv.unlimited) return;
+    const newQty = row.quantity - qty;
+    await tx.inventoryLocation.update({
+      where: { id: inventoryLocationId },
+      data: { quantity: newQty, reserved: Math.max(0, row.reserved - qty) },
+    });
+    await tx.inventoryChange.create({
+      data: {
+        inventoryId: row.inventoryId,
+        locationId: row.locationId,
+        delta: -qty,
+        reason: 'FULFILLED',
+        previousQty: row.quantity,
+        newQty,
+        actorId: actorId ?? undefined,
+        note: 'Delivery pickup confirmed',
+      },
+    });
+  }
+
+  /** The per-location child row for one inventory row + location, or null if
+   *  that product has no stock recorded at that specific location. */
+  async rowForLocation(inventoryId: string, locationId: string, tx: Tx = this.prisma): Promise<InventoryLocation | null> {
+    return tx.inventoryLocation.findUnique({ where: { inventoryId_locationId: { inventoryId, locationId } } });
+  }
+
+  /** Get-or-create the child row for one inventory row + location. The first
+   *  stock write at a location "adopts" per-location tracking for THAT
+   *  product only — every other product at the vendor is untouched. */
+  private async ensureLocationInventory(inventoryId: string, locationId: string, tx: Tx): Promise<InventoryLocation> {
+    const existing = await this.rowForLocation(inventoryId, locationId, tx);
+    if (existing) return existing;
+    return tx.inventoryLocation.create({ data: { inventoryId, locationId, quantity: 0 } });
+  }
+
+  /**
+   * The availability one Inventory row + its InventoryLocation children (if
+   * any) resolve to. A row with children reports their SUM as quantity/
+   * reserved (children are the source of truth once adopted); settings
+   * (unlimited/allowBackorders/lowStockThreshold) always come from the
+   * PARENT row, which stays the identity/settings anchor regardless of
+   * adoption. A row with zero children reports its own columns, unchanged —
+   * this is the SAME sum-across-rows shape publicAvailability/summaryFor/
+   * inStockMap already use one level up (across sibling Inventory rows per
+   * productId), extended to the new level.
+   *
+   * Public: every OTHER caller of availability(inv) on a raw Inventory row
+   * outside this class (cart.service.ts's stock checks, variants.service.ts's
+   * public variant listing) has the exact same staleness exposure once a
+   * product adopts per-location tracking, and must route through this (or
+   * effectiveAvailability/locationMapFor below) instead — see their own call
+   * sites for why each one batches.
+   */
+  effectiveFromMap(row: Inventory, locByInv: Map<string, LocRow[]>): Availability {
+    if (row.unlimited) return this.availability(row);
+    const locs = locByInv.get(row.id);
+    if (!locs || locs.length === 0) return this.availability(row);
+    const quantity = locs.reduce((s, x) => s + x.quantity, 0);
+    const reserved = locs.reduce((s, x) => s + x.reserved, 0);
+    return this.availability({ ...row, quantity, reserved });
+  }
+
+  /** Batch-fetch InventoryLocation rows for several Inventory ids at once —
+   *  one query, grouped by inventoryId — so callers over many products never
+   *  reintroduce the N+1 publicAvailability/summaryFor/inStockMap already
+   *  avoid at the sibling-row level. Public for the same reason as
+   *  effectiveFromMap above. */
+  async locationMapFor(inventoryIds: string[], tx: Tx = this.prisma): Promise<Map<string, LocRow[]>> {
+    const out = new Map<string, LocRow[]>();
+    if (!inventoryIds.length) return out;
+    const rows = await tx.inventoryLocation.findMany({ where: { inventoryId: { in: inventoryIds } } });
+    for (const r of rows) {
+      const list = out.get(r.inventoryId) ?? [];
+      list.push(r);
+      out.set(r.inventoryId, list);
+    }
+    return out;
+  }
+
+  /** Single-row convenience wrapper — see locationMapFor/effectiveFromMap. */
+  async effectiveAvailability(inv: Inventory, tx: Tx = this.prisma): Promise<Availability> {
+    return this.effectiveFromMap(inv, await this.locationMapFor([inv.id], tx));
+  }
+
+  /** Vendor: per-location stock for one product/variant — one row per
+   *  vendor location, present even if never adjusted there (reads as zero,
+   *  matching a never-adjusted product-level row's own convention). */
+  async getLocationsForProduct(userId: string, productId: string, variantId: string | null) {
+    const product = await this.ownership.ownedProduct(userId, productId);
+    const inv = await this.resolveTarget(productId, variantId);
+    const [locations, rows] = await Promise.all([
+      this.prisma.vendorLocation.findMany({
+        where: { vendorProfileId: product.vendorProfileId },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      }),
+      this.prisma.inventoryLocation.findMany({ where: { inventoryId: inv.id } }),
+    ]);
+    const byLocation = new Map(rows.map((r) => [r.locationId, r]));
+    return locations.map((loc) => {
+      const row = byLocation.get(loc.id);
+      const quantity = row?.quantity ?? 0;
+      const reserved = row?.reserved ?? 0;
+      return {
+        locationId: loc.id,
+        label: loc.label,
+        isPrimary: loc.isPrimary,
+        adopted: row != null,
+        inventoryLocationId: row?.id ?? null,
+        ...this.availability({ ...inv, quantity, reserved }),
+      };
+    });
+  }
+
+  /**
+   * Vendor: adjust on-hand quantity AT ONE LOCATION by a signed delta — the
+   * location-scoped sibling of adjust() above. Same validated input shape
+   * (delta/reason/note), same append-only InventoryChange history (with
+   * locationId set) and audit action, same back-in-stock crossing detection
+   * — now evaluated on the product's AGGREGATE availability across all its
+   * locations (what a customer sees), not this one location in isolation.
+   * No row lock (`FOR UPDATE`): matches adjust()'s own precedent — a vendor
+   * manually correcting stock is not the concurrent-customer race BMPL-256
+   * exists for.
+   */
+  async adjustAtLocation(
+    actor: ActorContext,
+    productId: string,
+    variantId: string | null,
+    locationId: string,
+    dto: InventoryAdjustInput,
+  ) {
+    const product = await this.ownership.ownedProduct(actor.userId, productId);
+    await this.ownLocationOrThrow(product.vendorProfileId, locationId);
+    const inv = await this.resolveTarget(productId, variantId);
+
+    let becameInStock = false;
+    await this.prisma.$transaction(async (tx) => {
+      const row = await this.ensureLocationInventory(inv.id, locationId, tx);
+      const current = await tx.inventoryLocation.findUniqueOrThrow({ where: { id: row.id } });
+      const newQty = current.quantity + dto.delta;
+      if (newQty < 0) {
+        throw new BadRequestException('Adjustment would drive on-hand quantity below zero.');
+      }
+
+      const before = await this.effectiveAvailability(inv, tx);
+      await tx.inventoryLocation.update({ where: { id: row.id }, data: { quantity: newQty } });
+      const after = await this.effectiveAvailability(inv, tx);
+      becameInStock = before.outOfStock && after.inStock;
+
+      await tx.inventoryChange.create({
+        data: {
+          inventoryId: inv.id,
+          locationId,
+          delta: dto.delta,
+          reason: dto.reason,
+          previousQty: current.quantity,
+          newQty,
+          actorId: actor.userId,
+          note: dto.note ?? null,
+        },
+      });
+      await this.audit.record(
+        {
+          action: 'INVENTORY_ADJUSTED',
+          actorId: actor.userId,
+          ipAddress: actor.ipAddress ?? null,
+          sessionId: actor.sessionId ?? null,
+          previousValue: { quantity: current.quantity, locationId },
+          newValue: { quantity: newQty, reason: dto.reason, locationId },
+        },
+        tx,
+      );
+    });
+    if (becameInStock) {
+      await this.backInStock.notifyRestock(productId, inv.variantId);
+    }
+    return this.getLocationsForProduct(actor.userId, productId, variantId);
+  }
+
+  private async ownLocationOrThrow(vendorProfileId: string, locationId: string) {
+    const loc = await this.prisma.vendorLocation.findUnique({ where: { id: locationId } });
+    if (!loc || loc.vendorProfileId !== vendorProfileId) throw new NotFoundException('Location not found.');
+    return loc;
+  }
+
   // ---- Public availability (used by ProductsService) ----
 
   /** Aggregate availability for a product: product-level row, else any variant in stock. */
@@ -278,7 +560,10 @@ export class InventoryService {
     if (rows.length === 0) {
       return { inStock: true, lowStock: false, outOfStock: false, available: null, unlimited: false, allowBackorders: false };
     }
-    const avails = rows.map((r) => this.availability(r));
+    // BMPL-175: a row that has adopted per-location tracking reports the SUM
+    // across its locations, not its own (stale once adopted) columns.
+    const locMap = await this.locationMapFor(rows.map((r) => r.id));
+    const avails = rows.map((r) => this.effectiveFromMap(r, locMap));
     const unlimited = avails.some((a) => a.unlimited);
     return {
       inStock: avails.some((a) => a.inStock),
@@ -301,10 +586,12 @@ export class InventoryService {
     const out = new Map<string, { available: number | null; unlimited: boolean; status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'UNTRACKED' }>();
     if (!productIds.length) return out;
     const rows = await this.prisma.inventory.findMany({ where: { productId: { in: productIds } } });
+    // BMPL-175: batched once for every row here, same reasoning as publicAvailability.
+    const locMap = await this.locationMapFor(rows.map((r) => r.id));
     const byProduct = new Map<string, ReturnType<InventoryService['availability']>[]>();
     for (const r of rows) {
       const list = byProduct.get(r.productId) ?? [];
-      list.push(this.availability(r));
+      list.push(this.effectiveFromMap(r, locMap));
       byProduct.set(r.productId, list);
     }
     for (const id of productIds) {
@@ -332,6 +619,8 @@ export class InventoryService {
     const out = new Map<string, boolean>();
     if (!productIds.length) return out;
     const rows = await this.prisma.inventory.findMany({ where: { productId: { in: productIds } } });
+    // BMPL-175: batched once for every row here, same reasoning as publicAvailability.
+    const locMap = await this.locationMapFor(rows.map((r) => r.id));
     const byProduct = new Map<string, Inventory[]>();
     for (const r of rows) {
       const list = byProduct.get(r.productId) ?? [];
@@ -340,7 +629,7 @@ export class InventoryService {
     }
     for (const id of productIds) {
       const list = byProduct.get(id);
-      out.set(id, !list || list.length === 0 ? true : list.some((r) => this.availability(r).inStock));
+      out.set(id, !list || list.length === 0 ? true : list.some((r) => this.effectiveFromMap(r, locMap).inStock));
     }
     return out;
   }

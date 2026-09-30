@@ -191,7 +191,8 @@ export class CartService {
   private async assertStock(target: Purchasable, quantity: number) {
     const inv = await this.targetInventory(target.productId, target.variantId);
     if (!inv) return; // untracked inventory = treated as available (marketplace convention)
-    const a = this.inventory.availability(inv);
+    // BMPL-175: honours per-location adoption — see InventoryService.effectiveAvailability.
+    const a = await this.inventory.effectiveAvailability(inv);
     if (a.unlimited || a.allowBackorders) return;
     if (a.available !== null && a.available < quantity) {
       throw new ConflictException(
@@ -251,6 +252,13 @@ export class CartService {
       this.productLevelInventory(productIds),
       this.activeVariantProductIds(productIds),
     ]);
+    // BMPL-175: one batched lookup for every inventory row in this cart —
+    // same reasoning as InventoryService.publicAvailability/summaryFor.
+    const invIds = [
+      ...[...productInvMap.values()].map((r) => r.id),
+      ...items.map((i) => i.variant?.inventory?.id).filter((id): id is string => !!id),
+    ];
+    const locMap = await this.inventory.locationMapFor(invIds);
 
     const evaluated = items.map((item) => {
       const p = item.product;
@@ -266,7 +274,7 @@ export class CartService {
 
       const unitPriceMinor = effectiveUnitPrice(p, v);
       const inv = item.variantId ? v?.inventory ?? null : productInvMap.get(item.productId) ?? null;
-      const a = inv ? this.inventory.availability(inv) : null;
+      const a = inv ? this.inventory.effectiveFromMap(inv, locMap) : null;
       const available = a ? a.available : null; // null = unlimited / untracked
       const inStock = a ? a.inStock : true;
       if (a && !a.unlimited && !a.allowBackorders && available !== null) {

@@ -276,6 +276,21 @@ export class VendorService {
   async deleteLocation(userId: string, locationId: string) {
     const profile = await this.ownProfileOrThrow(userId);
     await this.ownLocationOrThrow(profile.id, locationId);
+    // BMPL-175: deleting a location CASCADEs its InventoryLocation child
+    // rows. If any of them still carry a reservation, an order is currently
+    // relying on stock this delete would silently erase — the exact
+    // oversell-adjacent risk BMPL-256 exists to prevent, one step removed.
+    // On-hand quantity with nothing reserved is a data-loss concern for the
+    // vendor, not a correctness one, so only `reserved > 0` is guarded here.
+    const outstanding = await this.prisma.inventoryLocation.aggregate({
+      where: { locationId },
+      _sum: { reserved: true },
+    });
+    if ((outstanding._sum.reserved ?? 0) > 0) {
+      throw new ConflictException(
+        'This location has stock reserved for open orders and cannot be removed until those orders are fulfilled or released.',
+      );
+    }
     await this.prisma.vendorLocation.delete({ where: { id: locationId } });
     return this.getOwn(userId);
   }

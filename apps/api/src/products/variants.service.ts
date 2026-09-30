@@ -77,7 +77,17 @@ export class VariantsService {
       include: { inventory: true, _count: { select: { orderItems: true } } },
     });
     if (affected.length > 0 && !force) {
-      const withData = affected.filter((v) => (v.inventory?.quantity ?? 0) > 0 || v._count.orderItems > 0);
+      // BMPL-175: a location-tracked variant's own `inventory.quantity` can
+      // read 0 while real stock lives in its child rows — that would
+      // silently drop this warning for a variant that still has stock
+      // somewhere (and delete would cascade it away). See
+      // InventoryService.effectiveFromMap's own comment.
+      const locMap = await this.inventory.locationMapFor(
+        affected.map((v) => v.inventory?.id).filter((id): id is string => !!id),
+      );
+      const withData = affected.filter(
+        (v) => (v.inventory ? this.inventory.effectiveFromMap(v.inventory, locMap).quantity : 0) > 0 || v._count.orderItems > 0,
+      );
       if (withData.length > 0) {
         throw new ConflictException(`${affected.length} variant(s) use this value${withData.length ? ' and some have inventory or orders' : ''}. Confirm to remove them.`);
       }
@@ -253,6 +263,11 @@ export class VariantsService {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { optionValues: true, inventory: true },
     });
+    // BMPL-175: one batched lookup for every variant's inventory row here —
+    // same reasoning as InventoryService.publicAvailability/summaryFor.
+    const locMap = await this.inventory.locationMapFor(
+      variants.map((v) => v.inventory?.id).filter((id): id is string => !!id),
+    );
     const mapped = variants.map((v) => ({
         id: v.id,
         // Resolved marketplace title (displayName → option label → product title)
@@ -275,7 +290,7 @@ export class VariantsService {
               available,
               unlimited,
               allowBackorders,
-            }))(this.inventory.availability(v.inventory))
+            }))(this.inventory.effectiveFromMap(v.inventory, locMap))
           : { inStock: true, lowStock: false, outOfStock: false, available: null, unlimited: false, allowBackorders: false },
       }));
     // When the vendor opts to hide out-of-stock, drop OOS variants from the public
@@ -308,6 +323,12 @@ export class VariantsService {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { optionValues: true, inventory: true },
     });
+    // BMPL-175: a location-tracked variant's own `inventory.quantity` is
+    // stale once adopted (the child rows are the source of truth) — same
+    // reasoning as InventoryService.getForProduct's own aggregate.
+    const locMap = await this.inventory.locationMapFor(
+      variants.map((v) => v.inventory?.id).filter((id): id is string => !!id),
+    );
     return {
       productTitle: product.title,
       options: options.map((o) => ({
@@ -328,7 +349,7 @@ export class VariantsService {
           salePriceMinor: v.salePriceMinor == null ? null : Number(v.salePriceMinor),
           isActive: v.isActive,
           optionValueIds: v.optionValues.map((ov) => ov.productOptionValueId),
-          quantity: v.inventory?.quantity ?? 0,
+          quantity: v.inventory ? this.inventory.effectiveFromMap(v.inventory, locMap).quantity : 0,
         };
       }),
     };

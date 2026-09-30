@@ -58,4 +58,31 @@ export class ProductInventoryController {
   ) {
     return this.inventory.history(user.userId, productId, variantId ?? null);
   }
+
+  // ---- Per-location stock (BMPL-175) ----
+
+  /** One row per vendor location (present even if never stocked there). */
+  @Get('locations')
+  getLocations(
+    @CurrentUser() user: AuthContext,
+    @Param('productId') productId: string,
+    @Query('variantId') variantId: string | undefined,
+  ) {
+    return this.inventory.getLocationsForProduct(user.userId, productId, variantId ?? null);
+  }
+
+  /** Adjust on-hand quantity at one location by a signed delta (same shape
+   *  as POST .../adjust above) — the first adjustment at a location adopts
+   *  per-location tracking for this product. */
+  @Post('locations/:locationId/adjust')
+  adjustLocation(
+    @CurrentUser() user: AuthContext,
+    @Req() req: Request,
+    @Param('productId') productId: string,
+    @Param('locationId') locationId: string,
+    @Query('variantId') variantId: string | undefined,
+    @Body(ZodBody(inventoryAdjustSchema)) body: InventoryAdjustInput,
+  ) {
+    return this.inventory.adjustAtLocation(this.actor(user, req), productId, variantId ?? null, locationId, body);
+  }
 }
