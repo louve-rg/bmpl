@@ -46,6 +46,64 @@ interface CheckoutLine {
 const groupKey = (vendorProfileId: string, originLocationId: string | null) =>
   `${vendorProfileId}::${originLocationId ?? ''}`;
 
+/**
+ * Split `totalMinor` across `weights` so the outputs sum EXACTLY back to
+ * `totalMinor` — no rounding dust created or destroyed (BMPL-351). This is
+ * what keeps sum(OrderDelivery.feeMinor across a vendor's split origins)
+ * equal to the ONE delivery fee actually charged and collected at
+ * checkout: the customer is billed once per vendor, and settlement later
+ * pays drivers out of exactly that pooled amount, never more.
+ *
+ * LARGEST-REMAINDER METHOD, DELIBERATELY, NOT "last share absorbs
+ * whatever's left": floor every share, then hand the leftover minor units
+ * (always fewer than weights.length, since each flooring loses strictly
+ * less than one unit) one at a time to the shares with the LARGEST
+ * fractional remainder. Flooring every share and dumping the WHOLE
+ * remainder onto one arbitrary element (e.g. always the last, by
+ * whatever order the caller's Map happens to iterate in) can leave a
+ * heavily-weighted group with a near-zero share when a lighter group
+ * absorbs a disproportionate chunk of the slack — the sum would still be
+ * exact, but the DISTRIBUTION would misrepresent the weights it was
+ * supposed to honour. Do not "simplify" this back to a plain round() or a
+ * last-takes-remainder loop — both can pass a test built on an evenly-
+ * divisible fee while silently breaking on one that is not (see this
+ * function's own test for a fee that does NOT divide evenly).
+ *
+ * EVERY WEIGHT ZERO BUT A REAL TOTAL TO SPLIT: falls back to an EQUAL
+ * split (same largest-remainder leftover pass, just on uniform weights)
+ * rather than returning all zeros. Unreachable today — a group's subtotal
+ * is always <= the pooled vendor subtotal it was drawn from, and the
+ * free-delivery threshold is evaluated per VENDOR, so if every per-group
+ * weight quoted free (0), the pooled quote already quoted free too and
+ * `totalMinor` is 0 right alongside them. But that safety is a
+ * COINCIDENCE of those two rules holding together, not something this
+ * function can see — a future per-location threshold, a per-origin
+ * promotion, or any non-monotonic rate would break it silently: an
+ * all-zero return would drop the entire collected fee and
+ * sum(feeMinor) would stop equaling what the customer actually paid,
+ * with no error anywhere. An equal split preserves that invariant under
+ * any future rule change this function doesn't know about, and can never
+ * fail a live checkout the way throwing here could.
+ */
+export function allocateProportional(totalMinor: bigint, weights: readonly bigint[]): bigint[] {
+  if (weights.length === 0) return [];
+  const sumWeights = weights.reduce((s, w) => s + w, 0n);
+  const [effWeights, effSum] = sumWeights === 0n ? [weights.map(() => 1n), BigInt(weights.length)] : [weights, sumWeights];
+  const floors = effWeights.map((w) => (totalMinor * w) / effSum);
+  const remainders = effWeights.map((w) => (totalMinor * w) % effSum);
+  let leftover = totalMinor - floors.reduce((s, f) => s + f, 0n);
+  const shares = [...floors];
+  const byRemainderDesc = remainders
+    .map((r, i) => i)
+    .sort((a, b) => (remainders[b]! > remainders[a]! ? 1 : remainders[b]! < remainders[a]! ? -1 : a - b));
+  for (const i of byRemainderDesc) {
+    if (leftover <= 0n) break;
+    shares[i] = shares[i]! + 1n;
+    leftover -= 1n;
+  }
+  return shares;
+}
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -196,21 +254,22 @@ export class OrdersService {
       }
       const vendorProfileIds = [...new Set([...linesByGroup.values()].map((lines) => lines[0]!.vendorProfileId))];
 
-      // ---- Delivery (M13): validate method offered + price per resulting VendorOrder ----
+      // ---- Delivery (M13/BMPL-351): priced ONCE per VENDOR, pooling every
+      // origin group under that vendor, never re-quoted per group. ----
       //
-      // BMPL-175: priced per (vendor, origin) GROUP now, not per vendor — a
-      // customer chooses ONE deliveryMethod per STORE (choiceByVendor is
-      // still keyed by vendorProfileId; that choice applies identically to
-      // every group under that vendor), but each group becomes its own
-      // VendorOrder with its own OrderDelivery, so each is quoted on its OWN
-      // subtotal. NAMED CONSEQUENCE, not an oversight: if one vendor's cart
-      // splits across two locations, a vendor-wide free-delivery threshold
-      // is evaluated against each group's share rather than the pooled
-      // total — the overwhelming majority of vendors (0-1 locations, or a
-      // cart that never actually splits) sees no difference at all.
+      // Owner ruling (BMPL-351): one checkout from one vendor is one
+      // coherent purchase to the customer, however many locations BML
+      // internally selected to fulfil it from. The deliverability check,
+      // the free-delivery threshold, and the ONE fee charged are all
+      // evaluated against the vendor's WHOLE subtotal — never a single
+      // origin group's own share. Where that vendor's fulfilment still
+      // splits into several OrderDelivery rows, the one fee is ALLOCATED
+      // across them afterward (allocateProportional, below) rather than
+      // re-derived — the internal split changes nothing about what the
+      // customer is charged or whether free delivery applies.
       const address = dto.deliveryAddress;
-      const anyDelivery = [...linesByGroup.values()].some(
-        (lines) => (choiceByVendor.get(lines[0]!.vendorProfileId)?.deliveryMethod ?? 'PICKUP') === 'DELIVERY',
+      const anyDelivery = vendorProfileIds.some(
+        (vpId) => (choiceByVendor.get(vpId)?.deliveryMethod ?? 'PICKUP') === 'DELIVERY',
       );
       if (anyDelivery && !address) {
         throw new BadRequestException('A delivery address is required for delivery orders.');
@@ -223,10 +282,14 @@ export class OrdersService {
         appliedZoneId: string | null;
         instructions: string | null;
       }
-      const deliveryByGroup = new Map<string, VendorDelivery>();
-      let deliveryFeeMinor = 0n;
-      for (const [key, lines] of linesByGroup) {
+      const linesByVendor = new Map<string, CheckoutLine[]>();
+      for (const lines of linesByGroup.values()) {
         const vpId = lines[0]!.vendorProfileId;
+        linesByVendor.set(vpId, [...(linesByVendor.get(vpId) ?? []), ...lines]);
+      }
+      const deliveryByVendor = new Map<string, VendorDelivery>();
+      let deliveryFeeMinor = 0n;
+      for (const vpId of vendorProfileIds) {
         const choice = choiceByVendor.get(vpId);
         const method = choice?.deliveryMethod ?? 'PICKUP';
         const settings = await tx.vendorSettings.findUnique({ where: { vendorProfileId: vpId } });
@@ -234,7 +297,7 @@ export class OrdersService {
           if (settings && !settings.pickupEnabled) throw new BadRequestException('This store does not offer pickup.');
           continue;
         }
-        const vSubtotal = lines.reduce((s, l) => s + l.subtotalMinor, 0n);
+        const vSubtotal = linesByVendor.get(vpId)!.reduce((s, l) => s + l.subtotalMinor, 0n);
         const q = await this.deliveryPricing.quote(vpId, address!.district, vSubtotal);
         if (!q.deliverable) {
           const msg =
@@ -245,7 +308,7 @@ export class OrdersService {
                 : `This store does not deliver to ${address!.district.replace('_', ' ')}.`;
           throw new BadRequestException(msg);
         }
-        deliveryByGroup.set(key, {
+        deliveryByVendor.set(vpId, {
           feeMinor: q.feeMinor,
           freeApplied: q.freeApplied,
           estimate: q.estimate,
@@ -253,6 +316,50 @@ export class OrdersService {
           instructions: choice?.deliveryInstructions?.trim() || null,
         });
         deliveryFeeMinor += q.feeMinor;
+      }
+
+      // Allocate each delivering vendor's ONE fee across its own split
+      // origin groups by each group's OWN STANDALONE quoted fee — re-quoted
+      // per group exactly as checkout did before this card, but now used
+      // only as an ALLOCATION WEIGHT, never as the charged amount (the
+      // pooled vendor-level quote above is the only fee actually billed).
+      // Deliberately NOT subtotal share: a driver's work tracks the
+      // DELIVERY (the zone/base rate for this vendor+district), not the
+      // value of what is in the box — subtotal share would pay more for
+      // carrying an expensive parcel a short distance than a cheap one a
+      // long way, which is not what anyone is being paid for. The
+      // zone/base rate itself depends only on (vendor, district), never on
+      // subtotal, so two groups of one vendor delivering to the same
+      // address normally weigh identically — only a group whose OWN
+      // subtotal alone clears the vendor's free-delivery threshold weighs
+      // differently (its standalone fee is 0).
+      //
+      // sum(feeByGroup for one vendor's groups) === deliveryByVendor.get
+      // (vpId).feeMinor EXACTLY (allocateProportional's whole job), so
+      // settlement never pays out more than this checkout ever charged. A
+      // vendor with a single group (the overwhelming majority — 0/1
+      // locations, or a cart that never splits) gets that group assigned
+      // 100% of its own fee, unchanged from before.
+      const feeByGroup = new Map<string, bigint>();
+      for (const [vpId, dv] of deliveryByVendor) {
+        const groupsForVendor = [...linesByGroup.entries()].filter(([, lines]) => lines[0]!.vendorProfileId === vpId);
+        const weights: bigint[] = [];
+        for (const [, lines] of groupsForVendor) {
+          const groupSubtotal = lines.reduce((s, l) => s + l.subtotalMinor, 0n);
+          const gq = await this.deliveryPricing.quote(vpId, address!.district, groupSubtotal);
+          // A group whose OWN subtotal happens to fall under the vendor's
+          // minimum-order gate still gets a real, positive weight —
+          // minimumOrderMinor is a DELIVERABILITY gate, not a price, and
+          // this group IS being delivered (the pooled subtotal already
+          // cleared it at the vendor level above). Floored at 1n so
+          // largest-remainder can never zero out a real leg entirely; a
+          // legitimately free leg (gq.deliverable with feeMinor 0) stays
+          // 0 on purpose — the "not deliverable standalone" case is the
+          // only one this floor guards.
+          weights.push(gq.deliverable ? gq.feeMinor : 1n);
+        }
+        const shares = allocateProportional(dv.feeMinor, weights);
+        groupsForVendor.forEach(([key], i) => feeByGroup.set(key, shares[i]!));
       }
 
       // ---- Simulation flag: DERIVED from the storefront, never from the request ----
@@ -323,7 +430,7 @@ export class OrdersService {
         const vpId = lines[0]!.vendorProfileId;
         const originLocationId = lines[0]!.originLocationId;
         const choice = choiceByVendor.get(vpId);
-        const dv = deliveryByGroup.get(key);
+        const dv = deliveryByVendor.get(vpId);
         await tx.vendorOrder.create({
           data: {
             orderNumber: `${orderNumber}-${idx}`,
@@ -353,12 +460,16 @@ export class OrdersService {
               })),
             },
             // Delivery snapshot (M13) — only for DELIVERY vendor-orders.
+            // feeMinor is THIS GROUP's allocated share of the vendor's one
+            // pooled fee (BMPL-351), never an independent quote — see
+            // feeByGroup's own comment above for why the shares always sum
+            // back to dv.feeMinor exactly.
             ...(dv
               ? {
                   delivery: {
                     create: {
                       status: 'PENDING_ASSIGNMENT',
-                      feeMinor: dv.feeMinor,
+                      feeMinor: feeByGroup.get(key) ?? 0n,
                       freeApplied: dv.freeApplied,
                       estimateMinHours: dv.estimate?.minHours ?? null,
                       estimateMaxHours: dv.estimate?.maxHours ?? null,

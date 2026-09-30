@@ -51,7 +51,7 @@ and found it on requirements 1, 3 and 11 at once.
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
 | 10 | Cancellation before custody, failed delivery, return-to-sender | **Blocked** | Pre-custody half already correct in shipped code; the rest is designed, nothing built |
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
-| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **Two of four pieces done** | ETA: `f1bbfce` (BMPL-340 phase 1). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Open: ETA-change notice (BMPL-345), hold/reroute (BMPL-343) |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **Two of four pieces done** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by BMPL-346. Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Open: ETA-change notice (BMPL-345), hold/reroute (BMPL-343) |
 
 **Three of twelve — requirements 1, 2 and 4 — share one cause, not three
 separate ones: each has a real, merged, tested API and no user-facing
@@ -447,12 +447,20 @@ Four distinct pieces, per the owner's original requirement:
   per-leg detail) and the public/recipient views (`RecipientTrackingView` —
   `trackPublic`, `trackAsRecipient`, `listIncoming` — journey-level
   confidence + arrival only). Documented in `docs/openapi/shipping.yaml`
-  (`EtaConfidence`, `ShipmentEta`, `ShipmentLegEta`). One real gap carried
-  forward, found and reported rather than built around: nothing anywhere yet
-  writes a `LINE_HAUL` leg's own `scheduledDepartureAt`/`scheduledArrivalAt`,
-  so a multi-hub shipment's overall ETA still reads `UNKNOWN` today even
-  though its `FIRST_MILE`/`LAST_MILE` legs resolve correctly — tracked as
-  BMPL-346, in progress, not yet merged.
+  (`EtaConfidence`, `ShipmentEta`, `ShipmentLegEta`). The one real gap this
+  phase left, found and reported rather than built around, is now also
+  closed: nothing anywhere wrote a `LINE_HAUL` leg's own
+  `scheduledDepartureAt`/`scheduledArrivalAt`, so a multi-hub shipment's
+  overall ETA read `UNKNOWN` even though its `FIRST_MILE`/`LAST_MILE` legs
+  resolved correctly. **Done (BMPL-346)**: `ShipmentService.scheduleLeg` is
+  the writer — established first that nothing configured could be derived
+  instead (`LogisticsRoute.scheduleNote` is a free-text label by its own
+  field comment; `PassengerTrip`'s own departure time is populated the same
+  operator-typed way) — reachable by the admin desk (`logistics.operate`)
+  and by the carrier's own organization (`assertMyLeg`), LINE_HAUL only, on
+  a positive allow-list of eligible leg statuses rather than the existing
+  transition machinery, since a carrier's fixed sailing time is knowable
+  before an earlier leg has even started.
 - **Material ETA-change notification, on the owner's already-approved
   30-minute threshold** ([Ruling 11](./OWNER-RULINGS.md#ruling-11--recipient-availability-and-eta-changes)).
   **Does not exist.** Split out as BMPL-345 (needs a persisted previous-ETA

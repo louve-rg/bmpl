@@ -276,6 +276,200 @@ describe('what depart and arrive refuse', () => {
   });
 });
 
+describe('recording a transport leg\'s scheduled departure/arrival (BMPL-346)', () => {
+  it('demands logistics.operate — logistics.read alone is refused', async () => {
+    const s = await book();
+    const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
+    const future = new Date(Date.now() + 3600_000).toISOString();
+    expect((await post(readOnlyAdmin, `admin/logistics/legs/${lineHaul.id}/schedule`, { scheduledDepartureAt: future })).status).toBe(403);
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, { scheduledDepartureAt: future })).status).toBe(201);
+  });
+
+  it('never leaks the leg\'s own handoff PIN back through the response, holding logistics.operate alone', async () => {
+    const s = await book();
+    const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
+    const pin = await pinOf(lineHaul.id);
+    const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+      scheduledDepartureAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    expect(r.status).toBe(201);
+    expect(JSON.stringify(r.body)).not.toContain(pin);
+  });
+
+  it('refuses a courier leg — there is nothing here for a driver-worked leg to commit to', async () => {
+    const s = await book();
+    const firstMile = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const r = await post(admin, `admin/logistics/legs/${firstMile.id}/schedule`, {
+      scheduledDepartureAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.message).toContain('Only a transport leg');
+  });
+
+  it('accepts a commitment on a leg whose turn has not even come yet — a carrier\'s fixed sailing is real before the first mile finishes', async () => {
+    const s = await book();
+    const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
+    expect(lineHaul.status).toBe('PENDING'); // the first mile has not moved — depart itself would refuse here
+    const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+      scheduledDepartureAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    expect(r.status).toBe(201);
+    const row = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(row.status).toBe('PENDING'); // scheduling is not a state transition
+    expect(row.scheduledDepartureAt).not.toBeNull();
+  });
+
+  it('rejects an empty patch, a past time, and arrival before departure', async () => {
+    const s = await book();
+    const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
+
+    const empty = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {});
+    expect(empty.status).toBe(400);
+
+    const past = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+      scheduledDepartureAt: new Date(Date.now() - 3600_000).toISOString(),
+    });
+    expect(past.status).toBe(400);
+    expect(past.body.message).toContain('already passed');
+
+    const departureAt = new Date(Date.now() + 7200_000);
+    const backwards = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+      scheduledDepartureAt: departureAt.toISOString(),
+      scheduledArrivalAt: new Date(departureAt.getTime() - 60_000).toISOString(),
+    });
+    expect(backwards.status).toBe(400);
+    expect(JSON.stringify(backwards.body)).toContain('after the scheduled departure');
+  });
+
+  /**
+   * Named invariant (owner ruling, BMPL-346 CI review): A RECORDED SCHEDULE
+   * MAY DESCRIBE THE PAST ONLY FOR AN EVENT THAT HAS ALREADY HAPPENED —
+   * equivalently, a scheduled time must never create a knowingly false ETA.
+   * Each test name below states the half of the invariant it proves, so a
+   * failure message teaches the rule rather than just naming a symptom.
+   */
+  describe('the invariant: a recorded schedule may describe the past only for an event that already happened', () => {
+    it('REFUSES a past scheduledArrivalAt on a leg that has not arrived — that would be a knowingly false ETA', async () => {
+      const driver = await makeDriver();
+      const { lineHaul } = await bookedWithFirstMileDone(driver);
+      expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+      const departed = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+      expect(departed.arrivedAt).toBeNull(); // the event this field describes has not happened
+
+      // A past scheduledArrivalAt here would be read DIRECTLY as a
+      // confident KNOWN ETA (projectLineHaul, no clamp) for a shipment that
+      // has not arrived — worse than UNKNOWN. This is the knowingly-false
+      // case the invariant exists to refuse.
+      const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+        scheduledArrivalAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      expect(r.status).toBe(400);
+      expect(r.body.message).toContain('already passed');
+    });
+
+    it('ACCEPTS a past scheduledDepartureAt on a leg that has departed — that event already happened, so it is history, not a false ETA', async () => {
+      const driver = await makeDriver();
+      const { lineHaul } = await bookedWithFirstMileDone(driver);
+      expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+      const departed = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+      expect(departed.departedAt).not.toBeNull(); // the event this field describes already happened
+
+      // projectLineHaul only ever uses this field clamped to
+      // max(scheduledDepartureAt, anchor) — a past value here can never
+      // produce a false ETA, only fall back to "now". Refusing it was the
+      // bug the invariant caught, and an EXCEPTION leg is exactly where a
+      // time gets fixed after the fact.
+      const pastDeparture = new Date(Date.now() - 3600_000);
+      const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+        scheduledDepartureAt: pastDeparture.toISOString(),
+      });
+      expect(r.status).toBe(201);
+      expect(
+        (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } })).scheduledDepartureAt?.toISOString(),
+      ).toBe(pastDeparture.toISOString());
+    });
+
+    it('ACCEPTS a past scheduledArrivalAt too, once the leg has actually arrived (even before handoff) — that event already happened', async () => {
+      const driver = await makeDriver();
+      const { lineHaul } = await bookedWithFirstMileDone(driver);
+      expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+      expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`)).status).toBe(201);
+      const arrived = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+      expect(arrived.arrivedAt).not.toBeNull(); // the event this field describes already happened
+      expect(arrived.status).toBe('IN_PROGRESS'); // arrive stamps only; handoff still pending
+
+      const pastArrival = new Date(Date.now() - 1800_000);
+      const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+        scheduledArrivalAt: pastArrival.toISOString(),
+      });
+      expect(r.status).toBe(201);
+      expect(
+        (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } })).scheduledArrivalAt?.toISOString(),
+      ).toBe(pastArrival.toISOString());
+    });
+  });
+
+  it('a partial update leaves the other field exactly as it stood', async () => {
+    const s = await book();
+    const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
+    const departureAt = new Date(Date.now() + 3600_000);
+    const arrivalAt = new Date(Date.now() + 7200_000);
+
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, { scheduledDepartureAt: departureAt.toISOString() })).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, { scheduledArrivalAt: arrivalAt.toISOString() })).status).toBe(201);
+
+    const row = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(row.scheduledDepartureAt?.toISOString()).toBe(departureAt.toISOString());
+    expect(row.scheduledArrivalAt?.toISOString()).toBe(arrivalAt.toISOString());
+
+    // Readable on the staff shipment view, not just the raw row.
+    const view = await request(ctx.server).get(`/api/admin/logistics/shipments/${s.reference}`).set('Cookie', admin);
+    const legOut = view.body.legs.find((l: { id: string }) => l.id === lineHaul.id);
+    expect(legOut.scheduledDepartureAt).toBe(departureAt.toISOString());
+    expect(legOut.scheduledArrivalAt).toBe(arrivalAt.toISOString());
+  });
+
+  it('refuses once the leg is COMPLETED — a finished journey does not get a schedule rewritten onto it', async () => {
+    const driver = await makeDriver();
+    const { lineHaul } = await bookedWithFirstMileDone(driver);
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`)).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/handoff`, {
+      pin: await pinOf(lineHaul.id), receivedByName: 'Desk BZW',
+    })).status).toBe(201);
+
+    const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+      scheduledDepartureAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.message).toContain('completed');
+  });
+
+  it('leaves depart/arrive behaving exactly as before when nothing was ever scheduled — absence still means unconstrained', async () => {
+    // No call to /schedule anywhere in this test. If this ever behaves any
+    // differently from the pre-existing walk above, BMPL-346 broke a leg
+    // that never opted into the new field.
+    const driver = await makeDriver();
+    const { lineHaul } = await bookedWithFirstMileDone(driver);
+    expect(lineHaul.scheduledDepartureAt).toBeNull();
+    expect(lineHaul.scheduledArrivalAt).toBeNull();
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`)).status).toBe(201);
+    const row = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(row.status).toBe('IN_PROGRESS');
+    expect(row.departedAt).not.toBeNull();
+    expect(row.arrivedAt).not.toBeNull();
+    // And scheduling AFTER a real departure does not disturb the real stamps.
+    const scheduled = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+      scheduledArrivalAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    expect(scheduled.status).toBe(201);
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(after.departedAt?.toISOString()).toBe(row.departedAt!.toISOString());
+    expect(after.arrivedAt?.toISOString()).toBe(row.arrivedAt!.toISOString());
+  });
+});
+
 describe("Edward's journey shape: San Pedro -> Belize City by water taxi", () => {
   it('plans as courier -> SEA line-haul -> courier, and only the first mile is workable', async () => {
     const s = await book();

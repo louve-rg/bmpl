@@ -454,6 +454,32 @@ describe('the carrier surface', () => {
     }
   });
 
+  it("records the org's own scheduled departure/arrival, and a cross-org probe reads like a missing leg (BMPL-346)", async () => {
+    const carrierA = await makeCarrier('Reef Runner Ltd');
+    const carrierB = await makeCarrier('Cave Branch Bus Co');
+    const { leg } = await bookedFor(carrierA.profileId);
+    const departureAt = new Date(Date.now() + 3600_000);
+
+    const foreign = await post(carrierB.cookies, `shipping/provider/legs/${leg.id}/schedule`, {
+      scheduledDepartureAt: departureAt.toISOString(),
+    });
+    expect(foreign.status).toBe(404);
+
+    const mine = await post(carrierA.cookies, `shipping/provider/legs/${leg.id}/schedule`, {
+      scheduledDepartureAt: departureAt.toISOString(),
+    });
+    expect(mine.status).toBe(201);
+    expect(mine.body.scheduledDepartureAt).toBe(departureAt.toISOString());
+    expect(mine.body.canSchedule).toBe(true);
+
+    // Departing for real neither needs nor is blocked by the commitment
+    // recorded above — the two are independent facts.
+    expect((await post(carrierA.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(201);
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } });
+    expect(after.scheduledDepartureAt?.toISOString()).toBe(departureAt.toISOString());
+    expect(after.departedAt).not.toBeNull();
+  });
+
   it('an ended membership cuts access on the very next request; the org keeps working', async () => {
     const carrier = await makeCarrier('Reef Runner Ltd');
     const staff = await makeStaff(carrier.profileId);

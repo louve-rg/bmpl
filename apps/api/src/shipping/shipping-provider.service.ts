@@ -4,6 +4,7 @@ import type {
   AddProviderMemberInput,
   AddRouteScheduleExceptionInput,
   LegDepartInput,
+  LegScheduleInput,
   SetLegOperatorInput,
   SetRouteWeeklyScheduleInput,
   ShippingProviderProfileInput,
@@ -12,7 +13,7 @@ import type {
 import type { Prisma, ShippingProviderProfile } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { ShipmentService } from './shipment.service';
+import { SCHEDULABLE_LEG_STATUSES, ShipmentService } from './shipment.service';
 import { LogisticsNetworkService } from './logistics-network.service';
 import { assertOperableProvider } from './provider-eligibility';
 
@@ -282,6 +283,17 @@ export class ShippingProviderService {
     return this.myLeg(userId, legId);
   }
 
+  /**
+   * BMPL-346: the carrier's own commitment for their leg's departure and/or
+   * arrival — same ownership gate as depart/arrive, same underlying writer
+   * the admin desk uses (`ShipmentService.scheduleLeg`).
+   */
+  async schedule(userId: string, legId: string, input: LegScheduleInput) {
+    await this.assertMyLeg(userId, legId);
+    await this.shipments.scheduleLeg(legId, input, { userId });
+    return this.myLeg(userId, legId);
+  }
+
   /** 404 on a cross-org id: one carrier must not be able to probe another's legs. */
   private async assertMyLeg(userId: string, legId: string) {
     const orgIds = await this.myOrgIds(userId);
@@ -400,6 +412,9 @@ export class ShippingProviderService {
       // of the state machine. PENDING means an earlier leg has not finished.
       canDepart: (l.status === 'READY' || l.status === 'IN_PROGRESS') && l.departedAt == null,
       canArrive: l.status === 'IN_PROGRESS' && l.arrivedAt == null,
+      // Same "still open" set scheduleLeg itself gates on (BMPL-346) — this
+      // carries no second copy of that rule, it just names it for the UI.
+      canSchedule: SCHEDULABLE_LEG_STATUSES.includes(l.status),
     };
   }
 }
