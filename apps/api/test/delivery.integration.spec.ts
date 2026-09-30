@@ -195,6 +195,77 @@ describe('delivery pricing at checkout', () => {
   });
 });
 
+/**
+ * Edward REQ 5: the pre-checkout quote also carries the vendor's configured
+ * hours (weekly pattern + exceptions) so the web client can compute the
+ * "may close before your order arrives" warning itself — the same
+ * client-computes-from-raw-hours pattern BMPL-335's storefront badge
+ * already uses, kept in one place (packages/shared's resolvers) rather than
+ * restated as a second, server-side "is it closing soon" calculation.
+ *
+ * This suite deliberately does NOT assert the warning's own text or timing
+ * logic — that is real-clock-dependent and already covered, with a fixed
+ * clock, by apps/web/lib/vendor-hours.test.ts. It asserts only that the
+ * quote carries the right DATA, shaped exactly like the storefront payload:
+ * present for a DELIVERY line, empty for a PICKUP line, and — like BMPL-335
+ * before it — never the vendor's private exception `reason` or
+ * `createdByUserId`.
+ */
+describe('delivery quote hours data (Edward REQ 5)', () => {
+  let vendor: Awaited<ReturnType<typeof makeVendor>>;
+  let productId: string;
+
+  beforeAll(async () => {
+    vendor = await makeVendor('deliv_v_hours@example.bz', 'Deliv Hours');
+    await request(ctx.server).patch('/api/vendor/settings').set('Cookie', vendor.cookies).send({ deliveryEnabled: true, baseDeliveryFeeMinor: 500 });
+    await request(ctx.server).put('/api/vendor/delivery/estimate').set('Cookie', vendor.cookies).send({ minHours: 1, maxHours: 2 });
+    await request(ctx.server)
+      .put('/api/vendor/profile/hours')
+      .set('Cookie', vendor.cookies)
+      .send({ hours: [{ dayOfWeek: 1, isClosed: false, openTime: '09:00', closeTime: '17:00' }] })
+      .expect(200);
+    const secretReason = 'Owner at the doctor — must never reach a customer';
+    await request(ctx.server)
+      .post('/api/vendor/profile/hours/exceptions')
+      .set('Cookie', vendor.cookies)
+      .send({ date: '2026-12-25', status: 'CLOSED', reason: secretReason })
+      .expect(201);
+    productId = await createProduct(vendor.cookies, 'HoursWidget', 1000);
+    await restock(vendor.cookies, productId, 50);
+    await publishDirect(productId);
+  });
+
+  it('carries the configured weekly hours and a safely-shaped exception for a DELIVERY line', async () => {
+    const c = await registerCustomer('deliv_c_hours_delivery@example.bz');
+    await addItem(c, productId, 1).expect(201);
+    const res = await request(ctx.server)
+      .post('/api/checkout/delivery-quote')
+      .set('Cookie', c)
+      .send({ district: 'BELIZE', vendors: [{ vendorProfileId: vendor.vpId, deliveryMethod: 'DELIVERY' }] });
+    expect(res.status).toBe(201);
+    const v = res.body.vendors[0];
+    expect(v.openingHours).toEqual([{ dayOfWeek: 1, isClosed: false, openTime: '09:00', closeTime: '17:00' }]);
+    expect(v.hoursExceptions).toHaveLength(1);
+    expect(Object.keys(v.hoursExceptions[0]).sort()).toEqual(['closeTime', 'date', 'openTime', 'status']);
+    expect(v.hoursExceptions[0]).toMatchObject({ date: '2026-12-25', status: 'CLOSED', openTime: null, closeTime: null });
+    expect(JSON.stringify(res.body)).not.toContain('doctor');
+    expect(JSON.stringify(res.body)).not.toContain('createdByUserId');
+    await clearCart(c);
+  });
+
+  it('carries no hours data for a PICKUP line — irrelevant when there is no delivery to arrive', async () => {
+    const c = await registerCustomer('deliv_c_hours_pickup@example.bz');
+    await addItem(c, productId, 1).expect(201);
+    const res = await request(ctx.server)
+      .post('/api/checkout/delivery-quote')
+      .set('Cookie', c)
+      .send({ district: 'BELIZE', vendors: [{ vendorProfileId: vendor.vpId, deliveryMethod: 'PICKUP' }] });
+    expect(res.status).toBe(201);
+    expect(res.body.vendors[0]).toMatchObject({ openingHours: [], hoursExceptions: [] });
+    await clearCart(c);
+  });
+});
+
 describe('delivery not offered', () => {
   it('rejects DELIVERY when the vendor has delivery disabled', async () => {
     const vendor = await makeVendor('deliv_v3@example.bz', 'Pickup Only');

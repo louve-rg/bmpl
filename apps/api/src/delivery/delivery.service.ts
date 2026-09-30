@@ -5,6 +5,7 @@ import type {
   DeliveryZoneInput,
   DeliveryZoneUpdateInput,
 } from '@bmpl/validation';
+import { Prisma } from '@bmpl/database';
 import type { DeliveryZone, DeliveryRate } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { CartService } from '../cart/cart.service';
@@ -131,14 +132,48 @@ export class VendorDeliveryService {
   }
 }
 
+/**
+ * Relations loaded for the quote's "may close before arrival" warning
+ * (Edward REQ 5) — deliberately the SAME four-field exception shape
+ * STOREFRONT_INCLUDE already uses in vendor.service.ts: never `reason` or
+ * `createdByUserId`, neither of which is customer-facing. Named at the
+ * select, not fixed up later, for the same reason as there.
+ */
+const HOURS_INCLUDE = {
+  openingHours: { orderBy: { dayOfWeek: 'asc' } },
+  hoursExceptions: {
+    select: { date: true, status: true, openTime: true, closeTime: true },
+    orderBy: { date: 'asc' },
+  },
+} satisfies Prisma.VendorProfileInclude;
+
 /** Customer-facing pre-checkout delivery quote for the active cart. */
 @Injectable()
 export class CustomerDeliveryService {
-  constructor(private readonly cart: CartService, private readonly pricing: DeliveryPricingService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cart: CartService,
+    private readonly pricing: DeliveryPricingService,
+  ) {}
 
   async quote(userId: string, dto: DeliveryQuoteInput) {
     const cart = await this.cart.getActive(userId);
     const choice = new Map(dto.vendors.map((v) => [v.vendorProfileId, v.deliveryMethod]));
+    const deliveryVendorIds = cart.vendors.filter((v) => (choice.get(v.vendorProfileId) ?? 'PICKUP') === 'DELIVERY').map((v) => v.vendorProfileId);
+
+    // Batched, not one query per vendor: the quote's own vendor count is
+    // small (one cart), but there is no reason to pay N round trips for it.
+    const hoursByVendor = new Map(
+      deliveryVendorIds.length === 0
+        ? []
+        : (
+            await this.prisma.vendorProfile.findMany({
+              where: { id: { in: deliveryVendorIds } },
+              select: { id: true, ...HOURS_INCLUDE },
+            })
+          ).map((p) => [p.id, p]),
+    );
+
     let deliveryFeeMinor = 0;
     const vendors = [];
     for (const v of cart.vendors) {
@@ -146,6 +181,7 @@ export class CustomerDeliveryService {
       if (method === 'DELIVERY') {
         const q = await this.pricing.quote(v.vendorProfileId, dto.district, BigInt(v.subtotalMinor));
         if (q.deliverable) deliveryFeeMinor += Number(q.feeMinor);
+        const hours = hoursByVendor.get(v.vendorProfileId);
         vendors.push({
           vendorProfileId: v.vendorProfileId,
           businessName: v.businessName,
@@ -156,6 +192,8 @@ export class CustomerDeliveryService {
           freeApplied: q.freeApplied,
           estimate: q.estimate,
           minimumOrderMinor: q.minimumOrderMinor != null ? Number(q.minimumOrderMinor) : null,
+          openingHours: hours?.openingHours.map((h) => ({ dayOfWeek: h.dayOfWeek, isClosed: h.isClosed, openTime: h.openTime, closeTime: h.closeTime })) ?? [],
+          hoursExceptions: hours?.hoursExceptions.map((e) => ({ date: e.date.toISOString().slice(0, 10), status: e.status, openTime: e.openTime, closeTime: e.closeTime })) ?? [],
         });
       } else {
         vendors.push({
@@ -168,6 +206,8 @@ export class CustomerDeliveryService {
           freeApplied: false,
           estimate: null,
           minimumOrderMinor: null,
+          openingHours: [],
+          hoursExceptions: [],
         });
       }
     }
