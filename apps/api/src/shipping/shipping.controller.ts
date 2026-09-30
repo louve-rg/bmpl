@@ -17,6 +17,7 @@ import {
   addProviderMemberSchema,
   addRouteScheduleExceptionSchema,
   resolveLegExceptionSchema,
+  returnToSenderSchema,
   setAvailabilityWindowsSchema,
   setHubWeeklyHoursSchema,
   setLegOperatorSchema,
@@ -44,6 +45,7 @@ import {
   type AddProviderMemberInput,
   type AddRouteScheduleExceptionInput,
   type ResolveLegExceptionInput,
+  type ReturnToSenderInput,
   type SetAvailabilityWindowsInput,
   type SetHubWeeklyHoursInput,
   type SetLegOperatorInput,
@@ -606,6 +608,36 @@ export class AdminLogisticsController {
     @Body(ZodBody(resolveLegExceptionSchema)) dto: ResolveLegExceptionInput,
   ) {
     return this.shipments.resolveException(id, dto, { userId: u.userId });
+  }
+
+  /**
+   * BMPL-183/343: what a return-to-sender would cost, for an exceptional
+   * delivery leg — read-only, moves nothing. `logistics.operate`, the same
+   * tier as flagging or resolving the exception itself: asking the price
+   * creates no charge (owner Ruling 2 reserves `logistics.manage` for the
+   * action that does).
+   */
+  @RequirePermission('logistics.operate')
+  @Post('legs/:id/return-quote')
+  previewReturn(@Param('id') id: string) {
+    return this.shipments.previewReturn(id);
+  }
+
+  /**
+   * The confirmation — and the only one of the two return endpoints that may
+   * charge the customer, which is why it needs `logistics.manage` rather
+   * than the `logistics.operate` every other leg action on this controller
+   * uses (owner Ruling 2: a shipment action that creates a customer charge
+   * takes the stricter permission).
+   */
+  @RequirePermission('logistics.manage')
+  @Post('legs/:id/return-to-sender')
+  returnToSender(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(returnToSenderSchema)) dto: ReturnToSenderInput,
+  ) {
+    return this.shipments.returnToSender(id, dto, { userId: u.userId });
   }
 
   /** The recipient walked in and picked it up. No leg moves, so nothing else can

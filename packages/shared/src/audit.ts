@@ -276,6 +276,16 @@ export const AUDIT_ACTIONS = [
   // rather than reusing SHIPMENT_LEG_DEPARTED, which is the leg ACTUALLY
   // departing (departedAt, custody, status) — a different fact entirely.
   'SHIPMENT_LEG_SCHEDULED',
+  // BMPL-183/343: a post-custody return-to-sender was booked as a new
+  // transport charge (owner ruling) — a wholly new Shipment, priced,
+  // confirmed and paid, never a reversal of the original charge. newValue
+  // carries both shipment ids and the return's own price.
+  'SHIPMENT_RETURN_INITIATED',
+  // The mirror image of the ruling's own fence: no valid configured price
+  // could be calculated for the reversed route, so the return stays PENDING
+  // or MANUAL rather than guessing one — a supported outcome, not an error
+  // swallowed silently. Nothing is charged and no shipment is created.
+  'SHIPMENT_RETURN_PENDING_MANUAL',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

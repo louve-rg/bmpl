@@ -417,6 +417,22 @@ export const resolveLegExceptionSchema = z.object({
 });
 export type ResolveLegExceptionInput = z.infer<typeof resolveLegExceptionSchema>;
 
+/**
+ * Confirming a return-to-sender (BMPL-183/343). Deliberately its own action,
+ * not a third `resolveLegExceptionSchema` resolution: RESUME/RELEASE_DRIVER
+ * restore the SAME leg to an active state and create no charge, while a
+ * return books a wholly new shipment and charges the customer — owner Ruling
+ * 2 requires the stricter `logistics.manage` for exactly that reason, one
+ * permission tier below where RESUME/RELEASE_DRIVER sit. No price field
+ * here: the price is never taken from the client (see `previewReturn`,
+ * which is read-only and moves nothing), it is always recalculated fresh at
+ * confirmation, the same rule `create()` already applies to every shipment.
+ */
+export const returnToSenderSchema = z.object({
+  note: z.string().trim().min(4, 'Say why this is being returned.').max(500),
+});
+export type ReturnToSenderInput = z.infer<typeof returnToSenderSchema>;
+
 /** Recording that a recipient collected their parcel from a terminal. */
 export const collectShipmentSchema = z.object({
   collectedByName: z.string().trim().min(2, 'Who collected it?').max(120),

@@ -395,6 +395,8 @@ enum AuditAction {
   SHIPMENT_LEG_EXCEPTION_RESOLVED
   SHIPMENT_RECIPIENT_LINKED
   SHIPMENT_RECIPIENT_CLAIM_FAILED
+  SHIPMENT_RETURN_INITIATED
+  SHIPMENT_RETURN_PENDING_MANUAL
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -5048,6 +5050,17 @@ model Shipment {
   cancellationReason String?
   exceptionAt        DateTime?
   exceptionReason    String?
+
+  /// BMPL-183/343: a return-to-sender is booked as its own NEW Shipment (owner
+  /// ruling — "a new transport service at normal configured pricing", never a
+  /// reversal of the original charge), because Payment.shipmentId is unique:
+  /// one Payment per Shipment row, so the original's already-settled payment
+  /// cannot also carry the return's. This is the link back to whichever
+  /// shipment this one returns, if any. @unique enforces at most one return
+  /// per original at the database level, not only in application logic.
+  returnOfShipmentId String?   @unique
+  returnOfShipment   Shipment? @relation("ShipmentReturn", fields: [returnOfShipmentId], references: [id], onDelete: Restrict)
+  returnShipment     Shipment? @relation("ShipmentReturn")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
