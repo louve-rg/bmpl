@@ -1,5 +1,5 @@
 -- Audit vocabulary for recipient account linking (edward batch requirement 3),
--- part 1 of 2.
+-- part 1 of 3.
 --
 -- Enum value in its OWN migration, applied before the migration that uses it:
 -- Postgres refuses to add an enum value and use it inside one transaction,

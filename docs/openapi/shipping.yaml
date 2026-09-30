@@ -238,18 +238,27 @@ paths:
         Strictly throttled. Holding the token still only ever proved you
         could READ the shipment; this is the deliberate, audited step
         (`SHIPMENT_RECIPIENT_LINKED`) that additionally proves you may claim
-        it — matched on the token alone, never on the customer-typed
-        destination email/phone, which would let a claim probe whether an
-        address belongs to an account. Idempotent for the SAME account: a
-        repeat claim answers exactly like the first success, `linked: true`,
-        never an error. Refuses across the isTest boundary (a real account
-        cannot claim a simulation shipment or vice versa) and refuses a
-        token already claimed by a DIFFERENT account — both are a 400, not a
-        404, because the token resolved to a real shipment; only a token
-        matching no shipment at all is a 404. Claiming never widens what is
-        visible — see `GET /shipping/incoming` below, which returns the
-        exact same allowlist this endpoint's sibling `GET` already does, not
-        a second, richer view.
+        it. Owner decision, 2026-09-30: the token alone is no longer
+        sufficient — the caller's OWN account email or phone, already on
+        file, must also equal `destinationEmail`/`destinationPhone`. Never a
+        sender round-trip (the caller types nothing; the account's existing
+        fields are compared server-side) and never an oracle (a failed match
+        never says which field, or the real value). A failed match is rate-
+        limited per shipment (`recipientClaimAttempts`, same shape as
+        `ShipmentLeg.handoffPinAttempts`) and audited
+        (`SHIPMENT_RECIPIENT_CLAIM_FAILED`); five failures lock the link for
+        good (403) regardless of which account tries next. Idempotent for
+        the SAME account: a repeat claim answers exactly like the first
+        success, `linked: true`, never an error, and never touches the
+        match/attempt logic. Refuses across the isTest boundary (a real
+        account cannot claim a simulation shipment or vice versa — not
+        counted as a matching-signal attempt) and refuses a token already
+        claimed by a DIFFERENT account, checked BEFORE the match logic runs
+        — both are a 400, not a 404, because the token resolved to a real
+        shipment; only a token matching no shipment at all is a 404.
+        Claiming never widens what is visible — see `GET /shipping/incoming`
+        below, which returns the exact same allowlist this endpoint's
+        sibling `GET` already does, not a second, richer view.
       parameters:
         - { name: token, in: path, required: true, schema: { type: string }, description: "Capability token from the booking customer's `recipientTrackingToken`" }
       responses:
@@ -264,6 +273,7 @@ paths:
                   linked: { type: boolean, enum: [true] }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Matching-signal attempts exhausted for this shipment's token — contact support" }
         "404": { $ref: "#/components/responses/NotFound" }
   /shipping/incoming:
     get:

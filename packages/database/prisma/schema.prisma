@@ -390,6 +390,7 @@ enum AuditAction {
   PASSENGER_AFFILIATION_CHANGED
   SHIPMENT_LEG_EXCEPTION_RESOLVED
   SHIPMENT_RECIPIENT_LINKED
+  SHIPMENT_RECIPIENT_CLAIM_FAILED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -4893,6 +4894,13 @@ model Shipment {
   /// When the claim happened. Kept next to recipientUserId rather than only in
   /// the audit log so a "linked since" fact is a plain column, not a query.
   recipientClaimedAt DateTime?
+  /// Failed claim attempts against THIS shipment's token, regardless of which
+  /// account made them — the same per-resource (not per-account) lockout
+  /// shape as ShipmentLeg.handoffPinAttempts, so a claim probe cannot be
+  /// laundered by registering a fresh account per guess. See
+  /// `claimAsRecipient`'s own comment for what counts as a match and why a
+  /// failure is rate-limited at all.
+  recipientClaimAttempts Int @default(0)
 
   /// Set when the shipment fulfils a marketplace order. Null for a standalone
   /// courier booking, which is why it is optional rather than the parent.

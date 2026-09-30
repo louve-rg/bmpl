@@ -7,11 +7,15 @@
  * anonymous status-only view (`recipient-tracking.integration.spec.ts`
  * proves that payload never widens). Becoming the shipment's linked
  * recipient is a second, deliberate, authenticated step — this suite proves
- * that step is: keyed on the token and nothing else (never a reference or
- * id); race-safe against two accounts; idempotent for the same account;
- * open to any signed-in account regardless of role (account creation stays
- * optional, and the recipient need not hold CUSTOMER); and that it changes
- * nothing about what the anonymous link itself returns.
+ * that step is: keyed on the token AND a matching signal (the claiming
+ * account's own email or phone must equal destinationEmail/destinationPhone
+ * — 2026-09-30 owner decision, see claimAsRecipient's own comment); never a
+ * reference or id; race-safe against two accounts; idempotent for the same
+ * account; open to any signed-in account regardless of role (account
+ * creation stays optional, and the recipient need not hold CUSTOMER); rate-
+ * limited per shipment rather than silently unlimited; never an oracle for
+ * the real destinationEmail/destinationPhone on a failed match; and that it
+ * changes nothing about what the anonymous link itself returns.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -39,6 +43,22 @@ async function registerUser(email: string) {
   expect(reg.status).toBe(201);
   const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
   return { cookies: cookiesOf(reg), userId: user.id };
+}
+
+/**
+ * A registered account whose own PHONE genuinely matches what a sender
+ * typed for the recipient — the common positive-path fixture for the
+ * 2026-09-30 matching-signal rule. Phone, not email: `User.email` is the
+ * unique login identifier, so setting it to a shared constant after
+ * registration would collide the moment a second test did the same; phone
+ * carries no such constraint. `phone` defaults to RECIPIENT's own value but
+ * accepts a differently-formatted-but-equivalent one, for the
+ * normalization-specific tests below.
+ */
+async function registerMatchingRecipient(loginEmail: string, phone: string = RECIPIENT.phone) {
+  const r = await registerUser(loginEmail);
+  await ctx.prisma.user.update({ where: { id: r.userId }, data: { phone } });
+  return r;
 }
 
 async function seedNetwork() {
@@ -105,11 +125,11 @@ async function disableDispatch() {
 const SENDER = { district: 'STANN_CREEK', city: 'Placencia', address: '1 Sidewalk Street', name: 'Sonia Sender', phone: '501-2223333' };
 const RECIPIENT = { district: 'BELIZE', city: 'San Pedro', address: '5 Barrier Reef Drive', name: 'Rory Recipient', phone: '501-4445555' };
 
-async function book(as: string[] = customer) {
+async function book(as: string[] = customer, destinationOverrides: Record<string, unknown> = {}) {
   const r = await post(as, 'shipping', {
     service: 'DOOR_TO_DOOR',
     origin: { ...SENDER },
-    destination: { ...RECIPIENT },
+    destination: { ...RECIPIENT, ...destinationOverrides },
     preferredMode: 'AIR',
     description: 'Prescription refill',
     payWithWallet: true,
@@ -154,7 +174,7 @@ beforeEach(async () => {
 describe('claiming the link', () => {
   it('a signed-in account claims via the token, and the shipment shows up in its own account', async () => {
     const s = await book();
-    const recipient = await registerUser(`rlrec_${uniq()}@example.com`);
+    const recipient = await registerMatchingRecipient(`rlrec_${uniq()}@example.com`);
 
     const claimed = await claim(recipient.cookies, s.recipientTrackingToken);
     expect(claimed.status).toBe(201);
@@ -191,7 +211,7 @@ describe('claiming the link', () => {
    */
   it('the linked account sees EXACTLY the same allowlisted payload the anonymous link would — linking never widens it', async () => {
     const s = await book();
-    const recipient = await registerUser(`rlparity_${uniq()}@example.com`);
+    const recipient = await registerMatchingRecipient(`rlparity_${uniq()}@example.com`);
     expect((await claim(recipient.cookies, s.recipientTrackingToken)).status).toBe(201);
 
     const viaToken = await publicTrack(s.recipientTrackingToken);
@@ -215,7 +235,7 @@ describe('claiming the link', () => {
 
   it('claiming needs no BML role at all — the recipient need not be a CUSTOMER', async () => {
     const s = await book();
-    const recipient = await registerUser(`rlnorole_${uniq()}@example.com`);
+    const recipient = await registerMatchingRecipient(`rlnorole_${uniq()}@example.com`);
     // Every account is born CUSTOMER (auth.service.ts); suspend it so this
     // account genuinely holds no APPROVED role, then prove the linking
     // surface still works while the CUSTOMER-gated one correctly refuses.
@@ -246,7 +266,7 @@ describe('required negative: an unclaimed shipment stays invisible', () => {
   it('an account that claimed a DIFFERENT shipment cannot read this one by reference', async () => {
     const s1 = await book();
     const s2 = await book();
-    const recipient = await registerUser(`rlother_${uniq()}@example.com`);
+    const recipient = await registerMatchingRecipient(`rlother_${uniq()}@example.com`);
     expect((await claim(recipient.cookies, s1.recipientTrackingToken)).status).toBe(201);
 
     const wrongOne = await get(recipient.cookies, `shipping/incoming/${s2.reference}`);
@@ -287,7 +307,11 @@ describe('required negative: a claim cannot be made from a guessable value', () 
 describe('required negative: one account cannot claim what another already legitimately claimed', () => {
   it('a second account is refused, and the DATABASE keeps the first claimant — not just the response code', async () => {
     const s = await book();
-    const first = await registerUser(`rlfirst_${uniq()}@example.com`);
+    const first = await registerMatchingRecipient(`rlfirst_${uniq()}@example.com`);
+    // Deliberately NOT a matching account — proves "already claimed by
+    // someone else" wins regardless of whether this caller would itself
+    // have matched, exactly as claimAsRecipient's own comment says it must
+    // (checked before the match logic ever runs).
     const second = await registerUser(`rlsecond_${uniq()}@example.com`);
 
     expect((await claim(first.cookies, s.recipientTrackingToken)).status).toBe(201);
@@ -308,7 +332,7 @@ describe('required negative: one account cannot claim what another already legit
 
   it('the same account re-claiming its own shipment is idempotent, not an error', async () => {
     const s = await book();
-    const recipient = await registerUser(`rlreplay_${uniq()}@example.com`);
+    const recipient = await registerMatchingRecipient(`rlreplay_${uniq()}@example.com`);
     expect((await claim(recipient.cookies, s.recipientTrackingToken)).status).toBe(201);
 
     const replay = await claim(recipient.cookies, s.recipientTrackingToken);
@@ -356,7 +380,7 @@ describe('required negative: the anonymous tracking view is unchanged', () => {
     const before = await publicTrack(s.recipientTrackingToken);
     expect(before.status).toBe(200);
 
-    const recipient = await registerUser(`rlanon_${uniq()}@example.com`);
+    const recipient = await registerMatchingRecipient(`rlanon_${uniq()}@example.com`);
     expect((await claim(recipient.cookies, s.recipientTrackingToken)).status).toBe(201);
 
     const after = await publicTrack(s.recipientTrackingToken);
@@ -374,5 +398,98 @@ describe('required negative: the anonymous tracking view is unchanged', () => {
     const r = await publicTrack(s.recipientTrackingToken);
     expect(r.status).toBe(200);
     expect(Object.keys(r.body)).not.toContain('recipientUserId');
+  });
+});
+
+/**
+ * The matching-signal requirement itself (owner decision, 2026-09-30):
+ * holding the token is necessary but no longer sufficient — the claiming
+ * account's OWN email or phone, already on file, must equal
+ * destinationEmail/destinationPhone. See claimAsRecipient's own comment in
+ * shipment.service.ts for the full reasoning (rulings 7 and 12 together).
+ */
+describe('the matching signal — an authenticated claim needs more than the link', () => {
+  it('an account whose own email/phone match neither destination field is refused, with a generic message', async () => {
+    const s = await book();
+    const stranger = await registerUser(`rlnomatch_${uniq()}@example.com`);
+
+    const attempt = await claim(stranger.cookies, s.recipientTrackingToken);
+    expect(attempt.status).toBe(400);
+    expect(attempt.body.message).toMatch(/couldn't confirm this parcel is addressed to you/i);
+    // Never an oracle: neither the real phone nor any fragment of it appears
+    // anywhere in the response. The message names BOTH candidate fields
+    // generically ("email or phone") rather than singling one out as the
+    // one that failed — it never says which of the two (or that only one)
+    // was wrong, which is the part that would otherwise leak a bit per try.
+    const raw = JSON.stringify(attempt.body);
+    expect(raw).not.toContain(RECIPIENT.phone);
+    expect(raw).not.toContain('4445555');
+
+    const row = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { recipientUserId: true, recipientClaimAttempts: true } });
+    expect(row.recipientUserId).toBeNull();
+    expect(row.recipientClaimAttempts).toBe(1);
+
+    const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'SHIPMENT_RECIPIENT_CLAIM_FAILED' }, orderBy: { createdAt: 'desc' } });
+    expect(audit?.actorId).toBe(stranger.userId);
+  });
+
+  it('matching on phone alone (no email set on the account) succeeds', async () => {
+    const s = await book();
+    const recipient = await registerMatchingRecipient(`rlmatchphone_${uniq()}@example.com`);
+    expect((await claim(recipient.cookies, s.recipientTrackingToken)).status).toBe(201);
+  });
+
+  it('matching on email alone (a non-matching phone on the account) succeeds', async () => {
+    const email = `rlmatchemail_${uniq()}@example.bz`;
+    const s = await book(customer, { email });
+    const recipient = await registerUser(email); // login email IS the matching signal here
+    await ctx.prisma.user.update({ where: { id: recipient.userId }, data: { phone: '501-9998888' } }); // deliberately non-matching phone
+
+    expect((await claim(recipient.cookies, s.recipientTrackingToken)).status).toBe(201);
+  });
+
+  it('phone matching is normalized — country code and separators do not have to match byte-for-byte', async () => {
+    const s = await book();
+    // RECIPIENT.phone is '501-4445555'; this is the same number with spaces
+    // instead of dashes and no country code at all.
+    const recipient = await registerMatchingRecipient(`rlnormphone_${uniq()}@example.com`, '444 5555');
+    expect((await claim(recipient.cookies, s.recipientTrackingToken)).status).toBe(201);
+  });
+
+  it('email matching is normalized — case does not have to match', async () => {
+    const email = `rlnormemail_${uniq()}@example.bz`;
+    const s = await book(customer, { email: email.toUpperCase() });
+    const recipient = await registerUser(email); // stored lowercase, exactly as typed at registration
+    expect((await claim(recipient.cookies, s.recipientTrackingToken)).status).toBe(201);
+  });
+
+  it('five failed attempts lock the claim link for good, even for an account that would have matched', async () => {
+    const s = await book();
+    for (let i = 0; i < 5; i += 1) {
+      const stranger = await registerUser(`rllock${i}_${uniq()}@example.com`);
+      const attempt = await claim(stranger.cookies, s.recipientTrackingToken);
+      expect(attempt.status).toBe(400);
+    }
+
+    const row = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { recipientClaimAttempts: true } });
+    expect(row.recipientClaimAttempts).toBe(5);
+
+    const wouldHaveMatched = await registerMatchingRecipient(`rllocked_${uniq()}@example.com`);
+    const lockedOut = await claim(wouldHaveMatched.cookies, s.recipientTrackingToken);
+    expect(lockedOut.status).toBe(403);
+
+    const finalRow = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { recipientUserId: true } });
+    expect(finalRow.recipientUserId).toBeNull();
+  });
+
+  it('a TEST/real simulation-boundary mismatch is never counted as a matching-signal attempt', async () => {
+    const s = await book();
+    const testRecipient = await registerMatchingRecipient(`rlboundaryattempt_${uniq()}@example.com`);
+    await ctx.prisma.user.update({ where: { id: testRecipient.userId }, data: { isTest: true } });
+
+    expect((await claim(testRecipient.cookies, s.recipientTrackingToken)).status).toBe(400);
+
+    const row = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { recipientClaimAttempts: true } });
+    expect(row.recipientClaimAttempts).toBe(0);
   });
 });
