@@ -1,27 +1,32 @@
 # Edward requirements matrix
 
-Edward's production UAT batch of 2026-09-24/25 produced eleven numbered
-requirements — a cross-cutting dependency-mapping pass (kanban card BMPL-185)
-audited the schema and the shipping service and split the work into
-BMPL-174 through BMPL-184, one card per requirement. This document records
-where each one actually stands, against the code, not against a report about
-the code.
+The owner's list of Edward's production-UAT requirements — twelve items — is
+the authority here, not the kanban card set. This document is numbered on
+that list; card ids appear as supporting evidence, not as the spine.
 
-**A note on the count.** The dispatch that asked for this document referred
-to "twelve Edward requirements." Reading every BMPL-17x/18x card and the
-dependency-map card itself (BMPL-185) turned up exactly **eleven** numbered
-requirements (1–11, listed below) plus the dependency-map card that produced
-them. If a twelfth, distinctly-numbered requirement exists somewhere this
-search did not reach, it isn't reflected here — tell me which card it is and
-this document gets a twelfth row.
+**Requirement 12 was never carded, and that absence is itself a finding.** A
+cross-cutting dependency-mapping pass (kanban card BMPL-185) audited the
+schema and the shipping service in 2026-09-25 and split the batch into cards
+— but it produced only eleven, BMPL-174 through BMPL-184, one per
+requirement 1–11. Requirement 12 (multi-leg ETA, material ETA-change
+notification, terminal hold/reroute, and carrier schedule date exceptions)
+never got a card of its own; only its last slice, carrier schedule date
+exceptions, was ever built, and it shipped folded into BMPL-184, where it
+reads as part of requirement 11. Counting the cards and counting the owner's
+requirements gave two different totals, and the gap between them is exactly
+how an entire requirement went unbuilt without anyone noticing — a
+requirement with no card is invisible to every process this floor runs.
+Recorded properly now as BMPL-340.
 
 **The rule this document follows:** every status below is a claim about the
 code, and those are the sentences that rot. Every row marked **Done** names
-the commit that makes it true. Where the classification this document was
-built from said "done" and no commit could be found, the entry below says
-what was actually found instead — see requirement 1's history for an example
-of that happening the other way (a card believed open turned out to already
-be shipped).
+the commit that makes it true, and every one of those commits was checked
+with `git merge-base --is-ancestor` against `origin/main` before being
+written down — not taken from a PR title or a card's own claim. Where the
+classification this document was built from said "done" and no commit could
+be found, the entry below says what was actually found instead — see
+requirement 1's history for an example of that happening the other way (a
+card believed open turned out to already be shipped).
 
 ## Status summary
 
@@ -33,11 +38,12 @@ be shipped).
 | 4 | Granular driver service areas (district → city) | **Done** | `3950db0` (PR #126) |
 | 5 | Operating hours & closed/soon-closing handling | **Mostly done, one piece open** | `056b709`, `e498765`, `c2d1b0a`, `a072971`; remainder on BMPL-338 |
 | 6 | Handoff-chain security & an end-to-end walk test | **Security fix done; walk test open** | `6676d68` (PR #117); BMPL-337 in progress |
-| 7 | Courier & vehicle identification once assigned | **Done** | `a4fb20d` (PR #119) |
+| 7 | Courier & vehicle identification once assigned | **Done** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247 |
 | 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Mostly done, one check open** | `4eac6e8` (PR #121), `c99a596` (PR #129); BMPL-338 checking map precision |
-| 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default/delete-safety re-verified directly, see below |
+| 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
 | 10 | Cancellation before custody, failed delivery, return-to-sender | **Blocked** | Pre-custody half already correct in shipped code; the rest is designed, nothing built |
-| 11 | Availability windows, ETA-drift notice, schedule exceptions | **Mostly done, several pieces open** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `fcc3592`; see below for what's missing |
+| 11 | Recipient availability windows & updates | **Mostly done, one piece open** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`; see below for what's missing |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **Never carded until today; not started except one slice** | Schedule-exceptions slice only: `fcc3592`, folded into BMPL-184. Everything else: BMPL-340, no branch |
 
 ---
 
@@ -171,9 +177,12 @@ legal name, licence, registration and insurance — confirmed by an
 independent review reading the exact Prisma select, not the PR's own
 description of it. The owner separately ruled (2026-09-26) that a private
 account phone must never be exposed as a customer-contact number; what
-already shipped matches the ruling exactly, so no change was needed. The
-unbuilt piece — a dedicated business contact number, explicitly distinguished
-from a private one — is its own open card, BMPL-201.
+already shipped matches the ruling exactly, so no change was needed. The same
+boundary was independently enforced on the courier's own side by BMPL-247,
+which removed `DriverProfile.phone` from `ShipmentService.expectedAtHub()`'s
+selection entirely — not filtered from the response, absent from the query.
+The unbuilt piece — a dedicated business contact number, explicitly
+distinguished from a private one — is its own open card, BMPL-201.
 
 ## 8. Expandable maps & A/B/C/D route stops (pre-acceptance)
 
@@ -262,14 +271,11 @@ a return leg "from wherever this parcel currently sits, back to the sender."
 (staff-mediated vs. sender-direct), and the return-leg price. No branch
 exists.
 
-## 11. Availability windows, ETA-drift notice, carrier schedule exceptions
+## 11. Recipient availability windows & updates
 
-**Status: mostly done, several distinct pieces still open.**
+**Status: mostly done, one piece open.**
 
 **Done:**
-- **Carrier schedule date exceptions** — already existed before this batch
-  (`RouteOperatingDay` + `RouteScheduleException`, BMPL-186, merged
-  `fcc3592`), found by audit rather than built again.
 - **Sender-entered shipment availability windows**, end to end: the child
   table and sender write surface (`056b709`, PR #209), dispatch actually
   reading them with symmetric `FIRST_MILE`/`LAST_MILE`/`DIRECT` handling and
@@ -282,31 +288,69 @@ exists.
   schedule can't support the request.
 
 **Not built:**
-- **The 30-minute (default, configurable) ETA-drift notification** that
-  [Ruling 11](./OWNER-RULINGS.md#ruling-11--recipient-availability-and-eta-changes)
-  requires. No field anywhere persists the previously-communicated estimate
-  needed to measure drift against — `ShipmentLeg.scheduledArrivalAt` exists
-  as a column but nothing ever writes to it.
-- **Terminal-hold / reroute / return for a recipient known to be
-  unavailable.** No status represents it; adjacent to requirement 10 but
-  proactive (before dispatch) rather than reactive (after a failed attempt).
 - **Recipient-side self-service on availability windows.** Re-verified
   directly for this matrix: `setAvailabilityWindows`
   (`apps/api/src/shipping/shipment.service.ts:1728`) gates the **entire**
   call on `shipment.customerUserId === actor.userId` before it even looks at
   which role's window is being set — so today only the sender can set a
-  window for *either* role, including the recipient's own. Ruling 11 says
-  recipients may provide or update one. This is not a silent contradiction
-  of the ruling: the code that shipped this (BMPL-288) states in its own
-  card notes that recipient self-service is deliberately deferred, because
-  there is no way to authenticate a "recipient" at all without requirement 3
-  (recipient account linking) landing first. It resolves the moment
-  requirement 3 does.
+  window for *either* role, including the recipient's own.
+  [Ruling 11](./OWNER-RULINGS.md#ruling-11--recipient-availability-and-eta-changes)
+  says recipients may provide or update one. This is not a silent
+  contradiction of the ruling: the code that shipped this (BMPL-288) states
+  in its own card notes that recipient self-service is deliberately
+  deferred, because there is no way to authenticate a "recipient" at all
+  without requirement 3 (recipient account linking) landing first. It
+  resolves the moment requirement 3 does.
+
+## 12. Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions
+
+**Status: not started, except one slice — and this requirement never had a
+card until BMPL-340 was opened today.**
+
+Four distinct pieces, per the owner's original requirement, none of them
+built except the last:
+
+- **A multi-leg ETA derived only from actually configured schedules,
+  operating hours, exceptions and current shipment state** — never a guess,
+  a map service, or an invented average. **Does not exist.** Confirmed by
+  search: `transportMinutes` (`shipment.service.ts:179`) is a quote-time
+  planner total produced once at booking, not a live, updating ETA. The rest
+  of the codebase is explicit about the same absence rather than silent
+  about it — `dispatch.module.ts`'s own module comment states "NO
+  GPS/tracking/routing/ETA/…", `delivery.pricing.ts` documents "NO routing,
+  geocoding, ETA-from-maps, or dispatch", and the one driver-facing route
+  estimate that exists (`driver-jobs.service.ts`) carries its own comment,
+  "Never presented as a live ETA — there is no traffic data behind it."
+- **Material ETA-change notification, on the owner's already-approved
+  30-minute threshold** ([Ruling 11](./OWNER-RULINGS.md#ruling-11--recipient-availability-and-eta-changes)).
+  **Does not exist.** There is no ETA-change event in the notification
+  catalog, and — see above — nothing computes an ETA to change in the first
+  place.
+- **Terminal hold / reroute / return for a recipient known to be
+  unavailable.** **Does not exist.** No status represents it. Adjacent to
+  requirement 10 but proactive (before dispatch reaches the recipient)
+  rather than reactive (after a failed delivery attempt).
+- **Date-specific carrier schedule exceptions.** **The one slice that is
+  done** — `RouteOperatingDay` + `RouteScheduleException` (BMPL-186, merged
+  `fcc3592`) already provide the weekly default and date-specific overrides,
+  found by audit rather than built again. It shipped and is documented under
+  BMPL-184 because that is the card the audit was run against — a card
+  boundary, not a requirement boundary; it belongs here on the owner's own
+  list.
+
+**Why this matters more than a missing row:** this requirement was never
+carded by the BMPL-185 dependency-mapping pass that produced BMPL-174
+through BMPL-184, so no agent was ever assigned to build it, no PR was ever
+expected against it, and nothing on any board flagged it as outstanding. It
+surfaced only because this document counted the owner's requirements
+independently of the card set and the two totals disagreed. Tracked now as
+BMPL-340, queued behind requirement 1 (BMPL-175).
 
 ---
 
-*Sources: kanban cards BMPL-174 through BMPL-190, BMPL-283 through BMPL-288,
-BMPL-337, BMPL-338 and the owner rulings in [`OWNER-RULINGS.md`](./OWNER-RULINGS.md).
-Every commit cited above was confirmed to be an ancestor of `origin/main`
-before this document was written. If a status here and a dependent card's own
-notes ever disagree, the code — not either document — is the tiebreaker.*
+*Sources: kanban cards BMPL-174 through BMPL-190, BMPL-201, BMPL-247,
+BMPL-283 through BMPL-288, BMPL-337, BMPL-338, BMPL-340, and the owner
+rulings in [`OWNER-RULINGS.md`](./OWNER-RULINGS.md). Every commit cited above
+was confirmed to be an ancestor of `origin/main` before this document was
+written. If a status here and a dependent card's own notes ever disagree,
+the code — not either document — is the tiebreaker.*
