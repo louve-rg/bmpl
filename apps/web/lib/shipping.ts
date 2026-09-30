@@ -187,6 +187,19 @@ export interface RecipientTrackingView {
   steps: RecipientTrackingStep[];
 }
 
+/**
+ * Edward requirement 11: a linked recipient's own delivery window — a write
+ * confirmation / own-data read, deliberately NOT part of RecipientTrackingView
+ * above. That type is pinned identical whether reached by the anonymous
+ * token or a linked account (recipient-tracking.integration.spec.ts); an
+ * authenticated-only field like this one would break that parity rather
+ * than extend it, so it travels through its own small endpoints instead.
+ */
+export interface RecipientAvailabilityWindows {
+  reference: string;
+  windows: Array<{ startTime: string; endTime: string }>;
+}
+
 export interface QuoteLeg {
   sequence: number;
   kind: string;
@@ -271,6 +284,23 @@ export const shippingApi = {
   incoming: () => api.get<RecipientTrackingView[]>('/shipping/incoming'),
   /** One claimed shipment by reference — 404 if this account never claimed it. */
   incomingOne: (reference: string) => api.get<RecipientTrackingView>(`/shipping/incoming/${encodeURIComponent(reference)}`),
+  /**
+   * Edward requirement 11: a linked recipient's own delivery availability
+   * window — never the sender's. Read-only; the recipient's own currently-
+   * stored window(s), possibly empty.
+   */
+  incomingAvailabilityWindow: (reference: string) =>
+    api.get<RecipientAvailabilityWindows>(`/shipping/incoming/${encodeURIComponent(reference)}/availability-window`),
+  /**
+   * Set or clear the recipient's own window — replace-all, same shape the
+   * sender's own `setAvailabilityWindows` uses, but every row must be
+   * `role: 'RECIPIENT'` (the API refuses anything else) and the write can
+   * never touch the sender's own row.
+   */
+  setIncomingAvailabilityWindow: (reference: string, windows: Array<{ startTime: string; endTime: string }>) =>
+    api.put<RecipientAvailabilityWindows>(`/shipping/incoming/${encodeURIComponent(reference)}/availability-window`, {
+      windows: windows.map((w) => ({ ...w, role: 'RECIPIENT' as const })),
+    }),
 };
 
 /** Minor units to a Belize dollar string. */
