@@ -50,7 +50,9 @@ branched, verified, reviewed and integrated is
 logistics privacy, addresses and ETAs that answer no single open card — most
 importantly that a tracking link proves possession, not identity or
 authorization — are [`OWNER-RULINGS.md`](./OWNER-RULINGS.md); check there
-before treating one of those questions as unanswered.
+before treating one of those questions as unanswered. Where the production
+UAT batch's eleven requirements actually stand, each against a named commit
+or an honest "not built," is [`EDWARD-REQUIREMENTS.md`](./EDWARD-REQUIREMENTS.md).
 
 Superseded status documents from earlier phases are archived in
 [`history/`](./history/README.md). **Nothing in there is current** — in
