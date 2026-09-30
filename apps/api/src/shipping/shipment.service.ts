@@ -57,6 +57,35 @@ const money = (v: bigint) => Number(v);
 const MAX_PIN_ATTEMPTS = 5;
 const PIN_LENGTH = 4;
 
+/**
+ * How many failed matching-signal attempts before a shipment's claim link
+ * stops accepting them at all — same number, same shape as MAX_PIN_ATTEMPTS,
+ * applied to `claimAsRecipient` instead of `verifyHandoffPin`. Per-shipment
+ * (stored on the shipment itself), not per-account, so the limit cannot be
+ * laundered by registering a fresh account for each guess.
+ */
+const MAX_RECIPIENT_CLAIM_ATTEMPTS = 5;
+
+/** Case/whitespace only — an account's own email is not typed twice. */
+function normalizeEmail(email: string | null | undefined): string | null {
+  const v = email?.trim().toLowerCase();
+  return v ? v : null;
+}
+
+/**
+ * Digits only, with the `+501` country code folded away so `+501 444-5555`,
+ * `501-4445555` and a bare local `444-5555` all normalize to the same
+ * 7-digit string — exactly the shapes `phoneSchema` (packages/validation)
+ * already accepts as one valid Belize number, never a looser match than
+ * that schema already allows.
+ */
+function normalizePhone(phone: string | null | undefined): string | null {
+  const digits = phone?.replace(/\D/g, '') ?? '';
+  if (!digits) return null;
+  const local = digits.length === 10 && digits.startsWith('501') ? digits.slice(3) : digits;
+  return local.length === 7 ? local : null;
+}
+
 const SHIPMENT_INCLUDE = {
   legs: {
     orderBy: { sequence: 'asc' },
@@ -89,6 +118,18 @@ const SHIPMENT_INCLUDE = {
 } satisfies Prisma.ShipmentInclude;
 
 type ShipmentWithGraph = Prisma.ShipmentGetPayload<{ include: typeof SHIPMENT_INCLUDE }>;
+
+/**
+ * The recipient allowlist's data needs, shared by `trackPublic` (by token),
+ * `trackAsRecipient` and `listIncoming` (by `recipientUserId`) — one query
+ * shape for the one view, so the allowlist cannot drift between callers.
+ */
+const RECIPIENT_VIEW_INCLUDE = {
+  legs: { orderBy: { sequence: 'asc' } },
+  destinationHub: { select: { name: true, city: true, addressLine1: true, instructions: true } },
+} satisfies Prisma.ShipmentInclude;
+
+type RecipientViewGraph = Prisma.ShipmentGetPayload<{ include: typeof RECIPIENT_VIEW_INCLUDE }>;
 
 /**
  * Multi-leg shipment orchestration.
@@ -702,17 +743,21 @@ export class ShipmentService {
    *
    * A miss is one fixed 404 whatever the cause — wrong token, deleted row,
    * never existed — so a guessed URL cannot confirm a real shipment exists.
+   *
+   * This is the SAME allowlist a legitimately linked recipient sees in their
+   * own account (`trackAsRecipient`/`listIncoming`) — linking does not widen
+   * it, it only lets an account reach it without holding the raw token.
    */
   async trackPublic(token: string) {
     const s = await this.prisma.shipment.findUnique({
       where: { recipientToken: token },
-      include: {
-        legs: { orderBy: { sequence: 'asc' } },
-        destinationHub: { select: { name: true, city: true, addressLine1: true, instructions: true } },
-      },
+      include: RECIPIENT_VIEW_INCLUDE,
     });
     if (!s) throw new NotFoundException('No shipment for that link.');
+    return this.recipientView(s);
+  }
 
+  private recipientView(s: RecipientViewGraph) {
     const endsAtHub = !needsLastMile(s.service);
     const live = s.legs.filter((l) => l.status !== 'CANCELLED');
     const current = live.find((l) => l.status !== 'COMPLETED') ?? null;
@@ -747,6 +792,182 @@ export class ShipmentService {
         completedAt: l.completedAt,
       })),
     };
+  }
+
+  /**
+   * A legitimately linked recipient's own copy of the tracking view.
+   *
+   * Scoped by `recipientUserId`, never by reference or id alone — a reference
+   * is customer-facing and effectively guessable-adjacent (sequential-ish,
+   * shared at a collection desk out loud), so it must never double as a
+   * lookup key for someone else's shipment. A miss reads identically whether
+   * the reference does not exist or simply was never claimed by this
+   * account, for the same enumeration-resistance reason `trackPublic` uses
+   * one fixed 404.
+   */
+  async trackAsRecipient(reference: string, userId: string) {
+    const s = await this.prisma.shipment.findUnique({ where: { reference }, include: RECIPIENT_VIEW_INCLUDE });
+    if (!s || s.recipientUserId !== userId) throw new NotFoundException('No shipment with that reference.');
+    return this.recipientView(s);
+  }
+
+  /** Every shipment this account has claimed as recipient, newest first. */
+  async listIncoming(userId: string) {
+    const rows = await this.prisma.shipment.findMany({
+      where: { recipientUserId: userId },
+      orderBy: { createdAt: 'desc' },
+      include: RECIPIENT_VIEW_INCLUDE,
+      take: 50,
+    });
+    return rows.map((s) => this.recipientView(s));
+  }
+
+  /**
+   * The claim itself — the one action that turns "holds the tracking link"
+   * into "is the shipment's recipient of record".
+   *
+   * Keyed on the SAME unguessable `recipientToken` the public view uses —
+   * never a reference or id — PLUS a matching signal: the claiming account's
+   * OWN email or phone, already on file, must equal `destinationEmail` or
+   * `destinationPhone` (normalized — see `normalizeEmail`/`normalizePhone`).
+   * Owner decision, 2026-09-30, forced by two rulings together: ruling 12
+   * says a tracking token proves possession of a link, never authorization,
+   * which rules out "holds the token, first authenticated account to click
+   * wins"; ruling 7 already contemplates an account that has "CLAIMED" a
+   * shipment, so a real claim step is expected to exist. A matching signal
+   * is the minimum authorization consistent with both — no sender
+   * round-trip, and strictly more than link possession alone.
+   *
+   * NEVER A SENDER ROUND-TRIP, AND NEVER AN ORACLE. The caller is never
+   * asked to type the email/phone themselves (that would just move the
+   * guess into a form field), and a failed match never says which of
+   * email/phone didn't match, or what the real value was — one generic
+   * message either way. Matching on the account's OWN fields, read from its
+   * own row rather than accepted in the request body, is what keeps this
+   * from becoming exactly the "does this email/phone belong to an account"
+   * probe account linking was told to avoid: nothing about a stranger's
+   * email or phone can be tested without actually holding an account
+   * registered under it.
+   *
+   * RATE-LIMITED, NOT SILENTLY UNLIMITED: `recipientClaimAttempts` is
+   * `ShipmentLeg.handoffPinAttempts`' own precedent, applied here — a failed
+   * match increments it and is audited (`SHIPMENT_RECIPIENT_CLAIM_FAILED`),
+   * and `MAX_RECIPIENT_CLAIM_ATTEMPTS` failures lock the shipment's claim
+   * link for good (an administrator has to intervene), exactly mirroring
+   * `verifyHandoffPin`'s lockout rather than inventing a second shape. The
+   * counter lives on the SHIPMENT, not the account, so the limit cannot be
+   * laundered by registering a fresh account per guess.
+   *
+   * Idempotent for the same account (a retried tap does not error, and never
+   * touches the match/attempt logic), and race-safe against a second
+   * account: the write is a conditional `updateMany` guarded on
+   * `recipientUserId: null`, so only one of two concurrent claims can land —
+   * the lock-then-check-in-the-write-clause pattern already used by
+   * `resolveException`'s exception-claim race.
+   *
+   * ACCEPTED, NOT OVERLOOKED: a real-but-already-claimed token answers 400
+   * here, while a nonexistent one answers 404 above — a distinguishable
+   * failure that would normally be an oracle (BMPL-140's own standard is one
+   * fixed answer for "missing" and "not yours"). It is accepted as a
+   * deliberate tradeoff because it tells the caller nothing they could not
+   * already learn: anyone holding this token can call the anonymous
+   * `trackPublic` route right now and get back 200 with the shipment's live
+   * status, which already proves the shipment exists. The 400/404 split adds
+   * no information to a token holder that the read path does not already
+   * give away for free. REVISIT THIS if `recipientToken` ever stops being an
+   * independently unguessable, opaque value — e.g. if it is ever derived
+   * from the reference, a sequence, or anything else a caller could produce
+   * without having first received the real token — because at that point the
+   * split would tell an attacker "this token exists" without them needing
+   * the anonymous route to already know it. An already-claimed-by-someone-
+   * else shipment is refused BEFORE the match/attempt logic ever runs and
+   * regardless of whether this caller's own details would have matched —
+   * there is nothing left to claim, and "someone already claimed this" is
+   * not new information about the real recipient's identity.
+   */
+  async claimAsRecipient(token: string, userId: string) {
+    const s = await this.prisma.shipment.findUnique({
+      where: { recipientToken: token },
+      select: {
+        id: true,
+        reference: true,
+        isTest: true,
+        recipientUserId: true,
+        recipientClaimAttempts: true,
+        destinationEmail: true,
+        destinationPhone: true,
+      },
+    });
+    if (!s) throw new NotFoundException('No shipment for that link.');
+    if (s.recipientUserId === userId) {
+      return { reference: s.reference, linked: true };
+    }
+    if (s.recipientUserId != null) {
+      throw new BadRequestException('This shipment has already been linked to another account.');
+    }
+
+    // KNOWN LIMITATION (accepted, not solved, by owner review 2026-09-30):
+    // the counter lives on the SHIPMENT so the limit cannot be laundered by
+    // registering a fresh account per guess (see this method's own top
+    // comment) — but that same property means anyone merely holding the
+    // tracking link can deliberately burn all five attempts and permanently
+    // lock out the genuine recipient. A locked-out recipient here and a
+    // locked-out handoff PIN (verifyHandoffPin) are the same unanswered
+    // question, and it is already in front of the owner as BMPL-13. Do not
+    // invent a reset path here — that would decide BMPL-13 by
+    // implementation rather than by the owner actually deciding it.
+    if (s.recipientClaimAttempts >= MAX_RECIPIENT_CLAIM_ATTEMPTS) {
+      throw new ForbiddenException('Too many attempts to link this account to this shipment. Contact support for help.');
+    }
+
+    const me = await this.prisma.user.findUnique({ where: { id: userId }, select: { isTest: true, email: true, phone: true } });
+    // Simulation and real shipments never mix, in either direction — the
+    // same boundary money, network and dispatch already enforce. Not a
+    // matching-signal failure, so it is never counted as an attempt.
+    if (!me || me.isTest !== s.isTest) {
+      throw new BadRequestException('This shipment cannot be linked to this account.');
+    }
+
+    const myEmail = normalizeEmail(me.email);
+    const myPhone = normalizePhone(me.phone);
+    const matches =
+      (myEmail != null && myEmail === normalizeEmail(s.destinationEmail)) ||
+      (myPhone != null && myPhone === normalizePhone(s.destinationPhone));
+
+    if (!matches) {
+      const updated = await this.prisma.shipment.update({
+        where: { id: s.id },
+        data: { recipientClaimAttempts: { increment: 1 } },
+        select: { recipientClaimAttempts: true },
+      });
+      await this.audit.record({
+        action: 'SHIPMENT_RECIPIENT_CLAIM_FAILED',
+        actorId: userId,
+        newValue: { shipmentId: s.id },
+      });
+      const left = MAX_RECIPIENT_CLAIM_ATTEMPTS - updated.recipientClaimAttempts;
+      throw new BadRequestException(
+        left > 0
+          ? `We couldn't confirm this parcel is addressed to you. Check that your account's email or phone matches what the sender used, then try again. ${left} ${left === 1 ? 'try' : 'tries'} left.`
+          : `We couldn't confirm this parcel is addressed to you, and that was the last try.`,
+      );
+    }
+
+    const claimed = await this.prisma.shipment.updateMany({
+      where: { id: s.id, recipientUserId: null },
+      data: { recipientUserId: userId, recipientClaimedAt: new Date() },
+    });
+    if (claimed.count === 0) {
+      // Someone else's claim landed between the read above and this write.
+      throw new BadRequestException('This shipment has already been linked to another account.');
+    }
+
+    await this.audit.record({
+      action: 'SHIPMENT_RECIPIENT_LINKED',
+      actorId: userId,
+      newValue: { reference: s.reference },
+    });
+    return { reference: s.reference, linked: true };
   }
 
   async listMine(userId: string) {

@@ -260,6 +260,16 @@ export const AUDIT_ACTIONS = [
   // carried in newValue — the PASSENGER_AFFILIATION_CHANGED precedent of one
   // code per lifecycle rather than one per verb.
   'SHIPMENT_LEG_EXCEPTION_RESOLVED',
+  // A recipient account deliberately claimed a shipment via its tracking
+  // token. Holding the token only ever authorised reading trackPublic(); this
+  // is the one action that turns that into an actual account link.
+  'SHIPMENT_RECIPIENT_LINKED',
+  // An authenticated account attempted to claim a shipment but its own
+  // email/phone did not match what the sender typed for the recipient —
+  // the SHIPMENT_LEG_HANDOFF_PIN_FAILED precedent, applied to a claim
+  // instead of a handoff code. Recorded on every failed attempt, same as
+  // that one, so the rate limit has an audit trail behind it.
+  'SHIPMENT_RECIPIENT_CLAIM_FAILED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

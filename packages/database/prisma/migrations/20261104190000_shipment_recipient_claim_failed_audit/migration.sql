@@ -1,0 +1,23 @@
+-- Audit vocabulary for recipient account linking (edward batch requirement 3),
+-- part 3 of 3.
+--
+-- Written AFTER part 2 (20261104180000_shipment_recipient_link), not before
+-- it — unlike part 1, this value is not needed by anything part 2 does; it
+-- is needed by claimAsRecipient's failure path, which is application code,
+-- not migration SQL. Kept in its own migration anyway, same reasoning as
+-- part 1's own comment: Postgres refuses to add an enum value and use it
+-- inside one transaction, and Prisma wraps each migration in one.
+--
+-- SHIPMENT_RECIPIENT_CLAIM_FAILED: an authenticated account attempted to
+-- claim a shipment (POST shipping/track/:token/claim) but its own email and
+-- phone matched neither destinationEmail nor destinationPhone — the
+-- matching-signal requirement a 2026-09-30 owner decision added on top of
+-- part 2's recipientUserId/recipientClaimedAt columns (see that migration's
+-- own updated comment for the full reasoning, and recipientClaimAttempts'
+-- own field comment in schema.prisma for the rate limit this audits).
+-- Recorded on every failed attempt, the same as SHIPMENT_LEG_HANDOFF_PIN_FAILED
+-- is for a wrong handoff code — the precedent this follows, not reinvents.
+--
+-- Additive and idempotent; no table, no column, no backfill, and no existing
+-- enum value is touched.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_RECIPIENT_CLAIM_FAILED';
