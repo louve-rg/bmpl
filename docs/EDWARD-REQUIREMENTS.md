@@ -154,23 +154,38 @@ all, and the warning never implies the order can't be placed.
 
 ## 6. Handoff-chain security & an end-to-end walk test
 
-**Status: security fix done and live; the walk test is open.** The defect —
-a handoff code alone released a shipment, with no check that the
-authenticated actor was the currently assigned courier — is fixed. Merged
-`6676d68` (PR #117): `verifyHandoffPin` now resolves the actor's
-`DriverProfile` and folds a wrong-courier result into the same failure path
-as a wrong code, sharing the attempt counter, so neither can be distinguished
-from the other. A terminal-to-terminal leg (`LINE_HAUL`) never carries
-`assignedDriverProfileId`, so the new check is a correct no-op there rather
-than a second custody-code requirement the owner never asked for.
+**Status: done.** The defect — a handoff code alone released a shipment,
+with no check that the authenticated actor was the currently assigned
+courier — is fixed. Merged `6676d68` (PR #117): `verifyHandoffPin` now
+resolves the actor's `DriverProfile` and folds a wrong-courier result into
+the same failure path as a wrong code, sharing the attempt counter, so
+neither can be distinguished from the other. A terminal-to-terminal leg
+(`LINE_HAUL`) never carries `assignedDriverProfileId`, so the new check is a
+correct no-op there rather than a second custody-code requirement the owner
+never asked for.
 
-**What remains:** the individual pieces (`startLeg`, `departLeg`, `arriveLeg`,
-`completeLeg`, `verifyHandoffPin`, `appendCustody`,
-`flagException`/`resolveException`, `pinFor()`) are each unit-tested, but no
-single test walks a whole multi-leg journey through all of them at once —
-in progress on BMPL-337. That card also carries a second question: whether
-BMPL-138 (a San Pedro → Belize City leg stuck unable to mark departed) is a
-code defect or missing carrier schedule configuration.
+The walk test (BMPL-337) is merged: one integration test books a
+`DOOR_TO_DOOR` shipment and drives it through `FIRST_MILE` → `LINE_HAUL` →
+`LAST_MILE` to `DELIVERED`, asserting at every handoff that a non-assigned
+courier is refused, a wrong PIN is refused and counted on the shared
+lockout counter, exactly one custody row is written per real transfer (and
+none for a rejected attempt or a bare arrival stamp), and the PIN never
+leaks into a response that shouldn't carry it — not the courier's own job
+view, not the staff admin view, not the public tracking link.
+`apps/api/test/transport-leg-operations.integration.spec.ts`.
+
+BMPL-138 (a San Pedro → Belize City leg stuck unable to mark departed) was
+traced end to end — route/leg creation, schedule resolution, carrier vs.
+staff authorization, the admin UI's `controlsFor()` — with no code defect
+found. A second test in the same file proves what the code does when a
+route is genuinely configured `NOT_OPERATING` for a day: `departLeg` refuses
+with the schedule reason and recovers once the exception is removed. That
+makes a data/configuration fact (a schedule exception, or a route never
+configured for that day) or an account-permission issue the more likely
+explanation than a bug — but the four facts originally asked of Edward
+(shipment reference, leg rows, account grants, screen used) were never
+answered and remain the concrete next step. No schedule data was invented
+to reproduce his exact live case.
 
 ## 7. Courier & vehicle identification once assigned
 
