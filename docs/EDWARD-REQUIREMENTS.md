@@ -12,9 +12,11 @@ requirement 1–11. Requirement 12 (multi-leg ETA, material ETA-change
 notification, terminal hold/reroute, and carrier schedule date exceptions)
 never got a card of its own until this document's own count disagreed with
 the card set; its last slice, carrier schedule date exceptions, had already
-shipped folded into BMPL-184, where it reads as part of requirement 11, and
-the gap between the two totals is exactly how an entire requirement went
-unbuilt without anyone noticing — a requirement with no card is invisible to
+shipped as BMPL-186 (`fcc3592`) but was tracked/audited under BMPL-184,
+where it reads as part of requirement 11 — see requirement 12 below for how
+the two cards relate. The gap between the two totals is exactly how an
+entire requirement went unbuilt without anyone noticing — a requirement with
+no card is invisible to
 every process this floor runs. Recorded properly now as BMPL-340, which has
 since shipped its multi-leg-ETA slice (`f1bbfce`); two of the requirement's
 four pieces are done, two remain open as BMPL-345 and BMPL-343 — see
@@ -45,7 +47,7 @@ card believed open turned out to already be shipped).
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
 | 10 | Cancellation before custody, failed delivery, return-to-sender | **Blocked** | Pre-custody half already correct in shipped code; the rest is designed, nothing built |
 | 11 | Recipient availability windows & updates | **Mostly done, one piece open** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`; see below for what's missing |
-| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **Two of four pieces done** | ETA: `f1bbfce` (BMPL-340 phase 1). Schedule exceptions: `fcc3592`, folded into BMPL-184. Open: ETA-change notice (BMPL-345), hold/reroute (BMPL-343) |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **Two of four pieces done** | ETA: `f1bbfce` (BMPL-340 phase 1). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Open: ETA-change notice (BMPL-345), hold/reroute (BMPL-343) |
 
 ---
 
@@ -383,10 +385,11 @@ independently of the card set and the two totals disagreed. The first piece
 above is the corrective work; the remaining two pieces stay open, tracked
 as BMPL-345 and BMPL-343.
 
-**On `main`, not yet in production:** `f1bbfce` is merged but is not yet an
-ancestor of the currently deployed API (as of this writing, production is
-at `371439e`) — the contract above exists in the repository; whether it is
-live is a deployment question this document does not answer.
+The contract above exists in the repository. Whether a given commit is
+currently deployed is a question this document does not answer — a served
+commit is a fact that changes with the next deploy, and this document
+cannot hold that current; asking a running-API source (e.g.
+`pnpm deploy:status`) is the only way to actually know.
 
 ---
 
