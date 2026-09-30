@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   nextOpenWindow,
   resolveHoursStatus,
+  windowStartInstant,
   type HoursException,
   type NextOpenWindow,
   type WeeklyOpeningHours,
@@ -181,5 +182,26 @@ describe('nextOpenWindow', () => {
       openTime: '09:00',
       closeTime: '10:00',
     });
+  });
+});
+
+describe('windowStartInstant (BMPL-340)', () => {
+  it('a configured window resolves to its own open time, as a real instant', () => {
+    const window: NextOpenWindow = { date: calendarDate(2026, 11, 2), openTime: '08:00', closeTime: '17:00' };
+    expect(windowStartInstant(window, monday(3, 0))).toEqual(monday(8, 0));
+  });
+
+  it('an unconstrained window (both times null) resolves to that day\'s own Belize midnight', () => {
+    const window: NextOpenWindow = { date: calendarDate(2026, 11, 2), openTime: null, closeTime: null };
+    expect(windowStartInstant(window, belizeInstant(2026, 10, 30, 12, 0))).toEqual(belizeInstant(2026, 11, 2, 0, 0));
+  });
+
+  it('clamps to `from` rather than reporting a start in `from`\'s own past', () => {
+    // The window opened at 08:00 but `from` is already 10:00 the same day
+    // (e.g. nextOpenWindow was searched from a later projected instant) —
+    // the window is still the right DAY, just not honestly "starting" before
+    // the instant the caller is projecting from.
+    const window: NextOpenWindow = { date: calendarDate(2026, 11, 2), openTime: '08:00', closeTime: '17:00' };
+    expect(windowStartInstant(window, monday(10, 0))).toEqual(monday(10, 0));
   });
 });
