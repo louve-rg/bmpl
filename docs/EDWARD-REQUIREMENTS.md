@@ -36,10 +36,10 @@ card believed open turned out to already be shipped).
 | 2 | Package pickup/handoff photo | **Done (API)** | `682b501` (PR #127) |
 | 3 | Recipient account linking & incoming-shipment tracking | **Blocked, unmerged** | PR #135 open; no commit on `main` |
 | 4 | Granular driver service areas (district → city) | **Done** | `3950db0` (PR #126) |
-| 5 | Operating hours & closed/soon-closing handling | **Mostly done, one piece open** | `056b709`, `e498765`, `c2d1b0a`, `a072971`; remainder on BMPL-338 |
+| 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255) |
 | 6 | Handoff-chain security & an end-to-end walk test | **Security fix done; walk test open** | `6676d68` (PR #117); BMPL-337 in progress |
 | 7 | Courier & vehicle identification once assigned | **Done** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247 |
-| 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Mostly done, one check open** | `4eac6e8` (PR #121), `c99a596` (PR #129); BMPL-338 checking map precision |
+| 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) |
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
 | 10 | Cancellation before custody, failed delivery, return-to-sender | **Blocked** | Pre-custody half already correct in shipped code; the rest is designed, nothing built |
 | 11 | Recipient availability windows & updates | **Mostly done, one piece open** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`; see below for what's missing |
@@ -132,21 +132,25 @@ in [`DISPATCH.md`](./DISPATCH.md)).
 
 ## 5. Operating hours & closed/soon-closing handling
 
-**Status: mostly done.** The **terminal half** is complete end to end:
-structured hub hours and dated exceptions, the write surface, and a
-consumer that actually defers dispatch outside hours and self-corrects
-(shipped ahead of this matrix — see [`PROJECT_STATUS.md`](./PROJECT_STATUS.md)
-§12). The **business (vendor) half** — dispatch reading `VendorOpeningHours`
-and deferring a marketplace pickup while the vendor is closed — merged
-`a072971` (PR #248). A customer-facing "closed now" badge merged separately
-(BMPL-335, BMPL-334 for one-off closures).
+**Status: done.** The **terminal half** is complete end to end: structured
+hub hours and dated exceptions, the write surface, and a consumer that
+actually defers dispatch outside hours and self-corrects (shipped ahead of
+this matrix — see [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) §12). The
+**business (vendor) half** — dispatch reading `VendorOpeningHours` and
+deferring a marketplace pickup while the vendor is closed — merged `a072971`
+(PR #248). A customer-facing "closed now" badge merged separately (BMPL-335,
+BMPL-334 for one-off closures).
 
-**What remains:** Edward's specific ask — a warning that a location **may
-close before arrival** — is not built. Inputs exist (the structured week, the
-exception rows, the pre-transaction delivery estimate); the copy constraint
-is that hours constrain dispatch, they don't block ordering, so the warning
-must never imply the order can't be placed, and no configured hours must mean
-no warning at all. In progress on BMPL-338.
+Edward's specific remaining ask — a warning that a location **may close
+before arrival** — merged `1161a6f` (PR #255, confirmed an ancestor of
+`origin/main`). The checkout delivery quote now carries each DELIVERY
+vendor's `openingHours`/`hoursExceptions` (documented in
+[`docs/openapi/marketplace.yaml`](./openapi/marketplace.yaml) as this same
+change — see `DeliveryQuoteVendor`), and the web client composes the warning
+client-side from that data plus the vendor's own configured delivery
+estimate, never a second server-side calculation or an invented promise.
+Matches the closed-badge's own rule: no configured hours means no warning at
+all, and the warning never implies the order can't be placed.
 
 ## 6. Handoff-chain security & an end-to-end walk test
 
@@ -186,7 +190,7 @@ distinguished from a private one — is its own open card, BMPL-201.
 
 ## 8. Expandable maps & A/B/C/D route stops (pre-acceptance)
 
-**Status: mostly done.** Merged `4eac6e8` (PR #121) — a reusable
+**Status: done.** Merged `4eac6e8` (PR #121) — a reusable
 embedded-preview → expand → full-screen modal pattern, verified to touch none
 of the residential-privacy-sensitive files it was excluded from and to
 introduce no new coordinate source. Merged `c99a596` (PR #129) — the driver
@@ -206,10 +210,19 @@ under touch — the auditor named this an inference about headless pointer-event
 emulation, not a claimed defect, and asked for a ten-second check on a real
 phone. Not yet done.
 
-**What remains:** BMPL-338 is separately re-checking the privacy half —
-that pre-acceptance stops send only approximate positions, never exact
-coordinates, reduced before the value leaves the API rather than merely
-drawn coarsely on the client.
+The remaining pieces merged `1161a6f` (PR #255, confirmed an ancestor of
+`origin/main`). The privacy half was checked, not assumed, before anything
+was built: the pre-acceptance A/B/C/D job maps already reduce a door-end pin
+to `null` at the API select before acceptance, and the driver job list's own
+serializer never puts coordinates on the wire at all — no leak found, so no
+API change was needed for it. The real remaining gap was `LocationPicker`,
+which had no way to place a pin outside a fixed 256px box; it now opens the
+same picker full-screen inside `FullScreenMapModal` on request, as two
+independent Leaflet instances that are never both mounted at once (the
+existing `ExpandableRouteMap`/`MapPreview` pattern). Confirmed for this
+matrix: every file this commit touches for requirement 8 is under
+`apps/web` — no API file changed, so no OpenAPI spec update was needed for
+this half either.
 
 ## 9. Saved addresses — label, CRUD, default, delete-safety
 
