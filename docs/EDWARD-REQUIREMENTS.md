@@ -30,53 +30,110 @@ written down — not taken from a PR title or a card's own claim. Where the
 classification this document was built from said "done" and no commit could
 be found, the entry below says what was actually found instead — see
 requirement 1's history for an example of that happening the other way (a
-card believed open turned out to already be shipped).
+card believed open turned out to already be shipped). That second direction
+is the harder one to catch: every review of this document all evening looked
+for a claim of more than the code delivers; nobody was looking for the
+opposite until a final-acceptance audit checked cards against rows directly
+and found it on requirements 1, 3 and 11 at once.
 
 ## Status summary
 
 | # | Requirement | Status | Evidence |
 | - | --- | --- | --- |
-| 1 | Vendor location-level inventory & fulfilment origin | **Design approved, not built** | BMPL-175. No commit — no branch exists yet. |
-| 2 | Package pickup/handoff photo | **Done (API)** | `682b501` (PR #127) |
-| 3 | Recipient account linking & incoming-shipment tracking | **Blocked, unmerged** | PR #135 open; no commit on `main` |
-| 4 | Granular driver service areas (district → city) | **Done** | `3950db0` (PR #126) |
+| 1 | Vendor location-level inventory & fulfilment origin | **API done; no UI** | `bad7b3f` (BMPL-175, PR #259) touches zero `apps/web`/`apps/admin` files; UI tracked as BMPL-354 |
+| 2 | Package pickup/handoff photo | **API done; no web UI** | `682b501` (PR #127); no screen anywhere shows or uploads it; UI tracked as BMPL-352 |
+| 3 | Recipient account linking & incoming-shipment tracking | **Done** | `a6b7d97` (BMPL-179, PR #135); two policy questions open (BMPL-119), see below |
+| 4 | Granular driver service areas (district → city) | **API done; no UI** | `3950db0` (PR #126) touches zero `apps/web`/`apps/admin` files for the city dimension; UI tracked as BMPL-353 |
 | 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255) |
-| 6 | Handoff-chain security & an end-to-end walk test | **Security fix done; walk test open** | `6676d68` (PR #117); BMPL-337 in progress |
+| 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
 | 7 | Courier & vehicle identification once assigned | **Done** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247 |
 | 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) |
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
 | 10 | Cancellation before custody, failed delivery, return-to-sender | **Blocked** | Pre-custody half already correct in shipped code; the rest is designed, nothing built |
-| 11 | Recipient availability windows & updates | **Mostly done, one piece open** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`; see below for what's missing |
+| 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
 | 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **Two of four pieces done** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by BMPL-346. Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Open: ETA-change notice (BMPL-345), hold/reroute (BMPL-343) |
+
+**Three of twelve — requirements 1, 2 and 4 — share one cause, not three
+separate ones: each has a real, merged, tested API and no user-facing
+screen at all.** Confirmed for each by diffing its own merge commit for
+`apps/web`/`apps/admin` files (`bad7b3f`, `682b501`, `3950db0` — every one
+touches zero) rather than inferring it from the commit message. This batch
+was built API-first, and the web half of all three was never scheduled — not
+blocked on a decision, not attempted and abandoned. Recording each as its
+own isolated status invites fixing them one at a time without anyone asking
+why there were three. All three are now carded — requirement 1 as BMPL-354,
+requirement 2 as BMPL-352, requirement 4 as BMPL-353 — which is the
+difference between a document that records a gap and one a reader can act
+on.
 
 ---
 
 ## 1. Vendor location-level inventory & fulfilment origin
 
-**Status: design approved 2026-09-30, nothing built.** `VendorLocation` already
-exists (label, address, district, lat/long, `isPrimary`); inventory is keyed
-on product/variant only, with no location dimension, and `VendorOrder` has no
-field recording which location fulfilled it.
-
-The design (argued from the code, not assumed): a new child table keyed on
-`inventoryId` + `locationId`, with the existing `Inventory` row kept as the
-identity/settings anchor, so every product that never adopts a location keeps
-working unchanged. Origin selection is availability-only, with
+**Status: API delivered, no user-facing surface. Do not read this as
+done.** Merged `bad7b3f` (BMPL-175, PR #259) —
+`packages/database/prisma/migrations/20261104170800_vendor_location_inventory`.
+A new child table (`inventory_locations`: `inventoryId` + `locationId` FKs,
+`quantity`/`reserved`) lets a vendor with multiple `VendorLocation`s track
+stock per shop, with the existing `Inventory` row kept as the identity/
+settings anchor — a product that never adopts per-location tracking is
+completely unaffected (zero child rows, byte-identical behaviour). Checkout
+chooses the fulfilling location by availability only, with
 `VendorLocation.isPrimary` as the tie-break — `DeliveryPricingService.quote()`
 carries no `locationId` and does no routing, so anything claiming to pick the
-"most efficient" origin would be inventing a capability that doesn't exist.
-Historical orders get `originLocationId` **null, permanently** — there is no
-way to recover which location fulfilled a past order, and guessing one would
-put a fabricated fact in the record. A one-location vendor experiences
-nothing different.
+"most efficient" origin would be inventing a capability that doesn't exist —
+and records it on the new nullable `VendorOrder.originLocationId`, reserving/
+releasing/finalizing against that location's own row through the same
+lock-then-check-then-write discipline as the existing product-level
+reservation path (BMPL-256), never a second way to reserve. Historical orders
+get `originLocationId` **null, permanently** — there is no way to recover
+which location fulfilled a past order, and guessing one would put a
+fabricated fact in the record. A one-location vendor experiences nothing
+different. Every other direct reader of raw `Inventory.quantity`/`.reserved`
+was updated to honour per-location adoption in the same PR (cart add/view,
+the public product and variant pages, the vendor's own inventory and
+variant-management views, and the search/listing raw SQL), so the feature
+does not go stale in six other call sites the moment a vendor actually
+adopts it. A `VendorLocation` cannot be deleted while any of its rows still
+carries a reservation, tested for both the refusal and the reservation's
+survival.
 
-The owner authorized proceeding on 2026-09-30 (checked against
-[`OWNER-RULINGS.md`](./OWNER-RULINGS.md) first — nothing there contradicts
-it). **No branch exists yet.**
+One narrow question was split off rather than answered silently: when a
+single vendor's cart splits across two origin locations, the delivery fee
+and free-delivery threshold are evaluated per resulting order rather than
+pooled — real, configured rates, nothing invented, but it does change what a
+customer pays, so it went to the owner as its own question rather than
+riding through on this merge. Now tracked as BMPL-351, open.
+
+**What remains — a real gap, not a formality:** `bad7b3f` touches zero
+files under `apps/web` or `apps/admin` — 13 files, all `apps/api` plus
+`packages/database` plus one integration spec. Confirmed directly (zero-hit
+greps on the commit's own names — `inventory-locations`, `adjustAtLocation`,
+`originLocationId` — across both apps' source) rather than assumed from the
+file list alone: the vendor inventory editor still calls the old
+product-level `/inventory/adjust`
+(`apps/web/components/products/inventory-adjust.ts:13`), never a
+per-location endpoint. There is no vendor screen to set stock per location
+and no admin screen to see which location fulfilled a `VendorOrder`. Tracked
+as BMPL-354, open.
+
+**History:** this requirement was carried as "design approved, nothing
+built" through this document's original writing (BMPL-339); BMPL-175
+shipped in the same evening without the matrix being told. A first
+correction pass (this same final-acceptance audit) swung the row straight to
+"Done," which was also wrong — the code delivers the API, not the
+requirement, and neither extreme described what actually shipped.
 
 ## 2. Package pickup/handoff photo
 
-**Status: done, API only.** Merged `682b501` (PR #127). Reuses
+**Status: API done; no web UI exists. Do not read this as done.** Merged
+`682b501` (PR #127) on the API side only — confirmed for this audit by
+grepping `apps/web` and `apps/admin` source (excluding build output) for
+`pickupPhotoUrls`/`handoffPhoto`/`pickup-photo`: zero hits. No screen
+anywhere shows the photo to a sender or staff member, and no screen lets a
+courier upload one from the driver app's own UI (the API endpoint exists;
+nothing calls it). The feature is data-model-and-API complete and has no
+front end. Reuses
 `ShipmentLeg.handoffPhotoKeys` (already private storage keys, already
 unused) rather than inventing a second image concept.
 
@@ -99,40 +156,75 @@ all, so an anonymous link holder cannot reach a photo. This matches
 exactly for the three audiences that exist today.
 
 **What remains:** the owner approved recipient access to the photo in
-principle (Ruling 7), but there is no "recipient" audience to grant it to —
-that depends on requirement 3 landing first.
+principle (Ruling 7). Requirement 3 has since landed, so a real "recipient"
+audience now exists — but nothing has wired `pickupPhotoUrls` into
+`trackAsRecipient`/`listIncoming`/`trackPublic` for it yet, nor built any
+screen for sender, staff or courier. Tracked as BMPL-352, which names the
+same cause: this piece was recorded as blocked on requirement 3, requirement
+3 merged, and nothing fired to unblock it — a dependency that clears itself
+is how work goes missing.
 
 ## 3. Recipient account linking & incoming-shipment tracking
 
-**Status: blocked, unmerged.** PR #135 is built and independently reviewed —
-`recipientUserId`/`recipientClaimedAt`, a claim endpoint on its own
-controller so it doesn't inherit the public tracking route's decorator, a
-strict throttle, keyed on the token alone (never on a reference, id, or
-`destinationEmail`/`destinationPhone` match, to avoid an account-lookup
-oracle) — but it does not merge as designed.
-
+**Status: done, as Edward asked for it.** Merged `a6b7d97` (BMPL-179, PR
+#135) — `packages/database/prisma/migrations/20261104170000_shipment_recipient_link_audit`,
+`20261104180000_shipment_recipient_link`,
+`20261104190000_shipment_recipient_claim_failed_audit`. `recipientUserId`/
+`recipientClaimedAt` record a deliberate, authenticated claim
+(`POST /shipping/track/{token}/claim`) against the existing `recipientToken`
+capability link, on its own controller so it doesn't inherit the public
+tracking route's `@Public()`. The shipped claim policy is the one
 [Ruling 12](./OWNER-RULINGS.md#ruling-12--a-tracking-token-proves-possession-not-identity)
-eliminates the claim policy the PR shipped: "first authenticated claimant
-wins" is exactly the position the ruling rejects, since claiming is an
-authorization-granting act keyed on nothing but possession of the link. Two
-narrower options remain (require a matching contact signal, or have the
-sender confirm the claim) and the choice is the owner's.
+requires, not the one an earlier draft of this PR carried: a claim succeeds
+only when the caller's own account email or phone (normalized, already on
+file) matches the shipment's `destinationEmail`/`destinationPhone` —
+possession of the token alone is never sufficient. A failed match is
+rate-limited per shipment (5 attempts, counted on the shipment itself so it
+cannot be laundered by registering a fresh account) and audited; a repeat
+claim by the same account answers identically to the first success. Refuses
+across the `isTest` boundary. `trackAsRecipient` and `listIncoming` exist and
+are reached with the exact same allowlisted payload the anonymous link
+already returns — linking changes WHERE the view can be read from, never
+WHAT is in it.
 
-Confirmed for this matrix: `trackAsRecipient` and `listIncoming` do not exist
-anywhere in `apps/api/src` on `origin/main` — they exist only on the
-unmerged branch.
+**This is the requirement as Edward asked for it, delivered. Two further
+policy questions widen it and remain open — they are not missing pieces of
+what was asked, and a reader should not conclude the requirement is
+incomplete or that nothing is outstanding.** Card BMPL-119 (blocked), split
+out when the base tracking link shipped:
+
+- May BML text or email a recipient their tracking link using contact
+  details the sender supplied, when that person never gave BML their own
+  details? Deliberately not answered by Ruling 11's ETA-change-notification
+  language — "notify affected users" is not permission to initiate contact
+  with someone who never signed up, and the owner explicitly said not to
+  stretch it.
+- Should shipments booked before the tracking column existed get links
+  back-issued, or only new ones?
+
+Both are the owner's to answer and neither blocks anything shipping today.
 
 ## 4. Granular driver service areas (district → city)
 
-**Status: done.** Merged `3950db0` (PR #126). `DriverServiceArea` stayed
-completely unchanged; a new `DriverServiceCity` table
-(`driverProfileId`, `district`, `city`, `isActive`, composite FK cascading
-from the district row) carries the finer grain. An empty city set for a
-district means "serves the whole district" — the same thing every existing
-row has always meant — so no row needed a migration decision.
+**Status: API delivered, no user-facing surface. Do not read this as
+done.** Merged `3950db0` (PR #126) — `apps/api/src/driver/driver.controller.ts`,
+`driver.service.ts` and an integration spec only, zero `apps/web`/`apps/admin`
+files. `DriverServiceArea` stayed completely unchanged; a new
+`DriverServiceCity` table (`driverProfileId`, `district`, `city`,
+`isActive`, composite FK cascading from the district row) carries the finer
+grain. An empty city set for a district means "serves the whole district" —
+the same thing every existing row has always meant — so no row needed a
+migration decision.
 
 Consumed by dispatch matching in BMPL-194 (exact-match `sameCity`, documented
-in [`DISPATCH.md`](./DISPATCH.md)).
+in [`DISPATCH.md`](./DISPATCH.md)) — so the matching logic is genuinely
+live, not dormant. **What remains:** the district-level service-area picker
+already has a screen (`apps/web/app/dashboard/driver/service-areas/page.tsx`,
+`ServiceAreasSection.tsx`) that this feature never extended — confirmed by a
+zero-hit grep for `DriverServiceCity`/`serviceCities` across `apps/web` and
+`apps/admin` source. A driver today cannot narrow a district to specific
+cities from any screen; only dispatch matching benefits, and only for a row
+nothing lets anyone create. Tracked as BMPL-353.
 
 ## 5. Operating hours & closed/soon-closing handling
 
@@ -305,9 +397,8 @@ exists.
 
 ## 11. Recipient availability windows & updates
 
-**Status: mostly done, one piece open.**
+**Status: done.**
 
-**Done:**
 - **Sender-entered shipment availability windows**, end to end: the child
   table and sender write surface (`056b709`, PR #209), dispatch actually
   reading them with symmetric `FIRST_MILE`/`LAST_MILE`/`DIRECT` handling and
@@ -318,21 +409,24 @@ exists.
   to fourteen days for a serviceable date rather than inventing one, and
   degrades honestly to "could not confirm a date" when the configured
   schedule can't support the request.
+- **Recipient-side self-service on availability windows** — merged `a6f81bb`
+  (BMPL-344), the moment requirement 3 (`a6b7d97`, BMPL-179) landed and made
+  it possible to authenticate a "recipient" at all, exactly as this
+  requirement's history below predicted. `setAvailabilityWindows` now scopes
+  its delete to `{shipmentId, role IN allowedRoles}` rather than replacing
+  every role's rows — the sender's own path stays byte-identical (its
+  allowed roles are still both), so a recipient write can never erase the
+  sender's window. Authorization is `recipientUserId`, set only by
+  `claimAsRecipient` and never the token — Ruling 12 held. The recipient's
+  write returns a separate, smaller ack shape (reference + their own windows
+  only), never the full sender-facing view. Delivery *location* — Ruling
+  11's "where policy permits" — is correctly still not built; no card claims
+  otherwise.
 
-**Not built:**
-- **Recipient-side self-service on availability windows.** Re-verified
-  directly for this matrix: `setAvailabilityWindows`
-  (`apps/api/src/shipping/shipment.service.ts:1728`) gates the **entire**
-  call on `shipment.customerUserId === actor.userId` before it even looks at
-  which role's window is being set — so today only the sender can set a
-  window for *either* role, including the recipient's own.
-  [Ruling 11](./OWNER-RULINGS.md#ruling-11--recipient-availability-and-eta-changes)
-  says recipients may provide or update one. This is not a silent
-  contradiction of the ruling: the code that shipped this (BMPL-288) states
-  in its own card notes that recipient self-service is deliberately
-  deferred, because there is no way to authenticate a "recipient" at all
-  without requirement 3 (recipient account linking) landing first. It
-  resolves the moment requirement 3 does.
+**History:** until this landed, this row read "mostly done, one piece
+open," and its own text already said the open piece would resolve the
+moment requirement 3 did — requirement 3 merged in the same evening and the
+row was not updated until this final-acceptance audit checked it directly.
 
 ## 12. Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions
 
@@ -401,9 +495,11 @@ cannot hold that current; asking a running-API source (e.g.
 
 ---
 
-*Sources: kanban cards BMPL-174 through BMPL-190, BMPL-201, BMPL-247,
-BMPL-283 through BMPL-288, BMPL-337, BMPL-338, BMPL-340, BMPL-343, BMPL-345,
-BMPL-346, and the owner rulings in [`OWNER-RULINGS.md`](./OWNER-RULINGS.md).
+*Sources: kanban cards BMPL-119, BMPL-174 through BMPL-190, BMPL-201,
+BMPL-247, BMPL-283 through BMPL-288, BMPL-337, BMPL-338, BMPL-340, BMPL-343,
+BMPL-344, BMPL-345, BMPL-346, BMPL-351, BMPL-352, BMPL-353, BMPL-354, and
+the owner rulings in
+[`OWNER-RULINGS.md`](./OWNER-RULINGS.md).
 Every commit cited above was confirmed to be an ancestor of `origin/main`
 before this document was written. If a status here and a dependent card's
 own notes ever disagree, the code — not either document — is the
