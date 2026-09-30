@@ -68,13 +68,29 @@ const groupKey = (vendorProfileId: string, originLocationId: string | null) =>
  * last-takes-remainder loop — both can pass a test built on an evenly-
  * divisible fee while silently breaking on one that is not (see this
  * function's own test for a fee that does NOT divide evenly).
+ *
+ * EVERY WEIGHT ZERO BUT A REAL TOTAL TO SPLIT: falls back to an EQUAL
+ * split (same largest-remainder leftover pass, just on uniform weights)
+ * rather than returning all zeros. Unreachable today — a group's subtotal
+ * is always <= the pooled vendor subtotal it was drawn from, and the
+ * free-delivery threshold is evaluated per VENDOR, so if every per-group
+ * weight quoted free (0), the pooled quote already quoted free too and
+ * `totalMinor` is 0 right alongside them. But that safety is a
+ * COINCIDENCE of those two rules holding together, not something this
+ * function can see — a future per-location threshold, a per-origin
+ * promotion, or any non-monotonic rate would break it silently: an
+ * all-zero return would drop the entire collected fee and
+ * sum(feeMinor) would stop equaling what the customer actually paid,
+ * with no error anywhere. An equal split preserves that invariant under
+ * any future rule change this function doesn't know about, and can never
+ * fail a live checkout the way throwing here could.
  */
-function allocateProportional(totalMinor: bigint, weights: readonly bigint[]): bigint[] {
-  const sumWeights = weights.reduce((s, w) => s + w, 0n);
+export function allocateProportional(totalMinor: bigint, weights: readonly bigint[]): bigint[] {
   if (weights.length === 0) return [];
-  if (sumWeights === 0n) return weights.map(() => 0n);
-  const floors = weights.map((w) => (totalMinor * w) / sumWeights);
-  const remainders = weights.map((w) => (totalMinor * w) % sumWeights);
+  const sumWeights = weights.reduce((s, w) => s + w, 0n);
+  const [effWeights, effSum] = sumWeights === 0n ? [weights.map(() => 1n), BigInt(weights.length)] : [weights, sumWeights];
+  const floors = effWeights.map((w) => (totalMinor * w) / effSum);
+  const remainders = effWeights.map((w) => (totalMinor * w) % effSum);
   let leftover = totalMinor - floors.reduce((s, f) => s + f, 0n);
   const shares = [...floors];
   const byRemainderDesc = remainders
