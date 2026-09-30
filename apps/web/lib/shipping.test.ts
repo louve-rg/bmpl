@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { formatTransitTime, headlineFor, legPhase, shippingMoney, type ShipmentLegView, type ShipmentView } from './shipping';
+import {
+  etaLine,
+  formatTransitTime,
+  headlineFor,
+  legEtaNote,
+  legPhase,
+  shippingMoney,
+  showsEta,
+  type ShipmentEtaSummary,
+  type ShipmentLegEta,
+  type ShipmentLegView,
+  type ShipmentView,
+} from './shipping';
 
 const leg = (over: Partial<ShipmentLegView> = {}): ShipmentLegView => ({
   id: 'l1',
@@ -26,6 +38,7 @@ const leg = (over: Partial<ShipmentLegView> = {}): ShipmentLegView => ({
   courier: null,
   courierVehicle: null,
   conversationId: null,
+  eta: null,
   ...over,
 });
 
@@ -53,6 +66,7 @@ const shipment = (over: Partial<ShipmentView> = {}): ShipmentView => ({
   legs: [],
   custody: [],
   availabilityWindows: [],
+  eta: { confidence: 'UNKNOWN', estimatedArrivalAt: null },
   ...over,
 });
 
@@ -126,5 +140,83 @@ describe('headlineFor', () => {
   it('says cancelled before anything else', () => {
     const s = shipment({ status: 'CANCELLED', statusLabel: 'Cancelled', cancelledAt: new Date().toISOString() });
     expect(headlineFor(s)).toBe('Cancelled');
+  });
+});
+
+describe('showsEta', () => {
+  it('hides once there is nothing left to estimate', () => {
+    expect(showsEta('DELIVERED')).toBe(false);
+    expect(showsEta('CANCELLED')).toBe(false);
+  });
+
+  it('shows for every other status, including one it has not seen before', () => {
+    expect(showsEta('IN_TRANSIT')).toBe(true);
+    expect(showsEta('AWAITING_COLLECTION')).toBe(true);
+    expect(showsEta('EXCEPTION')).toBe(true);
+    expect(showsEta('SOME_FUTURE_STATUS')).toBe(true);
+  });
+});
+
+describe('etaLine', () => {
+  const summary = (over: Partial<ShipmentEtaSummary> = {}): ShipmentEtaSummary => ({
+    confidence: 'PROJECTED',
+    estimatedArrivalAt: '2026-10-02T15:00:00.000Z',
+    ...over,
+  });
+
+  it('says so in plain words when the confidence is UNKNOWN — never a blank, never a date', () => {
+    // UNKNOWN is a normal, permanent state (BMPL-340) — even if a stray
+    // timestamp were present, the confidence field alone decides the line.
+    expect(etaLine(summary({ confidence: 'UNKNOWN', estimatedArrivalAt: '2026-10-02T15:00:00.000Z' }), 'Fri, 2 Oct, 3:00 PM')).toBe(
+      "We don’t have an estimate for this yet",
+    );
+    expect(etaLine(summary({ confidence: 'UNKNOWN', estimatedArrivalAt: null }), null)).toBe(
+      "We don’t have an estimate for this yet",
+    );
+  });
+
+  it('says a carrier-committed or already-finished time as a fact, not a guess', () => {
+    expect(etaLine(summary({ confidence: 'KNOWN' }), 'Fri, 2 Oct, 3:00 PM')).toBe('Arriving Fri, 2 Oct, 3:00 PM');
+  });
+
+  it('says a computed time as the estimate it is', () => {
+    expect(etaLine(summary({ confidence: 'PROJECTED' }), 'Fri, 2 Oct, 3:00 PM')).toBe('Estimated to arrive Fri, 2 Oct, 3:00 PM');
+  });
+
+  it('falls back to the unknown line if a date somehow failed to format, rather than rendering a hole', () => {
+    expect(etaLine(summary({ confidence: 'PROJECTED' }), null)).toBe("We don’t have an estimate for this yet");
+  });
+});
+
+describe('legEtaNote', () => {
+  const eta = (over: Partial<ShipmentLegEta> = {}): ShipmentLegEta => ({
+    sequence: 1,
+    confidence: 'UNKNOWN',
+    estimatedCompletionAt: null,
+    reason: 'no carrier departure has been confirmed for this leg yet',
+    ...over,
+  });
+
+  it('passes the API reason through unchanged', () => {
+    expect(legEtaNote(leg({ eta: eta() }))).toBe('no carrier departure has been confirmed for this leg yet');
+  });
+
+  it('is null when the leg carries no eta at all — a cancelled leg, for instance', () => {
+    expect(legEtaNote(leg({ eta: null }))).toBeNull();
+  });
+
+  it('is null when the eta itself has nothing to say (e.g. a completed leg)', () => {
+    expect(legEtaNote(leg({ eta: eta({ confidence: 'KNOWN', reason: null }) }))).toBeNull();
+  });
+
+  it('is suppressed when the leg already shows its own exception reason — never say it twice', () => {
+    expect(
+      legEtaNote(
+        leg({
+          exceptionReason: 'Flight cancelled by the carrier.',
+          eta: eta({ reason: 'this leg needs attention before its onward journey can be estimated' }),
+        }),
+      ),
+    ).toBeNull();
   });
 });
