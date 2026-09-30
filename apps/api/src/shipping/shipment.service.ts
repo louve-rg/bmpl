@@ -1803,9 +1803,27 @@ export class ShipmentService {
    * CANCELLED leg). So the assignment is cleared, the offer history is closed,
    * and the driver is told — exactly what DispatchService.cancel already does
    * for a marketplace delivery.
+   *
+   * BMPL-183 (owner rule, given verbatim): acceptance is not pickup, and
+   * cancellation before ACTUAL custody transfer does not incur the delivery
+   * fee. "Actual custody" is read from the custody trail itself
+   * (`appendCustody`'s own rows), not inferred from leg status — a leg status
+   * is a second, derived source for the same fact, and this method already
+   * had one bug from trusting a status snapshot instead of the ledger of what
+   * really happened (see the class comment on `isDelivered`/BMPL-300 for the
+   * same lesson applied to a different guard). A courier merely accepting an
+   * offer (`courierStatus: DRIVER_ACCEPTED`) writes no custody row and leaves
+   * `status` at READY — no fee is withheld. The first row with a real
+   * `fromHolder` (`startLeg` SENDER/HUB -> DRIVER, or `departLeg` HUB ->
+   * CARRIER for a hub-only leg) is the moment somebody actually took the
+   * parcel; from then on the fee already earned stands and is not released.
+   * What happens to that parcel next — an exception state, a hub hold, a
+   * fresh return-to-sender charge — is deliberately NOT built here: the
+   * return leg is a new transport service with its own disclosed fee, and no
+   * fee has been given by the owner to build it with.
    */
   async cancel(id: string, input: CancelShipmentInput, actor: { userId: string; isStaff: boolean }) {
-    const { shipment, releasedDriverProfileIds } = await this.prisma.$transaction(async (tx) => {
+    const { shipment, releasedDriverProfileIds, custodyTransferred } = await this.prisma.$transaction(async (tx) => {
       const s = await tx.shipment.findUnique({ where: { id }, include: { legs: true } });
       if (!s) throw new NotFoundException('Shipment not found.');
       if (!actor.isStaff && s.customerUserId !== actor.userId) throw new NotFoundException('Shipment not found.');
@@ -1831,6 +1849,19 @@ export class ShipmentService {
       if (moving && !actor.isStaff) {
         throw new BadRequestException('This shipment is already moving. Contact support to stop it.');
       }
+
+      // BMPL-183: has anyone ACTUALLY taken the parcel — not merely accepted
+      // the job. Read from the custody trail itself rather than derived from
+      // `moving` above: `moving` only sees a leg that is IN_PROGRESS *right
+      // now*, so it misses a shipment sitting at a hub between two legs (the
+      // first already COMPLETED, the next not yet started) — custody has
+      // already passed to BML in that gap even though nothing is currently
+      // "moving". A real transfer is any custody row with a non-null
+      // `fromHolder`; the one row every shipment starts with (`null` ->
+      // `SENDER`, written at booking) is not a transfer, just the parcel's
+      // starting point.
+      const custodyTransferred =
+        (await tx.custodyEvent.count({ where: { shipmentId: id, fromHolder: { not: null } } })) > 0;
 
       // Who is being released. Read BEFORE the rows are rewritten — afterwards
       // there is nobody left on the leg to notify. Covers a driver who merely
@@ -1877,11 +1908,17 @@ export class ShipmentService {
         data: { status: 'CANCELLED', endedAt: new Date() },
       });
 
-      // Give the money back. Nobody has started work — the guard above refuses a
-      // customer cancellation once a leg is IN_PROGRESS — so the whole amount is
-      // returned. The release is idempotent: it only picks up holds that are
-      // still live, and its ledger reference is unique per payment.
-      await this.payments.releaseForShipment(tx, id, actor.userId);
+      // Give the money back — but only when nobody actually took the parcel
+      // yet (BMPL-183). Before custody, the release is idempotent and returns
+      // the whole amount, exactly as it always has. Once custody has
+      // transferred, the fee already earned stands: this is not a second
+      // charge and not a settlement, it is simply the absence of a release —
+      // no wallet mutation happens on this branch at all, staff or customer.
+      // Reversing it later (or charging a new fee for a return trip) is the
+      // still-blocked return-leg work, not this one.
+      if (!custodyTransferred) {
+        await this.payments.releaseForShipment(tx, id, actor.userId);
+      }
       const updated = await tx.shipment.update({
         where: { id },
         data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: input.reason },
@@ -1890,6 +1927,7 @@ export class ShipmentService {
       return {
         shipment: updated,
         releasedDriverProfileIds: [...new Set(released.map((l) => l.assignedDriverProfileId!))],
+        custodyTransferred,
       };
     });
 
@@ -1897,7 +1935,15 @@ export class ShipmentService {
       action: 'SHIPMENT_CANCELLED',
       actorId: actor.userId,
       reason: input.reason,
-      newValue: { shipmentId: shipment.id, reference: shipment.reference, releasedDriverProfileIds },
+      newValue: {
+        shipmentId: shipment.id,
+        reference: shipment.reference,
+        releasedDriverProfileIds,
+        // BMPL-183: whether the delivery fee was released (false) or stands
+        // because custody had already transferred (true) — the fact this
+        // whole card exists to get right, worth being able to read back.
+        custodyTransferred,
+      },
     });
 
     // Tell the released drivers, after the commit — a notification for a
