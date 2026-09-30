@@ -17,6 +17,7 @@ import {
 import { api, type ApiError } from '../../lib/api';
 import { affordability, bzd, walletApi, type WalletSummary } from '../../lib/wallet';
 import { Alert, Button, Card, EmptyState, ButtonLink, Input, PageHeader, Spinner } from '../../components/ui';
+import { vendorClosingSoonWarning, type VendorHoursExceptionPublic, type VendorWeeklyHour } from '../../lib/vendor-hours';
 
 type Method = 'PICKUP' | 'DELIVERY';
 
@@ -30,6 +31,8 @@ interface QuoteVendor {
   freeApplied: boolean;
   estimate: { minHours: number; maxHours: number; label: string | null } | null;
   minimumOrderMinor: number | null;
+  openingHours: VendorWeeklyHour[];
+  hoursExceptions: VendorHoursExceptionPublic[];
 }
 interface QuoteResponse {
   district: string;
@@ -293,10 +296,27 @@ export default function CheckoutPage() {
                     {/* Live per-vendor delivery outcome */}
                     {method === 'DELIVERY' && q && (
                       q.deliverable ? (
-                        <p className="mt-2 text-xs font-medium text-slate-500">
-                          Delivery: <span className="text-belize-navy">{q.freeApplied ? 'Free' : money(q.feeMinor)}</span>
-                          {estText(q.estimate) ? ` · Est. ${estText(q.estimate)}` : ''}
-                        </p>
+                        <>
+                          <p className="mt-2 text-xs font-medium text-slate-500">
+                            Delivery: <span className="text-belize-navy">{q.freeApplied ? 'Free' : money(q.feeMinor)}</span>
+                            {estText(q.estimate) ? ` · Est. ${estText(q.estimate)}` : ''}
+                          </p>
+                          {/* Edward REQ 5: "closing soon" — open right now, but the
+                              vendor's own configured hours say they may already be
+                              closed by the time this order is expected to arrive
+                              (worst case of the delivery estimate). Owner ruling 10
+                              still applies: never implies the order can't be placed. */}
+                          {(() => {
+                            if (!q.estimate) return null;
+                            const arrival = new Date(Date.now() + q.estimate.maxHours * 60 * 60 * 1000);
+                            const warning = vendorClosingSoonWarning(q.openingHours, q.hoursExceptions, new Date(), arrival);
+                            return warning ? (
+                              <Alert tone="warning" className="mt-2">
+                                {warning.message}
+                              </Alert>
+                            ) : null;
+                          })()}
+                        </>
                       ) : (
                         <p className="mt-2 text-xs font-semibold text-amber-600">
                           {q.reason === 'PICKUP_ONLY'

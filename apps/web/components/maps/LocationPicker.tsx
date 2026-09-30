@@ -8,6 +8,7 @@ import 'leaflet/dist/leaflet.css';
 import { BELIZE_BOUNDS, DISTRICT_CENTROIDS, OUT_OF_BOUNDS_MESSAGE, asDistrict, isWithinBelize, type Coordinates } from '@bmpl/shared';
 import { api } from '../../lib/api';
 import { Alert, Button, Spinner } from '../ui';
+import { FullScreenMapModal } from './FullScreenMapModal';
 
 interface GeocodeResult {
   label: string;
@@ -67,34 +68,7 @@ function describeAccuracy(m: number | null): { tone: 'success' | 'warning'; text
   };
 }
 
-/**
- * Pick the exact delivery spot on a map, the way you'd share a location in a
- * messaging app.
- *
- * WHY THIS EXISTS: Belize street addresses are frequently not findable. "412
- * Hummingbird Highway Extension, behind the old bridge" is a real address and a
- * useless navigation target. A pin is unambiguous, and it also upgrades the
- * driver's route estimate from a district-centroid guess to a real distance.
- *
- * Leaflet + OpenStreetMap, deliberately: no API key, no billing account, no
- * per-load cost. Leaflet is imported dynamically inside an effect so neither it
- * nor its CSS reaches any other page's bundle — only the routes that actually
- * show a map (checkout, and the vendor's pickup locations) pay for it.
- *
- * The pin is OPTIONAL. A customer who refuses location permission, or whose GPS
- * fails, or who simply doesn't want to, completes checkout on the typed address
- * exactly as before. Nothing here is allowed to become a wall.
- */
-export function LocationPicker({
-  value,
-  onChange,
-  disabled,
-  address,
-  district,
-  heading,
-  hint,
-  autoLocateAddress,
-}: {
+interface LocationPickerProps {
   value: Coordinates | null;
   onChange: (next: Coordinates | null) => void;
   disabled?: boolean;
@@ -115,7 +89,66 @@ export function LocationPicker({
    * we could have shown them.
    */
   autoLocateAddress?: boolean;
-}) {
+}
+
+/**
+ * Pick the exact delivery spot on a map, the way you'd share a location in a
+ * messaging app.
+ *
+ * WHY THIS EXISTS: Belize street addresses are frequently not findable. "412
+ * Hummingbird Highway Extension, behind the old bridge" is a real address and a
+ * useless navigation target. A pin is unambiguous, and it also upgrades the
+ * driver's route estimate from a district-centroid guess to a real distance.
+ *
+ * Leaflet + OpenStreetMap, deliberately: no API key, no billing account, no
+ * per-load cost. Leaflet is imported dynamically inside an effect so neither it
+ * nor its CSS reaches any other page's bundle — only the routes that actually
+ * show a map (checkout, and the vendor's pickup locations) pay for it.
+ *
+ * The pin is OPTIONAL. A customer who refuses location permission, or whose GPS
+ * fails, or who simply doesn't want to, completes checkout on the typed address
+ * exactly as before. Nothing here is allowed to become a wall.
+ *
+ * EDWARD REQ 8: the embedded map is a fixed 256px box, which is workably small
+ * for glancing at a pin but cramped for placing or dragging one precisely with
+ * a thumb. This component now renders `LocationPickerBody` twice — once
+ * embedded, once (on request) inside `FullScreenMapModal` — exactly the
+ * ExpandableRouteMap/MapPreview pattern (BMPL-182/BMPL-210): two independent
+ * Leaflet instances, never mounted at the same time, so expanding never pays
+ * for two live maps and never fights over one DOM node. `value` is owned by
+ * the caller, so the pin itself survives the switch; only the map's own
+ * transient state (GPS accuracy circle, address-lookup results) does not —
+ * the same accepted trade ExpandableRouteMap's own viewport already makes.
+ */
+export function LocationPicker(props: LocationPickerProps) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      {!expanded && <LocationPickerBody {...props} onExpand={() => setExpanded(true)} />}
+      <FullScreenMapModal
+        open={expanded}
+        onClose={() => setExpanded(false)}
+        title={props.heading ?? 'Delivery location'}
+        confirmLabel="Use this location"
+      >
+        {expanded && <LocationPickerBody {...props} inModal />}
+      </FullScreenMapModal>
+    </>
+  );
+}
+
+function LocationPickerBody({
+  value,
+  onChange,
+  disabled,
+  address,
+  district,
+  heading,
+  hint,
+  autoLocateAddress,
+  inModal = false,
+  onExpand,
+}: LocationPickerProps & { inModal?: boolean; onExpand?: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletNS.Map | null>(null);
   const markerRef = useRef<LeafletNS.Marker | null>(null);
@@ -238,9 +271,12 @@ export function LocationPicker({
       const map = L.map(containerRef.current, {
         center: [start.latitude, start.longitude],
         zoom: value ? PINNED_ZOOM : DEFAULT_ZOOM,
-        // A map that swallows one-finger scroll traps the customer mid-checkout.
-        // Dragging still pans; two fingers zoom. Scrolling the PAGE keeps working.
-        scrollWheelZoom: false,
+        // Embedded: a map that swallows one-finger scroll traps the customer
+        // mid-checkout, so wheel/pinch-zoom stays off and dragging still pans.
+        // In the full-screen modal there is no page scroll to protect, so the
+        // map may as well own every gesture, the way a dedicated map screen
+        // normally does.
+        scrollWheelZoom: inModal,
         // Keep the customer inside the country they are ordering in.
         maxBounds: L.latLngBounds(
           [BELIZE_BOUNDS.minLatitude, BELIZE_BOUNDS.minLongitude],
@@ -397,48 +433,55 @@ export function LocationPicker({
     onChangeRef.current(null);
   }, [clearAccuracyCircle]);
 
-  return (
-    <section aria-labelledby={headingId} className="overflow-hidden rounded-bmpl-md border border-slate-200 p-2.5 sm:p-4">
-      <h3 id={headingId} className="bmpl-label">
-        {heading ?? 'Delivery location'}
-      </h3>
-      <p className="mt-0.5 text-xs text-slate-500">
-        {hint ??
-          'Place the pin at the exact spot where you want your order delivered — the map follows the district you choose, and “Show my address” will try to find what you typed. This is optional, but it helps your driver find you.'}
-      </p>
-
-      <div className="mt-3 flex flex-wrap gap-2">
+  const buttons = (
+    <div className="mt-3 flex flex-wrap gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        // The primary action here, tapped one-handed. `size="sm"` renders 34px,
+        // which is below a comfortable target, so the height is set explicitly.
+        className="min-h-[44px] flex-1 sm:flex-none"
+        disabled={disabled || geo.kind === 'locating'}
+        onClick={useCurrentLocation}
+        aria-label="Use my current location to place the delivery pin"
+      >
+        {geo.kind === 'locating' ? 'Finding you…' : '📍 Use my current location'}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="min-h-[44px] flex-1 sm:flex-none"
+        disabled={disabled || lookup.busy}
+        onClick={findAddress}
+        aria-label="Show the address you typed on the map"
+      >
+        {lookup.busy ? <Spinner className="h-4 w-4" /> : '🔎 Show my address'}
+      </Button>
+      {value && (
+        <Button type="button" variant="outline" size="sm" className="min-h-[44px]" disabled={disabled} onClick={clear}>
+          Remove pin
+        </Button>
+      )}
+      {!inModal && onExpand && (
         <Button
           type="button"
           variant="outline"
           size="sm"
-          // The primary action here, tapped one-handed. `size="sm"` renders 34px,
-          // which is below a comfortable target, so the height is set explicitly.
-          className="min-h-[44px] flex-1 sm:flex-none"
-          disabled={disabled || geo.kind === 'locating'}
-          onClick={useCurrentLocation}
-          aria-label="Use my current location to place the delivery pin"
+          className="min-h-[44px]"
+          disabled={disabled}
+          onClick={onExpand}
+          aria-label="Open the map full screen to place the pin more precisely"
         >
-          {geo.kind === 'locating' ? 'Finding you…' : '📍 Use my current location'}
+          ⛶ Full screen
         </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="min-h-[44px] flex-1 sm:flex-none"
-          disabled={disabled || lookup.busy}
-          onClick={findAddress}
-          aria-label="Show the address you typed on the map"
-        >
-          {lookup.busy ? <Spinner className="h-4 w-4" /> : '🔎 Show my address'}
-        </Button>
-        {value && (
-          <Button type="button" variant="outline" size="sm" className="min-h-[44px]" disabled={disabled} onClick={clear}>
-            Remove pin
-          </Button>
-        )}
-      </div>
+      )}
+    </div>
+  );
 
+  const messages = (
+    <>
       {geo.kind === 'error' && (
         <Alert tone="warning" className="mt-3">
           {geo.message}
@@ -485,46 +528,89 @@ export function LocationPicker({
           {OUT_OF_BOUNDS_MESSAGE}
         </Alert>
       )}
+    </>
+  );
 
-      {/* h-64 with a hard max-width: the map must never be wider than the page,
-          and touch-pan-y lets a one-finger swipe scroll the checkout past it. */}
-      {/* -mx on phones: the map claws back the section's own padding so it is as
-          wide as the card allows. At 320px that is the difference between a
-          usable map and a postage stamp. */}
-      <div
-        ref={containerRef}
-        className="-mx-2.5 mt-3 h-64 overflow-hidden border-y border-slate-200 bg-slate-100 sm:mx-0 sm:rounded-bmpl-md sm:border"
-        style={{ touchAction: 'pan-y' }}
-        role="application"
-        aria-label="Map for choosing your delivery location. Use the current-location button, or tap the map to place the pin."
-      />
+  const status = (
+    <div aria-live="polite" className="mt-2 text-sm">
+      {value ? (
+        <>
+          <p className="font-semibold text-emerald-700">✓ Location selected</p>
+          {/* The accuracy line only applies while the pin is still where the
+              DEVICE put it. `place` clears the circle on any manual tap or
+              drag, so once the customer has corrected it we stop quoting a
+              margin of error at them for a point they chose themselves. */}
+          {geo.kind === 'located' && pinIsFromGps && (
+            <>
+              <p className={`mt-0.5 ${accuracy.tone === 'warning' ? 'text-amber-700' : 'text-slate-500'}`}>
+                {accuracy.text}
+              </p>
+              {accuracy.nudge && <p className="mt-0.5 text-xs text-slate-500">{accuracy.nudge}</p>}
+            </>
+          )}
+        </>
+      ) : (
+        <p className="text-slate-500">No pin yet — your typed address will be used.</p>
+      )}
+    </div>
+  );
+
+  const mapBox = (
+    <div
+      ref={containerRef}
+      className={
+        inModal
+          ? 'relative min-h-0 flex-1 bg-slate-100'
+          : '-mx-2.5 mt-3 h-64 overflow-hidden border-y border-slate-200 bg-slate-100 sm:mx-0 sm:rounded-bmpl-md sm:border'
+      }
+      // Embedded: pan-y lets a one-finger swipe keep scrolling the page past
+      // the map. In the modal there is no page underneath to protect, so the
+      // map owns every gesture (pinch-zoom included) directly.
+      style={{ touchAction: inModal ? 'none' : 'pan-y' }}
+      role="application"
+      aria-label="Map for choosing your delivery location. Use the current-location button, or tap the map to place the pin."
+    />
+  );
+
+  if (inModal) {
+    // FullScreenMapModal already supplies the dialog chrome (title bar,
+    // Escape/✕, and a full-width "Use this location" confirm button at the
+    // bottom) — this body only fills the middle: a compact controls strip,
+    // then the map filling whatever space remains.
+    return (
+      <div className="flex h-full flex-col">
+        <div className="shrink-0 px-3 pt-3">
+          <p className="text-xs text-slate-500">
+            {hint ?? 'Tap the map to place the pin, then drag it until it is exactly right.'}
+          </p>
+          {buttons}
+          {messages}
+        </div>
+        {mapBox}
+        {!ready && <p className="shrink-0 px-3 py-2 text-xs text-slate-400">Loading map…</p>}
+        <div className="shrink-0 border-t border-slate-200 px-3 py-2">{status}</div>
+      </div>
+    );
+  }
+
+  return (
+    <section aria-labelledby={headingId} className="overflow-hidden rounded-bmpl-md border border-slate-200 p-2.5 sm:p-4">
+      <h3 id={headingId} className="bmpl-label">
+        {heading ?? 'Delivery location'}
+      </h3>
+      <p className="mt-0.5 text-xs text-slate-500">
+        {hint ??
+          'Place the pin at the exact spot where you want your order delivered — the map follows the district you choose, and “Show my address” will try to find what you typed. This is optional, but it helps your driver find you.'}
+      </p>
+
+      {buttons}
+      {messages}
+
+      {mapBox}
 
       {!ready && <p className="mt-2 text-xs text-slate-400">Loading map…</p>}
 
-      {/* The state a screen reader needs, and the reassurance everyone else does.
-          Coordinates are deliberately not the headline — they mean nothing to a
-          customer — but they are available for anyone who wants them. */}
-      <div aria-live="polite" className="mt-2 text-sm">
-        {value ? (
-          <>
-            <p className="font-semibold text-emerald-700">✓ Location selected</p>
-            {/* The accuracy line only applies while the pin is still where the
-                DEVICE put it. `place` clears the circle on any manual tap or
-                drag, so once the customer has corrected it we stop quoting a
-                margin of error at them for a point they chose themselves. */}
-            {geo.kind === 'located' && pinIsFromGps && (
-              <>
-                <p className={`mt-0.5 ${accuracy.tone === 'warning' ? 'text-amber-700' : 'text-slate-500'}`}>
-                  {accuracy.text}
-                </p>
-                {accuracy.nudge && <p className="mt-0.5 text-xs text-slate-500">{accuracy.nudge}</p>}
-              </>
-            )}
-          </>
-        ) : (
-          <p className="text-slate-500">No pin yet — your typed address will be used.</p>
-        )}
-      </div>
+      {status}
       {value && (
         <details className="mt-1">
           <summary className="flex min-h-11 cursor-pointer items-center text-xs text-slate-400">Coordinates</summary>

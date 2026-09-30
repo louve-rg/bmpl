@@ -109,3 +109,64 @@ export function vendorClosedBadge(
 function formatCalendarDate(d: Date): string {
   return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(d);
 }
+
+export interface VendorClosingSoonWarning {
+  message: string;
+}
+
+/**
+ * Edward REQ 5: the case `vendorClosedBadge` deliberately does not cover — a
+ * vendor who is open RIGHT NOW but whose configured hours say they will close
+ * before this order's estimated delivery window is over.
+ *
+ * Same absolute rule as the closed badge (owner ruling 10): hours CONSTRAIN
+ * DISPATCH, they do not block ordering, so this never says or implies the
+ * order cannot be placed — only that it may be delivered after they've
+ * reopened. And the same "no configured hours -> no warning at all" default:
+ * an unconfigured vendor is unconstrained, not a vendor about whom nothing
+ * can be promised.
+ *
+ * Mutually exclusive with the closed badge by construction: if the vendor is
+ * already closed, THAT is the relevant fact and this returns null — "closing
+ * soon" only makes sense for a vendor who is still open right now.
+ *
+ * `estimatedArrival` is computed by the caller from the vendor's own
+ * configured `DeliveryEstimate` (never invented here) — conventionally
+ * `now + estimate.maxHours`, the worst case, so this warns on any chance of
+ * closing before arrival rather than only a certainty. No estimate configured
+ * means no arrival to compare against, so the caller should not call this at
+ * all in that case (there's nothing to warn about).
+ */
+export function vendorClosingSoonWarning(
+  weeklyHours: readonly VendorWeeklyHour[],
+  exceptions: readonly VendorHoursExceptionPublic[],
+  now: Date,
+  estimatedArrival: Date,
+): VendorClosingSoonWarning | null {
+  if (weeklyHours.length === 0 && exceptions.length === 0) return null;
+
+  const weeklyPattern: WeeklyOpeningHours[] = weeklyHours.map((h) => ({
+    dayOfWeek: h.dayOfWeek,
+    openTime: h.openTime,
+    closeTime: h.closeTime,
+    isClosed: h.isClosed,
+  }));
+  // Same no-Belize-shift parsing as vendorClosedBadge — see its own comment.
+  const hoursExceptions: HoursException[] = exceptions.map((e) => ({
+    date: new Date(e.date),
+    status: e.status,
+    openTime: e.openTime,
+    closeTime: e.closeTime,
+  }));
+
+  const nowResolution = resolveHoursStatus(now, weeklyPattern, hoursExceptions);
+  if (!nowResolution.isOpen) return null; // already closed — vendorClosedBadge's job, not this one.
+
+  const arrivalResolution = resolveHoursStatus(estimatedArrival, weeklyPattern, hoursExceptions);
+  if (arrivalResolution.isOpen) return null; // still open by the time it's expected to arrive.
+
+  const closesAt = nowResolution.closeTime ? ` at ${nowResolution.closeTime}` : '';
+  return {
+    message: `Open now, but may close${closesAt} before your order is expected to arrive. It will still be delivered once they reopen.`,
+  };
+}
