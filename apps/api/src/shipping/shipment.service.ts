@@ -906,6 +906,16 @@ export class ShipmentService {
       throw new BadRequestException('This shipment has already been linked to another account.');
     }
 
+    // KNOWN LIMITATION (accepted, not solved, by owner review 2026-09-30):
+    // the counter lives on the SHIPMENT so the limit cannot be laundered by
+    // registering a fresh account per guess (see this method's own top
+    // comment) — but that same property means anyone merely holding the
+    // tracking link can deliberately burn all five attempts and permanently
+    // lock out the genuine recipient. A locked-out recipient here and a
+    // locked-out handoff PIN (verifyHandoffPin) are the same unanswered
+    // question, and it is already in front of the owner as BMPL-13. Do not
+    // invent a reset path here — that would decide BMPL-13 by
+    // implementation rather than by the owner actually deciding it.
     if (s.recipientClaimAttempts >= MAX_RECIPIENT_CLAIM_ATTEMPTS) {
       throw new ForbiddenException('Too many attempts to link this account to this shipment. Contact support for help.');
     }
