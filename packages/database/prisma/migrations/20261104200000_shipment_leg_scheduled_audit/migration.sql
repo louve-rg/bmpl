@@ -1,0 +1,18 @@
+-- BMPL-346: audit vocabulary for recording a transport leg's scheduled
+-- departure/arrival.
+--
+-- ShipmentLeg.scheduledDepartureAt/scheduledArrivalAt already existed in the
+-- schema (they are what estimateShipmentEta reads for a LINE_HAUL leg's
+-- projection) but nothing anywhere wrote them -- no endpoint, no service.
+-- This migration adds no column: the columns are not the gap, their writer
+-- was. It adds only the audit action the new writer records under.
+--
+-- SHIPMENT_LEG_SCHEDULED: a carrier (their own leg) or staff recorded, or
+-- corrected, a real scheduled departure and/or arrival time for a LINE_HAUL
+-- leg. Deliberately its own value rather than reusing SHIPMENT_LEG_DEPARTED
+-- (that is the leg ACTUALLY departing -- departedAt, custody, status --
+-- a completely different fact from a carrier's advance commitment).
+--
+-- Additive and idempotent; no table, no column, no backfill, and no existing
+-- enum value is touched.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_LEG_SCHEDULED';

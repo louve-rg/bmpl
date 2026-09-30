@@ -41,6 +41,7 @@ import type {
   LegDepartInput,
   LegExceptionInput,
   LegHandoffInput,
+  LegScheduleInput,
   ResolveLegExceptionInput,
   SetAvailabilityWindowsInput,
   ShipmentQuoteInput,
@@ -154,6 +155,15 @@ type RecipientViewGraph = Prisma.ShipmentGetPayload<{ include: typeof RECIPIENT_
  * Custody is append-only. The answer to "who had it when it went missing" is only
  * worth having if nothing in this file can rewrite it.
  */
+
+/**
+ * BMPL-346: the statuses a transport leg's carrier-scheduled time may still
+ * be recorded or corrected under — every status except the two terminal
+ * ones. Exported so `ShippingProviderService`'s own read-side `canSchedule`
+ * names this exact rule rather than keeping a second copy of it.
+ */
+export const SCHEDULABLE_LEG_STATUSES: LegStatus[] = ['PENDING', 'READY', 'IN_PROGRESS', 'EXCEPTION'];
+
 @Injectable()
 export class ShipmentService {
   constructor(
@@ -1322,6 +1332,116 @@ export class ShipmentService {
     });
   }
 
+  /**
+   * BMPL-346: the only writer for `scheduledDepartureAt`/`scheduledArrivalAt`
+   * on a transport leg — a real carrier commitment, so `estimateShipmentEta`
+   * stops answering UNKNOWN for the one reason it always did: nothing
+   * anywhere ever wrote these two columns. The schema already chose their
+   * home (`RouteScheduleException`'s own comment: "an individual departure's
+   * time lives on PassengerTrip / ShipmentLeg, not here") — this fills the
+   * writer in, it does not invent a new place for the data to live.
+   *
+   * No source to derive this from exists: `LogisticsRoute.scheduleNote` is a
+   * free-text label ("Mon/Wed/Fri 09:00") its own field comment calls
+   * exactly that — "operations write [it] and the planner only reports it.
+   * Real timetables are a later problem" — never a machine-readable time,
+   * and `PassengerTrip.scheduledDepartureAt` is a different domain's
+   * departure model with no link to a `LogisticsRoute` at all, itself
+   * populated the same way this method populates its freight counterpart:
+   * an authorized party typing in a real, specific time (see
+   * `PassengerNetworkService.createTrip`).
+   *
+   * LINE_HAUL only — a courier leg's timing is dispatch and a driver's own
+   * progress, not a published schedule; there is nothing for a
+   * FIRST_MILE/LAST_MILE/DIRECT leg to commit to here.
+   *
+   * Deliberately NOT `transition()`: nothing about the leg's status, its
+   * custody, or the shipment's own derived status changes — a carrier's
+   * fixed sailing time is real and knowable well before an earlier leg has
+   * even started, so `isLegActionable`'s "only the leg whose turn it is"
+   * rule must not gate this the way it gates an actual transition. The
+   * positive allow-list below is `cancel()`'s own "still open" set
+   * (`PENDING`, `READY`, `IN_PROGRESS`, `EXCEPTION`) — everything except the
+   * two terminal statuses, matching apps/api/CLAUDE.md's guidance to name
+   * the eligible statuses rather than negatively check for "not finished".
+   *
+   * A partial update (only one of the two fields) leaves the other exactly
+   * as it stood — correcting a departure estimate must not silently erase an
+   * already-recorded arrival commitment.
+   *
+   * THE NAMED INVARIANT (owner ruling, BMPL-346 CI review): A RECORDED
+   * SCHEDULE MAY DESCRIBE THE PAST ONLY FOR AN EVENT THAT HAS ALREADY
+   * HAPPENED. Equivalently: a scheduled time must never create a knowingly
+   * false ETA. The two "must be in the future" checks below exist only to
+   * enforce this — each is scoped to the event its own field describes, not
+   * to "now" in general, because the two fields are not equally dangerous
+   * when stale. Traced from how `estimateShipmentEta`'s `projectLineHaul`
+   * actually consumes them (`packages/shared/src/shipment-eta.ts`):
+   *
+   * - `scheduledArrivalAt`, while the leg genuinely has not arrived yet
+   *   (`arrivedAt` still null), is taken DIRECTLY as a confident `KNOWN`
+   *   ETA with no clamp at all — a past value here IS the knowingly-false
+   *   case the invariant names: it would report an already-arrived
+   *   shipment that has not arrived, worse than `UNKNOWN`. Refused while
+   *   `arrivedAt` is null.
+   * - `scheduledDepartureAt` only ever feeds a PROJECTED estimate clamped
+   *   to `max(scheduledDepartureAt, anchor)` — a past value here is not
+   *   false at all once the leg has genuinely departed (`departedAt` set):
+   *   it is history, and the projection simply falls back to "now" (or the
+   *   leg's own `startedAt`) regardless. Refusing it was the bug the
+   *   invariant caught — an EXCEPTION leg is exactly where a time gets
+   *   fixed after the fact. Refused only while `departedAt` is still null.
+   *
+   * Once the leg has both really departed and really arrived, neither
+   * guard applies — there is nothing left to protect and every correction
+   * is describing something that has already, verifiably, happened.
+   */
+  async scheduleLeg(legId: string, input: LegScheduleInput, actor: { userId: string }) {
+    const leg = await this.prisma.shipmentLeg.findUnique({ where: { id: legId } });
+    if (!leg) throw new NotFoundException('Leg not found.');
+    if (leg.kind !== 'LINE_HAUL') {
+      throw new BadRequestException('Only a transport leg carries a carrier-scheduled time.');
+    }
+    if (!SCHEDULABLE_LEG_STATUSES.includes(leg.status)) {
+      throw new BadRequestException(`This leg is ${leg.status.toLowerCase()}; its schedule can no longer be recorded.`);
+    }
+    const now = Date.now();
+    if (input.scheduledDepartureAt && leg.departedAt == null && input.scheduledDepartureAt.getTime() <= now) {
+      throw new BadRequestException('That departure time has already passed.');
+    }
+    if (input.scheduledArrivalAt && leg.arrivedAt == null && input.scheduledArrivalAt.getTime() <= now) {
+      throw new BadRequestException('That arrival time has already passed.');
+    }
+
+    const updated = await this.prisma.shipmentLeg.update({
+      where: { id: legId },
+      data: {
+        scheduledDepartureAt: input.scheduledDepartureAt ?? leg.scheduledDepartureAt,
+        scheduledArrivalAt: input.scheduledArrivalAt ?? leg.scheduledArrivalAt,
+      },
+    });
+    await this.audit.record({
+      action: 'SHIPMENT_LEG_SCHEDULED',
+      actorId: actor.userId,
+      newValue: {
+        legId,
+        shipmentId: leg.shipmentId,
+        scheduledDepartureAt: updated.scheduledDepartureAt?.toISOString() ?? null,
+        scheduledArrivalAt: updated.scheduledArrivalAt?.toISOString() ?? null,
+      },
+    });
+
+    // The full shipment, STAFF-serialized — same shape depart/arrive return,
+    // and NOT the raw leg row: `updated` above carries `handoffPin`, and this
+    // method has no business handing a code out just because it also holds
+    // `logistics.operate` (that stays behind `logistics.verify`'s separate
+    // reveal). The carrier's own surface (ShippingProviderService.schedule)
+    // already goes through `myLeg` -> `providerLegOut`, which never carried
+    // the PIN either.
+    const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id: leg.shipmentId }, include: SHIPMENT_INCLUDE });
+    return this.serialize(fresh, { audience: 'STAFF' });
+  }
+
   /** Complete a leg: verify the handoff, then hand custody to whoever now holds it. */
   async completeLeg(legId: string, input: LegHandoffInput, actor: { userId: string; label?: string }) {
     let released = false;
@@ -2273,6 +2393,10 @@ export class ShipmentService {
         conversationId: conversationIds.get(l.id) ?? null,
         scheduleNote: l.route?.scheduleNote ?? null,
         scheduledDepartureAt: l.scheduledDepartureAt,
+        // BMPL-346: departure's own counterpart was exposed here already;
+        // arrival was not — caught by the new writer's own read-back test,
+        // not assumed fine because departure already worked.
+        scheduledArrivalAt: l.scheduledArrivalAt,
         departedAt: l.departedAt,
         arrivedAt: l.arrivedAt,
         startedAt: l.startedAt,

@@ -354,6 +354,27 @@ export const legDepartSchema = z.object({
 export type LegDepartInput = z.infer<typeof legDepartSchema>;
 
 /**
+ * Recording a real carrier commitment for a transport leg's departure and/or
+ * arrival (BMPL-346) — the only writer for `ShipmentLeg.scheduledDepartureAt`
+ * / `scheduledArrivalAt`. At least one of the two; when both are given,
+ * arrival has to be after departure, the same shape `passengerTripCreateSchema`
+ * already uses for the same pair of fields on `PassengerTrip`.
+ */
+export const legScheduleSchema = z
+  .object({
+    scheduledDepartureAt: z.coerce.date().optional(),
+    scheduledArrivalAt: z.coerce.date().optional(),
+  })
+  .refine((v) => v.scheduledDepartureAt != null || v.scheduledArrivalAt != null, {
+    message: 'Give a scheduled departure or arrival time.',
+  })
+  .refine((v) => !v.scheduledDepartureAt || !v.scheduledArrivalAt || v.scheduledArrivalAt > v.scheduledDepartureAt, {
+    message: 'The scheduled arrival must be after the scheduled departure.',
+    path: ['scheduledArrivalAt'],
+  });
+export type LegScheduleInput = z.infer<typeof legScheduleSchema>;
+
+/**
  * Confirming a leg's handoff. The PIN is what the RECEIVER holds, so whoever is
  * handing over has to produce it — the same shape as the delivery PIN that
  * already works.

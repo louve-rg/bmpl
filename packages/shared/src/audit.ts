@@ -270,6 +270,12 @@ export const AUDIT_ACTIONS = [
   // instead of a handoff code. Recorded on every failed attempt, same as
   // that one, so the rate limit has an audit trail behind it.
   'SHIPMENT_RECIPIENT_CLAIM_FAILED',
+  // BMPL-346: a carrier (their own leg) or staff recorded, or corrected, a
+  // real scheduled departure/arrival for a LINE_HAUL leg — the only writer
+  // for ShipmentLeg.scheduledDepartureAt/scheduledArrivalAt. Its own value
+  // rather than reusing SHIPMENT_LEG_DEPARTED, which is the leg ACTUALLY
+  // departing (departedAt, custody, status) — a different fact entirely.
+  'SHIPMENT_LEG_SCHEDULED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
