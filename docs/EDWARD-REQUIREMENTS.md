@@ -40,10 +40,10 @@ and found it on requirements 1, 3 and 11 at once.
 
 | # | Requirement | Status | Evidence |
 | - | --- | --- | --- |
-| 1 | Vendor location-level inventory & fulfilment origin | **Done** | `bad7b3f` (BMPL-175, PR #259) |
+| 1 | Vendor location-level inventory & fulfilment origin | **API done; no UI** | `bad7b3f` (BMPL-175, PR #259) touches zero `apps/web`/`apps/admin` files; UI tracked as BMPL-354 |
 | 2 | Package pickup/handoff photo | **API done; no web UI** | `682b501` (PR #127); no screen anywhere shows or uploads it — see below |
 | 3 | Recipient account linking & incoming-shipment tracking | **Done** | `a6b7d97` (BMPL-179, PR #135); two policy questions open (BMPL-119), see below |
-| 4 | Granular driver service areas (district → city) | **Done** | `3950db0` (PR #126) |
+| 4 | Granular driver service areas (district → city) | **API done; no UI** | `3950db0` (PR #126) touches zero `apps/web`/`apps/admin` files for the city dimension; see below |
 | 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255) |
 | 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
 | 7 | Courier & vehicle identification once assigned | **Done** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247 |
@@ -53,11 +53,24 @@ and found it on requirements 1, 3 and 11 at once.
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
 | 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **Two of four pieces done** | ETA: `f1bbfce` (BMPL-340 phase 1). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Open: ETA-change notice (BMPL-345), hold/reroute (BMPL-343) |
 
+**Three of twelve — requirements 1, 2 and 4 — share one cause, not three
+separate ones: each has a real, merged, tested API and no user-facing
+screen at all.** Confirmed for each by diffing its own merge commit for
+`apps/web`/`apps/admin` files (`bad7b3f`, `682b501`, `3950db0` — every one
+touches zero) rather than inferring it from the commit message. This batch
+was built API-first, and the web half of these three was never scheduled —
+not blocked on a decision, not attempted and abandoned, simply never carded.
+Recording each as its own isolated status invites fixing them one at a time
+without anyone asking why there were three. Requirement 1's UI is tracked as
+BMPL-354; requirement 2's recipient-photo wiring and requirement 4's
+city-picker UI are both real gaps with no card yet.
+
 ---
 
 ## 1. Vendor location-level inventory & fulfilment origin
 
-**Status: done.** Merged `bad7b3f` (BMPL-175, PR #259) —
+**Status: API delivered, no user-facing surface. Do not read this as
+done.** Merged `bad7b3f` (BMPL-175, PR #259) —
 `packages/database/prisma/migrations/20261104170800_vendor_location_inventory`.
 A new child table (`inventory_locations`: `inventoryId` + `locationId` FKs,
 `quantity`/`reserved`) lets a vendor with multiple `VendorLocation`s track
@@ -91,11 +104,24 @@ pooled — real, configured rates, nothing invented, but it does change what a
 customer pays, so it went to the owner as its own question rather than
 riding through on this merge. Now tracked as BMPL-351, open.
 
+**What remains — a real gap, not a formality:** `bad7b3f` touches zero
+files under `apps/web` or `apps/admin` — 13 files, all `apps/api` plus
+`packages/database` plus one integration spec. Confirmed directly (zero-hit
+greps on the commit's own names — `inventory-locations`, `adjustAtLocation`,
+`originLocationId` — across both apps' source) rather than assumed from the
+file list alone: the vendor inventory editor still calls the old
+product-level `/inventory/adjust`
+(`apps/web/components/products/inventory-adjust.ts:13`), never a
+per-location endpoint. There is no vendor screen to set stock per location
+and no admin screen to see which location fulfilled a `VendorOrder`. Tracked
+as BMPL-354, open.
+
 **History:** this requirement was carried as "design approved, nothing
-built" through this document's original writing (BMPL-339) — BMPL-175
-shipped in the same evening without the matrix being told, and stayed wrong
-until a final-acceptance audit checked the card directly instead of trusting
-the row.
+built" through this document's original writing (BMPL-339); BMPL-175
+shipped in the same evening without the matrix being told. A first
+correction pass (this same final-acceptance audit) swung the row straight to
+"Done," which was also wrong — the code delivers the API, not the
+requirement, and neither extreme described what actually shipped.
 
 ## 2. Package pickup/handoff photo
 
@@ -177,15 +203,25 @@ Both are the owner's to answer and neither blocks anything shipping today.
 
 ## 4. Granular driver service areas (district → city)
 
-**Status: done.** Merged `3950db0` (PR #126). `DriverServiceArea` stayed
-completely unchanged; a new `DriverServiceCity` table
-(`driverProfileId`, `district`, `city`, `isActive`, composite FK cascading
-from the district row) carries the finer grain. An empty city set for a
-district means "serves the whole district" — the same thing every existing
-row has always meant — so no row needed a migration decision.
+**Status: API delivered, no user-facing surface. Do not read this as
+done.** Merged `3950db0` (PR #126) — `apps/api/src/driver/driver.controller.ts`,
+`driver.service.ts` and an integration spec only, zero `apps/web`/`apps/admin`
+files. `DriverServiceArea` stayed completely unchanged; a new
+`DriverServiceCity` table (`driverProfileId`, `district`, `city`,
+`isActive`, composite FK cascading from the district row) carries the finer
+grain. An empty city set for a district means "serves the whole district" —
+the same thing every existing row has always meant — so no row needed a
+migration decision.
 
 Consumed by dispatch matching in BMPL-194 (exact-match `sameCity`, documented
-in [`DISPATCH.md`](./DISPATCH.md)).
+in [`DISPATCH.md`](./DISPATCH.md)) — so the matching logic is genuinely
+live, not dormant. **What remains:** the district-level service-area picker
+already has a screen (`apps/web/app/dashboard/driver/service-areas/page.tsx`,
+`ServiceAreasSection.tsx`) that this feature never extended — confirmed by a
+zero-hit grep for `DriverServiceCity`/`serviceCities` across `apps/web` and
+`apps/admin` source. A driver today cannot narrow a district to specific
+cities from any screen; only dispatch matching benefits, and only for a row
+nothing lets anyone create. No card exists yet for this UI gap.
 
 ## 5. Operating hours & closed/soon-closing handling
 
@@ -450,7 +486,7 @@ cannot hold that current; asking a running-API source (e.g.
 
 *Sources: kanban cards BMPL-119, BMPL-174 through BMPL-190, BMPL-201,
 BMPL-247, BMPL-283 through BMPL-288, BMPL-337, BMPL-338, BMPL-340, BMPL-343,
-BMPL-344, BMPL-345, BMPL-346, BMPL-351, and the owner rulings in
+BMPL-344, BMPL-345, BMPL-346, BMPL-351, BMPL-354, and the owner rulings in
 [`OWNER-RULINGS.md`](./OWNER-RULINGS.md).
 Every commit cited above was confirmed to be an ancestor of `origin/main`
 before this document was written. If a status here and a dependent card's
