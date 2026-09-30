@@ -52,7 +52,7 @@ export function RecipientTracking({ view }: { view: RecipientTrackingView }) {
             to arrive, including an honest "we don't know yet" — never a
             blank, never a spinner. Hidden once delivered or cancelled. */}
         {showsEta(view.status) && (
-          <p className="mt-3 text-sm text-slate-600">{etaLine(view.eta, formatDate(view.eta.estimatedArrivalAt))}</p>
+          <p className="mt-3 text-sm text-slate-600">{etaLine(view.eta, formatDate(view.eta?.estimatedArrivalAt ?? null))}</p>
         )}
       </div>
 

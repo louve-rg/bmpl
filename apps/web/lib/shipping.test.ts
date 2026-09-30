@@ -186,6 +186,19 @@ describe('etaLine', () => {
   it('falls back to the unknown line if a date somehow failed to format, rather than rendering a hole', () => {
     expect(etaLine(summary({ confidence: 'PROJECTED' }), null)).toBe("We don’t have an estimate for this yet");
   });
+
+  it('does not throw when eta itself is absent — a real case, not a hypothetical one', () => {
+    // web and api deploy independently (Vercel vs. Railway, which runs
+    // `prisma migrate deploy` first and is therefore slower). A response can
+    // legitimately arrive with no `eta` field at all while api is still
+    // rolling out; this must read as UNKNOWN, never crash the page. Cloning
+    // through JSON + delete simulates a real wire payload missing the key,
+    // not just an in-memory `undefined` a type-only test would miss.
+    const raw = JSON.parse(JSON.stringify(shipment())) as Record<string, unknown>;
+    delete raw.eta;
+    expect(() => etaLine(raw.eta as ShipmentEtaSummary | undefined, null)).not.toThrow();
+    expect(etaLine(raw.eta as ShipmentEtaSummary | undefined, null)).toBe("We don’t have an estimate for this yet");
+  });
 });
 
 describe('legEtaNote', () => {

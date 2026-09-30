@@ -189,8 +189,16 @@ export interface ShipmentView {
    * the token existed; absent until the API that mints it is deployed.
    */
   recipientTrackingToken?: string | null;
-  /** BMPL-340 (Edward req 12): the journey's own overall ETA. */
-  eta: ShipmentEtaSummary;
+  /**
+   * BMPL-340 (Edward req 12): the journey's own overall ETA. Optional like
+   * `recipientTrackingToken` above and for the same reason — web and api
+   * deploy independently (Vercel vs. Railway, which runs `prisma migrate
+   * deploy` first and is therefore slower), so there is a real window where
+   * this page is live against an API that does not send the field yet.
+   * Absence means the same thing `confidence: 'UNKNOWN'` means — read it
+   * through {@link etaLine}, never dereferenced directly.
+   */
+  eta?: ShipmentEtaSummary;
 }
 
 /**
@@ -227,8 +235,14 @@ export interface RecipientTrackingView {
    * type is pinned byte-identical across `trackPublic`/`trackAsRecipient`/
    * `listIncoming` (the BMPL-179 parity test), so `eta` must stay exactly
    * this shape on all three.
+   *
+   * Optional, same reason as `ShipmentView.eta` above: web and api deploy
+   * independently, and `trackPublic` in particular is UNAUTHENTICATED — a
+   * crash there is a blank page visible to anyone holding the link, not
+   * just a signed-in customer. Absence means the same thing UNKNOWN means;
+   * read it through {@link etaLine}, never dereferenced directly.
    */
-  eta: ShipmentEtaSummary;
+  eta?: ShipmentEtaSummary;
 }
 
 /**
@@ -395,11 +409,16 @@ export function showsEta(status: string): boolean {
  * system today, not a loading state: say so in plain words, never a blank
  * or a spinner that never resolves.
  *
+ * `eta` itself is optional — a real, non-hypothetical case, not just a
+ * defensive type: web and api deploy independently, so a response can
+ * legitimately arrive with no `eta` field at all while api is still
+ * rolling out. Absence is read exactly like UNKNOWN, never a crash.
+ *
  * `formattedDate` is passed in already localized — this function has no
  * opinion on date formatting, only on what the confidence means.
  */
-export function etaLine(eta: ShipmentEtaSummary, formattedDate: string | null): string {
-  if (eta.confidence === 'UNKNOWN' || !formattedDate) {
+export function etaLine(eta: ShipmentEtaSummary | undefined, formattedDate: string | null): string {
+  if (!eta || eta.confidence === 'UNKNOWN' || !formattedDate) {
     return 'We don’t have an estimate for this yet';
   }
   // KNOWN: a carrier's own commitment, or the leg already finished — not a

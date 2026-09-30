@@ -157,7 +157,7 @@ export function ShipmentJourney({ shipment }: { shipment: ShipmentView }) {
           {showsEta(shipment.status) && (
             <div className="col-span-2">
               <dt className="text-xs text-slate-500">Arrival</dt>
-              <dd className="text-slate-900">{etaLine(shipment.eta, formatDate(shipment.eta.estimatedArrivalAt))}</dd>
+              <dd className="text-slate-900">{etaLine(shipment.eta, formatDate(shipment.eta?.estimatedArrivalAt ?? null))}</dd>
             </div>
           )}
         </dl>

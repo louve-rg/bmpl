@@ -90,7 +90,7 @@ export default function IncomingShipmentsPage() {
                 </div>
                 {destinationLine(s) && <p className="mt-2 break-words text-xs text-slate-600">Going to {destinationLine(s)}</p>}
                 {showsEta(s.status) && (
-                  <p className="mt-1 break-words text-xs text-slate-500">{etaLine(s.eta, formatDate(s.eta.estimatedArrivalAt))}</p>
+                  <p className="mt-1 break-words text-xs text-slate-500">{etaLine(s.eta, formatDate(s.eta?.estimatedArrivalAt ?? null))}</p>
                 )}
               </Link>
             </li>
