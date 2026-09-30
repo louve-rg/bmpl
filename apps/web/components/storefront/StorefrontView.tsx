@@ -26,10 +26,20 @@ export interface Storefront {
   logoUrl: string | null;
   bannerUrl: string | null;
   locations: Array<{ label: string; addressLine1: string; addressLine2: string | null; city: string; district: string; isPrimary: boolean }>;
-  openingHours: VendorWeeklyHour[];
+  /**
+   * BMPL-335. Optional: web (Vercel) and api (Railway, which runs `prisma
+   * migrate deploy` first and is therefore slower) deploy independently, so
+   * there is a real window after a merge like this one's own where this
+   * PUBLIC, unauthenticated page (`/store/[slug]`) is live against an api
+   * that doesn't send these fields yet. Absence means the same thing an
+   * empty array means here — nothing configured, no badge, no card — never
+   * a crash for an anonymous shopper.
+   */
+  openingHours?: VendorWeeklyHour[];
   /** BMPL-335: exactly the four fields the API selects — never `reason` or
-   *  `createdByUserId`, see vendor.service.ts's STOREFRONT_INCLUDE. */
-  hoursExceptions: VendorHoursExceptionPublic[];
+   *  `createdByUserId`, see vendor.service.ts's STOREFRONT_INCLUDE. Optional
+   *  for the same reason as `openingHours` above. */
+  hoursExceptions?: VendorHoursExceptionPublic[];
   featuredProducts: Array<{ id: string; title: string; slug: string; priceMinor: number; salePriceMinor: number | null; category: { name: string }; primaryImageUrl: string | null }>;
   categories: Array<{ name: string; slug: string }>;
 }
@@ -40,13 +50,21 @@ export interface Storefront {
  * only — callers provide their own page chrome (header/footer or dashboard shell).
  */
 export function StorefrontView({ store }: { store: Storefront }) {
+  // Read once, absence-safe: see the field's own doc comment above for why
+  // `openingHours`/`hoursExceptions` can legitimately be missing rather than
+  // empty. Every other use of either field in this component goes through
+  // these two locals, never `store.openingHours`/`store.hoursExceptions`
+  // directly, so a future addition below can't reopen the same crash.
+  const openingHours = store.openingHours ?? [];
+  const hoursExceptions = store.hoursExceptions ?? [];
+
   // Ruling 10 (BMPL-259/BMPL-335): configured hours CONSTRAIN DISPATCH, they
   // do not block ordering. Computed from BOTH the weekly pattern AND the
   // exception rows — either alone can give the wrong answer on an excepted
   // date, which is exactly the case this card was held all evening to avoid.
   // null (no configured hours at all, or currently open) means no badge —
   // not "hours unknown", nothing.
-  const closedBadge = vendorClosedBadge(store.openingHours, store.hoursExceptions);
+  const closedBadge = vendorClosedBadge(openingHours, hoursExceptions);
 
   return (
     <>
@@ -183,9 +201,9 @@ export function StorefrontView({ store }: { store: Storefront }) {
               </Card>
             )}
 
-            {store.openingHours.length > 0 && (
+            {openingHours.length > 0 && (
               <Card title="Opening hours">
-                {store.openingHours.map((h) => (
+                {openingHours.map((h) => (
                   <p key={h.dayOfWeek} className="flex justify-between text-sm text-slate-600">
                     <span>{DAYS[h.dayOfWeek]}</span>
                     <span>{h.isClosed ? 'Closed' : `${h.openTime}–${h.closeTime}`}</span>
