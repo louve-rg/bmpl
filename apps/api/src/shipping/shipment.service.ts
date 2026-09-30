@@ -17,6 +17,7 @@ import {
   SHIPPING_SERVICE_DESCRIPTIONS,
   SHIPPING_SERVICE_LABELS,
   TRANSPORT_MODE_LABELS,
+  type AvailabilityWindowRole,
   type Endpoint,
   type PlannerHub,
   type PlannerLane,
@@ -1925,38 +1926,84 @@ export class ShipmentService {
   }
 
   /**
-   * BMPL-284/285: replace the whole set of sender/recipient availability
-   * windows in one call — same "replace all, not patch one row" shape as
-   * setHubWeeklyHours: a window the sender no longer submits is gone, never
-   * a stale row sitting beside new ones. The sender only; the recipient has
-   * no write surface today (BMPL-184/BMPL-179).
+   * BMPL-284/285/288 + Edward requirement 11 (unblocked by BMPL-179): replace
+   * the CALLER's own role(s)' availability windows in one call — same
+   * "replace all, not patch one row" shape as setHubWeeklyHours: a window no
+   * longer submitted is gone, never a stale row sitting beside new ones.
    *
-   * GATING, per BMPL-284's own authorization finding: a role's windows may
-   * only be set or changed while the leg that role governs has not started
-   * (SENDER -> FIRST_MILE or, on a door-to-door DIRECT leg, that leg;
-   * RECIPIENT -> LAST_MILE or that same DIRECT leg). Once a driver is
-   * actually en route, a window nobody can act on any more is not a real
-   * constraint, and changing it would tell the sender the window did
-   * something it no longer can. CLEARING is exempt from this: dropping a
-   * role from the submitted set only widens back toward "no constraint",
-   * which is always safe, so a role whose leg has already started may still
-   * be cleared (by simply not including it), just never newly set.
+   * WHO MAY TOUCH WHOSE WINDOW is the authorization rule, not merely "who
+   * may call this at all" — that was the bug (BMPL-288's own deferred
+   * decision, recorded on that card): the whole call used to 404 on anyone
+   * but the sender before it ever looked at which role's window was being
+   * set, so a recipient with a genuine BML account still could not set
+   * their own.
+   *   - The booking customer (SENDER) may set or clear EITHER role's window
+   *     — unchanged. They book for a recipient who may never hold an
+   *     account, so they remain the fallback authority for both.
+   *   - A genuinely LINKED recipient (`shipment.recipientUserId ===
+   *     actor.userId`, set only by the audited `claimAsRecipient` step) may
+   *     set or clear ONLY the RECIPIENT role's window. Never derived from
+   *     holding the tracking token: a token holder who has not claimed is
+   *     not a recipient for this purpose (owner ruling 12) — checking the
+   *     LINK rather than the token is the one thing that makes exposing
+   *     this to an unauthenticated-by-role caller safe at all.
+   *   - Anyone else gets the same neutral 404 the rest of this file uses
+   *     for "not yours", never a 403 that would confirm the shipment
+   *     exists to a stranger.
    *
-   * NO CONSUMER YET. Nothing reads this table to decide anything this
-   * round — the absence of a gating check anywhere else is the entire
-   * point: this card is storage and the write surface only.
+   * THE WRITE ITSELF is scoped to the caller's own allowed role(s) —
+   * deleting only `{shipmentId, role: IN allowedRoles}`, never the whole
+   * shipment's rows — so a recipient setting their own window can never
+   * wipe the sender's, and vice versa. For the sender this changes nothing
+   * observable (their allowed roles are still both, so the delete still
+   * spans the same two rows it always did); for a recipient it is the only
+   * thing that makes a second, independent caller safe to add to a
+   * replace-all endpoint at all.
+   *
+   * GATING, per BMPL-284's own authorization finding, UNCHANGED and applied
+   * identically regardless of who is calling — a recipient gets the same
+   * rule as the sender, not a softer one: a role's window may only be set
+   * or changed while the leg that role governs has not started (SENDER ->
+   * FIRST_MILE or, on a door-to-door DIRECT leg, that leg; RECIPIENT ->
+   * LAST_MILE or that same DIRECT leg). CLEARING is exempt from this:
+   * dropping a role from the submitted set only widens back toward "no
+   * constraint", which is always safe, so a role whose leg has already
+   * started may still be cleared (by simply not including it), just never
+   * newly set.
+   *
+   * DELIVERY LOCATION IS DELIBERATELY NOT HERE. Ruling 11 permits a
+   * recipient-updated availability window explicitly; it permits a changed
+   * delivery location only "where policy permits", and no policy has been
+   * given for changing a destination address after booking — a different
+   * address can mean a different district, a different fee and a different
+   * courier. That is custody and pricing territory this card does not
+   * decide.
    */
   async setAvailabilityWindows(id: string, input: SetAvailabilityWindowsInput, actor: { userId: string }) {
     const shipment = await this.prisma.shipment.findUnique({ where: { id }, include: { legs: true } });
     if (!shipment) throw new NotFoundException('Shipment not found.');
-    if (shipment.customerUserId !== actor.userId) throw new NotFoundException('Shipment not found.');
+
+    const isSender = shipment.customerUserId === actor.userId;
+    const isRecipient = !isSender && shipment.recipientUserId === actor.userId;
+    if (!isSender && !isRecipient) throw new NotFoundException('Shipment not found.');
+
+    const allowedRoles: AvailabilityWindowRole[] = isSender ? ['SENDER', 'RECIPIENT'] : ['RECIPIENT'];
+    const submittedRoles = new Set(input.windows.map((w) => w.role));
+    for (const role of submittedRoles) {
+      if (!allowedRoles.includes(role)) {
+        throw new BadRequestException(
+          role === 'SENDER'
+            ? "Only the sender's own account can set the pickup window."
+            : 'You can only set the delivery window for your own account.',
+        );
+      }
+    }
 
     const NOT_STARTED: LegStatus[] = ['PENDING', 'READY'];
     const direct = shipment.legs.find((l) => l.kind === 'DIRECT');
     const firstMile = shipment.legs.find((l) => l.kind === 'FIRST_MILE');
     const lastMile = shipment.legs.find((l) => l.kind === 'LAST_MILE');
 
-    const submittedRoles = new Set(input.windows.map((w) => w.role));
     if (submittedRoles.has('SENDER')) {
       const leg = direct ?? firstMile;
       if (!leg) throw new BadRequestException('This shipment has no pickup leg for a sender window to apply to.');
@@ -1973,7 +2020,7 @@ export class ShipmentService {
     }
 
     await this.prisma.$transaction([
-      this.prisma.shipmentAvailabilityWindow.deleteMany({ where: { shipmentId: id } }),
+      this.prisma.shipmentAvailabilityWindow.deleteMany({ where: { shipmentId: id, role: { in: allowedRoles } } }),
       this.prisma.shipmentAvailabilityWindow.createMany({
         data: input.windows.map((w) => ({ shipmentId: id, role: w.role, startTime: w.startTime, endTime: w.endTime })),
       }),
@@ -1981,11 +2028,62 @@ export class ShipmentService {
     await this.audit.record({
       action: 'SHIPMENT_AVAILABILITY_WINDOWS_SET',
       actorId: actor.userId,
-      newValue: { shipmentId: id, reference: shipment.reference, windows: input.windows },
+      newValue: {
+        shipmentId: id,
+        reference: shipment.reference,
+        actorRole: isSender ? 'SENDER' : 'RECIPIENT',
+        windows: input.windows,
+      },
     });
 
-    const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
-    return this.serialize(fresh, { audience: 'CUSTOMER' });
+    if (isSender) {
+      const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
+      return this.serialize(fresh, { audience: 'CUSTOMER' });
+    }
+
+    // The recipient's own ack: exactly what is now stored for THEIR role,
+    // never the sender's row or any other shipment field. A write
+    // confirmation, not a widened read — deliberately NOT routed through
+    // `recipientView()`, whose allowlist is pinned identical whether reached
+    // by token or by account (recipient-tracking.integration.spec.ts); an
+    // authenticated-only field like this one would break that parity rather
+    // than extend it.
+    const myWindows = await this.prisma.shipmentAvailabilityWindow.findMany({
+      where: { shipmentId: id, role: 'RECIPIENT' },
+      orderBy: { startTime: 'asc' },
+      select: { startTime: true, endTime: true },
+    });
+    return { reference: shipment.reference, windows: myWindows };
+  }
+
+  /**
+   * The thin recipient-facing entry point: resolves the shipment's public
+   * `reference` to its internal id (the recipient does not otherwise know
+   * or need it) and defers the REAL authorization check — is this account
+   * genuinely linked as recipient? — to `setAvailabilityWindows` itself, so
+   * there is exactly one place that decision is made.
+   */
+  async setRecipientAvailabilityWindows(reference: string, input: SetAvailabilityWindowsInput, actor: { userId: string }) {
+    const s = await this.prisma.shipment.findUnique({ where: { reference }, select: { id: true } });
+    if (!s) throw new NotFoundException('No shipment with that reference.');
+    return this.setAvailabilityWindows(s.id, input, actor);
+  }
+
+  /**
+   * A linked recipient's own currently-stored delivery window — read-only,
+   * scoped to their own RECIPIENT-role rows, never the sender's. Same
+   * genuinely-linked gate as the write path: `recipientUserId`, never the
+   * token.
+   */
+  async recipientAvailabilityWindow(reference: string, userId: string) {
+    const s = await this.prisma.shipment.findUnique({ where: { reference }, select: { id: true, recipientUserId: true } });
+    if (!s || s.recipientUserId !== userId) throw new NotFoundException('No shipment with that reference.');
+    const windows = await this.prisma.shipmentAvailabilityWindow.findMany({
+      where: { shipmentId: s.id, role: 'RECIPIENT' },
+      orderBy: { startTime: 'asc' },
+      select: { startTime: true, endTime: true },
+    });
+    return { reference, windows };
   }
 
   /* ------------------------------------------------------------- reading */

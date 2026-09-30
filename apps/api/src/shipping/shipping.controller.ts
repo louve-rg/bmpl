@@ -172,6 +172,34 @@ export class ShipmentRecipientController {
   one(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
     return this.shipments.trackAsRecipient(reference, u.userId);
   }
+
+  /**
+   * Edward requirement 11: a linked recipient's own delivery availability
+   * window — read-only. The write side is the PUT below; both are scoped to
+   * the RECIPIENT role only inside ShipmentService, never the sender's.
+   */
+  @Get(':reference/availability-window')
+  myWindow(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
+    return this.shipments.recipientAvailabilityWindow(reference, u.userId);
+  }
+
+  /**
+   * Edward requirement 11: a linked recipient sets or clears their OWN
+   * delivery availability window — never the sender's. Same replace-all
+   * body shape as the sender's own `PUT /shipping/:id/availability-windows`
+   * below; the real authorization (genuinely linked, and which role this
+   * caller may touch) lives entirely in ShipmentService.setAvailabilityWindows,
+   * reached here by reference since a recipient does not know the shipment's
+   * internal id.
+   */
+  @Put(':reference/availability-window')
+  setMyWindow(
+    @CurrentUser() u: AuthContext,
+    @Param('reference') reference: string,
+    @Body(ZodBody(setAvailabilityWindowsSchema)) dto: SetAvailabilityWindowsInput,
+  ) {
+    return this.shipments.setRecipientAvailabilityWindows(reference, dto, { userId: u.userId });
+  }
 }
 
 /**
@@ -225,7 +253,11 @@ export class ShippingController {
   /**
    * BMPL-285: the sender's own write surface for pickup/delivery
    * availability windows — replace-all, same shape as the admin hub-hours
-   * PUT. No consumer reads this yet; see ShipmentService.setAvailabilityWindows.
+   * PUT. By id, since the sender's own shipment view already carries it.
+   * A linked recipient uses the separate by-reference routes on
+   * ShipmentRecipientController above instead, and may only touch their own
+   * RECIPIENT-role window — see ShipmentService.setAvailabilityWindows for
+   * the whole authorization rule.
    */
   @Put(':id/availability-windows')
   setAvailabilityWindows(

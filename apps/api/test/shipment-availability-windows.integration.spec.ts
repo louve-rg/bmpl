@@ -1,9 +1,6 @@
 /**
- * BMPL-284/285: sender/recipient availability windows — storage and the
- * sender write surface only. NO CONSUMER this round: nothing in dispatch,
- * quoting or leg scheduling reads this table yet, deliberately (BMPL-284's
- * own scope finding — the consumer surface is wider than hub hours and is
- * its own card).
+ * BMPL-284/285/288 + Edward requirement 11: sender AND recipient
+ * availability windows — storage and both write surfaces.
  *
  * Deliberately NOT the weekly-pattern-plus-exception shape hub/vendor/route
  * hours use: a shipment is a ONE-TIME event, so this is a short flat list —
@@ -11,12 +8,17 @@
  * governs, no day-of-week or date-exception axis at all.
  *
  * What this file exists specifically to prove:
- *  - a shipment with NO window behaves IDENTICALLY to today — nothing here
- *    can gate or change dispatch, because nothing reads this table yet.
- *  - the replace-all write surface, its validation (start before end, both
- *    at the API and the CHECK), and its gating (a role's windows may only
- *    be SET while the leg that role governs has not started; CLEARING is
- *    always allowed, since it only widens back toward "no constraint").
+ *  - a shipment with NO window behaves IDENTICALLY to today.
+ *  - the sender's replace-all write surface, its validation (start before
+ *    end, both at the API and the CHECK), and its gating (a role's windows
+ *    may only be SET while the leg that role governs has not started;
+ *    CLEARING is always allowed, since it only widens back toward "no
+ *    constraint").
+ *  - a genuinely LINKED recipient (BMPL-179's recipientUserId, never the
+ *    tracking token — owner ruling 12) gets the SAME gating on their OWN
+ *    role only, and can never touch or wipe the sender's row, or vice
+ *    versa — the real point of scoping the replace-all delete to the
+ *    caller's own allowed role(s) rather than the whole shipment.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -46,6 +48,22 @@ async function fundedSender() {
   const { cookies, userId } = await registerUser(`sender_${uniq()}@example.com`);
   await post(admin, 'admin/wallet/test-credit', { userId, amountMinor: 100_000, reason: 'BMPL-285 test fixture.' });
   return { cookies, userId };
+}
+
+/**
+ * A registered account, genuinely LINKED as a shipment's recipient via the
+ * real claim endpoint (BMPL-179) — never merely holding the tracking token.
+ * `doorToDoor()`'s own destination phone ('501-4445555') is the matching
+ * signal; the account's phone is set to it directly (same pattern
+ * shipment-recipient-linking.integration.spec.ts uses) since `User.phone`
+ * carries no uniqueness constraint a shared fixture value would collide on.
+ */
+async function claimedRecipient(shipment: { recipientTrackingToken: string }, email: string) {
+  const r = await registerUser(email);
+  await ctx.prisma.user.update({ where: { id: r.userId }, data: { phone: '501-4445555' } });
+  const claimed = await post(r.cookies, `shipping/track/${shipment.recipientTrackingToken}/claim`);
+  expect(claimed.status).toBe(201);
+  return r;
 }
 
 async function driverFor(userId: string, districts: string[]) {
@@ -317,6 +335,148 @@ describe('shipment availability windows — storage and write surface (BMPL-285)
       (
         await put(sender.cookies, 'shipping/nonexistent00000000000000/availability-windows', {
           windows: [{ role: 'SENDER', startTime: '09:00', endTime: '12:00' }],
+        })
+      ).status,
+    ).toBe(404);
+  });
+});
+
+/**
+ * Edward requirement 11: a linked recipient's own write surface — the whole
+ * job, per the owner's framing, is that WHO MAY TOUCH WHOSE WINDOW depends
+ * on which role it is, not merely "who may call this at all".
+ */
+describe('recipient availability window — a linked recipient\'s own write surface (Edward req 11)', () => {
+  it('a linked recipient sets their OWN window without touching the sender\'s', async () => {
+    const sender = await fundedSender();
+    const shipment = await book(sender.cookies, doorToDoor());
+    expect(
+      (
+        await put(sender.cookies, `shipping/${shipment.id}/availability-windows`, {
+          windows: [{ role: 'SENDER', startTime: '09:00', endTime: '12:00' }],
+        })
+      ).status,
+    ).toBe(200);
+
+    const recipient = await claimedRecipient(shipment, `avwrec_${uniq()}@example.com`);
+    const set = await put(recipient.cookies, `shipping/incoming/${shipment.reference}/availability-window`, {
+      windows: [{ role: 'RECIPIENT', startTime: '13:00', endTime: '16:00' }],
+    });
+    expect(set.status).toBe(200);
+    expect(set.body).toEqual({
+      reference: shipment.reference,
+      windows: [{ startTime: '13:00', endTime: '16:00' }],
+    });
+
+    // The database, not just the response, proves the sender's row survived
+    // — the exact correctness property scoping the delete to the caller's
+    // own allowed role(s) exists for.
+    // Enum ordering is by DECLARATION order (AVAILABILITY_WINDOW_ROLES:
+    // SENDER, then RECIPIENT), not string-alphabetical.
+    const rows = await ctx.prisma.shipmentAvailabilityWindow.findMany({ where: { shipmentId: shipment.id }, orderBy: { role: 'asc' } });
+    expect(rows.map((r) => ({ role: r.role, startTime: r.startTime, endTime: r.endTime }))).toEqual([
+      { role: 'SENDER', startTime: '09:00', endTime: '12:00' },
+      { role: 'RECIPIENT', startTime: '13:00', endTime: '16:00' },
+    ]);
+
+    const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'SHIPMENT_AVAILABILITY_WINDOWS_SET' }, orderBy: { createdAt: 'desc' } });
+    expect(audit!.actorId).toBe(recipient.userId);
+  });
+
+  it('a linked recipient cannot set the SENDER\'s window — refused, not silently dropped', async () => {
+    const sender = await fundedSender();
+    const shipment = await book(sender.cookies, doorToDoor());
+    const recipient = await claimedRecipient(shipment, `avwreject_${uniq()}@example.com`);
+
+    const attempt = await put(recipient.cookies, `shipping/incoming/${shipment.reference}/availability-window`, {
+      windows: [{ role: 'SENDER', startTime: '09:00', endTime: '12:00' }],
+    });
+    expect(attempt.status).toBe(400);
+    expect(await ctx.prisma.shipmentAvailabilityWindow.count({ where: { shipmentId: shipment.id } })).toBe(0);
+  });
+
+  it('clearing the recipient\'s own window (submitting none) removes only that row', async () => {
+    const sender = await fundedSender();
+    const shipment = await book(sender.cookies, doorToDoor());
+    await put(sender.cookies, `shipping/${shipment.id}/availability-windows`, {
+      windows: [{ role: 'SENDER', startTime: '09:00', endTime: '12:00' }],
+    });
+    const recipient = await claimedRecipient(shipment, `avwclear_${uniq()}@example.com`);
+    await put(recipient.cookies, `shipping/incoming/${shipment.reference}/availability-window`, {
+      windows: [{ role: 'RECIPIENT', startTime: '13:00', endTime: '16:00' }],
+    });
+
+    const cleared = await put(recipient.cookies, `shipping/incoming/${shipment.reference}/availability-window`, { windows: [] });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.windows).toEqual([]);
+
+    const rows = await ctx.prisma.shipmentAvailabilityWindow.findMany({ where: { shipmentId: shipment.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.role).toBe('SENDER');
+  });
+
+  it('the recipient\'s own GET reads back exactly what was set', async () => {
+    const sender = await fundedSender();
+    const shipment = await book(sender.cookies, doorToDoor());
+    const recipient = await claimedRecipient(shipment, `avwget_${uniq()}@example.com`);
+
+    const before = await get(recipient.cookies, `shipping/incoming/${shipment.reference}/availability-window`);
+    expect(before.status).toBe(200);
+    expect(before.body).toEqual({ reference: shipment.reference, windows: [] });
+
+    await put(recipient.cookies, `shipping/incoming/${shipment.reference}/availability-window`, {
+      windows: [{ role: 'RECIPIENT', startTime: '13:00', endTime: '16:00' }],
+    });
+    const after = await get(recipient.cookies, `shipping/incoming/${shipment.reference}/availability-window`);
+    expect(after.body.windows).toEqual([{ startTime: '13:00', endTime: '16:00' }]);
+  });
+
+  it('the SAME gating applies to the recipient as to the sender — set refused once the leg started, clear still allowed', async () => {
+    const sender = await fundedSender();
+    const shipment = await book(sender.cookies, doorToDoor());
+    const recipient = await claimedRecipient(shipment, `avwgate_${uniq()}@example.com`);
+    expect(
+      (
+        await put(recipient.cookies, `shipping/incoming/${shipment.reference}/availability-window`, {
+          windows: [{ role: 'RECIPIENT', startTime: '13:00', endTime: '16:00' }],
+        })
+      ).status,
+    ).toBe(200);
+
+    const legs = await legsOf(shipment.id);
+    const lastMile = legs.find((l) => l.kind === 'LAST_MILE')!;
+    await ctx.prisma.shipmentLeg.update({ where: { id: lastMile.id }, data: { status: 'IN_PROGRESS', startedAt: new Date() } });
+
+    const changeAfterStart = await put(recipient.cookies, `shipping/incoming/${shipment.reference}/availability-window`, {
+      windows: [{ role: 'RECIPIENT', startTime: '14:00', endTime: '17:00' }],
+    });
+    expect(changeAfterStart.status).toBe(400);
+
+    const clear = await put(recipient.cookies, `shipping/incoming/${shipment.reference}/availability-window`, { windows: [] });
+    expect(clear.status).toBe(200);
+  });
+
+  it('holding the tracking link but never having CLAIMED is not a recipient for this purpose (ruling 12)', async () => {
+    const sender = await fundedSender();
+    const shipment = await book(sender.cookies, doorToDoor());
+    // Registered, and knows the reference (e.g. from a shared tracking
+    // link), but never called the claim endpoint — recipientUserId stays
+    // null. Must be refused exactly like any other stranger.
+    const neverClaimed = await registerUser(`avwnoclaim_${uniq()}@example.com`);
+
+    const attempt = await put(neverClaimed.cookies, `shipping/incoming/${shipment.reference}/availability-window`, {
+      windows: [{ role: 'RECIPIENT', startTime: '13:00', endTime: '16:00' }],
+    });
+    expect(attempt.status).toBe(404);
+  });
+
+  it('a nonexistent reference 404s on both the recipient read and write routes', async () => {
+    const recipient = await registerUser(`avwnoref_${uniq()}@example.com`);
+    expect((await get(recipient.cookies, 'shipping/incoming/NOSUCHREF/availability-window')).status).toBe(404);
+    expect(
+      (
+        await put(recipient.cookies, 'shipping/incoming/NOSUCHREF/availability-window', {
+          windows: [{ role: 'RECIPIENT', startTime: '13:00', endTime: '16:00' }],
         })
       ).status,
     ).toBe(404);

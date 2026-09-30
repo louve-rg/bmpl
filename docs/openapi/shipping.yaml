@@ -320,6 +320,90 @@ paths:
               schema: { $ref: "#/components/schemas/RecipientTrackingView" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/incoming/{reference}/availability-window:
+    get:
+      tags: [ShipmentRecipient]
+      summary: A linked recipient's own delivery availability window (Edward requirement 11)
+      description: >-
+        Read-only. Scoped to `recipientUserId`, never the tracking token —
+        a token holder who has not claimed the shipment is not a recipient
+        for this purpose (owner ruling 12). Returns only this account's own
+        RECIPIENT-role window, never the sender's.
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string }, description: Shipment reference }
+      responses:
+        "200":
+          description: The recipient's own currently-stored window(s), possibly empty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference: { type: string }
+                  windows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        startTime: { type: string, example: "13:00" }
+                        endTime: { type: string, example: "16:00" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [ShipmentRecipient]
+      summary: A linked recipient sets or clears their OWN delivery window (Edward requirement 11)
+      description: >-
+        Same replace-all body shape as the sender's own
+        `PUT /shipping/{id}/availability-windows` below, but reached by
+        reference (a recipient does not know the shipment's internal id)
+        and restricted to the `RECIPIENT` role only — every window in the
+        body must have `role: RECIPIENT`, or the request is refused (400),
+        never silently dropped. The real authorization — genuinely linked
+        via `recipientUserId`, set only by the audited claim step, never
+        the tracking token — lives in `ShipmentService.setAvailabilityWindows`,
+        the same function the sender's own route calls, so there is exactly
+        one place this decision is made. Setting is refused once the
+        governing leg (LAST_MILE, or the shared DIRECT leg) has started;
+        clearing (submitting no windows) is always allowed. The write is
+        scoped to this account's own RECIPIENT rows only — the sender's
+        window is never touched, in either direction.
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string }, description: Shipment reference }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                windows:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: object
+                    properties:
+                      role: { type: string, enum: [RECIPIENT] }
+                      startTime: { type: string, example: "13:00" }
+                      endTime: { type: string, example: "16:00" }
+      responses:
+        "200":
+          description: The recipient's own windows after the write, same shape as the GET above
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference: { type: string }
+                  windows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        startTime: { type: string }
+                        endTime: { type: string }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /shipping/{reference}:
     get:
       tags: [Shipping]
