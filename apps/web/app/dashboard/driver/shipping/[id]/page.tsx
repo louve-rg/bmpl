@@ -5,7 +5,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../../lib/api';
 import { tripMapPoints } from '../../../../../lib/trip-map';
-import { Alert, Button, Card, PageHeader, Spinner, StatusBadge } from '../../../../../components/ui';
+import { uploadFile } from '../../../../../lib/uploads';
+import { pickupPhotoSection } from '../../../../../lib/driver-shipping-job';
+import { Alert, Badge, Button, Card, Label, PageHeader, Spinner, StatusBadge } from '../../../../../components/ui';
 import { DriverBreadcrumb } from '../../../../../components/driver/DriverBreadcrumb';
 import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRouteMap';
 
@@ -48,6 +50,13 @@ interface ShippingJob {
   handoffCodeHeldBy: string;
   offerExpiresAt: string | null;
   pinAttemptsRemaining: number;
+  /**
+   * BMPL-178/352 (Edward req 2): pickup evidence already attached to THIS
+   * leg. Optional — web and api deploy independently, and a required field
+   * read unguarded is how a screen crashes on the api side lagging behind a
+   * merge (BMPL-349); absence means nothing attached yet, same as empty.
+   */
+  pickupPhotoUrls?: string[];
 }
 
 const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
@@ -127,6 +136,8 @@ export default function DriverShippingJobPage() {
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState('');
   const [receivedBy, setReceivedBy] = useState('');
+  const [photoKeys, setPhotoKeys] = useState<string[]>([]);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -144,6 +155,7 @@ export default function DriverShippingJobPage() {
   }, [load]);
 
   const action = job ? actionFor(job.status) : null;
+  const photoSection = job ? pickupPhotoSection(job, action !== null) : 'hidden';
 
   async function run() {
     if (!job || !action) return;
@@ -158,6 +170,38 @@ export default function DriverShippingJobPage() {
       setErr(errMessage(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * BMPL-178/352 (Edward req 2): pickup-evidence photo, server-side upload
+   * then attach — two independent calls, not bundled into the main action
+   * (unlike the marketplace delivery form's podPhotoKeys, which rides the
+   * SAME confirm-delivery POST). `confirmPickupPhoto` REPLACES
+   * `handoffPhotoKeys` wholesale on every call — it does not merge with
+   * what is already stored — and the read side only ever returns signed
+   * URLs, never the underlying keys, so there is no way to recover a
+   * PRIOR session's keys to include them here. Resending every key added
+   * IN THIS SESSION on each call (not just the newest one) is what keeps
+   * a second photo from silently overwriting the first; this control is
+   * offered only while nothing is attached yet (see the render below) so
+   * a session that starts with existing evidence can never reach a
+   * confirm call that would wipe it.
+   */
+  async function addPhoto(file: File) {
+    if (!job) return;
+    setPhotoBusy(true);
+    setErr(null);
+    try {
+      const key = await uploadFile(`/driver/shipping-jobs/${job.id}/pickup-photo/upload`, file);
+      const keys = [...photoKeys, key];
+      const updated = await api.post<ShippingJob>(`/driver/shipping-jobs/${job.id}/pickup-photo/confirm`, { photoKeys: keys });
+      setPhotoKeys(keys);
+      setJob(updated);
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setPhotoBusy(false);
     }
   }
 
@@ -238,6 +282,52 @@ export default function DriverShippingJobPage() {
                 <p className="mt-0.5 text-sm text-slate-500">About {(job.parcel.weightGrams / 453.6).toFixed(1)} lb</p>
               )}
             </Card>
+
+            {/* BMPL-178/352 (Edward req 2): evidence you actually picked this
+                parcel up for your own leg — sender and staff see the same
+                photo on their own screens. Shown only once you've accepted
+                (nothing to photograph at a door you haven't unlocked), and
+                the "add" control only while nothing is attached yet — see
+                addPhoto's own comment for why a second upload session
+                cannot safely add to a first. */}
+            {photoSection !== 'hidden' && (
+              <Card className="p-4 sm:p-5">
+                <Label>Pickup photo</Label>
+                {photoSection === 'existing' ? (
+                  <div className="mt-1.5 flex flex-wrap gap-2">
+                    {(job.pickupPhotoUrls ?? []).map((url, i) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={i}
+                        src={url}
+                        alt={`Pickup photo ${i + 1}`}
+                        className="h-20 w-20 rounded-bmpl-md border border-slate-200 object-cover"
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    {photoKeys.map((k) => (
+                      <Badge key={k} tone="success">
+                        Photo added
+                      </Badge>
+                    ))}
+                    <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5">
+                      {photoBusy ? <Spinner className="h-4 w-4" /> : 'Add photo'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        disabled={photoBusy}
+                        onChange={(e) => e.target.files?.[0] && void addPhoto(e.target.files[0])}
+                      />
+                    </label>
+                  </div>
+                )}
+                <p className="mt-1 text-xs text-slate-400">Optional</p>
+              </Card>
+            )}
           </div>
 
           {/* The handoff code. Told up front, not at the counter — the driver
