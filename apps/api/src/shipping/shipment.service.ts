@@ -115,7 +115,7 @@ const REVERSED_SERVICE: Record<ShippingService, ShippingService> = {
  * is not merely unconfigured, it is not derivable from this feature's own
  * reversal formula at all (see `previewReturn`'s comment) — but the owner's
  * own answer for "no valid configured price" is PENDING_MANUAL, not a
- * refusal that leaves no trail: "if BMPL cannot calculate a valid configured
+ * refusal that leaves no trail: "if BML cannot calculate a valid configured
  * return price, the return should remain PENDING/MANUAL rather than
  * guessing." A flat 400 here would be the same silent dead-end for a parcel
  * genuinely stuck mid-journey that the owner's ruling exists to prevent —
