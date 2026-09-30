@@ -21,6 +21,7 @@ export * from './service-schedule';
 export * from './belize-time';
 export * from './hub-hours';
 export * from './availability-windows';
+export * from './shipment-eta';
 export * from './route-planner';
 export * from './dispatch-ranking';
 export * from './driver-queue';

@@ -18,7 +18,7 @@
 /// Nothing in apps/api calls it this round - that is deliberate, not an
 /// oversight, so there is nothing yet to wire to the wrong place.
 
-import { belizeCalendarDate, belizeCalendarDateKey, belizeWeekday, startOfBelizeDay, toBelizeLocal } from './belize-time';
+import { belizeCalendarDate, belizeCalendarDateKey, belizeMidday, belizeWeekday, startOfBelizeDay, toBelizeLocal } from './belize-time';
 
 export const HUB_HOURS_EXCEPTION_STATUSES = ['CLOSED', 'MODIFIED'] as const;
 export type HubHoursExceptionStatus = (typeof HUB_HOURS_EXCEPTION_STATUSES)[number];
@@ -226,4 +226,26 @@ export function nextOpenWindow(
     return { date: belizeCalendarDate(candidate), openTime: null, closeTime: null };
   }
   return null;
+}
+
+/**
+ * Turn a `NextOpenWindow` into the real instant it starts at (BMPL-340) -
+ * composes on top of `nextOpenWindow` rather than duplicating its search,
+ * the same "compose, don't re-derive" discipline this file's own header
+ * describes. An unconstrained window (both times null - open all day,
+ * nothing specific configured) starts at that calendar day's own Belize
+ * midnight; EITHER WAY the result is clamped to never read as earlier than
+ * `from` - a window nextOpenWindow already confirmed is reachable from
+ * `from` cannot honestly be reported as having started before the caller
+ * could have observed it.
+ */
+export function windowStartInstant(window: NextOpenWindow, from: Date): Date {
+  // `window.date` is already a pure UTC-midnight-normalized calendar date
+  // (belizeCalendarDate's own representation) - feeding it to
+  // startOfBelizeDay directly would shift it onto the PREVIOUS Belize
+  // calendar day (see belizeMidday's own comment for exactly this trap).
+  // belizeMidday lands safely inside the same calendar day first.
+  const dayStart = startOfBelizeDay(belizeMidday(window.date));
+  const instant = window.openTime ? new Date(dayStart.getTime() + parseMinutes(window.openTime) * 60_000) : dayStart;
+  return instant.getTime() > from.getTime() ? instant : from;
 }

@@ -551,6 +551,36 @@ export class LogisticsNetworkService {
     };
   }
 
+  /**
+   * Batched RAW hours data for several hubs at once (BMPL-340): unlike
+   * `hubHoursStatus` above, this returns the weekly pattern + exceptions
+   * themselves rather than a resolution already pinned to one instant —
+   * `estimateShipmentEta` (packages/shared) needs to resolve hours at a
+   * PROJECTED instant it computes internally, possibly different for every
+   * leg, so the raw data is what it needs, not a pre-resolved status. Two
+   * queries total regardless of hub count, the same batching shape
+   * InventoryService.locationMapFor (BMPL-175) uses for the equivalent
+   * per-product fan-out.
+   */
+  async hubHoursConfig(hubIds: readonly string[]): Promise<Map<string, { weeklyPattern: WeeklyOpeningHours[]; exceptions: HoursException[] }>> {
+    const out = new Map<string, { weeklyPattern: WeeklyOpeningHours[]; exceptions: HoursException[] }>();
+    const ids = [...new Set(hubIds)];
+    if (!ids.length) return out;
+    const [days, exceptions] = await Promise.all([
+      this.prisma.hubOpeningDay.findMany({ where: { hubId: { in: ids } } }),
+      this.prisma.hubHoursException.findMany({ where: { hubId: { in: ids } } }),
+    ]);
+    for (const id of ids) {
+      out.set(id, {
+        weeklyPattern: days.filter((d) => d.hubId === id).map((d) => ({ dayOfWeek: d.dayOfWeek, openTime: d.openTime, closeTime: d.closeTime, isClosed: d.isClosed })),
+        exceptions: exceptions
+          .filter((e) => e.hubId === id)
+          .map((e) => ({ date: e.date, status: e.status as HoursException['status'], openTime: e.openTime, closeTime: e.closeTime, reason: e.reason })),
+      });
+    }
+    return out;
+  }
+
   /* -------------------------------------------------------- courier lanes */
 
   /**
