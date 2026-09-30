@@ -224,12 +224,20 @@ for what is and is not built against this ruling.
 - **BMPL-119, question 2** ("may a door PIN ever travel on a public tracking
   link?") — closed. The code already never puts a PIN on a public link; this
   ruling confirms that behavior as policy rather than requiring a change.
-- **BMPL-179** (recipient account linking) — eliminated one of three proposed
-  claim policies. "Accept it: first authenticated claimant wins, the link is
-  already trusted" is the exact position this ruling rejects, since claiming
-  is itself an authorization-granting act keyed on nothing but possession of
-  the link. The choice between the two remaining options is still the
-  owner's and is still open.
+- **BMPL-179** (recipient account linking) — this ruling itself eliminated
+  one of three proposed claim policies: "accept it, first authenticated
+  claimant wins, the link is already trusted" is the exact position it
+  rejects, since claiming is itself an authorization-granting act keyed on
+  nothing but possession of the link. **That elimination is the owner's
+  ruling and stands as written.** The choice between the two remaining
+  options was then settled — **not by a further owner ruling, but as an
+  engineering decision on 2026-09-30**, derived from this ruling together
+  with [Ruling 7](#ruling-7--who-can-see-a-pickuphandoff-photo)'s own phrase
+  "an authenticated recipient who has been legitimately linked to, or has
+  claimed": a claim requires an authenticated account whose own details
+  match a sender-supplied recipient detail — never possession of the link
+  alone, and never a sender round-trip. See BMPL-179 for the reasoning; it
+  is not restated here because it is not this document's kind of fact.
 
 ---
 
