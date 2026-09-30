@@ -341,6 +341,74 @@ describe('recording a transport leg\'s scheduled departure/arrival (BMPL-346)', 
     expect(JSON.stringify(backwards.body)).toContain('after the scheduled departure');
   });
 
+  /**
+   * Named invariant (owner ruling, BMPL-346 CI review): A RECORDED SCHEDULE
+   * MAY DESCRIBE THE PAST ONLY FOR AN EVENT THAT HAS ALREADY HAPPENED —
+   * equivalently, a scheduled time must never create a knowingly false ETA.
+   * Each test name below states the half of the invariant it proves, so a
+   * failure message teaches the rule rather than just naming a symptom.
+   */
+  describe('the invariant: a recorded schedule may describe the past only for an event that already happened', () => {
+    it('REFUSES a past scheduledArrivalAt on a leg that has not arrived — that would be a knowingly false ETA', async () => {
+      const driver = await makeDriver();
+      const { lineHaul } = await bookedWithFirstMileDone(driver);
+      expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+      const departed = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+      expect(departed.arrivedAt).toBeNull(); // the event this field describes has not happened
+
+      // A past scheduledArrivalAt here would be read DIRECTLY as a
+      // confident KNOWN ETA (projectLineHaul, no clamp) for a shipment that
+      // has not arrived — worse than UNKNOWN. This is the knowingly-false
+      // case the invariant exists to refuse.
+      const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+        scheduledArrivalAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      expect(r.status).toBe(400);
+      expect(r.body.message).toContain('already passed');
+    });
+
+    it('ACCEPTS a past scheduledDepartureAt on a leg that has departed — that event already happened, so it is history, not a false ETA', async () => {
+      const driver = await makeDriver();
+      const { lineHaul } = await bookedWithFirstMileDone(driver);
+      expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+      const departed = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+      expect(departed.departedAt).not.toBeNull(); // the event this field describes already happened
+
+      // projectLineHaul only ever uses this field clamped to
+      // max(scheduledDepartureAt, anchor) — a past value here can never
+      // produce a false ETA, only fall back to "now". Refusing it was the
+      // bug the invariant caught, and an EXCEPTION leg is exactly where a
+      // time gets fixed after the fact.
+      const pastDeparture = new Date(Date.now() - 3600_000);
+      const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+        scheduledDepartureAt: pastDeparture.toISOString(),
+      });
+      expect(r.status).toBe(201);
+      expect(
+        (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } })).scheduledDepartureAt?.toISOString(),
+      ).toBe(pastDeparture.toISOString());
+    });
+
+    it('ACCEPTS a past scheduledArrivalAt too, once the leg has actually arrived (even before handoff) — that event already happened', async () => {
+      const driver = await makeDriver();
+      const { lineHaul } = await bookedWithFirstMileDone(driver);
+      expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {})).status).toBe(201);
+      expect((await post(admin, `admin/logistics/legs/${lineHaul.id}/arrive`)).status).toBe(201);
+      const arrived = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+      expect(arrived.arrivedAt).not.toBeNull(); // the event this field describes already happened
+      expect(arrived.status).toBe('IN_PROGRESS'); // arrive stamps only; handoff still pending
+
+      const pastArrival = new Date(Date.now() - 1800_000);
+      const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/schedule`, {
+        scheduledArrivalAt: pastArrival.toISOString(),
+      });
+      expect(r.status).toBe(201);
+      expect(
+        (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } })).scheduledArrivalAt?.toISOString(),
+      ).toBe(pastArrival.toISOString());
+    });
+  });
+
   it('a partial update leaves the other field exactly as it stood', async () => {
     const s = await book();
     const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
