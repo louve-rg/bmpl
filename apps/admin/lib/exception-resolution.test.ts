@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canPrice, confirmLabel, needsPaymentConfirmation, priceUnavailableMessage } from './exception-resolution';
+import { canPrice, confirmLabel, priceUnavailableMessage } from './exception-resolution';
 
 describe('canPrice (BMPL-364)', () => {
   it('is true for a real, positive, available price', () => {
@@ -39,37 +39,21 @@ describe('priceUnavailableMessage', () => {
   });
 });
 
-describe('needsPaymentConfirmation (owner Ruling 2, BMPL-343)', () => {
-  it('is true for a reroute that increases the charge', () => {
-    expect(needsPaymentConfirmation({ available: true, totalMinor: 3000, increasesCharge: true })).toBe(true);
-  });
-
-  it('is false for a reroute that does not increase the charge — no dialog for the sake of having one', () => {
-    expect(needsPaymentConfirmation({ available: true, totalMinor: 1200, increasesCharge: false })).toBe(false);
-  });
-
-  it('is false when there is no real price to compare, even if increasesCharge were somehow set', () => {
-    expect(needsPaymentConfirmation({ available: true, totalMinor: 0, increasesCharge: true })).toBe(false);
-  });
-
-  it('is false (the safe default) when increasesCharge is entirely absent, as on a return preview', () => {
-    expect(needsPaymentConfirmation({ available: true, totalMinor: 1500 })).toBe(false);
-  });
-});
-
-describe('confirmLabel — the three required paths (BMPL-364 "done means")', () => {
-  it('priced path: a return names the real amount it will charge', () => {
-    expect(confirmLabel('RETURN', { available: true, totalMinor: 4575 })).toBe('Confirm return — charge $45.75');
-  });
-
-  it('priced path: a reroute that increases the charge names the real amount', () => {
-    expect(confirmLabel('REROUTE', { available: true, totalMinor: 3200, increasesCharge: true })).toBe('Confirm reroute — charge $32.00');
-  });
-
-  it('free-reroute path: a reroute that does not increase the charge still states the price, with no charge wording', () => {
-    const label = confirmLabel('REROUTE', { available: true, totalMinor: 1800, increasesCharge: false });
-    expect(label).toBe('Confirm reroute — $18.00, no change to what was already paid');
+describe('confirmLabel — the three required paths (BMPL-364/375 "done means"), now preparing rather than charging', () => {
+  it('priced path: a return names the real amount, as a preparation, never a charge', () => {
+    const label = confirmLabel('RETURN', { available: true, totalMinor: 4575 });
+    expect(label).toBe('Prepare return — $45.75');
     expect(label).not.toMatch(/charge/i);
+  });
+
+  it('priced path: a reroute that costs more than the original still only ever PREPARES, never charges — BMPL-375 removed the old payment-dialog split entirely', () => {
+    const label = confirmLabel('REROUTE', { available: true, totalMinor: 3200, legCostsMoreThanOriginal: true });
+    expect(label).toBe('Prepare reroute — $32.00');
+    expect(label).not.toMatch(/charge/i);
+  });
+
+  it('a reroute that does NOT cost more than the original prepares identically — legCostsMoreThanOriginal never changes the button', () => {
+    expect(confirmLabel('REROUTE', { available: true, totalMinor: 1800, legCostsMoreThanOriginal: false })).toBe('Prepare reroute — $18.00');
   });
 
   it('PENDING_MANUAL path: an unavailable return never offers a button that would charge nothing', () => {
@@ -77,6 +61,6 @@ describe('confirmLabel — the three required paths (BMPL-364 "done means")', ()
   });
 
   it('PENDING_MANUAL path: a zero-priced reroute reads the same as unavailable, not as a free success', () => {
-    expect(confirmLabel('REROUTE', { available: true, totalMinor: 0, increasesCharge: false })).toBe('Record as pending — no charge');
+    expect(confirmLabel('REROUTE', { available: true, totalMinor: 0, legCostsMoreThanOriginal: false })).toBe('Record as pending — no charge');
   });
 });

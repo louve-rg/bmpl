@@ -5,43 +5,50 @@ import { DISTRICTS, DISTRICT_LABELS } from '@bmpl/shared';
 import { previewRerouteSchema, rerouteSchema, returnToSenderSchema, type RerouteInput } from '@bmpl/validation';
 import { api, type ApiError } from '../../lib/api';
 import { Alert, Button, Field, Input, Select, Spinner, Textarea } from '../ui';
-import { canPrice, confirmLabel, needsPaymentConfirmation, priceUnavailableMessage, type QuotePreview } from '../../lib/exception-resolution';
+import { canPrice, confirmLabel, priceUnavailableMessage, type QuotePreview } from '../../lib/exception-resolution';
 
 /**
  * Resolving an exceptional leg by returning the parcel or redirecting it
- * (BMPL-364/183/343) — ONE panel covering both fates, not two screens, so an
- * operator picks the fate once and everything after (price, confirmation,
- * charge) follows the same shape either way.
+ * (BMPL-364/375/183/343) — ONE panel covering both fates, not two screens,
+ * so an operator picks the fate once and everything after (price,
+ * preparation) follows the same shape either way.
  *
- * THE OWNER'S RULES THIS PANEL ENFORCES, NOT JUST DISPLAYS:
+ * BMPL-375, OWNER RULING — THE THING THIS PANEL USED TO DO AND NO LONGER
+ * DOES: staff action alone must never authorize charging the customer's
+ * wallet. This panel's "confirm" button used to be the thing that booked
+ * and charged a return/reroute; it is now the thing that PREPARES one —
+ * writes a proposal, nothing money-shaped — and the shipment's own paying
+ * customer, on their own screen, is the only one who can turn that into a
+ * real charge. Nothing here reads as "resolved" or "charged" on success;
+ * it reads as "prepared, waiting on the customer."
+ *
+ * THE OWNER'S RULES THIS PANEL STILL ENFORCES, NOT JUST DISPLAYS:
  *  - A return/reroute is priced with BML's real configured pricing — never a
  *    fixed fee, never a number this screen invents. Every price shown here
- *    came back from the API's own `quote()`, verbatim.
- *  - Calculate, SHOW the price, take an EXPLICIT confirmation, then the
- *    existing payment path — never silent. The confirm button always states
- *    the amount (or the honest absence of one) out loud; see
- *    `exception-resolution.ts`'s `confirmLabel`.
+ *    came back from the API's own `quote()`, verbatim, and is recomputed
+ *    fresh again when the customer confirms — this screen's own number is
+ *    informational for staff, the same way it is for the customer.
  *  - When no valid price can be calculated, the action stays PENDING_MANUAL —
  *    this panel never offers a button that would silently charge nothing
- *    while looking like a real confirmation (`canPrice`/`priceUnavailableMessage`).
- *  - A reroute that does not increase the charge needs no payment-confirmation
- *    dialog, only a reroute that does (`needsPaymentConfirmation`) — the
- *    button label is the only thing that changes; there is still exactly one
- *    explicit click either way, never an auto-fired action.
+ *    while looking like a real preparation (`canPrice`/`priceUnavailableMessage`).
+ *  - Every priced reroute prepares the same way regardless of whether it
+ *    costs more or less than the original (owner correction, BMPL-375: a
+ *    reroute always takes a fresh, unrefunded debit from the customer, so
+ *    there is no "nothing to consent to" case). `legCostsMoreThanOriginal`
+ *    is informational text only now, never a gate on which button appears.
  *
- * WHO CONFIRMS: both `return-to-sender` and `reroute` are staff-only routes
- * (`logistics.manage` — stronger than the `logistics.operate` this whole page
- * already gates on) — there is no customer-facing confirmation endpoint
- * anywhere in this codebase for either flow. Calling the confirm endpoint
- * below, as a staff member, IS the "explicit confirmation" the owner's
- * ruling names; the customer is informed afterward through the existing
- * notification path (`SHIPMENT_REROUTED`/audit trail), not through a second
- * UI this card did not find any route for.
+ * WHO CONFIRMS, CORRECTED: both `return-to-sender` and `reroute` are still
+ * staff-only routes (`logistics.manage`) — but they only PREPARE now. The
+ * actual confirmation — the thing that charges anyone — lives on the
+ * shipment's own tracking page, reached only by its `customerUserId`
+ * (`RoutingProposalConfirm` in apps/web). This panel used to assume a
+ * staff click WAS that confirmation; that assumption was the defect BMPL-375
+ * fixed, not a design this panel gets to keep.
  *
  * Nothing here rewrites a reservation, an oversell protection or a
  * historical fulfilment-origin snapshot — this panel only ever reads a
- * preview and, on confirm, calls the one approved booking/payment path the
- * API already enforces all of that inside of.
+ * preview and, on "Prepare," writes the one proposal row the customer's own
+ * confirmation later consumes.
  */
 
 interface DestinationForm {
@@ -91,7 +98,7 @@ interface Hub {
 }
 
 type Action = 'RETURN' | 'REROUTE';
-type Outcome = { outcome: 'INITIATED'; reference: string } | { outcome: 'PENDING_MANUAL'; reason: string };
+type Outcome = { outcome: 'PREPARED'; totalMinor: number } | { outcome: 'PENDING_MANUAL'; reason: string };
 
 export function ExceptionResolution({
   legId,
@@ -193,15 +200,13 @@ export function ExceptionResolution({
     try {
       const body = action === 'RETURN' ? { note: note.trim() } : { destination: destinationPayload(destination), note: note.trim() };
       const path = action === 'RETURN' ? 'return-to-sender' : 'reroute';
-      const res = await api.post<
-        | { outcome: 'PENDING_MANUAL'; reason: string }
-        | { outcome: 'INITIATED'; returnShipment?: { reference: string }; rerouteShipment?: { reference: string } }
-      >(`/admin/logistics/legs/${legId}/${path}`, body);
-      setOutcome(
-        res.outcome === 'PENDING_MANUAL'
-          ? res
-          : { outcome: 'INITIATED', reference: (res.returnShipment ?? res.rerouteShipment)!.reference },
-      );
+      // BMPL-375: this call now only PREPARES — {outcome:'PREPARED', totalMinor}
+      // (reroute also carries legCostsMoreThanOriginal, informational only) or
+      // the same PENDING_MANUAL fence as the preview step. Never INITIATED,
+      // never a returnShipment/rerouteShipment — nothing is booked or charged
+      // here any more.
+      const res = await api.post<Outcome & { legCostsMoreThanOriginal?: boolean }>(`/admin/logistics/legs/${legId}/${path}`, body);
+      setOutcome(res);
       await onResolved();
     } catch (e) {
       setErr((e as ApiError).message ?? 'That action was refused.');
@@ -212,9 +217,12 @@ export function ExceptionResolution({
 
   if (outcome) {
     return (
-      <Alert tone={outcome.outcome === 'INITIATED' ? 'success' : 'warning'} title={outcome.outcome === 'INITIATED' ? 'Resolved' : 'Recorded as pending'}>
-        {outcome.outcome === 'INITIATED' ? (
-          <>This shipment's new leg is booked as {outcome.reference}.</>
+      <Alert tone={outcome.outcome === 'PREPARED' ? 'success' : 'warning'} title={outcome.outcome === 'PREPARED' ? 'Prepared — waiting on the customer' : 'Recorded as pending'}>
+        {outcome.outcome === 'PREPARED' ? (
+          <>
+            Nothing is booked and nothing is charged yet. The customer will see this on their own shipment page and must confirm
+            before anything happens — currently priced at ${(outcome.totalMinor / 100).toFixed(2)}.
+          </>
         ) : (
           <>{outcome.reason} Nothing was charged. An operator will need to handle this manually.</>
         )}
@@ -341,15 +349,17 @@ export function ExceptionResolution({
               This is a new transport service at BML's normal configured pricing:{' '}
               <span className="font-semibold tabular-nums">${((preview.totalMinor ?? 0) / 100).toFixed(2)}</span>.
               {action === 'REROUTE' &&
-                (needsPaymentConfirmation(preview)
-                  ? ' This increases what the customer already paid.'
-                  : ' This does not increase what the customer already paid — they will still be told about the new delivery time.')}
+                (preview.legCostsMoreThanOriginal
+                  ? ' This costs more than what the customer already paid.'
+                  : ' This does not cost more than what the customer already paid.')}{' '}
+              This is informational for you — the amount is recomputed fresh when the customer confirms, and preparing does not
+              charge anyone.
             </p>
           ) : (
             <Alert tone="warning">We cannot price this — {priceUnavailableMessage(preview)} Operations must handle it manually.</Alert>
           )}
 
-          <Field label="Note" hint="Why this is being resolved this way. The customer may see this.">
+          <Field label="Note" hint="Why this is being resolved this way. The customer will see this on their own confirmation screen.">
             <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
 
@@ -361,7 +371,7 @@ export function ExceptionResolution({
             </Button>
           ) : (
             <p className="text-xs text-slate-500">
-              You can preview this, but resolving it needs the stronger logistics-manage permission.
+              You can preview this, but preparing it needs the stronger logistics-manage permission.
             </p>
           )}
         </div>
