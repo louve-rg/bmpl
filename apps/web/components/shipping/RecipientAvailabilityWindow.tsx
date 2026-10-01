@@ -56,8 +56,9 @@ export function RecipientAvailabilityWindow({ reference }: { reference: string }
       .incomingAvailabilityWindow(reference)
       .then((v: RecipientAvailabilityWindows) => {
         if (cancelled) return;
-        setStored(v.windows);
-        setRows(v.windows);
+        const windows = v.windows ?? [];
+        setStored(windows);
+        setRows(windows);
       })
       .catch(() => {
         if (!cancelled) setStored([]);
@@ -95,8 +96,9 @@ export function RecipientAvailabilityWindow({ reference }: { reference: string }
     setSaved(false);
     try {
       const result = await shippingApi.setIncomingAvailabilityWindow(reference, rows);
-      setStored(result.windows);
-      setRows(result.windows);
+      const windows = result.windows ?? [];
+      setStored(windows);
+      setRows(windows);
       setSaved(true);
     } catch (e) {
       setErr((e as ApiError).message ?? 'We could not save this.');

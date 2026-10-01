@@ -43,8 +43,14 @@ interface ShippingJob {
   addressUnlocked: boolean;
   pickup: Place | null;
   dropoff: Place | null;
-  /** The whole known journey, sender door to recipient door — not just this leg's two ends (BMPL-190). */
-  routeStops: Place[];
+  /**
+   * The whole known journey, sender door to recipient door — not just this
+   * leg's two ends (BMPL-190). Optional: web and api deploy independently
+   * (BMPL-349/350) — a real window on every merge where this field hasn't
+   * started arriving yet. Absence degrades the same as an empty array: no
+   * map renders, same as any shipment with no locatable stop today.
+   */
+  routeStops?: Place[];
   parcel: { description: string | null; pieces: number; weightGrams: number | null };
   feeMinor: number;
   handoffCodeHeldBy: string;
@@ -261,12 +267,13 @@ export default function DriverShippingJobPage() {
                 full-screen view (BMPL-182) — still behind a tap so the tiles
                 never load for a driver on data who just wants the words. */}
             {(() => {
-              const points = tripMapPoints(job.routeStops);
+              const routeStops = job.routeStops ?? [];
+              const points = tripMapPoints(routeStops);
               if (points.length === 0) return null;
               return (
                 <Card className="p-4 sm:p-5">
                   <ExpandableRouteMap points={points} title={`${job.reference} · route`} />
-                  {points.length < job.routeStops.length && !job.addressUnlocked && (
+                  {points.length < routeStops.length && !job.addressUnlocked && (
                     <p className="mt-2 text-xs text-slate-500">The other end shows its area above until you accept.</p>
                   )}
                 </Card>
