@@ -168,3 +168,76 @@ describe('ShipmentOpsPage — pickup photo (BMPL-178/352)', () => {
     expect(document.body.querySelectorAll('img[alt^="Pickup photo"]').length).toBe(0);
   });
 });
+
+/**
+ * BMPL-364: resolving an exceptional leg by return or reroute. Only wiring
+ * is asserted here (trigger visibility, permission split, the RETURNED
+ * guard) — the pricing/confirmation behaviour itself is covered in full by
+ * ExceptionResolution.test.tsx.
+ */
+describe('ShipmentOpsPage — exception resolution wiring (BMPL-364)', () => {
+  function exceptionShipment(overrides: Partial<typeof SHIPMENT> = {}) {
+    return {
+      ...SHIPMENT,
+      status: 'EXCEPTION',
+      statusLabel: 'Needs attention',
+      exceptionReason: 'Recipient refused delivery.',
+      legs: [{ ...SHIPMENT.legs[0], status: 'EXCEPTION', exceptionReason: 'Recipient refused delivery.' }],
+      ...overrides,
+    };
+  }
+
+  it('an operator sees both resolution triggers on an EXCEPTION leg', async () => {
+    stubFetch(['logistics.operate']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, exceptionShipment());
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    const texts = buttonTexts();
+    expect(texts).toContain('Return to sender');
+    expect(texts).toContain('Reroute to a new address');
+  });
+
+  it('a read-only viewer sees neither trigger, even on an EXCEPTION leg', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.read'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, exceptionShipment());
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    const texts = buttonTexts();
+    expect(texts).not.toContain('Return to sender');
+    expect(texts).not.toContain('Reroute to a new address');
+  });
+
+  it('hides both triggers once the shipment already reads RETURNED (BMPL-356), even though the leg itself stays EXCEPTION', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          return jsonResponse(200, exceptionShipment({ status: 'RETURNED', statusLabel: 'Returned to sender' }));
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    const texts = buttonTexts();
+    expect(texts).not.toContain('Return to sender');
+    expect(texts).not.toContain('Reroute to a new address');
+  });
+});
