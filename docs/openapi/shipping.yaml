@@ -1300,6 +1300,36 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/provider/legs/{id}/schedule:
+    post:
+      tags: [ShippingProvider]
+      summary: Record (or correct) my organization's leg's carrier-committed schedule (BMPL-346)
+      description: >-
+        Same request body, state machine and writer as the admin schedule
+        endpoint (`ShipmentService.scheduleLeg`); org ownership is asserted
+        first and a foreign leg answers 404 exactly like a missing one.
+        Returns the carrier-safe leg, never the staff shipment payload.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: At least one of the two is required; given both, arrival must be after departure.
+              properties:
+                scheduledDepartureAt: { type: string, format: date-time }
+                scheduledArrivalAt: { type: string, format: date-time }
+      responses:
+        "201":
+          description: The updated leg
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderLeg" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /shipping/provider/routes:
     get:
       tags: [ShippingProvider]
@@ -1541,6 +1571,47 @@ paths:
       tags: [AdminLogistics]
       summary: A line-haul reached the far terminal, not yet handed over (logistics.operate)
       parameters: [ { $ref: "#/components/parameters/legId" } ]
+      responses:
+        "201":
+          description: The updated shipment, staff audience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentView" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/logistics/legs/{id}/schedule:
+    post:
+      tags: [AdminLogistics]
+      summary: Record (or correct) a line-haul's carrier-committed schedule (logistics.operate, BMPL-346)
+      description: >-
+        LINE_HAUL only — a courier leg's timing is dispatch and a driver's
+        own progress, nothing to commit to. Gated on the same positive
+        allow-list of statuses the carrier read-side's `canSchedule` names
+        (PENDING, READY, IN_PROGRESS, EXCEPTION — every status except the two
+        terminal ones), not the depart/arrive sequencing machinery: a
+        carrier's fixed sailing time is knowable before an earlier leg has
+        even started. At least one of scheduledDepartureAt/
+        scheduledArrivalAt is required; given both, arrival must be after
+        departure. A past scheduledDepartureAt is refused only while the leg
+        has not actually departed yet (`departedAt` null) — once departed,
+        a past value is a correction, not a lie. Same rule for
+        scheduledArrivalAt against `arrivedAt`. Partial updates preserve
+        whichever field is not given. Returns the full shipment, staff
+        audience — never the raw leg row, which carries `handoffPin`.
+        Audited as SHIPMENT_LEG_SCHEDULED.
+      parameters: [ { $ref: "#/components/parameters/legId" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: At least one of the two is required; given both, arrival must be after departure.
+              properties:
+                scheduledDepartureAt: { type: string, format: date-time }
+                scheduledArrivalAt: { type: string, format: date-time }
       responses:
         "201":
           description: The updated shipment, staff audience
@@ -1809,9 +1880,11 @@ components:
         best-effort estimate, still entirely from configured data, never a
         map service, an average or an invented timetable. `UNKNOWN` — no
         configured signal anchors a start or arrival time — today, most
-        commonly a `LINE_HAUL` leg: nothing on this surface yet writes a
-        carrier's own scheduled departure or arrival, so an unstarted
-        `LINE_HAUL` leg is honestly UNKNOWN rather than guessed. UNKNOWN
+        commonly a `LINE_HAUL` leg nobody has recorded a carrier schedule
+        for yet. BMPL-346 added the writer (`POST .../legs/{id}/schedule`,
+        admin and carrier); an unstarted `LINE_HAUL` leg is UNKNOWN only
+        until that call is made for it, not because nothing can write it.
+        UNKNOWN
         propagates forward from the first leg that cannot be
         anchored, since every later leg's own start depends on it. A client
         must render this as "cannot be estimated yet" and never substitute a
@@ -2547,6 +2620,7 @@ components:
         isTest: { type: boolean }
         canDepart: { type: boolean, description: "READY or IN_PROGRESS, not yet departed, and its turn has come" }
         canArrive: { type: boolean, description: "IN_PROGRESS and not yet arrived" }
+        canSchedule: { type: boolean, description: "PENDING, READY, IN_PROGRESS or EXCEPTION — every status except the two terminal ones (BMPL-346)" }
     LegAssignmentResult:
       type: object
       properties:
