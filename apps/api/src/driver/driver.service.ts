@@ -321,6 +321,51 @@ export class DriverService {
     }));
   }
 
+  /**
+   * Every town a driver could reasonably declare for this district (BMPL-360):
+   * every configured `LogisticsHub` city in it, UNION every town a
+   * `CourierLane` actually connects FROM or TO it. Both are real, already
+   * configured BML geography — this just stops hiding half of it from the
+   * one audience who needs the full list to describe where they actually
+   * work. Ladyville (no hub, reachable by lane from Belize City) is the
+   * named real example this closes.
+   *
+   * Still driver-only, never a customer-facing or public surface — the
+   * admin courier-lanes screen's own comment says a lane "is never shown to
+   * customers as a service", on purpose, and that boundary is unchanged
+   * here: an authenticated driver describing their own real work area is a
+   * different audience from a customer being offered a lane as a bookable
+   * service, not an exception carved into the same one.
+   */
+  async selectableCities(district: string): Promise<{ cities: string[] }> {
+    if (!(DISTRICTS as readonly string[]).includes(district)) throw new BadRequestException('Unknown district.');
+    const d = district as District;
+    const [hubs, lanes] = await Promise.all([
+      this.prisma.logisticsHub.findMany({ where: { district: d, isActive: true, isTest: false }, select: { city: true } }),
+      this.prisma.courierLane.findMany({
+        where: { isActive: true, isTest: false, OR: [{ originDistrict: d }, { destinationDistrict: d }] },
+        select: { originDistrict: true, originCity: true, destinationDistrict: true, destinationCity: true },
+      }),
+    ]);
+    const cities: string[] = hubs.map((h) => h.city);
+    for (const l of lanes) {
+      if (l.originDistrict === d) cities.push(l.originCity);
+      if (l.destinationDistrict === d) cities.push(l.destinationCity);
+    }
+    // Same "is this the same place" convention as sameCity() above, case-fold
+    // only — keeps the FIRST spelling seen, hubs first, so a hub's own
+    // configured spelling wins over a lane's free text for the same place.
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const c of cities) {
+      const key = c.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(c.trim());
+    }
+    return { cities: unique.sort((a, b) => a.localeCompare(b)) };
+  }
+
   /** Narrow (or, given an empty list, widen back) a driver's coverage of one
    *  district they already declare in `serviceAreas`. Owner-scoped by `userId`,
    *  exactly like `setServiceAreas` — a driver can only ever touch their own

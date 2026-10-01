@@ -117,6 +117,15 @@ export class DriverController {
     return this.driver.setServiceAreas(u.userId, body);
   }
 
+  /** Every town selectable for this district — hub towns plus lane-reachable
+   *  ones (BMPL-360). Driver-only (DriverService.selectableCities' own
+   *  comment explains why that is not the same thing as making lanes
+   *  public). `:district` validated in the service, as below. */
+  @Get('service-areas/:district/cities')
+  selectableCities(@Param('district') district: string) {
+    return this.driver.selectableCities(district);
+  }
+
   /** Narrow one already-served district to specific cities (empty list widens
    *  it back to the whole district). `:district` must be one of DISTRICTS —
    *  validated in the service, since it is a path param rather than a body. */

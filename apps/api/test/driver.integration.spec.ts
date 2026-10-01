@@ -212,6 +212,78 @@ describe('service areas', () => {
   });
 });
 
+/** BMPL-360: the city picker must offer every real, configured town — hub
+ *  towns AND lane-reachable towns — not just hub towns, while keeping lanes
+ *  off any customer-facing or public surface. */
+describe('selectable cities for narrowing a service area (BMPL-360)', () => {
+  const createHub = (district: string, city: string, code: string) =>
+    post(adminCookies, 'admin/logistics/hubs', { code, name: `${city} Hub`, type: 'AIRSTRIP', district, city, modes: ['LAND', 'AIR'] });
+  const createLane = (over: Record<string, unknown>) =>
+    post(adminCookies, 'admin/logistics/courier-lanes', {
+      originDistrict: 'BELIZE', originCity: 'Belize City', destinationDistrict: 'BELIZE', destinationCity: 'Ladyville',
+      ...over,
+    });
+
+  it('offers a hub town and an intra-district lane-only town together — the named real case (Ladyville)', async () => {
+    expect((await createHub('BELIZE', 'Belize City', `BZC${Date.now()}`)).status).toBe(201);
+    expect((await createLane({})).status).toBe(201);
+
+    const res = await get(adminCookies, 'driver/service-areas/BELIZE/cities');
+    expect(res.status).toBe(200);
+    expect(res.body.cities).toEqual(['Belize City', 'Ladyville']);
+  });
+
+  it('a cross-district lane offers the town on EACH side to its OWN district only, never the other', async () => {
+    const seq = Date.now();
+    expect((await createHub('CAYO', 'Belmopan', `BMP${seq}`)).status).toBe(201);
+    expect((await createLane({
+      originDistrict: 'CAYO', originCity: 'Belmopan', destinationDistrict: 'BELIZE', destinationCity: 'Hattieville',
+    })).status).toBe(201);
+
+    const belize = await get(adminCookies, 'driver/service-areas/BELIZE/cities');
+    expect(belize.body.cities).toContain('Hattieville');
+    expect(belize.body.cities).not.toContain('Belmopan');
+
+    const cayo = await get(adminCookies, 'driver/service-areas/CAYO/cities');
+    expect(cayo.body.cities).toContain('Belmopan');
+    expect(cayo.body.cities).not.toContain('Hattieville');
+  });
+
+  it('excludes an inactive lane and a test-network lane — same isolation every other network read already holds', async () => {
+    expect((await createHub('TOLEDO', 'Punta Gorda', `PG${Date.now()}`)).status).toBe(201);
+    expect((await createLane({
+      originDistrict: 'TOLEDO', originCity: 'Punta Gorda', destinationDistrict: 'TOLEDO', destinationCity: 'Barranco', isActive: false,
+    })).status).toBe(201);
+    expect((await createLane({
+      originDistrict: 'TOLEDO', originCity: 'Punta Gorda', destinationDistrict: 'TOLEDO', destinationCity: 'Blue Creek', isTest: true,
+    })).status).toBe(201);
+
+    const res = await get(adminCookies, 'driver/service-areas/TOLEDO/cities');
+    expect(res.body.cities).toEqual(['Punta Gorda']);
+  });
+
+  it('de-dupes case/whitespace variants, keeping the hub\'s own spelling', async () => {
+    expect((await createHub('STANN_CREEK', 'Dangriga', `DGA${Date.now()}`)).status).toBe(201);
+    expect((await createLane({
+      originDistrict: 'STANN_CREEK', originCity: '  dangriga ', destinationDistrict: 'STANN_CREEK', destinationCity: 'Hopkins',
+    })).status).toBe(201);
+
+    const res = await get(adminCookies, 'driver/service-areas/STANN_CREEK/cities');
+    expect(res.body.cities).toEqual(['Dangriga', 'Hopkins']);
+  });
+
+  it('rejects an unknown district', async () => {
+    const res = await get(adminCookies, 'driver/service-areas/NOT_A_DISTRICT/cities');
+    expect(res.status).toBe(400);
+  });
+
+  it('is reachable by an unapproved applicant, same as the district picker it feeds', async () => {
+    const { cookies } = await registerCustomer('drv_selectable@example.bz');
+    const res = await get(cookies, 'driver/service-areas/BELIZE/cities');
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('availability + ONLINE eligibility', () => {
   async function eligibleDriver(email: string) {
     const { cookies, userId } = await registerCustomer(email);
