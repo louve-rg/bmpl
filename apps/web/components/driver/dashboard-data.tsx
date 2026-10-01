@@ -63,9 +63,23 @@ export interface Vehicle {
   insuranceExpiryStatus?: ExpiryStatus;
 }
 
+export interface ServiceAreaCity {
+  id: string;
+  city: string;
+  isActive: boolean;
+}
+
 export interface ServiceArea {
   district: string;
   isActive: boolean;
+  /**
+   * Narrowing rows for this district. Absent/empty means "serves the whole
+   * district" — the same meaning every service area had before narrowing
+   * existed, unchanged by this field's addition. Optional defensively: this
+   * repo's convention (see BMPL-349) is that a web-side type never requires a
+   * field purely because the api's current response always sends it.
+   */
+  cities?: ServiceAreaCity[];
 }
 
 export interface Eligibility {
