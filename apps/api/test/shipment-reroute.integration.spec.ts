@@ -325,7 +325,7 @@ describe('hold (flagException) — Ruling 1: both sender and recipient are told,
 });
 
 describe('previewReroute — read-only, moves nothing', () => {
-  it('shows the redirected route\'s real price without creating or charging anything, and names whether it increases the charge', async () => {
+  it('shows the redirected route\'s real price without creating or charging anything, and names whether this leg costs more than what was already quoted (informational only — see rerouteShipment\'s own tests for why this never gates confirmation)', async () => {
     const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
 
@@ -336,15 +336,15 @@ describe('previewReroute — read-only, moves nothing', () => {
     expect(r.status).toBe(201);
     expect(r.body.available).toBe(true);
     expect(r.body.totalMinor).toBeGreaterThan(0);
-    expect(typeof r.body.increasesCharge).toBe('boolean');
-    expect(r.body.increasesCharge).toBe(r.body.totalMinor > Number(shipment.quotedTotalMinor));
+    expect(typeof r.body.legCostsMoreThanOriginal).toBe('boolean');
+    expect(r.body.legCostsMoreThanOriginal).toBe(r.body.totalMinor > Number(shipment.quotedTotalMinor));
 
     expect(await ctx.prisma.shipment.count()).toBe(shipmentsBefore);
     const after = (await get(customer, 'wallet')).body as { availableMinor: number };
     expect(after.availableMinor).toBe(before.availableMinor);
   });
 
-  it('reports increasesCharge: true when the redirect costs more than the customer already paid', async () => {
+  it('reports legCostsMoreThanOriginal: true when the redirect costs more than the customer already paid', async () => {
     const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
     // Forced low rather than relying on the planner's own numbers to differ:
@@ -355,10 +355,10 @@ describe('previewReroute — read-only, moves nothing', () => {
     const r = await previewReroute(legId, toHub());
     expect(r.status).toBe(201);
     expect(r.body.available).toBe(true);
-    expect(r.body.increasesCharge).toBe(true);
+    expect(r.body.legCostsMoreThanOriginal).toBe(true);
   });
 
-  it('reports increasesCharge: false when the redirect does not cost more than the customer already paid', async () => {
+  it('reports legCostsMoreThanOriginal: false when the redirect does not cost more than the customer already paid — and BMPL-375: this does NOT mean the redirect is free (see rerouteShipment\'s own tests)', async () => {
     const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
     await ctx.prisma.shipment.update({ where: { id: shipment.id }, data: { quotedTotalMinor: 99_999_999n } });
@@ -366,7 +366,7 @@ describe('previewReroute — read-only, moves nothing', () => {
     const r = await previewReroute(legId, toHub());
     expect(r.status).toBe(201);
     expect(r.body.available).toBe(true);
-    expect(r.body.increasesCharge).toBe(false);
+    expect(r.body.legCostsMoreThanOriginal).toBe(false);
   });
 
   it('reports the same unavailability an ordinary quote would when the onward lane has no configured route', async () => {
@@ -409,8 +409,8 @@ describe('previewReroute — read-only, moves nothing', () => {
   });
 });
 
-describe('rerouteShipment — the confirmation, and the only step that may charge', () => {
-  it('books a new shipment to the new destination at the normal configured price, charges the sender, links it back, notifies sender and recipient, and leaves the original leg/shipment exactly as it was', async () => {
+describe('rerouteShipment — now only PREPARES (BMPL-375 correction): EVERY priced reroute takes a fresh, unrefunded debit, so every one of them — not just a dearer one — requires the paying customer\'s own confirmation', () => {
+  it('prepares, then — on the paying customer\'s own confirmation — books a new shipment to the new destination at the normal configured price, charges the sender, links it back, notifies sender and recipient, and leaves the original leg/shipment exactly as it was', async () => {
     const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
     const recipient = await registerUser(`grecip2_${uniq()}@example.com`);
@@ -421,12 +421,22 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
     expect(preview.body.available).toBe(true);
     const expectedPrice = preview.body.totalMinor as number;
 
-    const r = await rerouteShipment(legId, toHub());
+    // STAFF PREPARES ONLY — owner ruling: staff action alone must never
+    // authorize charging the customer's wallet.
+    const prepared = await rerouteShipment(legId, toHub());
+    expect(prepared.status).toBe(201);
+    expect(prepared.body.outcome).toBe('PREPARED');
+    expect(prepared.body.rerouteShipment).toBeUndefined();
+    const midWallet = (await get(customer, 'wallet')).body as { availableMinor: number };
+    expect(midWallet.availableMinor).toBe(before.availableMinor);
+
+    // ONLY NOW — the paying customer's own confirmation — may this charge.
+    const r = await confirmRouting(shipment.id);
     expect(r.status).toBe(201);
     expect(r.body.outcome).toBe('INITIATED');
     expect(r.body.rerouteShipment).toBeTruthy();
     expect(r.body.rerouteShipment.id).not.toBe(shipment.id);
-    expect(r.body.increasesCharge).toBe(expectedPrice > Number(shipment.quotedTotalMinor));
+    expect(r.body.legCostsMoreThanOriginal).toBe(expectedPrice > Number(shipment.quotedTotalMinor));
 
     const rerouteRow = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: r.body.rerouteShipment.id } });
     expect(rerouteRow.rerouteOfShipmentId).toBe(shipment.id);
@@ -477,13 +487,14 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
     expect(fetched.body.returnShipment).toBeNull();
   });
 
-  it('BMPL-375: a CHARGE-INCREASING reroute only PREPARES on staff action — nothing charges until the paying customer confirms', async () => {
+  it('BMPL-375: a reroute whose own leg costs MORE than the original only PREPARES on staff action — nothing charges until the paying customer confirms', async () => {
     const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
-    // Forced low so the redirect's real price is guaranteed to increase the
-    // charge — same technique previewReroute's own "increasesCharge: true"
-    // test already uses, isolating the authorization boundary from the
-    // pricing engine (already covered elsewhere).
+    // Forced low so the redirect's real price is guaranteed to be dearer
+    // than the original — same technique previewReroute's own
+    // "legCostsMoreThanOriginal: true" test already uses, isolating the
+    // authorization boundary from the pricing engine (already covered
+    // elsewhere).
     await ctx.prisma.shipment.update({ where: { id: shipment.id }, data: { quotedTotalMinor: 1n } });
 
     const before = (await get(customer, 'wallet')).body as { availableMinor: number };
@@ -491,7 +502,7 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
     // original-shipment payment already exists and is legitimate.
     const paymentsBefore = await ctx.prisma.payment.count();
     const preview = await previewReroute(legId, toHub());
-    expect(preview.body.increasesCharge).toBe(true);
+    expect(preview.body.legCostsMoreThanOriginal).toBe(true);
     const expectedPrice = preview.body.totalMinor as number;
 
     // STAFF PREPARES ONLY — owner ruling: staff action alone must never
@@ -499,7 +510,7 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
     const prepared = await rerouteShipment(legId, toHub());
     expect(prepared.status).toBe(201);
     expect(prepared.body.outcome).toBe('PREPARED');
-    expect(prepared.body.increasesCharge).toBe(true);
+    expect(prepared.body.legCostsMoreThanOriginal).toBe(true);
     expect(prepared.body.totalMinor).toBe(expectedPrice);
     expect(prepared.body.rerouteShipment).toBeUndefined();
     expect(await ctx.prisma.payment.count()).toBe(paymentsBefore);
@@ -517,7 +528,7 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
     const r = await confirmRouting(shipment.id);
     expect(r.status).toBe(201);
     expect(r.body.outcome).toBe('INITIATED');
-    expect(r.body.increasesCharge).toBe(true);
+    expect(r.body.legCostsMoreThanOriginal).toBe(true);
     expect(r.body.rerouteShipment).toBeTruthy();
 
     const payment = await ctx.prisma.payment.findFirstOrThrow({ where: { shipmentId: r.body.rerouteShipment.id } });
@@ -527,20 +538,44 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
     expect(await ctx.prisma.shipmentRoutingProposal.count({ where: { legId } })).toBe(0);
   });
 
-  it('BMPL-375: a reroute that does NOT increase the charge executes on staff action alone — nothing to consent to, no proposal left behind', async () => {
+  it('BMPL-375 (the defect god\'s ruling corrected, QA\'s own red-test scenario): a reroute whose own leg is CHEAPER than the original still takes a fresh, unrefunded debit, so it ALSO only prepares — it does NOT execute on staff action alone', async () => {
     const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
-    // Forced high so the redirect's real price is guaranteed NOT to
-    // increase the charge — the mirror image of the charge-increasing test
-    // above, same forcing technique previewReroute's own test already uses.
+    // Forced high so the redirect's real price is guaranteed to be cheaper
+    // than the original — the mirror image of the dearer-leg test above,
+    // same forcing technique previewReroute's own test already uses. This
+    // is exactly the shape of QA's BMPL-376 fixture (a toHub() redirect
+    // that prices below quotedTotalMinor): the ORIGINAL comparison
+    // (totalMinor > quotedTotalMinor) read this as "nothing to consent to"
+    // and executed immediately, taking a real, unrefunded debit under a
+    // staff-only call — that was the defect, not a carve-out.
     await ctx.prisma.shipment.update({ where: { id: shipment.id }, data: { quotedTotalMinor: 99_999_999n } });
 
-    const r = await rerouteShipment(legId, toHub());
+    const before = (await get(customer, 'wallet')).body as { availableMinor: number };
+    const paymentsBefore = await ctx.prisma.payment.count();
+    const preview = await previewReroute(legId, toHub());
+    expect(preview.body.legCostsMoreThanOriginal).toBe(false);
+    const expectedPrice = preview.body.totalMinor as number;
+    expect(expectedPrice).toBeGreaterThan(0); // ZERO IS NOT A PRICE — if this were 0 it would PENDING_MANUAL instead, a different case entirely.
+
+    const prepared = await rerouteShipment(legId, toHub());
+    expect(prepared.status).toBe(201);
+    expect(prepared.body.outcome).toBe('PREPARED');
+    expect(prepared.body.legCostsMoreThanOriginal).toBe(false);
+    expect(prepared.body.rerouteShipment).toBeUndefined();
+    // The defect, proven absent: no fresh debit happened on the staff call alone.
+    expect(await ctx.prisma.payment.count()).toBe(paymentsBefore);
+    const midWallet = (await get(customer, 'wallet')).body as { availableMinor: number };
+    expect(midWallet.availableMinor).toBe(before.availableMinor);
+    const midShipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+    expect(midShipment.status).toBe('EXCEPTION');
+
+    const r = await confirmRouting(shipment.id);
     expect(r.status).toBe(201);
     expect(r.body.outcome).toBe('INITIATED');
-    expect(r.body.increasesCharge).toBe(false);
-    expect(r.body.rerouteShipment).toBeTruthy();
-    // Nothing was ever prepared — there was nothing to consent to.
+    expect(r.body.legCostsMoreThanOriginal).toBe(false);
+    const after = (await get(customer, 'wallet')).body as { availableMinor: number };
+    expect(after.availableMinor).toBe(before.availableMinor - expectedPrice);
     expect(await ctx.prisma.shipmentRoutingProposal.count({ where: { legId } })).toBe(0);
   });
 
@@ -581,9 +616,12 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
   });
 
   it('REFUSES a second reroute once one is already booked for the same shipment', async () => {
-    const { legId } = await walkToLastMileException();
+    const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
+    // BMPL-375: rerouteShipment now only PREPARES — the paying customer's
+    // own confirmation is what actually books it.
     expect((await rerouteShipment(legId, toHub())).status).toBe(201);
+    expect((await confirmRouting(shipment.id)).status).toBe(201);
 
     const again = await rerouteShipment(legId, toHub());
     expect(again.status).toBe(400);
@@ -604,9 +642,12 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
   });
 
   it('REFUSES to resolve/resume the original leg once a reroute has already been booked against it (BMPL-367: the original attempt is settled, not reopened)', async () => {
-    const { legId } = await walkToLastMileException();
+    const { shipment: bookedShipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
+    // BMPL-375: rerouteShipment now only PREPARES — the paying customer's
+    // own confirmation is what actually books it.
     expect((await rerouteShipment(legId, toHub())).status).toBe(201);
+    expect((await confirmRouting(bookedShipment.id)).status).toBe(201);
 
     const r = await post(admin, `admin/logistics/legs/${legId}/resolve-exception`, { resolution: 'RESUME', note: 'Trying to resume anyway.' });
     expect(r.status).toBe(400);

@@ -57,7 +57,22 @@
 -- Additive and idempotent; no existing column, table or enum value is
 -- touched, changed or removed.
 --
+-- ADDED AFTER REVIEW (same migration, not a second file — the constraint
+-- describes the same new, still-empty table): a CHECK constraint enforcing
+-- destination IS NULL for kind = RETURN and IS NOT NULL for kind = REROUTE.
+-- The service layer already enforces this and the header above already
+-- documented it as a convention; reviewer's own observation was that the
+-- table is brand new and empty, so making the invariant STRUCTURAL rather
+-- than merely conventional costs nothing today and is the exact argument
+-- just accepted for moving the wallet-ownership guard into escrowInTx
+-- itself -- a rule stated once, at the layer that cannot forget it, rather
+-- than trusted to every caller. Prisma has no schema-level representation
+-- for a CHECK constraint in this version, so it is intentionally invisible
+-- to schema.prisma -- documented there as the same class of gap as the
+-- hand-written GIN trigram indexes (packages/database/CLAUDE.md §6).
+--
 -- ROLLBACK (verified against a scratch database, in order):
+--   ALTER TABLE "shipment_routing_proposals" DROP CONSTRAINT "shipment_routing_proposals_destination_kind_check";
 --   ALTER TABLE "shipment_routing_proposals" DROP CONSTRAINT "shipment_routing_proposals_legId_fkey";
 --   DROP TABLE "shipment_routing_proposals";
 --   DROP TYPE "ShipmentRoutingProposalKind";
@@ -85,6 +100,10 @@ CREATE UNIQUE INDEX "shipment_routing_proposals_legId_key" ON "shipment_routing_
 -- AddForeignKey
 ALTER TABLE "shipment_routing_proposals" ADD CONSTRAINT "shipment_routing_proposals_legId_fkey"
     FOREIGN KEY ("legId") REFERENCES "shipment_legs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddCheckConstraint
+ALTER TABLE "shipment_routing_proposals" ADD CONSTRAINT "shipment_routing_proposals_destination_kind_check"
+    CHECK (("kind" = 'RETURN' AND "destination" IS NULL) OR ("kind" = 'REROUTE' AND "destination" IS NOT NULL));
 
 ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_RETURN_PREPARED';
 ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_REROUTE_PREPARED';

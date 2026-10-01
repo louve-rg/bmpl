@@ -2378,13 +2378,16 @@ export class ShipmentService {
 
   /**
    * Shows what a reroute would cost, WITHOUT moving anything — same rule
-   * `previewReturn` follows, for the same reason. `increasesCharge` is the
-   * one extra fact a caller needs that a return's preview does not: the
-   * owner's own distinction between a reroute that needs an explicit
-   * confirmation dialog and one that does not turns on whether this number
-   * is more than what the customer already paid (`quotedTotalMinor`) — a
-   * decision for a caller (the admin UI) to make from this flag, not this
-   * method, which only ever reports facts.
+   * `previewReturn` follows, for the same reason. `legCostsMoreThanOriginal`
+   * is informational ONLY — whether this specific leg's own price is more
+   * than what was already quoted (`quotedTotalMinor`) — and must never be
+   * read as "the customer needs to confirm." BMPL-375 correction: a reroute
+   * always books a brand-new Payment for the full redirected segment with
+   * nothing refunded or credited back on the original (see `rerouteShipment`'s
+   * own comment for why) — so the customer's wallet is debited `totalMinor`
+   * regardless of which way this comparison falls, and confirmation is
+   * required regardless of it too. This field used to be misnamed
+   * `increasesCharge`, which claimed to answer that question and didn't.
    */
   async previewReroute(legId: string, destination: RerouteInput['destination']) {
     const leg = await this.loadRerouteLeg(legId);
@@ -2398,7 +2401,7 @@ export class ShipmentService {
     // local sidesteps a property read that stays "possibly undefined" past
     // the guard above even though the runtime value never is.
     const totalMinor = quote.totalMinor ?? 0;
-    return { ...quote, increasesCharge: totalMinor > Number(leg.shipment.quotedTotalMinor) };
+    return { ...quote, legCostsMoreThanOriginal: totalMinor > Number(leg.shipment.quotedTotalMinor) };
   }
 
   /**
@@ -2426,16 +2429,28 @@ export class ShipmentService {
    * in the first place).
    *
    * BMPL-375, owner ruling: STAFF ACTION ALONE MUST NEVER AUTHORIZE CHARGING
-   * THE CUSTOMER'S WALLET — but a reroute that does NOT increase the charge
-   * has nothing to consent to, so the owner's own distinction is exactly
-   * where this splits: `increasesCharge === false` still executes
-   * immediately on staff action alone (unchanged — `executeReroute` below,
-   * same as always); `increasesCharge === true` now only PREPARES (writes a
-   * `ShipmentRoutingProposal`, including the chosen destination, and
-   * returns), and only the paying customer's own `confirmRouting` may
-   * actually book and charge it. `increasesCharge` used to merely be
-   * information for the caller's OWN UI to decide whether to show a warning
-   * dialog; it is now the decision this method itself makes.
+   * THE CUSTOMER'S WALLET. THIS METHOD USED to carve out an exception for a
+   * reroute that did not cost more than the ORIGINAL leg's own price
+   * (`totalMinor > quotedTotalMinor`), on the theory that a cheaper redirect
+   * had "nothing to consent to" — WRONG, and corrected after god's own
+   * review caught it: `executeReroute` always books a brand-new Payment for
+   * the FULL redirected segment via `create()` (`rerouteInput` hardcodes
+   * `payWithWallet: true`), and nothing in this codebase refunds or credits
+   * the ORIGINAL payment — there is no partial-refund primitive to build
+   * that on (see this method's own older comment, still true). So the
+   * customer's wallet is ALWAYS debited the new leg's full `totalMinor`,
+   * stacked on top of what they already paid, REGARDLESS of whether that
+   * `totalMinor` is more or less than the original price — the comparison
+   * this used to gate on measures something else entirely (which leg is
+   * dearer), not whether the customer owes anything new (they always do,
+   * once priced: `priceReroute`'s own ZERO IS NOT A PRICE check already
+   * guarantees `totalMinor > 0` whenever `priced: true`). There is therefore
+   * NO live carve-out any more: every priced reroute PREPARES, full stop —
+   * writes a `ShipmentRoutingProposal` (including the chosen destination)
+   * and returns, and only the paying customer's own `confirmRouting` may
+   * actually book and charge it. The renamed `legCostsMoreThanOriginal` is
+   * what the old `increasesCharge` actually measured — kept for information,
+   * never read as a gate again.
    *
    * BMPL-367: the ORIGINAL leg is left exactly as it was — EXCEPTION,
    * never CANCELLED, the historical record of what actually happened to it,
@@ -2462,14 +2477,10 @@ export class ShipmentService {
     const priced = await this.priceReroute(leg, shipment, input.destination, input.note, actor.userId);
     if (!priced.priced) return priced.outcome;
 
-    if (!priced.increasesCharge) {
-      // Nothing to consent to — staff action alone is fine here, exactly as
-      // before this card.
-      return this.executeReroute(legId, shipment, priced.rerouted, priced.totalMinor, false, input.note, actor.userId);
-    }
-
-    // Charge-increasing — staff action stops HERE. Persist the proposal,
-    // including the operator-chosen destination, and wait for the customer.
+    // ALWAYS prepares — see this method's own comment above for why there is
+    // no remaining case where staff action alone may execute a reroute.
+    // Persist the proposal, including the operator-chosen destination, and
+    // wait for the customer.
     await this.prisma.shipmentRoutingProposal.upsert({
       where: { legId },
       create: { legId, kind: 'REROUTE', destination: input.destination, note: input.note, preparedByUserId: actor.userId },
@@ -2479,9 +2490,9 @@ export class ShipmentService {
       action: 'SHIPMENT_REROUTE_PREPARED',
       actorId: actor.userId,
       reason: input.note,
-      newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, priceMinor: priced.totalMinor, increasesCharge: true },
+      newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, priceMinor: priced.totalMinor, legCostsMoreThanOriginal: priced.legCostsMoreThanOriginal },
     });
-    return { outcome: 'PREPARED' as const, totalMinor: priced.totalMinor, increasesCharge: true };
+    return { outcome: 'PREPARED' as const, totalMinor: priced.totalMinor, legCostsMoreThanOriginal: priced.legCostsMoreThanOriginal };
   }
 
   /**
@@ -2498,7 +2509,7 @@ export class ShipmentService {
     note: string | undefined,
     actorId: string,
   ): Promise<
-    | { priced: true; totalMinor: number; increasesCharge: boolean; rerouted: CreateShipmentInput }
+    | { priced: true; totalMinor: number; legCostsMoreThanOriginal: boolean; rerouted: CreateShipmentInput }
     | { priced: false; outcome: { outcome: 'PENDING_MANUAL'; reason: string } }
   > {
     const pendingManual = async (reason: string, planReason: string | undefined) => {
@@ -2524,24 +2535,25 @@ export class ShipmentService {
     if (totalMinor <= 0) {
       return pendingManual(quote.pricingNote ?? 'This redirected route has not been priced yet.', 'ZERO_PRICE');
     }
-    const increasesCharge = totalMinor > Number(shipment.quotedTotalMinor);
-    return { priced: true, totalMinor, increasesCharge, rerouted };
+    const legCostsMoreThanOriginal = totalMinor > Number(shipment.quotedTotalMinor);
+    return { priced: true, totalMinor, legCostsMoreThanOriginal, rerouted };
   }
 
   /**
    * The only place that actually books and charges a reroute — the existing,
-   * approved booking + payment machinery, reused verbatim. Called either (a)
-   * immediately by `rerouteShipment` itself, when the reroute does not
-   * increase the charge and there is nothing to consent to, or (b) from
+   * approved booking + payment machinery, reused verbatim. Reached ONLY from
    * `confirmRouting`, after the shipment's own paying customer has
-   * explicitly confirmed a charge-increasing one.
+   * explicitly confirmed — `rerouteShipment` itself never calls this
+   * directly any more (see its own comment: every priced reroute debits the
+   * customer something new, so there is no case left where staff action
+   * alone is enough).
    */
   private async executeReroute(
     legId: string,
     shipment: RerouteableShipment,
     rerouted: CreateShipmentInput,
     totalMinor: number,
-    increasesCharge: boolean,
+    legCostsMoreThanOriginal: boolean,
     note: string | undefined,
     actorId: string,
   ) {
@@ -2566,7 +2578,7 @@ export class ShipmentService {
         rerouteShipmentId: rerouteShipment.id,
         rerouteReference: rerouteShipment.reference,
         priceMinor: totalMinor,
-        increasesCharge,
+        legCostsMoreThanOriginal,
       },
     });
 
@@ -2593,19 +2605,21 @@ export class ShipmentService {
     // Sender always notified (an account always exists, checked above);
     // recipient only when genuinely linked, same honest limit as the hold
     // notification above.
+    // BMPL-375 correction: every reroute that reaches this point has just
+    // taken a fresh, unrefunded debit (see this method's own doc comment) —
+    // there is no longer a "does not change the price" case, so the
+    // notification no longer branches on one.
     const toNotify = [shipment.customerUserId!, ...(shipment.recipientUserId ? [shipment.recipientUserId] : [])];
     await this.notifications.notifyUsers(toNotify, {
       type: 'MARKETPLACE',
       category: 'DELIVERY',
       event: 'SHIPMENT_REROUTED',
       title: `Shipment ${shipment.reference} redirected`,
-      body: increasesCharge
-        ? `This shipment is being redirected to a new address, which changes its delivery time and its price.`
-        : `This shipment is being redirected to a new address, which changes its delivery time.`,
-      data: { shipmentId: shipment.id, reference: shipment.reference, rerouteShipmentId: rerouteShipment.id, increasesCharge },
+      body: `This shipment is being redirected to a new address, which changes its delivery time and its price.`,
+      data: { shipmentId: shipment.id, reference: shipment.reference, rerouteShipmentId: rerouteShipment.id, legCostsMoreThanOriginal },
     });
 
-    return { outcome: 'INITIATED' as const, rerouteShipment, increasesCharge };
+    return { outcome: 'INITIATED' as const, rerouteShipment, legCostsMoreThanOriginal };
   }
 
   /**
@@ -2664,7 +2678,7 @@ export class ShipmentService {
     const priced = await this.priceReroute(leg, rerouteableShipment, destination, proposal.note, userId);
     await this.prisma.shipmentRoutingProposal.delete({ where: { id: proposal.id } });
     if (!priced.priced) return priced.outcome;
-    return this.executeReroute(legWithProposal.id, rerouteableShipment, priced.rerouted, priced.totalMinor, priced.increasesCharge, proposal.note, userId);
+    return this.executeReroute(legWithProposal.id, rerouteableShipment, priced.rerouted, priced.totalMinor, priced.legCostsMoreThanOriginal, proposal.note, userId);
   }
 
   /**

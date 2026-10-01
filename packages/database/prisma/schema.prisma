@@ -5332,6 +5332,14 @@ enum ShipmentRoutingProposalKind {
 /// a second staff round-trip) to resupply it. Null for RETURN: the reversed
 /// trip is fully derived from the shipment's own stored origin, exactly as
 /// `previewReturn`/`returnToSender` already compute it fresh every time.
+/// That RETURN<->NULL, REROUTE<->NOT NULL pairing is also enforced as a raw
+/// CHECK constraint in the migration (`shipment_routing_proposals_destination_kind_check`)
+/// — structural, not merely conventional, the same reasoning BMPL-375 applied
+/// to moving the wallet-ownership guard into the sink. Prisma has no
+/// attribute for a CHECK constraint in this schema version, so it is
+/// invisible here by necessity, the same gap documented for the hand-written
+/// GIN trigram indexes (packages/database/CLAUDE.md §6, mechanism 1) — do not
+/// "restore" it by deleting the constraint to match what this file shows.
 model ShipmentRoutingProposal {
   id               String                      @id @default(cuid())
   legId            String                      @unique
