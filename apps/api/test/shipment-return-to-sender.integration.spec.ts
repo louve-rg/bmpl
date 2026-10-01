@@ -385,6 +385,15 @@ describe('returnToSender — the confirmation, and the only step that may charge
     expect(mine).toBeTruthy();
     expect((mine!.newValue as { returnShipmentId?: string }).returnShipmentId).toBe(returnRow.id);
     expect((mine!.newValue as { priceMinor?: number }).priceMinor).toBe(expectedPrice);
+
+    // BMPL-367: the signal is exposed on the wire, not just in the database —
+    // a resolution panel reading the original shipment needs to know WHICH
+    // new shipment it became, not just that its status changed.
+    const fetched = await request(ctx.server).get(`/api/admin/logistics/shipments/${shipment.reference}`).set('Cookie', admin);
+    expect(fetched.status).toBe(200);
+    expect(fetched.body.status).toBe('RETURNED');
+    expect(fetched.body.returnShipment).toMatchObject({ id: returnRow.id, reference: returnRow.reference });
+    expect(fetched.body.rerouteShipment).toBeNull();
   });
 
   it('STAYS PENDING_MANUAL — charges nobody and creates nothing — when the reverse route has no configured price, rather than guessing one', async () => {

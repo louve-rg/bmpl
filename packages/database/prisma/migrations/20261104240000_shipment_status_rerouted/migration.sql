@@ -1,0 +1,35 @@
+-- BMPL-367: the same false-status class BMPL-356 (20261104230100) closed for
+-- a return, left open for a reroute on the same branch -- found by the web
+-- lane building the resolution panel, named rather than worked around. A
+-- rerouted shipment's own exceptional leg stays EXCEPTION forever
+-- (deliberately; see rerouteShipment's own comment), so without this a
+-- rerouted shipment would sit at EXCEPTION ("Needs attention") forever too,
+-- honest but stale, never resolving to the thing that actually happened.
+--
+-- REROUTED is not derived by deriveShipmentStatus() in @bmpl/shared -- it is
+-- layered on top in shipment.service.ts's recompute(), the identical idiom
+-- 20261104230100 already used for RETURNED: "this shipment has a reroute
+-- booked against it" (rerouteShipment, added by 20261104230000) is a fact
+-- the legs alone cannot express, so deriveShipmentStatus() itself needed no
+-- change at all; only recompute()'s layering and rerouteShipment() (which
+-- did not previously call recompute() for the original shipment at all)
+-- needed to learn about this value. Every consumer of ShipmentStatus was
+-- checked before adding this value, the same sweep 20261104230100 ran
+-- (shared label map, settlement's delivered-gate, web status
+-- grouping/ETA display, admin status filter) -- see the PR for the full
+-- consumer audit.
+--
+-- Deliberately its own migration, separate from everything else on this
+-- branch -- one migration per enum extension remains this floor's own
+-- convention.
+--
+-- Additive and idempotent; no existing enum value is touched, changed or
+-- removed.
+--
+-- ROLLBACK: PostgreSQL has no ALTER TYPE ... DROP VALUE -- the same
+-- limitation every prior ADD VALUE migration on this floor already carries
+-- (e.g. 20261104190000, 20261104200000, 20261104230100). Rolling back would
+-- mean recreating the enum without this value and recasting every column
+-- that uses it, needed only if a row has actually been written with this
+-- value.
+ALTER TYPE "ShipmentStatus" ADD VALUE IF NOT EXISTS 'REROUTED';

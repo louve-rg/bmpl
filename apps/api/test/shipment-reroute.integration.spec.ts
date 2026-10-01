@@ -438,13 +438,16 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
     const after = (await get(customer, 'wallet')).body as { availableMinor: number };
     expect(after.availableMinor).toBe(before.availableMinor - expectedPrice);
 
-    // The original leg/shipment is left exactly as it was — same deliberate
-    // choice already made for return-to-sender before BMPL-356, flagged as
-    // the same kind of gap for a future card, not guessed at here.
+    // The ORIGINAL LEG is left exactly as it was — EXCEPTION, never
+    // CANCELLED, the historical record of what actually happened to it. The
+    // ORIGINAL SHIPMENT's own derived status, though, now reads REROUTED
+    // (BMPL-367): once a reroute is booked and charged, staying at
+    // EXCEPTION forever would be honest-but-stale, the same fix BMPL-356
+    // already gave returns.
     const originalLeg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
     expect(originalLeg.status).toBe('EXCEPTION');
     const originalShipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
-    expect(originalShipment.status).toBe('EXCEPTION');
+    expect(originalShipment.status).toBe('REROUTED');
 
     const notified = await ctx.prisma.notificationRecipient.findMany({
       where: { userId: { in: [customerUserId, recipient.userId] } },
@@ -458,6 +461,15 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
     expect(mine).toBeTruthy();
     expect((mine!.newValue as { rerouteShipmentId?: string }).rerouteShipmentId).toBe(rerouteRow.id);
     expect((mine!.newValue as { priceMinor?: number }).priceMinor).toBe(expectedPrice);
+
+    // BMPL-367: the signal is exposed on the wire, not just in the database —
+    // a resolution panel reading the original shipment needs to know WHICH
+    // new shipment it became, not just that its status changed.
+    const fetched = await request(ctx.server).get(`/api/admin/logistics/shipments/${shipment.reference}`).set('Cookie', admin);
+    expect(fetched.status).toBe(200);
+    expect(fetched.body.status).toBe('REROUTED');
+    expect(fetched.body.rerouteShipment).toMatchObject({ id: rerouteRow.id, reference: rerouteRow.reference });
+    expect(fetched.body.returnShipment).toBeNull();
   });
 
   it('STAYS PENDING_MANUAL — charges nobody and creates nothing — when the onward route has no configured price, rather than guessing one', async () => {
@@ -514,6 +526,20 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
     const r = await rerouteShipment(legId, toHub());
     expect(r.status).toBe(400);
     expect(r.body.message).toMatch(/already returned/i);
+  });
+
+  it('REFUSES to resolve/resume the original leg once a reroute has already been booked against it (BMPL-367: the original attempt is settled, not reopened)', async () => {
+    const { legId } = await walkToLastMileException();
+    await addReverseRoutes();
+    expect((await rerouteShipment(legId, toHub())).status).toBe(201);
+
+    const r = await post(admin, `admin/logistics/legs/${legId}/resolve-exception`, { resolution: 'RESUME', note: 'Trying to resume anyway.' });
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/already rerouted/i);
+
+    // Still REROUTED, not nudged back toward IN_PROGRESS/READY by the refused call.
+    const shipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } })).shipmentId } });
+    expect(shipment.status).toBe('REROUTED');
   });
 
   it('REFUSES on a marketplace shipment, and creates or charges nothing', async () => {
