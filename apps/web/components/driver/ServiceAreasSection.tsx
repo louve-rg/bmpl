@@ -23,7 +23,7 @@ import { Card, DISTRICTS, districtLabel, errMessage, type ServiceArea } from './
  *
  * Town OPTIONS come from the public terminal list (`GET /shipping/hubs`,
  * already used by checkout to show customers where BML operates) rather than
- * a free-text box. That list is BMPL-operator-curated geography — active,
+ * a free-text box. That list is BML-operator-curated geography — active,
  * non-simulation hubs an admin entered on the Logistics screen — never
  * something a driver types. Courier-lane-only towns (a town with a road but
  * no terminal, e.g. Ladyville) are deliberately NOT offered here: lanes are
@@ -162,7 +162,7 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
       .hubs()
       .then((hubs) => {
         if (cancelled) return;
-        // Configured, BMPL-operator-curated towns for this district — never a
+        // Configured, BML-operator-curated towns for this district — never a
         // free-text invention. Union with whatever is already saved so a town
         // whose hub was since deactivated or renamed stays visible to uncheck,
         // rather than silently vanishing from the list.

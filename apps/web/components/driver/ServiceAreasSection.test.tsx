@@ -28,7 +28,7 @@ vi.mock('../../lib/shipping', () => ({
 
 /**
  * BMPL-353: the city picker is sourced from `GET /shipping/hubs` (the same
- * public, BMPL-operator-curated terminal list checkout already uses) — never
+ * public, BML-operator-curated terminal list checkout already uses) — never
  * a free-text box. These tests exercise: the district picker still works
  * unchanged, the town picker only offers configured towns, saving an empty
  * town set is indistinguishable in meaning from never narrowing at all (the
