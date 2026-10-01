@@ -19,10 +19,10 @@ entire requirement went unbuilt without anyone noticing — a requirement with
 no card is invisible to
 every process this floor runs. Recorded properly now as BMPL-340, which has
 since shipped its multi-leg-ETA slice (`f1bbfce`); every one of the
-requirement's four pieces now has a merged API — hold/reroute (BMPL-343)
-merged as `7ff34a1` while this very document was being corrected — and the
-one remaining gap is a staff screen for hold/reroute, in an open PR
-(#278) — see requirement 12 below.
+requirement's four pieces has a merged API as of `7ff34a1` (hold/reroute,
+BMPL-343, merged while this very document was being corrected), and the one
+remaining gap as of that commit is a staff screen for hold/reroute, in an
+open PR (#278) — see requirement 12 below.
 
 **The rule this document follows:** every status below is a claim about the
 code, and those are the sentences that rot. Every row marked **Done** names
@@ -42,18 +42,18 @@ and found it on requirements 1, 3 and 11 at once.
 
 | # | Requirement | Status | Evidence |
 | - | --- | --- | --- |
-| 1 | Vendor location-level inventory & fulfilment origin | **Done** | `bad7b3f` (BMPL-175, PR #259) for the API; UI landed `74cbcd6` (BMPL-354, PR #273) |
-| 2 | Package pickup/handoff photo | **Done for sender, staff and courier** | `682b501` (PR #127) for the API; UI landed `a568d6a` (BMPL-352, PR #270) — courier upload, sender and staff view; recipient access still not wired |
+| 1 | Vendor location-level inventory & fulfilment origin | **Done as of `74cbcd6`** | `bad7b3f` (BMPL-175, PR #259) for the API; UI landed `74cbcd6` (BMPL-354, PR #273) |
+| 2 | Package pickup/handoff photo | **Done for sender, staff and courier as of `a568d6a`; recipient access still not wired as of `a568d6a`** | `682b501` (PR #127) for the API; UI landed `a568d6a` (BMPL-352, PR #270) — courier upload, sender and staff view |
 | 3 | Recipient account linking & incoming-shipment tracking | **Done** | `a6b7d97` (BMPL-179, PR #135); two policy questions open (BMPL-119), see below |
-| 4 | Granular driver service areas (district → city) | **UI landed, not yet end-to-end** | `3950db0` (PR #126) for the API; city picker landed `99e98c1` (BMPL-353, PR #272) but still reads the public hub feed; the lane-town endpoint (`a032771`, BMPL-365/360, PR #277) exists but isn't wired in yet (BMPL-368), so a lane-only town (e.g. Ladyville) is still unselectable |
+| 4 | Granular driver service areas (district → city) | **End-to-end as of `2cbcf73`** | `3950db0` (PR #126) for the API; city picker landed `99e98c1` (BMPL-353, PR #272); wired to the lane-town endpoint by `2cbcf73` (BMPL-368, PR #279) — a lane-only town (e.g. Ladyville) is selectable as of `2cbcf73` |
 | 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255) |
 | 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
 | 7 | Courier & vehicle identification once assigned | **Done** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247 |
 | 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) |
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
-| 10 | Cancellation before custody, failed delivery, return-to-sender | **No longer owner-blocked; return-to-sender shipped API-only, failed delivery still unbuilt** | Pre-custody half already correct in shipped code; return-to-sender (non-vendor courier) landed `f8f89dd` (BMPL-183/343, PR #271) once the owner ruled on price and who may initiate; no staff screen yet (one is in open PR #278, alongside hold/reroute); failed-delivery trigger still does not exist |
+| 10 | Cancellation before custody, failed delivery, return-to-sender | **No longer owner-blocked as of `f8f89dd`; return-to-sender shipped API-only as of `f8f89dd`; failed delivery unbuilt as of `f8f89dd`** | Pre-custody half already correct in shipped code; return-to-sender (non-vendor courier) landed `f8f89dd` (BMPL-183/343, PR #271) once the owner ruled on price and who may initiate; no staff screen as of `f8f89dd` (one is in open PR #278, alongside hold/reroute); failed-delivery trigger does not exist as of `f8f89dd` |
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
-| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four; UI pending for one** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by BMPL-346. ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only; the staff screen is in an open PR, #278, not merged |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff screen pending for one as of `7ff34a1`** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by BMPL-346. ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen is in an open PR, #278, not merged as of `7ff34a1` |
 
 **Three of twelve — requirements 1, 2 and 4 — shared one cause, not three
 separate ones: each had a real, merged, tested API and no user-facing
@@ -63,21 +63,33 @@ touched zero) rather than inferring it from the commit message. This batch
 was built API-first, and the web half of all three was never scheduled — not
 blocked on a decision, not attempted and abandoned.
 
-**Update: two of the three have since shipped their UI.** Requirement 1's
-landed whole (`74cbcd6`, BMPL-354) and requirement 2's landed for every
-audience except the recipient (`a568d6a`, BMPL-352). Requirement 4's UI also
-landed (`99e98c1`, BMPL-353) but is not yet end-to-end: it still reads the
-public hub feed for its town list, so a lane-only town stays unselectable
-until BMPL-368 wires in the new lane-town endpoint (`a032771`). The original
+**Update: all three have since shipped their UI.** Requirement 1's landed
+whole as of `74cbcd6` (BMPL-354). Requirement 2's landed for every audience
+except the recipient as of `a568d6a` (BMPL-352). Requirement 4's landed as
+of `99e98c1` (BMPL-353) and became end-to-end as of `2cbcf73` (BMPL-368,
+PR #279) — a lane-only town is selectable as of that commit. The original
 finding — why there were three isolated API-only rows at once — is unchanged
 by these follow-ups landing; it is why each was carded rather than fixed
 quietly, and the cards are what let this update happen at all.
+
+**A pattern worth naming, not just this one update:** seven pull requests
+landed on `main` during the single editing pass that produced this table,
+and one of this table's own prior claims (requirement 12's hold/reroute)
+went stale while it was being written, caught only by re-checking before
+reporting back. A present-tense status claim on a floor that merges this
+fast is not a mistake waiting to happen — it is a certainty waiting to
+happen, silently, with nothing marking it. That is why every status above
+is now anchored to the commit it was true as of, not stated as a bare
+present tense: a reader who sees a commit a hundred merges old knows to go
+and check; a reader who sees "is done" believes it without checking
+anything. Anchoring is what keeps this document honest without someone
+rewriting it every hour.
 
 ---
 
 ## 1. Vendor location-level inventory & fulfilment origin
 
-**Status: done.** Merged `bad7b3f` (BMPL-175, PR #259) —
+**Status: done as of `74cbcd6`.** Merged `bad7b3f` (BMPL-175, PR #259) —
 `packages/database/prisma/migrations/20261104170800_vendor_location_inventory`.
 A new child table (`inventory_locations`: `inventoryId` + `locationId` FKs,
 `quantity`/`reserved`) lets a vendor with multiple `VendorLocation`s track
@@ -135,8 +147,9 @@ the requirement, and neither extreme described what had actually shipped.
 
 ## 2. Package pickup/handoff photo
 
-**Status: done for sender, staff and courier. Recipient access is the one
-piece still open.** Merged `682b501` (PR #127) for the API, and `a568d6a`
+**Status: done for sender, staff and courier as of `a568d6a`. Recipient
+access is the one piece still open as of `a568d6a`.** Merged `682b501`
+(PR #127) for the API, and `a568d6a`
 (BMPL-352, PR #270) for the web surface — matching exactly the three
 audiences the API already granted: a courier can upload from
 `/dashboard/driver/shipping/[id]` (an "add" control shown only while nothing
@@ -218,8 +231,7 @@ Both are the owner's to answer and neither blocks anything shipping today.
 
 ## 4. Granular driver service areas (district → city)
 
-**Status: UI landed, but not yet end-to-end. Do not read this as fully
-done.** Merged `3950db0` (PR #126) — `apps/api/src/driver/driver.controller.ts`,
+**Status: end-to-end as of `2cbcf73`.** Merged `3950db0` (PR #126) — `apps/api/src/driver/driver.controller.ts`,
 `driver.service.ts` and an integration spec only, zero `apps/web`/`apps/admin`
 files. `DriverServiceArea` stayed completely unchanged; a new
 `DriverServiceCity` table (`driverProfileId`, `district`, `city`,
@@ -232,23 +244,28 @@ Consumed by dispatch matching in BMPL-194 (exact-match `sameCity`, documented
 in [`DISPATCH.md`](./DISPATCH.md)) — so the matching logic is genuinely
 live, not dormant.
 
-**The UI landed.** `99e98c1` (BMPL-353, PR #272) extends the existing
-district picker (`ServiceAreasSection.tsx`) rather than adding a second
-service-area editor: each saved district gets an optional town picker, with
-an empty selection still meaning "the whole district," unchanged. A driver
-can now narrow a district to specific towns from the real screen, and
-dispatch matching benefits for real.
+**The UI landed, then became end-to-end.** `99e98c1` (BMPL-353, PR #272)
+extends the existing district picker (`ServiceAreasSection.tsx`) rather
+than adding a second service-area editor: each saved district gets an
+optional town picker, with an empty selection still meaning "the whole
+district," unchanged. A driver can narrow a district to specific towns
+from the real screen, and dispatch matching benefits for real.
 
-**What remains — a real gap, not a formality:** the picker's town options
-come from `GET /shipping/hubs`, the public hub list — so a courier-lane-only
-town with no hub of its own (Ladyville is the named case) is deliberately
-not offered, by the same "lanes are never shown to anyone as a service"
-convention admin's own courier-lanes screen follows. A new endpoint,
+At `99e98c1`, the picker's town options came from `GET /shipping/hubs`,
+the public hub list — so a courier-lane-only town with no hub of its own
+(Ladyville is the named case) was deliberately not offered, by the same
+"lanes are never shown to anyone as a service" convention admin's own
+courier-lanes screen follows. A new endpoint,
 `GET /driver/service-areas/:district/cities` (`a032771`, BMPL-365/360, PR
-#277), now serves hub towns merged with every lane-reachable town for the
-district — but the picker (`99e98c1`) was never updated to call it. Until
-that wiring lands (BMPL-368), a driver whose real service area is a
-lane-only town still cannot select it from any screen.
+#277), served hub towns merged with every lane-reachable town for the
+district, but the picker was not yet updated to call it.
+
+**Closed as of `2cbcf73`** (BMPL-368, PR #279): `ServiceAreasSection.tsx`
+now calls the driver-scoped `GET /driver/service-areas/:district/cities`
+endpoint directly, and no hub-feed call remains in the file (confirmed by
+reading the merged source directly, not the PR title) — a driver whose
+real service area is a lane-only town can select it from the real screen
+as of this commit.
 
 ## 5. Operating hours & closed/soon-closing handling
 
@@ -397,8 +414,9 @@ default except by deleting the current one.
 
 ## 10. Cancellation before custody, failed delivery, return-to-sender
 
-**Status: no longer owner-blocked; return-to-sender shipped API-only;
-failed delivery still entirely unbuilt.** The custody boundary itself — a
+**Status: no longer owner-blocked as of `f8f89dd`; return-to-sender
+shipped API-only as of `f8f89dd`; failed delivery still entirely unbuilt
+as of `f8f89dd`.** The custody boundary itself — a
 courier *accepting* a job is not the same as *custody* — was already
 correct in shipped code before this card existed:
 `ShipmentService.cancel()` blocks once a leg reaches `IN_PROGRESS`, set only
@@ -419,11 +437,12 @@ charge. Who may initiate: the charge-creating confirmation requires
 codebase for it — staff-mediated, not sender-direct. Scope fence: non-vendor
 courier shipments only; a marketplace shipment is refused outright. If no
 valid price can be calculated, the return stays `PENDING_MANUAL` rather than
-guessing. **No staff screen exists yet** — `f8f89dd` is API-only (8 files,
-all `apps/api`/`packages/database`); one is being built in an open PR (#278,
-covering both this and hold/reroute together), not yet merged.
+guessing. **No staff screen exists as of `f8f89dd`** — that commit is
+API-only (8 files, all `apps/api`/`packages/database`); one is being built
+in an open PR (#278, covering both this and hold/reroute together), not
+yet merged.
 
-Failed delivery remains **entirely unbuilt**: the `EXCEPTION` state and
+Failed delivery remains **entirely unbuilt as of `f8f89dd`**: the `EXCEPTION` state and
 `flagException`/`resolveException` already exist and are the right
 mechanism to extend rather than duplicate, but the *trigger* — any signal
 that a delivery attempt failed — does not exist anywhere; today a failed
@@ -472,8 +491,9 @@ row was not updated until this final-acceptance audit checked it directly.
 
 ## 12. Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions
 
-**Status: every piece now has a merged API; one still has no staff screen.
-This requirement never had a card until BMPL-340 was opened.**
+**Status: every piece has a merged API as of `7ff34a1`; one still has no
+staff screen as of `7ff34a1`. This requirement never had a card until
+BMPL-340 was opened.**
 
 Four distinct pieces, per the owner's original requirement:
 
@@ -517,8 +537,8 @@ Four distinct pieces, per the owner's original requirement:
   sum against the original reference point. Ships with its migration
   additive and unapplied pending review, per this card's own instruction.
 - **Terminal hold / reroute / return for a recipient known to be
-  unavailable.** **API done (`7ff34a1`, BMPL-356/343, PR #275); no staff
-  screen yet.** Merged after this very edit started — the dispatch that
+  unavailable.** **API done as of `7ff34a1` (BMPL-356/343, PR #275); no
+  staff screen as of `7ff34a1`.** Merged after this very edit started — the dispatch that
   requested this correction described it as still unmerged, and it was,
   until it wasn't; re-checked directly rather than trusted from the
   original instruction. Hold needed no new state machine (the existing
@@ -531,10 +551,11 @@ Four distinct pieces, per the owner's original requirement:
   pricing shown and confirmed before a charge that increases what the
   customer already paid, `PENDING_MANUAL` when no valid price exists, and a
   scoped notification with no payment dialog when the charge does not
-  increase. **No staff screen exists on `main` yet** — the trigger UI for
-  this and for requirement 10's return-to-sender is one coherent panel
-  built in a still-open PR, #278. Do not read this as done for a staff
-  user. Adjacent to requirement 10 but proactive (before dispatch reaches
+  increase. **No staff screen exists on `main` as of `7ff34a1`** — the
+  trigger UI for this and for requirement 10's return-to-sender is one
+  coherent panel built in a still-open PR, #278. Do not read this as done
+  for a staff user without checking #278's status. Adjacent to
+  requirement 10 but proactive (before dispatch reaches
   the recipient) rather than reactive (after a failed delivery attempt).
   Tracked as BMPL-343.
 - **Date-specific carrier schedule exceptions.** **The one slice that is
@@ -551,8 +572,9 @@ through BMPL-184, so no agent was ever assigned to build it, no PR was ever
 expected against it, and nothing on any board flagged it as outstanding. It
 surfaced only because this document counted the owner's requirements
 independently of the card set and the two totals disagreed. All four
-pieces above now have a merged API; the one piece still missing is a
-staff screen, tracked as BMPL-343 (open PR #278).
+pieces above have a merged API as of `7ff34a1`; the one piece still
+missing as of that commit is a staff screen, tracked as BMPL-343 (open
+PR #278).
 
 The contract above exists in the repository. Whether a given commit is
 currently deployed is a question this document does not answer — a served
