@@ -1013,7 +1013,24 @@ export class OrdersService {
   }
 
   private shapeVendorOrder(
-    vo: { id: string; orderNumber: string; status: string; deliveryMethod: string; customerNotes: string | null; currency: string; itemCount: number; subtotalMinor: bigint; vendorProfile: { businessName: string; slug: string }; items: OrderItemRow[]; delivery?: DeliveryRow | null },
+    vo: {
+      id: string;
+      orderNumber: string;
+      status: string;
+      deliveryMethod: string;
+      customerNotes: string | null;
+      currency: string;
+      itemCount: number;
+      subtotalMinor: bigint;
+      vendorProfile: { businessName: string; slug: string };
+      items: OrderItemRow[];
+      delivery?: DeliveryRow | null;
+      // Which of the vendor's locations fulfilled this order (BMPL-175) — null
+      // for orders placed before a vendor adopted per-location stock, and that
+      // is permanent history, not a gap to fill in (see the schema comment on
+      // VendorOrder.originLocationId).
+      originLocation?: { id: string; label: string } | null;
+    },
     lineImageUrls: (string | null)[],
   ) {
     const d = vo.delivery ?? null;
@@ -1047,6 +1064,7 @@ export class OrdersService {
       itemCount: vo.itemCount,
       subtotalMinor: money(vo.subtotalMinor),
       vendor: { businessName: vo.vendorProfile.businessName, slug: vo.vendorProfile.slug },
+      originLocation: vo.originLocation ? { id: vo.originLocation.id, label: vo.originLocation.label } : null,
       items: vo.items.map((i, idx) => ({
         productTitle: i.productTitle,
         variantTitle: i.variantTitle,
@@ -1092,7 +1110,15 @@ const ORDER_DETAIL_INCLUDE = {
     addresses: true,
     vendorOrders: {
       orderBy: { createdAt: 'asc' as const },
-      include: { vendorProfile: { select: { businessName: true, slug: true } }, items: { orderBy: { createdAt: 'asc' as const } }, delivery: true },
+      include: {
+        vendorProfile: { select: { businessName: true, slug: true } },
+        items: { orderBy: { createdAt: 'asc' as const } },
+        delivery: true,
+        // BMPL-175/354: named at the select, not fixed up after — only the id
+        // and label a vendor's own storefront already shows publicly, never
+        // the address/phone/coordinates columns VendorLocation also carries.
+        originLocation: { select: { id: true, label: true } },
+      },
     },
   },
 } satisfies { include: Prisma.OrderInclude };
@@ -1103,6 +1129,7 @@ const VENDOR_ORDER_DETAIL_INCLUDE = {
     items: { orderBy: { createdAt: 'asc' as const } },
     delivery: true,
     order: { select: { orderNumber: true, placedAt: true, addresses: true, user: { select: { firstName: true, lastName: true } } } },
+    originLocation: { select: { id: true, label: true } },
   },
 } satisfies { include: Prisma.VendorOrderInclude };
 
