@@ -18,11 +18,11 @@ the two cards relate. The gap between the two totals is exactly how an
 entire requirement went unbuilt without anyone noticing — a requirement with
 no card is invisible to
 every process this floor runs. Recorded properly now as BMPL-340, which has
-since shipped its multi-leg-ETA slice (`f1bbfce`); three of the
-requirement's four pieces are now done — the ETA slice and the material
-ETA-change notification (BMPL-345, `e7ef2ed`) — and one remains open,
-terminal hold/reroute (BMPL-343), in an open PR chain, not merged — see
-requirement 12 below.
+since shipped its multi-leg-ETA slice (`f1bbfce`); every one of the
+requirement's four pieces now has a merged API — hold/reroute (BMPL-343)
+merged as `7ff34a1` while this very document was being corrected — and the
+one remaining gap is a staff screen for hold/reroute, in an open PR
+(#278) — see requirement 12 below.
 
 **The rule this document follows:** every status below is a claim about the
 code, and those are the sentences that rot. Every row marked **Done** names
@@ -53,7 +53,7 @@ and found it on requirements 1, 3 and 11 at once.
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
 | 10 | Cancellation before custody, failed delivery, return-to-sender | **No longer owner-blocked; return-to-sender shipped API-only, failed delivery still unbuilt** | Pre-custody half already correct in shipped code; return-to-sender (non-vendor courier) landed `f8f89dd` (BMPL-183/343, PR #271) once the owner ruled on price and who may initiate; no staff screen yet (one is in open PR #278, alongside hold/reroute); failed-delivery trigger still does not exist |
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
-| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **Three of four pieces done** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by BMPL-346. ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Open: terminal hold/reroute (BMPL-343) — in an open PR chain (#275, #278), not merged |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four; UI pending for one** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by BMPL-346. ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only; the staff screen is in an open PR, #278, not merged |
 
 **Three of twelve — requirements 1, 2 and 4 — shared one cause, not three
 separate ones: each had a real, merged, tested API and no user-facing
@@ -472,8 +472,8 @@ row was not updated until this final-acceptance audit checked it directly.
 
 ## 12. Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions
 
-**Status: in progress — three of four pieces now done, and this
-requirement never had a card until BMPL-340 was opened.**
+**Status: every piece now has a merged API; one still has no staff screen.
+This requirement never had a card until BMPL-340 was opened.**
 
 Four distinct pieces, per the owner's original requirement:
 
@@ -517,15 +517,26 @@ Four distinct pieces, per the owner's original requirement:
   sum against the original reference point. Ships with its migration
   additive and unapplied pending review, per this card's own instruction.
 - **Terminal hold / reroute / return for a recipient known to be
-  unavailable.** **Not merged — in an open PR chain.** No status represents
-  it on `main` today. Hold/reroute endpoints and schemas exist on branch
-  `feat/bmpl-356-hold-reroute` (BMPL-356, PR #275, unmerged), and a staff
-  screen covering both reroute and the already-merged return-to-sender
-  (requirement 10) is built on top of that branch (PR #278, explicitly held
-  for review until #275 lands). Do not read this as done. Adjacent to
-  requirement 10 but proactive (before dispatch reaches the recipient)
-  rather than reactive (after a failed delivery attempt). Tracked as
-  BMPL-343.
+  unavailable.** **API done (`7ff34a1`, BMPL-356/343, PR #275); no staff
+  screen yet.** Merged after this very edit started — the dispatch that
+  requested this correction described it as still unmerged, and it was,
+  until it wasn't; re-checked directly rather than trusted from the
+  original instruction. Hold needed no new state machine (the existing
+  `EXCEPTION`/`flagException` already is one) beyond notifying the
+  recipient too, not just staff and the sender, per Ruling 1. `RETURNED`
+  is now an honest terminal status (BMPL-356) instead of a return staying
+  at `EXCEPTION` forever. Reroute mirrors return-to-sender's architecture
+  (requirement 10) — its own new `Shipment`/`Payment`, never a reversal or
+  a direct wallet mutation — with three pricing rules: real configured
+  pricing shown and confirmed before a charge that increases what the
+  customer already paid, `PENDING_MANUAL` when no valid price exists, and a
+  scoped notification with no payment dialog when the charge does not
+  increase. **No staff screen exists on `main` yet** — the trigger UI for
+  this and for requirement 10's return-to-sender is one coherent panel
+  built in a still-open PR, #278. Do not read this as done for a staff
+  user. Adjacent to requirement 10 but proactive (before dispatch reaches
+  the recipient) rather than reactive (after a failed delivery attempt).
+  Tracked as BMPL-343.
 - **Date-specific carrier schedule exceptions.** **The one slice that is
   done** — `RouteOperatingDay` + `RouteScheduleException` (BMPL-186, merged
   `fcc3592`) already provide the weekly default and date-specific overrides,
@@ -539,9 +550,9 @@ carded by the BMPL-185 dependency-mapping pass that produced BMPL-174
 through BMPL-184, so no agent was ever assigned to build it, no PR was ever
 expected against it, and nothing on any board flagged it as outstanding. It
 surfaced only because this document counted the owner's requirements
-independently of the card set and the two totals disagreed. The first two
-pieces above are the corrective work; one piece stays open, tracked as
-BMPL-343.
+independently of the card set and the two totals disagreed. All four
+pieces above now have a merged API; the one piece still missing is a
+staff screen, tracked as BMPL-343 (open PR #278).
 
 The contract above exists in the repository. Whether a given commit is
 currently deployed is a question this document does not answer — a served
