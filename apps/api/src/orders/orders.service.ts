@@ -1064,6 +1064,22 @@ export class OrdersService {
       itemCount: vo.itemCount,
       subtotalMinor: money(vo.subtotalMinor),
       vendor: { businessName: vo.vendorProfile.businessName, slug: vo.vendorProfile.slug },
+      // shapeVendorOrder() has exactly THREE callers and all three see this
+      // field, INCLUDING the customer on their own order (GET /orders/:id,
+      // and the checkout POST response itself) — this is deliberate, not an
+      // oversight to "fix" by splitting the shaper or restricting it to
+      // admin/vendor. The label is already public on the storefront
+      // (vendor.service.ts buildStorefront()'s locations[]), so the fact it
+      // reveals — which of a vendor's branches fulfilled the order — is
+      // already available to anyone; the bare id adds no information beyond
+      // that and unlocks nothing (the only endpoint that accepts a
+      // locationId, POST .../inventory/locations/:locationId/adjust, is
+      // scoped to the caller's own userId, so an opaque id in a customer's
+      // hands enables nothing). One shaper serving all three audiences,
+      // documented, beats a second shaper for this one field — two views of
+      // the same order drifting apart is the recurring failure in this
+      // domain (see the BMPL-179 parity test). Do not add a second
+      // "admin-only" field beside this one assuming this is admin-only.
       originLocation: vo.originLocation ? { id: vo.originLocation.id, label: vo.originLocation.label } : null,
       items: vo.items.map((i, idx) => ({
         productTitle: i.productTitle,
