@@ -19,6 +19,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { belizeCalendarDate } from '@bmpl/shared';
 import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -743,15 +744,34 @@ describe('BMPL-138 classification: a route configured NOT_OPERATING today refuse
     const { lineHaul } = await bookedWithFirstMileDone(driver);
     const route = await ctx.prisma.logisticsRoute.findUniqueOrThrow({ where: { id: lineHaul.routeId! } });
 
+    // BMPL-363: "today" has to be the BELIZE calendar day the depart check
+    // will actually look up (resolveScheduleStatus resolves `now` through
+    // belizeCalendarDateKey, Belize-shifted) — not a bare UTC instant. Posting
+    // `new Date().toISOString()` here used to pass this test's own date
+    // through addScheduleException's UTC-only truncation, which agrees with
+    // Belize's calendar day eighteen hours out of twenty-four and disagrees
+    // for the six hours (00:00-06:00 UTC == 18:00-00:00 Belize) where the UTC
+    // and Belize calendar days differ — a real window, not a flake, and this
+    // test ran inside it. `belizeCalendarDate` is the same normalization
+    // `addScheduleException` itself SHOULD apply (see the card filed
+    // alongside this fix) — using it here makes the fixture agree with the
+    // resolver regardless of wall-clock time, rather than agreeing with it by
+    // coincidence most of the day.
+    const belizeToday = belizeCalendarDate(new Date());
+    const belizeTodayKey = belizeToday.toISOString().slice(0, 10);
+
     const ex = await post(admin, `admin/logistics/routes/${route.id}/schedule/exceptions`, {
-      date: new Date().toISOString(),
+      date: belizeToday.toISOString(),
       status: 'NOT_OPERATING',
       reason: 'UAT: carrier reported no service today.',
     });
-    expect(ex.status).toBe(201);
+    expect(ex.status, `expected a NOT_OPERATING exception for ${belizeTodayKey} to be created`).toBe(201);
 
     const refused = await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {});
-    expect(refused.status).toBe(400);
+    // Named so a future failure here reads as "the exception we just set for
+    // this date was not found/enforced" rather than an opaque 400-vs-201 —
+    // a missing exception, not a behaviour change, unless proven otherwise.
+    expect(refused.status, `expected the ${belizeTodayKey} NOT_OPERATING exception to block departure`).toBe(400);
     expect(refused.body.message).toContain('not operating today');
     expect(refused.body.message).toContain('UAT: carrier reported no service today.');
     // Refusing to depart must not silently move anything.
