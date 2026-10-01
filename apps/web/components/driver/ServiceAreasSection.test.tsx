@@ -19,38 +19,19 @@ vi.mock('../../lib/api', () => ({
   },
 }));
 
-const hubs = vi.fn();
-vi.mock('../../lib/shipping', () => ({
-  shippingApi: {
-    hubs: (...args: unknown[]) => hubs(...args),
-  },
-}));
-
 /**
- * BMPL-353: the city picker is sourced from `GET /shipping/hubs` (the same
- * public, BML-operator-curated terminal list checkout already uses) — never
- * a free-text box. These tests exercise: the district picker still works
- * unchanged, the town picker only offers configured towns, saving an empty
- * town set is indistinguishable in meaning from never narrowing at all (the
- * "whole district" invariant this feature must not break for any existing
- * driver), and a town narrowed before its hub was deactivated/renamed stays
- * visible rather than silently disappearing.
+ * BMPL-353/360/368: the city picker is sourced from the driver-scoped
+ * `GET /driver/service-areas/:district/cities` — hub towns AND
+ * lane-reachable towns (BMPL-360, Ladyville is the named real case),
+ * merged server-side — never a free-text box. These tests exercise: the
+ * district picker still works unchanged, lane-only towns are now
+ * selectable, saving an empty town set is indistinguishable in meaning
+ * from never narrowing at all (the "whole district" invariant this feature
+ * must not break for any existing driver), a town narrowed before it
+ * dropped out of the server's current list stays visible rather than
+ * silently disappearing, and — the part BMPL-368 exists for — the new
+ * endpoint's 404 (no DriverProfile) is never shown as "no configured towns."
  */
-function hub(district: string, city: string) {
-  return {
-    id: `${district}-${city}`,
-    code: `${district}-${city}`.toUpperCase(),
-    name: city,
-    type: 'BMPL_HUB',
-    district,
-    city,
-    address: null,
-    latitude: null,
-    longitude: null,
-    modes: ['LAND'],
-    instructions: null,
-  };
-}
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -63,7 +44,6 @@ afterEach(() => {
   container = null;
   apiGet.mockReset();
   apiPut.mockReset();
-  hubs.mockReset();
 });
 
 async function mount(serviceAreas: ServiceArea[]) {
@@ -74,7 +54,7 @@ async function mount(serviceAreas: ServiceArea[]) {
   await act(async () => {
     root!.render(<ServiceAreasSection serviceAreas={serviceAreas} onDone={onDone} />);
   });
-  // Let the per-district hub fetch (a microtask chain) resolve and re-render.
+  // Let the per-district city fetch (a microtask chain) resolve and re-render.
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
@@ -84,7 +64,7 @@ async function mount(serviceAreas: ServiceArea[]) {
 
 describe('ServiceAreasSection', () => {
   it('renders the existing district picker checked for active areas', async () => {
-    hubs.mockResolvedValue([]);
+    apiGet.mockResolvedValue({ cities: [] });
     await mount([{ district: 'BELIZE', isActive: true, cities: [] }]);
     const belize = container!.querySelector<HTMLInputElement>('#sa-BELIZE');
     const cayo = container!.querySelector<HTMLInputElement>('#sa-CAYO');
@@ -93,7 +73,7 @@ describe('ServiceAreasSection', () => {
   });
 
   it('saves the district list unchanged from before narrowing existed', async () => {
-    hubs.mockResolvedValue([]);
+    apiGet.mockResolvedValue({ cities: [] });
     await mount([{ district: 'BELIZE', isActive: true, cities: [] }]);
     const cayo = container!.querySelector<HTMLInputElement>('#sa-CAYO')!;
     await act(async () => {
@@ -107,20 +87,24 @@ describe('ServiceAreasSection', () => {
     expect(apiPut).toHaveBeenCalledWith('/driver/service-areas', { districts: expect.arrayContaining(['BELIZE']) });
   });
 
-  it('offers only configured towns from the public hub list, never free text', async () => {
-    hubs.mockResolvedValue([hub('BELIZE', 'Belize City'), hub('BELIZE', 'Ladyville'), hub('CAYO', 'San Ignacio')]);
+  it('reads the driver-scoped, district-scoped endpoint — not the old public hub feed', async () => {
+    apiGet.mockResolvedValue({ cities: ['Belize City'] });
     await mount([{ district: 'BELIZE', isActive: true, cities: [] }]);
-    expect(hubs).toHaveBeenCalled();
-    expect(container!.textContent).toContain('Belize City');
+    expect(apiGet).toHaveBeenCalledWith('/driver/service-areas/BELIZE/cities');
+  });
+
+  it('offers a lane-only town with no hub, the named real case (BMPL-360/368)', async () => {
+    apiGet.mockResolvedValue({ cities: ['Belize City', 'Ladyville'] });
+    await mount([{ district: 'BELIZE', isActive: true, cities: [] }]);
     expect(container!.textContent).toContain('Ladyville');
-    // A CAYO-only hub town must not leak into the BELIZE picker.
-    expect(container!.textContent).not.toContain('San Ignacio');
+    const ladyville = container!.querySelector<HTMLInputElement>('#sa-BELIZE-city-Ladyville');
+    expect(ladyville).not.toBeNull();
     // No free-text input anywhere in the town picker.
     expect(container!.querySelector('input[type="text"]')).toBeNull();
   });
 
-  it('keeps a previously-narrowed town visible even if its hub is gone from the current list', async () => {
-    hubs.mockResolvedValue([hub('BELIZE', 'Belize City')]);
+  it('keeps a previously-narrowed town visible even if the server no longer lists it', async () => {
+    apiGet.mockResolvedValue({ cities: ['Belize City'] });
     await mount([
       {
         district: 'BELIZE',
@@ -134,7 +118,7 @@ describe('ServiceAreasSection', () => {
   });
 
   it('narrows to a subset of configured towns and saves them', async () => {
-    hubs.mockResolvedValue([hub('BELIZE', 'Belize City'), hub('BELIZE', 'San Pedro')]);
+    apiGet.mockResolvedValue({ cities: ['Belize City', 'San Pedro'] });
     await mount([{ district: 'BELIZE', isActive: true, cities: [] }]);
     const sanPedro = container!.querySelector<HTMLInputElement>('#sa-BELIZE-city-San\\ Pedro')!;
     await act(async () => {
@@ -150,7 +134,7 @@ describe('ServiceAreasSection', () => {
   });
 
   it('saving with no towns picked still means the whole district (unchanged behaviour)', async () => {
-    hubs.mockResolvedValue([hub('BELIZE', 'Belize City'), hub('BELIZE', 'San Pedro')]);
+    apiGet.mockResolvedValue({ cities: ['Belize City', 'San Pedro'] });
     await mount([{ district: 'BELIZE', isActive: true, cities: [] }]);
     expect(container!.textContent).toContain('Serving all of Belize.');
     const saveTowns = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Save — serve all of'))!;
@@ -167,7 +151,7 @@ describe('ServiceAreasSection', () => {
   });
 
   it('does not offer town narrowing for a district only selected locally, not yet saved', async () => {
-    hubs.mockResolvedValue([hub('CAYO', 'San Ignacio')]);
+    apiGet.mockResolvedValue({ cities: ['San Ignacio'] });
     await mount([{ district: 'BELIZE', isActive: true, cities: [] }]);
     const cayo = container!.querySelector<HTMLInputElement>('#sa-CAYO')!;
     await act(async () => {
@@ -175,5 +159,44 @@ describe('ServiceAreasSection', () => {
     });
     expect(container!.textContent).toContain('Save service areas above before narrowing');
     expect(container!.querySelector('#sa-CAYO-city-San\\ Ignacio')).toBeNull();
+  });
+
+  describe('the new endpoint is driver-gated — a 404 must never read as "no towns" (BMPL-368)', () => {
+    it('shows the server-s own message, not the empty-district message, and offers no save button', async () => {
+      apiGet.mockRejectedValue({ status: 404, message: 'Start your driver application first.' });
+      await mount([{ district: 'BELIZE', isActive: true, cities: [] }]);
+      expect(container!.textContent).toContain('Start your driver application first.');
+      expect(container!.textContent).not.toContain('No configured towns in Belize yet');
+      // The top-level "Save service areas" button is unrelated to this
+      // district's town picker and stays — only the TOWN save button, which
+      // would save against data that never actually loaded, must be absent.
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Save towns' || b.textContent?.startsWith('Save — serve all of'))).toBe(
+        false,
+      );
+    });
+
+    it('recovers via "Try again" once the endpoint succeeds', async () => {
+      apiGet.mockRejectedValueOnce({ status: 404, message: 'Start your driver application first.' });
+      await mount([{ district: 'BELIZE', isActive: true, cities: [] }]);
+      expect(container!.textContent).toContain('Start your driver application first.');
+
+      apiGet.mockResolvedValueOnce({ cities: ['Belize City'] });
+      const retry = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Try again')!;
+      await act(async () => {
+        retry.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container!.textContent).not.toContain('Start your driver application first.');
+      expect(container!.textContent).toContain('Belize City');
+    });
+
+    it('a network error is likewise never shown as an empty district', async () => {
+      apiGet.mockRejectedValue({ status: 500, message: 'Something went wrong.' });
+      await mount([{ district: 'BELIZE', isActive: true, cities: [] }]);
+      expect(container!.textContent).toContain('Something went wrong.');
+      expect(container!.textContent).not.toContain('No configured towns in Belize yet');
+    });
   });
 });

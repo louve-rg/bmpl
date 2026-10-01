@@ -1,8 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { api } from '../../lib/api';
-import { shippingApi } from '../../lib/shipping';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api, type ApiError } from '../../lib/api';
 import { Alert, Button } from '../ui';
 import { Card, DISTRICTS, districtLabel, errMessage, type ServiceArea } from './dashboard-data';
 
@@ -21,17 +20,20 @@ import { Card, DISTRICTS, districtLabel, errMessage, type ServiceArea } from './
  * towns picked means exactly what it always meant — the whole district — so
  * narrowing is purely optional and additive.
  *
- * Town OPTIONS come from the public terminal list (`GET /shipping/hubs`,
- * already used by checkout to show customers where BML operates) rather than
- * a free-text box. That list is BML-operator-curated geography — active,
- * non-simulation hubs an admin entered on the Logistics screen — never
- * something a driver types. Courier-lane-only towns (a town with a road but
- * no terminal, e.g. Ladyville) are deliberately NOT offered here: lanes are
- * explicitly never shown to anyone as a service in their own screen, and
- * widening that is a product decision, not a UI one. A driver who only
- * serves such a town keeps the whole district selected rather than narrowing
- * it, which is a reasonable (safe-by-default) understatement, never a false
- * widening.
+ * Town OPTIONS come from the driver-scoped `GET /driver/service-areas/
+ * :district/cities` (BMPL-360/368) rather than a free-text box. That
+ * endpoint merges the same BML-operator-curated hub towns the public
+ * terminal list (`GET /shipping/hubs`) carries with every town a configured
+ * `CourierLane` connects FROM or TO the district — Ladyville (no hub,
+ * reachable only by courier lane from Belize City) is the named real case
+ * this exists for. Lane towns are real, already-configured geography, not
+ * something this screen invents; they stay off every CUSTOMER-facing and
+ * public surface, which is a different audience from "a driver choosing
+ * where they personally work," not an exception to that boundary. The
+ * endpoint is driver-gated (requires an actual `DriverProfile`, 404s
+ * without one) where the old public hub feed was not — handled explicitly
+ * in `DistrictCities` below, never left to fall through to an empty picker
+ * that would read as "BML has no towns here."
  */
 export function ServiceAreasSection({ serviceAreas, onDone }: { serviceAreas: ServiceArea[]; onDone: () => Promise<void> }) {
   const [selected, setSelected] = useState<string[]>(serviceAreas.filter((a) => a.isActive).map((a) => a.district));
@@ -151,27 +153,39 @@ export function ServiceAreasSection({ serviceAreas, onDone }: { serviceAreas: Se
 function DistrictCities({ district, initial, onDone }: { district: string; initial: string[]; onDone: () => Promise<void> }) {
   const [options, setOptions] = useState<string[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
+  // Distinct from `err` below (which is reused for a SAVE failure) — a LOAD
+  // failure means there is nothing real to show, never "zero towns in this
+  // district," so it is checked first and suppresses the whole picker body,
+  // not just shown alongside a false-empty "no configured towns" message.
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [selectedCities, setSelectedCities] = useState<string[]>(initial);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadOptions = useCallback(() => {
     let cancelled = false;
-    shippingApi
-      .hubs()
-      .then((hubs) => {
+    setLoadingOptions(true);
+    setLoadErr(null);
+    api
+      .get<{ cities: string[] }>(`/driver/service-areas/${district}/cities`)
+      .then(({ cities }) => {
         if (cancelled) return;
-        // Configured, BML-operator-curated towns for this district — never a
-        // free-text invention. Union with whatever is already saved so a town
-        // whose hub was since deactivated or renamed stays visible to uncheck,
-        // rather than silently vanishing from the list.
-        const fromHubs = hubs.filter((h) => h.district === district).map((h) => h.city);
-        const merged = Array.from(new Set([...fromHubs, ...initial])).sort((a, b) => a.localeCompare(b));
+        // Union with whatever is already saved so a town whose hub/lane was
+        // since deactivated or renamed stays visible to uncheck, rather than
+        // silently vanishing from the list — the endpoint itself only ever
+        // reports CURRENTLY active geography, not this driver's own history.
+        const merged = Array.from(new Set([...cities, ...initial])).sort((a, b) => a.localeCompare(b));
         setOptions(merged);
       })
       .catch((e) => {
-        if (!cancelled) setErr(errMessage(e));
+        if (cancelled) return;
+        // The endpoint is driver-gated (404 without a DriverProfile, unlike
+        // the old public hub feed) — its own message ("Start your driver
+        // application first.") is already the honest, specific thing to show;
+        // no separate case is invented for it, but a false empty is refused
+        // either way by keeping this in loadErr, never options.
+        setLoadErr(errMessage(e as ApiError));
       })
       .finally(() => {
         if (!cancelled) setLoadingOptions(false);
@@ -179,6 +193,11 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
     return () => {
       cancelled = true;
     };
+  }, [district, initial]);
+
+  useEffect(() => {
+    const cancel = loadOptions();
+    return cancel;
     // `initial` only changes when the parent reloads after a save; re-fetching
     // options on every keystroke isn't a concern since there are none here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -214,6 +233,17 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
       )}
       {loadingOptions ? (
         <p className="text-sm text-slate-500">Loading configured towns…</p>
+      ) : loadErr ? (
+        // A load failure is never shown as "no configured towns" — that would
+        // tell the driver something untrue about where BML operates, and they
+        // could narrow their area on the strength of it. No save button
+        // either: there is nothing real behind it to save against.
+        <div>
+          <Alert tone="error">{loadErr}</Alert>
+          <button type="button" onClick={loadOptions} className="mt-2 text-xs font-semibold text-belize-blue hover:underline">
+            Try again
+          </button>
+        </div>
       ) : options.length === 0 ? (
         <p className="text-sm text-slate-500">
           No configured towns in {districtLabel(district)} yet — you serve the whole district.
@@ -253,9 +283,11 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
           </div>
         </>
       )}
-      <Button type="button" variant="outline" className="mt-3 w-full sm:w-auto" disabled={busy || loadingOptions} onClick={save}>
-        {selectedCities.length === 0 ? `Save — serve all of ${districtLabel(district)}` : 'Save towns'}
-      </Button>
+      {!loadErr && (
+        <Button type="button" variant="outline" className="mt-3 w-full sm:w-auto" disabled={busy || loadingOptions} onClick={save}>
+          {selectedCities.length === 0 ? `Save — serve all of ${districtLabel(district)}` : 'Save towns'}
+        </Button>
+      )}
     </fieldset>
   );
 }
