@@ -70,8 +70,20 @@ export const DELIVERY_INCLUDE = {
       items: { orderBy: { createdAt: 'asc' as const } },
     },
   },
+  // BMPL-373: named at the select, not fixed up after — a field never
+  // fetched cannot leak under a later careless spread (the BMPL-335
+  // precedent). driverSummary() below reads exactly these three
+  // DriverProfile fields plus the already-select-scoped user block; a bare
+  // `include` here would load the full row — phone, homeAddress,
+  // emergencyContactPhone, licenceNumber — into memory on every delivery
+  // read, correct only because nothing currently spreads it wholesale.
   assignedDriver: {
-    include: { user: { select: { firstName: true, lastName: true, ...AVATAR_SELECT } } },
+    select: {
+      displayName: true,
+      ratingAverage: true,
+      completedDeliveries: true,
+      user: { select: { firstName: true, lastName: true, ...AVATAR_SELECT } },
+    },
   },
   assignedVehicle: true,
   timeline: { orderBy: { createdAt: 'asc' as const } },
