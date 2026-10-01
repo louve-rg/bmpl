@@ -4576,15 +4576,18 @@ enum LegStatus {
 /// Derived from the legs by deriveShipmentStatus() in @bmpl/shared, never set
 /// independently. Two writable sources for one fact is how they drift.
 ///
-/// BMPL-356: RETURNED is the one exception — it is layered on top of the
-/// leg-derived value by recompute() in shipment.service.ts, the same way
-/// `collectedAt` already overrides AWAITING_COLLECTION to DELIVERED, because
-/// "this shipment has a return booked against it" is a fact the legs alone
-/// cannot express (the returned leg stays EXCEPTION forever; it is not
-/// marked CANCELLED, so deriveShipmentStatus() itself never needed to
-/// change). Before this value existed, a returned shipment just stayed at
-/// EXCEPTION ("Needs attention") forever once its return was booked —
-/// honest, but stale, never resolving to the thing that actually happened.
+/// BMPL-356/367: RETURNED and REROUTED are the exceptions — each is layered
+/// on top of the leg-derived value by recompute() in shipment.service.ts,
+/// the same way `collectedAt` already overrides AWAITING_COLLECTION to
+/// DELIVERED, because "this shipment has a return/reroute booked against
+/// it" is a fact the legs alone cannot express (the exceptional leg stays
+/// EXCEPTION forever either way; it is not marked CANCELLED, so
+/// deriveShipmentStatus() itself never needed to change for either one).
+/// Before RETURNED existed, a returned shipment just stayed at EXCEPTION
+/// ("Needs attention") forever once its return was booked — honest, but
+/// stale, never resolving to the thing that actually happened. REROUTED
+/// closes the identical gap for a reroute, found by the web lane building
+/// the resolution panel rather than worked around.
 enum ShipmentStatus {
   DRAFT
   AWAITING_PICKUP
@@ -4597,6 +4600,7 @@ enum ShipmentStatus {
   DELIVERED
   EXCEPTION
   RETURNED
+  REROUTED
   CANCELLED
 }
 

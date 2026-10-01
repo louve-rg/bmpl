@@ -162,11 +162,12 @@ export const SHIPMENT_STATUSES = [
   'AWAITING_COLLECTION', // ends at a hub; the recipient collects
   'DELIVERED',
   'EXCEPTION',
-  // BMPL-356: not derived by deriveShipmentStatus() below — layered on top
-  // in shipment.service.ts's recompute(), the same way collectedAt already
-  // overrides AWAITING_COLLECTION to DELIVERED. See that enum's own comment
-  // in schema.prisma for why.
+  // BMPL-356/367: neither is derived by deriveShipmentStatus() below — both
+  // are layered on top in shipment.service.ts's recompute(), the same way
+  // collectedAt already overrides AWAITING_COLLECTION to DELIVERED. See that
+  // enum's own comment in schema.prisma for why.
   'RETURNED',
+  'REROUTED',
   'CANCELLED',
 ] as const;
 export type ShipmentStatus = (typeof SHIPMENT_STATUSES)[number];
@@ -183,6 +184,7 @@ export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
   DELIVERED: 'Delivered',
   EXCEPTION: 'Needs attention',
   RETURNED: 'Returned to sender',
+  REROUTED: 'Redirected',
   CANCELLED: 'Cancelled',
 };
 

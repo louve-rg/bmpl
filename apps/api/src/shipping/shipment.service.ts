@@ -191,6 +191,15 @@ const SHIPMENT_INCLUDE = {
   // this list to gate or warn about anything yet, so it rides along in the
   // same include as everything else the shipment owner already sees.
   availabilityWindows: { orderBy: [{ role: 'asc' }, { startTime: 'asc' }] },
+  // BMPL-367: the one piece either `status` alone cannot fully explain and a
+  // caller resolving an exception needs to act on, not just display — which
+  // shipment this one became. `status` (RETURNED/REROUTED) already says
+  // THAT it happened; this says WHICH new shipment to follow, the same
+  // reference `returnToSender`/`rerouteShipment`'s own refusal messages
+  // already read internally, now reaching the client that has to decide
+  // whether to offer the return/reroute action at all.
+  returnShipment: { select: { id: true, reference: true } },
+  rerouteShipment: { select: { id: true, reference: true } },
 } satisfies Prisma.ShipmentInclude;
 
 type ShipmentWithGraph = Prisma.ShipmentGetPayload<{ include: typeof SHIPMENT_INCLUDE }>;
@@ -2376,11 +2385,14 @@ export class ShipmentService {
    * reading is wrong, it is wrong in one place, not scattered through the
    * booking math.
    *
-   * Deliberately does NOT touch the original leg or shipment's own status
-   * (same choice already made for return-to-sender before BMPL-356 gave
-   * "returned" an honest terminal status) — a rerouted shipment stays at
-   * EXCEPTION, honest but not yet resolved to "redirected." Flagged as the
-   * same kind of gap BMPL-356 closed for returns, not guessed at here.
+   * BMPL-367: the ORIGINAL leg is left exactly as it was — EXCEPTION,
+   * never CANCELLED, the historical record of what actually happened to it,
+   * the identical choice `returnToSender` already makes for the same
+   * reason. The ORIGINAL SHIPMENT's own derived status, though, flips to
+   * REROUTED once this links back — the same honest-terminal-status fix
+   * BMPL-356 gave returns, closing the identical gap this method left open
+   * on the same branch until now (found by the web lane building the
+   * resolution panel, named rather than worked around).
    */
   async rerouteShipment(legId: string, input: RerouteInput, actor: { userId: string }) {
     const leg = await this.loadRerouteLeg(legId);
@@ -2431,7 +2443,14 @@ export class ShipmentService {
     const increasesCharge = totalMinor > Number(shipment.quotedTotalMinor);
 
     const rerouteShipment = await this.create(shipment.customerUserId, rerouted, shipment.isTest);
-    await this.prisma.shipment.update({ where: { id: rerouteShipment.id }, data: { rerouteOfShipmentId: shipment.id } });
+    // Linking the two IS what flips the original to REROUTED (BMPL-367) —
+    // recompute() reads `rerouteShipment` fresh, so this single transaction
+    // is the only place that fact needs to be written. Same pattern
+    // `returnToSender` already uses for `returnOfShipmentId`/RETURNED.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.shipment.update({ where: { id: rerouteShipment.id }, data: { rerouteOfShipmentId: shipment.id } });
+      await this.recompute(tx, shipment.id);
+    });
 
     await this.audit.record({
       action: 'SHIPMENT_REROUTE_INITIATED',
@@ -2553,7 +2572,7 @@ export class ShipmentService {
   /**
    * Recompute the shipment's status from its legs and persist it.
    *
-   * Two things the legs cannot tell us are layered on top of the pure
+   * Three things the legs cannot tell us are layered on top of the pure
    * leg-derived value, never folded into `deriveShipmentStatus` itself:
    *
    *  - whether a recipient has walked into a terminal and picked their
@@ -2567,6 +2586,10 @@ export class ShipmentService {
    *    the final word: it wins over whatever the legs alone would derive,
    *    because once a return has been booked and charged the original
    *    attempt's own fate is settled.
+   *  - BMPL-367: the identical fact for a reroute — `rerouteShipment`
+   *    existing wins the same way, for the same reason (the rerouted leg
+   *    also stays EXCEPTION forever; see `rerouteShipment`). A shipment is
+   *    never both, since each refuses once the other already exists.
    */
   private async recompute(tx: Prisma.TransactionClient, shipmentId: string): Promise<ShipmentStatus> {
     const s = await tx.shipment.findUniqueOrThrow({
@@ -2575,12 +2598,14 @@ export class ShipmentService {
         service: true,
         collectedAt: true,
         returnShipment: { select: { id: true } },
+        rerouteShipment: { select: { id: true } },
         legs: { select: { sequence: true, kind: true, mode: true, status: true } },
       },
     });
     let status = this.statusFrom(s.legs, !needsLastMile(s.service));
     if (status === 'AWAITING_COLLECTION' && s.collectedAt) status = 'DELIVERED';
     if (s.returnShipment) status = 'RETURNED';
+    if (s.rerouteShipment) status = 'REROUTED';
     const done = status === 'DELIVERED' ? { deliveredAt: new Date() } : {};
     await tx.shipment.update({ where: { id: shipmentId }, data: { status, ...done } });
     return status;
@@ -3208,6 +3233,12 @@ export class ShipmentService {
       serviceLabel: SHIPPING_SERVICE_LABELS[s.service],
       status: s.status,
       statusLabel: SHIPMENT_STATUS_LABELS[s.status] ?? s.status,
+      // BMPL-367: null unless this shipment's fate was settled by one of
+      // these — a caller deciding whether to still offer "return" or
+      // "reroute" on an exception needs this, not just the status string,
+      // to link straight to the shipment that already exists.
+      returnShipment: s.returnShipment,
+      rerouteShipment: s.rerouteShipment,
       isTest: s.isTest,
       endsAtHub,
       quotedTotalMinor: money(s.quotedTotalMinor),

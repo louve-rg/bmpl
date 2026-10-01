@@ -402,18 +402,19 @@ export function legPhase(leg: ShipmentLegView): LegPhase {
 }
 
 /**
- * Once a parcel is delivered, cancelled or returned there is nothing left to
- * estimate — the journey already ended, one way or the other. Shared by
- * every surface that carries `eta` (sender, recipient, incoming list) so
- * they agree on when to show it at all, not just what it says while shown.
+ * Once a parcel is delivered, cancelled, returned or rerouted there is
+ * nothing left to estimate — the journey already ended, one way or
+ * another. Shared by every surface that carries `eta` (sender, recipient,
+ * incoming list) so they agree on when to show it at all, not just what it
+ * says while shown.
  *
- * RETURNED (BMPL-356): without this a returned shipment would still show a
- * live "arrival" estimate for a journey that is not completing — the same
- * kind of false-progress reading BMPL-356 exists to close, just on this
- * surface instead of the status badge.
+ * RETURNED (BMPL-356) / REROUTED (BMPL-367): without this, a finished
+ * shipment would still show a live "arrival" estimate for a journey that is
+ * not completing — the same kind of false-progress reading both cards exist
+ * to close, just on this surface instead of the status badge.
  */
 export function showsEta(status: string): boolean {
-  return status !== 'DELIVERED' && status !== 'CANCELLED' && status !== 'RETURNED';
+  return status !== 'DELIVERED' && status !== 'CANCELLED' && status !== 'RETURNED' && status !== 'REROUTED';
 }
 
 /**
