@@ -10,7 +10,7 @@ import { bootApp, resetDb, seedRoles, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 
 beforeAll(async () => {
   ctx = await bootApp();

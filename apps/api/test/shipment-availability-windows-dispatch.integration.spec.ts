@@ -35,7 +35,7 @@ let dispatch: ShipmentDispatchService;
 let admin: string[];
 let hub: Record<string, string>;
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
 /** Belize is a fixed UTC-6, no DST (belize-time.ts). 2026-11-02 is a Monday. */
