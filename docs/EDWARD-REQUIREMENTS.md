@@ -161,7 +161,10 @@ overwrite); the sender sees a thumbnail grid on
 `/dashboard/shipments/[reference]` (`ShipmentJourney`'s `LegRow`); staff see
 the same treatment on `/dashboard/logistics/[reference]`. Reuses
 `ShipmentLeg.handoffPhotoKeys` (already private storage keys, already
-unused) rather than inventing a second image concept.
+unused) rather than inventing a second image concept. A later fix,
+`8841444` (BMPL-189), stopped a re-attached photo from writing a second
+pickup-audit row — an audit-log-integrity correction, not a change to
+who can see the photo or how upload works.
 
 Verified directly against `apps/api/src/shipping/shipment.service.ts` and
 `shipment-driver.service.ts` for this matrix (god's own read-only check,
@@ -395,7 +398,7 @@ snapshot. Re-verified directly for this matrix, against the actual source
 rather than the PR's own description:
 
 - **Default exists and is maintained as a genuine singleton.**
-  `SavedAddress.isDefault` (`packages/database/prisma/schema.prisma:2585`).
+  `SavedAddress.isDefault` (`packages/database/prisma/schema.prisma:2681`).
   `AddressesService.create`/`update` (`apps/api/src/addresses/addresses.service.ts`)
   clear every other default in the same transaction before setting a new one;
   `remove()` promotes the next-most-recently-updated address to default if the
@@ -404,7 +407,7 @@ rather than the PR's own description:
   just by policy.** `SavedAddress` has no relation to `Order`, `VendorOrder`
   or `Shipment` anywhere in the schema — `grep`-confirmed. `Shipment` carries
   its own inline `originAddress`/`destinationAddress` fields
-  (`schema.prisma:4894`, `:4909`); checkout copies address data at the time of
+  (`schema.prisma:5025`, `:5040`); checkout copies address data at the time of
   the order rather than storing a foreign key back to the address book. There
   is nothing a delete could cascade into, because nothing points at the
   address book from an order in the first place.
