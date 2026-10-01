@@ -397,6 +397,8 @@ enum AuditAction {
   SHIPMENT_RECIPIENT_CLAIM_FAILED
   SHIPMENT_RETURN_INITIATED
   SHIPMENT_RETURN_PENDING_MANUAL
+  SHIPMENT_REROUTE_INITIATED
+  SHIPMENT_REROUTE_PENDING_MANUAL
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -4573,6 +4575,16 @@ enum LegStatus {
 
 /// Derived from the legs by deriveShipmentStatus() in @bmpl/shared, never set
 /// independently. Two writable sources for one fact is how they drift.
+///
+/// BMPL-356: RETURNED is the one exception — it is layered on top of the
+/// leg-derived value by recompute() in shipment.service.ts, the same way
+/// `collectedAt` already overrides AWAITING_COLLECTION to DELIVERED, because
+/// "this shipment has a return booked against it" is a fact the legs alone
+/// cannot express (the returned leg stays EXCEPTION forever; it is not
+/// marked CANCELLED, so deriveShipmentStatus() itself never needed to
+/// change). Before this value existed, a returned shipment just stayed at
+/// EXCEPTION ("Needs attention") forever once its return was booked —
+/// honest, but stale, never resolving to the thing that actually happened.
 enum ShipmentStatus {
   DRAFT
   AWAITING_PICKUP
@@ -4584,6 +4596,7 @@ enum ShipmentStatus {
   AWAITING_COLLECTION
   DELIVERED
   EXCEPTION
+  RETURNED
   CANCELLED
 }
 
@@ -5061,6 +5074,19 @@ model Shipment {
   returnOfShipmentId String?   @unique
   returnOfShipment   Shipment? @relation("ShipmentReturn", fields: [returnOfShipmentId], references: [id], onDelete: Restrict)
   returnShipment     Shipment? @relation("ShipmentReturn")
+
+  /// BMPL-343: a reroute is booked the same way a return is — its own NEW
+  /// Shipment, never an edit of this one's legs or a reversal of what was
+  /// already charged, and for the same reason (Payment.shipmentId is
+  /// unique). A reroute is NOT a return: it redirects to a new destination
+  /// the operator supplies, not back to the original sender, so it gets its
+  /// own link field rather than overloading `returnOfShipmentId` — a
+  /// shipment's fate is either returned or redirected, never recorded as
+  /// one when it was really the other. @unique enforces at most one reroute
+  /// per original at the database level, not only in application logic.
+  rerouteOfShipmentId String?   @unique
+  rerouteOfShipment   Shipment? @relation("ShipmentReroute", fields: [rerouteOfShipmentId], references: [id], onDelete: Restrict)
+  rerouteShipment     Shipment? @relation("ShipmentReroute")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

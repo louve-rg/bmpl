@@ -286,6 +286,15 @@ export const AUDIT_ACTIONS = [
   // or MANUAL rather than guessing one — a supported outcome, not an error
   // swallowed silently. Nothing is charged and no shipment is created.
   'SHIPMENT_RETURN_PENDING_MANUAL',
+  // BMPL-343: a reroute booked and charged through the same confirm-then-pay
+  // flow as a return, to a NEW destination the operator supplied rather than
+  // back to the sender. newValue carries both shipment ids, the reroute's
+  // own price, and whether it increased what the customer had already paid.
+  'SHIPMENT_REROUTE_INITIATED',
+  // Same fence as SHIPMENT_RETURN_PENDING_MANUAL, for the redirected route:
+  // no valid configured price, so the reroute stays PENDING/MANUAL rather
+  // than guessing one. Nothing is charged and no shipment is created.
+  'SHIPMENT_REROUTE_PENDING_MANUAL',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

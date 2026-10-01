@@ -150,5 +150,6 @@ export const NOTIFICATION_EVENTS = [
   'SHIPMENT_LEG_CANCELLED',
   'SHIPMENT_EXCEPTION',
   'SHIPMENT_STATUS',
+  'SHIPMENT_REROUTED', // BMPL-343 — a reroute's own notice, distinct from SHIPMENT_STATUS
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];

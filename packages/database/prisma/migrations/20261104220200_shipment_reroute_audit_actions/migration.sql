@@ -1,0 +1,22 @@
+-- BMPL-343: audit vocabulary for the two possible outcomes of attempting a
+-- reroute (see 20261104220000 for the data-model half), the same shape
+-- 20261104210100 already established for return-to-sender.
+--
+-- SHIPMENT_REROUTE_INITIATED: a reroute was priced, confirmed and booked as
+-- a new transport charge to a new destination -- newValue carries both
+-- shipment ids, the reroute's own price, and whether it increased what the
+-- customer had already paid.
+--
+-- SHIPMENT_REROUTE_PENDING_MANUAL: the mirror image of the owner's own
+-- fence -- no valid configured price could be calculated for the redirected
+-- route, so the reroute stays PENDING or MANUAL rather than guessing one. A
+-- supported, tested outcome, not an error swallowed silently. Nothing is
+-- charged and no shipment is created when this is recorded.
+--
+-- Additive and idempotent; no existing enum value is touched, changed or
+-- removed. Kept in its own migration, separate from the structural change
+-- (rerouteOfShipmentId, 20261104220000) this feature also needs and from the
+-- unrelated ShipmentStatus addition (20261104220100) -- one migration per
+-- enum extension remains this floor's own convention.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_REROUTE_INITIATED';
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_REROUTE_PENDING_MANUAL';

@@ -433,6 +433,58 @@ export const returnToSenderSchema = z.object({
 });
 export type ReturnToSenderInput = z.infer<typeof returnToSenderSchema>;
 
+/**
+ * Confirming (or previewing) a reroute (BMPL-343). A reroute is not a
+ * return: it redirects to a NEW destination the operator supplies here,
+ * never back to the original sender, so it needs the destination endpoint a
+ * return never asks for. The origin side is never asked for either — it is
+ * always wherever the parcel currently sits (the original shipment's own
+ * destination), the same fixed point `reversedReturnInput` uses, derived in
+ * shipment.service.ts, never taken from a caller.
+ *
+ * There is no explicit `service` field to say whether this new destination
+ * is a door or a terminal, unlike a fresh booking — a reroute has no
+ * `service` of its own to choose, so hubId's presence IS the answer: filled
+ * in means a terminal, left out means a door, exactly how `endpointSchema`
+ * is used everywhere else a caller already knows which one they mean.
+ *
+ * The destination-only checks are shared by preview (price only, no note
+ * needed — asking never moves money, same rule `shipmentQuoteSchema`
+ * follows) and confirm, so what counts as a valid redirect cannot drift
+ * between the two the way `loadRerouteLeg` already keeps it from drifting on
+ * the service side.
+ */
+const rerouteDestinationChecks = <T extends z.ZodTypeAny>(schema: T) =>
+  schema
+    .refine((v: { destination: z.infer<typeof endpointSchema> }) => !!v.destination.hubId || !!v.destination.district, {
+      message: 'Tell us where to redirect it: a district for a door delivery, or a terminal.',
+      path: ['destination'],
+    })
+    .refine(
+      (v: { destination: z.infer<typeof endpointSchema> }) =>
+        !!v.destination.hubId || isLocatable({ street: v.destination.address, latitude: v.destination.latitude, longitude: v.destination.longitude }),
+      { message: UNLOCATABLE_ADDRESS_MESSAGE, path: ['destination', 'address'] },
+    )
+    .refine((v: { destination: z.infer<typeof endpointSchema> }) => !!v.destination.hubId || !!v.destination.city, {
+      message: 'Which town is it going to?',
+      path: ['destination', 'city'],
+    })
+    .refine((v: { destination: z.infer<typeof endpointSchema> }) => !!v.destination.name && !!v.destination.phone, {
+      message: 'We need a name and phone number for whoever is receiving this.',
+      path: ['destination', 'name'],
+    });
+
+export const previewRerouteSchema = rerouteDestinationChecks(z.object({ destination: endpointSchema }));
+export type PreviewRerouteInput = z.infer<typeof previewRerouteSchema>;
+
+export const rerouteSchema = rerouteDestinationChecks(
+  z.object({
+    destination: endpointSchema,
+    note: z.string().trim().min(4, 'Say why this is being rerouted.').max(500),
+  }),
+);
+export type RerouteInput = z.infer<typeof rerouteSchema>;
+
 /** Recording that a recipient collected their parcel from a terminal. */
 export const collectShipmentSchema = z.object({
   collectedByName: z.string().trim().min(2, 'Who collected it?').max(120),

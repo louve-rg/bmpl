@@ -19,6 +19,7 @@ const TONE_FOR: Record<string, Tone> = {
   AWAITING_COLLECTION: 'success',
   CANCELLED: 'neutral',
   EXCEPTION: 'warning',
+  RETURNED: 'neutral',
 };
 
 /**
@@ -38,7 +39,10 @@ const GROUPS = [
 function groupOf(s: ShipmentView): (typeof GROUPS)[number]['key'] {
   if (s.status === 'AWAITING_COLLECTION') return 'COLLECT';
   if (s.status === 'EXCEPTION') return 'ATTENTION';
-  if (s.status === 'DELIVERED' || s.status === 'CANCELLED') return 'DONE';
+  // RETURNED (BMPL-356): a finished outcome, not a parcel still on the way —
+  // falling through to ACTIVE here would bucket a shipment that is done, and
+  // never arriving at its original destination, under "On the way".
+  if (s.status === 'DELIVERED' || s.status === 'CANCELLED' || s.status === 'RETURNED') return 'DONE';
   return 'ACTIVE';
 }
 
