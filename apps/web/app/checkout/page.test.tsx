@@ -15,11 +15,21 @@ import type { WalletSummary } from '../../lib/wallet';
 // router reference across renders. A mock returning a fresh object every
 // call breaks checkout's own `useCallback(load, [router])` /
 // `useEffect(..., [load])` chain (load's identity changes every render, so
-// the effect re-fires every render, forever) — an infinite render loop that
-// LOOKS exactly like the next/dynamic hang this file exists to guard
-// against, but has nothing to do with it. Found while building this test;
-// worth leaving as a visible landmine warning for the next person who
-// copies this file's mocks elsewhere.
+// the effect re-fires every render, forever) — an infinite render loop.
+//
+// BMPL-380, negative control (god's ruling): this instability, not
+// next/dynamic, turned out to be the ACTUAL cause of the original mount
+// hang. With this object stabilized, CheckoutPage mounts its real,
+// unmocked `next/dynamic()`-wrapped AddressField/LocationPicker just
+// fine — confirmed by disabling the global next/dynamic mock entirely and
+// re-running this file (passed, 3/3 deterministic), then reproducing the
+// hang again with only this one object made unstable (next/dynamic still
+// real, untouched). So BMPL-380's original premise — that next/dynamic
+// itself cannot mount under Vitest — was wrong; the global mock has been
+// removed. Left here as a landmine warning: an unstable router mock
+// produces a hang that presents identically to a real bundler-dependency
+// failure, and the only way to tell them apart is a control like this one,
+// not a guess from the symptom.
 const router = { push: vi.fn(), refresh: vi.fn() };
 vi.mock('next/navigation', () => ({
   useRouter: () => router,
@@ -158,9 +168,9 @@ async function flush() {
 }
 
 /**
- * BMPL-380: the global `next/dynamic` mock (test/next-dynamic.setup.ts)
- * resolves `AddressField`'s lazy `LocationPicker` via a real dynamic
- * `import()`. That settles on a real timer tick, not a plain microtask —
+ * BMPL-380: the REAL `next/dynamic()` resolves `AddressField`'s lazy
+ * `LocationPicker` via a genuine dynamic `import()`, same as it would in
+ * production. That settles on a real timer tick, not a plain microtask —
  * unlike the rest of this file's state updates, a fixed small number of
  * `await Promise.resolve()`s is not reliably enough to also clear it. Poll
  * instead of guessing a tick count, the same way LocationPicker.test.tsx's
@@ -191,14 +201,18 @@ function mount() {
 
 /**
  * This is the test #287 (BMPL-350) had to ship without: CheckoutPage composes
- * AddressField, which wraps its LocationPicker in `next/dynamic()`. Before
- * BMPL-380, mounting this page under Vitest hung forever — not a thrown
- * error, so nothing to catch or mock around — because `next/dynamic`
- * depends on Next's own bundler chunk-loading machinery, absent here. These
- * tests exist to prove that regression stays fixed, not to re-litigate
- * checkout's own business logic (covered elsewhere).
+ * AddressField, which wraps its LocationPicker in a real, unmocked
+ * `next/dynamic()`. Before BMPL-380, mounting this page under Vitest hung
+ * forever — not a thrown error, so nothing to catch or mock around.
+ * BMPL-350 traced that hang to `next/dynamic` itself; BMPL-380's own
+ * negative control (see the `router` comment above) found the actual
+ * cause was an unstable `next/navigation` `useRouter()` test mock, not
+ * `next/dynamic` — which mounts here exactly as written, no special
+ * handling needed beyond the polling flush below. These tests exist to
+ * prove that mount stays fixed, not to re-litigate checkout's own business
+ * logic (covered elsewhere).
  */
-describe('CheckoutPage mounts its next/dynamic-wrapped AddressField (BMPL-380)', () => {
+describe('CheckoutPage mounts its real next/dynamic-wrapped AddressField (BMPL-380)', () => {
   it('loads the cart, and switching a vendor to Delivery reveals the real map — not an eternal loading placeholder', async () => {
     mount();
     await flush();
