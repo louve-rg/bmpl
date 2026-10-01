@@ -21,7 +21,7 @@ let adminCookies: string[];
 let categoryId: string;
 let inventoryService: InventoryService;
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 
 async function login(email: string, password: string): Promise<string[]> {
   const res = await request(ctx.server).post('/api/auth/login').send({ email, password });
