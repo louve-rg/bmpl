@@ -62,17 +62,34 @@ export async function bootApp(): Promise<TestContext> {
  * forever (the assumed zero happens to still be literally true by luck).
  *
  * `action` may itself reject -- proving a write is refused is usually the
- * whole point of calling this -- so it runs inside a try/catch and its
- * outcome is ignored; `read()` is what gets compared, before and after.
+ * whole point of calling this -- so it runs inside a try/catch and, with no
+ * `expectRejection` given, any rejection is swallowed; `read()` is what gets
+ * compared, before and after.
+ *
+ * That swallow is itself a version of the exact bug this helper exists to
+ * prevent, one level deeper: if `action` rejects for an UNRELATED reason --
+ * a typo, a missing fixture, a closed connection -- the call never reaches
+ * whatever it was meant to exercise, `read()` naturally shows no change
+ * either way, and the test passes while proving nothing. The author would
+ * believe they had demonstrated a guard works when their own setup never
+ * reached it. Pass `expectRejection` (a substring or a pattern) when the
+ * point IS that `action` must be refused, so a DIFFERENT failure still
+ * fails the test for its real reason instead of passing by accident.
  */
-export async function expectUnchangedBy<T>(read: () => Promise<T>, action: () => Promise<unknown>): Promise<void> {
+export async function expectUnchangedBy<T>(
+  read: () => Promise<T>,
+  action: () => Promise<unknown>,
+  expectRejection?: string | RegExp,
+): Promise<void> {
   const before = await read();
   try {
     await action();
-  } catch {
-    // Often the point: `action` is frequently an attempt this test expects
-    // to be refused, and the refusal itself is asserted separately by the
-    // caller. Either way, what matters here is whether `read()` moved.
+  } catch (e) {
+    if (expectRejection !== undefined) {
+      const message = e instanceof Error ? e.message : String(e);
+      const matches = typeof expectRejection === 'string' ? message.includes(expectRejection) : expectRejection.test(message);
+      if (!matches) throw e; // a DIFFERENT failure -- let it fail the test for its real reason.
+    }
   }
   expect(await read()).toEqual(before);
 }

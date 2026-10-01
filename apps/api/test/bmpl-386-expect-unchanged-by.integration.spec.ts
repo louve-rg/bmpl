@@ -29,7 +29,8 @@ describe('expectUnchangedBy', () => {
   it('passes when a refused write changes nothing -- the normal case it exists for', async () => {
     await makeHub('BMPL386A');
     await expect(
-      expectUnchangedBy(countHubs, () => makeHub('BMPL386A')), // duplicate code -> rejects, count unmoved
+      // duplicate code -> rejects with exactly this message, count unmoved.
+      expectUnchangedBy(countHubs, () => makeHub('BMPL386A'), /Unique constraint failed/),
     ).resolves.toBeUndefined();
   });
 
@@ -37,5 +38,17 @@ describe('expectUnchangedBy', () => {
     // A perfectly successful, unrefused create -- the count DOES change, and
     // the helper must say so rather than silently agreeing with the fixture.
     await expect(expectUnchangedBy(countHubs, () => makeHub('BMPL386B'))).rejects.toThrow();
+  });
+
+  it('FAILS on an UNRELATED rejection when a specific one was expected -- it must not swallow a broken fixture as "refused"', async () => {
+    // This is the deeper version of the same bug the helper exists to catch:
+    // a caller who means "this write must be REFUSED" has to be told when
+    // `action` instead failed for some other reason entirely (a typo, a
+    // missing fixture, a renamed field) -- not shown a quiet pass that
+    // proves nothing about the guard they meant to exercise.
+    const brokenAction = () => Promise.reject(new Error('BMPL-386 simulated unrelated failure, not a unique-constraint violation'));
+    await expect(expectUnchangedBy(countHubs, brokenAction, /Unique constraint failed/)).rejects.toThrow(
+      /simulated unrelated failure/,
+    );
   });
 });
