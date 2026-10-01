@@ -242,6 +242,11 @@ function InventoryField({
   const [locErr, setLocErr] = useState<string | null>(null);
   const q = `?variantId=${variant.id}`;
   const unlimited = invRow?.unlimited ?? false;
+  // BMPL-372: once this product has adopted per-location tracking, the
+  // server refuses this control's own endpoint rather than silently writing
+  // a number checkout no longer reads — so the control must not be offered
+  // at all, with a reason, rather than shown and left to fail.
+  const hasLocations = invRow?.hasLocations ?? false;
   const current = variant.quantity;
   const reserved = invRow?.reserved ?? 0;
   const qty = qtyStr.trim() === '' ? 0 : Number(qtyStr);
@@ -312,6 +317,8 @@ function InventoryField({
 
       {unlimited ? (
         <p className="text-xs text-slate-400">Unlimited stock — quantity tracking is off for this variant.</p>
+      ) : hasLocations ? (
+        <p className="text-xs text-slate-500">This product tracks stock per location — adjust it there.</p>
       ) : (
         <div className="rounded-bmpl-md border border-slate-200 p-2">
           {/* Adjustment type — no minus sign needed on mobile */}

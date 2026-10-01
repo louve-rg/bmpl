@@ -109,12 +109,18 @@ export class InventoryService {
     // across its locations here, not its own (stale once adopted) columns —
     // see effectiveFromMap's own comment.
     const locMap = await this.locationMapFor([productInv.id, ...variantRows.map((r) => r.id)]);
+    // BMPL-372: `hasLocations` is the SAME "any child rows at all" check
+    // adjust() now refuses on and chooseLocation() already branches on — one
+    // fact, read the same way everywhere, so the vendor UI can gate the
+    // legacy control before the vendor ever submits and hits the refusal.
+    const hasLocations = (id: string) => (locMap.get(id)?.length ?? 0) > 0;
     return {
-      product: { inventoryId: productInv.id, ...this.effectiveFromMap(productInv, locMap) },
+      product: { inventoryId: productInv.id, hasLocations: hasLocations(productInv.id), ...this.effectiveFromMap(productInv, locMap) },
       variants: variantRows.map((r) => ({
         inventoryId: r.id,
         variantId: r.variantId,
         sku: r.variant?.sku ?? null,
+        hasLocations: hasLocations(r.id),
         ...this.effectiveFromMap(r, locMap),
       })),
     };
@@ -143,6 +149,26 @@ export class InventoryService {
   async adjust(actor: ActorContext, productId: string, variantId: string | null, dto: InventoryAdjustInput) {
     await this.ownership.ownedProduct(actor.userId, productId);
     const inv = await this.resolveTarget(productId, variantId);
+
+    // BMPL-372: once a product has adopted per-location tracking (ANY
+    // InventoryLocation child row exists, even one still at zero stock),
+    // those rows are the real stock of record — chooseLocation() and every
+    // read through effectiveFromMap() already sum THEM, not this row's own
+    // quantity (see effectiveFromMap's own comment). Letting this endpoint
+    // keep writing the parent column directly would make it a second,
+    // unreconciled inventory system: the owner's own instruction when this
+    // batch was reopened ("do not create a second inventory system",
+    // "preserve all existing reservation/oversell protections"). There is no
+    // well-defined way to reconcile a flat delta against a multi-location
+    // split — which location absorbs it is a business decision this system
+    // has never been told — so this refuses rather than guesses.
+    const hasLocations = await this.prisma.inventoryLocation.findFirst({
+      where: { inventoryId: inv.id },
+      select: { id: true },
+    });
+    if (hasLocations) {
+      throw new BadRequestException('This product tracks stock per location — adjust it there.');
+    }
 
     // Detect an out-of-stock → in-stock crossing so we can fire back-in-stock alerts.
     let becameInStock = false;

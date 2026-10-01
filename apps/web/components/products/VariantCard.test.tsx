@@ -42,6 +42,7 @@ function invRow(overrides: Partial<InvRow> = {}): InvRow {
     inventoryId: 'inv-1',
     variantId: 'var-1',
     sku: 'SKU-1',
+    hasLocations: false,
     quantity: 20,
     reserved: 2,
     available: 18,
@@ -116,6 +117,20 @@ describe('VariantCard — stock by location (BMPL-175/354)', () => {
   it('does not offer a per-location breakdown when the variant is unlimited', () => {
     const el = mount({ unlimited: true });
     expect(el.textContent).not.toContain('Stock by location');
+  });
+
+  it('BMPL-372: hides the legacy product-level adjuster once locations are adopted, and says why', () => {
+    const el = mount({ hasLocations: true });
+    expect(el.textContent).not.toContain('Apply adjustment');
+    expect(el.textContent).toContain('This product tracks stock per location — adjust it there.');
+    // The per-location breakdown itself is untouched by this gate — still offered.
+    expect(el.textContent).toContain('Stock by location');
+  });
+
+  it('still offers the legacy adjuster for a product that has not adopted locations', () => {
+    const el = mount({ hasLocations: false });
+    expect(el.textContent).toContain('Apply adjustment');
+    expect(el.textContent).not.toContain('This product tracks stock per location');
   });
 
   it('fetches and renders each vendor location on open, scoped to this variant', async () => {
