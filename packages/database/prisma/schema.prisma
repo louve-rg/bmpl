@@ -882,6 +882,10 @@ enum ConversationParticipantRole {
   APPLICANT
   LISTER
   ENQUIRER
+  /// BMPL-359: a shipment's genuinely linked recipient, rides the SAME
+  /// CUSTOMER_DRIVER pairing a shipment leg already has — see
+  /// messaging.service.ts authorize() for why no new pairing is needed.
+  RECIPIENT
 }
 
 enum MessageType {

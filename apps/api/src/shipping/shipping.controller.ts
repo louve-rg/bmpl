@@ -71,6 +71,7 @@ import { ShippingProviderService } from './shipping-provider.service';
 import { ShipmentDispatchService } from './shipment-dispatch.service';
 import { ShipmentService } from './shipment.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MessagingService } from '../messaging/messaging.service';
 
 /**
  * The public terminal list.
@@ -169,7 +170,10 @@ export class ShippingClaimController {
  */
 @Controller('shipping/incoming')
 export class ShipmentRecipientController {
-  constructor(private readonly shipments: ShipmentService) {}
+  constructor(
+    private readonly shipments: ShipmentService,
+    private readonly messaging: MessagingService,
+  ) {}
 
   @Get()
   mine(@CurrentUser() u: AuthContext) {
@@ -207,6 +211,20 @@ export class ShipmentRecipientController {
     @Body(ZodBody(setAvailabilityWindowsSchema)) dto: SetAvailabilityWindowsInput,
   ) {
     return this.shipments.setRecipientAvailabilityWindows(reference, dto, { userId: u.userId });
+  }
+
+  /**
+   * BMPL-359: a linked recipient's own entry point into the existing per-leg
+   * CUSTOMER_DRIVER conversation with whichever driver currently has their
+   * parcel — reached by reference like every other route on this controller,
+   * since a recipient does not know the shipment's internal leg id. The
+   * authorization and conversation-materialization both live in
+   * MessagingService.openShipmentLegForRecipient; this route is just the
+   * recipient-facing door into it, same shape as every other action here.
+   */
+  @Post(':reference/courier-conversation')
+  openCourierConversation(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
+    return this.messaging.openShipmentLegForRecipient({ userId: u.userId, status: u.status, sessionId: u.sessionId, permissions: u.permissions }, reference);
   }
 }
 

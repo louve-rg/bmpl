@@ -30,6 +30,9 @@ interface ContextParties {
   customerUserId?: string | null;
   vendorUserId?: string | null;
   currentDriverUserId?: string | null;
+  // BMPL-359: a shipment leg's linked recipient — only ever set for
+  // SHIPMENT_LEG, since claiming a recipient slot is a shipping-only concept.
+  recipientUserId?: string | null;
   // Belize Connect Jobs (M24) — employer↔applicant thread parties.
   employerUserId?: string | null;
   applicantUserId?: string | null;
@@ -118,14 +121,30 @@ export class MessagingService {
         where: { id: contextId },
         include: {
           assignedDriver: { select: { userId: true } },
-          shipment: { select: { customerUserId: true, reference: true } },
+          shipment: { select: { customerUserId: true, recipientUserId: true, reference: true } },
         },
       });
       if (!leg) throw new NotFoundException('Job not found.');
       // No vendor: a shipment is between a sender and a recipient, and the
       // customer who booked it is the party the driver may need to reach.
+      // BMPL-359: a GENUINELY LINKED recipient (claimed their own account —
+      // never sender-typed contact details, see claimAsRecipient) is the
+      // other party who may need to reach the SAME driver — but ONLY on a
+      // leg that actually ends by delivering to them. recipientUserId is a
+      // SHIPMENT-level field, so without this kind check it would read as
+      // true for EVERY leg of the shipment, including FIRST_MILE — the
+      // courier's coordination with the SENDER's own door, which has nothing
+      // to do with the recipient and must stay exactly as invisible to them
+      // as the vendor↔driver pickup thread already is to a delivery's
+      // customer. A caught-by-its-own-test mistake, not a hypothetical: an
+      // earlier version of this check had no kind guard at all, and a
+      // multi-leg test proved a recipient could read the completed
+      // first-mile thread. LINE_HAUL is excluded for the same reason —
+      // hub-to-hub transit has no door to coordinate at either end.
+      const recipientFacingLeg = leg.kind === 'LAST_MILE' || leg.kind === 'DIRECT';
       return {
         customerUserId: leg.shipment.customerUserId ?? undefined,
+        recipientUserId: recipientFacingLeg ? leg.shipment.recipientUserId ?? undefined : undefined,
         currentDriverUserId: leg.assignedDriver?.userId ?? null,
         label: `Shipment ${leg.shipment.reference} · ${leg.kind === 'FIRST_MILE' ? 'collection' : 'delivery'}`,
       };
@@ -190,6 +209,67 @@ export class MessagingService {
       throw new NotFoundException('Delivery not found.');
     }
     const conv = await this.ensureConversation('DELIVERY', deliveryId, pairing, actor.userId, p.label, members);
+    return this.getConversation(actor, conv.id);
+  }
+
+  /**
+   * A linked recipient's own entry point into the per-leg CUSTOMER_DRIVER
+   * conversation with whichever driver currently has their parcel (BMPL-359).
+   *
+   * Reached by shipment REFERENCE, never an internal leg id — a recipient
+   * does not know one, the same reason every other recipient-facing route
+   * (`ShipmentRecipientController`) uses reference. Scoped by `recipientUserId`,
+   * never by reference alone, for the same enumeration-resistance reason
+   * `trackAsRecipient` is — a miss reads identically whether the reference
+   * does not exist or simply was never claimed by this account.
+   *
+   * The customer and driver never need this: `ensureShipmentLegThread`
+   * already seeds them as initial participants the moment a driver accepts
+   * the leg, so they reach it through the ordinary conversation list. A
+   * recipient is never an initial member (claiming happens independently,
+   * often after acceptance), so without this they would have no discovery
+   * path at all even once `authorize()` recognises them — a correct
+   * permission check with nothing that leads to it is still a missing
+   * feature from where they are standing.
+   *
+   * "Current leg" starts from the SAME definition `recipientView()` already
+   * shows them as their highlighted step (first live, non-completed leg),
+   * narrowed to LAST_MILE/DIRECT — the only kinds that end by delivering to
+   * the recipient at all. A FIRST_MILE leg can be "current" too (the parcel
+   * has not left the sender yet), but that leg is the courier's coordination
+   * with the SENDER's own door, never the recipient's — see `resolveParties`'s
+   * own comment on why that guard lives there as well, not only here.
+   *
+
+   * NEVER CREATES A THREAD ITSELF — only ever joins one that already exists.
+   * `assignedDriverProfileId` is set the moment dispatch OFFERS a leg, well
+   * before any driver has accepted it (`shipping-messaging.integration.spec.ts`'s
+   * own "a thread opens on acceptance, and not before" rule) — an earlier
+   * version of this method checked the assigned-driver relation directly,
+   * which would have let a recipient's visit create (and thus prematurely
+   * enrol) a thread for a leg nobody had accepted yet. Checking for an
+   * EXISTING conversation instead means this can only ever join what
+   * `ensureShipmentLegThread` already created on real acceptance, never race
+   * ahead of it.
+   */
+  async openShipmentLegForRecipient(actor: Actor, reference: string) {
+    const s = await this.prisma.shipment.findUnique({
+      where: { reference },
+      select: { recipientUserId: true, legs: { orderBy: { sequence: 'asc' }, select: { id: true, kind: true, status: true } } },
+    });
+    if (!s || s.recipientUserId !== actor.userId) throw new NotFoundException('No shipment with that reference.');
+    const current = s.legs.find((l) => (l.kind === 'LAST_MILE' || l.kind === 'DIRECT') && l.status !== 'CANCELLED' && l.status !== 'COMPLETED');
+    const existing = current
+      ? await this.prisma.conversation.findUnique({
+          where: { contextType_contextId_pairing: { contextType: 'SHIPMENT_LEG', contextId: current.id, pairing: 'CUSTOMER_DRIVER' } },
+        })
+      : null;
+    if (!existing) throw new BadRequestException('No courier conversation is open for this shipment yet.');
+    const p = await this.resolveParties('SHIPMENT_LEG', current!.id);
+    const conv = await this.ensureConversation('SHIPMENT_LEG', current!.id, 'CUSTOMER_DRIVER', actor.userId, p.label, [
+      { userId: p.currentDriverUserId!, role: 'DRIVER' },
+      { userId: actor.userId, role: 'RECIPIENT' },
+    ]);
     return this.getConversation(actor, conv.id);
   }
 
@@ -333,6 +413,11 @@ export class MessagingService {
     const rawRelated =
       actor.userId === parties.currentDriverUserId ? 'DRIVER'
       : actor.userId === parties.customerUserId ? 'CUSTOMER'
+      // BMPL-359: checked before VENDOR etc. deliberately has no effect on
+      // precedence — recipientUserId is only ever set for SHIPMENT_LEG, which
+      // never sets vendorUserId/employerUserId/etc, so these branches cannot
+      // collide for the same party. Order here is just readability.
+      : actor.userId === parties.recipientUserId ? 'RECIPIENT'
       : actor.userId === parties.vendorUserId ? 'VENDOR'
       : actor.userId === parties.employerUserId ? 'EMPLOYER'
       : actor.userId === parties.applicantUserId ? 'APPLICANT'
@@ -340,7 +425,18 @@ export class MessagingService {
       : actor.userId === parties.enquirerUserId ? 'ENQUIRER'
       : null;
     const pairingRoles = conv.pairing.split('_'); // e.g. CUSTOMER_DRIVER → [CUSTOMER, DRIVER]
-    const relatedRole = rawRelated && pairingRoles.includes(rawRelated) ? rawRelated : null;
+    // RECIPIENT is the one role that deliberately does NOT appear in any
+    // pairing's own name — BMPL-359 was ruled to reuse the EXISTING
+    // CUSTOMER_DRIVER pairing a shipment leg already has (god: "do not build
+    // a new messaging rail and do not invent a new pairing"), not to mint a
+    // CUSTOMER_DRIVER_RECIPIENT one. A SHIPMENT_LEG conversation only ever
+    // has the one pairing (ensureShipmentLegThread's own comment: "ONE
+    // conversation, not two"), so there is no second, wrong-pairing thread
+    // for a recipient to leak into the way the pairingRoles check exists to
+    // stop a customer reading a VENDOR_DRIVER pickup thread — the check
+    // below is this role's ENTIRE scoping, so it is the one place this
+    // defect-class is prevented, same as every other role here.
+    const relatedRole = rawRelated === 'RECIPIENT' ? 'RECIPIENT' : rawRelated && pairingRoles.includes(rawRelated) ? rawRelated : null;
     if (!participant && !relatedRole && !isSupport) throw new NotFoundException('Conversation not found.');
     const role: ConversationParticipantRole | 'SUPPORT' | null = participant?.role ?? relatedRole ?? (isSupport ? 'SUPPORT' : null);
     return { conv, role, isSupport, parties };

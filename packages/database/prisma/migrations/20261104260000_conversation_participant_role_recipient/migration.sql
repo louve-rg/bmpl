@@ -1,0 +1,35 @@
+-- BMPL-359: a shipment's genuinely LINKED recipient (claimed their own
+-- account via claimAsRecipient -- never sender-typed contact details) is a
+-- second party who may need to reach the SAME driver the customer already
+-- can, through the SAME per-leg CUSTOMER_DRIVER conversation a shipment leg
+-- already has. Owner's own wording: "Customer-to-courier communication
+-- should use BML's existing per-leg messaging where available" -- so this
+-- reuses the existing messaging rail rather than inventing a parallel one,
+-- and reuses the existing CUSTOMER_DRIVER pairing rather than inventing a
+-- CUSTOMER_DRIVER_RECIPIENT one (see messaging.service.ts authorize()'s own
+-- comment for why that is safe: a SHIPMENT_LEG conversation only ever has
+-- ONE pairing, so there is no second, wrong-pairing thread to leak into).
+--
+-- WHAT WAS WRONG. CONVERSATION_PAIRINGS already includes CUSTOMER_DRIVER and
+-- the capability already exists -- but ConversationParticipantRole had no
+-- value to record a recipient AS a participant distinct from the customer
+-- who booked the shipment, so party resolution could not recognise a linked
+-- recipient as a party at all. Not a missing feature; a missing participant.
+--
+-- THE FIX. One new enum value. Additive and idempotent (ADD VALUE IF NOT
+-- EXISTS); nothing dropped, renamed or rewritten. PG16, so this is
+-- transactional, and the new value is not used anywhere in this same
+-- migration, so the same-transaction restriction on a fresh enum value does
+-- not apply here either (the application code that writes 'RECIPIENT' rows
+-- ships in a separate deploy, after this migration has committed).
+--
+-- ROLLBACK: Postgres cannot drop a single enum value directly. If this
+-- value is never written (verified false by that point — this migration
+-- would not ship without the application code that uses it), the safe
+-- rollback is to leave the value in place; an unused enum member is inert.
+-- Removing it for real would require rebuilding the enum type (rename old,
+-- create new without the value, migrate every column, drop old) — the same
+-- heavyweight path any enum-value removal here would need, not specific to
+-- this change.
+
+ALTER TYPE "ConversationParticipantRole" ADD VALUE IF NOT EXISTS 'RECIPIENT';
