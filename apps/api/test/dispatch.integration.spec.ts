@@ -579,6 +579,14 @@ describe('visibility, proof, permissions', () => {
     expect(view.body.driver).not.toHaveProperty('emergencyContactName');
     expect(view.body.driver).not.toHaveProperty('emergencyContactPhone');
     expect(view.body.driver).not.toHaveProperty('licenceNumber');
+    // BMPL-377: same reasoning, the vehicle's own documents. The owner's
+    // requirement-7 instruction names "insurance documents" and "licence
+    // documents" explicitly.
+    expect(view.body.vehicle.licencePlate).toBeTruthy();
+    expect(view.body.vehicle).not.toHaveProperty('registrationNumber');
+    expect(view.body.vehicle).not.toHaveProperty('insuranceProvider');
+    expect(view.body.vehicle).not.toHaveProperty('insurancePolicyNumber');
+    expect(view.body.vehicle).not.toHaveProperty('photoKeys');
     const other = await registerCustomer(`other_${uniq()}@example.bz`);
     expect((await get(other.cookies, `deliveries/${order.deliveryId}`)).status).toBe(404);
   });

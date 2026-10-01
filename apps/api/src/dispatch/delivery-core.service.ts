@@ -85,7 +85,19 @@ export const DELIVERY_INCLUDE = {
       user: { select: { firstName: true, lastName: true, ...AVATAR_SELECT } },
     },
   },
-  assignedVehicle: true,
+  // BMPL-377: named at the select, not fixed up after — same reasoning and
+  // precedent as assignedDriver above (BMPL-373). A bare `true` here loaded
+  // the FULL DriverVehicle row — registrationNumber, insuranceProvider,
+  // insurancePolicyNumber, photoKeys (private-bucket storage keys) — into
+  // memory on every delivery read, even though vehicleSummary() below only
+  // ever reads these five fields. The owner's requirement-7 instruction
+  // names "insurance documents" and "licence documents" explicitly as
+  // things never to expose; an insurance policy number sitting in memory
+  // on a customer-facing read is exactly that class, correct today only
+  // because nothing has spread `v` wholesale yet.
+  assignedVehicle: {
+    select: { type: true, make: true, model: true, color: true, licencePlate: true },
+  },
   timeline: { orderBy: { createdAt: 'asc' as const } },
   assignments: {
     orderBy: { assignedAt: 'asc' as const },
