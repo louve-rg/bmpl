@@ -220,8 +220,17 @@ describe('service areas', () => {
  *  returns SHARED reference data (lane towns), so it additionally requires
  *  an actual DriverProfile row before it reads one. */
 describe('selectable cities for narrowing a service area (BMPL-360)', () => {
-  const createHub = (district: string, city: string, code: string) =>
-    post(adminCookies, 'admin/logistics/hubs', { code, name: `${city} Hub`, type: 'AIRSTRIP', district, city, modes: ['LAND', 'AIR'] });
+  // LogisticsHub.code is capped at 12 characters (packages/validation/src/
+  // shipping.ts) — a bare Date.now() suffix alone is 13 digits and blows
+  // past it on its own, 400ing before any assertion is reached. Base-36
+  // compresses the timestamp to ~8 characters, same shape proven in
+  // shipment-eta.integration.spec.ts's own `uniq()` (BMPL-362: codes must be
+  // unique against the OTHER ~97 spec files sharing this database, not just
+  // against each other within this file).
+  let codeSeq = 0;
+  const uniqCode = () => `${Date.now().toString(36)}${(codeSeq += 1)}`;
+  const createHub = (district: string, city: string, prefix: string) =>
+    post(adminCookies, 'admin/logistics/hubs', { code: `${prefix}${uniqCode()}`.slice(0, 12), name: `${city} Hub`, type: 'AIRSTRIP', district, city, modes: ['LAND', 'AIR'] });
   const createLane = (over: Record<string, unknown>) =>
     post(adminCookies, 'admin/logistics/courier-lanes', {
       originDistrict: 'BELIZE', originCity: 'Belize City', destinationDistrict: 'BELIZE', destinationCity: 'Ladyville',
@@ -237,7 +246,7 @@ describe('selectable cities for narrowing a service area (BMPL-360)', () => {
   }
 
   it('offers a hub town and an intra-district lane-only town together — the named real case (Ladyville)', async () => {
-    expect((await createHub('BELIZE', 'Belize City', `BZC${Date.now()}`)).status).toBe(201);
+    expect((await createHub('BELIZE', 'Belize City', 'BZC')).status).toBe(201);
     expect((await createLane({})).status).toBe(201);
     const driver = await driverWithProfile('drv_sel_ladyville@example.bz');
 
@@ -247,8 +256,7 @@ describe('selectable cities for narrowing a service area (BMPL-360)', () => {
   });
 
   it('a cross-district lane offers the town on EACH side to its OWN district only, never the other', async () => {
-    const seq = Date.now();
-    expect((await createHub('CAYO', 'Belmopan', `BMP${seq}`)).status).toBe(201);
+    expect((await createHub('CAYO', 'Belmopan', 'BMP')).status).toBe(201);
     expect((await createLane({
       originDistrict: 'CAYO', originCity: 'Belmopan', destinationDistrict: 'BELIZE', destinationCity: 'Hattieville',
     })).status).toBe(201);
@@ -264,7 +272,7 @@ describe('selectable cities for narrowing a service area (BMPL-360)', () => {
   });
 
   it('excludes an inactive lane and a test-network lane — same isolation every other network read already holds', async () => {
-    expect((await createHub('TOLEDO', 'Punta Gorda', `PG${Date.now()}`)).status).toBe(201);
+    expect((await createHub('TOLEDO', 'Punta Gorda', 'PGO')).status).toBe(201);
     expect((await createLane({
       originDistrict: 'TOLEDO', originCity: 'Punta Gorda', destinationDistrict: 'TOLEDO', destinationCity: 'Barranco', isActive: false,
     })).status).toBe(201);
@@ -278,7 +286,7 @@ describe('selectable cities for narrowing a service area (BMPL-360)', () => {
   });
 
   it('de-dupes case/whitespace variants, keeping the hub\'s own spelling', async () => {
-    expect((await createHub('STANN_CREEK', 'Dangriga', `DGA${Date.now()}`)).status).toBe(201);
+    expect((await createHub('STANN_CREEK', 'Dangriga', 'DGA')).status).toBe(201);
     expect((await createLane({
       originDistrict: 'STANN_CREEK', originCity: '  dangriga ', destinationDistrict: 'STANN_CREEK', destinationCity: 'Hopkins',
     })).status).toBe(201);
