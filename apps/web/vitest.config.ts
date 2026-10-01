@@ -19,5 +19,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['{lib,components,app}/**/*.test.{ts,tsx}', '*.test.mjs'],
+    // BMPL-380: next/dynamic() hangs forever under Vitest (no webpack chunk
+    // loader to resolve it) — see test/next-dynamic.setup.ts for why and how
+    // this is worked around, globally, for every test file.
+    setupFiles: ['./test/next-dynamic.setup.ts'],
   },
 });
