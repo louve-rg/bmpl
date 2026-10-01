@@ -150,5 +150,8 @@ export const NOTIFICATION_EVENTS = [
   'SHIPMENT_LEG_CANCELLED',
   'SHIPMENT_EXCEPTION',
   'SHIPMENT_STATUS',
+  // BMPL-345: the shipment's own ETA moved materially since the customer was
+  // last told — never emitted while the new ETA is UNKNOWN.
+  'SHIPMENT_ETA_CHANGED',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];

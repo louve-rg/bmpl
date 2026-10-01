@@ -135,6 +135,12 @@ const envSchema = z.object({
     .transform((v) => (v?.trim() ? v.trim() : undefined))
     .pipe(z.string().datetime().optional()),
 
+  // ---- Shipping ----
+  // BMPL-345, owner ruling 11: 30 minutes is the INITIAL DEFAULT, not a
+  // hard-coded constant — the owner's own ruling requires this to stay
+  // configurable as business policy rather than fixed in code.
+  SHIPMENT_ETA_CHANGE_THRESHOLD_MINUTES: z.coerce.number().int().positive().default(30),
+
   // ---- Error monitoring (Sentry) ----
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().optional(),

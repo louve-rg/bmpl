@@ -1,0 +1,37 @@
+-- BMPL-345: a reference point for the ETA-change notification.
+--
+-- WHAT WAS MISSING. The shipment ETA (BMPL-340/f1bbfce) is computed fresh on
+-- every read; nothing was ever persisted, so there was no way to ask "has it
+-- moved enough since we last told the customer to say something again?" — the
+-- comparison has no left-hand side without a stored previous value.
+--
+-- THE FIX. shipments.etaBaselineAt is a single nullable timestamp: the
+-- estimated arrival instant the customer was last told about, or — before
+-- anything was ever material enough to tell them — the first instant the ETA
+-- became knowable at all (set silently, no notification, there being nothing
+-- yet to compare it against). ShipmentService.noticeEtaChange is the only
+-- writer, called from the two places a leg's recorded schedule or status can
+-- actually move the computed ETA (transition(), scheduleLeg()).
+--
+-- WHY PERSISTED RATHER THAN HELD IN MEMORY (the design question this card
+-- asked to be decided explicitly, in writing, beside the code): only a
+-- persisted value survives a restart, a redeploy, or a second API worker
+-- process. An in-memory map keyed by shipment id would forget every baseline
+-- on every deploy — on a system that deploys on every merge to main — and
+-- silently re-notify every customer with a live shipment for a "change" that
+-- is really just the server forgetting what it already said. The write is a
+-- `updateMany` compare-and-set keyed on the OLD baseline value (see the
+-- service method), not a plain `update`, so two concurrent writers computing
+-- the same move can never both win and a customer is never notified twice.
+--
+-- WHAT DOES NOT CHANGE. Every existing shipment keeps etaBaselineAt NULL —
+-- the same "nothing established yet" state a shipment booked before this
+-- migration already reads as, so the first ETA computed for it after this
+-- deploys is treated as the no-previous-value case (establish, don't
+-- notify), never as a sudden unexplained jump from nothing.
+--
+-- ROLLBACK (verified against a scratch database):
+--   ALTER TABLE "shipments" DROP COLUMN "etaBaselineAt";
+
+-- AlterTable
+ALTER TABLE "shipments" ADD COLUMN "etaBaselineAt" TIMESTAMP(3);
