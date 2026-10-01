@@ -51,7 +51,7 @@ interface OpsRow {
 const STATUSES = [
   'AWAITING_PICKUP', 'FIRST_MILE', 'AT_ORIGIN_HUB', 'IN_TRANSIT',
   'AT_DESTINATION_HUB', 'OUT_FOR_DELIVERY', 'AWAITING_COLLECTION',
-  'DELIVERED', 'EXCEPTION', 'CANCELLED',
+  'DELIVERED', 'EXCEPTION', 'RETURNED', 'CANCELLED',
 ];
 
 const money = (n: number) => `$${(n / 100).toFixed(2)}`;

@@ -16,6 +16,8 @@ import {
   addHubHoursExceptionSchema,
   addProviderMemberSchema,
   addRouteScheduleExceptionSchema,
+  previewRerouteSchema,
+  rerouteSchema,
   resolveLegExceptionSchema,
   returnToSenderSchema,
   setAvailabilityWindowsSchema,
@@ -44,6 +46,8 @@ import {
   type AddHubHoursExceptionInput,
   type AddProviderMemberInput,
   type AddRouteScheduleExceptionInput,
+  type PreviewRerouteInput,
+  type RerouteInput,
   type ResolveLegExceptionInput,
   type ReturnToSenderInput,
   type SetAvailabilityWindowsInput,
@@ -638,6 +642,28 @@ export class AdminLogisticsController {
     @Body(ZodBody(returnToSenderSchema)) dto: ReturnToSenderInput,
   ) {
     return this.shipments.returnToSender(id, dto, { userId: u.userId });
+  }
+
+  /**
+   * BMPL-343: what redirecting an exceptional leg to a NEW destination would
+   * cost, read-only, moves nothing — same tier as `return-quote`, same
+   * reasoning (owner Ruling 2).
+   */
+  @RequirePermission('logistics.operate')
+  @Post('legs/:id/reroute-quote')
+  previewReroute(@Param('id') id: string, @Body(ZodBody(previewRerouteSchema)) dto: PreviewRerouteInput) {
+    return this.shipments.previewReroute(id, dto.destination);
+  }
+
+  /**
+   * The confirmation — and the only one of the two reroute endpoints that
+   * may charge the customer, `logistics.manage` for the same reason
+   * `return-to-sender` needs it (owner Ruling 2).
+   */
+  @RequirePermission('logistics.manage')
+  @Post('legs/:id/reroute')
+  rerouteShipment(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(rerouteSchema)) dto: RerouteInput) {
+    return this.shipments.rerouteShipment(id, dto, { userId: u.userId });
   }
 
   /** The recipient walked in and picked it up. No leg moves, so nothing else can

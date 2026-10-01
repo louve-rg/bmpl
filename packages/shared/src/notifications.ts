@@ -150,6 +150,7 @@ export const NOTIFICATION_EVENTS = [
   'SHIPMENT_LEG_CANCELLED',
   'SHIPMENT_EXCEPTION',
   'SHIPMENT_STATUS',
+  'SHIPMENT_REROUTED', // BMPL-343 — a reroute's own notice, distinct from SHIPMENT_STATUS
   // BMPL-345: the shipment's own ETA moved materially since the customer was
   // last told — never emitted while the new ETA is UNKNOWN.
   'SHIPMENT_ETA_CHANGED',

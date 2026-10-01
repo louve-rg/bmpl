@@ -1,0 +1,32 @@
+-- BMPL-356: a returned shipment reports as DELIVERED (or, before this leg's
+-- own EXCEPTION status, would stay at EXCEPTION forever) -- the owner's own
+-- classification of this gap is a defect, not a limitation: a system that
+-- tells a customer their parcel arrived while it is actually being returned
+-- is telling them something false.
+--
+-- RETURNED is not derived by deriveShipmentStatus() in @bmpl/shared -- it is
+-- layered on top in shipment.service.ts's recompute(), the same way
+-- `collectedAt` already overrides AWAITING_COLLECTION to DELIVERED, because
+-- "this shipment has a return booked against it" (returnShipment, added by
+-- 20261104210000) is a fact the legs alone cannot express. The returned
+-- leg itself is deliberately left at EXCEPTION, not CANCELLED -- see that
+-- migration's own comment and shipment.service.ts's returnToSender -- so
+-- deriveShipmentStatus() itself needed no change at all; only recompute()'s
+-- layering and its one production call site needed to learn about this
+-- value. Every consumer of ShipmentStatus was checked before adding this
+-- value (shared label map, settlement's delivered-gate, web status
+-- grouping/ETA display) -- see the PR for the full consumer audit.
+--
+-- Deliberately its own migration, separate from the reroute's structural
+-- change (20261104230000) and its own AuditAction additions (20261104230200)
+-- -- one migration per enum extension remains this floor's own convention.
+--
+-- Additive and idempotent; no existing enum value is touched, changed or
+-- removed.
+--
+-- ROLLBACK: PostgreSQL has no ALTER TYPE ... DROP VALUE -- the same
+-- limitation every prior ADD VALUE migration on this floor already carries
+-- (e.g. 20261104190000, 20261104200000). Rolling back would mean recreating
+-- the enum without this value and recasting every column that uses it,
+-- needed only if a row has actually been written with this value.
+ALTER TYPE "ShipmentStatus" ADD VALUE IF NOT EXISTS 'RETURNED';

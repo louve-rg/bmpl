@@ -44,6 +44,7 @@ import type {
   LegExceptionInput,
   LegHandoffInput,
   LegScheduleInput,
+  RerouteInput,
   ResolveLegExceptionInput,
   ReturnToSenderInput,
   SetAvailabilityWindowsInput,
@@ -129,6 +130,17 @@ const REVERSED_SERVICE: Record<ShippingService, ShippingService> = {
  */
 const MID_CARRY_RETURN_MESSAGE =
   'This leg is still mid-journey, not at a delivery attempt — a return from wherever the parcel currently sits is a different movement than a shipment-level reverse quote, so pricing it needs a human decision, not a guess.';
+
+/**
+ * Same hazard as `MID_CARRY_RETURN_MESSAGE`, for a reroute: `rerouteInput`
+ * below treats the ORIGINAL shipment's destination as wherever the parcel
+ * currently sits, which is only true for the two leg kinds a reroute (like a
+ * return) applies to — `RETURNABLE_LEG_KINDS` is shared between the two
+ * features because this constraint is identical, not because a reroute is a
+ * kind of return.
+ */
+const MID_CARRY_REROUTE_MESSAGE =
+  'This leg is still mid-journey, not at a delivery attempt — redirecting it from wherever the parcel currently sits is a different movement than a shipment-level reroute quote, so pricing it needs a human decision, not a guess.';
 
 /** Case/whitespace only — an account's own email is not typed twice. */
 function normalizeEmail(email: string | null | undefined): string | null {
@@ -244,6 +256,49 @@ const RETURN_SHIPMENT_SELECT = {
 } satisfies Prisma.ShipmentSelect;
 
 type ReturnableShipment = Prisma.ShipmentGetPayload<{ select: typeof RETURN_SHIPMENT_SELECT }>;
+
+/**
+ * Everything `rerouteInput` (BMPL-343) needs to describe the redirected
+ * trip's fixed origin — wherever the parcel currently sits, i.e. this
+ * shipment's own destination, the same fixed point `RETURN_SHIPMENT_SELECT`
+ * reads for a return — plus `quotedTotalMinor` (what the customer already
+ * paid, to tell whether a reroute's own price increases that) and both
+ * `returnShipment`/`rerouteShipment` (has this one already been returned or
+ * rerouted?). A separate select from `RETURN_SHIPMENT_SELECT` rather than a
+ * shared, widened one: the two features' data needs only partly overlap, and
+ * widening the proven return select to carry reroute's extra fields risks
+ * the shipped return path for no benefit to it.
+ */
+const REROUTE_SHIPMENT_SELECT = {
+  id: true,
+  reference: true,
+  service: true,
+  isTest: true,
+  vendorOrderId: true,
+  customerUserId: true,
+  recipientUserId: true,
+  quotedTotalMinor: true,
+  preferredMode: true,
+  weightGrams: true,
+  pieces: true,
+  description: true,
+  destinationHubId: true,
+  destinationName: true,
+  destinationPhone: true,
+  destinationEmail: true,
+  destinationCompany: true,
+  destinationAddress: true,
+  destinationAddress2: true,
+  destinationCity: true,
+  destinationDistrict: true,
+  destinationLatitude: true,
+  destinationLongitude: true,
+  destinationInstructions: true,
+  returnShipment: { select: { id: true, reference: true } },
+  rerouteShipment: { select: { id: true, reference: true } },
+} satisfies Prisma.ShipmentSelect;
+
+type RerouteableShipment = Prisma.ShipmentGetPayload<{ select: typeof REROUTE_SHIPMENT_SELECT }>;
 
 /**
  * Multi-leg shipment orchestration.
@@ -1690,9 +1745,34 @@ export class ShipmentService {
     }
   }
 
-  /** Something went wrong on a leg. The shipment stops and a human is told. */
+  /**
+   * Something went wrong on a leg. The shipment stops and a human is told —
+   * and, per owner Ruling 1, that human is not staff alone.
+   *
+   * `transition()`'s own epilogue already notifies the SENDER
+   * (`customerUserId`) for every leg transition, exception included — see
+   * `notifyCustomer`. What it does not reach is the RECIPIENT, which Ruling
+   * 1 requires for exactly this moment: a hold begins, and whoever is
+   * waiting on the other end deserves to know too, not just whoever paid.
+   * This is the one channel this codebase has to reach them: a genuinely
+   * linked account (`recipientUserId`). An unclaimed recipient has no
+   * account to notify through yet — a real, honest limit, not a decision to
+   * invent an SMS/email channel around it.
+   *
+   * Hold itself needed no new state machine (research confirmed this before
+   * writing any code): `isLegActionable` already halts the whole shipment's
+   * progression the instant any leg reads EXCEPTION, regardless of whether
+   * that leg was PENDING or IN_PROGRESS when it was flagged — the custody
+   * trail (who last received a parcel, `CustodyEvent`) already answers "what
+   * can a hold do" for each case: a PENDING leg's custody already sits at
+   * SENDER/HUB (nothing moving — EXCEPTION alone is a complete hold), an
+   * IN_PROGRESS leg's custody sits at DRIVER/CARRIER (custody is append-only
+   * and real, so a hold cannot teleport the parcel to a hub; it only
+   * actually lands at one once that leg's own arrive/handoff writes the next
+   * custody row). `flagException` already is the hold primitive.
+   */
   async flagException(legId: string, input: LegExceptionInput, actor: { userId: string; label?: string }) {
-    return this.transition(legId, actor, async (tx, leg, shipment) => {
+    const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
       await tx.shipmentLeg.update({
         where: { id: leg.id },
         data: { status: 'EXCEPTION', exceptionAt: new Date(), exceptionReason: input.reason },
@@ -1712,6 +1792,22 @@ export class ShipmentService {
       );
       return { action: 'SHIPMENT_LEG_EXCEPTION' as const, note: input.reason };
     });
+
+    const withRecipient = await this.prisma.shipmentLeg.findUnique({
+      where: { id: legId },
+      select: { shipment: { select: { id: true, reference: true, recipientUserId: true } } },
+    });
+    if (withRecipient?.shipment.recipientUserId) {
+      await this.notifications.notifyUsers([withRecipient.shipment.recipientUserId], {
+        type: 'MARKETPLACE',
+        category: 'DELIVERY',
+        event: 'SHIPMENT_STATUS',
+        title: `Shipment ${withRecipient.shipment.reference}`,
+        body: SHIPMENT_STATUS_LABELS.EXCEPTION,
+        data: { shipmentId: withRecipient.shipment.id, reference: withRecipient.shipment.reference, status: 'EXCEPTION' },
+      });
+    }
+    return result;
   }
 
   /**
@@ -1746,7 +1842,18 @@ export class ShipmentService {
     const outcome = await this.prisma.$transaction(async (tx) => {
       const leg = await tx.shipmentLeg.findUnique({
         where: { id: legId },
-        include: { shipment: { select: { id: true, reference: true, customerUserId: true, cancelledAt: true } } },
+        include: {
+          shipment: {
+            select: {
+              id: true,
+              reference: true,
+              customerUserId: true,
+              cancelledAt: true,
+              returnShipment: { select: { reference: true } },
+              rerouteShipment: { select: { reference: true } },
+            },
+          },
+        },
       });
       if (!leg) throw new NotFoundException('Leg not found.');
       if (leg.status !== 'EXCEPTION') {
@@ -1754,6 +1861,15 @@ export class ShipmentService {
       }
       if (leg.shipment.cancelledAt) {
         throw new BadRequestException('That shipment was cancelled; a cancelled journey is not resumed.');
+      }
+      // BMPL-356/343: once a return or reroute has been booked and charged,
+      // the original attempt's fate is settled — resuming it here would
+      // contradict a transport service the customer has already paid for.
+      if (leg.shipment.returnShipment) {
+        throw new BadRequestException(`This shipment was already returned (${leg.shipment.returnShipment.reference}); the original attempt cannot be resumed.`);
+      }
+      if (leg.shipment.rerouteShipment) {
+        throw new BadRequestException(`This shipment was already rerouted (${leg.shipment.rerouteShipment.reference}); the original attempt cannot be resumed.`);
       }
 
       let restored: LegStatus;
@@ -2095,7 +2211,13 @@ export class ShipmentService {
     // a second, parallel way to charge a customer. The sender's own account
     // pays, exactly as it did for the original shipment.
     const returnShipment = await this.create(shipment.customerUserId, reversed, shipment.isTest);
-    await this.prisma.shipment.update({ where: { id: returnShipment.id }, data: { returnOfShipmentId: shipment.id } });
+    // Linking the two IS what flips the original to RETURNED (BMPL-356) —
+    // recompute() reads `returnShipment` fresh, so this single transaction
+    // is the only place that fact needs to be written.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.shipment.update({ where: { id: returnShipment.id }, data: { returnOfShipmentId: shipment.id } });
+      await this.recompute(tx, shipment.id);
+    });
 
     await this.audit.record({
       action: 'SHIPMENT_RETURN_INITIATED',
@@ -2112,6 +2234,256 @@ export class ShipmentService {
     });
 
     return { outcome: 'INITIATED' as const, returnShipment };
+  }
+
+  /**
+   * Builds the redirected trip's booking input the same way
+   * `reversedReturnInput` builds a return's: a fixed origin wherever the
+   * parcel currently sits (this shipment's own destination — valid only for
+   * LAST_MILE/DIRECT, exactly the kinds `RETURNABLE_LEG_KINDS` already
+   * restricts both features to), paired here with a NEW destination the
+   * operator chose instead of the fixed "back to the original sender" a
+   * return always uses.
+   *
+   * There is no `REVERSED_SERVICE` lookup to reuse: a return's new endpoints
+   * are a mirror image of the SAME journey, so swapping door/hub roles is
+   * exactly swapping which end they were already on. A reroute's new
+   * destination has no relationship to the original journey's roles at all
+   * — it is whatever the operator says, so the service has to be derived
+   * fresh from what each actual endpoint is: the origin side keeps whatever
+   * role the original shipment's OWN destination already had
+   * (`needsLastMile(shipment.service)` — true for a door, false for a hub),
+   * and the destination side is a hub exactly when the request supplied a
+   * `hubId` (see `rerouteSchema`'s own comment for why presence is the
+   * signal here, unlike a fresh booking's explicit `service` field).
+   */
+  private rerouteInput(shipment: RerouteableShipment, destination: RerouteInput['destination']): CreateShipmentInput {
+    const originIsDoor = needsLastMile(shipment.service);
+    const destIsDoor = !destination.hubId;
+    const service = `${originIsDoor ? 'DOOR' : 'HUB'}_TO_${destIsDoor ? 'DOOR' : 'HUB'}` as ShippingService;
+    return {
+      service,
+      origin: {
+        hubId: shipment.destinationHubId ?? undefined,
+        name: shipment.destinationName ?? undefined,
+        phone: shipment.destinationPhone ?? undefined,
+        email: shipment.destinationEmail ?? undefined,
+        company: shipment.destinationCompany ?? undefined,
+        address: shipment.destinationAddress ?? undefined,
+        address2: shipment.destinationAddress2 ?? undefined,
+        city: shipment.destinationCity ?? undefined,
+        district: shipment.destinationDistrict ?? undefined,
+        latitude: shipment.destinationLatitude ?? undefined,
+        longitude: shipment.destinationLongitude ?? undefined,
+        instructions: shipment.destinationInstructions ?? undefined,
+      },
+      destination: {
+        hubId: destination.hubId ?? undefined,
+        name: destination.name ?? undefined,
+        phone: destination.phone ?? undefined,
+        email: destination.email ?? undefined,
+        company: destination.company ?? undefined,
+        address: destination.address ?? undefined,
+        address2: destination.address2 ?? undefined,
+        city: destination.city ?? undefined,
+        district: destination.district ?? undefined,
+        latitude: destination.latitude ?? undefined,
+        longitude: destination.longitude ?? undefined,
+        instructions: destination.instructions ?? undefined,
+      },
+      preferredMode: shipment.preferredMode ?? undefined,
+      weightGrams: shipment.weightGrams ?? undefined,
+      pieces: shipment.pieces,
+      description: shipment.description ? `Redirected: ${shipment.description}` : 'Redirected shipment',
+      payWithWallet: true,
+    };
+  }
+
+  /**
+   * The one gate `previewReroute` and `rerouteShipment` share — same shape as
+   * `loadReturnableLeg`, kept as its own method and its own select rather
+   * than widening that one: the two features' data needs only partly
+   * overlap, and this way neither can destabilize the other.
+   */
+  private async loadRerouteLeg(legId: string) {
+    const leg = await this.prisma.shipmentLeg.findUnique({
+      where: { id: legId },
+      select: { id: true, kind: true, status: true, shipment: { select: REROUTE_SHIPMENT_SELECT } },
+    });
+    if (!leg) throw new NotFoundException('Leg not found.');
+    if (leg.status !== 'EXCEPTION') {
+      throw new BadRequestException('This leg is not in exception, so there is nothing to reroute.');
+    }
+    // Same scope fence as return-to-sender (owner ruling): non-vendor
+    // courier shipments only.
+    if (leg.shipment.vendorOrderId != null) {
+      throw new BadRequestException('A marketplace order is redirected through the marketplace, not here.');
+    }
+    return leg;
+  }
+
+  /**
+   * Shows what a reroute would cost, WITHOUT moving anything — same rule
+   * `previewReturn` follows, for the same reason. `increasesCharge` is the
+   * one extra fact a caller needs that a return's preview does not: the
+   * owner's own distinction between a reroute that needs an explicit
+   * confirmation dialog and one that does not turns on whether this number
+   * is more than what the customer already paid (`quotedTotalMinor`) — a
+   * decision for a caller (the admin UI) to make from this flag, not this
+   * method, which only ever reports facts.
+   */
+  async previewReroute(legId: string, destination: RerouteInput['destination']) {
+    const leg = await this.loadRerouteLeg(legId);
+    if (!RETURNABLE_LEG_KINDS.includes(leg.kind)) {
+      return { available: false as const, reason: 'MID_CARRY' as const, message: MID_CARRY_REROUTE_MESSAGE };
+    }
+    const quote = await this.quote(this.rerouteInput(leg.shipment, destination), { isTest: leg.shipment.isTest });
+    if (!quote.available) return quote;
+    // See returnToSender's own comment on `totalMinor`: quote()'s inferred
+    // return type does not discriminate cleanly on `available`, so a plain
+    // local sidesteps a property read that stays "possibly undefined" past
+    // the guard above even though the runtime value never is.
+    const totalMinor = quote.totalMinor ?? 0;
+    return { ...quote, increasesCharge: totalMinor > Number(leg.shipment.quotedTotalMinor) };
+  }
+
+  /**
+   * The confirmation step, mirroring `returnToSender` almost exactly — same
+   * `logistics.manage` gate (owner Ruling 2: this can charge), same fresh
+   * recompute of the price rather than trusting a preview, same PENDING_MANUAL
+   * fence for a mid-carry leg or an unpriceable lane.
+   *
+   * THE OWNER'S THREE RULES (BMPL-343): never invent a reroute price and
+   * never silently charge anyone; a reroute that changes the charge uses
+   * real configured pricing, shows it, and requires confirmation before
+   * charging — the same PENDING_MANUAL fence as a return when no valid price
+   * exists; a reroute that does NOT increase the charge still needs the
+   * customer informed of the material ETA change, it just does not need a
+   * payment-confirmation dialog for the sake of having one.
+   *
+   * ONE ASSUMPTION THIS CODE MAKES THAT THE RULING ITSELF DOES NOT SETTLE,
+   * flagged rather than guessed past: "the customer's charge" is read here
+   * as the ORIGINAL shipment's own full price (`quotedTotalMinor`), and a
+   * reroute always books its own full new Payment for the redirected
+   * segment — exactly return-to-sender's architecture, never a delta or a
+   * credit against what was already paid (this codebase has no partial
+   * refund/credit primitive to build that on, and Payment.shipmentId's own
+   * uniqueness is the same constraint that forced return-to-sender's design
+   * in the first place). `increasesCharge` on the response is offered so the
+   * caller can decide whether THEIR OWN UI needs a warning dialog before
+   * calling this method — this method itself always treats being called as
+   * the explicit confirmation, exactly as `returnToSender` does. If this
+   * reading is wrong, it is wrong in one place, not scattered through the
+   * booking math.
+   *
+   * Deliberately does NOT touch the original leg or shipment's own status
+   * (same choice already made for return-to-sender before BMPL-356 gave
+   * "returned" an honest terminal status) — a rerouted shipment stays at
+   * EXCEPTION, honest but not yet resolved to "redirected." Flagged as the
+   * same kind of gap BMPL-356 closed for returns, not guessed at here.
+   */
+  async rerouteShipment(legId: string, input: RerouteInput, actor: { userId: string }) {
+    const leg = await this.loadRerouteLeg(legId);
+    const shipment = leg.shipment;
+    if (shipment.returnShipment) {
+      throw new BadRequestException(`This shipment was already returned (${shipment.returnShipment.reference}); it cannot also be rerouted.`);
+    }
+    if (shipment.rerouteShipment) {
+      throw new BadRequestException(`This shipment was already rerouted (${shipment.rerouteShipment.reference}).`);
+    }
+    if (!shipment.customerUserId) {
+      throw new BadRequestException('This shipment has no customer account to charge for a reroute.');
+    }
+
+    if (!RETURNABLE_LEG_KINDS.includes(leg.kind)) {
+      await this.audit.record({
+        action: 'SHIPMENT_REROUTE_PENDING_MANUAL',
+        actorId: actor.userId,
+        reason: input.note,
+        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: 'MID_CARRY' },
+      });
+      return { outcome: 'PENDING_MANUAL' as const, reason: MID_CARRY_REROUTE_MESSAGE };
+    }
+
+    const rerouted = this.rerouteInput(shipment, input.destination);
+    const quote = await this.quote(rerouted, { isTest: shipment.isTest });
+
+    if (!quote.available) {
+      await this.audit.record({
+        action: 'SHIPMENT_REROUTE_PENDING_MANUAL',
+        actorId: actor.userId,
+        reason: input.note,
+        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: quote.reason },
+      });
+      return { outcome: 'PENDING_MANUAL' as const, reason: quote.message ?? 'This redirected route cannot be priced yet.' };
+    }
+    const totalMinor = quote.totalMinor ?? 0;
+    if (totalMinor <= 0) {
+      await this.audit.record({
+        action: 'SHIPMENT_REROUTE_PENDING_MANUAL',
+        actorId: actor.userId,
+        reason: input.note,
+        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: 'ZERO_PRICE' },
+      });
+      return { outcome: 'PENDING_MANUAL' as const, reason: quote.pricingNote ?? 'This redirected route has not been priced yet.' };
+    }
+
+    const increasesCharge = totalMinor > Number(shipment.quotedTotalMinor);
+
+    const rerouteShipment = await this.create(shipment.customerUserId, rerouted, shipment.isTest);
+    await this.prisma.shipment.update({ where: { id: rerouteShipment.id }, data: { rerouteOfShipmentId: shipment.id } });
+
+    await this.audit.record({
+      action: 'SHIPMENT_REROUTE_INITIATED',
+      actorId: actor.userId,
+      reason: input.note,
+      newValue: {
+        legId,
+        shipmentId: shipment.id,
+        reference: shipment.reference,
+        rerouteShipmentId: rerouteShipment.id,
+        rerouteReference: rerouteShipment.reference,
+        priceMinor: totalMinor,
+        increasesCharge,
+      },
+    });
+
+    // Ruling's new part: a reroute that does not increase the charge still
+    // needs the customer informed of the material ETA change it causes —
+    // scoped and direct, the same notifyUsers shape every other
+    // action-triggered notification in this file already uses, not the
+    // generic baseline-ETA watcher BMPL-345 built (`noticeEtaChange`).
+    //
+    // THIS CALL IS LOAD-BEARING, NOT A CONVENIENCE: `noticeEtaChange` fires
+    // from exactly two places, the private `transition()` choke point and
+    // `scheduleLeg()` — traced by grepping both call sites, not assumed.
+    // `rerouteShipment` reaches neither: the original leg/shipment is
+    // deliberately left untouched (no `transition()` call, same choice
+    // already made for return-to-sender), and `create()`'s fresh-booking
+    // path for the new rerouted shipment doesn't reach it either — and even
+    // if it did, a first-ever baseline is silent by that method's own
+    // design. So the baseline notifier CANNOT cover a reroute. This scoped
+    // call is the ONLY thing in the system that tells a customer their
+    // parcel was redirected and when it will now arrive — anyone later
+    // consolidating notification code must not remove it on the assumption
+    // BMPL-345's notifier already covers reroutes.
+    //
+    // Sender always notified (an account always exists, checked above);
+    // recipient only when genuinely linked, same honest limit as the hold
+    // notification above.
+    const toNotify = [shipment.customerUserId, ...(shipment.recipientUserId ? [shipment.recipientUserId] : [])];
+    await this.notifications.notifyUsers(toNotify, {
+      type: 'MARKETPLACE',
+      category: 'DELIVERY',
+      event: 'SHIPMENT_REROUTED',
+      title: `Shipment ${shipment.reference} redirected`,
+      body: increasesCharge
+        ? `This shipment is being redirected to a new address, which changes its delivery time and its price.`
+        : `This shipment is being redirected to a new address, which changes its delivery time.`,
+      data: { shipmentId: shipment.id, reference: shipment.reference, rerouteShipmentId: rerouteShipment.id, increasesCharge },
+    });
+
+    return { outcome: 'INITIATED' as const, rerouteShipment, increasesCharge };
   }
 
   /**
@@ -2181,18 +2553,34 @@ export class ShipmentService {
   /**
    * Recompute the shipment's status from its legs and persist it.
    *
-   * The one thing the legs cannot tell us is whether a recipient has walked into
-   * a terminal and picked their parcel up — no leg moves when that happens. So a
-   * recorded collection is layered on top: once `collectedAt` is set, a journey
-   * that would otherwise sit at AWAITING_COLLECTION forever reads as DELIVERED.
+   * Two things the legs cannot tell us are layered on top of the pure
+   * leg-derived value, never folded into `deriveShipmentStatus` itself:
+   *
+   *  - whether a recipient has walked into a terminal and picked their
+   *    parcel up — no leg moves when that happens, so a journey that would
+   *    otherwise sit at AWAITING_COLLECTION forever reads as DELIVERED once
+   *    `collectedAt` is set.
+   *  - BMPL-356: whether this shipment has a return booked against it — the
+   *    returned leg itself stays EXCEPTION forever (deliberately; see
+   *    `returnToSender`), so without this a returned shipment would sit at
+   *    EXCEPTION forever too, honest but stale. `returnShipment` existing is
+   *    the final word: it wins over whatever the legs alone would derive,
+   *    because once a return has been booked and charged the original
+   *    attempt's own fate is settled.
    */
   private async recompute(tx: Prisma.TransactionClient, shipmentId: string): Promise<ShipmentStatus> {
     const s = await tx.shipment.findUniqueOrThrow({
       where: { id: shipmentId },
-      select: { service: true, collectedAt: true, legs: { select: { sequence: true, kind: true, mode: true, status: true } } },
+      select: {
+        service: true,
+        collectedAt: true,
+        returnShipment: { select: { id: true } },
+        legs: { select: { sequence: true, kind: true, mode: true, status: true } },
+      },
     });
     let status = this.statusFrom(s.legs, !needsLastMile(s.service));
     if (status === 'AWAITING_COLLECTION' && s.collectedAt) status = 'DELIVERED';
+    if (s.returnShipment) status = 'RETURNED';
     const done = status === 'DELIVERED' ? { deliveredAt: new Date() } : {};
     await tx.shipment.update({ where: { id: shipmentId }, data: { status, ...done } });
     return status;

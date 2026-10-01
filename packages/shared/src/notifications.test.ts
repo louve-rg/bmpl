@@ -23,6 +23,7 @@ describe('NOTIFICATION_EVENTS catalog includes every code production actually em
     expect(NOTIFICATION_EVENTS).toContain('SHIPMENT_LEG_CANCELLED');
     expect(NOTIFICATION_EVENTS).toContain('SHIPMENT_EXCEPTION');
     expect(NOTIFICATION_EVENTS).toContain('SHIPMENT_STATUS');
+    expect(NOTIFICATION_EVENTS).toContain('SHIPMENT_REROUTED');
   });
 
   it('has no duplicate entries', () => {
