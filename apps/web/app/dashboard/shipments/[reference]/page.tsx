@@ -7,6 +7,7 @@ import { shippingApi, type ShipmentView } from '../../../../lib/shipping';
 import { ShipmentJourney } from '../../../../components/shipping/ShipmentJourney';
 import { ShareTrackingLink } from '../../../../components/shipping/ShareTrackingLink';
 import { AvailabilityWindows } from '../../../../components/shipping/AvailabilityWindows';
+import { RoutingProposalConfirm } from '../../../../components/shipping/RoutingProposalConfirm';
 import { Alert, Button, Spinner } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
 
@@ -90,6 +91,12 @@ export default function TrackShipmentPage() {
       {shipment && (
         <div className="mt-4 space-y-4">
           <ShipmentJourney shipment={shipment} />
+
+          {/* A proposal (staff-prepared return/reroute) can only exist while
+              the leg it's against reads EXCEPTION — gating the fetch on that
+              avoids a wasted request + a harmless-but-noisy 404 on every
+              ordinary shipment (BMPL-364/375). */}
+          {shipment.status === 'EXCEPTION' && <RoutingProposalConfirm shipmentId={shipment.id} onConfirmed={load} />}
 
           {/* The recipient has no account and no channel of their own — the
               sender hands them the link. Shown only once the API has minted a
