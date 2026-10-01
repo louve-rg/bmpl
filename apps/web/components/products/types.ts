@@ -49,6 +49,11 @@ export interface InvRow {
   inventoryId: string;
   variantId?: string | null;
   sku?: string | null;
+  /** Has at least one InventoryLocation child row (BMPL-175/372) — once true,
+   *  the legacy product-level adjustment is refused server-side, and the
+   *  quantity/reserved below are already the SUM across locations, not this
+   *  row's own (stale) columns. */
+  hasLocations: boolean;
   quantity: number;
   reserved: number;
   available: number | null;

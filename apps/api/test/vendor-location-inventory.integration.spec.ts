@@ -141,6 +141,45 @@ describe('per-location stock (vendor management)', () => {
     expect(otherLocs.body.every((l: { adopted: boolean }) => l.adopted === false)).toBe(true);
   });
 
+  it('BMPL-372: refuses the legacy product-level adjustment once locations are adopted, and touches nothing', async () => {
+    const s = uniq();
+    const vendor = await makeVendor(`v372_${s}@example.bz`, `Guard ${s}`);
+    const locA = await addLocation(vendor.cookies, 'Shop A', true);
+    const productId = await createProduct(vendor.cookies, { title: 'Guarded Stock', sku: `G-${s}`, priceMinor: 1000 });
+    await adjustAt(vendor.cookies, productId, locA, 6).expect(201);
+
+    // The exact divergence case: a vendor reaches for the OLD control AFTER
+    // locations are already allocated — this is what used to silently write
+    // the parent column while checkout kept reading the child rows.
+    const legacy = await request(ctx.server)
+      .post(`/api/vendor/products/${productId}/inventory/adjust`)
+      .set('Cookie', vendor.cookies)
+      .send({ delta: 50, reason: 'RESTOCK' });
+    expect(legacy.status).toBe(400);
+    expect(legacy.body.message).toContain('tracks stock per location');
+
+    // Nothing moved: the parent row stays exactly as untouched as it was
+    // before adoption, and the location row's own total is unchanged.
+    const inv = await ctx.prisma.inventory.findFirstOrThrow({ where: { productId, variantId: null } });
+    expect(inv.quantity).toBe(0);
+    const locs = await getLocations(vendor.cookies, productId).expect(200);
+    expect(locs.body.find((l: { locationId: string }) => l.locationId === locA)).toMatchObject({ quantity: 6 });
+
+    // The aggregate the vendor and checkout both actually read is unchanged too.
+    const get = await request(ctx.server).get(`/api/vendor/products/${productId}/inventory`).set('Cookie', vendor.cookies);
+    expect(get.body.product.quantity).toBe(6);
+    expect(get.body.product.hasLocations).toBe(true);
+  });
+
+  it('a product that has never adopted locations still has hasLocations: false on the read side', async () => {
+    const s = uniq();
+    const vendor = await makeVendor(`v372b_${s}@example.bz`, `NoAdopt ${s}`);
+    await addLocation(vendor.cookies, 'Only Shop', true);
+    const productId = await createProduct(vendor.cookies, { title: 'Plain Stock', sku: `P-${s}`, priceMinor: 1000 });
+    const get = await request(ctx.server).get(`/api/vendor/products/${productId}/inventory`).set('Cookie', vendor.cookies);
+    expect(get.body.product.hasLocations).toBe(false);
+  });
+
   it('a location-tracked product with real stock stays visible to inStock search and hideOutOfStock (BMPL-175)', async () => {
     const s = uniq();
     const vendor = await makeVendor(`vis_${s}@example.bz`, `Vis ${s}`);
