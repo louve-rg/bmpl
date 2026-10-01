@@ -197,6 +197,11 @@ async function walkToLastMileException(reason?: string) {
 const previewReroute = (legId: string, destination: object) => post(admin, `admin/logistics/legs/${legId}/reroute-quote`, { destination });
 const rerouteShipment = (legId: string, destination: object, note = 'Recipient asked for a different address.') =>
   post(admin, `admin/logistics/legs/${legId}/reroute`, { destination, note });
+/** BMPL-375: the paying customer's own confirmation — needed only when
+ *  returnToSender/rerouteShipment PREPARES rather than booking immediately
+ *  (a return always prepares; a reroute prepares only when it increases the
+ *  charge — see that method's own comment). */
+const confirmRouting = (shipmentId: string) => post(customer, `shipping/${shipmentId}/routing-proposal/confirm`, {});
 
 /** To a terminal (GMUN) rather than a door — avoids local-delivery edge
  *  cases a same-city door redirect would hit, and needs only the GSPA->GMUN
@@ -472,6 +477,73 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
     expect(fetched.body.returnShipment).toBeNull();
   });
 
+  it('BMPL-375: a CHARGE-INCREASING reroute only PREPARES on staff action — nothing charges until the paying customer confirms', async () => {
+    const { shipment, legId } = await walkToLastMileException();
+    await addReverseRoutes();
+    // Forced low so the redirect's real price is guaranteed to increase the
+    // charge — same technique previewReroute's own "increasesCharge: true"
+    // test already uses, isolating the authorization boundary from the
+    // pricing engine (already covered elsewhere).
+    await ctx.prisma.shipment.update({ where: { id: shipment.id }, data: { quotedTotalMinor: 1n } });
+
+    const before = (await get(customer, 'wallet')).body as { availableMinor: number };
+    // Scoped against a BEFORE count, not an absolute zero — book()'s own
+    // original-shipment payment already exists and is legitimate.
+    const paymentsBefore = await ctx.prisma.payment.count();
+    const preview = await previewReroute(legId, toHub());
+    expect(preview.body.increasesCharge).toBe(true);
+    const expectedPrice = preview.body.totalMinor as number;
+
+    // STAFF PREPARES ONLY — owner ruling: staff action alone must never
+    // authorize charging the customer's wallet.
+    const prepared = await rerouteShipment(legId, toHub());
+    expect(prepared.status).toBe(201);
+    expect(prepared.body.outcome).toBe('PREPARED');
+    expect(prepared.body.increasesCharge).toBe(true);
+    expect(prepared.body.totalMinor).toBe(expectedPrice);
+    expect(prepared.body.rerouteShipment).toBeUndefined();
+    expect(await ctx.prisma.payment.count()).toBe(paymentsBefore);
+    const midWallet = (await get(customer, 'wallet')).body as { availableMinor: number };
+    expect(midWallet.availableMinor).toBe(before.availableMinor);
+    const midShipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+    expect(midShipment.status).toBe('EXCEPTION');
+
+    // A wrong customer cannot confirm it.
+    const stranger = await registerUser(`gstranger_${uniq()}@example.com`);
+    expect((await post(stranger.cookies, `shipping/${shipment.id}/routing-proposal/confirm`, {})).status).toBe(404);
+    expect(await ctx.prisma.payment.count()).toBe(paymentsBefore);
+
+    // ONLY NOW — the paying customer's own confirmation.
+    const r = await confirmRouting(shipment.id);
+    expect(r.status).toBe(201);
+    expect(r.body.outcome).toBe('INITIATED');
+    expect(r.body.increasesCharge).toBe(true);
+    expect(r.body.rerouteShipment).toBeTruthy();
+
+    const payment = await ctx.prisma.payment.findFirstOrThrow({ where: { shipmentId: r.body.rerouteShipment.id } });
+    expect(payment.status).toBe('AUTHORIZED');
+    const after = (await get(customer, 'wallet')).body as { availableMinor: number };
+    expect(after.availableMinor).toBe(before.availableMinor - expectedPrice);
+    expect(await ctx.prisma.shipmentRoutingProposal.count({ where: { legId } })).toBe(0);
+  });
+
+  it('BMPL-375: a reroute that does NOT increase the charge executes on staff action alone — nothing to consent to, no proposal left behind', async () => {
+    const { shipment, legId } = await walkToLastMileException();
+    await addReverseRoutes();
+    // Forced high so the redirect's real price is guaranteed NOT to
+    // increase the charge — the mirror image of the charge-increasing test
+    // above, same forcing technique previewReroute's own test already uses.
+    await ctx.prisma.shipment.update({ where: { id: shipment.id }, data: { quotedTotalMinor: 99_999_999n } });
+
+    const r = await rerouteShipment(legId, toHub());
+    expect(r.status).toBe(201);
+    expect(r.body.outcome).toBe('INITIATED');
+    expect(r.body.increasesCharge).toBe(false);
+    expect(r.body.rerouteShipment).toBeTruthy();
+    // Nothing was ever prepared — there was nothing to consent to.
+    expect(await ctx.prisma.shipmentRoutingProposal.count({ where: { legId } })).toBe(0);
+  });
+
   it('STAYS PENDING_MANUAL — charges nobody and creates nothing — when the onward route has no configured price, rather than guessing one', async () => {
     const { shipment, legId } = await walkToLastMileException();
     // No addReverseRoutes(): the onward lane is genuinely unconfigured.
@@ -519,9 +591,12 @@ describe('rerouteShipment — the confirmation, and the only step that may charg
   });
 
   it('REFUSES a reroute once the shipment has already been returned instead', async () => {
-    const { legId } = await walkToLastMileException();
+    const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
+    // BMPL-375: return-to-sender now only PREPARES — the paying customer's
+    // own confirmation is what actually books it.
     expect((await post(admin, `admin/logistics/legs/${legId}/return-to-sender`, { note: 'Returned first.' })).status).toBe(201);
+    expect((await confirmRouting(shipment.id)).status).toBe(201);
 
     const r = await rerouteShipment(legId, toHub());
     expect(r.status).toBe(400);

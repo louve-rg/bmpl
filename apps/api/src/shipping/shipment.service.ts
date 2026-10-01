@@ -2158,6 +2158,16 @@ export class ShipmentService {
    * unconfigured — the reversal this feature uses is the wrong movement for
    * a leg that has not reached its delivery attempt, so it is never even
    * computed). Either way a human, not a refusal, is what's left behind.
+   *
+   * BMPL-375, owner ruling: STAFF ACTION ALONE MUST NEVER AUTHORIZE CHARGING
+   * THE CUSTOMER'S WALLET. This method USED to treat being called as the
+   * explicit confirmation and book+charge immediately — correct for an
+   * ordinary booking, where the caller IS the paying customer, wrong here,
+   * where the caller is staff (`logistics.manage`). It now only PREPARES: a
+   * priceable return writes a `ShipmentRoutingProposal` row and returns
+   * `PREPARED`, touching nothing money-shaped. Only `confirmRouting` — the
+   * shipment's own `customerUserId`, a different caller entirely — may
+   * actually book and charge. See that method's own comment for the rest.
    */
   async returnToSender(legId: string, input: ReturnToSenderInput, actor: { userId: string }) {
     const leg = await this.loadReturnableLeg(legId);
@@ -2169,33 +2179,61 @@ export class ShipmentService {
       throw new BadRequestException('This shipment has no customer account to charge for a return.');
     }
 
+    const priced = await this.priceReturn(leg, shipment, input.note, actor.userId);
+    if (!priced.priced) return priced.outcome;
+
+    // Staff action stops HERE. No create(), no Payment, no escrow — those
+    // happen only once the paying customer confirms (confirmRouting).
+    await this.prisma.shipmentRoutingProposal.upsert({
+      where: { legId },
+      create: { legId, kind: 'RETURN', note: input.note, preparedByUserId: actor.userId },
+      update: { note: input.note, preparedByUserId: actor.userId, preparedAt: new Date() },
+    });
+    await this.audit.record({
+      action: 'SHIPMENT_RETURN_PREPARED',
+      actorId: actor.userId,
+      reason: input.note,
+      newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, priceMinor: priced.totalMinor },
+    });
+    return { outcome: 'PREPARED' as const, totalMinor: priced.totalMinor };
+  }
+
+  /**
+   * The mid-carry fence + quote + zero-price checks `returnToSender` always
+   * ran, extracted unchanged so `confirmRouting` can run the EXACT same
+   * gauntlet a second time at confirmation — never trusting what staff saw
+   * at prepare time, the same "never trust an echoed price" rule `create()`
+   * already applies to every booking. PENDING_MANUAL audits itself here so
+   * both callers get it identically.
+   */
+  private async priceReturn(
+    leg: { kind: LegKind },
+    shipment: ReturnableShipment,
+    note: string | undefined,
+    actorId: string,
+  ): Promise<{ priced: true; totalMinor: number; reversed: CreateShipmentInput } | { priced: false; outcome: { outcome: 'PENDING_MANUAL'; reason: string } }> {
+    const pendingManual = async (reason: string, planReason: string | undefined) => {
+      await this.audit.record({
+        action: 'SHIPMENT_RETURN_PENDING_MANUAL',
+        actorId,
+        reason: note,
+        newValue: { shipmentId: shipment.id, reference: shipment.reference, planReason },
+      });
+      return { priced: false as const, outcome: { outcome: 'PENDING_MANUAL' as const, reason } };
+    };
+
     if (!RETURNABLE_LEG_KINDS.includes(leg.kind)) {
       // Never computed via reversedReturnInput()/quote() — see
       // MID_CARRY_RETURN_MESSAGE's own comment for why that reversal answers
       // the wrong question for a leg that has not reached its delivery
-      // attempt. Routed to the SAME supported outcome an unconfigured lane
-      // gets below, for a different reason: no price, audited, nothing
-      // charged, nothing booked.
-      await this.audit.record({
-        action: 'SHIPMENT_RETURN_PENDING_MANUAL',
-        actorId: actor.userId,
-        reason: input.note,
-        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: 'MID_CARRY' },
-      });
-      return { outcome: 'PENDING_MANUAL' as const, reason: MID_CARRY_RETURN_MESSAGE };
+      // attempt.
+      return pendingManual(MID_CARRY_RETURN_MESSAGE, 'MID_CARRY');
     }
 
     const reversed = this.reversedReturnInput(shipment);
     const quote = await this.quote(reversed, { isTest: shipment.isTest });
-
     if (!quote.available) {
-      await this.audit.record({
-        action: 'SHIPMENT_RETURN_PENDING_MANUAL',
-        actorId: actor.userId,
-        reason: input.note,
-        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: quote.reason },
-      });
-      return { outcome: 'PENDING_MANUAL' as const, reason: quote.message ?? 'This return route cannot be priced yet.' };
+      return pendingManual(quote.message ?? 'This return route cannot be priced yet.', quote.reason);
     }
     // ZERO IS NOT A PRICE — the same rule create() enforces on every booking,
     // applied here too: an unconfigured courier fee on an otherwise-planned
@@ -2206,20 +2244,27 @@ export class ShipmentService {
     // though the runtime value never is.
     const totalMinor = quote.totalMinor ?? 0;
     if (totalMinor <= 0) {
-      await this.audit.record({
-        action: 'SHIPMENT_RETURN_PENDING_MANUAL',
-        actorId: actor.userId,
-        reason: input.note,
-        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: 'ZERO_PRICE' },
-      });
-      return { outcome: 'PENDING_MANUAL' as const, reason: quote.pricingNote ?? 'This return route has not been priced yet.' };
+      return pendingManual(quote.pricingNote ?? 'This return route has not been priced yet.', 'ZERO_PRICE');
     }
+    return { priced: true, totalMinor, reversed };
+  }
 
-    // The existing, approved booking + payment machinery — its own quote,
-    // its own plan, its own Payment and escrow — reused verbatim rather than
-    // a second, parallel way to charge a customer. The sender's own account
-    // pays, exactly as it did for the original shipment.
-    const returnShipment = await this.create(shipment.customerUserId, reversed, shipment.isTest);
+  /**
+   * The only place that actually books and charges a return — the existing,
+   * approved booking + payment machinery (its own quote, its own plan, its
+   * own Payment and escrow) reused verbatim rather than a second, parallel
+   * way to charge a customer. Called ONLY from `confirmRouting`, after the
+   * shipment's own paying customer has explicitly confirmed.
+   */
+  private async executeReturn(
+    legId: string,
+    shipment: ReturnableShipment,
+    reversed: CreateShipmentInput,
+    totalMinor: number,
+    note: string | undefined,
+    actorId: string,
+  ) {
+    const returnShipment = await this.create(shipment.customerUserId!, reversed, shipment.isTest);
     // Linking the two IS what flips the original to RETURNED (BMPL-356) —
     // recompute() reads `returnShipment` fresh, so this single transaction
     // is the only place that fact needs to be written.
@@ -2230,8 +2275,8 @@ export class ShipmentService {
 
     await this.audit.record({
       action: 'SHIPMENT_RETURN_INITIATED',
-      actorId: actor.userId,
-      reason: input.note,
+      actorId,
+      reason: note,
       newValue: {
         legId,
         shipmentId: shipment.id,
@@ -2378,12 +2423,19 @@ export class ShipmentService {
    * credit against what was already paid (this codebase has no partial
    * refund/credit primitive to build that on, and Payment.shipmentId's own
    * uniqueness is the same constraint that forced return-to-sender's design
-   * in the first place). `increasesCharge` on the response is offered so the
-   * caller can decide whether THEIR OWN UI needs a warning dialog before
-   * calling this method — this method itself always treats being called as
-   * the explicit confirmation, exactly as `returnToSender` does. If this
-   * reading is wrong, it is wrong in one place, not scattered through the
-   * booking math.
+   * in the first place).
+   *
+   * BMPL-375, owner ruling: STAFF ACTION ALONE MUST NEVER AUTHORIZE CHARGING
+   * THE CUSTOMER'S WALLET — but a reroute that does NOT increase the charge
+   * has nothing to consent to, so the owner's own distinction is exactly
+   * where this splits: `increasesCharge === false` still executes
+   * immediately on staff action alone (unchanged — `executeReroute` below,
+   * same as always); `increasesCharge === true` now only PREPARES (writes a
+   * `ShipmentRoutingProposal`, including the chosen destination, and
+   * returns), and only the paying customer's own `confirmRouting` may
+   * actually book and charge it. `increasesCharge` used to merely be
+   * information for the caller's OWN UI to decide whether to show a warning
+   * dialog; it is now the decision this method itself makes.
    *
    * BMPL-367: the ORIGINAL leg is left exactly as it was — EXCEPTION,
    * never CANCELLED, the historical record of what actually happened to it,
@@ -2407,42 +2459,93 @@ export class ShipmentService {
       throw new BadRequestException('This shipment has no customer account to charge for a reroute.');
     }
 
-    if (!RETURNABLE_LEG_KINDS.includes(leg.kind)) {
-      await this.audit.record({
-        action: 'SHIPMENT_REROUTE_PENDING_MANUAL',
-        actorId: actor.userId,
-        reason: input.note,
-        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: 'MID_CARRY' },
-      });
-      return { outcome: 'PENDING_MANUAL' as const, reason: MID_CARRY_REROUTE_MESSAGE };
+    const priced = await this.priceReroute(leg, shipment, input.destination, input.note, actor.userId);
+    if (!priced.priced) return priced.outcome;
+
+    if (!priced.increasesCharge) {
+      // Nothing to consent to — staff action alone is fine here, exactly as
+      // before this card.
+      return this.executeReroute(legId, shipment, priced.rerouted, priced.totalMinor, false, input.note, actor.userId);
     }
 
-    const rerouted = this.rerouteInput(shipment, input.destination);
-    const quote = await this.quote(rerouted, { isTest: shipment.isTest });
+    // Charge-increasing — staff action stops HERE. Persist the proposal,
+    // including the operator-chosen destination, and wait for the customer.
+    await this.prisma.shipmentRoutingProposal.upsert({
+      where: { legId },
+      create: { legId, kind: 'REROUTE', destination: input.destination, note: input.note, preparedByUserId: actor.userId },
+      update: { destination: input.destination, note: input.note, preparedByUserId: actor.userId, preparedAt: new Date() },
+    });
+    await this.audit.record({
+      action: 'SHIPMENT_REROUTE_PREPARED',
+      actorId: actor.userId,
+      reason: input.note,
+      newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, priceMinor: priced.totalMinor, increasesCharge: true },
+    });
+    return { outcome: 'PREPARED' as const, totalMinor: priced.totalMinor, increasesCharge: true };
+  }
 
-    if (!quote.available) {
+  /**
+   * The mid-carry fence + quote + zero-price checks `rerouteShipment` always
+   * ran, extracted unchanged so `confirmRouting` can run the EXACT same
+   * gauntlet a second time at confirmation — never trusting what staff saw
+   * at prepare time. PENDING_MANUAL audits itself here so both callers get
+   * it identically.
+   */
+  private async priceReroute(
+    leg: { kind: LegKind },
+    shipment: RerouteableShipment,
+    destination: RerouteInput['destination'],
+    note: string | undefined,
+    actorId: string,
+  ): Promise<
+    | { priced: true; totalMinor: number; increasesCharge: boolean; rerouted: CreateShipmentInput }
+    | { priced: false; outcome: { outcome: 'PENDING_MANUAL'; reason: string } }
+  > {
+    const pendingManual = async (reason: string, planReason: string | undefined) => {
       await this.audit.record({
         action: 'SHIPMENT_REROUTE_PENDING_MANUAL',
-        actorId: actor.userId,
-        reason: input.note,
-        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: quote.reason },
+        actorId,
+        reason: note,
+        newValue: { shipmentId: shipment.id, reference: shipment.reference, planReason },
       });
-      return { outcome: 'PENDING_MANUAL' as const, reason: quote.message ?? 'This redirected route cannot be priced yet.' };
+      return { priced: false as const, outcome: { outcome: 'PENDING_MANUAL' as const, reason } };
+    };
+
+    if (!RETURNABLE_LEG_KINDS.includes(leg.kind)) {
+      return pendingManual(MID_CARRY_REROUTE_MESSAGE, 'MID_CARRY');
+    }
+
+    const rerouted = this.rerouteInput(shipment, destination);
+    const quote = await this.quote(rerouted, { isTest: shipment.isTest });
+    if (!quote.available) {
+      return pendingManual(quote.message ?? 'This redirected route cannot be priced yet.', quote.reason);
     }
     const totalMinor = quote.totalMinor ?? 0;
     if (totalMinor <= 0) {
-      await this.audit.record({
-        action: 'SHIPMENT_REROUTE_PENDING_MANUAL',
-        actorId: actor.userId,
-        reason: input.note,
-        newValue: { legId, shipmentId: shipment.id, reference: shipment.reference, planReason: 'ZERO_PRICE' },
-      });
-      return { outcome: 'PENDING_MANUAL' as const, reason: quote.pricingNote ?? 'This redirected route has not been priced yet.' };
+      return pendingManual(quote.pricingNote ?? 'This redirected route has not been priced yet.', 'ZERO_PRICE');
     }
-
     const increasesCharge = totalMinor > Number(shipment.quotedTotalMinor);
+    return { priced: true, totalMinor, increasesCharge, rerouted };
+  }
 
-    const rerouteShipment = await this.create(shipment.customerUserId, rerouted, shipment.isTest);
+  /**
+   * The only place that actually books and charges a reroute — the existing,
+   * approved booking + payment machinery, reused verbatim. Called either (a)
+   * immediately by `rerouteShipment` itself, when the reroute does not
+   * increase the charge and there is nothing to consent to, or (b) from
+   * `confirmRouting`, after the shipment's own paying customer has
+   * explicitly confirmed a charge-increasing one.
+   */
+  private async executeReroute(
+    legId: string,
+    shipment: RerouteableShipment,
+    rerouted: CreateShipmentInput,
+    totalMinor: number,
+    increasesCharge: boolean,
+    note: string | undefined,
+    actorId: string,
+  ) {
+    const rerouteShipment = await this.create(shipment.customerUserId!, rerouted, shipment.isTest);
     // Linking the two IS what flips the original to REROUTED (BMPL-367) —
     // recompute() reads `rerouteShipment` fresh, so this single transaction
     // is the only place that fact needs to be written. Same pattern
@@ -2454,8 +2557,8 @@ export class ShipmentService {
 
     await this.audit.record({
       action: 'SHIPMENT_REROUTE_INITIATED',
-      actorId: actor.userId,
-      reason: input.note,
+      actorId,
+      reason: note,
       newValue: {
         legId,
         shipmentId: shipment.id,
@@ -2490,7 +2593,7 @@ export class ShipmentService {
     // Sender always notified (an account always exists, checked above);
     // recipient only when genuinely linked, same honest limit as the hold
     // notification above.
-    const toNotify = [shipment.customerUserId, ...(shipment.recipientUserId ? [shipment.recipientUserId] : [])];
+    const toNotify = [shipment.customerUserId!, ...(shipment.recipientUserId ? [shipment.recipientUserId] : [])];
     await this.notifications.notifyUsers(toNotify, {
       type: 'MARKETPLACE',
       category: 'DELIVERY',
@@ -2503,6 +2606,93 @@ export class ShipmentService {
     });
 
     return { outcome: 'INITIATED' as const, rerouteShipment, increasesCharge };
+  }
+
+  /**
+   * THE PAYING CUSTOMER'S OWN CONFIRMATION (BMPL-375, owner ruling): staff
+   * action alone must never authorize a wallet charge, so `returnToSender`
+   * and `rerouteShipment` above only ever PREPARE a charge-increasing
+   * return/reroute. This is the one call that may actually charge, and it
+   * may only be made by the shipment's own `customerUserId` — enforced here,
+   * not left to the controller, the same self-scoped-query discipline every
+   * other customer action in this file already follows.
+   *
+   * The price is recomputed FRESH via the SAME `priceReturn`/`priceReroute`
+   * gauntlet the prepare step ran — never the number stored on the
+   * proposal — in case configuration changed in between. If it is no longer
+   * priceable, the proposal is consumed anyway (a stale, no-longer-valid
+   * proposal must not sit around offering a confirm button that would only
+   * fail) and the outcome is the same PENDING_MANUAL fence as everywhere
+   * else, not a guess.
+   *
+   * A miss (no shipment, wrong customer, or no proposal pending) is one
+   * fixed 404 — enumeration-resistant, the same reasoning `track()` already
+   * uses for a wrong-customer reference lookup.
+   */
+  async confirmRouting(shipmentId: string, userId: string) {
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      select: { id: true, customerUserId: true, legs: { select: { id: true, routingProposal: { select: { kind: true } } } } },
+    });
+    if (!shipment || shipment.customerUserId !== userId) throw new NotFoundException('No shipment with that id.');
+    const legWithProposal = shipment.legs.find((l) => l.routingProposal);
+    if (!legWithProposal?.routingProposal) throw new NotFoundException('No return or reroute is awaiting your confirmation.');
+
+    if (legWithProposal.routingProposal.kind === 'RETURN') {
+      const leg = await this.loadReturnableLeg(legWithProposal.id);
+      const returnableShipment = leg.shipment;
+      const proposal = await this.prisma.shipmentRoutingProposal.findUniqueOrThrow({ where: { legId: legWithProposal.id } });
+      if (returnableShipment.returnShipment) {
+        throw new BadRequestException(`This shipment was already returned (${returnableShipment.returnShipment.reference}).`);
+      }
+      const priced = await this.priceReturn(leg, returnableShipment, proposal.note, userId);
+      await this.prisma.shipmentRoutingProposal.delete({ where: { id: proposal.id } });
+      if (!priced.priced) return priced.outcome;
+      return this.executeReturn(legWithProposal.id, returnableShipment, priced.reversed, priced.totalMinor, proposal.note, userId);
+    }
+
+    const leg = await this.loadRerouteLeg(legWithProposal.id);
+    const rerouteableShipment = leg.shipment;
+    const proposal = await this.prisma.shipmentRoutingProposal.findUniqueOrThrow({ where: { legId: legWithProposal.id } });
+    if (rerouteableShipment.returnShipment) {
+      throw new BadRequestException(`This shipment was already returned (${rerouteableShipment.returnShipment.reference}); it cannot also be rerouted.`);
+    }
+    if (rerouteableShipment.rerouteShipment) {
+      throw new BadRequestException(`This shipment was already rerouted (${rerouteableShipment.rerouteShipment.reference}).`);
+    }
+    const destination = proposal.destination as RerouteInput['destination'];
+    const priced = await this.priceReroute(leg, rerouteableShipment, destination, proposal.note, userId);
+    await this.prisma.shipmentRoutingProposal.delete({ where: { id: proposal.id } });
+    if (!priced.priced) return priced.outcome;
+    return this.executeReroute(legWithProposal.id, rerouteableShipment, priced.rerouted, priced.totalMinor, priced.increasesCharge, proposal.note, userId);
+  }
+
+  /**
+   * The customer's own read of whatever is awaiting their confirmation — the
+   * price, RECOMPUTED FRESH, never the number stored at prepare time, same
+   * rule `confirmRouting` itself follows. 404 (no shipment, wrong customer,
+   * or nothing pending) rather than leaking which case it was.
+   */
+  async routingProposalForCustomer(shipmentId: string, userId: string) {
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      select: {
+        id: true,
+        customerUserId: true,
+        legs: { select: { id: true, routingProposal: { select: { kind: true, destination: true, note: true, preparedAt: true } } } },
+      },
+    });
+    if (!shipment || shipment.customerUserId !== userId) throw new NotFoundException('No shipment with that id.');
+    const legWithProposal = shipment.legs.find((l) => l.routingProposal);
+    if (!legWithProposal?.routingProposal) throw new NotFoundException('No return or reroute is awaiting your confirmation.');
+    const { kind, destination, note, preparedAt } = legWithProposal.routingProposal;
+
+    if (kind === 'RETURN') {
+      const quote = await this.previewReturn(legWithProposal.id);
+      return { kind, legId: legWithProposal.id, note, preparedAt, ...quote };
+    }
+    const quote = await this.previewReroute(legWithProposal.id, destination as RerouteInput['destination']);
+    return { kind, legId: legWithProposal.id, destination, note, preparedAt, ...quote };
   }
 
   /**
