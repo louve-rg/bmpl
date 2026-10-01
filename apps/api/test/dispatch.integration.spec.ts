@@ -568,8 +568,17 @@ describe('visibility, proof, permissions', () => {
     const view = await get(order.customerCookies, `deliveries/${order.deliveryId}`);
     expect(view.status).toBe(200);
     expect(view.body.driver.displayName).toBeTruthy();
-    expect(view.body.driver.legalName).toBeUndefined();
-    expect(view.body.driver.phone).toBeUndefined();
+    // BMPL-373: named at the select (DELIVERY_INCLUDE), not just absent from
+    // the response — the same convention as shipping's courierSummary
+    // (shipping-driver.integration.spec.ts:1246's not.toHaveProperty('phone')).
+    // Every field the owner named explicitly, not just the two this test
+    // already checked.
+    expect(view.body.driver).not.toHaveProperty('legalName');
+    expect(view.body.driver).not.toHaveProperty('phone');
+    expect(view.body.driver).not.toHaveProperty('homeAddress');
+    expect(view.body.driver).not.toHaveProperty('emergencyContactName');
+    expect(view.body.driver).not.toHaveProperty('emergencyContactPhone');
+    expect(view.body.driver).not.toHaveProperty('licenceNumber');
     const other = await registerCustomer(`other_${uniq()}@example.bz`);
     expect((await get(other.cookies, `deliveries/${order.deliveryId}`)).status).toBe(404);
   });
