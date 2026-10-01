@@ -64,3 +64,25 @@ export interface Inventory {
   product: InvRow;
   variants: InvRow[];
 }
+
+/** One vendor location's stock for a single product/variant (BMPL-175/354) —
+ *  one row per vendor location, present even if never stocked there. */
+export interface LocationStock {
+  locationId: string;
+  label: string;
+  isPrimary: boolean;
+  /** Whether this product has adopted per-location tracking at this location
+   *  (has at least one InventoryLocation row) — false means it reads as zero,
+   *  not "unknown". */
+  adopted: boolean;
+  inventoryLocationId: string | null;
+  quantity: number;
+  reserved: number;
+  available: number | null;
+  unlimited: boolean;
+  allowBackorders: boolean;
+  lowStockThreshold: number;
+  inStock: boolean;
+  lowStock: boolean;
+  outOfStock: boolean;
+}
