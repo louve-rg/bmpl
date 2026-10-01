@@ -27,17 +27,44 @@ const globalForPrisma = globalThis as unknown as { __bmplPrisma?: PrismaClient }
  * arguably worse, especially in a system where a missed defect can touch
  * real money.
  *
- * Fixed instead with event-based logging, filtered on the one thing that is
- * actually true of every deliberately-caught case and nothing else: a
- * P2002's message always ends with the engine's own fixed diagnostic line,
- * "Unique constraint failed on the fields: (...)". Confirmed by direct
- * probe (not assumed): the engine's `error` log event and the thrown
- * error's own `.message` are character-for-character identical for a
- * P2002, and that exact phrase never appears in an unrelated failure
- * (checked against a raw query error, which reports Postgres's own message
- * instead). Anything that is not this one fixed string still prints exactly
- * as before - a real unexpected error is never silenced, in any
- * environment.
+ * Fixed instead with event-based logging, filtered on the engine's own
+ * fixed diagnostic line for this error CLASS, "Unique constraint failed on
+ * the fields: (...)". Confirmed by direct probe (not assumed): the engine's
+ * `error` log event and the thrown error's own `.message` are
+ * character-for-character identical for a P2002, and that exact phrase
+ * never appears in an unrelated failure (checked against a raw query error,
+ * which reports Postgres's own message instead).
+ *
+ * THE FILTER DISCRIMINATES BY ERROR CLASS, NOT BY WHETHER ANYONE CAUGHT IT -
+ * `LogEvent` carries no `.code`, only `.message`, so there is no structural
+ * way to ask "was this one handled?" at this layer. A 21st P2002 at a call
+ * site nobody anticipated is just as silent HERE as the 20 expected ones.
+ * That is only safe because of what happens next, confirmed by a second
+ * probe, not assumed: nothing in this codebase registers a filter for
+ * `PrismaClientKnownRequestError` (`apps/api/src/app.module.ts`'s only
+ * `APP_FILTER` is `LedgerErrorFilter`, scoped to `LedgerError`), so an
+ * uncaught P2002 reaches Nest's own built-in `ExceptionsHandler`, which
+ * logs the exact same full error block - through the same logger
+ * `main.ts` hands `NestFactory.create` - independently of anything this
+ * file does, and still turns it into a 500. THE SAFETY NET FOR AN
+ * UNEXPECTED P2002 IS NEST'S DEFAULT EXCEPTION HANDLING, NOT THIS FILTER -
+ * this file only ever silences the Prisma-layer line for an error class
+ * every known caller already treats as success, trusting Nest to still
+ * report it loudly the moment one isn't caught.
+ *
+ * Two honest limits, left as-is rather than engineered around:
+ * - The substring is a Prisma-version-fragile match. An upstream wording
+ *   change would silently stop filtering - which fails safe (the old noise
+ *   returns, nothing goes unlogged), but would do so without a red test
+ *   anywhere. Not added here to keep this one small; a candidate for a
+ *   follow-up card if that silent drift risk is worth guarding explicitly.
+ * - `console.error(e.message)` is a deliberately slimmer line than the old
+ *   stdout emission: it keeps the message and drops `e.target`/
+ *   `e.timestamp`, since both show up again in Nest's own built-in logging
+ *   format for any error this layer doesn't swallow, every value this
+ *   layer can swallow is a case every caller already treats as a success,
+ *   and the node process's own stderr line already carries a wall-clock
+ *   time.
  */
 function createPrismaClient(): PrismaClient {
   const client = new PrismaClient({
