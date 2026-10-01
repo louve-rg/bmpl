@@ -118,12 +118,15 @@ export class DriverController {
   }
 
   /** Every town selectable for this district — hub towns plus lane-reachable
-   *  ones (BMPL-360). Driver-only (DriverService.selectableCities' own
-   *  comment explains why that is not the same thing as making lanes
-   *  public). `:district` validated in the service, as below. */
+   *  ones (BMPL-360). This controller's class-level `@Roles('CUSTOMER')`
+   *  alone is NOT the driver-only gate this route needs — it returns shared
+   *  reference data, not the caller's own profile, so `u.userId` is passed
+   *  through to `DriverService.selectableCities`, which requires an actual
+   *  `DriverProfile` to exist before it reads a lane town. `:district`
+   *  validated in the service, as below. */
   @Get('service-areas/:district/cities')
-  selectableCities(@Param('district') district: string) {
-    return this.driver.selectableCities(district);
+  selectableCities(@CurrentUser() u: AuthContext, @Param('district') district: string) {
+    return this.driver.selectableCities(u.userId, district);
   }
 
   /** Narrow one already-served district to specific cities (empty list widens

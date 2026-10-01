@@ -332,12 +332,19 @@ export class DriverService {
    *
    * Still driver-only, never a customer-facing or public surface — the
    * admin courier-lanes screen's own comment says a lane "is never shown to
-   * customers as a service", on purpose, and that boundary is unchanged
-   * here: an authenticated driver describing their own real work area is a
-   * different audience from a customer being offered a lane as a bookable
-   * service, not an exception carved into the same one.
+   * customers as a service", on purpose, and that boundary holds here only
+   * because of the `ownProfileOrThrow` call below, NOT because of this
+   * controller's class-level `@Roles('CUSTOMER')` — every other route on
+   * `DriverController` returns the caller's OWN profile data, where that
+   * gate is sufficient; this is the first one to return SHARED reference
+   * data, so the same gate is not the same protection. Requiring a real
+   * `DriverProfile` is what actually narrows the audience to a driver, the
+   * one this method's argument depends on — a customer with no driver
+   * profile at all is refused before any lane town is read, not merely
+   * undocumented as able to.
    */
-  async selectableCities(district: string): Promise<{ cities: string[] }> {
+  async selectableCities(userId: string, district: string): Promise<{ cities: string[] }> {
+    await this.ownProfileOrThrow(userId);
     if (!(DISTRICTS as readonly string[]).includes(district)) throw new BadRequestException('Unknown district.');
     const d = district as District;
     const [hubs, lanes] = await Promise.all([

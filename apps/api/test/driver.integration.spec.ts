@@ -214,7 +214,11 @@ describe('service areas', () => {
 
 /** BMPL-360: the city picker must offer every real, configured town — hub
  *  towns AND lane-reachable towns — not just hub towns, while keeping lanes
- *  off any customer-facing or public surface. */
+ *  off any customer-facing or public surface. This controller's class-level
+ *  @Roles('CUSTOMER') is not that gate by itself — every other route here
+ *  returns the caller's OWN profile data, where that is enough; this route
+ *  returns SHARED reference data (lane towns), so it additionally requires
+ *  an actual DriverProfile row before it reads one. */
 describe('selectable cities for narrowing a service area (BMPL-360)', () => {
   const createHub = (district: string, city: string, code: string) =>
     post(adminCookies, 'admin/logistics/hubs', { code, name: `${city} Hub`, type: 'AIRSTRIP', district, city, modes: ['LAND', 'AIR'] });
@@ -223,12 +227,21 @@ describe('selectable cities for narrowing a service area (BMPL-360)', () => {
       originDistrict: 'BELIZE', originCity: 'Belize City', destinationDistrict: 'BELIZE', destinationCity: 'Ladyville',
       ...over,
     });
+  /** A profile is all this gate requires — no role approval, matching the
+   *  "an applicant can build their profile before approval" convention this
+   *  whole controller already follows. */
+  async function driverWithProfile(email: string) {
+    const { cookies, userId } = await registerCustomer(email);
+    await put(cookies, 'driver/profile', profilePayload());
+    return { cookies, userId };
+  }
 
   it('offers a hub town and an intra-district lane-only town together — the named real case (Ladyville)', async () => {
     expect((await createHub('BELIZE', 'Belize City', `BZC${Date.now()}`)).status).toBe(201);
     expect((await createLane({})).status).toBe(201);
+    const driver = await driverWithProfile('drv_sel_ladyville@example.bz');
 
-    const res = await get(adminCookies, 'driver/service-areas/BELIZE/cities');
+    const res = await get(driver.cookies, 'driver/service-areas/BELIZE/cities');
     expect(res.status).toBe(200);
     expect(res.body.cities).toEqual(['Belize City', 'Ladyville']);
   });
@@ -239,12 +252,13 @@ describe('selectable cities for narrowing a service area (BMPL-360)', () => {
     expect((await createLane({
       originDistrict: 'CAYO', originCity: 'Belmopan', destinationDistrict: 'BELIZE', destinationCity: 'Hattieville',
     })).status).toBe(201);
+    const driver = await driverWithProfile('drv_sel_cross@example.bz');
 
-    const belize = await get(adminCookies, 'driver/service-areas/BELIZE/cities');
+    const belize = await get(driver.cookies, 'driver/service-areas/BELIZE/cities');
     expect(belize.body.cities).toContain('Hattieville');
     expect(belize.body.cities).not.toContain('Belmopan');
 
-    const cayo = await get(adminCookies, 'driver/service-areas/CAYO/cities');
+    const cayo = await get(driver.cookies, 'driver/service-areas/CAYO/cities');
     expect(cayo.body.cities).toContain('Belmopan');
     expect(cayo.body.cities).not.toContain('Hattieville');
   });
@@ -257,8 +271,9 @@ describe('selectable cities for narrowing a service area (BMPL-360)', () => {
     expect((await createLane({
       originDistrict: 'TOLEDO', originCity: 'Punta Gorda', destinationDistrict: 'TOLEDO', destinationCity: 'Blue Creek', isTest: true,
     })).status).toBe(201);
+    const driver = await driverWithProfile('drv_sel_isolation@example.bz');
 
-    const res = await get(adminCookies, 'driver/service-areas/TOLEDO/cities');
+    const res = await get(driver.cookies, 'driver/service-areas/TOLEDO/cities');
     expect(res.body.cities).toEqual(['Punta Gorda']);
   });
 
@@ -267,20 +282,28 @@ describe('selectable cities for narrowing a service area (BMPL-360)', () => {
     expect((await createLane({
       originDistrict: 'STANN_CREEK', originCity: '  dangriga ', destinationDistrict: 'STANN_CREEK', destinationCity: 'Hopkins',
     })).status).toBe(201);
+    const driver = await driverWithProfile('drv_sel_dedupe@example.bz');
 
-    const res = await get(adminCookies, 'driver/service-areas/STANN_CREEK/cities');
+    const res = await get(driver.cookies, 'driver/service-areas/STANN_CREEK/cities');
     expect(res.body.cities).toEqual(['Dangriga', 'Hopkins']);
   });
 
   it('rejects an unknown district', async () => {
-    const res = await get(adminCookies, 'driver/service-areas/NOT_A_DISTRICT/cities');
+    const driver = await driverWithProfile('drv_sel_district@example.bz');
+    const res = await get(driver.cookies, 'driver/service-areas/NOT_A_DISTRICT/cities');
     expect(res.status).toBe(400);
   });
 
-  it('is reachable by an unapproved applicant, same as the district picker it feeds', async () => {
-    const { cookies } = await registerCustomer('drv_selectable@example.bz');
-    const res = await get(cookies, 'driver/service-areas/BELIZE/cities');
+  it('is reachable by an unapproved applicant who has only started a profile, same as the district picker it feeds', async () => {
+    const driver = await driverWithProfile('drv_selectable@example.bz');
+    const res = await get(driver.cookies, 'driver/service-areas/BELIZE/cities');
     expect(res.status).toBe(200);
+  });
+
+  it('refuses a signed-in customer who has never started a driver profile at all — the gate this endpoint actually needs', async () => {
+    const { cookies } = await registerCustomer('drv_sel_noprofile@example.bz');
+    const res = await get(cookies, 'driver/service-areas/BELIZE/cities');
+    expect(res.status).toBe(404);
   });
 });
 
