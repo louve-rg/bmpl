@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Spinner } from '../../../../components/ui';
+import { ExceptionResolution } from '../../../../components/logistics/ExceptionResolution';
 
 /**
  * Operating one shipment.
@@ -103,6 +104,7 @@ export default function ShipmentOpsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [handoff, setHandoff] = useState<Record<string, { pin: string; who: string }>>({});
   const [canOperate, setCanOperate] = useState(false);
+  const [canManage, setCanManage] = useState(false);
 
   // Every control on this screen — depart/arrive, confirm handover, flag a
   // problem, record a hub collection — is drawn only for logistics.operate.
@@ -110,11 +112,22 @@ export default function ShipmentOpsPage() {
   // this screen shows and what the API enforces cannot disagree. On any
   // doubt (request fails, field absent) every control stays hidden: fail
   // closed. This page only ever needed logistics.read to load (BMPL-270).
+  // BMPL-364: resolving an exception by return/reroute can CHARGE the
+  // customer, so the API gates its confirm step on the stronger
+  // logistics.manage — this screen checks that one separately rather than
+  // assuming operate implies it (see ExceptionResolution's own comment).
   useEffect(() => {
     api
       .get<{ adminPermissions?: string[] }>('/me')
-      .then((me) => setCanOperate((me.adminPermissions ?? []).includes('logistics.operate')))
-      .catch(() => setCanOperate(false));
+      .then((me) => {
+        const perms = me.adminPermissions ?? [];
+        setCanOperate(perms.includes('logistics.operate'));
+        setCanManage(perms.includes('logistics.manage'));
+      })
+      .catch(() => {
+        setCanOperate(false);
+        setCanManage(false);
+      });
   }, []);
 
   const load = useCallback(async () => {
@@ -336,6 +349,20 @@ export default function ShipmentOpsPage() {
                       >
                         Report a problem with this leg
                       </button>
+                    )}
+
+                    {/* BMPL-364: once a return has already been booked against
+                        this shipment, s.status flips to RETURNED (BMPL-356) —
+                        that is read here, not re-derived, same "client
+                        restates nothing the server owns" rule as everywhere
+                        else on this page. A reroute leaves status at
+                        EXCEPTION (a known, named gap — see the branch's own
+                        comment), so a second reroute attempt is instead
+                        caught honestly by the confirm endpoint's own guard
+                        and surfaced through this panel's existing error
+                        state, not pre-empted here. */}
+                    {canOperate && leg.status === 'EXCEPTION' && s.status !== 'RETURNED' && (
+                      <ExceptionResolution legId={leg.id} canManage={canManage} onResolved={load} />
                     )}
                   </li>
                 );
