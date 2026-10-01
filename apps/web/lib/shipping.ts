@@ -191,7 +191,10 @@ export interface ShipmentView {
   currentLegSequence: number | null;
   legs: ShipmentLegView[];
   custody: CustodyEntry[];
-  availabilityWindows: AvailabilityWindowView[];
+  /** Optional: web and api deploy independently (BMPL-349/350) — a real
+   *  window on every merge where this field hasn't started arriving yet.
+   *  Absence degrades the same as an empty array: no window set. */
+  availabilityWindows?: AvailabilityWindowView[];
   /**
    * Capability token for the recipient's public tracking link — the sender
    * shares it (`GET /shipping/track/{token}`). Null on shipments booked before
@@ -264,7 +267,10 @@ export interface RecipientTrackingView {
  */
 export interface RecipientAvailabilityWindows {
   reference: string;
-  windows: Array<{ startTime: string; endTime: string }>;
+  /** Optional: web and api deploy independently (BMPL-349/350) — a real
+   *  window on every merge where this field hasn't started arriving yet.
+   *  Absence degrades the same as an empty array: no window set. */
+  windows?: Array<{ startTime: string; endTime: string }>;
 }
 
 export interface QuoteLeg {

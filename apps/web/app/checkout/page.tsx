@@ -31,8 +31,13 @@ interface QuoteVendor {
   freeApplied: boolean;
   estimate: { minHours: number; maxHours: number; label: string | null } | null;
   minimumOrderMinor: number | null;
-  openingHours: VendorWeeklyHour[];
-  hoursExceptions: VendorHoursExceptionPublic[];
+  /** Optional: web (Vercel) and api (Railway, slower — prisma migrate
+   *  deploy runs first) deploy independently, so there is a real window on
+   *  every merge where this bundle is new and the API hasn't started
+   *  sending these fields yet (BMPL-349/350). Absence means the same thing
+   *  an empty array already means here — no configured hours to warn from. */
+  openingHours?: VendorWeeklyHour[];
+  hoursExceptions?: VendorHoursExceptionPublic[];
 }
 interface QuoteResponse {
   district: string;
@@ -309,7 +314,9 @@ export default function CheckoutPage() {
                           {(() => {
                             if (!q.estimate) return null;
                             const arrival = new Date(Date.now() + q.estimate.maxHours * 60 * 60 * 1000);
-                            const warning = vendorClosingSoonWarning(q.openingHours, q.hoursExceptions, new Date(), arrival);
+                            const openingHours = q.openingHours ?? [];
+                            const hoursExceptions = q.hoursExceptions ?? [];
+                            const warning = vendorClosingSoonWarning(openingHours, hoursExceptions, new Date(), arrival);
                             return warning ? (
                               <Alert tone="warning" className="mt-2">
                                 {warning.message}
