@@ -18,7 +18,7 @@
 -- grouping/ETA display) -- see the PR for the full consumer audit.
 --
 -- Deliberately its own migration, separate from the reroute's structural
--- change (20261104220000) and its own AuditAction additions (20261104220200)
+-- change (20261104230000) and its own AuditAction additions (20261104230200)
 -- -- one migration per enum extension remains this floor's own convention.
 --
 -- Additive and idempotent; no existing enum value is touched, changed or

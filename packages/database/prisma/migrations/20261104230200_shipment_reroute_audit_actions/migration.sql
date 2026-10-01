@@ -1,5 +1,5 @@
 -- BMPL-343: audit vocabulary for the two possible outcomes of attempting a
--- reroute (see 20261104220000 for the data-model half), the same shape
+-- reroute (see 20261104230000 for the data-model half), the same shape
 -- 20261104210100 already established for return-to-sender.
 --
 -- SHIPMENT_REROUTE_INITIATED: a reroute was priced, confirmed and booked as
@@ -15,8 +15,8 @@
 --
 -- Additive and idempotent; no existing enum value is touched, changed or
 -- removed. Kept in its own migration, separate from the structural change
--- (rerouteOfShipmentId, 20261104220000) this feature also needs and from the
--- unrelated ShipmentStatus addition (20261104220100) -- one migration per
+-- (rerouteOfShipmentId, 20261104230000) this feature also needs and from the
+-- unrelated ShipmentStatus addition (20261104230100) -- one migration per
 -- enum extension remains this floor's own convention.
 ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_REROUTE_INITIATED';
 ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_REROUTE_PENDING_MANUAL';

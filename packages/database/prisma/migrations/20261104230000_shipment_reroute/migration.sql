@@ -37,8 +37,8 @@
 -- loadRerouteLeg.
 --
 -- Deliberately split from the AuditAction additions this feature also needs
--- (20261104220200) and from the ShipmentStatus addition BMPL-356 needs
--- (20261104220100) -- one migration per enum extension remains this floor's
+-- (20261104230200) and from the ShipmentStatus addition BMPL-356 needs
+-- (20261104230100) -- one migration per enum extension remains this floor's
 -- own convention; this file touches only a table, no enum.
 --
 -- Additive and idempotent; no existing column, table or enum value is

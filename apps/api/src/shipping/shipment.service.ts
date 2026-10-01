@@ -2451,8 +2451,23 @@ export class ShipmentService {
     // Ruling's new part: a reroute that does not increase the charge still
     // needs the customer informed of the material ETA change it causes —
     // scoped and direct, the same notifyUsers shape every other
-    // action-triggered notification in this file already uses, not a
-    // generic ETA-diff watcher (that is BMPL-345's own job, still unbuilt).
+    // action-triggered notification in this file already uses, not the
+    // generic baseline-ETA watcher BMPL-345 built (`noticeEtaChange`).
+    //
+    // THIS CALL IS LOAD-BEARING, NOT A CONVENIENCE: `noticeEtaChange` fires
+    // from exactly two places, the private `transition()` choke point and
+    // `scheduleLeg()` — traced by grepping both call sites, not assumed.
+    // `rerouteShipment` reaches neither: the original leg/shipment is
+    // deliberately left untouched (no `transition()` call, same choice
+    // already made for return-to-sender), and `create()`'s fresh-booking
+    // path for the new rerouted shipment doesn't reach it either — and even
+    // if it did, a first-ever baseline is silent by that method's own
+    // design. So the baseline notifier CANNOT cover a reroute. This scoped
+    // call is the ONLY thing in the system that tells a customer their
+    // parcel was redirected and when it will now arrive — anyone later
+    // consolidating notification code must not remove it on the assumption
+    // BMPL-345's notifier already covers reroutes.
+    //
     // Sender always notified (an account always exists, checked above);
     // recipient only when genuinely linked, same honest limit as the hold
     // notification above.
