@@ -1,6 +1,7 @@
 import type { Server } from 'node:http';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
+import { expect } from 'vitest';
 import cookieParser from 'cookie-parser';
 import {
   MAX_DOCUMENT_BYTES,
@@ -42,6 +43,55 @@ export async function bootApp(): Promise<TestContext> {
   app.enableCors({ origin: origins, credentials: true });
   await app.init();
   return { app, prisma, server: app.getHttpServer() as Server };
+}
+
+/**
+ * BMPL-386: assert that `read()` returns the same value immediately before
+ * and after `action()` runs, by diffing a freshly-taken baseline rather than
+ * asserting against an assumed literal. This suite hit the same bug four
+ * times in one night, always the same shape: a test asserted a field or a
+ * row count against a value it ASSUMED (a payment sitting at `'CREATED'`, a
+ * ledger with zero entries) when the fixture's own setup had ALREADY
+ * legitimately touched the same thing first -- `createForShipment`
+ * internally transitions `CREATED` -> `PENDING` before returning; a test's
+ * own funding call posts a real ledger entry on the wallet it then asserts
+ * against. An assertion built on an assumed value measures the fixture, not
+ * the action under test -- worse than a missing test, since a CORRECTLY
+ * fixed system can then read as still broken (the assumed literal no longer
+ * matches reality), or a guard that silently stops working can keep passing
+ * forever (the assumed zero happens to still be literally true by luck).
+ *
+ * `action` may itself reject -- proving a write is refused is usually the
+ * whole point of calling this -- so it runs inside a try/catch and, with no
+ * `expectRejection` given, any rejection is swallowed; `read()` is what gets
+ * compared, before and after.
+ *
+ * That swallow is itself a version of the exact bug this helper exists to
+ * prevent, one level deeper: if `action` rejects for an UNRELATED reason --
+ * a typo, a missing fixture, a closed connection -- the call never reaches
+ * whatever it was meant to exercise, `read()` naturally shows no change
+ * either way, and the test passes while proving nothing. The author would
+ * believe they had demonstrated a guard works when their own setup never
+ * reached it. Pass `expectRejection` (a substring or a pattern) when the
+ * point IS that `action` must be refused, so a DIFFERENT failure still
+ * fails the test for its real reason instead of passing by accident.
+ */
+export async function expectUnchangedBy<T>(
+  read: () => Promise<T>,
+  action: () => Promise<unknown>,
+  expectRejection?: string | RegExp,
+): Promise<void> {
+  const before = await read();
+  try {
+    await action();
+  } catch (e) {
+    if (expectRejection !== undefined) {
+      const message = e instanceof Error ? e.message : String(e);
+      const matches = typeof expectRejection === 'string' ? message.includes(expectRejection) : expectRejection.test(message);
+      if (!matches) throw e; // a DIFFERENT failure -- let it fail the test for its real reason.
+    }
+  }
+  expect(await read()).toEqual(before);
 }
 
 /** Wipe all application data between test groups (keeps schema + migrations). */
