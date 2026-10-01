@@ -97,7 +97,8 @@ stock per shop, with the existing `Inventory` row kept as the identity/
 settings anchor — a product that never adopts per-location tracking is
 completely unaffected (zero child rows, byte-identical behaviour). Checkout
 chooses the fulfilling location by availability only, with
-`VendorLocation.isPrimary` as the tie-break — `DeliveryPricingService.quote()`
+`VendorLocation.isPrimary` then `createdAt` as the two-level tie-break
+(`chooseLocation()`, `bad7b3f`) — `DeliveryPricingService.quote()`
 carries no `locationId` and does no routing, so anything claiming to pick the
 "most efficient" origin would be inventing a capability that doesn't exist —
 and records it on the new nullable `VendorOrder.originLocationId`, reserving/
