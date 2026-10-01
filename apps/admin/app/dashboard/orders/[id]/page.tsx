@@ -40,6 +40,11 @@ interface VendorOrder {
   subtotalMinor: number;
   vendor: { businessName: string };
   items: Item[];
+  // Which of the vendor's locations fulfilled this order (BMPL-175/354). Null
+  // for an order placed before the vendor's own location fulfilled it, or one
+  // placed before per-location tracking existed at all — that is permanent
+  // history, not a loading state, so it is never shown as an error.
+  originLocation?: { id: string; label: string } | null;
 }
 interface AdminOrder {
   id: string;
@@ -124,6 +129,11 @@ export default function AdminOrderDetailPage() {
                 <StatusBadge status={vo.status} />
               </span>
             </header>
+            {vo.originLocation && (
+              <p className="border-b border-slate-100 px-4 py-1.5 text-xs text-slate-500">
+                Fulfilled from <span className="font-medium text-slate-700">{vo.originLocation.label}</span>
+              </p>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <tbody>

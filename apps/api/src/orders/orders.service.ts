@@ -1013,7 +1013,24 @@ export class OrdersService {
   }
 
   private shapeVendorOrder(
-    vo: { id: string; orderNumber: string; status: string; deliveryMethod: string; customerNotes: string | null; currency: string; itemCount: number; subtotalMinor: bigint; vendorProfile: { businessName: string; slug: string }; items: OrderItemRow[]; delivery?: DeliveryRow | null },
+    vo: {
+      id: string;
+      orderNumber: string;
+      status: string;
+      deliveryMethod: string;
+      customerNotes: string | null;
+      currency: string;
+      itemCount: number;
+      subtotalMinor: bigint;
+      vendorProfile: { businessName: string; slug: string };
+      items: OrderItemRow[];
+      delivery?: DeliveryRow | null;
+      // Which of the vendor's locations fulfilled this order (BMPL-175) — null
+      // for orders placed before a vendor adopted per-location stock, and that
+      // is permanent history, not a gap to fill in (see the schema comment on
+      // VendorOrder.originLocationId).
+      originLocation?: { id: string; label: string } | null;
+    },
     lineImageUrls: (string | null)[],
   ) {
     const d = vo.delivery ?? null;
@@ -1047,6 +1064,23 @@ export class OrdersService {
       itemCount: vo.itemCount,
       subtotalMinor: money(vo.subtotalMinor),
       vendor: { businessName: vo.vendorProfile.businessName, slug: vo.vendorProfile.slug },
+      // shapeVendorOrder() has exactly THREE callers and all three see this
+      // field, INCLUDING the customer on their own order (GET /orders/:id,
+      // and the checkout POST response itself) — this is deliberate, not an
+      // oversight to "fix" by splitting the shaper or restricting it to
+      // admin/vendor. The label is already public on the storefront
+      // (vendor.service.ts buildStorefront()'s locations[]), so the fact it
+      // reveals — which of a vendor's branches fulfilled the order — is
+      // already available to anyone; the bare id adds no information beyond
+      // that and unlocks nothing (the only endpoint that accepts a
+      // locationId, POST .../inventory/locations/:locationId/adjust, is
+      // scoped to the caller's own userId, so an opaque id in a customer's
+      // hands enables nothing). One shaper serving all three audiences,
+      // documented, beats a second shaper for this one field — two views of
+      // the same order drifting apart is the recurring failure in this
+      // domain (see the BMPL-179 parity test). Do not add a second
+      // "admin-only" field beside this one assuming this is admin-only.
+      originLocation: vo.originLocation ? { id: vo.originLocation.id, label: vo.originLocation.label } : null,
       items: vo.items.map((i, idx) => ({
         productTitle: i.productTitle,
         variantTitle: i.variantTitle,
@@ -1092,7 +1126,15 @@ const ORDER_DETAIL_INCLUDE = {
     addresses: true,
     vendorOrders: {
       orderBy: { createdAt: 'asc' as const },
-      include: { vendorProfile: { select: { businessName: true, slug: true } }, items: { orderBy: { createdAt: 'asc' as const } }, delivery: true },
+      include: {
+        vendorProfile: { select: { businessName: true, slug: true } },
+        items: { orderBy: { createdAt: 'asc' as const } },
+        delivery: true,
+        // BMPL-175/354: named at the select, not fixed up after — only the id
+        // and label a vendor's own storefront already shows publicly, never
+        // the address/phone/coordinates columns VendorLocation also carries.
+        originLocation: { select: { id: true, label: true } },
+      },
     },
   },
 } satisfies { include: Prisma.OrderInclude };
@@ -1103,6 +1145,7 @@ const VENDOR_ORDER_DETAIL_INCLUDE = {
     items: { orderBy: { createdAt: 'asc' as const } },
     delivery: true,
     order: { select: { orderNumber: true, placedAt: true, addresses: true, user: { select: { firstName: true, lastName: true } } } },
+    originLocation: { select: { id: true, label: true } },
   },
 } satisfies { include: Prisma.VendorOrderInclude };
 

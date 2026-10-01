@@ -384,3 +384,64 @@ describe('a location cannot be deleted out from under an open reservation', () =
     expect(vo.originLocationId).toBeNull();
   });
 });
+
+describe('fulfilment origin is readable, not just recorded (BMPL-354)', () => {
+  it('the customer, the owning vendor and admin each see {id, label} — never the address — through the one shared shaper', async () => {
+    const s = uniq();
+    const vendor = await makeVendor(`org1_${s}@example.bz`, `Org1 ${s}`);
+    const locA = await addLocation(vendor.cookies, 'Front Counter', true);
+    const productId = await createProduct(vendor.cookies, { title: 'Originful', sku: `OR-${s}`, priceMinor: 1000 });
+    await adjustAt(vendor.cookies, productId, locA, 5).expect(201);
+
+    const customer = await registerCustomer(`org1c_${s}@example.bz`);
+    await addToCart(customer, { productId, quantity: 1 }).expect(201);
+    const checkoutRes = await checkout(customer).expect(201);
+    const orderId = checkoutRes.body.id as string;
+    const vendorOrderId = checkoutRes.body.vendorOrders[0].id as string;
+    const expected = { id: locA, label: 'Front Counter' };
+
+    // Audience 1: the customer who placed the order — the SAME checkout
+    // response above already went through getOwn()/serializeOrder(), and a
+    // later plain GET must agree with it.
+    expect(checkoutRes.body.vendorOrders[0].originLocation).toEqual(expected);
+    const customerGet = await request(ctx.server).get(`/api/orders/${orderId}`).set('Cookie', customer).expect(200);
+    expect(customerGet.body.vendorOrders[0].originLocation).toEqual(expected);
+
+    // Audience 2: the owning vendor's own order detail.
+    const vendorGet = await request(ctx.server).get(`/api/vendor/orders/${vendorOrderId}`).set('Cookie', vendor.cookies).expect(200);
+    expect(vendorGet.body.originLocation).toEqual(expected);
+
+    // Audience 3: admin (orders.read) order detail — the gap BMPL-354 opened on.
+    const adminGetRes = await request(ctx.server).get(`/api/admin/orders/${orderId}`).set('Cookie', adminCookies).expect(200);
+    expect(adminGetRes.body.vendorOrders[0].originLocation).toEqual(expected);
+
+    // Named at the select (vendor.service.ts/BMPL-335 precedent): the address
+    // this location was created with must never ride along.
+    for (const body of [customerGet.body, adminGetRes.body]) {
+      expect(JSON.stringify(body)).not.toContain('Front Counter St');
+    }
+  });
+
+  it('reads as null, not a missing key, for an order with no recorded origin', async () => {
+    const s = uniq();
+    const vendor = await makeVendor(`org2_${s}@example.bz`, `Org2 ${s}`);
+    await addLocation(vendor.cookies, 'Only Shop', true);
+    const productId = await createProduct(vendor.cookies, { title: 'Originless', sku: `OL-${s}`, priceMinor: 1000 });
+    // Adjusted at product level only — never adopts per-location tracking, so
+    // chooseLocation() never runs and originLocationId stays null (same fixture
+    // shape as 'one-location vendor experiences nothing' above).
+    await request(ctx.server).post(`/api/vendor/products/${productId}/inventory/adjust`).set('Cookie', vendor.cookies).send({ delta: 5, reason: 'RESTOCK' }).expect(201);
+
+    const customer = await registerCustomer(`org2c_${s}@example.bz`);
+    await addToCart(customer, { productId, quantity: 1 }).expect(201);
+    const checkoutRes = await checkout(customer).expect(201);
+    expect(checkoutRes.body.vendorOrders[0].originLocation).toBeNull();
+
+    const vendorOrderId = checkoutRes.body.vendorOrders[0].id as string;
+    const vendorGet = await request(ctx.server).get(`/api/vendor/orders/${vendorOrderId}`).set('Cookie', vendor.cookies).expect(200);
+    expect(vendorGet.body.originLocation).toBeNull();
+
+    const adminGetRes = await request(ctx.server).get(`/api/admin/orders/${checkoutRes.body.id}`).set('Cookie', adminCookies).expect(200);
+    expect(adminGetRes.body.vendorOrders[0].originLocation).toBeNull();
+  });
+});

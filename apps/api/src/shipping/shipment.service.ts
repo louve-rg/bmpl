@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   belizeCalendarDateKey,
   belizeMidday,
@@ -61,6 +61,8 @@ import { ShipmentDispatchService } from './shipment-dispatch.service';
 import { assertOperableProvider } from './provider-eligibility';
 import { StorageService } from '../storage/storage.service';
 import { AVATAR_SELECT, publicAvatarUrl } from '../common/avatar-url';
+import { ENV } from '../config/config.module';
+import type { Env } from '../config/env';
 
 /** Minor units go out as numbers; see the note in logistics-network.service.ts. */
 const money = (v: bigint) => Number(v);
@@ -330,6 +332,7 @@ export class ShipmentService {
     private readonly payments: PaymentsService,
     private readonly settlement: SettlementService,
     private readonly storage: StorageService,
+    @Inject(ENV) private readonly env: Env,
   ) {}
 
   /* -------------------------------------------------------------- quoting */
@@ -1594,7 +1597,9 @@ export class ShipmentService {
     // already goes through `myLeg` -> `providerLegOut`, which never carried
     // the PIN either.
     const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id: leg.shipmentId }, include: SHIPMENT_INCLUDE });
-    return this.serialize(fresh, { audience: 'STAFF' });
+    const payload = await this.serialize(fresh, { audience: 'STAFF' });
+    await this.noticeEtaChange(fresh, payload.eta);
+    return payload;
   }
 
   /** Complete a leg: verify the handoff, then hand custody to whoever now holds it. */
@@ -2518,7 +2523,9 @@ export class ShipmentService {
     }
 
     const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id: result.shipmentId }, include: SHIPMENT_INCLUDE });
-    return this.serialize(fresh, { audience: 'STAFF' });
+    const payload = await this.serialize(fresh, { audience: 'STAFF' });
+    await this.noticeEtaChange(fresh, payload.eta);
+    return payload;
   }
 
   /** PENDING → READY for the leg whose turn it now is. */
@@ -2627,6 +2634,76 @@ export class ShipmentService {
         data: { shipmentId: r.shipmentId, reference: r.reference, status: r.status },
       },
     );
+  }
+
+  /**
+   * BMPL-345, owner ruling 11: tell the customer when the shipment's OWN eta
+   * has moved by at least `env.SHIPMENT_ETA_CHANGE_THRESHOLD_MINUTES` from the
+   * last instant they were told about — `shipment.etaBaselineAt`, loaded by
+   * the caller fresh, in the same read that produced `eta`.
+   *
+   * No previous value (`etaBaselineAt` null): there is nothing to compare a
+   * first value against, so this ESTABLISHES the baseline silently rather
+   * than notifying — the first real eta a shipment ever gets is not a
+   * "change" from anything.
+   *
+   * Never fires while the new eta is UNKNOWN: there is no honest arrival
+   * instant to put in the message, the same invariant `scheduleLeg` enforces
+   * at the point a schedule is recorded (its own comment names it verbatim).
+   * An eta that drops BACK to UNKNOWN is left alone entirely — the baseline
+   * is not cleared, so the next time it becomes knowable again the
+   * comparison is still against the last real information the customer was
+   * given, not against nothing, and a small drift either side of a transient
+   * gap cannot be mistaken for a fresh "first" value.
+   *
+   * Below the threshold: no notification AND no baseline update, on purpose
+   * — several small moves that individually stay under the threshold must
+   * still sum against the ORIGINAL baseline and eventually fire once their
+   * total genuinely crosses it, rather than each one silently resetting the
+   * reference point a sub-threshold move is compared against next.
+   *
+   * The actual write is a `updateMany` compare-and-set keyed on the OLD
+   * baseline value, not a plain `update` — so two concurrent callers (a
+   * second worker, a request that raced a background job) computing the
+   * same move can never both win it, and only the one that wins ever sends
+   * the notification. This is what makes a restart or a redeploy safe: the
+   * baseline this reads is the one actually persisted, not one held in this
+   * process's memory.
+   */
+  private async noticeEtaChange(
+    shipment: { id: string; customerUserId: string | null; reference: string; etaBaselineAt: Date | null },
+    eta: { confidence: EtaConfidence; estimatedArrivalAt: Date | null },
+  ) {
+    const newAt = eta.confidence === 'UNKNOWN' ? null : eta.estimatedArrivalAt;
+    if (newAt === null) return;
+
+    const prevAt = shipment.etaBaselineAt;
+    if (prevAt !== null) {
+      const deltaMinutes = Math.abs(newAt.getTime() - prevAt.getTime()) / 60_000;
+      if (deltaMinutes < this.env.SHIPMENT_ETA_CHANGE_THRESHOLD_MINUTES) return;
+    }
+
+    const cas = await this.prisma.shipment.updateMany({
+      where: { id: shipment.id, etaBaselineAt: prevAt },
+      data: { etaBaselineAt: newAt },
+    });
+    if (cas.count !== 1) return; // Someone else already moved the baseline first.
+    if (prevAt === null || !shipment.customerUserId) return; // Establishing the first baseline is silent.
+
+    await this.notifications.notifyUsers([shipment.customerUserId], {
+      type: 'MARKETPLACE',
+      category: 'DELIVERY',
+      event: 'SHIPMENT_ETA_CHANGED',
+      title: `Shipment ${shipment.reference} — updated arrival estimate`,
+      body: `The estimated arrival for shipment ${shipment.reference} has changed.`,
+      data: {
+        shipmentId: shipment.id,
+        reference: shipment.reference,
+        previousEstimatedArrivalAt: prevAt.toISOString(),
+        newEstimatedArrivalAt: newAt.toISOString(),
+        confidence: eta.confidence,
+      },
+    });
   }
 
   /**

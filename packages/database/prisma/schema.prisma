@@ -5064,6 +5064,18 @@ model Shipment {
   exceptionAt        DateTime?
   exceptionReason    String?
 
+  /// BMPL-345: the estimated arrival instant the customer was last told about,
+  /// OR — if none has ever been material enough to tell them — the first
+  /// instant the shipment's ETA became knowable at all. Null until the ETA
+  /// first resolves to KNOWN/PROJECTED. Persisted (not held in memory) so a
+  /// restart, a redeploy or a second worker compares against the SAME
+  /// reference point rather than re-establishing a baseline and firing again;
+  /// see ShipmentService.noticeEtaChange for the comparison and the
+  /// compare-and-set write that keeps two concurrent writers from both
+  /// winning it. Left untouched when the ETA drops back to UNKNOWN — see that
+  /// method's own comment for why.
+  etaBaselineAt DateTime?
+
   /// BMPL-183/343: a return-to-sender is booked as its own NEW Shipment (owner
   /// ruling — "a new transport service at normal configured pricing", never a
   /// reversal of the original charge), because Payment.shipmentId is unique:
