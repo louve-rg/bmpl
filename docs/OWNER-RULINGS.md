@@ -45,9 +45,27 @@ Answered **BMPL-109** (the disposition half of its question 1) and
 **BMPL-183**, confirming the custody boundary the ruling describes already
 matches shipped code — `ShipmentService.cancel()` blocks once a leg reaches
 `IN_PROGRESS` (set only by `startLeg`, which appends custody in the same
-call), not on acceptance or assignment. Still open on BMPL-183: who may
-initiate a return (staff-mediated or sender-direct) and the return-leg
-price — both genuinely new decisions this ruling didn't reach.
+call), not on acceptance or assignment.
+
+Who may initiate a return, and the return-leg price, were both answered and
+shipped as of `f8f89dd` (BMPL-183/343, PR #271): staff may initiate or
+prepare a post-custody return — staff-mediated, not sender-direct, gated on
+`logistics.manage` — and the price is BML's own normal configured pricing
+for the return movement, calculated by a reversed `quote()`, never
+invented. **Neither question is open any longer.**
+
+**A further ruling narrows what shipped, and it is not yet built as of
+`f8f89dd` — this is an open defect against this ruling, not an open
+question, tracked as BMPL-375:** "Staff may initiate or prepare a
+post-custody return, but staff action alone must never authorize charging
+the customer's wallet," and "`payWithWallet: true` must not transform an
+operational staff action into customer payment consent." As shipped,
+`returnToSender()`'s own comment treats the staff member's call to that
+method as *the* explicit confirmation a charge requires — but
+`reversedReturnInput()` hardcodes `payWithWallet: true` on the customer's
+own account when `returnToSender()` builds that call, so a staff action
+alone is what actually authorizes the wallet charge today. That is exactly
+what this further ruling says may never happen.
 
 ## Ruling 2 — least privilege: a broad permission must not carry access nothing at that scope needs
 
@@ -265,7 +283,7 @@ public-launch checklist should find this card named on it.
 
 *Sources: kanban card BMPL-331 (rulings 7, 8, 11, 12 — the four that
 answered no open ask) and, for rulings 1–6, 9 and 10, the card each one
-answered: BMPL-109, BMPL-183 (1); BMPL-183, BMPL-201, BMPL-247 (2); BMPL-330
+answered: BMPL-109, BMPL-183, BMPL-375 (1); BMPL-183, BMPL-201, BMPL-247 (2); BMPL-330
 (3); BMPL-232 (4); BMPL-194 (5); BMPL-283 (6); BMPL-180, BMPL-201, BMPL-247
 (9); BMPL-259 (10). If a ruling above and a dependent card's own notes ever
 disagree, the card is the primary source for that ruling — check it for the
