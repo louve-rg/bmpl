@@ -580,6 +580,38 @@ describe('a genuinely linked recipient can reach the same courier too (BMPL-359)
     expect(r.status).toBe(404);
   });
 
+  it('holding a valid tracking token is not holding the recipient seat — the owner\'s own framing, proved both ways', async () => {
+    const { s, last } = await walkToAcceptedLastMile();
+    const thread = (await threadFor(last.id))!;
+    const { recipientToken } = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { recipientToken: true } });
+
+    // It really is a valid token: the public tracking view accepts it, with
+    // no session at all.
+    expect((await request(ctx.server).get(`/api/shipping/track/${recipientToken}`)).status).toBe(200);
+
+    // The messaging door is not reachable by a token in the first place —
+    // this route takes no token parameter, only @CurrentUser() — so an
+    // anonymous token holder cannot even construct a request that could earn
+    // a seat. Refused at authentication, before any recipient logic runs.
+    expect((await request(ctx.server).post(`/api/shipping/incoming/${s.reference}/courier-conversation`)).status).toBe(401);
+
+    // A real, signed-in account that has READ the token (genuinely holds the
+    // tracking link) but never called claim is still refused — reading and
+    // claiming are different capabilities, and only claiming links the
+    // account as shipment.recipientUserId, which is the only thing
+    // openShipmentLegForRecipient trusts.
+    const holder = await registerUser(`bmpl359tok_${uniq()}@example.com`);
+    expect((await request(ctx.server).get(`/api/shipping/track/${recipientToken}`).set('Cookie', holder.cookies)).status).toBe(200);
+    expect((await openCourierConversation(holder.cookies, s.reference)).status).toBe(404);
+
+    // No participant seat was created for the token holder on the real
+    // existing thread, by reading the token, by the refused attempt, or by
+    // both together.
+    const parts = await ctx.prisma.conversationParticipant.findMany({ where: { conversationId: thread.id } });
+    expect(parts.map((p) => p.userId)).not.toContain(holder.userId);
+    expect(parts).toHaveLength(2); // customer + last-mile driver only
+  });
+
   it('refuses an account linked as recipient of a DIFFERENT shipment', async () => {
     const driver = await makeDriver();
     const s = await book();
