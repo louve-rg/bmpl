@@ -49,7 +49,7 @@ and found it on requirements 1, 3 and 11 at once.
 | 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255) |
 | 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
 | 7 | Courier & vehicle identification once assigned | **Done for the booking customer as of `4d96bb0`; not yet true for a linked recipient** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient half held on an owner migration signature, PR #293 (BMPL-359) |
-| 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done for shipping; marketplace delivery's driver job screen has no embedded map at all, as of `4d96bb0`** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) — none touch `apps/web/app/dashboard/driver/jobs/[id]`, which links out to the device's own maps app instead |
+| 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done for shipping and marketplace delivery, as of `16e4b4b`; whether the requirement was ever meant to cover marketplace's always-two-stop case is unsettled** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) for shipping; marketplace's driver job screen wired to the same `ExpandableRouteMap` by `16e4b4b` (BMPL-390, PR #302) — no API change, the pre-acceptance pin gate was already correct |
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
 | 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `4d96bb0`: return-to-sender/reroute carry a live staff-alone-can-charge defect under Ruling 1 (BMPL-375); failed delivery unbuilt** | Pre-custody half already correct in shipped code; return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) but with no customer-confirmation step before charging — proven live by the API and QA lanes; the fix (PR #288) is written, tested and CI-green but unmerged, held on an owner migration signature; no staff screen as of `f8f89dd` either (one is in open PR #278); failed-delivery trigger does not exist as of `4d96bb0` |
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
@@ -366,17 +366,25 @@ signature (BMPL-359). Do not read this as working today.
 
 ## 8. Expandable maps & A/B/C/D route stops (pre-acceptance)
 
-**Status: done for shipping's multi-hub job maps; the marketplace delivery
-half is not built.** `apps/web/app/dashboard/driver/jobs/[id]` (the
-marketplace delivery driver's own job screen) has no embedded or expandable
-map component at all — every stop offers "Open in Maps" to the device's own
-maps app instead, confirmed by reading the file directly (zero
-`FullScreenMapModal`/`ExpandableRouteMap`/Leaflet references; every `map`
-hit is either `Array.prototype.map` or that device-maps link text). A
-marketplace delivery always has exactly two stops (pickup, drop-off), so
-whether the owner's A/B/C/D requirement was ever meant to cover it at all is
-unsettled — nothing quotes Edward on that point either way. The rest of this
-section describes the SHIPPING side, which is built and verified.
+**Status: done for both shipping's multi-hub job maps and marketplace
+delivery, as of `16e4b4b`.** `apps/web/app/dashboard/driver/jobs/[id]` (the
+marketplace delivery driver's own job screen) now reuses `ExpandableRouteMap`
+directly via a new `jobMapPoints()` (`lib/driver-job.ts`) that feeds the
+existing `tripMapPoints()` — no second map implementation. No API change was
+needed: `delivery-core.service.ts` already gated the customer's door pin on
+acceptance (`pinnedLocation: null` until `acceptedAt` is set) exactly the
+same way shipping's leg pins are gated, so the pre-acceptance privacy half
+of this requirement was already correct for marketplace — this closed only
+the missing screen. `jobMapPoints()` draws whatever pin it is handed and
+never re-checks the gate itself, so a pre-acceptance call naturally yields a
+pickup-only pin; it does not duplicate the server's privacy rule in a second
+place.
+
+A marketplace delivery always has exactly two stops (pickup, drop-off), so
+whether the owner's A/B/C/D requirement was ever meant to cover it at all
+remains **unsettled** — nothing quotes Edward on that point either way.
+`16e4b4b` answers the engineering question, not the scope question: a
+shipped component does not retroactively settle what Edward asked for.
 
 Merged `4eac6e8` (PR #121) — a reusable
 embedded-preview → expand → full-screen modal pattern, verified to touch none
