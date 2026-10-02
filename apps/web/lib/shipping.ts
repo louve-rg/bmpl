@@ -228,6 +228,16 @@ export interface RecipientTrackingStep {
   completed: boolean;
   isCurrent: boolean;
   completedAt: string | null;
+  /**
+   * BMPL-391 (Edward req 2's recipient gap): the same single optional
+   * pickup/handoff photo set the sender already sees for this leg, present
+   * only once a legitimately linked recipient reads it (`trackAsRecipient`/
+   * `listIncoming`) — the anonymous token view (`trackPublic`) never
+   * carries this field at all. Optional here for the ordinary BMPL-349
+   * reason (web/api deploy independently); absence means the same thing an
+   * empty array already means — nothing attached yet.
+   */
+  pickupPhotoUrls?: string[];
 }
 
 export interface RecipientTrackingView {

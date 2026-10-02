@@ -105,6 +105,24 @@ export function RecipientTracking({ view }: { view: RecipientTrackingView }) {
                       <span>{step.kindLabel}</span>
                       {step.completedAt && <span>{formatDate(step.completedAt)}</span>}
                     </div>
+                    {/* BMPL-391 (Edward req 2): the same single optional
+                        pickup photo the sender sees on this leg, mirrored
+                        from ShipmentJourney's LegRow — one thumbnail set,
+                        never a gallery, never a placeholder implying one
+                        exists before it does. */}
+                    {step.pickupPhotoUrls && step.pickupPhotoUrls.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {step.pickupPhotoUrls.map((url, i) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={i}
+                            src={url}
+                            alt={`Pickup photo ${i + 1}`}
+                            className="h-16 w-16 rounded-bmpl-md border border-slate-200 object-cover"
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </li>
               );
