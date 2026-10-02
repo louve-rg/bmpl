@@ -6,13 +6,18 @@ import { RecipientTracking } from '../../../../components/shipping/RecipientTrac
 import { RecipientAvailabilityWindow } from '../../../../components/shipping/RecipientAvailabilityWindow';
 import { Alert, Spinner } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
-import { shippingApi, type RecipientTrackingView } from '../../../../lib/shipping';
+import { shippingApi, type LinkedRecipientTrackingView } from '../../../../lib/shipping';
 
 /**
  * One claimed shipment, from the account's OWN "incoming" list (BMPL-179).
  *
- * Same `<RecipientTracking>` presentation the anonymous `/track/[token]` page
- * uses — claiming changes where this can be read from, never what is in it.
+ * Same `<RecipientTracking>` presentation the anonymous `/track/[token]`
+ * page uses — but no longer identical in content as of BMPL-391/#304:
+ * a genuinely claimed recipient now also sees the single pickup/handoff
+ * photo the sender does, via `LinkedRecipientTrackingView`/
+ * `attachPickupPhotos`, which the token-only view never carries. Claiming
+ * still changes only WHERE this can be read from and not the rest of
+ * WHAT is in it — the photo is the one deliberate, named exception.
  * A reference this account never claimed answers the same 404 as one that
  * does not exist at all (`shipment.service.ts#trackAsRecipient`), so this
  * page shows one neutral message for every miss.
@@ -22,7 +27,7 @@ export default function IncomingShipmentPage() {
   const router = useRouter();
   const reference = String(params.reference ?? '');
 
-  const [view, setView] = useState<RecipientTrackingView | null>(null);
+  const [view, setView] = useState<LinkedRecipientTrackingView | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 

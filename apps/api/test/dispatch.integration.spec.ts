@@ -14,7 +14,7 @@ let ctx: TestContext;
 let adminCookies: string[];
 let categoryId: string;
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 
 const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 const PAST = new Date(Date.now() - 24 * 3600 * 1000);
@@ -568,8 +568,25 @@ describe('visibility, proof, permissions', () => {
     const view = await get(order.customerCookies, `deliveries/${order.deliveryId}`);
     expect(view.status).toBe(200);
     expect(view.body.driver.displayName).toBeTruthy();
-    expect(view.body.driver.legalName).toBeUndefined();
-    expect(view.body.driver.phone).toBeUndefined();
+    // BMPL-373: named at the select (DELIVERY_INCLUDE), not just absent from
+    // the response — the same convention as shipping's courierSummary
+    // (shipping-driver.integration.spec.ts:1246's not.toHaveProperty('phone')).
+    // Every field the owner named explicitly, not just the two this test
+    // already checked.
+    expect(view.body.driver).not.toHaveProperty('legalName');
+    expect(view.body.driver).not.toHaveProperty('phone');
+    expect(view.body.driver).not.toHaveProperty('homeAddress');
+    expect(view.body.driver).not.toHaveProperty('emergencyContactName');
+    expect(view.body.driver).not.toHaveProperty('emergencyContactPhone');
+    expect(view.body.driver).not.toHaveProperty('licenceNumber');
+    // BMPL-377: same reasoning, the vehicle's own documents. The owner's
+    // requirement-7 instruction names "insurance documents" and "licence
+    // documents" explicitly.
+    expect(view.body.vehicle.licencePlate).toBeTruthy();
+    expect(view.body.vehicle).not.toHaveProperty('registrationNumber');
+    expect(view.body.vehicle).not.toHaveProperty('insuranceProvider');
+    expect(view.body.vehicle).not.toHaveProperty('insurancePolicyNumber');
+    expect(view.body.vehicle).not.toHaveProperty('photoKeys');
     const other = await registerCustomer(`other_${uniq()}@example.bz`);
     expect((await get(other.cookies, `deliveries/${order.deliveryId}`)).status).toBe(404);
   });

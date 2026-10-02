@@ -21,7 +21,7 @@ let ctx: TestContext;
 let env: Record<string, unknown>;
 let admin: string[];
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 
 const CAP = 25_000;
 

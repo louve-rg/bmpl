@@ -34,7 +34,9 @@ function governingLeg(shipment: ShipmentView, role: Role): ShipmentLegView | nul
 }
 
 function windowsFor(shipment: ShipmentView, role: Role): Row[] {
-  return shipment.availabilityWindows.filter((w) => w.role === role).map((w) => ({ startTime: w.startTime, endTime: w.endTime }));
+  return (shipment.availabilityWindows ?? [])
+    .filter((w) => w.role === role)
+    .map((w) => ({ startTime: w.startTime, endTime: w.endTime }));
 }
 
 function formatClock(hhmm: string): string {

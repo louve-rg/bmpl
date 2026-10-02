@@ -13,7 +13,7 @@ let ctx: TestContext;
 let admin: string[];
 let adminUserId: string;
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 const PDF = Buffer.from('%PDF-1.4 test');
 

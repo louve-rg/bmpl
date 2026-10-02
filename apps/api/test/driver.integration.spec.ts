@@ -223,12 +223,19 @@ describe('selectable cities for narrowing a service area (BMPL-360)', () => {
   // LogisticsHub.code is capped at 12 characters (packages/validation/src/
   // shipping.ts) — a bare Date.now() suffix alone is 13 digits and blows
   // past it on its own, 400ing before any assertion is reached. Base-36
-  // compresses the timestamp to ~8 characters, same shape proven in
-  // shipment-eta.integration.spec.ts's own `uniq()` (BMPL-362: codes must be
-  // unique against the OTHER ~97 spec files sharing this database, not just
-  // against each other within this file).
+  // compresses the timestamp to ~8 characters so it fits.
+  //
+  // BMPL-362: the counter must come FIRST, not last. `.slice(0, 12)` keeps
+  // the FRONT of the string — counter-then-timestamp order would put the one
+  // part that changes on every call exactly where a short cap throws it
+  // away, leaving every call within the same timestamp-window the identical
+  // truncated code. This is a within-file risk, not a cross-file one: every
+  // spec's hub-code prefix is already distinct, so two files cannot collide
+  // on the shared digits even though they call this same shape. Proven in
+  // the BMPL-362 fix: counter-last collided 17/18 calls in a tight loop at
+  // this cap; counter-first collided 0/18, same cap, same call count.
   let codeSeq = 0;
-  const uniqCode = () => `${Date.now().toString(36)}${(codeSeq += 1)}`;
+  const uniqCode = () => `${(codeSeq += 1).toString(36)}${Date.now().toString(36)}`;
   const createHub = (district: string, city: string, prefix: string) =>
     post(adminCookies, 'admin/logistics/hubs', { code: `${prefix}${uniqCode()}`.slice(0, 12), name: `${city} Hub`, type: 'AIRSTRIP', district, city, modes: ['LAND', 'AIR'] });
   const createLane = (over: Record<string, unknown>) =>

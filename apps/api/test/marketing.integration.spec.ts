@@ -15,7 +15,7 @@ let admin: string[];
 let adminUserId: string;
 let categoryId: string;
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 /** A valid coupon code fragment (A–Z/0–9 only — no underscores). */
 const couponCode = (prefix: string) => `${prefix}${uniq().replace(/_/g, '')}`.slice(0, 24).toUpperCase();
 

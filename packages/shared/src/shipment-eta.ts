@@ -60,10 +60,12 @@ export interface EtaLegInput {
   startedAt: Date | null;
   /** When this leg actually finished, if it has. */
   completedAt: Date | null;
-  /** A carrier's own configured commitment (LINE_HAUL only; currently
-   *  unwritable anywhere in the API - see this file's test for why that
-   *  makes an unstarted LINE_HAUL leg UNKNOWN today, honestly, not a bug
-   *  in this function). */
+  /** A carrier's own configured commitment (LINE_HAUL only). Written by
+   *  `ShipmentService.scheduleLeg` (BMPL-346) via the admin logistics and
+   *  carrier provider-legs `POST legs/:id/schedule` routes - absent one,
+   *  there is genuinely nothing configured to anchor a start time to, and
+   *  an unstarted LINE_HAUL leg stays UNKNOWN honestly, not as a bug in
+   *  this function. */
   scheduledDepartureAt: Date | null;
   scheduledArrivalAt: Date | null;
 }

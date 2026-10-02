@@ -20,7 +20,7 @@ let ctx: TestContext;
 let admin: string[];
 let customer: string[];
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
 const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);

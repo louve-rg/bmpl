@@ -23,11 +23,12 @@ let admin: string[];
 let customer: string[];
 let customerId: string;
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
 const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+const claim = (c: string[], token: string) => request(ctx.server).post(`/api/shipping/track/${token}/claim`).set('Cookie', c).send({});
 const put = (c: string[], p: string, b: object = {}) => request(ctx.server).put(`/api/${p}`).set('Cookie', c).send(b);
 
 let hub: Record<string, string> = {};
@@ -39,6 +40,19 @@ async function registerUser(email: string) {
   expect(reg.status).toBe(201);
   const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
   return { cookies: cookiesOf(reg), userId: user.id };
+}
+
+/**
+ * An account whose own phone matches `book()`'s hard-coded destination
+ * phone (`501-4449999`) — the same matching-signal rule
+ * shipment-recipient-linking.integration.spec.ts exercises in full; this
+ * file only needs ONE positive fixture to get a genuinely linked recipient
+ * onto a shipment, not a re-test of the claim rule itself.
+ */
+async function registerMatchingRecipient(loginEmail: string) {
+  const r = await registerUser(loginEmail);
+  await ctx.prisma.user.update({ where: { id: r.userId }, data: { phone: '501-4449999' } });
+  return r;
 }
 
 async function makeDriver() {
@@ -251,6 +265,49 @@ describe('shipment ETA-change notification (BMPL-345)', () => {
     expect(changes[0]!.data.previousEstimatedArrivalAt).toBe(first.toISOString());
     const row = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
     expect(row.etaBaselineAt!.getTime()).toBe(new Date(first.getTime() + 30 * 60_000).getTime());
+  });
+
+  it('a move AT OR OVER the threshold also notifies a genuinely LINKED recipient, in addition to the customer', async () => {
+    const driver = await makeDriver();
+    const { lineHaul, shipment } = await bookedReadyForLineHaul(driver);
+    const first = new Date(Date.now() + 4 * 3600_000);
+    expect((await schedule(lineHaul.id, { scheduledArrivalAt: first.toISOString() })).status).toBe(201);
+
+    const recipient = await registerMatchingRecipient(`erecip_${uniq()}@example.com`);
+    const claimed = await claim(recipient.cookies, shipment.recipientTrackingToken);
+    expect(claimed.status).toBe(201);
+
+    const delivered = await capture(async () => {
+      const moved = new Date(first.getTime() + 30 * 60_000);
+      expect((await schedule(lineHaul.id, { scheduledArrivalAt: moved.toISOString() })).status).toBe(201);
+    });
+
+    const changes = etaChanges(delivered);
+    const notifiedIds = changes.map((c) => c.userId);
+    expect(notifiedIds).toContain(customerId);
+    expect(notifiedIds).toContain(recipient.userId);
+    expect(changes).toHaveLength(2); // exactly the sender and the linked recipient — nobody else
+  });
+
+  it('does NOT notify an account that merely HOLDS the tracking link but never claimed it', async () => {
+    const driver = await makeDriver();
+    const { lineHaul, shipment } = await bookedReadyForLineHaul(driver);
+    const first = new Date(Date.now() + 4 * 3600_000);
+    expect((await schedule(lineHaul.id, { scheduledArrivalAt: first.toISOString() })).status).toBe(201);
+
+    // A real account whose contact details would even match — the strongest
+    // negative case, since matching the destination alone is not a claim.
+    const unlinked = await registerMatchingRecipient(`eunlinked_${uniq()}@example.com`);
+
+    const delivered = await capture(async () => {
+      const moved = new Date(first.getTime() + 30 * 60_000);
+      expect((await schedule(lineHaul.id, { scheduledArrivalAt: moved.toISOString() })).status).toBe(201);
+    });
+
+    const changes = etaChanges(delivered);
+    expect(changes.map((c) => c.userId)).not.toContain(unlinked.userId);
+    expect(changes).toHaveLength(1); // the sender only
+    expect(changes[0]!.userId).toBe(customerId);
   });
 
   it('several sub-threshold moves still fire once their SUM crosses the threshold, measured against the original baseline', async () => {
