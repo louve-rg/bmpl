@@ -1,6 +1,6 @@
 'use client';
 
-import { etaLine, showsEta, type RecipientTrackingView } from '../../lib/shipping';
+import { etaLine, showsEta, type LinkedRecipientTrackingView, type RecipientTrackingView } from '../../lib/shipping';
 import { destinationLine, recipientHeadline, stepTone } from '../../lib/recipient-tracking';
 
 /**
@@ -12,6 +12,16 @@ import { destinationLine, recipientHeadline, stepTone } from '../../lib/recipien
  * shared link: reference, a status headline, the service, the destination town,
  * the collection terminal while (and only while) the parcel waits there, and the
  * step progress in customer language.
+ *
+ * Shared by BOTH the anonymous `/track/[token]` page (base
+ * `RecipientTrackingView`, no photo field) and the linked
+ * `/dashboard/incoming/[reference]` page (`LinkedRecipientTrackingView`,
+ * carries the sender's pickup photo — BMPL-391). The prop type is the
+ * union of both on purpose: whether a given step can show a photo is
+ * decided by `'pickupPhotoUrls' in step`, a type guard that is also the
+ * actual compile-time proof — the anonymous page's steps are never typed
+ * as having the field at all, so there is nothing for that branch to read
+ * on that page, not merely nothing it happens to send.
  */
 
 const MODE_ICON: Record<string, string> = { Road: '🚚', Air: '✈️', Sea: '⛴️' };
@@ -22,7 +32,7 @@ function formatDate(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export function RecipientTracking({ view }: { view: RecipientTrackingView }) {
+export function RecipientTracking({ view }: { view: RecipientTrackingView | LinkedRecipientTrackingView }) {
   const town = destinationLine(view);
 
   return (
@@ -110,7 +120,7 @@ export function RecipientTracking({ view }: { view: RecipientTrackingView }) {
                         from ShipmentJourney's LegRow — one thumbnail set,
                         never a gallery, never a placeholder implying one
                         exists before it does. */}
-                    {step.pickupPhotoUrls && step.pickupPhotoUrls.length > 0 && (
+                    {'pickupPhotoUrls' in step && step.pickupPhotoUrls.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {step.pickupPhotoUrls.map((url, i) => (
                           // eslint-disable-next-line @next/next/no-img-element

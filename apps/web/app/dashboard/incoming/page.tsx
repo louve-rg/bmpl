@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { destinationLine, recipientHeadline } from '../../../lib/recipient-tracking';
-import { etaLine, shippingApi, showsEta, type RecipientTrackingView } from '../../../lib/shipping';
+import { etaLine, shippingApi, showsEta, type LinkedRecipientTrackingView } from '../../../lib/shipping';
 import type { ApiError } from '../../../lib/api';
 import { PageHeader, Alert, Badge, EmptyState, Spinner, type Tone } from '../../../components/ui';
 
@@ -34,7 +34,7 @@ function formatDate(iso: string | null): string | null {
 
 export default function IncomingShipmentsPage() {
   const router = useRouter();
-  const [rows, setRows] = useState<RecipientTrackingView[] | null>(null);
+  const [rows, setRows] = useState<LinkedRecipientTrackingView[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {

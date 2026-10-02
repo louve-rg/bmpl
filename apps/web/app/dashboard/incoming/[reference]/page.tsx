@@ -6,7 +6,7 @@ import { RecipientTracking } from '../../../../components/shipping/RecipientTrac
 import { RecipientAvailabilityWindow } from '../../../../components/shipping/RecipientAvailabilityWindow';
 import { Alert, Spinner } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
-import { shippingApi, type RecipientTrackingView } from '../../../../lib/shipping';
+import { shippingApi, type LinkedRecipientTrackingView } from '../../../../lib/shipping';
 
 /**
  * One claimed shipment, from the account's OWN "incoming" list (BMPL-179).
@@ -22,7 +22,7 @@ export default function IncomingShipmentPage() {
   const router = useRouter();
   const reference = String(params.reference ?? '');
 
-  const [view, setView] = useState<RecipientTrackingView | null>(null);
+  const [view, setView] = useState<LinkedRecipientTrackingView | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 

@@ -228,16 +228,6 @@ export interface RecipientTrackingStep {
   completed: boolean;
   isCurrent: boolean;
   completedAt: string | null;
-  /**
-   * BMPL-391 (Edward req 2's recipient gap): the same single optional
-   * pickup/handoff photo set the sender already sees for this leg, present
-   * only once a legitimately linked recipient reads it (`trackAsRecipient`/
-   * `listIncoming`) — the anonymous token view (`trackPublic`) never
-   * carries this field at all. Optional here for the ordinary BMPL-349
-   * reason (web/api deploy independently); absence means the same thing an
-   * empty array already means — nothing attached yet.
-   */
-  pickupPhotoUrls?: string[];
 }
 
 export interface RecipientTrackingView {
@@ -265,6 +255,31 @@ export interface RecipientTrackingView {
    * read it through {@link etaLine}, never dereferenced directly.
    */
   eta?: ShipmentEtaSummary;
+}
+
+/**
+ * BMPL-391 (Edward req 2's last gap), god's call, with reasoning worth
+ * keeping: `pickupPhotoUrls` is REQUIRED here and absent from the base
+ * `RecipientTrackingStep`/`RecipientTrackingView` entirely — not merely
+ * optional there — because the anonymous token view (`trackPublic`) must
+ * never be able to type-check its way into carrying this field. An
+ * optional field on the shared type would have let the type system permit
+ * exactly the mistake the API layer (#304's `attachPickupPhotos`) already
+ * prevents structurally: a future page could pass `trackPublic`'s data
+ * somewhere that reads a photo, and nothing but the data happening to be
+ * absent would stop it. This makes that impossible at compile time, not
+ * just at runtime — the same "one gate, not two" shape as `jobMapPoints`
+ * (BMPL-390) not re-checking the marketplace acceptance gate client-side.
+ *
+ * Only `trackAsRecipient`/`listIncoming` (via `shippingApi.incoming`/
+ * `incomingOne`) return this narrower shape; `trackPublic` stays pinned to
+ * the base `RecipientTrackingView` above, unchanged.
+ */
+export interface LinkedRecipientTrackingStep extends RecipientTrackingStep {
+  pickupPhotoUrls: string[];
+}
+export interface LinkedRecipientTrackingView extends RecipientTrackingView {
+  steps: LinkedRecipientTrackingStep[];
 }
 
 /**
@@ -364,9 +379,9 @@ export const shippingApi = {
    */
   claim: (token: string) => api.post<{ reference: string; linked: boolean }>(`/shipping/track/${encodeURIComponent(token)}/claim`),
   /** Every shipment this account has claimed as recipient. Same allowlisted shape as `trackPublic`. */
-  incoming: () => api.get<RecipientTrackingView[]>('/shipping/incoming'),
+  incoming: () => api.get<LinkedRecipientTrackingView[]>('/shipping/incoming'),
   /** One claimed shipment by reference — 404 if this account never claimed it. */
-  incomingOne: (reference: string) => api.get<RecipientTrackingView>(`/shipping/incoming/${encodeURIComponent(reference)}`),
+  incomingOne: (reference: string) => api.get<LinkedRecipientTrackingView>(`/shipping/incoming/${encodeURIComponent(reference)}`),
   /**
    * Edward requirement 11: a linked recipient's own delivery availability
    * window — never the sender's. Read-only; the recipient's own currently-
