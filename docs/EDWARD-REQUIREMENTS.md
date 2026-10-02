@@ -398,7 +398,7 @@ snapshot. Re-verified directly for this matrix, against the actual source
 rather than the PR's own description:
 
 - **Default exists and is maintained as a genuine singleton.**
-  `SavedAddress.isDefault` (`packages/database/prisma/schema.prisma:2681`).
+  `SavedAddress.isDefault` (`packages/database/prisma/schema.prisma:2685`).
   `AddressesService.create`/`update` (`apps/api/src/addresses/addresses.service.ts`)
   clear every other default in the same transaction before setting a new one;
   `remove()` promotes the next-most-recently-updated address to default if the
