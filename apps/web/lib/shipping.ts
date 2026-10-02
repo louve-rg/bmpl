@@ -345,6 +345,40 @@ export type ShipmentQuote =
       nextAvailableDate: string | null;
     };
 
+/**
+ * What staff has PREPARED for this shipment (a return, or a redirect) and is
+ * waiting on the paying customer to confirm — BMPL-375/364. Staff action
+ * alone never charges anyone; this is read-only until `confirmRoutingProposal`
+ * is called. `...ShipmentQuote` is the price RECOMPUTED FRESH at read time,
+ * never the number staff saw when they prepared it — informational, not a
+ * locked-in figure, and it may differ again at confirm time.
+ */
+export type RoutingProposal = {
+  kind: 'RETURN' | 'REROUTE';
+  legId: string;
+  /** Staff's own note on why — may be shown to the customer. */
+  note: string;
+  preparedAt: string;
+  /** REROUTE only: the new destination staff chose, frozen at prepare time. */
+  destination?: { name: string | null; address: string | null; city: string | null; district: string | null } | null;
+  /**
+   * REROUTE only, and only when a real price came back: whether this costs
+   * more than what was already paid — informational, never a gate. Every
+   * priced reroute requires the same explicit confirmation regardless of
+   * this value; there is no "free" path any more (owner ruling, BMPL-375).
+   */
+  legCostsMoreThanOriginal?: boolean;
+} & ShipmentQuote;
+
+export type RoutingProposalOutcome =
+  | { outcome: 'PENDING_MANUAL'; reason: string }
+  | {
+      outcome: 'INITIATED';
+      returnShipment?: { id: string; reference: string; quotedTotalMinor: number };
+      rerouteShipment?: { id: string; reference: string; quotedTotalMinor: number };
+      legCostsMoreThanOriginal?: boolean;
+    };
+
 export const shippingApi = {
   hubs: () => api.get<ShippingHub[]>('/shipping/hubs'),
   /** The modes the configured network can actually offer right now. */
@@ -354,6 +388,19 @@ export const shippingApi = {
   mine: () => api.get<ShipmentView[]>('/shipping'),
   track: (reference: string) => api.get<ShipmentView>(`/shipping/${encodeURIComponent(reference)}`),
   cancel: (id: string, reason: string) => api.post<ShipmentView>(`/shipping/${id}/cancel`, { reason }),
+  /**
+   * Whatever staff has prepared and is awaiting this customer's own
+   * confirmation (BMPL-375/364) — a 404 means nothing is pending, the
+   * normal case for almost every shipment, never an error to show.
+   */
+  routingProposal: (id: string) => api.get<RoutingProposal>(`/shipping/${id}/routing-proposal`),
+  /**
+   * THE explicit confirmation — the only call that may actually book and
+   * charge the return/reroute staff prepared. No body: there is nothing left
+   * for the customer to supply: the destination (reroute) and the reason
+   * were staff's own, frozen at prepare time.
+   */
+  confirmRoutingProposal: (id: string) => api.post<RoutingProposalOutcome>(`/shipping/${id}/routing-proposal/confirm`),
   /**
    * Replace-all, same shape as the admin hub-hours PUT: every window the
    * sender still wants must be in `windows`, for both roles at once — one
