@@ -36,6 +36,27 @@ async function registerUser(email: string) {
   return { cookies: cookiesOf(reg), userId: user.id };
 }
 
+/** A registered account whose own phone genuinely matches what the sender
+ *  typed for the recipient (`doorToDoor()`'s destination.phone) — the
+ *  matching-signal rule `claimAsRecipient` enforces (2026-09-30 owner
+ *  decision; see shipment-recipient-linking.integration.spec.ts). */
+async function registerMatchingRecipient(email: string, phone = '501-4445555') {
+  const r = await registerUser(email);
+  await ctx.prisma.user.update({ where: { id: r.userId }, data: { phone } });
+  return r;
+}
+
+/** Claim a shipment as its recipient — the SAME two-step (token + matching
+ *  account) BMPL-359's own test-worthy claim already proves elsewhere; this
+ *  suite only needs the end state (a genuinely linked recipientUserId). */
+async function claimAsRecipient(shipmentId: string, cookies: string[]) {
+  const { recipientToken } = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, select: { recipientToken: true } });
+  const r = await post(cookies, `shipping/track/${recipientToken}/claim`, {});
+  expect(r.status).toBe(201);
+}
+
+const openCourierConversation = (cookies: string[], reference: string) => post(cookies, `shipping/incoming/${reference}/courier-conversation`);
+
 async function makeDriver() {
   const s = uniq();
   const { cookies, userId } = await registerUser(`msgdrv_${s}@example.com`);
@@ -489,5 +510,212 @@ describe('the shipment payload names each leg\'s own conversation (BMPL-290)', (
     const staffRead = await get(admin, `admin/logistics/shipments/${s.reference}`);
     expect(staffRead.status).toBe(200);
     expect(staffRead.body.legs.find((l: { id: string }) => l.id === first.id).conversationId).toBe(thread.id);
+  });
+});
+
+describe('a genuinely linked recipient can reach the same courier too (BMPL-359)', () => {
+  /** Walk a door-to-door shipment all the way to an ACCEPTED last-mile leg —
+   *  the only leg kind a recipient may ever reach (see resolveParties' own
+   *  comment on why FIRST_MILE/LINE_HAUL are excluded). Shared by every test
+   *  below that needs a real, reachable thread, so the walk is written once. */
+  async function walkToAcceptedLastMile() {
+    const firstDriver = await makeDriver();
+    const s = await book();
+    const rows = await legsOf(s.id);
+    const first = rows.find((l) => l.kind === 'FIRST_MILE')!;
+    await ctx.prisma.shipmentLeg.update({ where: { id: first.id }, data: { assignedDriverProfileId: firstDriver.driverProfileId, courierStatus: 'ASSIGNED', acceptedAt: null } });
+    await driveLeg(firstDriver, first.id);
+    for (const lh of rows.filter((l) => l.kind === 'LINE_HAUL')) await flyLineHaul(lh.id);
+    const last = (await legsOf(s.id)).find((l) => l.kind === 'LAST_MILE')!;
+    const lastDriver = await makeDriver();
+    await ctx.prisma.shipmentLeg.update({ where: { id: last.id }, data: { assignedDriverProfileId: lastDriver.driverProfileId, courierStatus: 'ASSIGNED', acceptedAt: null } });
+    await post(lastDriver.cookies, `driver/shipping-jobs/${last.id}/accept`);
+    return { s, first, last, lastDriver };
+  }
+
+  it('refuses before any driver has ACCEPTED anything — dispatch merely offering the first-mile job is not enough', async () => {
+    // assignedDriverProfileId is set the moment dispatch OFFERS a leg, well
+    // before acceptance (this file's own first describe block proves it) — the
+    // recipient entry point must not race ahead of ensureShipmentLegThread and
+    // create a thread for a leg nobody has accepted yet.
+    await makeDriver(); // enough for dispatch to offer the first-mile leg to somebody
+    const s = await book();
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect(first.assignedDriverProfileId).not.toBeNull();
+    expect(await threadFor(first.id)).toBeNull();
+
+    const recipient = await registerMatchingRecipient(`bmpl359a_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+
+    const r = await openCourierConversation(recipient.cookies, s.reference);
+    expect(r.status).toBe(400); // no LAST_MILE leg exists yet at all, let alone an accepted one
+    expect(await threadFor(first.id)).toBeNull(); // still did not create one
+  });
+
+  it('refuses once the LAST_MILE leg exists but has not been accepted yet — the precise boundary, not just "nothing exists at all"', async () => {
+    const firstDriver = await makeDriver();
+    const s = await book();
+    const rows = await legsOf(s.id);
+    const first = rows.find((l) => l.kind === 'FIRST_MILE')!;
+    await ctx.prisma.shipmentLeg.update({ where: { id: first.id }, data: { assignedDriverProfileId: firstDriver.driverProfileId, courierStatus: 'ASSIGNED', acceptedAt: null } });
+    await driveLeg(firstDriver, first.id);
+    for (const lh of rows.filter((l) => l.kind === 'LINE_HAUL')) await flyLineHaul(lh.id);
+    const last = (await legsOf(s.id)).find((l) => l.kind === 'LAST_MILE')!;
+    expect(last.assignedDriverProfileId).not.toBeNull(); // dispatch already offered it
+    expect(await threadFor(last.id)).toBeNull(); // but nobody has accepted, so no thread yet
+
+    const recipient = await registerMatchingRecipient(`bmpl359h_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+    expect((await openCourierConversation(recipient.cookies, s.reference)).status).toBe(400);
+  });
+
+  it('refuses a user who never claimed the recipient slot at all', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+
+    const notLinked = await registerUser(`bmpl359b_${uniq()}@example.com`);
+    const r = await openCourierConversation(notLinked.cookies, s.reference);
+    expect(r.status).toBe(404);
+  });
+
+  it('holding a valid tracking token is not holding the recipient seat — the owner\'s own framing, proved both ways', async () => {
+    const { s, last } = await walkToAcceptedLastMile();
+    const thread = (await threadFor(last.id))!;
+    const { recipientToken } = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { recipientToken: true } });
+
+    // It really is a valid token: the public tracking view accepts it, with
+    // no session at all.
+    expect((await request(ctx.server).get(`/api/shipping/track/${recipientToken}`)).status).toBe(200);
+
+    // The messaging door is not reachable by a token in the first place —
+    // this route takes no token parameter, only @CurrentUser() — so an
+    // anonymous token holder cannot even construct a request that could earn
+    // a seat. Refused at authentication, before any recipient logic runs.
+    expect((await request(ctx.server).post(`/api/shipping/incoming/${s.reference}/courier-conversation`)).status).toBe(401);
+
+    // A real, signed-in account that has READ the token (genuinely holds the
+    // tracking link) but never called claim is still refused — reading and
+    // claiming are different capabilities, and only claiming links the
+    // account as shipment.recipientUserId, which is the only thing
+    // openShipmentLegForRecipient trusts.
+    const holder = await registerUser(`bmpl359tok_${uniq()}@example.com`);
+    expect((await request(ctx.server).get(`/api/shipping/track/${recipientToken}`).set('Cookie', holder.cookies)).status).toBe(200);
+    expect((await openCourierConversation(holder.cookies, s.reference)).status).toBe(404);
+
+    // No participant seat was created for the token holder on the real
+    // existing thread, by reading the token, by the refused attempt, or by
+    // both together.
+    const parts = await ctx.prisma.conversationParticipant.findMany({ where: { conversationId: thread.id } });
+    expect(parts.map((p) => p.userId)).not.toContain(holder.userId);
+    expect(parts).toHaveLength(2); // customer + last-mile driver only
+  });
+
+  it('refuses an account linked as recipient of a DIFFERENT shipment', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+
+    const otherShipment = await book();
+    const otherRecipient = await registerMatchingRecipient(`bmpl359c_${uniq()}@example.com`);
+    await claimAsRecipient(otherShipment.id, otherRecipient.cookies);
+
+    const r = await openCourierConversation(otherRecipient.cookies, s.reference);
+    expect(r.status).toBe(404);
+  });
+
+  it('joins the EXISTING last-mile thread once accepted, becomes a RECIPIENT participant, can send and read, and changes nothing for the customer or driver', async () => {
+    const { s, last, lastDriver } = await walkToAcceptedLastMile();
+    const thread = (await threadFor(last.id))!;
+
+    const recipient = await registerMatchingRecipient(`bmpl359d_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+
+    const opened = await openCourierConversation(recipient.cookies, s.reference);
+    expect(opened.status).toBe(201);
+    expect(opened.body.id).toBe(thread.id); // the SAME thread, not a new one
+
+    const parts = await ctx.prisma.conversationParticipant.findMany({ where: { conversationId: thread.id } });
+    expect(parts).toHaveLength(3);
+    const byUser = Object.fromEntries(parts.map((p) => [p.userId, p.role]));
+    expect(byUser[customerId]).toBe('CUSTOMER'); // unchanged by the recipient joining
+    expect(byUser[lastDriver.userId]).toBe('DRIVER'); // unchanged by the recipient joining
+    expect(byUser[recipient.userId]).toBe('RECIPIENT');
+
+    // The recipient can send; the driver and the customer both see it.
+    expect((await post(recipient.cookies, `conversations/${thread.id}/messages`, { body: 'Please leave it with the gate guard.' })).status).toBe(201);
+    const driverRead = await get(lastDriver.cookies, `conversations/${thread.id}`);
+    expect(driverRead.body.messages.map((m: { body: string }) => m.body)).toContain('Please leave it with the gate guard.');
+    const customerRead = await get(customer, `conversations/${thread.id}`);
+    expect(customerRead.body.messages.map((m: { body: string }) => m.body)).toContain('Please leave it with the gate guard.');
+
+    // The customer can still send, and the recipient sees it — the existing
+    // relationship is additive, never replaced.
+    expect((await post(customer, `conversations/${thread.id}/messages`, { body: 'Thanks for coordinating.' })).status).toBe(201);
+    const recipientRead = await get(recipient.cookies, `conversations/${thread.id}`);
+    expect(recipientRead.body.messages.map((m: { body: string }) => m.body)).toContain('Thanks for coordinating.');
+
+    // Privacy (owner's requirement 7, non-negotiable): the participant list
+    // the recipient sees carries only what every other participant list in
+    // this module already carries — name, initials, avatar, role, canSend —
+    // never a phone number, address, or document.
+    const seenParticipants = recipientRead.body.participants as Array<Record<string, unknown>>;
+    expect(seenParticipants.length).toBe(3);
+    for (const p of seenParticipants) {
+      expect(Object.keys(p).sort()).toEqual(['avatarUrl', 'canSend', 'initials', 'name', 'role', 'userId'].sort());
+    }
+  });
+
+  it('a stranger driver still cannot reach the thread just because a recipient can — the recipient does not widen the driver-privacy boundary', async () => {
+    const { s, last } = await walkToAcceptedLastMile();
+    const thread = (await threadFor(last.id))!;
+    const recipient = await registerMatchingRecipient(`bmpl359e_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+    expect((await openCourierConversation(recipient.cookies, s.reference)).status).toBe(201);
+
+    const stranger = await makeDriver();
+    expect((await get(stranger.cookies, `conversations/${thread.id}`)).status).toBe(404);
+  });
+
+  it('reaches the CURRENT (LAST_MILE) leg\'s thread, not a completed earlier one, on a multi-leg journey', async () => {
+    const { s, first, last } = await walkToAcceptedLastMile();
+    const lastThread = (await threadFor(last.id))!;
+    const firstThread = (await threadFor(first.id))!;
+    expect(lastThread.id).not.toBe(firstThread.id);
+
+    const recipient = await registerMatchingRecipient(`bmpl359f_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+    const opened = await openCourierConversation(recipient.cookies, s.reference);
+    expect(opened.status).toBe(201);
+    expect(opened.body.id).toBe(lastThread.id); // reaches the CURRENT leg...
+    expect(opened.body.id).not.toBe(firstThread.id); // ...never the completed one
+
+    // And still cannot reach the completed first-mile thread directly — being
+    // a recipient of the shipment is not membership of every leg's own thread.
+    expect((await get(recipient.cookies, `conversations/${firstThread.id}`)).status).toBe(404);
+  });
+
+  it('refuses the recipient on a FIRST_MILE thread even while it is still live — this leg is the courier\'s coordination with the SENDER, never the recipient', async () => {
+    // The sharper version of the multi-leg test above: this is not a
+    // completed-history question, it is a kind question. recipientUserId is
+    // a SHIPMENT-level field, so WITHOUT a kind guard in resolveParties it
+    // would read true for every leg of the shipment, including the one
+    // still actively coordinating pickup from the sender's own door.
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    const thread = (await threadFor(first.id))!;
+
+    const recipient = await registerMatchingRecipient(`bmpl359g_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+
+    expect((await get(recipient.cookies, `conversations/${thread.id}`)).status).toBe(404);
+    expect((await post(recipient.cookies, `conversations/${thread.id}/messages`, { body: 'hi' })).status).toBe(404);
+    // And the discovery endpoint itself must not resolve to this leg either —
+    // there is no LAST_MILE/DIRECT leg yet, so it has nothing to open.
+    expect((await openCourierConversation(recipient.cookies, s.reference)).status).toBe(400);
   });
 });

@@ -12,8 +12,12 @@ export type ConversationContext = (typeof CONVERSATION_CONTEXTS)[number];
 export const CONVERSATION_STATUSES = ['OPEN', 'CLOSED'] as const;
 export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
 
-/** A participant's role WITHIN a conversation (distinct from their platform role). */
-export const CONVERSATION_PARTICIPANT_ROLES = ['CUSTOMER', 'VENDOR', 'DRIVER', 'SUPPORT', 'EMPLOYER', 'APPLICANT', 'LISTER', 'ENQUIRER'] as const;
+/** A participant's role WITHIN a conversation (distinct from their platform role).
+ *  RECIPIENT (BMPL-359): a shipment's linked recipientUserId, when different from
+ *  the customer who booked it — rides the SAME CUSTOMER_DRIVER pairing a shipment
+ *  leg already has, never a pairing of its own (see authorize()'s own comment in
+ *  messaging.service.ts for why that is safe). */
+export const CONVERSATION_PARTICIPANT_ROLES = ['CUSTOMER', 'VENDOR', 'DRIVER', 'SUPPORT', 'EMPLOYER', 'APPLICANT', 'LISTER', 'ENQUIRER', 'RECIPIENT'] as const;
 export type ConversationParticipantRole = (typeof CONVERSATION_PARTICIPANT_ROLES)[number];
 
 /** Message kinds. INTERNAL_NOTE is support/admin-only and never shown to end users. */
