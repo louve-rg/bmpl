@@ -966,15 +966,21 @@ export class ShipmentService {
    * money (the price is the customer's business), the parcel description
    * (customer-typed, can be sensitive), the handoff PIN (the two-party
    * handoff survives a leaked link only if the link cannot complete one),
-   * custody actor names, driver identity, and operator-typed exception or
-   * cancellation reasons (label only).
+   * custody actor names, driver identity, operator-typed exception or
+   * cancellation reasons (label only), and the pickup photo — see
+   * `attachPickupPhotos`'s own comment for why that one field is deliberately
+   * NOT reached from here.
    *
    * A miss is one fixed 404 whatever the cause — wrong token, deleted row,
    * never existed — so a guessed URL cannot confirm a real shipment exists.
    *
    * This is the SAME allowlist a legitimately linked recipient sees in their
    * own account (`trackAsRecipient`/`listIncoming`) — linking does not widen
-   * it, it only lets an account reach it without holding the raw token.
+   * it, it only lets an account reach it without holding the raw token. THE
+   * ONE NAMED EXCEPTION: the pickup photo, added only for those two linked
+   * surfaces, never for this one — possessing this token proves nothing
+   * about identity (Ruling 12), and a photo is sensitive for the same reason
+   * the parcel description above already is.
    */
   async trackPublic(token: string) {
     const s = await this.prisma.shipment.findUnique({
@@ -1002,6 +1008,34 @@ export class ShipmentService {
       s.availabilityWindows.map((w) => ({ role: w.role, startTime: w.startTime, endTime: w.endTime })),
     );
     return { confidence: eta.confidence, estimatedArrivalAt: eta.estimatedArrivalAt };
+  }
+
+  /**
+   * The one deliberate exception to `recipientView()`'s own parity rule
+   * (above): a linked recipient sees the SAME single optional pickup-photo
+   * set the sender already sees on their own tracking view (`serialize()`'s
+   * `pickupPhotoUrls`, per leg) — Ruling 7 approved recipient access to it
+   * "once a real recipient audience exists," and requirement 3 shipping is
+   * what made that audience real. `trackPublic` (token only, no identity)
+   * is NEVER routed through this method: the token proves possession, not
+   * identity, which is the exact line Ruling 12 already draws, and a photo
+   * is at least as sensitive as the parcel description `recipientView()`'s
+   * own header already excludes from the anonymous view for that reason.
+   *
+   * Matched by `sequence` against the SAME `live` legs `recipientView()`
+   * itself filtered to, so a cancelled leg's photo (if it had one) stays
+   * excluded here too, not just from the step list.
+   */
+  private async attachPickupPhotos<T extends { steps: Array<{ sequence: number }> }>(view: T, legs: RecipientViewGraph['legs']) {
+    const live = legs.filter((l) => l.status !== 'CANCELLED');
+    const bySequence = new Map(live.map((l) => [l.sequence, l]));
+    const steps = await Promise.all(
+      view.steps.map(async (step) => ({
+        ...step,
+        pickupPhotoUrls: await this.photoUrls(bySequence.get(step.sequence)?.handoffPhotoKeys ?? []),
+      })),
+    );
+    return { ...view, steps };
   }
 
   private recipientView(s: RecipientViewGraph) {
@@ -1056,17 +1090,22 @@ export class ShipmentService {
     const s = await this.prisma.shipment.findUnique({ where: { reference }, include: RECIPIENT_VIEW_INCLUDE });
     if (!s || s.recipientUserId !== userId) throw new NotFoundException('No shipment with that reference.');
     const hubHours = await this.hubHoursForLegs([this.toEtaLegInputs(s.legs)]);
-    return { ...this.recipientView(s), eta: this.recipientEtaSummary(s, hubHours) };
+    const view = await this.attachPickupPhotos(this.recipientView(s), s.legs);
+    return { ...view, eta: this.recipientEtaSummary(s, hubHours) };
   }
 
   /**
    * Every shipment this account has claimed as recipient, newest first.
    *
-   * Must stay byte-identical, per shipment, to what `trackPublic`/
-   * `trackAsRecipient` return for that SAME shipment (the parity a
-   * BMPL-179 test pins) — including `eta`, which is why this batches hub
-   * hours ONCE across every shipment on the page rather than reusing
-   * `trackPublic`'s per-shipment fetch N times.
+   * Must stay byte-identical, per shipment, to what `trackAsRecipient`
+   * returns for that SAME shipment (the parity a BMPL-179 test pins) —
+   * including `eta`, which is why this batches hub hours ONCE across every
+   * shipment on the page rather than reusing a per-shipment fetch N times.
+   *
+   * No longer byte-identical to `trackPublic` — see `attachPickupPhotos`'s
+   * own comment for why that is now a deliberate, named exception rather
+   * than a drift: both linked surfaces (this one and `trackAsRecipient`)
+   * carry the pickup photo, the anonymous token view never does.
    */
   async listIncoming(userId: string) {
     const rows = await this.prisma.shipment.findMany({
@@ -1077,7 +1116,12 @@ export class ShipmentService {
     });
     const legsByShipment = rows.map((s) => this.toEtaLegInputs(s.legs));
     const hubHours = await this.hubHoursForLegs(legsByShipment);
-    return rows.map((s) => ({ ...this.recipientView(s), eta: this.recipientEtaSummary(s, hubHours) }));
+    return Promise.all(
+      rows.map(async (s) => ({
+        ...(await this.attachPickupPhotos(this.recipientView(s), s.legs)),
+        eta: this.recipientEtaSummary(s, hubHours),
+      })),
+    );
   }
 
   /**
