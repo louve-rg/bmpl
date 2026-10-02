@@ -21,7 +21,7 @@ let ctx: TestContext;
 let reader: string[]; // logistics.read only — the support-agent/hub-staff persona this card is about
 let admin: string[]; // super admin, used only to create the hub fixture
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 
 const COURIER_PHONE = '+501-600-9876';
 

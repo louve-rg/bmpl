@@ -25,7 +25,7 @@ let ctx: TestContext;
 let admin: string[];
 let customer: string[];
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 
 const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
@@ -193,9 +193,10 @@ describe('claiming the link', () => {
 
   /**
    * WHAT THIS PROVES, AND WHAT IT CANNOT: this is a PARITY check — the two
-   * views produce identical output. Parity proves the linked account's view
-   * and the anonymous view AGREE; it can never prove either one is
-   * RESTRICTED, because both call the SAME `recipientView()` serializer. If
+   * views produce identical output, with ONE NAMED EXCEPTION (below). Parity
+   * proves the linked account's view and the anonymous view AGREE on
+   * everything else; it can never prove either one is RESTRICTED, because
+   * both still call the SAME `recipientView()` serializer underneath. If
    * that serializer ever widened to include a field it should not — the
    * sender's name, the parcel description, the handoff PIN — this test would
    * still pass: the two sides would agree on the wider payload just as
@@ -208,8 +209,16 @@ describe('claiming the link', () => {
    * must never appear, regardless of which key they might surface under. Do
    * not delete that test believing this one covers the same ground; do not
    * assume this test alone is sufficient if `recipientView()` ever changes.
+   *
+   * THE ONE NAMED EXCEPTION, added deliberately, not a drift: the linked
+   * account's own `steps` carry `pickupPhotoUrls` (Ruling 7, once requirement
+   * 3 made a real recipient audience exist — see `attachPickupPhotos`'s own
+   * comment in `shipment.service.ts`); the anonymous token view never gains
+   * that field. This fixture books no photo, so the field is merely present
+   * and empty here — `shipping-pickup-photo.integration.spec.ts` test 9b is
+   * where a real photo is proven to actually appear.
    */
-  it('the linked account sees EXACTLY the same allowlisted payload the anonymous link would — linking never widens it', async () => {
+  it('the linked account sees the SAME allowlisted payload the anonymous link would, except the one named exception (the pickup photo)', async () => {
     const s = await book();
     const recipient = await registerMatchingRecipient(`rlparity_${uniq()}@example.com`);
     expect((await claim(recipient.cookies, s.recipientTrackingToken)).status).toBe(201);
@@ -218,10 +227,18 @@ describe('claiming the link', () => {
     const viaAccount = await get(recipient.cookies, `shipping/incoming/${s.reference}`);
     expect(viaToken.status).toBe(200);
     expect(viaAccount.status).toBe(200);
-    expect(viaAccount.body).toEqual(viaToken.body);
+
+    for (const step of viaAccount.body.steps) expect(step.pickupPhotoUrls).toEqual([]);
+    for (const step of viaToken.body.steps) expect(step.pickupPhotoUrls).toBeUndefined();
+
+    const stripped = {
+      ...viaAccount.body,
+      steps: viaAccount.body.steps.map(({ pickupPhotoUrls, ...rest }: Record<string, unknown>) => rest),
+    };
+    expect(stripped).toEqual(viaToken.body);
 
     const list = await get(recipient.cookies, 'shipping/incoming');
-    expect(list.body[0]).toEqual(viaToken.body);
+    expect(list.body[0]).toEqual(viaAccount.body);
   });
 
   it('claiming requires a real signed-in session — holding the token alone is not enough', async () => {

@@ -399,6 +399,12 @@ enum AuditAction {
   SHIPMENT_RETURN_PENDING_MANUAL
   SHIPMENT_REROUTE_INITIATED
   SHIPMENT_REROUTE_PENDING_MANUAL
+  // BMPL-375: staff PREPARING a return/reroute is now its own audited event,
+  // distinct from INITIATED (which fires only once a real charge/shipment
+  // exists) — owner ruling: staff action alone must never be read as the
+  // customer's payment consent, so the audit trail must not conflate them.
+  SHIPMENT_RETURN_PREPARED
+  SHIPMENT_REROUTE_PREPARED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -5284,6 +5290,7 @@ model ShipmentLeg {
 
   custodyEvents CustodyEvent[]
   offers        ShipmentLegOffer[]
+  routingProposal ShipmentRoutingProposal?
 
   // Sequence is unique per shipment — two legs numbered 3 would make "what is
   // next" ambiguous, and the sequencing rule depends on it being answerable.
@@ -5301,6 +5308,53 @@ model ShipmentLeg {
   @@index([operatedByProviderId, status])
   @@map("shipment_legs")
   driverEarning DriverEarning?
+}
+
+enum ShipmentRoutingProposalKind {
+  RETURN
+  REROUTE
+}
+
+/// BMPL-375: the line between "staff proposed this" and "the paying customer
+/// agreed to be charged for it" — owner ruling, verbatim in substance: staff
+/// action alone must never authorize a wallet charge. A staff member with
+/// logistics.manage PREPARES a return or a charge-increasing reroute, which
+/// writes exactly this row and NOTHING ELSE money-shaped (no Payment, no
+/// escrow, no linked return/reroute Shipment) — the original shipment keeps
+/// reading EXCEPTION, not RETURNED/REROUTED, until the row is consumed.  Only
+/// the shipment's OWN customerUserId confirming (a separate, customer-scoped
+/// action) reads this row, recomputes the price FRESH (never trusts what is
+/// stored here), and THEN calls the existing create()/payment/escrow flow —
+/// at which point this row is deleted, consumed by the shipment it produced.
+///
+/// One row per leg (@@unique([legId])): a leg cannot have two competing
+/// proposals, and loading "the" proposal for a leg is never ambiguous.
+///
+/// `destination` is REROUTE-only — the operator-chosen new endpoint
+/// (`RerouteInput['destination']`, already Zod-validated on the way in),
+/// frozen at prepare time so confirmation does not require the customer (or
+/// a second staff round-trip) to resupply it. Null for RETURN: the reversed
+/// trip is fully derived from the shipment's own stored origin, exactly as
+/// `previewReturn`/`returnToSender` already compute it fresh every time.
+/// That RETURN<->NULL, REROUTE<->NOT NULL pairing is also enforced as a raw
+/// CHECK constraint in the migration (`shipment_routing_proposals_destination_kind_check`)
+/// — structural, not merely conventional, the same reasoning BMPL-375 applied
+/// to moving the wallet-ownership guard into the sink. Prisma has no
+/// attribute for a CHECK constraint in this schema version, so it is
+/// invisible here by necessity, the same gap documented for the hand-written
+/// GIN trigram indexes (packages/database/CLAUDE.md §6, mechanism 1) — do not
+/// "restore" it by deleting the constraint to match what this file shows.
+model ShipmentRoutingProposal {
+  id               String                      @id @default(cuid())
+  legId            String                      @unique
+  leg              ShipmentLeg                 @relation(fields: [legId], references: [id], onDelete: Cascade)
+  kind             ShipmentRoutingProposalKind
+  destination      Json?
+  note             String
+  preparedByUserId String
+  preparedAt       DateTime                    @default(now())
+
+  @@map("shipment_routing_proposals")
 }
 
 /// Append-only offer history for a courier leg. The CURRENT offer is

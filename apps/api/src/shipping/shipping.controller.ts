@@ -277,6 +277,28 @@ export class ShippingController {
   }
 
   /**
+   * BMPL-375: the price staff has PREPARED (a return, or a charge-increasing
+   * reroute) — recomputed fresh, never the number stored at prepare time.
+   * Ownership is enforced inside the service, the same self-scoped-query
+   * discipline every other route on this controller already follows.
+   */
+  @Get(':id/routing-proposal')
+  routingProposal(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.shipments.routingProposalForCustomer(id, u.userId);
+  }
+
+  /**
+   * THE CONFIRMATION — owner ruling (BMPL-375): staff action alone must
+   * never authorize a wallet charge, so this is the only call that may
+   * actually book and charge the return/reroute staff prepared, and only
+   * the shipment's own customer may make it.
+   */
+  @Post(':id/routing-proposal/confirm')
+  confirmRoutingProposal(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.shipments.confirmRouting(id, u.userId);
+  }
+
+  /**
    * BMPL-285: the sender's own write surface for pickup/delivery
    * availability windows — replace-all, same shape as the admin hub-hours
    * PUT. By id, since the sender's own shipment view already carries it.

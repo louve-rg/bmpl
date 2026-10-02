@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { destinationLine, recipientHeadline } from '../../../lib/recipient-tracking';
-import { etaLine, shippingApi, showsEta, type RecipientTrackingView } from '../../../lib/shipping';
+import { etaLine, shippingApi, showsEta, type LinkedRecipientTrackingView } from '../../../lib/shipping';
 import type { ApiError } from '../../../lib/api';
 import { PageHeader, Alert, Badge, EmptyState, Spinner, type Tone } from '../../../components/ui';
 
@@ -14,9 +14,13 @@ import { PageHeader, Alert, Badge, EmptyState, Spinner, type Tone } from '../../
  * Deliberately separate from `/dashboard/shipments`: that page is the SENDER's
  * view (money, full leg detail, cancel) of parcels this account booked. This
  * page is the RECIPIENT's view — the same deliberately minimal allowlist
- * `/track/[token]` already shows anonymously, just reachable from the account
- * a claim linked it to instead of a saved link. No role is required to reach
- * it: the recipient need not be a CUSTOMER.
+ * `/track/[token]` already shows anonymously (no role required to reach it:
+ * the recipient need not be a CUSTOMER), just reachable from the account a
+ * claim linked it to instead of a saved link — WITH ONE NAMED EXCEPTION as
+ * of BMPL-391/#304: each shipment's steps here also carry the sender's
+ * pickup/handoff photo (`LinkedRecipientTrackingView`), which the token-only
+ * view never does. Claiming widens content by exactly that one field, not
+ * by convention but by a type the anonymous view cannot even express.
  */
 
 const TONE_FOR: Record<string, Tone> = {
@@ -34,7 +38,7 @@ function formatDate(iso: string | null): string | null {
 
 export default function IncomingShipmentsPage() {
   const router = useRouter();
-  const [rows, setRows] = useState<RecipientTrackingView[] | null>(null);
+  const [rows, setRows] = useState<LinkedRecipientTrackingView[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {

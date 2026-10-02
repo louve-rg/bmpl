@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../../lib/api';
 import { uploadFile } from '../../../../../lib/uploads';
-import { pickupView, type PickupLocation } from '../../../../../lib/driver-job';
+import { jobMapPoints, pickupView, type PickupLocation } from '../../../../../lib/driver-job';
+import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRouteMap';
 import {
   Card,
   PageHeader,
@@ -236,6 +237,29 @@ export default function DriverJobDetailPage() {
           </p>
         )}
       </Card>
+
+      {/* The map draws only the pins the server actually sent (Edward
+          requirement 8): the vendor's pickup pin is a business address and
+          arrives unconditionally; the customer's door pin stays area-only
+          until this driver accepts (delivery-core.service.ts), the exact
+          same BMPL-136 gate shipping's courier legs already honour — this
+          reuses that gate's output, it does not re-check it. Still behind a
+          tap (ExpandableRouteMap's own default) so tiles never load for a
+          driver on data who just wants the words. */}
+      {(() => {
+        const points = jobMapPoints(job);
+        if (points.length === 0) return null;
+        return (
+          <Card className="p-4 sm:p-6">
+            <ExpandableRouteMap points={points} title={`Order #${job.orderNumber} · route`} />
+            {points.length < 2 && job.addressUnlocked === false && (
+              <p className="mt-2 text-xs text-slate-500">
+                The customer&rsquo;s pin appears here once you accept this delivery.
+              </p>
+            )}
+          </Card>
+        );
+      })()}
 
       <Card className="p-4 sm:p-6">
         <div className="mb-3 flex items-center justify-between">

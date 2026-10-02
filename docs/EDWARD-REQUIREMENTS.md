@@ -48,10 +48,10 @@ and found it on requirements 1, 3 and 11 at once.
 | 4 | Granular driver service areas (district → city) | **End-to-end as of `2cbcf73`** | `3950db0` (PR #126) for the API; city picker landed `99e98c1` (BMPL-353, PR #272); wired to the lane-town endpoint by `2cbcf73` (BMPL-368, PR #279) — a lane-only town (e.g. Ladyville) is selectable as of `2cbcf73` |
 | 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255) |
 | 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
-| 7 | Courier & vehicle identification once assigned | **Done** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247 |
-| 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) |
+| 7 | Courier & vehicle identification once assigned | **Done for the booking customer as of `4d96bb0`; not yet true for a linked recipient** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient half held on an owner migration signature, PR #293 (BMPL-359) |
+| 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done for shipping and marketplace delivery, as of `16e4b4b`; whether the requirement was ever meant to cover marketplace's always-two-stop case is unsettled** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) for shipping; marketplace's driver job screen wired to the same `ExpandableRouteMap` by `16e4b4b` (BMPL-390, PR #302) — no API change, the pre-acceptance pin gate was already correct |
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
-| 10 | Cancellation before custody, failed delivery, return-to-sender | **No longer owner-blocked as of `f8f89dd`; return-to-sender shipped API-only as of `f8f89dd`; failed delivery unbuilt as of `f8f89dd`** | Pre-custody half already correct in shipped code; return-to-sender (non-vendor courier) landed `f8f89dd` (BMPL-183/343, PR #271) once the owner ruled on price and who may initiate; no staff screen as of `f8f89dd` (one is in open PR #278, alongside hold/reroute); failed-delivery trigger does not exist as of `f8f89dd` |
+| 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `4d96bb0`: return-to-sender/reroute carry a live staff-alone-can-charge defect under Ruling 1 (BMPL-375); failed delivery unbuilt** | Pre-custody half already correct in shipped code; return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) but with no customer-confirmation step before charging — proven live by the API and QA lanes; the fix (PR #288) is written, tested and CI-green but unmerged, held on an owner migration signature; no staff screen as of `f8f89dd` either (one is in open PR #278); failed-delivery trigger does not exist as of `4d96bb0` |
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
 | 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff screen pending for one as of `7ff34a1`** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by BMPL-346. ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen is in an open PR, #278, not merged as of `7ff34a1` |
 
@@ -341,12 +341,52 @@ already shipped matches the ruling exactly, so no change was needed. The same
 boundary was independently enforced on the courier's own side by BMPL-247,
 which removed `DriverProfile.phone` from `ShipmentService.expectedAtHub()`'s
 selection entirely — not filtered from the response, absent from the query.
-The unbuilt piece — a dedicated business contact number, explicitly
-distinguished from a private one — is its own open card, BMPL-201.
+**The business-contact-number question is closed, not open.** BMPL-201
+closed 2026-10-01 as already satisfied by prior work, with no schema change:
+the existing SHIPMENT_LEG/CUSTOMER_DRIVER messaging thread (below) routes
+contact through BML rather than through any phone number at all, which
+makes the missing personal/business-number distinction moot rather than
+blocking. The line above once pointed at BMPL-201 as the unbuilt piece; it
+no longer is one.
+
+**Messaging for the booking customer is wired and reachable**: a per-leg
+"Message your courier" link appears once a driver has accepted
+(`ShipmentJourney.tsx`, gated on a non-null `conversationId` so an
+unaccepted leg shows nothing rather than a dead link) — the owner's
+instruction that customer-to-courier contact should use BML's existing
+per-leg messaging, confirmed wired end-to-end, not just present in the API.
+
+**Not yet true for the RECIPIENT, when different from the booking
+customer**: today a linked recipient has neither courier identity nor a
+messaging path at all (`trackAsRecipient`/`recipientView` is a deliberate
+allowlist that excludes driver identity entirely). A fix for the messaging
+half is written and tested — PR #293 lets a linked recipient join the
+existing per-leg thread — but it is **unmerged**, held on an owner migration
+signature (BMPL-359). Do not read this as working today.
 
 ## 8. Expandable maps & A/B/C/D route stops (pre-acceptance)
 
-**Status: done.** Merged `4eac6e8` (PR #121) — a reusable
+**Status: done for both shipping's multi-hub job maps and marketplace
+delivery, as of `16e4b4b`.** `apps/web/app/dashboard/driver/jobs/[id]` (the
+marketplace delivery driver's own job screen) now reuses `ExpandableRouteMap`
+directly via a new `jobMapPoints()` (`lib/driver-job.ts`) that feeds the
+existing `tripMapPoints()` — no second map implementation. No API change was
+needed: `delivery-core.service.ts` already gated the customer's door pin on
+acceptance (`pinnedLocation: null` until `acceptedAt` is set) exactly the
+same way shipping's leg pins are gated, so the pre-acceptance privacy half
+of this requirement was already correct for marketplace — this closed only
+the missing screen. `jobMapPoints()` draws whatever pin it is handed and
+never re-checks the gate itself, so a pre-acceptance call naturally yields a
+pickup-only pin; it does not duplicate the server's privacy rule in a second
+place.
+
+A marketplace delivery always has exactly two stops (pickup, drop-off), so
+whether the owner's A/B/C/D requirement was ever meant to cover it at all
+remains **unsettled** — nothing quotes Edward on that point either way.
+`16e4b4b` answers the engineering question, not the scope question: a
+shipped component does not retroactively settle what Edward asked for.
+
+Merged `4eac6e8` (PR #121) — a reusable
 embedded-preview → expand → full-screen modal pattern, verified to touch none
 of the residential-privacy-sensitive files it was excluded from and to
 introduce no new coordinate source. Merged `c99a596` (PR #129) — the driver
@@ -398,7 +438,7 @@ snapshot. Re-verified directly for this matrix, against the actual source
 rather than the PR's own description:
 
 - **Default exists and is maintained as a genuine singleton.**
-  `SavedAddress.isDefault` (`packages/database/prisma/schema.prisma:2685`).
+  `SavedAddress.isDefault` (`packages/database/prisma/schema.prisma:2691`).
   `AddressesService.create`/`update` (`apps/api/src/addresses/addresses.service.ts`)
   clear every other default in the same transaction before setting a new one;
   `remove()` promotes the next-most-recently-updated address to default if the
@@ -418,9 +458,10 @@ default except by deleting the current one.
 
 ## 10. Cancellation before custody, failed delivery, return-to-sender
 
-**Status: no longer owner-blocked as of `f8f89dd`; return-to-sender
-shipped API-only as of `f8f89dd`; failed delivery still entirely unbuilt
-as of `f8f89dd`.** The custody boundary itself — a
+**Status: NOT complete. Return-to-sender/reroute carry a live authorization
+defect under [Ruling 1](./OWNER-RULINGS.md#ruling-1--a-courier-accepting-a-job-is-not-custody)
+(tracked BMPL-375), and failed delivery is still entirely unbuilt, both as of
+`4d96bb0`.** The custody boundary itself — a
 courier *accepting* a job is not the same as *custody* — was already
 correct in shipped code before this card existed:
 `ShipmentService.cancel()` blocks once a leg reaches `IN_PROGRESS`, set only
@@ -436,15 +477,39 @@ movement (`previewReturn()`/`returnToSender()` reuse `quote()` reversed —
 zero new pricing logic, recomputed fresh at confirmation, never trusted from
 a prior preview) — calculated, shown, explicitly confirmed, then charged
 through the existing payment path, never a silent reversal of the original
-charge. Who may initiate: the charge-creating confirmation requires
-`logistics.manage` and there is no customer-facing route anywhere in this
-codebase for it — staff-mediated, not sender-direct. Scope fence: non-vendor
-courier shipments only; a marketplace shipment is refused outright. If no
-valid price can be calculated, the return stays `PENDING_MANUAL` rather than
-guessing. **No staff screen exists as of `f8f89dd`** — that commit is
-API-only (8 files, all `apps/api`/`packages/database`); one is being built
-in an open PR (#278, covering both this and hold/reroute together), not
-yet merged.
+charge — **that is the design, and it is not what shipped.** As `f8f89dd`
+actually shipped it, the staff confirmation that requires `logistics.manage`
+is **also** the thing that charges the customer's wallet, with no customer
+route anywhere in this codebase and no customer confirmation step of any
+kind. That is the exact shape Ruling 1's further ruling forbids: "staff
+action alone must never authorize charging the customer's wallet." It is
+not a hypothetical — the API lane confirmed the chain by reading the code
+(`reversedReturnInput()` hardcodes `payWithWallet: true`) and the QA lane
+reproduced it empirically against `4d96bb0` (a customer wallet moved
+83300 → 66600 on return, 83300 → 75800 on reroute, from one staff HTTP call,
+no customer involved anywhere). Reroute mirrors return exactly and carries
+the identical defect.
+
+**A fix is written and tested, but unmerged — do not read this requirement
+as complete.** PR #288 (`fix/bmpl-375-return-reroute-payment-consent`)
+splits the staff action into two steps: staff may still prepare a return or
+reroute (a `ShipmentRoutingProposal` row, nothing charged), but only the
+shipment's own customer may confirm it — confirmation 404s for any other
+user — and only that confirmation step executes the charge. Negative-control
+tests (PR #285) and a sink-level ownership test (PR #292) both exist and
+pass against the fix's branch; neither test exists on `main` today. This is
+reported from the API and QA lanes' own verification, not independently
+re-checked by this pass. PR #288 is CI-green and held at the owner's gate
+only because merging it applies a new production migration, which needs the
+owner's own signature, not because of any remaining engineering question.
+
+Scope fence: non-vendor courier shipments only; a marketplace shipment is
+refused outright. If no valid price can be calculated, the return stays
+`PENDING_MANUAL` rather than guessing. **No staff screen exists as of
+`f8f89dd`** — that commit is API-only (8 files, all
+`apps/api`/`packages/database`); one is being built in an open PR (#278,
+covering both this and hold/reroute together), not yet merged. Whether
+#278's screen still matches PR #288's two-step design is not verified here.
 
 Failed delivery remains **entirely unbuilt as of `f8f89dd`**: the `EXCEPTION` state and
 `flagException`/`resolveException` already exist and are the right
@@ -453,12 +518,6 @@ that a delivery attempt failed — does not exist anywhere; today a failed
 attempt only enters the system if staff hear about it and type it in by
 hand, and `DeliveryStatus` has no `FAILED` value. No branch exists for this
 half.
-
-**Separately flagged, not fixed here:** [Ruling 1](./OWNER-RULINGS.md#ruling-1--a-courier-accepting-a-job-is-not-custody)
-in `OWNER-RULINGS.md` still reads "still open on BMPL-183: who may initiate
-a return... and the return-leg price" — that ruling text is itself stale
-now that `f8f89dd` has shipped both answers. Reported to god; out of scope
-for this edit (one file, five rows).
 
 ## 11. Recipient availability windows & updates
 

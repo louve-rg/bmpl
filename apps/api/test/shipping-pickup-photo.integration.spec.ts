@@ -24,12 +24,14 @@
  *    already gated by the guard chain's `logistics.read`/`logistics.operate`
  *    permission on the admin route).
  *
- * The recipient is deliberately NOT covered here: the only recipient-facing
- * surface is `trackPublic` (`GET shipping/track/:token`), and its own doc
- * comment already excludes the parcel description as "customer-typed, can be
- * sensitive" — a photo of the parcel is at least as sensitive by that same
- * reasoning, so extending that anonymous, unauthenticated allowlist to cover
- * it is a product call this suite does not make. Reported, not guessed.
+ * The recipient: covered as of the fix below test 9, once requirement 3
+ * (recipient account linking) made a real identity-backed recipient
+ * audience exist at all. Ruling 7 had already approved recipient access to
+ * this photo "once a real recipient audience exists" — this suite's own
+ * history originally read that as not yet actionable, before requirement 3
+ * shipped. The anonymous, unauthenticated `trackPublic` link is a DIFFERENT
+ * audience (token possession, not identity — Ruling 12) and never gains
+ * this field; test 9 pins that half, test 9b pins the linked half.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -41,7 +43,7 @@ let dispatch: ShipmentDispatchService;
 let admin: string[];
 let hub: Record<string, string> = {};
 let seq = 0;
-const uniq = () => `${Date.now()}_${(seq += 1)}`;
+const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
 const PNG = Buffer.from(
@@ -362,6 +364,42 @@ describe('shipment pickup photo (BMPL-178)', () => {
     expect(track.status).toBe(200);
     expect(JSON.stringify(track.body)).not.toContain('pickupPhotoUrl');
     expect(JSON.stringify(track.body)).not.toContain(key);
+  });
+
+  /**
+   * BMPL req 2's recipient-access gap, closed: Ruling 7 approved recipient
+   * access to this photo "once a real recipient audience exists," and
+   * requirement 3 is what made that audience real. A LINKED recipient
+   * (`trackAsRecipient`/`listIncoming`) now sees the SAME photo the sender
+   * does; a BARE TOKEN HOLDER — test 9, directly above — still does not,
+   * because possessing the token proves nothing about identity (Ruling 12).
+   */
+  it('9b · a LINKED recipient sees the same pickup photo the sender does, on their own incoming-shipment view', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const firstMile = await assignedFirstMile(shipment.id, courier);
+    const key = await uploadPickupPhoto(courier, firstMile.id);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup-photo/confirm`, { photoKeys: [key] })).status).toBe(201);
+
+    // doorToDoor()'s own fixed destination phone — the same matching-signal
+    // rule shipment-recipient-linking.integration.spec.ts exercises in full.
+    const recipient = await registerUser(`photorecip_${uniq()}@example.com`);
+    await ctx.prisma.user.update({ where: { id: recipient.userId }, data: { phone: '501-4445555' } });
+    expect((await post(recipient.cookies, `shipping/track/${shipment.recipientTrackingToken}/claim`)).status).toBe(201);
+
+    const viaAccount = await get(recipient.cookies, `shipping/incoming/${shipment.reference}`);
+    expect(viaAccount.status).toBe(200);
+    const photographedStep = viaAccount.body.steps.find((s: { sequence: number }) => s.sequence === 1);
+    expect(photographedStep.pickupPhotoUrls).toHaveLength(1);
+
+    const viaList = await get(recipient.cookies, 'shipping/incoming');
+    expect(viaList.body[0].steps.find((s: { sequence: number }) => s.sequence === 1).pickupPhotoUrls).toHaveLength(1);
+
+    // And the token-only view, for the SAME shipment, still carries none —
+    // linking is what changed, not the underlying data.
+    const viaToken = await request(ctx.server).get(`/api/shipping/track/${shipment.recipientTrackingToken}`);
+    expect(JSON.stringify(viaToken.body)).not.toContain('pickupPhotoUrl');
   });
 
   it('10 · PER-LEG, NOT POOLED: a photo attached to one leg does not appear on its sibling legs of the same shipment', async () => {
