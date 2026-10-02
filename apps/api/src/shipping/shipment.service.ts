@@ -2711,7 +2711,7 @@ export class ShipmentService {
    * process's memory.
    */
   private async noticeEtaChange(
-    shipment: { id: string; customerUserId: string | null; reference: string; etaBaselineAt: Date | null },
+    shipment: { id: string; customerUserId: string | null; recipientUserId: string | null; reference: string; etaBaselineAt: Date | null },
     eta: { confidence: EtaConfidence; estimatedArrivalAt: Date | null },
   ) {
     const newAt = eta.confidence === 'UNKNOWN' ? null : eta.estimatedArrivalAt;
@@ -2728,9 +2728,18 @@ export class ShipmentService {
       data: { etaBaselineAt: newAt },
     });
     if (cas.count !== 1) return; // Someone else already moved the baseline first.
-    if (prevAt === null || !shipment.customerUserId) return; // Establishing the first baseline is silent.
+    if (prevAt === null) return; // Establishing the first baseline is silent.
 
-    await this.notifications.notifyUsers([shipment.customerUserId], {
+    // Sender and, when genuinely linked, the recipient — the same
+    // "scoped, not invented" contact list `rerouteShipment`'s own notify
+    // already uses for the same reason (Ruling 1): whoever is waiting on
+    // either end of a material ETA move deserves to hear about it, not just
+    // whoever paid. An unlinked recipient has no account to notify through
+    // yet, a real limit, not a decision to invent a channel around it.
+    const toNotify = [...(shipment.customerUserId ? [shipment.customerUserId] : []), ...(shipment.recipientUserId ? [shipment.recipientUserId] : [])];
+    if (toNotify.length === 0) return;
+
+    await this.notifications.notifyUsers(toNotify, {
       type: 'MARKETPLACE',
       category: 'DELIVERY',
       event: 'SHIPMENT_ETA_CHANGED',
