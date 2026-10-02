@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { canTransitionPayment, type PaymentStatus } from '@bmpl/shared';
 import { Prisma } from '@bmpl/database';
 import type { Currency } from '@bmpl/database';
@@ -231,6 +231,25 @@ export class PaymentsService {
   async escrowInTx(tx: Tx, paymentId: string, actor: ActorContext): Promise<void> {
     const fresh = await tx.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { holds: { where: { status: 'HELD' } } } });
     const payment = fresh;
+
+    // BMPL-375, owner ruling: staff action alone must never authorize a
+    // wallet charge. `authorize()` below already refused a mismatched actor
+    // before ever reaching here — but that was a copy of this rule each
+    // caller had to remember, not the rule itself. returnToSender and
+    // rerouteShipment reached this SAME sink through create() without ever
+    // carrying that copy, which is exactly how staff action alone could
+    // charge a customer. Enforced HERE instead, at the one place every
+    // customer-wallet debit passes through, so a caller who forgets it is
+    // refused rather than trusted. Every current caller already passes the
+    // real paying customer as `actor` (authorize(): checked above it;
+    // orders.checkout(): the session actor paying their own cart;
+    // shipment.create(): the confirmed owner of the shipment being booked) —
+    // this changes none of their behaviour, only what a future, forgetful
+    // caller is allowed to do.
+    if (payment.userId !== actor.userId) {
+      throw new ForbiddenException('The authorizing actor does not own this payment.');
+    }
+
     const wallet = await tx.walletAccount.findFirstOrThrow({ where: { userId: payment.userId, type: 'USER', currency: payment.currency } });
     if (fresh.status === 'AUTHORIZED') return; // concurrent replay
     if (fresh.status !== 'CREATED' && fresh.status !== 'PENDING') throw new ConflictException(`Cannot authorize a ${fresh.status} payment.`);

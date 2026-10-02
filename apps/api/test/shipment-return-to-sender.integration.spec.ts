@@ -204,6 +204,10 @@ async function walkToLastMileException(reason?: string) {
 const previewReturn = (legId: string) => post(admin, `admin/logistics/legs/${legId}/return-quote`, {});
 const returnToSender = (legId: string, body: object = { note: 'Recipient unreachable after two attempts.' }) =>
   post(admin, `admin/logistics/legs/${legId}/return-to-sender`, body);
+/** BMPL-375: staff only ever PREPARES — this is the paying customer's own
+ *  confirmation, the only call that may actually book and charge. */
+const confirmRouting = (shipmentId: string) => post(customer, `shipping/${shipmentId}/routing-proposal/confirm`, {});
+const routingProposal = (shipmentId: string) => get(customer, `shipping/${shipmentId}/routing-proposal`);
 
 /** A shipment fulfilling a marketplace order — the scope fence's other side. */
 async function marketplaceExceptionLeg() {
@@ -337,21 +341,50 @@ describe('previewReturn — read-only, moves nothing', () => {
   });
 });
 
-describe('returnToSender — the confirmation, and the only step that may charge', () => {
+describe('returnToSender — now only PREPARES (BMPL-375): staff action alone must never charge the customer', () => {
   it('books a new return shipment at the normal configured reverse price, charges the sender through the ordinary payment flow, and links it back — the original leg is left exactly as it was', async () => {
     const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
 
     const before = (await get(customer, 'wallet')).body as { availableMinor: number };
+    // Scoped against a BEFORE count, not an absolute zero — book()'s own
+    // original-shipment payment already exists and is legitimate.
+    const paymentsBefore = await ctx.prisma.payment.count();
     const preview = await previewReturn(legId);
     expect(preview.body.available).toBe(true);
     const expectedPrice = preview.body.totalMinor as number;
 
-    const r = await returnToSender(legId);
+    // STAFF PREPARES — and that is ALL this call may do. No charge, no
+    // shipment, no payment, no escrow — owner ruling, verbatim: staff action
+    // alone must never authorize charging the customer's wallet.
+    const prepared = await returnToSender(legId);
+    expect(prepared.status).toBe(201);
+    expect(prepared.body.outcome).toBe('PREPARED');
+    expect(prepared.body.totalMinor).toBe(expectedPrice);
+    expect(prepared.body.returnShipment).toBeUndefined();
+    expect(await ctx.prisma.payment.count()).toBe(paymentsBefore);
+    expect(await ctx.prisma.shipment.count({ where: { returnOfShipmentId: shipment.id } })).toBe(0);
+    const midWallet = (await get(customer, 'wallet')).body as { availableMinor: number };
+    expect(midWallet.availableMinor).toBe(before.availableMinor);
+    // The original shipment must not read as returned, paid, or any other
+    // financial state it is not yet in — a false financial status is worse
+    // than an incomplete one (owner's own instruction).
+    const midShipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+    expect(midShipment.status).toBe('EXCEPTION');
+
+    // The customer can see exactly what was prepared, at a FRESH price.
+    const seen = await routingProposal(shipment.id);
+    expect(seen.status).toBe(200);
+    expect(seen.body).toMatchObject({ kind: 'RETURN', available: true, totalMinor: expectedPrice });
+
+    // ONLY NOW — the paying customer's own confirmation — may this charge.
+    const r = await confirmRouting(shipment.id);
     expect(r.status).toBe(201);
     expect(r.body.outcome).toBe('INITIATED');
     expect(r.body.returnShipment).toBeTruthy();
     expect(r.body.returnShipment.id).not.toBe(shipment.id);
+    // The proposal is consumed — nothing left to confirm a second time.
+    expect(await ctx.prisma.shipmentRoutingProposal.count({ where: { legId } })).toBe(0);
 
     const returnRow = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: r.body.returnShipment.id } });
     expect(returnRow.returnOfShipmentId).toBe(shipment.id);
@@ -448,9 +481,10 @@ describe('returnToSender — the confirmation, and the only step that may charge
   });
 
   it('REFUSES a second return once one is already booked for the same shipment', async () => {
-    const { legId } = await walkToLastMileException();
+    const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
     expect((await returnToSender(legId)).status).toBe(201);
+    expect((await confirmRouting(shipment.id)).status).toBe(201);
 
     const again = await returnToSender(legId);
     expect(again.status).toBe(400);
@@ -458,17 +492,18 @@ describe('returnToSender — the confirmation, and the only step that may charge
   });
 
   it('REFUSES to resolve/resume the original leg once a return has already been booked against it (BMPL-356: the original attempt is settled, not reopened)', async () => {
-    const { legId } = await walkToLastMileException();
+    const { shipment, legId } = await walkToLastMileException();
     await addReverseRoutes();
     expect((await returnToSender(legId)).status).toBe(201);
+    expect((await confirmRouting(shipment.id)).status).toBe(201);
 
     const r = await post(admin, `admin/logistics/legs/${legId}/resolve-exception`, { resolution: 'RESUME', note: 'Trying to resume anyway.' });
     expect(r.status).toBe(400);
     expect(r.body.message).toMatch(/already returned/i);
 
     // Still RETURNED, not nudged back toward IN_PROGRESS/READY by the refused call.
-    const shipment = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } })).shipmentId } });
-    expect(shipment.status).toBe('RETURNED');
+    const reloaded = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipment.id } });
+    expect(reloaded.status).toBe('RETURNED');
   });
 
   it('REFUSES on a marketplace shipment, and creates or charges nothing', async () => {
@@ -504,5 +539,34 @@ describe('returnToSender — the confirmation, and the only step that may charge
     );
     const asManager = await post(managerCookies, `admin/logistics/legs/${legId}/return-to-sender`, { note: 'Manager confirming the return.' });
     expect(asManager.status).toBe(201);
+  });
+
+  it('BMPL-375: a different signed-in customer cannot read or confirm someone else\'s prepared return — same 404 whether wrong customer or nothing pending, enumeration-resistant', async () => {
+    const { shipment, legId } = await walkToLastMileException();
+    await addReverseRoutes();
+    const paymentsBefore = await ctx.prisma.payment.count();
+    expect((await returnToSender(legId)).status).toBe(201);
+
+    const stranger = await registerUser(`rstranger_${uniq()}@example.com`);
+    const strangerRead = await get(stranger.cookies, `shipping/${shipment.id}/routing-proposal`);
+    expect(strangerRead.status).toBe(404);
+    const strangerConfirm = await post(stranger.cookies, `shipping/${shipment.id}/routing-proposal/confirm`, {});
+    expect(strangerConfirm.status).toBe(404);
+
+    // Nothing moved — a stranger's attempt touches no money, no shipment.
+    expect(await ctx.prisma.payment.count()).toBe(paymentsBefore);
+    expect(await ctx.prisma.shipmentRoutingProposal.count({ where: { legId } })).toBe(1);
+
+    // The REAL customer can still confirm afterward — the stranger's refused
+    // attempt did not consume or corrupt the proposal.
+    expect((await confirmRouting(shipment.id)).status).toBe(201);
+  });
+
+  it('BMPL-375: the customer gets a plain 404 confirming when nothing was ever prepared', async () => {
+    const { shipment } = await walkToLastMileException();
+    const paymentsBefore = await ctx.prisma.payment.count();
+    const r = await confirmRouting(shipment.id);
+    expect(r.status).toBe(404);
+    expect(await ctx.prisma.payment.count()).toBe(paymentsBefore);
   });
 });

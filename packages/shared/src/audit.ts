@@ -295,6 +295,14 @@ export const AUDIT_ACTIONS = [
   // no valid configured price, so the reroute stays PENDING/MANUAL rather
   // than guessing one. Nothing is charged and no shipment is created.
   'SHIPMENT_REROUTE_PENDING_MANUAL',
+  // BMPL-375, owner ruling: staff action alone must never authorize a wallet
+  // charge, so a priceable return/charge-increasing reroute now PREPARES —
+  // writes a ShipmentRoutingProposal, charges nobody — distinct from
+  // INITIATED, which fires only once the paying customer has confirmed (or,
+  // for a non-charge-increasing reroute, immediately, since there is
+  // nothing to consent to).
+  'SHIPMENT_RETURN_PREPARED',
+  'SHIPMENT_REROUTE_PREPARED',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
