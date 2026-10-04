@@ -51,8 +51,6 @@ export function Header() {
   // The list is only shown below lg. If the window grows past it while open,
   // close it, so scroll is not left locked behind an invisible menu.
   useEffect(() => {
-    // Guarded: some test DOMs (jsdom) have no matchMedia; browsers always do.
-    if (typeof window.matchMedia !== 'function') return;
     const wide = window.matchMedia('(min-width: 1024px)');
     const onChange = () => {
       if (wide.matches) setOpen(false);
