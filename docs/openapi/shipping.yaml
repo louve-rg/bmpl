@@ -420,6 +420,66 @@ paths:
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/incoming/{reference}/courier-conversation:
+    post:
+      tags: [ShipmentRecipient]
+      summary: A linked recipient opens their own conversation with the courier on the current last-mile leg (BMPL-359)
+      description: >-
+        Takes no token and no body. The caller is the signed-in session user,
+        and the request is refused unless that user is the shipment's linked
+        `recipientUserId`. A tracking link alone never grants this: possession
+        of a link is not a recipient, and this route accepts no token parameter
+        at all. A non-linked caller gets the same 404 as an unknown reference,
+        so the response does not reveal whether the reference exists.
+
+        The conversation is the existing per-leg CUSTOMER_DRIVER thread for the
+        shipment's current LAST_MILE or DIRECT leg (the legs that end by
+        delivering to the recipient). It is not created here: the thread is
+        opened when a driver accepts the leg. Until then this route refuses
+        with 400. On success the caller is upserted into that thread as a
+        RECIPIENT participant with sending enabled (a previously left
+        participant is re-activated), the current driver is reconciled the
+        same way, and the conversation is returned.
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string }, description: Shipment reference }
+      responses:
+        "201":
+          description: The conversation for the current last-mile leg, with its messages (INTERNAL_NOTE messages are excluded for non-support viewers)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  contextType: { type: string, example: SHIPMENT_LEG }
+                  contextId: { type: string, description: The shipment leg id }
+                  pairing: { type: string, example: CUSTOMER_DRIVER }
+                  subject: { type: string, nullable: true }
+                  contextLabel: { type: string }
+                  status: { type: string }
+                  viewerRole: { type: string, description: The caller's role in this thread, e.g. RECIPIENT }
+                  canSend: { type: boolean }
+                  participants:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        userId: { type: string }
+                        role: { type: string }
+                        name: { type: string }
+                        initials: { type: string }
+                        avatarUrl: { type: string, nullable: true }
+                        canSend: { type: boolean }
+                  messages:
+                    type: array
+                    items: { type: object }
+        "400":
+          description: No courier conversation is open for this shipment yet (no driver has accepted the current last-mile or direct leg)
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /shipping/{reference}:
     get:
       tags: [Shipping]
