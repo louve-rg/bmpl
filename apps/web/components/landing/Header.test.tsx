@@ -129,11 +129,16 @@ describe('public Header mobile menu (P2)', () => {
     expect(panel()!.textContent).not.toContain('Sign out');
   });
 
-  it('shows sign out for a signed-in member', async () => {
+  it('shows sign out for a signed-in member, inside the account menu', async () => {
     await mount('signed-in');
     await openMenu();
-    expect(panel()!.textContent).toContain('Sign out');
+    // Guard: the mobile list rendered and holds the account menu.
+    expect(panel()!.textContent).toContain('Rae');
     expect(panel()!.textContent).not.toContain('Sign in');
+    expect(panel()!.textContent).not.toContain('Sign out');
+    const trigger = panel()!.querySelector<HTMLButtonElement>('button[aria-haspopup="true"]')!;
+    await act(async () => trigger.click());
+    expect(panel()!.textContent).toContain('Sign out');
   });
 
   it('closes the list when the window grows to desktop width', async () => {

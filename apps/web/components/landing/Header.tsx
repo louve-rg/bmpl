@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { BrandLockup } from '../Logo';
 import { ButtonLink } from '../ui';
 import { CartButton } from '../cart/CartButton';
@@ -10,13 +9,13 @@ import { SavedNavButton } from '../saved/SavedNavButton';
 import { AnnouncementBanner } from '../AnnouncementBanner';
 import { api } from '../../lib/api';
 import { PUBLIC_NAV } from '../../lib/public-nav';
+import { AccountMenu } from '../account/AccountMenu';
 import type { MeView } from '../../lib/types';
 import { useModalMenu } from '../../lib/use-modal-menu';
 
 
 export function Header() {
   const [open, setOpen] = useState(false);
-  const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const closeMenu = useCallback(() => setOpen(false), []);
@@ -48,19 +47,11 @@ export function Header() {
     return () => wide.removeEventListener('change', onChange);
   }, []);
 
-  async function logout() {
-    try {
-      await api.post('/auth/logout');
-    } catch {
-      /* ignore — clear local state regardless */
-    }
+  // Sign-out lives in AccountMenu; the header only drops its own signed-in state.
+  const signedOut = () => {
     setMe(null);
     setOpen(false);
-    router.push('/');
-    router.refresh();
-  }
-
-  const initials = me ? `${me.firstName?.[0] ?? ''}${me.lastName?.[0] ?? ''}`.toUpperCase() || 'U' : '';
+  };
 
   return (
     <>
@@ -89,20 +80,7 @@ export function Header() {
           {me === undefined ? (
             <span className="h-8 w-28 animate-pulse rounded-lg bg-white/10" aria-hidden />
           ) : me ? (
-            <>
-              <Link
-                href="/dashboard"
-                className="flex items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-medium text-white transition hover:bg-white/10"
-              >
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-belize-accent text-xs font-bold text-white">
-                  {initials}
-                </span>
-                <span className="max-w-[10rem] truncate">{me.firstName}</span>
-              </Link>
-              <button onClick={logout} className="text-sm font-medium text-blue-100 transition hover:text-white">
-                Sign out
-              </button>
-            </>
+            <AccountMenu me={me} tone="dark" afterSignOut="/" onSignedOut={signedOut} />
           ) : (
             <>
               <ButtonLink href="/login" variant="ghostLight" size="sm">
@@ -152,16 +130,8 @@ export function Header() {
             ))}
 
             {me === undefined ? null : me ? (
-              <div className="mt-2 flex flex-col gap-1 border-t border-white/10 pt-2">
-                <Link href="/dashboard" onClick={() => setOpen(false)} className="rounded px-2 py-2 font-medium text-white hover:bg-white/5">
-                  Dashboard
-                </Link>
-                <Link href="/orders" onClick={() => setOpen(false)} className="rounded px-2 py-2 text-blue-100 hover:bg-white/5 hover:text-white">
-                  My orders
-                </Link>
-                <button onClick={logout} className="rounded px-2 py-2 text-left text-blue-100 hover:bg-white/5 hover:text-white">
-                  Sign out
-                </button>
+              <div className="mt-2 border-t border-white/10 pt-2">
+                <AccountMenu me={me} tone="dark" afterSignOut="/" onSignedOut={signedOut} onNavigate={() => setOpen(false)} />
               </div>
             ) : (
               <div className="mt-2 flex gap-3">

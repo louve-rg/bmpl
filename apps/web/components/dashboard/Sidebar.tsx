@@ -2,12 +2,11 @@
 
 import Link from 'next/link';
 import { BrandLockup } from '../Logo';
-import { Avatar } from '../Avatar';
 import { RoleSwitcher } from './RoleSwitcher';
-import { LogoutButton } from './LogoutButton';
 import { DashboardNavList } from './DashboardNavList';
 import type { MeView } from '../../lib/types';
 import { useUnreadMessages } from '../../lib/use-unread-messages';
+import { AccountMenu } from '../account/AccountMenu';
 
 /**
  * The DESKTOP dashboard sidebar.
@@ -33,19 +32,7 @@ export function Sidebar({ me }: { me: MeView }) {
         <DashboardNavList me={me} unread={unread} />
 
         <div className="mt-auto border-t border-slate-100 pt-4">
-          <Link
-            href="/dashboard/profile"
-            className="mb-2 flex items-center gap-3 rounded-bmpl-md px-3 py-1.5 transition hover:bg-slate-50"
-          >
-            <Avatar name={`${me.firstName} ${me.lastName}`} src={me.avatarUrl} size="md" />
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold text-belize-navy">
-                {me.firstName} {me.lastName}
-              </span>
-              <span className="block truncate text-xs text-slate-500">{me.email}</span>
-            </span>
-          </Link>
-          <LogoutButton />
+          <AccountMenu me={me} tone="light" />
         </div>
       </div>
     </aside>
