@@ -71,6 +71,18 @@ const shipment = (over: Partial<ShipmentView> = {}): ShipmentView => ({
 });
 
 describe('shippingMoney', () => {
+  it('groups thousands with commas, and changes no digit', () => {
+    expect(shippingMoney(99999999999)).toBe('BZ$999,999,999.99');
+    expect(shippingMoney(123456789)).toBe('BZ$1,234,567.89');
+    expect(shippingMoney(100000)).toBe('BZ$1,000.00');
+    expect(shippingMoney(99999)).toBe('BZ$999.99');
+  });
+
+  it('keeps the sign where it was', () => {
+    expect(shippingMoney(-1250)).toBe('BZ$-12.50');
+    expect(shippingMoney(-123456)).toBe('BZ$-1,234.56');
+  });
+
   it('reads as Belize dollars, not raw minor units', () => {
     expect(shippingMoney(16700)).toBe('BZ$167.00');
     expect(shippingMoney(0)).toBe('BZ$0.00');
