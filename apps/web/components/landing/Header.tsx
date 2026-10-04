@@ -66,7 +66,7 @@ export function Header() {
           <BrandLockup />
         </Link>
 
-        <div className="hidden items-center gap-6 lg:flex">
+        <div className="hidden items-center gap-4 lg:flex">
           <a href={PUBLIC_NAV_HOME.href} className="flex min-h-[44px] items-center text-sm font-medium text-blue-100 transition hover:text-white">
             {PUBLIC_NAV_HOME.label}
           </a>
