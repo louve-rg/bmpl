@@ -14,6 +14,9 @@ const push = vi.fn();
 const refresh = vi.fn();
 vi.mock('../../lib/api', () => ({ api: { get: vi.fn(), post: (...a: unknown[]) => apiPost(...a) } }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
+// The menu's summary boxes load the wallet when the panel opens. Stub it to
+// resolve like the real call does, so the summary never trips on the bare api mock.
+vi.mock('../../lib/wallet', () => ({ walletApi: { summary: () => Promise.resolve({ exists: false }) } }));
 
 import { AccountMenu } from './AccountMenu';
 
