@@ -110,7 +110,7 @@ export function AccountSummary({ me, tone }: { me: MeView; tone: 'dark' | 'light
                   <span className="font-medium">{`${l.label}: Not available`}</span>
                 ) : (
                   <>
-                    <span className="font-medium">{l.value}</span> <span className={muted}>{l.label}</span>
+                    <span className={muted}>{l.label}:</span> <span className="font-medium">{l.value}</span>
                   </>
                 )}
                 <span className={`block text-xs ${muted}`}>{l.sublabel}</span>
@@ -145,5 +145,5 @@ function notApplicable(sublabel: string): Line {
 function walletLine(w: WalletSummary | null): Line {
   if (!w) return { label: 'Wallet', sublabel: 'your BML wallet', value: null };
   if (!w.exists) return { label: 'No wallet yet', sublabel: 'your BML wallet', value: null, muted: true };
-  return { label: 'available', sublabel: 'your BML wallet', value: moneyLabel(w.availableMinor, w.currency) };
+  return { label: 'Available balance', sublabel: 'your BML wallet', value: moneyLabel(w.availableMinor, w.currency) };
 }

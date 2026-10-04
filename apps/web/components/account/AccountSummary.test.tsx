@@ -74,6 +74,9 @@ describe('AccountSummary', () => {
     walletSummary.mockResolvedValue({ exists: true, currency: 'BZD', availableMinor: 2000 });
     const text = await render(me(['DELIVERY_DRIVER']));
     expect(text).toContain('$12.50');
+    // Label first on every value line, so the two lines in one box read the same way.
+    expect(text).toContain('Deliveries: 1');
+    expect(text).toContain('Delivery earnings today: $12.50');
     expect(text).toContain('Delivery earnings today');
     expect(text).toContain('driver deliveries');
     expect(text).toContain('$20.00');
