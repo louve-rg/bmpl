@@ -899,7 +899,7 @@ describe('CHARACTERISATION OF CURRENT BEHAVIOUR (not correct behaviour): a repla
     return { thread, oldDriver, newDriver, recipient };
   }
 
-  it('open owner question (MDF-111), not deliberate: a replaced driver can still READ the thread, while being refused a SEND', async () => {
+  it('open owner question (MDF-111): a replaced driver can still READ the thread, while being refused a SEND', async () => {
     const { thread, oldDriver } = await reassignedLastMile();
     expect((await get(oldDriver.cookies, `conversations/${thread.id}`)).status).toBe(200);
     expect((await post(oldDriver.cookies, `conversations/${thread.id}/messages`, { body: 'still here' })).status).toBe(403);
