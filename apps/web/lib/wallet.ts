@@ -64,9 +64,15 @@ export const walletApi = {
   claimTestFunds: () => api.post<TestFundingResult>('/wallet/test-fund', {}),
 };
 
-/** Minor units as Belize dollars. */
+/**
+ * Minor units as Belize dollars, with thousands separators (display only). The digits and
+ * rounding are the same as before: toFixed(2) of the major amount. Never feed this output
+ * back into an input: the three amount inputs parse plain digits.
+ */
 export function bzd(minor: number): string {
-  return `BZ$${(minor / 100).toFixed(2)}`;
+  const [whole, cents] = (Math.abs(minor) / 100).toFixed(2).split('.');
+  const sign = minor < 0 ? '-' : '';
+  return 'BZ$' + sign + whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + cents;
 }
 
 /**

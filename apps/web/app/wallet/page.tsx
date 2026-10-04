@@ -149,7 +149,7 @@ export default function WalletPage() {
           <>
             <Card className="mt-6 p-5 sm:p-6">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Available</p>
-              <p className="mt-1 text-4xl font-bold tabular-nums text-belize-navy">{bzd(summary.availableMinor)}</p>
+              <p className="mt-1 break-words text-4xl font-bold tabular-nums text-belize-navy">{bzd(summary.availableMinor)}</p>
 
               <dl className="mt-5 grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 text-sm">
                 <div>
