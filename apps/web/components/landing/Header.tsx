@@ -67,7 +67,7 @@ export function Header() {
         </Link>
 
         <div className="hidden items-center gap-6 lg:flex">
-          <a href={PUBLIC_NAV_HOME.href} className="text-sm font-medium text-blue-100 transition hover:text-white">
+          <a href={PUBLIC_NAV_HOME.href} className="flex min-h-[44px] items-center text-sm font-medium text-blue-100 transition hover:text-white">
             {PUBLIC_NAV_HOME.label}
           </a>
           {PUBLIC_NAV_GROUPS.map((group) => (
@@ -75,13 +75,13 @@ export function Header() {
             // browser, with no hover-only menu to get wrong. Each group is one
             // labelled disclosure with its real destinations inside.
             <details key={group.heading} className="group relative">
-              <summary className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-blue-100 transition hover:text-white">
+              <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-1 text-sm font-medium text-blue-100 transition hover:text-white">
                 {group.heading}
                 <span aria-hidden className="text-xs transition group-open:rotate-180">▾</span>
               </summary>
               <div className="absolute left-0 top-full z-50 mt-3 flex min-w-[14rem] flex-col gap-1 rounded-bmpl-md bg-belize-navy p-2 shadow-bmpl-md ring-1 ring-white/10">
                 {group.items.map((item) => (
-                  <a key={item.label} href={item.href} className="rounded px-3 py-2 text-sm text-blue-100 hover:bg-white/5 hover:text-white">
+                  <a key={item.label} href={item.href} className="flex min-h-[44px] items-center rounded px-3 py-2 text-sm text-blue-100 hover:bg-white/5 hover:text-white">
                     {item.label}
                   </a>
                 ))}
@@ -134,7 +134,7 @@ export function Header() {
           className="border-t border-white/10 bg-belize-navy lg:hidden"
         >
           <div className="container-bmpl flex flex-col gap-1 py-3">
-            <a href={PUBLIC_NAV_HOME.href} onClick={() => setOpen(false)} className="rounded px-2 py-2 font-medium text-white hover:bg-white/5">
+            <a href={PUBLIC_NAV_HOME.href} onClick={() => setOpen(false)} className="flex min-h-[44px] items-center rounded px-2 py-2 font-medium text-white hover:bg-white/5">
               {PUBLIC_NAV_HOME.label}
             </a>
             {PUBLIC_NAV_GROUPS.map((group) => (
@@ -145,7 +145,7 @@ export function Header() {
                     key={item.label}
                     href={item.href}
                     onClick={() => setOpen(false)}
-                    className="rounded px-2 py-2 text-blue-100 hover:bg-white/5 hover:text-white"
+                    className="flex min-h-[44px] items-center rounded px-2 py-2 text-blue-100 hover:bg-white/5 hover:text-white"
                   >
                     {item.label}
                   </a>
