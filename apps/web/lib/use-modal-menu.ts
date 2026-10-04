@@ -16,8 +16,11 @@ export const MENU_FOCUSABLE =
  * page behind `inert`. A slide-out nav menu does not need that, and adding it
  * to the public header would change what the page behind it can reach.
  *
+ * A press outside the panel (not on the trigger) also closes it. The dashboard
+ * drawer's scrim already did that; the hook now does it for every caller.
+ *
  * Callers own their visual shell, their own close on navigation, and the
- * trigger/panel refs. This hook owns only the four behaviours above.
+ * trigger/panel refs. This hook owns only the behaviours above.
  */
 export function useModalMenu({
   open,
@@ -40,6 +43,27 @@ export function useModalMenu({
       document.body.style.overflow = previous;
     };
   }, [open]);
+
+  // A press outside the panel closes it. The trigger is outside the panel too, so
+  // it is excluded: otherwise tapping the trigger closes the menu and the same
+  // tap reopens it, and the button looks dead. Desktop groups and the account
+  // menu already close this way; the mobile list did not.
+  useEffect(() => {
+    if (!open) return;
+    function onPress(e: MouseEvent | TouchEvent) {
+      const target = e.target as Node;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      onClose();
+    }
+    document.addEventListener('mousedown', onPress);
+    document.addEventListener('touchstart', onPress);
+    return () => {
+      document.removeEventListener('mousedown', onPress);
+      document.removeEventListener('touchstart', onPress);
+    };
+    // Refs are stable; the handler follows onClose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, onClose]);
 
   // Move focus into the panel on open, and back to the trigger on close, so a
   // keyboard or screen-reader user is not left at the top of the document.
