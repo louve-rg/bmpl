@@ -455,8 +455,10 @@ export const shippingApi = {
     }),
 };
 
-/** Minor units to a Belize dollar string. */
-/** Display only: the same digits as before, with thousands separators (see bzd in wallet.ts). */
+/**
+ * Minor units to a Belize dollar string. Display only: the same digits as before, with
+ * thousands separators (see bzd in wallet.ts).
+ */
 export function shippingMoney(minor: number): string {
   const [whole, cents] = (Math.abs(minor) / 100).toFixed(2).split('.');
   const sign = minor < 0 ? '-' : '';
