@@ -97,6 +97,45 @@ describe('saved addresses — create, list, update, delete', () => {
   });
 });
 
+describe('saved addresses — un-defaulting by PATCH never leaves the account with no default', () => {
+  const isDefaultOf = async (id: string) =>
+    (await ctx.prisma.savedAddress.findUniqueOrThrow({ where: { id }, select: { isDefault: true } })).isDefault;
+
+  it('PATCH isDefault:false on the current default promotes another address, so exactly one stays the default', async () => {
+    const cust = await makeCustomer();
+    const a = (await post(cust, 'addresses', addressBody({ label: 'Home' }))).body;
+    const b = (await post(cust, 'addresses', addressBody({ label: 'Work', addressLine1: '9 Albert Street' }))).body;
+    expect(await isDefaultOf(a.id)).toBe(true);
+
+    const res = await patch(cust, `addresses/${a.id}`, { isDefault: false });
+    expect(res.status).toBe(200);
+    expect(res.body.isDefault).toBe(false);
+    // stored state, not just the response: the successor really holds the default
+    expect(await isDefaultOf(a.id)).toBe(false);
+    expect(await isDefaultOf(b.id)).toBe(true);
+  });
+
+  it('PATCH isDefault:false on a NON-default address changes nothing about the current default (control)', async () => {
+    const cust = await makeCustomer();
+    const a = (await post(cust, 'addresses', addressBody({ label: 'Home' }))).body;
+    const b = (await post(cust, 'addresses', addressBody({ label: 'Work', addressLine1: '9 Albert Street' }))).body;
+
+    expect((await patch(cust, `addresses/${b.id}`, { isDefault: false })).status).toBe(200);
+    expect(await isDefaultOf(a.id)).toBe(true);
+    expect(await isDefaultOf(b.id)).toBe(false);
+  });
+
+  it('PATCH isDefault:false on the ONLY address is refused, and the stored default is untouched', async () => {
+    const cust = await makeCustomer();
+    const only = (await post(cust, 'addresses', addressBody({ label: 'Home' }))).body;
+    expect(await isDefaultOf(only.id)).toBe(true);
+
+    const res = await patch(cust, `addresses/${only.id}`, { isDefault: false });
+    expect(res.status).toBe(400);
+    expect(await isDefaultOf(only.id)).toBe(true);
+  });
+});
+
 describe('saved addresses — cross-user isolation', () => {
   it('one account cannot list, update or delete a saved address that belongs to another account', async () => {
     const owner = await makeCustomer();
