@@ -711,15 +711,21 @@ export class MessagingService {
   // ===========================================================================
 
   /**
-   * Who may close or reopen a delivery thread. The current driver always may, so
-   * a replacement is not locked out of a thread someone else opened. The creator
-   * may too, EXCEPT a driver who created it and has since been replaced: that
-   * driver must not silence the customer and the new driver. A customer or vendor
-   * who opened their own thread keeps the right, because they never held the
-   * DRIVER role on it.
+   * Who may close or reopen a thread. The live counterpart of the driver role is
+   * the CURRENT driver on the thread, not whoever created it.
+   *
+   * SHIPMENT_LEG: only the current driver. A replaced driver must not silence the
+   * recipient and the courier who now holds the parcel.
+   *
+   * DELIVERY: the current driver may, and the creator may too, EXCEPT a driver who
+   * created the thread and has since been replaced. A customer or vendor who opened
+   * their own thread keeps the right, because they never held the DRIVER role on it.
+   *
+   * Everything else keeps the creator rule unchanged.
    */
   private canCloseOrReopen(actor: Actor, ctx: { conv: ConversationRow; parties: ContextParties }): boolean {
     if (this.canRespondSupport(actor)) return true;
+    if (ctx.conv.contextType === 'SHIPMENT_LEG') return actor.userId === ctx.parties.currentDriverUserId;
     if (ctx.conv.contextType === 'DELIVERY') {
       if (actor.userId === ctx.parties.currentDriverUserId) return true;
       const heldDriverRole = ctx.conv.participants.some((p) => p.userId === actor.userId && p.role === 'DRIVER');
