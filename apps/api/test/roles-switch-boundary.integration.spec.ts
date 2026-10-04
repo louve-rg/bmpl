@@ -17,13 +17,20 @@ let ctx: TestContext;
 let seq = 0;
 const uniq = () => `${Date.now()}_${(seq += 1)}`;
 
-const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
+const post = (c: string[], p: string, b: object = {}) =>
+  request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
 
 async function registerVerifiedCustomer() {
   const email = `rsb_${uniq()}@example.com`;
   const reg = await request(ctx.server)
     .post('/api/auth/register')
-    .send({ email, password: 'CustomerPass123', firstName: 'R', lastName: 'S', acceptedTerms: true });
+    .send({
+      email,
+      password: 'CustomerPass123',
+      firstName: 'R',
+      lastName: 'S',
+      acceptedTerms: true,
+    });
   expect(reg.status).toBe(201);
   const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
   await ctx.prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
@@ -33,13 +40,23 @@ async function registerVerifiedCustomer() {
 async function holdVendorRole(userId: string, status: 'PENDING' | 'REJECTED' | 'APPROVED') {
   await ctx.prisma.userRole.upsert({
     where: { userId_roleCode: { userId, roleCode: 'VENDOR' } },
-    create: { userId, roleCode: 'VENDOR', status, approvedAt: status === 'APPROVED' ? new Date() : null },
+    create: {
+      userId,
+      roleCode: 'VENDOR',
+      status,
+      approvedAt: status === 'APPROVED' ? new Date() : null,
+    },
     update: { status, approvedAt: status === 'APPROVED' ? new Date() : null },
   });
 }
 
 async function activeRoleOf(userId: string) {
-  return (await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { activeRoleCode: true } })).activeRoleCode;
+  return (
+    await ctx.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { activeRoleCode: true },
+    })
+  ).activeRoleCode;
 }
 
 async function switchedAuditRows(userId: string) {

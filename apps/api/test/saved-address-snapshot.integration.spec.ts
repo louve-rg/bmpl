@@ -85,8 +85,11 @@ const SHIPMENT_ADDRESS_FIELDS = {
 
 const ORDER_ADDRESS_FIELDS = {
   fullName: true, phone: true, addressLine1: true, addressLine2: true, city: true, district: true, country: true,
-  latitude: true, longitude: true, instructions: true,
+  latitude: true, longitude: true,
 } as const;
+
+/** Delivery instructions live on the order delivery, not on the address row. */
+const ORDER_DELIVERY_FIELDS = { instructions: true } as const;
 
 beforeAll(async () => {
   ctx = await bootApp();
@@ -129,7 +132,7 @@ describe('editing or deleting a saved address leaves recorded shipment and order
     const vendor = await makeVendorProduct();
     await post(customer.cookies, 'cart/items', { productId: vendor.productId, quantity: 1 }).expect(201);
     const order = await post(customer.cookies, 'checkout', {
-      vendors: [{ vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'DELIVERY' }],
+      vendors: [{ vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'DELIVERY', deliveryInstructions: 'Ring the bell at the gate' }],
       deliveryAddress: { fullName: destination.name, phone: destination.phone, addressLine1: destination.address, city: destination.city, district: destination.district },
       payWithWallet: false,
     });
@@ -139,12 +142,16 @@ describe('editing or deleting a saved address leaves recorded shipment and order
     const shipmentSnapshot = async () =>
       JSON.stringify(await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, select: SHIPMENT_ADDRESS_FIELDS }));
     const orderSnapshot = async () =>
-      JSON.stringify(await ctx.prisma.orderAddress.findFirstOrThrow({ where: { orderId }, select: ORDER_ADDRESS_FIELDS }));
+      JSON.stringify({
+        address: await ctx.prisma.orderAddress.findFirstOrThrow({ where: { orderId }, select: ORDER_ADDRESS_FIELDS }),
+        delivery: await ctx.prisma.orderDelivery.findFirstOrThrow({ where: { vendorOrder: { orderId } }, select: ORDER_DELIVERY_FIELDS }),
+      });
 
     const shipBefore = await shipmentSnapshot();
     const orderBefore = await orderSnapshot();
     expect(shipBefore).toContain('12 Queen Street');
     expect(orderBefore).toContain('12 Queen Street');
+    expect(orderBefore).toContain('Ring the bell at the gate'); // control: the instructions were recorded before the edit
 
     // EDIT the saved address.
     const edited = await patch(customer.cookies, `addresses/${addressId}`, { addressLine1: '99 Changed Road', city: 'Changed Town', fullName: 'Changed Name' });
