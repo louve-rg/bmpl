@@ -30,7 +30,7 @@ export default async function DashboardHome() {
       <Card className="p-6">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold text-belize-navy">Your roles</h2>
-          <Link href="/dashboard/roles" className="inline-flex min-h-[44px] items-center text-sm font-semibold text-belize-blue hover:underline">
+          <Link href="/dashboard/roles" className="-my-3 inline-flex min-h-[44px] items-center text-sm font-semibold text-belize-blue hover:underline">
             Manage roles →
           </Link>
         </div>
