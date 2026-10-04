@@ -430,6 +430,13 @@ export const shippingApi = {
   /** One claimed shipment by reference — 404 if this account never claimed it. */
   incomingOne: (reference: string) => api.get<LinkedRecipientTrackingView>(`/shipping/incoming/${encodeURIComponent(reference)}`),
   /**
+   * The id of this recipient's open courier conversation, or null when none is
+   * open yet. A pure read — it never creates a conversation. A non-recipient gets
+   * the same refusal the messaging POST gives, never a null.
+   */
+  incomingCourierConversation: (reference: string) =>
+    api.get<{ conversationId: string | null }>(`/shipping/incoming/${encodeURIComponent(reference)}/courier-conversation`),
+  /**
    * Edward requirement 11: a linked recipient's own delivery availability
    * window — never the sender's. Read-only; the recipient's own currently-
    * stored window(s), possibly empty.

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { RecipientTracking } from '../../../../components/shipping/RecipientTracking';
 import { RecipientAvailabilityWindow } from '../../../../components/shipping/RecipientAvailabilityWindow';
+import { RecipientCourierMessage } from '../../../../components/shipping/RecipientCourierMessage';
 import { Alert, Spinner } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
 import { shippingApi, type LinkedRecipientTrackingView } from '../../../../lib/shipping';
@@ -67,6 +68,7 @@ export default function IncomingShipmentPage() {
   return (
     <div className="space-y-4">
       <RecipientTracking view={view} />
+      <RecipientCourierMessage reference={reference} />
       {/* Edward requirement 11: hidden once there is nothing left to
           schedule — the same spirit as the sender's own
           `!shipment.cancelledAt` gate, generalized to DELIVERED too. */}
