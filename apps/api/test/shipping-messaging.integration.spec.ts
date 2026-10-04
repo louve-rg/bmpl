@@ -871,7 +871,7 @@ describe('a delivered leg does not end the courier conversation (deliberate, pin
   });
 });
 
-describe('CHARACTERISATION OF CURRENT BEHAVIOUR (not correct behaviour): a replaced driver on a shipment-leg thread', () => {
+describe('a replaced driver on a shipment-leg thread: close/reopen follow the current courier; read access is an open question (MDF-111)', () => {
   /**
    * Walks a last-mile leg to an accepted courier, links a recipient, then moves
    * the leg to a replacement courier. Reassignment is a direct field write, as in
