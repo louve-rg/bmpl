@@ -182,6 +182,86 @@ describe('delivery conversations + reassignment', () => {
   });
 });
 
+describe('delivery thread close/reopen after a driver is replaced', () => {
+  /** Opens the delivery thread AS the first driver, so that driver is its creator; then reassigns to a second driver. */
+  async function replacedDriverOpenedThread() {
+    const vendor = await makeVendor();
+    const order = await makeDeliveryOrder(vendor);
+    const driver1 = await makeDriver();
+    await assign(order.deliveryId, driver1);
+    const conv = (await post(driver1.cookies, `conversations/delivery/${order.deliveryId}`)).body;
+    expect(conv.pairing).toBe('CUSTOMER_DRIVER');
+    const driver2 = await makeDriver();
+    expect((await post(adminCookies, `admin/deliveries/${order.deliveryId}/reassign`, { driverProfileId: driver2.driverProfileId, vehicleId: driver2.vehicleId, reason: 'swap' })).status).toBe(201);
+    return { conv, order, driver1, driver2 };
+  }
+
+  it('a replaced driver who opened the delivery thread is refused CLOSE', async () => {
+    const { conv, driver1 } = await replacedDriverOpenedThread();
+    expect((await post(driver1.cookies, `conversations/${conv.id}/close`, {})).status).toBe(403);
+  });
+
+  it('the current driver on a delivery CAN close a thread a replaced driver opened', async () => {
+    const { conv, driver2 } = await replacedDriverOpenedThread();
+    expect((await post(driver2.cookies, `conversations/${conv.id}/close`, {})).status).toBe(201);
+  });
+
+  it('a replaced driver who opened the delivery thread is refused REOPEN; the current driver can reopen a thread support closed', async () => {
+    // Support closes it, so the closed state is not set by the control under test.
+    // The 201 for the current driver is what makes the 403 for the replaced driver non-vacuous.
+    const { conv, driver1, driver2 } = await replacedDriverOpenedThread();
+    expect((await post(adminCookies, `conversations/${conv.id}/close`, {})).status).toBe(201);
+    expect((await post(driver1.cookies, `conversations/${conv.id}/reopen`, {})).status).toBe(403);
+    expect((await post(driver2.cookies, `conversations/${conv.id}/reopen`, {})).status).toBe(201);
+  });
+
+  it('TRAP: a customer who opened the delivery thread can still CLOSE and REOPEN it after the driver is replaced', async () => {
+    const vendor = await makeVendor();
+    const order = await makeDeliveryOrder(vendor);
+    const driver1 = await makeDriver();
+    await assign(order.deliveryId, driver1);
+    const conv = (await post(order.customerCookies, `conversations/delivery/${order.deliveryId}`)).body;
+    expect(conv.pairing).toBe('CUSTOMER_DRIVER');
+    const driver2 = await makeDriver();
+    expect((await post(adminCookies, `admin/deliveries/${order.deliveryId}/reassign`, { driverProfileId: driver2.driverProfileId, vehicleId: driver2.vehicleId, reason: 'swap' })).status).toBe(201);
+    expect((await post(order.customerCookies, `conversations/${conv.id}/close`, {})).status).toBe(201);
+    expect((await post(order.customerCookies, `conversations/${conv.id}/reopen`, {})).status).toBe(201);
+    expect((await post(driver2.cookies, `conversations/${conv.id}/messages`, { body: 'back on' })).status).toBe(201);
+  });
+
+  it('TRAP: a customer who is ALSO a driver on the platform keeps CLOSE and REOPEN on a thread they opened as the customer', async () => {
+    const vendor = await makeVendor();
+    const order = await makeDeliveryOrder(vendor);
+    // The customer holds the DELIVERY_DRIVER role at account level. Their DRIVER row
+    // is never on their own customer thread, so the rule must not strip them.
+    await ctx.prisma.userRole.upsert({
+      where: { userId_roleCode: { userId: order.customerId, roleCode: 'DELIVERY_DRIVER' } },
+      create: { userId: order.customerId, roleCode: 'DELIVERY_DRIVER', status: 'APPROVED', approvedAt: new Date() },
+      update: { status: 'APPROVED' },
+    });
+    const driver1 = await makeDriver();
+    await assign(order.deliveryId, driver1);
+    const conv = (await post(order.customerCookies, `conversations/delivery/${order.deliveryId}`)).body;
+    expect(conv.pairing).toBe('CUSTOMER_DRIVER');
+    const driver2 = await makeDriver();
+    expect((await post(adminCookies, `admin/deliveries/${order.deliveryId}/reassign`, { driverProfileId: driver2.driverProfileId, vehicleId: driver2.vehicleId, reason: 'swap' })).status).toBe(201);
+    expect((await post(order.customerCookies, `conversations/${conv.id}/close`, {})).status).toBe(201);
+    expect((await post(order.customerCookies, `conversations/${conv.id}/reopen`, {})).status).toBe(201);
+  });
+
+  it('TRAP: a vendor who opened the pickup thread can still CLOSE it after the driver is replaced', async () => {
+    const vendor = await makeVendor();
+    const order = await makeDeliveryOrder(vendor);
+    const driver1 = await makeDriver();
+    await assign(order.deliveryId, driver1);
+    const vd = (await post(vendor.vendorCookies, `conversations/delivery/${order.deliveryId}`)).body;
+    expect(vd.pairing).toBe('VENDOR_DRIVER');
+    const driver2 = await makeDriver();
+    expect((await post(adminCookies, `admin/deliveries/${order.deliveryId}/reassign`, { driverProfileId: driver2.driverProfileId, vehicleId: driver2.vehicleId, reason: 'swap' })).status).toBe(201);
+    expect((await post(vendor.vendorCookies, `conversations/${vd.id}/close`, {})).status).toBe(201);
+  });
+});
+
 describe('support + internal notes + close', () => {
   it('customer opens support, support joins + replies, internal note stays private, close blocks send', async () => {
     const s = uniq();
