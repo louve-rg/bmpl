@@ -41,7 +41,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <Link
               href="/dashboard/profile"
               aria-label="Your profile"
-              className="rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent"
             >
               <Avatar name={`${me.firstName} ${me.lastName}`} src={me.avatarUrl} size="sm" />
             </Link>

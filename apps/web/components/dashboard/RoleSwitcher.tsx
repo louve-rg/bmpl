@@ -57,7 +57,7 @@ export function RoleSwitcher({ me }: { me: MeView }) {
         value={me.activeRole ?? 'CUSTOMER'}
         disabled={busy}
         onChange={(e) => switchTo(e.target.value as RoleCode)}
-        className="font-semibold"
+        className="min-h-[44px] font-semibold"
       >
         {selectable.map((r) => (
           <option key={r.roleCode} value={r.roleCode}>
