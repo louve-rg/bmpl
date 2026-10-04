@@ -876,8 +876,9 @@ describe('CHARACTERISATION OF CURRENT BEHAVIOUR (not correct behaviour): a repla
    * Walks a last-mile leg to an accepted courier, links a recipient, then moves
    * the leg to a replacement courier. Reassignment is a direct field write, as in
    * the existing ex-driver test above; authorisation reads only that field.
-   * Each assertion here records what the code does TODAY. Some of it is a defect
-   * (see each test name); none of it is a statement that the behaviour is right.
+   * The close and reopen assertions pin the fixed rule (the current courier may act;
+   * the replaced driver may not). The read-access assertion records current behaviour
+   * that is an open owner question (MDF-111), not a settled rule.
    */
   async function reassignedLastMile() {
     const firstDriver = await makeDriver();
