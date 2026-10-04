@@ -8,7 +8,7 @@ import { CartButton } from '../cart/CartButton';
 import { SavedNavButton } from '../saved/SavedNavButton';
 import { AnnouncementBanner } from '../AnnouncementBanner';
 import { api } from '../../lib/api';
-import { PUBLIC_NAV } from '../../lib/public-nav';
+import { PUBLIC_NAV_GROUPS, PUBLIC_NAV_HOME } from '../../lib/public-nav';
 import { AccountMenu } from '../account/AccountMenu';
 import type { MeView } from '../../lib/types';
 import { useModalMenu } from '../../lib/use-modal-menu';
@@ -19,6 +19,7 @@ export function Header() {
   const panelRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const closeMenu = useCallback(() => setOpen(false), []);
+  const desktopNavRef = useRef<HTMLDivElement>(null);
   // undefined = still checking, null = signed out, MeView = signed in.
   const [me, setMe] = useState<MeView | null | undefined>(undefined);
 
@@ -35,6 +36,43 @@ export function Header() {
 
   // Escape, focus in/return, Tab trap and scroll lock for the mobile list (P2).
   useModalMenu({ open, onClose: closeMenu, panelRef, triggerRef: toggleRef });
+
+  // Desktop groups are native <details>. The browser does not close them on Escape
+  // or on a click outside, so this does: Escape closes the open group and returns
+  // focus to its summary; a click outside closes it; opening one group closes the
+  // others, so only one dropdown is ever open.
+  useEffect(() => {
+    const root = desktopNavRef.current;
+    if (!root) return;
+    const closeAll = (except?: Element) => {
+      root.querySelectorAll('details[open]').forEach((d) => {
+        if (d !== except) d.removeAttribute('open');
+      });
+    };
+    const onToggle = (e: Event) => {
+      const target = e.target as HTMLDetailsElement;
+      if (target.open) closeAll(target);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const open = root.querySelector<HTMLDetailsElement>('details[open]');
+      if (!open) return;
+      open.removeAttribute('open');
+      open.querySelector('summary')?.focus();
+    };
+    const onPointer = (e: MouseEvent) => {
+      if (!root.contains(e.target as Node)) closeAll();
+    };
+    // toggle does not bubble, so it is listened for in the capture phase on the container.
+    root.addEventListener('toggle', onToggle, true);
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onPointer);
+    return () => {
+      root.removeEventListener('toggle', onToggle, true);
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onPointer);
+    };
+  }, []);
 
   // The list is only shown below lg. If the window grows past it while open,
   // close it, so scroll is not left locked behind an invisible menu.
@@ -66,11 +104,27 @@ export function Header() {
           <BrandLockup />
         </Link>
 
-        <div className="hidden items-center gap-7 lg:flex">
-          {PUBLIC_NAV.map((item) => (
-            <a key={item.label} href={item.href} className="text-sm font-medium text-blue-100 transition hover:text-white">
-              {item.label}
-            </a>
+        <div ref={desktopNavRef} className="hidden items-center gap-4 lg:flex">
+          <a href={PUBLIC_NAV_HOME.href} className="flex min-h-[44px] items-center text-sm font-medium text-blue-100 transition hover:text-white">
+            {PUBLIC_NAV_HOME.label}
+          </a>
+          {PUBLIC_NAV_GROUPS.map((group) => (
+            // Native <details>: keyboard and screen-reader behaviour come from the
+            // browser, with no hover-only menu to get wrong. Each group is one
+            // labelled disclosure with its real destinations inside.
+            <details key={group.heading} className="group relative">
+              <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-1 text-sm font-medium text-blue-100 transition hover:text-white">
+                {group.heading}
+                <span aria-hidden className="text-xs transition group-open:rotate-180">▾</span>
+              </summary>
+              <div className="absolute left-0 top-full z-50 mt-3 flex min-w-[14rem] flex-col gap-1 rounded-bmpl-md bg-belize-navy p-2 shadow-bmpl-md ring-1 ring-white/10">
+                {group.items.map((item) => (
+                  <a key={item.label} href={item.href} className="flex min-h-[44px] items-center rounded px-3 py-2 text-sm text-blue-100 hover:bg-white/5 hover:text-white">
+                    {item.label}
+                  </a>
+                ))}
+              </div>
+            </details>
           ))}
         </div>
 
@@ -118,15 +172,23 @@ export function Header() {
           className="border-t border-white/10 bg-belize-navy lg:hidden"
         >
           <div className="container-bmpl flex flex-col gap-1 py-3">
-            {PUBLIC_NAV.map((item) => (
-              <a
-                key={item.label}
-                href={item.href}
-                onClick={() => setOpen(false)}
-                className="rounded px-2 py-2 text-blue-100 hover:bg-white/5 hover:text-white"
-              >
-                {item.label}
-              </a>
+            <a href={PUBLIC_NAV_HOME.href} onClick={() => setOpen(false)} className="flex min-h-[44px] items-center rounded px-2 py-2 font-medium text-white hover:bg-white/5">
+              {PUBLIC_NAV_HOME.label}
+            </a>
+            {PUBLIC_NAV_GROUPS.map((group) => (
+              <div key={group.heading} className="mt-2 flex flex-col gap-1">
+                <p className="px-2 pt-1 text-xs font-semibold uppercase tracking-[0.12em] text-belize-light">{group.heading}</p>
+                {group.items.map((item) => (
+                  <a
+                    key={item.label}
+                    href={item.href}
+                    onClick={() => setOpen(false)}
+                    className="flex min-h-[44px] items-center rounded px-2 py-2 text-blue-100 hover:bg-white/5 hover:text-white"
+                  >
+                    {item.label}
+                  </a>
+                ))}
+              </div>
             ))}
 
             {me === undefined ? null : me ? (
