@@ -710,9 +710,27 @@ export class MessagingService {
   // Close / reopen + support join
   // ===========================================================================
 
+  /**
+   * Who may close or reopen a delivery thread. The current driver always may, so
+   * a replacement is not locked out of a thread someone else opened. The creator
+   * may too, EXCEPT a driver who created it and has since been replaced: that
+   * driver must not silence the customer and the new driver. A customer or vendor
+   * who opened their own thread keeps the right, because they never held the
+   * DRIVER role on it.
+   */
+  private canCloseOrReopen(actor: Actor, ctx: { conv: ConversationRow; parties: ContextParties }): boolean {
+    if (this.canRespondSupport(actor)) return true;
+    if (ctx.conv.contextType === 'DELIVERY') {
+      if (actor.userId === ctx.parties.currentDriverUserId) return true;
+      const heldDriverRole = ctx.conv.participants.some((p) => p.userId === actor.userId && p.role === 'DRIVER');
+      return ctx.conv.createdById === actor.userId && !heldDriverRole;
+    }
+    return ctx.conv.createdById === actor.userId;
+  }
+
   async close(actor: Actor, conversationId: string) {
     const ctx = await this.authorize(actor, conversationId);
-    if (!this.canRespondSupport(actor) && ctx.conv.createdById !== actor.userId) throw new ForbiddenException('You cannot close this conversation.');
+    if (!this.canCloseOrReopen(actor, ctx)) throw new ForbiddenException('You cannot close this conversation.');
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { status: 'CLOSED', closedAt: new Date(), closedById: actor.userId } });
     await this.persistMessage(actor, conversationId, { body: 'Conversation closed.' }, 'SYSTEM');
     await this.audit.record({ action: 'CONVERSATION_CLOSED', actorId: actor.userId, newValue: { conversationId } });
@@ -733,7 +751,7 @@ export class MessagingService {
 
   async reopen(actor: Actor, conversationId: string) {
     const ctx = await this.authorize(actor, conversationId);
-    if (!this.canRespondSupport(actor) && ctx.conv.createdById !== actor.userId) throw new ForbiddenException('You cannot reopen this conversation.');
+    if (!this.canCloseOrReopen(actor, ctx)) throw new ForbiddenException('You cannot reopen this conversation.');
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { status: 'OPEN', closedAt: null, closedById: null } });
     await this.persistMessage(actor, conversationId, { body: 'Conversation reopened.' }, 'SYSTEM');
     await this.audit.record({ action: 'CONVERSATION_REOPENED', actorId: actor.userId, newValue: { conversationId } });
