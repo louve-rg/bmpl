@@ -54,7 +54,7 @@ export function MobileNavDrawer({ me }: { me: MeView }) {
         aria-expanded={open}
         aria-controls="dashboard-mobile-nav"
         aria-label="Open navigation menu"
-        className="inline-flex h-11 w-11 items-center justify-center rounded-bmpl-md text-slate-600 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent md:hidden"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-bmpl-md text-slate-600 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent md:hidden"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-5 w-5" aria-hidden>
           <path d="M4 7h16M4 12h16M4 17h16" />
