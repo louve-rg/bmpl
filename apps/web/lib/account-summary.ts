@@ -63,7 +63,13 @@ export function netSince(rows: MoneyRow[], since: Date, cap: number): { minor: n
   return { minor, currency };
 }
 
-/** Money as the app shows it elsewhere (same rule as the earnings page). */
+/**
+ * Money as the app shows it elsewhere (same rule as the earnings page), with thousands
+ * separators (display only). The value and its rounding are unchanged: toFixed(2) of the major amount.
+ */
 export function moneyLabel(minor: number, currency = 'BZD'): string {
-  return `${currency === 'USD' ? 'US$' : '$'}${(minor / 100).toFixed(2)}`;
+  const [whole, cents] = (Math.abs(minor) / 100).toFixed(2).split('.');
+  const sign = minor < 0 ? '-' : '';
+  const grouped = whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return (currency === 'USD' ? 'US$' : '$') + sign + grouped + '.' + cents;
 }

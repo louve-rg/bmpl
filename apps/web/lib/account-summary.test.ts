@@ -50,4 +50,18 @@ describe('moneyLabel', () => {
     expect(moneyLabel(12345)).toBe('$123.45');
     expect(moneyLabel(5, 'USD')).toBe('US$0.05');
   });
+
+  it('groups thousands with commas, and changes no digit', () => {
+    expect(moneyLabel(99999999999)).toBe('$999,999,999.99');
+    expect(moneyLabel(123456)).toBe('$1,234.56');
+    expect(moneyLabel(100000)).toBe('$1,000.00');
+    expect(moneyLabel(99999)).toBe('$999.99');
+    expect(moneyLabel(0)).toBe('$0.00');
+    expect(moneyLabel(123456789, 'USD')).toBe('US$1,234,567.89');
+  });
+
+  it('keeps the sign where it was', () => {
+    expect(moneyLabel(-1250)).toBe('$-12.50');
+    expect(moneyLabel(-123456)).toBe('$-1,234.56');
+  });
 });
