@@ -47,6 +47,8 @@ export const BASE_NAV: NavItem[] = [
   // of passenger transport, deliberately NOT under any role-gated group.
   { label: 'Passenger Service', href: '/dashboard/passenger', icon: 'M4 5h16v10H4V5Zm0 4h16M7 15v3M17 15v3M7.5 12h.01M16.5 12h.01' },
   { label: 'Wishlist', href: '/wishlist', icon: HEART_ICON },
+  // The saved addresses checkout offers (the existing /addresses API).
+  { label: 'Addresses', href: '/dashboard/addresses', icon: 'M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10Zm0-8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z' },
   { label: 'My Reviews', href: '/dashboard/reviews', icon: 'M12 3l2.9 5.88 6.49.94-4.7 4.58 1.11 6.46L12 17.3l-5.8 3.06 1.1-6.46-4.69-4.58 6.49-.94L12 3Z' },
   { label: 'Wallet', href: '/wallet', icon: 'M3 7h18v12H3zM17 12h2M3 10h14a2 2 0 0 1 2 2' },
   { label: 'Payments', href: '/payments', icon: CARD_ICON },

@@ -814,3 +814,59 @@ describe('a genuinely linked recipient can reach the same courier too (BMPL-359)
     expect((await openCourierConversation(recipient.cookies, s.reference)).status).toBe(400);
   });
 });
+
+describe('a delivered leg does not end the courier conversation (deliberate, pinned)', () => {
+  /**
+   * Access follows the leg's KIND (last-mile or direct) and the party, never the
+   * leg's status. A delivered leg therefore keeps its thread open for the
+   * booking customer and the linked recipient. This is the decided behaviour:
+   * messaging is BML's default contact channel and no phone numbers are shared,
+   * so closing the thread at delivery would leave a recipient with a damaged
+   * parcel and no way to reach the courier. These tests pin that choice; a
+   * change here must be a deliberate decision, not an accident.
+   */
+  async function deliveredLastMile() {
+    const firstDriver = await makeDriver();
+    const s = await book();
+    const rows = await legsOf(s.id);
+    const first = rows.find((l) => l.kind === 'FIRST_MILE')!;
+    await ctx.prisma.shipmentLeg.update({ where: { id: first.id }, data: { assignedDriverProfileId: firstDriver.driverProfileId, courierStatus: 'ASSIGNED', acceptedAt: null } });
+    await driveLeg(firstDriver, first.id);
+    for (const lh of rows.filter((l) => l.kind === 'LINE_HAUL')) await flyLineHaul(lh.id);
+    const last = (await legsOf(s.id)).find((l) => l.kind === 'LAST_MILE')!;
+    const lastDriver = await makeDriver();
+    await ctx.prisma.shipmentLeg.update({ where: { id: last.id }, data: { assignedDriverProfileId: lastDriver.driverProfileId, courierStatus: 'ASSIGNED', acceptedAt: null } });
+    await driveLeg(lastDriver, last.id);
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: last.id } })).status).toBe('COMPLETED');
+    const thread = (await threadFor(last.id))!;
+    return { s, thread, lastDriver };
+  }
+
+  it('a delivered leg does not end the conversation: the linked recipient can still READ it — deliberate, not an oversight', async () => {
+    const { s, thread } = await deliveredLastMile();
+    const recipient = await registerMatchingRecipient(`delivered_r_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+
+    expect((await get(recipient.cookies, `conversations/${thread.id}`)).status).toBe(200);
+  });
+
+  it('a delivered leg does not end the conversation: the linked recipient can still SEND on it — deliberate, not an oversight', async () => {
+    const { s, thread } = await deliveredLastMile();
+    const recipient = await registerMatchingRecipient(`delivered_s_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+
+    expect((await post(recipient.cookies, `conversations/${thread.id}/messages`, { body: 'The box arrived damaged.' })).status).toBe(201);
+  });
+
+  it('a delivered leg does not end the conversation: the booking customer can still READ it — deliberate, same rule as the recipient', async () => {
+    const { thread } = await deliveredLastMile();
+
+    expect((await get(customer, `conversations/${thread.id}`)).status).toBe(200);
+  });
+
+  it('a delivered leg does not end the conversation: the booking customer can still SEND on it — deliberate, same rule as the recipient', async () => {
+    const { thread } = await deliveredLastMile();
+
+    expect((await post(customer, `conversations/${thread.id}/messages`, { body: 'Thanks, the parcel is here.' })).status).toBe(201);
+  });
+});
