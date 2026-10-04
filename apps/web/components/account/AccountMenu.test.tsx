@@ -23,6 +23,7 @@ const me = {
   firstName: 'Rae',
   lastName: 'Test',
   avatarUrl: null,
+  roles: [],
 } as unknown as MeView;
 
 let root: Root | null = null;
