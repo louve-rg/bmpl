@@ -90,6 +90,15 @@ const custodyTransfers = (shipmentId: string) =>
 const balanceOf = async (customer: string[]) =>
   (await get(customer, 'wallet')).body as { availableMinor: number; onHoldMinor: number };
 
+/** Without a configured local courier price every booking is refused with a 400. */
+async function setLocalCourierFee(feeMinor: number) {
+  const r = await request(ctx.server)
+    .patch('/api/admin/ops/settings')
+    .set('Cookie', admin)
+    .send({ localCourierFeeMinor: feeMinor, localCourierFeeTestMinor: feeMinor, localCourierMinutes: 60 });
+  expect(r.status).toBe(200);
+}
+
 beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
@@ -97,6 +106,7 @@ beforeAll(async () => {
   const a = await seedSuperAdmin(ctx.prisma);
   admin = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password }));
   dispatch = ctx.app.get(ShipmentDispatchService);
+  await setLocalCourierFee(1500);
 });
 
 afterAll(async () => {
