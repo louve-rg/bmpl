@@ -120,7 +120,7 @@ export default function AddressesPage() {
         description="Addresses you save here are offered at checkout. Changing one does not change an order or shipment you have already placed."
         actions={
           editing === null ? (
-            <Button type="button" onClick={startNew}>
+            <Button type="button" onClick={startNew} className="min-h-[44px]">
               Add an address
             </Button>
           ) : null
@@ -181,10 +181,10 @@ export default function AddressesPage() {
             )}
 
             <div className="flex flex-wrap gap-3 sm:col-span-2">
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" disabled={busy} className="min-h-[44px]">
                 {busy ? 'Saving…' : 'Save address'}
               </Button>
-              <Button type="button" variant="outline" onClick={() => setEditing(null)} disabled={busy}>
+              <Button type="button" variant="outline" onClick={() => setEditing(null)} disabled={busy} className="min-h-[44px]">
                 Cancel
               </Button>
             </div>
@@ -221,15 +221,15 @@ export default function AddressesPage() {
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => startEdit(row)} disabled={editing !== null}>
+                    <Button type="button" variant="outline" size="sm" className="min-h-[44px]" onClick={() => startEdit(row)} disabled={editing !== null}>
                       Edit
                     </Button>
                     {!row.isDefault && (
-                      <Button type="button" variant="outline" size="sm" onClick={() => makeDefault(row)} disabled={editing !== null}>
+                      <Button type="button" variant="outline" size="sm" className="min-h-[44px]" onClick={() => makeDefault(row)} disabled={editing !== null}>
                         Make default
                       </Button>
                     )}
-                    <Button type="button" variant="ghost" size="sm" onClick={() => remove(row)} disabled={editing !== null}>
+                    <Button type="button" variant="ghost" size="sm" className="min-h-[44px]" onClick={() => remove(row)} disabled={editing !== null}>
                       Delete
                     </Button>
                   </div>
