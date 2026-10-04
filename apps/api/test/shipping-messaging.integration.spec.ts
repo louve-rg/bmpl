@@ -899,29 +899,29 @@ describe('CHARACTERISATION OF CURRENT BEHAVIOUR (not correct behaviour): a repla
     return { thread, oldDriver, newDriver, recipient };
   }
 
-  it('today (defect, BMPL-TBD): a replaced driver can still READ the thread, while being refused a SEND', async () => {
+  it('open owner question (MDF-111): a replaced driver can still READ the thread, while being refused a SEND', async () => {
     const { thread, oldDriver } = await reassignedLastMile();
     expect((await get(oldDriver.cookies, `conversations/${thread.id}`)).status).toBe(200);
     expect((await post(oldDriver.cookies, `conversations/${thread.id}/messages`, { body: 'still here' })).status).toBe(403);
   });
 
-  it('today (defect, BMPL-TBD): a replaced driver who created the thread can CLOSE it, and the close silences the recipient and the current courier', async () => {
+  it('a replaced driver who created the thread is refused CLOSE, so the recipient and the current courier can still send', async () => {
     const { thread, oldDriver, newDriver, recipient } = await reassignedLastMile();
-    expect((await post(oldDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(201);
-    expect((await post(recipient.cookies, `conversations/${thread.id}/messages`, { body: 'hello?' })).status).toBe(403);
-    expect((await post(newDriver.cookies, `conversations/${thread.id}/messages`, { body: 'on it' })).status).toBe(403);
+    expect((await post(oldDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(403);
+    expect((await post(recipient.cookies, `conversations/${thread.id}/messages`, { body: 'hello?' })).status).toBe(201);
+    expect((await post(newDriver.cookies, `conversations/${thread.id}/messages`, { body: 'on it' })).status).toBe(201);
   });
 
-  it('today (defect, BMPL-TBD): a replaced driver who created the thread can REOPEN it after closing it', async () => {
-    const { thread, oldDriver, recipient } = await reassignedLastMile();
-    expect((await post(oldDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(201);
-    expect((await post(oldDriver.cookies, `conversations/${thread.id}/reopen`, {})).status).toBe(201);
-    expect((await post(recipient.cookies, `conversations/${thread.id}/messages`, { body: 'back on' })).status).toBe(201);
+  it('a replaced driver who created the thread is refused REOPEN after the current courier closes it', async () => {
+    const { thread, oldDriver, newDriver, recipient } = await reassignedLastMile();
+    expect((await post(newDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(201);
+    expect((await post(oldDriver.cookies, `conversations/${thread.id}/reopen`, {})).status).toBe(403);
+    expect((await post(recipient.cookies, `conversations/${thread.id}/messages`, { body: 'still closed?' })).status).toBe(403);
   });
 
-  it('today: the replacement courier cannot CLOSE a thread created by the driver they replaced', async () => {
+  it('the courier who currently holds the leg CAN close the thread created by the driver they replaced', async () => {
     const { thread, newDriver } = await reassignedLastMile();
-    expect((await post(newDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(403);
+    expect((await post(newDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(201);
   });
 
   it('today: the recipient cannot CLOSE the courier thread', async () => {
@@ -930,8 +930,8 @@ describe('CHARACTERISATION OF CURRENT BEHAVIOUR (not correct behaviour): a repla
   });
 
   it('today: the recipient cannot REOPEN a thread once it has been closed', async () => {
-    const { thread, oldDriver, recipient } = await reassignedLastMile();
-    expect((await post(oldDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(201);
+    const { thread, newDriver, recipient } = await reassignedLastMile();
+    expect((await post(newDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(201);
     expect((await post(recipient.cookies, `conversations/${thread.id}/reopen`, {})).status).toBe(403);
   });
 });

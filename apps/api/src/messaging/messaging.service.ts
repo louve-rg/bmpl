@@ -710,9 +710,22 @@ export class MessagingService {
   // Close / reopen + support join
   // ===========================================================================
 
+  /**
+   * Who may close or reopen a thread. On a shipment-leg thread the live counterpart
+   * of the driver role is the CURRENT driver on the leg, not whoever created the
+   * thread: a replaced driver must not be able to silence the recipient and the
+   * courier who now holds the parcel. Delivery and every other context keep the
+   * creator rule unchanged.
+   */
+  private canCloseOrReopen(actor: Actor, ctx: { conv: ConversationRow; parties: ContextParties }): boolean {
+    if (this.canRespondSupport(actor)) return true;
+    if (ctx.conv.contextType === 'SHIPMENT_LEG') return actor.userId === ctx.parties.currentDriverUserId;
+    return ctx.conv.createdById === actor.userId;
+  }
+
   async close(actor: Actor, conversationId: string) {
     const ctx = await this.authorize(actor, conversationId);
-    if (!this.canRespondSupport(actor) && ctx.conv.createdById !== actor.userId) throw new ForbiddenException('You cannot close this conversation.');
+    if (!this.canCloseOrReopen(actor, ctx)) throw new ForbiddenException('You cannot close this conversation.');
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { status: 'CLOSED', closedAt: new Date(), closedById: actor.userId } });
     await this.persistMessage(actor, conversationId, { body: 'Conversation closed.' }, 'SYSTEM');
     await this.audit.record({ action: 'CONVERSATION_CLOSED', actorId: actor.userId, newValue: { conversationId } });
@@ -733,7 +746,7 @@ export class MessagingService {
 
   async reopen(actor: Actor, conversationId: string) {
     const ctx = await this.authorize(actor, conversationId);
-    if (!this.canRespondSupport(actor) && ctx.conv.createdById !== actor.userId) throw new ForbiddenException('You cannot reopen this conversation.');
+    if (!this.canCloseOrReopen(actor, ctx)) throw new ForbiddenException('You cannot reopen this conversation.');
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { status: 'OPEN', closedAt: null, closedById: null } });
     await this.persistMessage(actor, conversationId, { body: 'Conversation reopened.' }, 'SYSTEM');
     await this.audit.record({ action: 'CONVERSATION_REOPENED', actorId: actor.userId, newValue: { conversationId } });
