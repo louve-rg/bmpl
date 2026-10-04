@@ -8,9 +8,9 @@ import { Footer } from './Footer';
 
 /**
  * P3 defect fix: the footer's "Platform" links pointed at "/#services" or a
- * dead "#", and "Help Center" was a dead "#". Each link now either goes to a
- * real destination or is removed (Marketing and Help Center have no customer
- * page; they are named gaps, not stubs).
+ * dead "#". MDF-110 finished the job: every remaining dead link is either a real
+ * destination or removed. Privacy and Terms stay as "#" on purpose: they are
+ * owner-gated legal pages, not ours to create or point anywhere.
  */
 
 let root: Root | null = null;
@@ -49,5 +49,30 @@ describe('Footer links', () => {
     expect(links.get('Marketplace')).toBe('/products');
     expect(links.has('Marketing')).toBe(false);
     expect(links.has('Help Center')).toBe(false);
+  });
+
+  it('removes the Company, Resources and legal-bar links that have no BMPL page behind them', () => {
+    const links = render();
+    expect(links.get('Marketplace')).toBe('/products');
+    for (const gap of ['About', 'Careers', 'Press', 'Blog', 'Developers', 'API', 'Status', 'Accessibility', 'Security', 'Sitemap']) {
+      expect(links.has(gap), gap).toBe(false);
+    }
+  });
+
+  it('keeps Contact, pointed at the support address the product already publishes', () => {
+    const links = render();
+    expect(links.get('Contact')).toBe('mailto:support@bzemarketplace.com');
+  });
+
+  it('leaves Privacy and Terms as the only "#" links, both owner-gated', () => {
+    const links = render();
+    expect(links.get('Marketplace')).toBe('/products');
+    const dead = [...links].filter(([, href]) => href === '#').map(([label]) => label);
+    expect([...new Set(dead)].sort()).toEqual(['Privacy', 'Terms']);
+  });
+
+  it('shows no social icons, because no BMPL account is verified in the repo', () => {
+    render();
+    expect(container!.querySelector('a[aria-label="LinkedIn"], a[aria-label="Facebook"], a[aria-label="Instagram"], a[aria-label="YouTube"]')).toBeNull();
   });
 });
