@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import type { MeView } from '../../lib/types';
 import { Avatar } from '../Avatar';
+import { AccountSummary } from './AccountSummary';
 
 export type AccountMenuTone = 'dark' | 'light';
 
@@ -134,6 +135,7 @@ export function AccountMenu({
               : 'mt-2 rounded-bmpl-md border border-slate-100 bg-slate-50 p-2'
           }
         >
+          <AccountSummary me={me} tone={tone} />
           <Link href="/dashboard" onClick={close} className={itemClass}>
             Dashboard
           </Link>
