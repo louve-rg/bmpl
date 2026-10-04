@@ -6,10 +6,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
-import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
 
 let ctx: TestContext;
-let dispatch: ShipmentDispatchService;
 let admin: string[];
 let seq = 0;
 const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
@@ -66,7 +64,8 @@ async function makeCourier() {
     },
   });
   await ctx.prisma.driverServiceArea.create({ data: { driverProfileId: profile.id, district: 'BELIZE', isActive: true } });
-  return { cookies, userId };
+  const vehicle = await ctx.prisma.driverVehicle.findFirstOrThrow({ where: { driverProfileId: profile.id } });
+  return { cookies, userId, driverProfileId: profile.id, vehicleId: vehicle.id };
 }
 
 async function bookPaid(customer: string[]) {
@@ -78,10 +77,11 @@ async function bookPaid(customer: string[]) {
 const legOf = async (shipmentId: string) =>
   ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId }, orderBy: { sequence: 'asc' } });
 
-/** Offers the leg to the courier and has them accept it. Acceptance writes no custody row. */
-async function courierAccepts(legId: string, courier: string[]) {
-  await dispatch.dispatchLeg(legId);
-  expect((await post(courier, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+/** Assigns the leg to this courier and has them accept it. Acceptance writes no custody row. */
+async function courierAccepts(legId: string, courier: { cookies: string[]; driverProfileId: string; vehicleId: string }) {
+  const assigned = await post(admin, `admin/logistics/legs/${legId}/assign`, { driverProfileId: courier.driverProfileId, vehicleId: courier.vehicleId });
+  expect(assigned.status).toBe(201);
+  expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
 }
 
 const custodyTransfers = (shipmentId: string) =>
@@ -105,7 +105,6 @@ beforeAll(async () => {
   await seedRoles(ctx.prisma);
   const a = await seedSuperAdmin(ctx.prisma);
   admin = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password }));
-  dispatch = ctx.app.get(ShipmentDispatchService);
   await setLocalCourierFee(1500);
 });
 
@@ -119,7 +118,7 @@ describe('acceptance is not custody (req 10, rule 2)', () => {
     const shipment = await bookPaid(customer.cookies);
     const leg = await legOf(shipment.id);
     const courier = await makeCourier();
-    await courierAccepts(leg.id, courier.cookies);
+    await courierAccepts(leg.id, courier);
     expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } })).courierStatus).toBe('DRIVER_ACCEPTED');
 
     const cancel = await post(customer.cookies, `shipping/${shipment.id}/cancel`, { reason: 'Changed my mind after a driver accepted.' });
@@ -136,7 +135,7 @@ describe('acceptance is not custody (req 10, rule 2)', () => {
     const shipment = await bookPaid(customer.cookies);
     const leg = await legOf(shipment.id);
     const courier = await makeCourier();
-    await courierAccepts(leg.id, courier.cookies);
+    await courierAccepts(leg.id, courier);
     expect((await post(admin, `admin/logistics/legs/${leg.id}/start`)).status).toBe(201);
     expect(await custodyTransfers(shipment.id)).toBe(1);
 
@@ -156,7 +155,7 @@ describe('the public tracking payload carries no courier conversation (req 7)', 
     const shipment = await bookPaid(customer.cookies);
     const leg = await legOf(shipment.id);
     const courier = await makeCourier();
-    await courierAccepts(leg.id, courier.cookies);
+    await courierAccepts(leg.id, courier);
 
     const conversation = await ctx.prisma.conversation.findFirst({ where: { contextType: 'SHIPMENT_LEG', contextId: leg.id } });
     expect(conversation).not.toBeNull();
