@@ -870,3 +870,68 @@ describe('a delivered leg does not end the courier conversation (deliberate, pin
     expect((await post(customer, `conversations/${thread.id}/messages`, { body: 'Thanks, the parcel is here.' })).status).toBe(201);
   });
 });
+
+describe('CHARACTERISATION OF CURRENT BEHAVIOUR (not correct behaviour): a replaced driver on a shipment-leg thread', () => {
+  /**
+   * Walks a last-mile leg to an accepted courier, links a recipient, then moves
+   * the leg to a replacement courier. Reassignment is a direct field write, as in
+   * the existing ex-driver test above; authorisation reads only that field.
+   * Each assertion here records what the code does TODAY. Some of it is a defect
+   * (see each test name); none of it is a statement that the behaviour is right.
+   */
+  async function reassignedLastMile() {
+    const firstDriver = await makeDriver();
+    const s = await book();
+    const rows = await legsOf(s.id);
+    const first = rows.find((l) => l.kind === 'FIRST_MILE')!;
+    await ctx.prisma.shipmentLeg.update({ where: { id: first.id }, data: { assignedDriverProfileId: firstDriver.driverProfileId, courierStatus: 'ASSIGNED', acceptedAt: null } });
+    await driveLeg(firstDriver, first.id);
+    for (const lh of rows.filter((l) => l.kind === 'LINE_HAUL')) await flyLineHaul(lh.id);
+    const last = (await legsOf(s.id)).find((l) => l.kind === 'LAST_MILE')!;
+    const oldDriver = await makeDriver();
+    await ctx.prisma.shipmentLeg.update({ where: { id: last.id }, data: { assignedDriverProfileId: oldDriver.driverProfileId, courierStatus: 'ASSIGNED', acceptedAt: null } });
+    expect((await post(oldDriver.cookies, `driver/shipping-jobs/${last.id}/accept`)).status).toBe(201);
+    const thread = (await threadFor(last.id))!;
+    const recipient = await registerMatchingRecipient(`charac_r_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+    const newDriver = await makeDriver();
+    await ctx.prisma.shipmentLeg.update({ where: { id: last.id }, data: { assignedDriverProfileId: newDriver.driverProfileId } });
+    return { thread, oldDriver, newDriver, recipient };
+  }
+
+  it('today (defect, BMPL-TBD): a replaced driver can still READ the thread, while being refused a SEND', async () => {
+    const { thread, oldDriver } = await reassignedLastMile();
+    expect((await get(oldDriver.cookies, `conversations/${thread.id}`)).status).toBe(200);
+    expect((await post(oldDriver.cookies, `conversations/${thread.id}/messages`, { body: 'still here' })).status).toBe(403);
+  });
+
+  it('today (defect, BMPL-TBD): a replaced driver who created the thread can CLOSE it, and the close silences the recipient and the current courier', async () => {
+    const { thread, oldDriver, newDriver, recipient } = await reassignedLastMile();
+    expect((await post(oldDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(201);
+    expect((await post(recipient.cookies, `conversations/${thread.id}/messages`, { body: 'hello?' })).status).toBe(403);
+    expect((await post(newDriver.cookies, `conversations/${thread.id}/messages`, { body: 'on it' })).status).toBe(403);
+  });
+
+  it('today (defect, BMPL-TBD): a replaced driver who created the thread can REOPEN it after closing it', async () => {
+    const { thread, oldDriver, recipient } = await reassignedLastMile();
+    expect((await post(oldDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(201);
+    expect((await post(oldDriver.cookies, `conversations/${thread.id}/reopen`, {})).status).toBe(201);
+    expect((await post(recipient.cookies, `conversations/${thread.id}/messages`, { body: 'back on' })).status).toBe(201);
+  });
+
+  it('today: the replacement courier cannot CLOSE a thread created by the driver they replaced', async () => {
+    const { thread, newDriver } = await reassignedLastMile();
+    expect((await post(newDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(403);
+  });
+
+  it('today: the recipient cannot CLOSE the courier thread', async () => {
+    const { thread, recipient } = await reassignedLastMile();
+    expect((await post(recipient.cookies, `conversations/${thread.id}/close`, {})).status).toBe(403);
+  });
+
+  it('today: the recipient cannot REOPEN a thread once it has been closed', async () => {
+    const { thread, oldDriver, recipient } = await reassignedLastMile();
+    expect((await post(oldDriver.cookies, `conversations/${thread.id}/close`, {})).status).toBe(201);
+    expect((await post(recipient.cookies, `conversations/${thread.id}/reopen`, {})).status).toBe(403);
+  });
+});
