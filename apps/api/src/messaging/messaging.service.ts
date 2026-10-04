@@ -253,24 +253,42 @@ export class MessagingService {
    * ahead of it.
    */
   async openShipmentLegForRecipient(actor: Actor, reference: string) {
+    const { leg, existing } = await this.recipientCurrentLegConversation(actor, reference);
+    if (!leg || !existing) throw new BadRequestException('No courier conversation is open for this shipment yet.');
+    const p = await this.resolveParties('SHIPMENT_LEG', leg.id);
+    const conv = await this.ensureConversation('SHIPMENT_LEG', leg.id, 'CUSTOMER_DRIVER', actor.userId, p.label, [
+      { userId: p.currentDriverUserId!, role: 'DRIVER' },
+      { userId: actor.userId, role: 'RECIPIENT' },
+    ]);
+    return this.getConversation(actor, conv.id);
+  }
+
+  /**
+   * The conversation id a linked recipient may see, or null if none is open yet.
+   * PURE READ: no thread, participant or any other row is created here — a
+   * recipient's view must never be able to materialise the capability it reads.
+   * Shares its gate with `openShipmentLegForRecipient`, so "null" and "not yours"
+   * stay different answers only in that a stranger is refused exactly as the POST
+   * refuses them.
+   */
+  async courierConversationIdForRecipient(actor: Actor, reference: string): Promise<{ conversationId: string | null }> {
+    const { existing } = await this.recipientCurrentLegConversation(actor, reference);
+    return { conversationId: existing?.id ?? null };
+  }
+
+  private async recipientCurrentLegConversation(actor: Actor, reference: string) {
     const s = await this.prisma.shipment.findUnique({
       where: { reference },
       select: { recipientUserId: true, legs: { orderBy: { sequence: 'asc' }, select: { id: true, kind: true, status: true } } },
     });
     if (!s || s.recipientUserId !== actor.userId) throw new NotFoundException('No shipment with that reference.');
-    const current = s.legs.find((l) => (l.kind === 'LAST_MILE' || l.kind === 'DIRECT') && l.status !== 'CANCELLED' && l.status !== 'COMPLETED');
-    const existing = current
+    const leg = s.legs.find((l) => (l.kind === 'LAST_MILE' || l.kind === 'DIRECT') && l.status !== 'CANCELLED' && l.status !== 'COMPLETED');
+    const existing = leg
       ? await this.prisma.conversation.findUnique({
-          where: { contextType_contextId_pairing: { contextType: 'SHIPMENT_LEG', contextId: current.id, pairing: 'CUSTOMER_DRIVER' } },
+          where: { contextType_contextId_pairing: { contextType: 'SHIPMENT_LEG', contextId: leg.id, pairing: 'CUSTOMER_DRIVER' } },
         })
       : null;
-    if (!existing) throw new BadRequestException('No courier conversation is open for this shipment yet.');
-    const p = await this.resolveParties('SHIPMENT_LEG', current!.id);
-    const conv = await this.ensureConversation('SHIPMENT_LEG', current!.id, 'CUSTOMER_DRIVER', actor.userId, p.label, [
-      { userId: p.currentDriverUserId!, role: 'DRIVER' },
-      { userId: actor.userId, role: 'RECIPIENT' },
-    ]);
-    return this.getConversation(actor, conv.id);
+    return { leg, existing };
   }
 
   /** Open a support case for the caller, optionally linked to an order/delivery. */

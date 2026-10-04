@@ -612,6 +612,101 @@ describe('a genuinely linked recipient can reach the same courier too (BMPL-359)
     expect(parts).toHaveLength(2); // customer + last-mile driver only
   });
 
+  const getCourierConversation = (cookies: string[] | undefined, reference: string) => {
+    const r = request(ctx.server).get(`/api/shipping/incoming/${reference}/courier-conversation`);
+    return cookies ? r.set('Cookie', cookies) : r;
+  };
+
+  it('the linked recipient reads the open courier conversation id', async () => {
+    const { s, last } = await walkToAcceptedLastMile();
+    const thread = (await threadFor(last.id))!;
+    const recipient = await registerMatchingRecipient(`bmpl359r_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+
+    const r = await getCourierConversation(recipient.cookies, s.reference);
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ conversationId: thread.id });
+  });
+
+  it('the linked recipient reads null — not an error — before any courier has accepted', async () => {
+    const firstDriver = await makeDriver();
+    const s = await book();
+    const rows = await legsOf(s.id);
+    const first = rows.find((l) => l.kind === 'FIRST_MILE')!;
+    await ctx.prisma.shipmentLeg.update({ where: { id: first.id }, data: { assignedDriverProfileId: firstDriver.driverProfileId, courierStatus: 'ASSIGNED', acceptedAt: null } });
+    await driveLeg(firstDriver, first.id);
+    for (const lh of rows.filter((l) => l.kind === 'LINE_HAUL')) await flyLineHaul(lh.id);
+    const last = (await legsOf(s.id)).find((l) => l.kind === 'LAST_MILE')!;
+    const recipient = await registerMatchingRecipient(`bmpl359s_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+
+    const r = await getCourierConversation(recipient.cookies, s.reference);
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ conversationId: null });
+    expect(await threadFor(last.id)).toBeNull();
+  });
+
+  it('a pure read: reading creates no conversation and no participant, whether one is open or not', async () => {
+    const firstDriver = await makeDriver();
+    const s = await book();
+    const rows = await legsOf(s.id);
+    const first = rows.find((l) => l.kind === 'FIRST_MILE')!;
+    await ctx.prisma.shipmentLeg.update({ where: { id: first.id }, data: { assignedDriverProfileId: firstDriver.driverProfileId, courierStatus: 'ASSIGNED', acceptedAt: null } });
+    await driveLeg(firstDriver, first.id);
+    for (const lh of rows.filter((l) => l.kind === 'LINE_HAUL')) await flyLineHaul(lh.id);
+    const last = (await legsOf(s.id)).find((l) => l.kind === 'LAST_MILE')!;
+    const recipient = await registerMatchingRecipient(`bmpl359p_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+
+    const convCount = () => ctx.prisma.conversation.count({ where: { contextType: 'SHIPMENT_LEG', contextId: last.id } });
+    const partCount = () => ctx.prisma.conversationParticipant.count({ where: { userId: recipient.userId } });
+    const before = [await convCount(), await partCount()];
+    expect((await getCourierConversation(recipient.cookies, s.reference)).status).toBe(200);
+    expect([await convCount(), await partCount()]).toEqual(before);
+  });
+
+  it('a pure read on an OPEN conversation leaves its participant list exactly as it was', async () => {
+    const { s, last } = await walkToAcceptedLastMile();
+    const thread = (await threadFor(last.id))!;
+    const recipient = await registerMatchingRecipient(`bmpl359o_${uniq()}@example.com`);
+    await claimAsRecipient(s.id, recipient.cookies);
+
+    const parts = () => ctx.prisma.conversationParticipant.count({ where: { conversationId: thread.id } });
+    const partsBefore = await parts();
+    expect((await getCourierConversation(recipient.cookies, s.reference)).body).toEqual({ conversationId: thread.id });
+    expect(await parts()).toBe(partsBefore);
+    expect(await ctx.prisma.conversationParticipant.count({ where: { conversationId: thread.id, userId: recipient.userId } })).toBe(0);
+  });
+
+  it('holding a valid tracking token is not enough to read it — refused exactly as the POST refuses', async () => {
+    const { s, last } = await walkToAcceptedLastMile();
+    const { recipientToken } = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { recipientToken: true } });
+    expect((await request(ctx.server).get(`/api/shipping/track/${recipientToken}`)).status).toBe(200);
+
+    const holder = await registerUser(`bmpl359rt_${uniq()}@example.com`);
+    expect((await request(ctx.server).get(`/api/shipping/track/${recipientToken}`).set('Cookie', holder.cookies)).status).toBe(200);
+    const read = await getCourierConversation(holder.cookies, s.reference);
+    const write = await openCourierConversation(holder.cookies, s.reference);
+    expect(read.status).toBe(404);
+    expect(read.status).toBe(write.status);
+    expect(read.body).not.toHaveProperty('conversationId');
+    expect(await threadFor(last.id)).not.toBeNull();
+    expect(await ctx.prisma.conversationParticipant.count({ where: { userId: holder.userId } })).toBe(0);
+  });
+
+  it('an anonymous caller is refused at authentication, before any recipient logic runs', async () => {
+    const { s } = await walkToAcceptedLastMile();
+    expect((await getCourierConversation(undefined, s.reference)).status).toBe(401);
+  });
+
+  it('an unrelated signed-in stranger gets the refusal, never a null', async () => {
+    const { s } = await walkToAcceptedLastMile();
+    const stranger = await registerUser(`bmpl359x_${uniq()}@example.com`);
+    const r = await getCourierConversation(stranger.cookies, s.reference);
+    expect(r.status).toBe(404);
+    expect(r.body).not.toHaveProperty('conversationId');
+  });
+
   it('refuses an account linked as recipient of a DIFFERENT shipment', async () => {
     const driver = await makeDriver();
     const s = await book();
