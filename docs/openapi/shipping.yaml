@@ -336,6 +336,31 @@ paths:
               schema: { $ref: "#/components/schemas/RecipientTrackingView" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /shipping/incoming/{reference}/courier-conversation:
+    get:
+      tags: [ShipmentRecipient]
+      summary: The id of the open courier conversation for a linked recipient, or null (Edward requirement 7)
+      description: >-
+        A pure read — creates no conversation, participant or other row. Scoped
+        to `recipientUserId` and authenticated only: the tracking token is never
+        accepted here, so holding a valid token grants nothing on this route. A
+        reference that is not this account's recipient answers the same fixed 404
+        as `GET /shipping/incoming/{reference}`; `null` means only "the recipient
+        is linked, but no courier has accepted the current last-mile leg yet".
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string }, description: Shipment reference }
+      responses:
+        "200":
+          description: The open courier conversation id, or null when none is open yet
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conversationId]
+                properties:
+                  conversationId: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /shipping/incoming/{reference}/availability-window:
     get:
       tags: [ShipmentRecipient]

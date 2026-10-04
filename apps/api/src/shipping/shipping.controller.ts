@@ -222,6 +222,17 @@ export class ShipmentRecipientController {
    * MessagingService.openShipmentLegForRecipient; this route is just the
    * recipient-facing door into it, same shape as every other action here.
    */
+  /**
+   * The conversation id for the courier, if one is open — a pure read, for the
+   * recipient's own page to decide whether to offer the entry point at all.
+   * Authenticated session user only: holding the tracking token grants nothing
+   * here, by construction, since this route takes no token parameter.
+   */
+  @Get(':reference/courier-conversation')
+  courierConversation(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
+    return this.messaging.courierConversationIdForRecipient({ userId: u.userId, status: u.status, sessionId: u.sessionId, permissions: u.permissions }, reference);
+  }
+
   @Post(':reference/courier-conversation')
   openCourierConversation(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
     return this.messaging.openShipmentLegForRecipient({ userId: u.userId, status: u.status, sessionId: u.sessionId, permissions: u.permissions }, reference);
