@@ -64,3 +64,35 @@ export const PUBLIC_NAV_GROUPS: readonly PublicNavGroup[] = [
     items: [{ label: 'Addresses', href: '/dashboard/addresses' }],
   },
 ];
+
+function trimSlash(path: string): string {
+  return path.length > 1 ? path.replace(/\/+$/, '') : path;
+}
+
+/**
+ * Whether one item is the page the visitor is on. Exact on the path, and every
+ * query parameter in the item's href must match, so Sale (?purpose=FOR_SALE)
+ * and Rent (?purpose=FOR_RENT) are told apart on the same /properties path.
+ */
+export function isItemCurrent(href: string, path: string, search: string): boolean {
+  const target = new URL(href, 'https://bml.invalid');
+  if (trimSlash(target.pathname) !== trimSlash(path)) return false;
+  const here = new URLSearchParams(search);
+  for (const [key, value] of target.searchParams) {
+    if (here.get(key) !== value) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether a group is the current section: the page is one of its items, or is
+ * nested under one of them (a product page under /products lights Commerce).
+ */
+export function isGroupCurrent(group: PublicNavGroup, path: string, search: string): boolean {
+  const here = trimSlash(path);
+  return group.items.some((item) => {
+    if (isItemCurrent(item.href, path, search)) return true;
+    const base = trimSlash(new URL(item.href, 'https://bml.invalid').pathname);
+    return base !== '/' && here.startsWith(base + '/');
+  });
+}

@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // signed-out AND signed-in visitors, because the two render different panels.
 const apiGet = vi.fn();
 vi.mock('../../lib/api', () => ({ api: { get: (...a: unknown[]) => apiGet(...a), post: vi.fn() } }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }), usePathname: () => window.location.pathname }));
 vi.mock('../cart/CartButton', () => ({ CartButton: () => null }));
 vi.mock('../saved/SavedNavButton', () => ({ SavedNavButton: () => null }));
 vi.mock('../AnnouncementBanner', () => ({ AnnouncementBanner: () => null }));
@@ -212,5 +212,101 @@ describe('public Header desktop groups (P6 disclosures)', () => {
     });
     expect(transport.open).toBe(true);
     expect(commerce.open).toBe(false);
+  });
+
+  describe('mobile list closes on an outside press (the gap found live)', () => {
+    it('a press outside the list closes it', async () => {
+      await mount('signed-out');
+      await openMenu();
+      expect(panel()).not.toBeNull();
+      await act(async () => {
+        document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      });
+      expect(panel()).toBeNull();
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('a touch outside the list closes it too', async () => {
+      await mount('signed-out');
+      await openMenu();
+      await act(async () => {
+        document.body.dispatchEvent(new Event('touchstart', { bubbles: true }));
+      });
+      expect(panel()).toBeNull();
+    });
+
+    it('a press on the toggle does not close it; the toggle click itself does, once', async () => {
+      await mount('signed-out');
+      await openMenu();
+      await act(async () => {
+        toggle().dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      });
+      expect(panel()).not.toBeNull();
+      expect(toggle().getAttribute('aria-expanded')).toBe('true');
+      await act(async () => {
+        toggle().click();
+      });
+      expect(panel()).toBeNull();
+    });
+
+    it('a press inside the list does not close it', async () => {
+      await mount('signed-out');
+      await openMenu();
+      const link = panel()!.querySelector('a')!;
+      await act(async () => {
+        link.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      });
+      expect(panel()).not.toBeNull();
+    });
+  });
+
+  describe('active page (aria-current, not colour alone)', () => {
+    afterEach(() => {
+      window.history.replaceState({}, '', '/');
+    });
+
+    function link(label: string): HTMLAnchorElement {
+      return Array.from(container!.querySelectorAll<HTMLAnchorElement>('a')).find((a) => a.textContent?.trim() === label)!;
+    }
+
+    it('marks the leaf that is the current page, and only that one', async () => {
+      window.history.replaceState({}, '', '/products');
+      await mount('signed-out');
+      expect(link('Marketplace').getAttribute('aria-current')).toBe('page');
+      expect(link('Vendors').getAttribute('aria-current')).toBeNull();
+      expect(link('Orders').getAttribute('aria-current')).toBeNull();
+    });
+
+    it('lights the parent group on a nested route (a product page lights Commerce)', async () => {
+      window.history.replaceState({}, '', '/products/some-product');
+      await mount('signed-out');
+      expect(group('Commerce').querySelector('summary')!.getAttribute('aria-current')).toBe('true');
+      expect(link('Marketplace').getAttribute('aria-current')).toBeNull();
+    });
+
+    it('tells Sale and Rent apart on the same path by their query', async () => {
+      window.history.replaceState({}, '', '/properties?purpose=FOR_RENT');
+      await mount('signed-out');
+      expect(link('Rent').getAttribute('aria-current')).toBe('page');
+      expect(link('Sale').getAttribute('aria-current')).toBeNull();
+      expect(group('Real Estate').querySelector('summary')!.getAttribute('aria-current')).toBe('true');
+    });
+
+    it('marks no group on a page outside the nav', async () => {
+      window.history.replaceState({}, '', '/login');
+      await mount('signed-out');
+      for (const s of Array.from(container!.querySelectorAll('summary'))) {
+        expect(s.getAttribute('aria-current')).toBeNull();
+      }
+      expect(container!.querySelectorAll('[aria-current="page"]').length).toBe(0);
+    });
+
+    it('the mobile list shows the same current item', async () => {
+      window.history.replaceState({}, '', '/shipping');
+      await mount('signed-out');
+      await openMenu();
+      const mobileShipping = Array.from(panel()!.querySelectorAll('a')).find((a) => a.textContent?.trim() === 'Shipping & Delivery')!;
+      expect(mobileShipping.getAttribute('aria-current')).toBe('page');
+    });
   });
 });

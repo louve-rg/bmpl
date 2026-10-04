@@ -45,6 +45,8 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
 const router = { push: vi.fn(), refresh: vi.fn() };
 vi.mock('next/navigation', () => ({
   useRouter: () => router,
+  // The public Header reads the current page for aria-current.
+  usePathname: () => '/checkout',
 }));
 
 const CART: CartView = {

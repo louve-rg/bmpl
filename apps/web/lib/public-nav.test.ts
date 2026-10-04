@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PUBLIC_NAV_GROUPS, PUBLIC_NAV_HOME } from './public-nav';
+import { PUBLIC_NAV_GROUPS, PUBLIC_NAV_HOME, isGroupCurrent, isItemCurrent } from './public-nav';
 
 /**
  * P6: Edward's hierarchy as data. Pins the eight-part structure, that Vendors
@@ -48,5 +48,64 @@ describe('public nav hierarchy (P6)', () => {
     const rent = allItems.find((i) => i.label === 'Rent')!;
     expect(sale.href).toBe('/properties?purpose=FOR_SALE');
     expect(rent.href).toBe('/properties?purpose=FOR_RENT');
+  });
+});
+
+// The active-page rule for the public nav. Leaves match exactly on the path and
+// on every query parameter in their href; groups also light for a page nested
+// under one of their items.
+describe('isItemCurrent', () => {
+  it('matches the same path', () => {
+    expect(isItemCurrent('/products', '/products', '')).toBe(true);
+  });
+
+  it('ignores a trailing slash', () => {
+    expect(isItemCurrent('/products', '/products/', '')).toBe(true);
+  });
+
+  it('does not match a nested path (leaves are exact)', () => {
+    expect(isItemCurrent('/products', '/products/some-product', '')).toBe(false);
+  });
+
+  it('tells Sale and Rent apart by their query on the same path', () => {
+    expect(isItemCurrent('/properties?purpose=FOR_SALE', '/properties', 'purpose=FOR_SALE')).toBe(true);
+    expect(isItemCurrent('/properties?purpose=FOR_SALE', '/properties', 'purpose=FOR_RENT')).toBe(false);
+    expect(isItemCurrent('/properties?purpose=FOR_SALE', '/properties', '')).toBe(false);
+  });
+
+  it('a plain leaf still matches when the page has extra query parameters', () => {
+    expect(isItemCurrent('/shipping', '/shipping', 'ref=abc')).toBe(true);
+  });
+
+  it('Home matches only the root', () => {
+    expect(isItemCurrent('/', '/', '')).toBe(true);
+    expect(isItemCurrent('/', '/products', '')).toBe(false);
+  });
+});
+
+describe('isGroupCurrent', () => {
+  const group = (heading: string) => PUBLIC_NAV_GROUPS.find((g) => g.heading === heading)!;
+
+  it('is current when the page is one of its items', () => {
+    expect(isGroupCurrent(group('Commerce'), '/orders', '')).toBe(true);
+  });
+
+  it('is current when the page is nested under one of its items', () => {
+    expect(isGroupCurrent(group('Commerce'), '/products/some-product', '')).toBe(true);
+    expect(isGroupCurrent(group('Real Estate'), '/properties/123', '')).toBe(true);
+  });
+
+  it('is not current for a page outside its items', () => {
+    expect(isGroupCurrent(group('Commerce'), '/login', '')).toBe(false);
+  });
+
+  it('does not treat a longer path prefix as nested (/productsfoo is not /products)', () => {
+    expect(isGroupCurrent(group('Commerce'), '/productsfoo', '')).toBe(false);
+  });
+
+  it('Home is never a group, and the root lights no group', () => {
+    for (const g of PUBLIC_NAV_GROUPS) {
+      expect(isGroupCurrent(g, '/', '')).toBe(false);
+    }
   });
 });
