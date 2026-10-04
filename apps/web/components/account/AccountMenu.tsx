@@ -112,7 +112,7 @@ export function AccountMenu({
         onClick={() => setOpen((v) => !v)}
         className={
           dark
-            ? 'flex max-w-full items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-medium text-white transition hover:bg-white/10'
+            ? 'flex min-h-[44px] max-w-full items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-medium text-white transition hover:bg-white/10'
             : 'flex w-full items-center gap-3 rounded-bmpl-md px-3 py-1.5 text-left transition hover:bg-slate-50'
         }
       >
