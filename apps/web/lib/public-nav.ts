@@ -59,10 +59,6 @@ export const PUBLIC_NAV_GROUPS: readonly PublicNavGroup[] = [
       { label: 'Upload Resume & Skills', href: '/dashboard/jobs/profile' },
     ],
   },
-  {
-    heading: 'Favorites',
-    items: [{ label: 'Addresses', href: '/dashboard/addresses' }],
-  },
 ];
 
 function trimSlash(path: string): string {

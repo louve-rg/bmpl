@@ -19,7 +19,6 @@ describe('public nav hierarchy (P6)', () => {
       'Belize Connect',
       'Real Estate',
       'Opportunities & Earnings',
-      'Favorites',
     ]);
   });
 
@@ -107,5 +106,15 @@ describe('isGroupCurrent', () => {
     for (const g of PUBLIC_NAV_GROUPS) {
       expect(isGroupCurrent(g, '/', '')).toBe(false);
     }
+  });
+});
+
+// Favorites is not a public group. Edward's hierarchy puts it under the account
+// menu, and the saved-addresses page is already in the account navigation, so the
+// destination survives and only the public entry is gone.
+describe('Favorites is not in the public nav', () => {
+  it('has no Favorites group and no link to the personal addresses page', () => {
+    expect(headings).not.toContain('Favorites');
+    expect(allItems.map((i) => i.href)).not.toContain('/dashboard/addresses');
   });
 });
