@@ -160,3 +160,57 @@ describe('public Header mobile menu (P2)', () => {
     expect(panel()).toBeNull();
   });
 });
+
+describe('public Header desktop groups (P6 disclosures)', () => {
+  function group(heading: string): HTMLDetailsElement {
+    const summary = Array.from(container!.querySelectorAll('summary')).find((s) => s.textContent?.startsWith(heading));
+    return summary!.parentElement as HTMLDetailsElement;
+  }
+
+  it('Escape closes an open group and returns focus to its summary', async () => {
+    await mount('signed-out');
+    const commerce = group('Commerce');
+    // Guard: the group rendered with its real links before the behaviour is asserted.
+    expect(commerce.textContent).toContain('Marketplace');
+    await act(async () => {
+      commerce.open = true;
+      commerce.dispatchEvent(new Event('toggle'));
+    });
+    expect(commerce.open).toBe(true);
+    await act(async () => {
+      document.querySelector<HTMLAnchorElement>('details[open] a')!.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(commerce.open).toBe(false);
+    expect(document.activeElement).toBe(commerce.querySelector('summary'));
+  });
+
+  it('a click outside closes an open group', async () => {
+    await mount('signed-out');
+    const commerce = group('Commerce');
+    await act(async () => {
+      commerce.open = true;
+      commerce.dispatchEvent(new Event('toggle'));
+    });
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(commerce.open).toBe(false);
+  });
+
+  it('opening one group closes the others, so only one dropdown is open', async () => {
+    await mount('signed-out');
+    const commerce = group('Commerce');
+    const transport = group('Transport');
+    await act(async () => {
+      commerce.open = true;
+      commerce.dispatchEvent(new Event('toggle'));
+    });
+    await act(async () => {
+      transport.open = true;
+      transport.dispatchEvent(new Event('toggle'));
+    });
+    expect(transport.open).toBe(true);
+    expect(commerce.open).toBe(false);
+  });
+});

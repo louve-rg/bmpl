@@ -19,6 +19,7 @@ export function Header() {
   const panelRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const closeMenu = useCallback(() => setOpen(false), []);
+  const desktopNavRef = useRef<HTMLDivElement>(null);
   // undefined = still checking, null = signed out, MeView = signed in.
   const [me, setMe] = useState<MeView | null | undefined>(undefined);
 
@@ -35,6 +36,43 @@ export function Header() {
 
   // Escape, focus in/return, Tab trap and scroll lock for the mobile list (P2).
   useModalMenu({ open, onClose: closeMenu, panelRef, triggerRef: toggleRef });
+
+  // Desktop groups are native <details>. The browser does not close them on Escape
+  // or on a click outside, so this does: Escape closes the open group and returns
+  // focus to its summary; a click outside closes it; opening one group closes the
+  // others, so only one dropdown is ever open.
+  useEffect(() => {
+    const root = desktopNavRef.current;
+    if (!root) return;
+    const closeAll = (except?: Element) => {
+      root.querySelectorAll('details[open]').forEach((d) => {
+        if (d !== except) d.removeAttribute('open');
+      });
+    };
+    const onToggle = (e: Event) => {
+      const target = e.target as HTMLDetailsElement;
+      if (target.open) closeAll(target);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const open = root.querySelector<HTMLDetailsElement>('details[open]');
+      if (!open) return;
+      open.removeAttribute('open');
+      open.querySelector('summary')?.focus();
+    };
+    const onPointer = (e: MouseEvent) => {
+      if (!root.contains(e.target as Node)) closeAll();
+    };
+    // toggle does not bubble, so it is listened for in the capture phase on the container.
+    root.addEventListener('toggle', onToggle, true);
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onPointer);
+    return () => {
+      root.removeEventListener('toggle', onToggle, true);
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onPointer);
+    };
+  }, []);
 
   // The list is only shown below lg. If the window grows past it while open,
   // close it, so scroll is not left locked behind an invisible menu.
@@ -66,7 +104,7 @@ export function Header() {
           <BrandLockup />
         </Link>
 
-        <div className="hidden items-center gap-4 lg:flex">
+        <div ref={desktopNavRef} className="hidden items-center gap-4 lg:flex">
           <a href={PUBLIC_NAV_HOME.href} className="flex min-h-[44px] items-center text-sm font-medium text-blue-100 transition hover:text-white">
             {PUBLIC_NAV_HOME.label}
           </a>
