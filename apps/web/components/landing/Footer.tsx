@@ -9,11 +9,10 @@ const COLUMNS: Array<{ heading: string; links: LinkItem[] }> = [
     heading: 'Platform',
     links: [
       { label: 'Marketplace', href: '/products' },
-      { label: 'Shipping', href: '/#services' },
-      { label: 'Passenger', href: '/#services' },
-      { label: 'Jobs', href: '/#services' },
-      { label: 'Real Estate', href: '/#services' },
-      { label: 'Marketing', href: '/#services' },
+      { label: 'Shipping', href: '/shipping' },
+      { label: 'Passenger', href: '/dashboard/passenger' },
+      { label: 'Jobs', href: '/jobs' },
+      { label: 'Real Estate', href: '/properties' },
       { label: 'Wallet', href: '/#wallet' },
     ],
   },
@@ -30,7 +29,6 @@ const COLUMNS: Array<{ heading: string; links: LinkItem[] }> = [
   {
     heading: 'Resources',
     links: [
-      { label: 'Help Center', href: '#' },
       { label: 'Privacy', href: '#' },
       { label: 'Terms', href: '#' },
       { label: 'Developers', href: '#' },

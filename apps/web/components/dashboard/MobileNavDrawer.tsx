@@ -10,9 +10,7 @@ import { LogoutButton } from './LogoutButton';
 import { DashboardNavList } from './DashboardNavList';
 import type { MeView } from '../../lib/types';
 import { useUnreadMessages } from '../../lib/use-unread-messages';
-
-/** Everything that can hold focus inside the panel. */
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+import { useModalMenu } from '../../lib/use-modal-menu';
 
 /**
  * The phone/tablet dashboard navigation: a hamburger in the header that opens a
@@ -45,52 +43,8 @@ export function MobileNavDrawer({ me }: { me: MeView }) {
     setOpen(false);
   }, [pathname]);
 
-  // Lock background scroll while open. The previous overflow is restored rather
-  // than hard-set to '', so a page that legitimately sets its own is unharmed.
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, [open]);
-
-  // Move focus into the panel on open, and back to the hamburger on close, so a
-  // keyboard or screen-reader user is not left at the top of the document.
-  useEffect(() => {
-    if (!open) return;
-    const first = panelRef.current?.querySelector<HTMLElement>(FOCUSABLE);
-    first?.focus();
-    return () => triggerRef.current?.focus();
-  }, [open]);
-
-  // Escape closes; Tab cycles within the panel.
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        setOpen(false);
-        return;
-      }
-      if (e.key !== 'Tab') return;
-      const nodes = panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
-      if (!nodes || nodes.length === 0) return;
-      const first = nodes[0]!;
-      const last = nodes[nodes.length - 1]!;
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || !panelRef.current?.contains(active))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open]);
+  // Scroll lock, focus in/return, Tab trap and Escape: see useModalMenu (P1).
+  useModalMenu({ open, onClose: close, panelRef, triggerRef });
 
   return (
     <>
