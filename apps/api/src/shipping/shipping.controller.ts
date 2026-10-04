@@ -668,11 +668,15 @@ export class AdminLogisticsController {
   }
 
   /**
-   * The confirmation — and the only one of the two return endpoints that may
-   * charge the customer, which is why it needs `logistics.manage` rather
-   * than the `logistics.operate` every other leg action on this controller
-   * uses (owner Ruling 2: a shipment action that creates a customer charge
-   * takes the stricter permission).
+   * PREPARES a return — writes a shipmentRoutingProposal row and charges
+   * nothing itself (BMPL-375: staff action alone must never authorize a
+   * customer wallet charge). Still takes `logistics.manage` rather than the
+   * `logistics.operate` every other leg action on this controller uses,
+   * because preparing a return is a stronger act than flagging or quoting
+   * one (owner Ruling 2: a shipment action that creates a customer charge
+   * takes the stricter permission). The customer's own explicit
+   * confirmation is what actually enters the existing payment/escrow flow,
+   * via the separate customer-authenticated `confirmRoutingProposal`.
    */
   @RequirePermission('logistics.manage')
   @Post('legs/:id/return-to-sender')
@@ -696,9 +700,13 @@ export class AdminLogisticsController {
   }
 
   /**
-   * The confirmation — and the only one of the two reroute endpoints that
-   * may charge the customer, `logistics.manage` for the same reason
-   * `return-to-sender` needs it (owner Ruling 2).
+   * PREPARES a reroute — writes a shipmentRoutingProposal row and charges
+   * nothing itself (BMPL-375: staff action alone must never authorize a
+   * customer wallet charge). Still takes `logistics.manage`, the same
+   * stronger-act-than-quoting reason `return-to-sender` needs it for
+   * (owner Ruling 2). The customer's own explicit confirmation is what
+   * actually enters the existing payment/escrow flow, via the separate
+   * customer-authenticated `confirmRoutingProposal`.
    */
   @RequirePermission('logistics.manage')
   @Post('legs/:id/reroute')
