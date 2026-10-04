@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { SavedAddressInput } from '@bmpl/validation';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -40,10 +40,17 @@ export class AddressesService {
   }
 
   async update(userId: string, id: string, input: Partial<SavedAddressInput>) {
-    await this.ownedOrThrow(userId, id);
+    const existing = await this.ownedOrThrow(userId, id);
     return this.prisma.$transaction(async (tx) => {
       if (input.isDefault) {
         await tx.savedAddress.updateMany({ where: { userId, isDefault: true }, data: { isDefault: false } });
+      }
+      // Un-defaulting the current default must not leave the account with none.
+      // Same successor rule as remove(): the most recently updated other address.
+      if (input.isDefault === false && existing.isDefault) {
+        const next = await tx.savedAddress.findFirst({ where: { userId, id: { not: id } }, orderBy: { updatedAt: 'desc' } });
+        if (!next) throw new BadRequestException('This is your only address, so it has to stay your default.');
+        await tx.savedAddress.update({ where: { id: next.id }, data: { isDefault: true } });
       }
       return tx.savedAddress.update({ where: { id }, data: input });
     });
