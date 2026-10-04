@@ -11,6 +11,18 @@ import type { WalletSummary } from '../../lib/wallet';
 // @testing-library/react dependency in this repo).
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// The page renders the public Header, whose mobile list reads matchMedia in an
+// effect. jsdom has no matchMedia; this stub is test-environment only and
+// exists in no production path.
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    addEventListener() {},
+    removeEventListener() {},
+  })) as unknown as typeof window.matchMedia;
+}
+
 // A STABLE object — the real next/navigation useRouter() returns the same
 // router reference across renders. A mock returning a fresh object every
 // call breaks checkout's own `useCallback(load, [router])` /

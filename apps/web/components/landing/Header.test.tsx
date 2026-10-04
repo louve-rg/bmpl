@@ -70,7 +70,7 @@ function panel(): HTMLElement | null {
 describe('public Header mobile menu (P2)', () => {
   for (const state of ['signed-out', 'signed-in'] as const) {
     describe(state, () => {
-      it('moves focus into the list on open, traps Tab, and closes on Escape with focus back on the toggle', async () => {
+      it('moves focus into the list on open', async () => {
         await mount(state);
         toggle().focus();
         await openMenu();
@@ -79,6 +79,11 @@ describe('public Header mobile menu (P2)', () => {
         expect(panel()).not.toBeNull();
         expect(document.activeElement?.tagName).toBe('A');
         expect(panel()!.contains(document.activeElement)).toBe(true);
+      });
+
+      it('traps Tab inside the list, wrapping from last to first', async () => {
+        await mount(state);
+        await openMenu();
 
         const items = Array.from(panel()!.querySelectorAll<HTMLElement>('a[href], button:not([disabled])'));
         const last = items[items.length - 1]!;
@@ -89,6 +94,11 @@ describe('public Header mobile menu (P2)', () => {
           last.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
         });
         expect(document.activeElement).toBe(first);
+      });
+
+      it('closes on Escape and returns focus to the toggle', async () => {
+        await mount(state);
+        await openMenu();
 
         await act(async () => {
           document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
