@@ -20,9 +20,10 @@ no card is invisible to
 every process this floor runs. Recorded properly now as BMPL-340, which has
 since shipped its multi-leg-ETA slice (`f1bbfce`); every one of the
 requirement's four pieces has a merged API as of `7ff34a1` (hold/reroute,
-BMPL-343, merged while this very document was being corrected), and the one
-remaining gap as of that commit is a staff screen for hold/reroute, in an
-open PR (#278) — see requirement 12 below.
+BMPL-343, merged while this very document was being corrected), and the staff
+screen that was the one remaining gap as of `7ff34a1` landed as PR #309
+(`5fe37cf`) — as of `e72da60`, every requirement-12 piece has a merged API
+and a staff trigger. See requirement 12 below.
 
 **The rule this document follows:** every status below is a claim about the
 code, and those are the sentences that rot. Every row marked **Done** names
@@ -43,17 +44,17 @@ and found it on requirements 1, 3 and 11 at once.
 | # | Requirement | Status | Evidence |
 | - | --- | --- | --- |
 | 1 | Vendor location-level inventory & fulfilment origin | **Done as of `74cbcd6`** | `bad7b3f` (BMPL-175, PR #259) for the API; UI landed `74cbcd6` (BMPL-354, PR #273) |
-| 2 | Package pickup/handoff photo | **Done for sender, staff and courier as of `a568d6a`; recipient access still not wired as of `a568d6a`** | `682b501` (PR #127) for the API; UI landed `a568d6a` (BMPL-352, PR #270) — courier upload, sender and staff view |
+| 2 | Package pickup/handoff photo | **Done for sender, staff, courier and linked recipient as of `0c322d6`** | `682b501` (PR #127) for the API; UI landed `a568d6a` (BMPL-352, PR #270) — courier upload, sender and staff view; linked-recipient access landed `66487e4` (PR #304) and `0c322d6` (BMPL-391, PR #305) |
 | 3 | Recipient account linking & incoming-shipment tracking | **Done** | `a6b7d97` (BMPL-179, PR #135); two policy questions open (BMPL-119), see below |
 | 4 | Granular driver service areas (district → city) | **End-to-end as of `2cbcf73`** | `3950db0` (PR #126) for the API; city picker landed `99e98c1` (BMPL-353, PR #272); wired to the lane-town endpoint by `2cbcf73` (BMPL-368, PR #279) — a lane-only town (e.g. Ladyville) is selectable as of `2cbcf73` |
 | 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255) |
 | 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
-| 7 | Courier & vehicle identification once assigned | **Done for the booking customer as of `4d96bb0`; not yet true for a linked recipient** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient half held on an owner migration signature, PR #293 (BMPL-359) |
+| 7 | Courier & vehicle identification once assigned | **Done for the booking customer as of `4d96bb0`; for a linked recipient, messaging landed as of `910d5b2`, but courier identity is still not shown to the recipient as of `e72da60`** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient messaging: PR #293 (BMPL-359), merged `910d5b2` |
 | 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done for shipping and marketplace delivery, as of `16e4b4b`; whether the requirement was ever meant to cover marketplace's always-two-stop case is unsettled** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) for shipping; marketplace's driver job screen wired to the same `ExpandableRouteMap` by `16e4b4b` (BMPL-390, PR #302) — no API change, the pre-acceptance pin gate was already correct |
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below |
-| 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `4d96bb0`: return-to-sender/reroute carry a live staff-alone-can-charge defect under Ruling 1 (BMPL-375); failed delivery unbuilt** | Pre-custody half already correct in shipped code; return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) but with no customer-confirmation step before charging — proven live by the API and QA lanes; the fix (PR #288) is written, tested and CI-green but unmerged, held on an owner migration signature; no staff screen as of `f8f89dd` either (one is in open PR #278); failed-delivery trigger does not exist as of `4d96bb0` |
+| 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `e72da60`: the staff-alone charge defect under Ruling 1 (BMPL-375) is fixed; failed delivery is still unbuilt** | Pre-custody half correct in shipped code. Return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) with a staff-alone charge defect, fixed by `0efd970` (BMPL-375, PR #288, merged); negative-control tests PR #285 (`3ea4fa1`) and a sink ownership test PR #306 (`302a84c`) are on main; customer confirmation `e72da60` (PR #308); staff prepare panel `5fe37cf` (PR #309). Failed-delivery trigger does not exist as of `e72da60` |
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
-| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff screen pending for one as of `7ff34a1`** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by BMPL-346. ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen is in an open PR, #278, not merged as of `7ff34a1` |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff triggers for all four as of `e72da60`** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by BMPL-346. ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen landed as PR #309 (`5fe37cf`; it replaced the closed PR #278) after `7ff34a1` |
 
 **Three of twelve — requirements 1, 2 and 4 — shared one cause, not three
 separate ones: each had a real, merged, tested API and no user-facing
@@ -148,8 +149,9 @@ the requirement, and neither extreme described what had actually shipped.
 
 ## 2. Package pickup/handoff photo
 
-**Status: done for sender, staff and courier as of `a568d6a`. Recipient
-access is the one piece still open as of `a568d6a`.** Merged `682b501`
+**Status: done for sender, staff, courier and linked recipient as of
+`0c322d6`.** The linked-recipient piece landed as `66487e4` (PR #304) and
+`0c322d6` (BMPL-391, PR #305). Merged `682b501`
 (PR #127) for the API, and `a568d6a`
 (BMPL-352, PR #270) for the web surface — matching exactly the three
 audiences the API already granted: a courier can upload from
@@ -168,30 +170,25 @@ who can see the photo or how upload works.
 
 Verified directly against `apps/api/src/shipping/shipment.service.ts` and
 `shipment-driver.service.ts` for this matrix (god's own read-only check,
-requested alongside this document): `pickupPhotoUrls` reaches exactly three
-audiences —
+requested alongside this document): `pickupPhotoUrls` reached three audiences
+as of `a568d6a`, and a fourth — the linked recipient — as of `0c322d6`:
 
 - the **sender**, via `track()` → `serialize()`, gated on
   `shipment.customerUserId === viewer.userId`;
 - **staff**, via the same `serialize()`, behind the existing
   `logistics.read`/`operate`/`manage` route decorators;
 - the **assigned courier**, on their own leg only, via `getJob()` →
-  `ownedLeg()`, gated on `leg.assignedDriverProfileId === profileId`.
+  `ownedLeg()`, gated on `leg.assignedDriverProfileId === profileId`;
+- the **linked recipient**, via `trackAsRecipient()` and `listIncoming()`,
+  which call `attachPickupPhotos()` on the recipient view (`shipment.service.ts`).
 
-`trackPublic()` — the anonymous, unauthenticated tracking-link view — is a
-hand-built allowlist that never calls `serialize()` and has no photo field at
-all, so an anonymous link holder cannot reach a photo. This matches
-[Ruling 7](./OWNER-RULINGS.md#ruling-7--who-can-see-a-pickuphandoff-photo)
-exactly for the three audiences that exist today.
+`trackPublic()` — the anonymous, unauthenticated tracking-link view — does not
+call `attachPickupPhotos()` and has no photo field, so an anonymous link holder
+cannot reach a photo. This matches
+[Ruling 7](./OWNER-RULINGS.md#ruling-7--who-can-see-a-pickuphandoff-photo).
 
-**What remains:** the owner approved recipient access to the photo in
-principle (Ruling 7). Requirement 3 has since landed, so a real "recipient"
-audience now exists — but nothing has wired `pickupPhotoUrls` into
-`trackAsRecipient`/`listIncoming`/`trackPublic` for it, and `a568d6a`'s own
-commit message names this gap directly rather than guessing past it. Sender,
-staff and courier screens are now done. No card names this specific
-recipient-wiring gap as of this writing — reported plainly rather than
-inventing a number for it.
+**What remains:** nothing for this requirement as of `0c322d6`. Every audience
+Ruling 7 names is wired.
 
 ## 3. Recipient account linking & incoming-shipment tracking
 
@@ -356,13 +353,19 @@ unaccepted leg shows nothing rather than a dead link) — the owner's
 instruction that customer-to-courier contact should use BML's existing
 per-leg messaging, confirmed wired end-to-end, not just present in the API.
 
-**Not yet true for the RECIPIENT, when different from the booking
-customer**: today a linked recipient has neither courier identity nor a
-messaging path at all (`trackAsRecipient`/`recipientView` is a deliberate
-allowlist that excludes driver identity entirely). A fix for the messaging
-half is written and tested — PR #293 lets a linked recipient join the
-existing per-leg thread — but it is **unmerged**, held on an owner migration
-signature (BMPL-359). Do not read this as working today.
+**For the RECIPIENT, when different from the booking customer**, as of
+`e72da60`:
+
+- **Messaging landed.** PR #293 (BMPL-359, merged `910d5b2`) adds a RECIPIENT
+  conversation participant role (`packages/shared/src/messaging.ts`, with its
+  migration `20261104260000_conversation_participant_role_recipient` on main)
+  and opens the per-leg thread to a linked recipient only on LAST_MILE and
+  DIRECT legs, the legs that end by delivering to them. Whether that migration
+  has been applied to production is not established by this document.
+- **Courier identity has not landed.** `RECIPIENT_VIEW_INCLUDE`
+  (`shipment.service.ts`) selects no assigned driver and no assigned vehicle,
+  so a linked recipient still sees no courier identity. Nothing in this
+  document claims otherwise.
 
 ## 8. Expandable maps & A/B/C/D route stops (pre-acceptance)
 
@@ -458,10 +461,9 @@ default except by deleting the current one.
 
 ## 10. Cancellation before custody, failed delivery, return-to-sender
 
-**Status: NOT complete. Return-to-sender/reroute carry a live authorization
-defect under [Ruling 1](./OWNER-RULINGS.md#ruling-1--a-courier-accepting-a-job-is-not-custody)
-(tracked BMPL-375), and failed delivery is still entirely unbuilt, both as of
-`4d96bb0`.** The custody boundary itself — a
+**Status: NOT complete as of `e72da60`. The staff-alone charge defect under
+[Ruling 1](./OWNER-RULINGS.md#ruling-1--a-courier-accepting-a-job-is-not-custody)
+(tracked BMPL-375) is fixed on main; failed delivery is still entirely unbuilt.** The custody boundary itself — a
 courier *accepting* a job is not the same as *custody* — was already
 correct in shipped code before this card existed:
 `ShipmentService.cancel()` blocks once a leg reaches `IN_PROGRESS`, set only
@@ -490,34 +492,36 @@ reproduced it empirically against `4d96bb0` (a customer wallet moved
 no customer involved anywhere). Reroute mirrors return exactly and carries
 the identical defect.
 
-**A fix is written and tested, but unmerged — do not read this requirement
-as complete.** PR #288 (`fix/bmpl-375-return-reroute-payment-consent`)
-splits the staff action into two steps: staff may still prepare a return or
-reroute (a `ShipmentRoutingProposal` row, nothing charged), but only the
-shipment's own customer may confirm it — confirmation 404s for any other
-user — and only that confirmation step executes the charge. Negative-control
-tests (PR #285) and a sink-level ownership test (PR #292) both exist and
-pass against the fix's branch; neither test exists on `main` today. This is
-reported from the API and QA lanes' own verification, not independently
-re-checked by this pass. PR #288 is CI-green and held at the owner's gate
-only because merging it applies a new production migration, which needs the
-owner's own signature, not because of any remaining engineering question.
+**The two-step fix is merged.** PR #288 (`0efd970`, BMPL-375) splits the
+staff action into two steps: staff may prepare a return or reroute (a
+`ShipmentRoutingProposal` row, nothing charged), and only the shipment's own
+customer may confirm it. Confirmation for any other user returns 404, and only
+that confirmation step executes the charge. The migration
+`20261104250000_shipment_routing_proposal` is on main. Negative-control tests
+(PR #285, `3ea4fa1`) and a sink-level ownership test (PR #306, `302a84c`,
+carrying the same title as the closed PR #292) are on main too. Whether the
+migration has been applied to production is not established by this document.
+
+The customer's confirmation surface landed as `e72da60` (PR #308). The staff
+prepare panel landed as `5fe37cf` (PR #309, which replaced the closed PR #278):
+it offers return and reroute, and its own header says it prepares and never
+charges. This pass read that header and the panel's action list; it did not
+re-verify the panel's UI against the two-step design beyond that.
 
 Scope fence: non-vendor courier shipments only; a marketplace shipment is
 refused outright. If no valid price can be calculated, the return stays
-`PENDING_MANUAL` rather than guessing. **No staff screen exists as of
-`f8f89dd`** — that commit is API-only (8 files, all
-`apps/api`/`packages/database`); one is being built in an open PR (#278,
-covering both this and hold/reroute together), not yet merged. Whether
-#278's screen still matches PR #288's two-step design is not verified here.
+`PENDING_MANUAL` rather than guessing.
 
-Failed delivery remains **entirely unbuilt as of `f8f89dd`**: the `EXCEPTION` state and
+Failed delivery remains **entirely unbuilt as of `e72da60`**: the `EXCEPTION` state and
 `flagException`/`resolveException` already exist and are the right
 mechanism to extend rather than duplicate, but the *trigger* — any signal
 that a delivery attempt failed — does not exist anywhere; today a failed
 attempt only enters the system if staff hear about it and type it in by
-hand, and `DeliveryStatus` has no `FAILED` value. No branch exists for this
-half.
+hand, and `DeliveryStatus` has no `FAILED` value. A separate path exists for a
+locked delivery PIN (`deliveryVerificationStatus` `FAILED`, with an
+`ADMIN_FAILED_DELIVERY` notification, `driver-jobs.service.ts`). That records
+wrong PIN codes, not a failed attempt, and adds no `DeliveryStatus` value. Whether an open
+branch exists for the trigger was not checked in this pass.
 
 ## 11. Recipient availability windows & updates
 
@@ -554,9 +558,9 @@ row was not updated until this final-acceptance audit checked it directly.
 
 ## 12. Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions
 
-**Status: every piece has a merged API as of `7ff34a1`; one still has no
-staff screen as of `7ff34a1`. This requirement never had a card until
-BMPL-340 was opened.**
+**Status as of `e72da60`: every piece has a merged API, and every piece has a
+staff trigger (the reroute/return panel landed as `5fe37cf`, PR #309). This
+requirement never had a card until BMPL-340 was opened.**
 
 Four distinct pieces, per the owner's original requirement:
 
@@ -614,10 +618,13 @@ Four distinct pieces, per the owner's original requirement:
   pricing shown and confirmed before a charge that increases what the
   customer already paid, `PENDING_MANUAL` when no valid price exists, and a
   scoped notification with no payment dialog when the charge does not
-  increase. **No staff screen exists on `main` as of `7ff34a1`** — the
-  trigger UI for this and for requirement 10's return-to-sender is one
-  coherent panel built in a still-open PR, #278. Do not read this as done
-  for a staff user without checking #278's status. Adjacent to
+  increase. **Staff triggers as of `e72da60`:** reroute and return-to-sender
+  are in the admin panel from PR #309 (`5fe37cf`, which replaced the closed
+  PR #278); hold uses the existing exception-flag button on the admin
+  logistics page (`flagException`,
+  `apps/admin/app/dashboard/logistics/[reference]/page.tsx`). Whether that
+  button does what requirement 12 asks for hold was not verified in this
+  pass. Adjacent to
   requirement 10 but proactive (before dispatch reaches
   the recipient) rather than reactive (after a failed delivery attempt).
   Tracked as BMPL-343.
@@ -635,9 +642,8 @@ through BMPL-184, so no agent was ever assigned to build it, no PR was ever
 expected against it, and nothing on any board flagged it as outstanding. It
 surfaced only because this document counted the owner's requirements
 independently of the card set and the two totals disagreed. All four
-pieces above have a merged API as of `7ff34a1`; the one piece still
-missing as of that commit is a staff screen, tracked as BMPL-343 (open
-PR #278).
+pieces above have a merged API, and as of `e72da60` each has a staff trigger.
+The staff-screen gap tracked as BMPL-343 closed in `5fe37cf` (PR #309).
 
 The contract above exists in the repository. Whether a given commit is
 currently deployed is a question this document does not answer — a served
@@ -650,7 +656,8 @@ cannot hold that current; asking a running-API source (e.g.
 *Sources: kanban cards BMPL-119, BMPL-174 through BMPL-190, BMPL-201,
 BMPL-247, BMPL-283 through BMPL-288, BMPL-337, BMPL-338, BMPL-340, BMPL-343,
 BMPL-344, BMPL-345, BMPL-346, BMPL-351, BMPL-352, BMPL-353, BMPL-354,
-BMPL-356, BMPL-360, BMPL-364, BMPL-365, BMPL-368, and
+BMPL-356, BMPL-359, BMPL-360, BMPL-364, BMPL-365, BMPL-368, BMPL-375,
+BMPL-378, BMPL-391, and
 the owner rulings in
 [`OWNER-RULINGS.md`](./OWNER-RULINGS.md).
 Every commit cited above was confirmed to be an ancestor of `origin/main`
