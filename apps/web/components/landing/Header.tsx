@@ -9,21 +9,10 @@ import { CartButton } from '../cart/CartButton';
 import { SavedNavButton } from '../saved/SavedNavButton';
 import { AnnouncementBanner } from '../AnnouncementBanner';
 import { api } from '../../lib/api';
+import { PUBLIC_NAV } from '../../lib/public-nav';
 import type { MeView } from '../../lib/types';
 import { useModalMenu } from '../../lib/use-modal-menu';
 
-// Anchor links point at the landing page ("/#…") so they work from any route,
-// not just when the visitor is already on "/".
-const NAV = [
-  { label: 'Shop', href: '/products' },
-  { label: 'Vendors', href: '/vendors' },
-  { label: 'Jobs', href: '/jobs' },
-  { label: 'Real Estate', href: '/properties' },
-  { label: 'Services', href: '/#services' },
-  { label: 'For Providers', href: '/#providers' },
-  { label: 'Wallet', href: '/#wallet' },
-  { label: 'Mobile App', href: '/#mobile' },
-];
 
 export function Header() {
   const [open, setOpen] = useState(false);
@@ -89,7 +78,7 @@ export function Header() {
         </Link>
 
         <div className="hidden items-center gap-7 lg:flex">
-          {NAV.map((item) => (
+          {PUBLIC_NAV.map((item) => (
             <a key={item.label} href={item.href} className="text-sm font-medium text-blue-100 transition hover:text-white">
               {item.label}
             </a>
@@ -153,7 +142,7 @@ export function Header() {
           className="border-t border-white/10 bg-belize-navy lg:hidden"
         >
           <div className="container-bmpl flex flex-col gap-1 py-3">
-            {NAV.map((item) => (
+            {PUBLIC_NAV.map((item) => (
               <a
                 key={item.label}
                 href={item.href}
