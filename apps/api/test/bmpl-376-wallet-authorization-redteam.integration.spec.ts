@@ -267,7 +267,7 @@ beforeEach(async () => {
 /* ------------------------------------------------------------------------- */
 
 describe('BMPL-376: staff action alone must never authorize a customer wallet charge', () => {
-  it('[RED — expected to FAIL today] return-to-sender by a logistics.manage staff member, with no customer involved anywhere, must NOT move the customer\'s money', async () => {
+  it('[regression guard] return-to-sender by a logistics.manage staff member, with no customer involved anywhere, must NOT move the customer\'s money', async () => {
     const { legId } = await walkToLastMileException();
     const wallet = await walletAccountOf(customerUserId);
     const before = await ctx.prisma.walletAccount.findUniqueOrThrow({ where: { id: wallet.id } });
@@ -300,7 +300,7 @@ describe('BMPL-376: staff action alone must never authorize a customer wallet ch
     }
   });
 
-  it('[RED — expected to FAIL today] reroute mirrors return exactly, so if return has the hole, reroute has it too — verified, not assumed', async () => {
+  it('[regression guard] reroute mirrors return exactly, so if return has the hole, reroute has it too — verified, not assumed', async () => {
     const { legId } = await walkToLastMileException();
     const wallet = await walletAccountOf(customerUserId);
     const before = await ctx.prisma.walletAccount.findUniqueOrThrow({ where: { id: wallet.id } });
