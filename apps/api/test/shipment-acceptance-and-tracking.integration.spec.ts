@@ -136,7 +136,7 @@ describe('acceptance is not custody (req 10, rule 2)', () => {
     const leg = await legOf(shipment.id);
     const courier = await makeCourier();
     await courierAccepts(leg.id, courier);
-    expect((await post(admin, `admin/logistics/legs/${leg.id}/start`)).status).toBe(201);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${leg.id}/pickup`)).status).toBe(201);
     expect(await custodyTransfers(shipment.id)).toBe(1);
 
     const before = await balanceOf(customer.cookies);
