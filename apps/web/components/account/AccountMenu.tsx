@@ -96,9 +96,10 @@ export function AccountMenu({
     router.refresh();
   }
 
+  // min-h-[44px]: each item is a touch target (measured at 36px before this).
   const itemClass = dark
-    ? 'block rounded px-3 py-2 text-sm text-blue-100 hover:bg-white/5 hover:text-white'
-    : 'block rounded-bmpl-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-belize-navy';
+    ? 'flex min-h-[44px] items-center rounded px-3 py-2 text-sm text-blue-100 hover:bg-white/5 hover:text-white'
+    : 'flex min-h-[44px] items-center rounded-bmpl-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-belize-navy';
 
   return (
     <div ref={wrapRef} className="relative min-w-0">
