@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { BrandLockup } from '../Logo';
@@ -10,6 +10,7 @@ import { SavedNavButton } from '../saved/SavedNavButton';
 import { AnnouncementBanner } from '../AnnouncementBanner';
 import { api } from '../../lib/api';
 import type { MeView } from '../../lib/types';
+import { useModalMenu } from '../../lib/use-modal-menu';
 
 // Anchor links point at the landing page ("/#…") so they work from any route,
 // not just when the visitor is already on "/".
@@ -27,6 +28,9 @@ const NAV = [
 export function Header() {
   const [open, setOpen] = useState(false);
   const router = useRouter();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const closeMenu = useCallback(() => setOpen(false), []);
   // undefined = still checking, null = signed out, MeView = signed in.
   const [me, setMe] = useState<MeView | null | undefined>(undefined);
 
@@ -39,6 +43,20 @@ export function Header() {
     return () => {
       active = false;
     };
+  }, []);
+
+  // Escape, focus in/return, Tab trap and scroll lock for the mobile list (P2).
+  useModalMenu({ open, onClose: closeMenu, panelRef, triggerRef: toggleRef });
+
+  // The list is only shown below lg. If the window grows past it while open,
+  // close it, so scroll is not left locked behind an invisible menu.
+  useEffect(() => {
+    const wide = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => {
+      if (wide.matches) setOpen(false);
+    };
+    wide.addEventListener('change', onChange);
+    return () => wide.removeEventListener('change', onChange);
   }, []);
 
   async function logout() {
@@ -113,8 +131,10 @@ export function Header() {
           <CartButton />
           <button
             className="inline-flex items-center rounded-md p-2 text-white"
+            ref={toggleRef}
             aria-label="Toggle menu"
             aria-expanded={open}
+            aria-controls="public-mobile-nav"
             onClick={() => setOpen((v) => !v)}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -125,7 +145,11 @@ export function Header() {
       </nav>
 
       {open && (
-        <div className="border-t border-white/10 bg-belize-navy lg:hidden">
+        <div
+          ref={panelRef}
+          id="public-mobile-nav"
+          className="border-t border-white/10 bg-belize-navy lg:hidden"
+        >
           <div className="container-bmpl flex flex-col gap-1 py-3">
             {NAV.map((item) => (
               <a
