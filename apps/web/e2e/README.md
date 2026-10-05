@@ -75,3 +75,17 @@ that file's own tests. This README exists so the same two facts reach anyone
 writing a *different* browser test in this directory — a new spec for an
 overlay, a disabled control, a different focus trap — who would have no
 reason to open that specific dialog spec first.
+
+## 3. Running the browser suite locally (recipe)
+
+Verified on Windows, 2026-10-05, in a scratch worktree of `origin/main`:
+
+1. `pnpm install --frozen-lockfile` (frozen, so no dependency drift).
+2. `pnpm --filter @bmpl/shared build`. The web app imports the built shared package and fails to resolve it otherwise.
+3. `pnpm exec playwright install chromium` once per machine.
+4. Set `NEXT_PUBLIC_API_URL=http://localhost:4000`. The dev server refuses to start without it (see `docs/ENVIRONMENT.md`).
+5. `pnpm --filter @bmpl/web test:e2e e2e/<spec>.spec.ts`. Pass the spec path without a `--` separator.
+
+Do not click a control to move the page to a known scroll position. Playwright scrolls to bring the target into view, so the page can move before the assertion runs. Use a real `page.mouse.wheel` from a known position instead.
+
+When red-proving a fix, revert one change in a scratch copy, run the spec, check it goes red, then restore. Record the measured numbers (for example a panel height) in the PR, not just the test name.
