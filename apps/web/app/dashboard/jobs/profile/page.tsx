@@ -58,6 +58,12 @@ const VISIBILITY_LABELS: Record<JobSeekerVisibility, string> = {
   PUBLIC_SUMMARY: 'Public summary — a summary is discoverable',
 };
 
+// What the person says about themselves. BML does not check these, so they must not
+// read as verified: a certificate typed here is not a certificate BML has seen.
+const SELF_REPORTED = 'Entered by you. BML does not check this, so it is what you say about yourself.';
+const SELF_REPORTED_CERTIFICATIONS =
+  'Entered by you. BML does not check certificates, so listing one here is what you say, not a credential BML has checked.';
+
 const toMinor = (v: string) => (v.trim() === '' ? null : Math.round(Number(v) * 100));
 const toDollars = (m: number | null) => (m == null ? '' : (m / 100).toString());
 
@@ -400,7 +406,7 @@ function SkillsCollection({ profile, onChanged }: { profile: SeekerProfile; onCh
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   return (
-    <CollectionCard title="Skills">
+    <CollectionCard title="Skills" description={SELF_REPORTED}>
       <div className="flex flex-wrap gap-2">
         {profile.skills.length === 0 && <p className="text-sm text-slate-400">No skills added yet.</p>}
         {profile.skills.map((s) => (
@@ -517,7 +523,7 @@ function EducationCollection({ profile, onChanged }: { profile: SeekerProfile; o
   const [f, setF] = useState(empty);
   const [error, setError] = useState<string | null>(null);
   return (
-    <CollectionCard title="Education">
+    <CollectionCard title="Education" description={SELF_REPORTED}>
       <div className="space-y-2">
         {profile.education.map((x) => (
           <div key={x.id} className="flex items-start justify-between gap-3 rounded-bmpl-md border border-slate-200 p-3">
@@ -591,7 +597,7 @@ function CertificationsCollection({ profile, onChanged }: { profile: SeekerProfi
   const [f, setF] = useState(empty);
   const [error, setError] = useState<string | null>(null);
   return (
-    <CollectionCard title="Certifications">
+    <CollectionCard title="Certifications" description={SELF_REPORTED_CERTIFICATIONS}>
       <div className="space-y-2">
         {profile.certifications.map((x) => (
           <div key={x.id} className="flex items-center justify-between gap-3 rounded-bmpl-md border border-slate-200 p-3">
