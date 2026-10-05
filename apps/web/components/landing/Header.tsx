@@ -196,7 +196,12 @@ export function Header() {
         <div
           ref={panelRef}
           id="public-mobile-nav"
-          className="border-t border-white/10 bg-belize-navy lg:hidden"
+          // The menu is taller than a phone screen, and the page behind is locked
+          // while it is open. So the menu itself has to scroll: bounded to the
+          // screen below the 4rem header, scrolling inside, and not chaining to the
+          // locked page. dvh where supported (it excludes the mobile browser toolbar),
+          // vh as the fallback.
+          className="max-h-[calc(100vh-4rem)] overflow-y-auto overscroll-contain supports-[height:100dvh]:max-h-[calc(100dvh-4rem)] border-t border-white/10 bg-belize-navy lg:hidden"
         >
           <div className="container-bmpl flex flex-col gap-1 py-3">
             <a

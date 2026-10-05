@@ -310,3 +310,21 @@ describe('public Header desktop groups (P6 disclosures)', () => {
     });
   });
 });
+
+// The menu is taller than a phone screen and the page behind it is locked, so the
+// menu itself must scroll (Edward's live report: he could not scroll at all). jsdom
+// has no layout, so this pins the classes that make it scroll; the scrolling itself
+// is measured in a browser against the live site.
+describe('public Header mobile menu scrolls inside the screen', () => {
+  for (const state of ['signed-out', 'signed-in'] as const) {
+    it(`the open list is bounded to the screen and scrolls itself (${state})`, async () => {
+      await mount(state);
+      await openMenu();
+      const cls = panel()!.className;
+      expect(cls).toContain('overflow-y-auto');
+      expect(cls).toContain('overscroll-contain');
+      expect(cls).toContain('max-h-[calc(100vh-4rem)]');
+      expect(cls).toContain('supports-[height:100dvh]:max-h-[calc(100dvh-4rem)]');
+    });
+  }
+});
