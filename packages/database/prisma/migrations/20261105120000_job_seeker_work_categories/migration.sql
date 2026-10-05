@@ -19,8 +19,8 @@
 -- WHAT DOES NOT CHANGE: no existing table is altered. job_categories,
 -- job_seeker_profiles and every seeker child table are untouched. No backfill:
 -- the new table starts EMPTY, and no existing seeker is given any category.
--- Nothing here is verified by BMPL; a link means "the person says they will do
--- this", not that BMPL checked it.
+-- Nothing here is verified by BML; a link means "the person says they will do
+-- this", not that BML checked it.
 --
 -- SAFETY: additive only. CREATE TABLE plus indexes and foreign keys on a new,
 -- empty table. No DROP, no ALTER on existing data, no UPDATE, no DELETE. Lock

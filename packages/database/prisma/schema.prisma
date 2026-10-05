@@ -3262,7 +3262,7 @@ model JobSeekerResume {
 
 // The kinds of work a job seeker is willing to do, as links to the EXISTING
 // JobCategory taxonomy (never a parallel list). Self-declared: nothing here is
-// verified by BMPL, and nothing here claims a licence or certification.
+// verified by BML, and nothing here claims a licence or certification.
 model JobSeekerWorkCategory {
   id            String           @id @default(cuid())
   profileId     String

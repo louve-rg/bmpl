@@ -102,7 +102,7 @@ export class JobSeekerService {
    * Replace the seeker's whole set of work categories. Only VISIBLE JobCategory
    * rows are accepted, so a hidden or unknown id is refused as a whole and the
    * previous set is kept. Self-declared: this records what the person says they
-   * will do, and claims nothing about a licence or BMPL checking it.
+   * will do, and claims nothing about a licence or BML checking it.
    */
   async setWorkCategories(userId: string, dto: JobSeekerWorkCategoriesInput) {
     const profile = await this.requireProfile(userId);
