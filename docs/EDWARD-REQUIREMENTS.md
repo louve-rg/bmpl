@@ -39,6 +39,17 @@ for a claim of more than the code delivers; nobody was looking for the
 opposite until a final-acceptance audit checked cards against rows directly
 and found it on requirements 1, 3 and 11 at once.
 
+**Citing a schema.prisma field: name it, don't pin it (MDF-91).** Write the
+backtick-wrapped model-and-field name alone, with no trailing colon and
+number for the schema line it sits on. `scripts/detect-lookup-inventory-
+citation-drift.mjs` checks that form exactly as strongly as a line-pinned
+one — it confirms the field is declared inside that model's own block — but
+a schema insertion anywhere above the field can no longer make the citation
+stale, which is the exact failure PR #293 hit. This applies to schema.prisma
+fields specifically; a source-file-and-line citation still needs its line
+number, since that script has no model-block equivalent for TypeScript
+source.
+
 ## Status summary
 
 | # | Requirement | Status | Evidence |
@@ -441,7 +452,7 @@ snapshot. Re-verified directly for this matrix, against the actual source
 rather than the PR's own description:
 
 - **Default exists and is maintained as a genuine singleton.**
-  `SavedAddress.isDefault` (`packages/database/prisma/schema.prisma:2691`).
+  `SavedAddress.isDefault`.
   `AddressesService.create`/`update` (`apps/api/src/addresses/addresses.service.ts`)
   clear every other default in the same transaction before setting a new one;
   `remove()` promotes the next-most-recently-updated address to default if the
