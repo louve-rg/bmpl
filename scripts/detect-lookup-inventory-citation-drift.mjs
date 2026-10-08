@@ -64,6 +64,25 @@
  *       NEAREST PRECEDING citation already found on the SAME LINE. A `:N`
  *       with no earlier citation on its line has nothing to inherit and is
  *       reported FILE-NOT-FOUND rather than silently skipped.)
+ *     - `` `Model.field` `` with NO digit anywhere in the token at all
+ *       (MDF-91: the sixth pattern, added so a schema.prisma citation can
+ *       drop its line number entirely instead of re-pinning it on every
+ *       insertion above it). `Model` must be the exact name of a real
+ *       `model` or `enum` declared in schema.prisma RIGHT NOW — checked
+ *       against a name index built from the schema itself at startup, never
+ *       guessed from capitalization alone — and the token must not already
+ *       be serving as the attached `.symbol` label for a different citation
+ *       found earlier on the same line (otherwise
+ *       `` `SavedAddress.isDefault` (`schema.prisma:2691`) `` would be
+ *       counted twice: once as that citation's symbol, once again as its
+ *       own bare citation). Deliberately narrower than "any dotted backtick
+ *       identifier": `` `ShipmentService.scheduleLeg` `` and
+ *       `` `AddressesService.create` `` both occur in these exact documents
+ *       and are TS class-and-method mentions, not Prisma fields —
+ *       `ShipmentService` and `AddressesService` are not in the schema name
+ *       index, so neither is matched. This has no line to check against at
+ *       all, so it is verified differently from every other pattern — see
+ *       `checkSymbolOnlyCitation` below.
  *   For each: resolves the target file — a bare filename is searched for
  *   (recursively) under packages/shared/src, packages/database/prisma and
  *   apps/api/src, the same three roots as before; a citation containing a
@@ -107,6 +126,26 @@
  *     is the backstop for exactly that case.
  *   - Any document other than the three named in DOC_PATHS below. Whether
  *     this generalises further is a separate, unasked question.
+ *   - A bare `` `file.ts` `` or `` `file.prisma` `` mention with no digit and
+ *     no symbol at all (MDF-91, considered and deliberately rejected for the
+ *     sixth pattern). All three documents were searched for this shape
+ *     before writing the pattern below: 19 real instances exist across
+ *     EDWARD-REQUIREMENTS.md and LOOKUP-DATA-INVENTORY.md
+ *     (`` `driver-jobs.service.ts` ``, `` `seed.ts` ``, and 17 more), and
+ *     every one is plain prose naming where some code lives, not a claim
+ *     this script was asked to verify. Matching all of them would be
+ *     exactly the "fires on every unrelated backtick-wrapped identifier"
+ *     failure MDF-91 named as the thing to prove didn't happen — and the
+ *     verification gained would be negative: a bare file with no symbol and
+ *     no line gets only "does this file exist," strictly weaker than the
+ *     NO-SYMBOL-TO-CHECK bucket other patterns already produce (which also
+ *     bounds a line number). Rejected on these grounds, not implemented.
+ *   - A dotted `` `Enum.MEMBER` `` citation. The sixth pattern's model-name
+ *     gate accepts enum names as well as model names (both are valid schema
+ *     declarations), but its field-part regex requires a lowercase-leading
+ *     identifier, which no enum member in this schema is (all are
+ *     SCREAMING_CASE) — so this shape is excluded by the same regex that
+ *     targets Prisma field-naming convention, not by a separate rule.
  *   - Whether the CONTENT at a correctly-cited line is semantically right
  *     (e.g. whether `EmploymentType` still has the right VALUES, or whether
  *     a correctly-cited `Model.field` is still the RIGHT field for the claim
@@ -164,6 +203,23 @@ const SCHEMA_PATH = path.join(REPO_ROOT, 'packages/database/prisma/schema.prisma
 const SEARCH_ROOTS = ['packages/shared/src', 'packages/database/prisma', 'apps/api/src'].map((p) => path.join(REPO_ROOT, p));
 const SKIP_DIRS = new Set(['node_modules', '.turbo', 'dist', '.git']);
 
+/**
+ * MDF-91: the exact set of real schema.prisma model/enum names, built fresh from
+ * the schema itself every run — never hand-maintained, so it can never drift from
+ * the schema it gates. This is what lets pattern 6 tell `SavedAddress.isDefault`
+ * (a real model) apart from `ShipmentService.scheduleLeg` (a TS class, not a model)
+ * without hard-coding either name.
+ */
+function buildModelNameIndex(schemaPath) {
+  const names = new Set();
+  const declRe = /^(model|enum)\s+(\w+)/;
+  for (const line of readFileSync(schemaPath, 'utf8').split(/\r?\n/)) {
+    const m = declRe.exec(line.trim());
+    if (m) names.add(m[2]);
+  }
+  return names;
+}
+
 /** basename -> full path[]; more than one entry means AMBIGUOUS, not a guess. */
 function buildFileIndex(roots) {
   const index = new Map();
@@ -193,8 +249,12 @@ function rel(p) {
   return path.relative(REPO_ROOT, p).replace(/\\/g, '/');
 }
 
-/** Extracts every citation from one doc line, masking each match so later passes don't re-find it. */
-function extractCitations(line) {
+/**
+ * Extracts every citation from one doc line, masking each match so later passes
+ * don't re-find it. `modelNames` (MDF-91) gates pattern 6 — see the header comment
+ * and pattern 6's own comment below for why this needs the real schema's name set.
+ */
+function extractCitations(line, modelNames) {
   const citations = [];
   let masked = line;
 
@@ -280,15 +340,48 @@ function extractCitations(line) {
   // Model.field citation style — LOOKUP-DATA-INVENTORY.md's own symbols never contain one, so
   // this only adds matches, it does not change which bare identifier wins for the old doc.
   const idRe = /`([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)`/g;
+  // MDF-91: positions (in `line`/`masked` — mask() never changes length, so the two
+  // stay index-aligned) of every backtick token already consumed as SOME citation's
+  // `.symbol` label. Pattern 6 below must skip these — otherwise a token like
+  // `` `SavedAddress.isDefault` `` immediately followed by `` (`schema.prisma:2691`) ``
+  // would be counted as two separate citations (its existing role as that citation's
+  // symbol, AND a brand-new standalone pattern-6 citation for the same text).
+  const consumedSymbolIndices = new Set();
   for (const c of citations) {
     const before = line.slice(0, c.index);
     const cellStart = before.lastIndexOf('|') + 1;
     const cellBefore = before.slice(cellStart);
     let last = null;
+    let lastAbsIndex = null;
     let m;
     idRe.lastIndex = 0;
-    while ((m = idRe.exec(cellBefore)) !== null) last = m[1];
+    while ((m = idRe.exec(cellBefore)) !== null) {
+      last = m[1];
+      lastAbsIndex = cellStart + m.index;
+    }
     c.symbol = last;
+    if (lastAbsIndex !== null) consumedSymbolIndices.add(lastAbsIndex);
+  }
+
+  // 6) `` `Model.field` `` with NO digit anywhere in the token (MDF-91). `Model` must
+  // be a real model/enum name from the CURRENT schema (never hard-coded — see
+  // buildModelNameIndex), which is what keeps this from matching
+  // `` `ShipmentService.scheduleLeg` `` or `` `AddressesService.create` `` — both
+  // occur in EDWARD-REQUIREMENTS.md and are TS class-and-method mentions, not
+  // schema fields, so neither name is in modelNames. Runs against `masked` (never
+  // re-matches text patterns 1-5 already claimed) and skips anything already
+  // consumed as another citation's symbol label, above. Unlike every other pattern,
+  // this one has NO line number — `lineSpec: null` — so it is checked differently;
+  // see `checkSymbolOnlyCitation`.
+  {
+    const re = /`([A-Z][A-Za-z0-9_]*)\.([a-z_][A-Za-z0-9_]*)`/g;
+    let m;
+    while ((m = re.exec(masked)) !== null) {
+      if (!modelNames.has(m[1])) continue;
+      if (consumedSymbolIndices.has(m.index)) continue;
+      citations.push({ index: m.index, file: 'schema.prisma', lineSpec: null, kind: 'schema', symbol: `${m[1]}.${m[2]}` });
+      mask(m.index, m.index + m[0].length);
+    }
   }
 
   return { citations: citations.sort((a, b) => a.index - b.index), masked };
@@ -371,6 +464,54 @@ function escapeForRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * MDF-91: finds the `model X { ... }` / `enum X { ... }` block for a pattern-6
+ * symbol-only citation — the span between the declaration line and the first line
+ * that is ONLY a closing brace. Returns null if the model/enum no longer exists at
+ * all (a real drift: the model was renamed or removed since the citation was written).
+ */
+function findModelBlock(src, modelName) {
+  const declRe = new RegExp(`^(model|enum)\\s+${modelName}\\b`);
+  const startIdx = src.findIndex((l) => declRe.test(l.trim()));
+  if (startIdx < 0) return null;
+  for (let i = startIdx + 1; i < src.length; i++) {
+    if (src[i].trim() === '}') return { startIdx, endIdx: i };
+  }
+  return { startIdx, endIdx: src.length };
+}
+
+/**
+ * MDF-91: the strong check for a pattern-6 symbol-only citation. There is no line
+ * number to bound against, so "verified exactly as strongly" means something
+ * different here than for every other pattern: not "is the symbol at THIS line,"
+ * but "does the field actually live inside THIS model's own block" — bounded to the
+ * named model/enum specifically, not a whole-file word search, because Prisma field
+ * names repeat across models (`id`, `createdAt`, `quantity`) and a whole-file search
+ * would report a real drift (field moved to a different model, or deleted) as a
+ * false OK just because some unrelated model happens to share the field name.
+ */
+function checkSymbolOnlyCitation(citation, src, base, rp) {
+  const [modelName, fieldName] = citation.symbol.split('.');
+  const block = findModelBlock(src, modelName);
+  if (!block) {
+    return { ...base, verdict: 'DRIFTED', resolvedPath: rel(rp), citedLine: null, actualLine: null, citedLineText: `model/enum ${modelName} is no longer declared in schema.prisma` };
+  }
+  const fieldRe = new RegExp(`\\b${escapeForRegex(fieldName)}\\b`);
+  for (let i = block.startIdx + 1; i < block.endIdx; i++) {
+    if (fieldRe.test(src[i])) {
+      return { ...base, verdict: 'OK', resolvedPath: rel(rp) };
+    }
+  }
+  return {
+    ...base,
+    verdict: 'DRIFTED',
+    resolvedPath: rel(rp),
+    citedLine: null,
+    actualLine: null,
+    citedLineText: `field "${fieldName}" not found inside model ${modelName} (schema.prisma:${block.startIdx + 1}-${block.endIdx + 1})`,
+  };
+}
+
 function checkCitation(citation, index, fileCache) {
   const resolved = resolveFile(index, citation.kind, citation.file);
   const base = { file: citation.file, lineSpec: citation.lineSpec, symbol: citation.symbol };
@@ -383,6 +524,12 @@ function checkCitation(citation, index, fileCache) {
     fileCache.set(rp, readFileSync(rp, 'utf8').split(/\r?\n/));
   }
   const src = fileCache.get(rp);
+
+  // MDF-91: pattern 6 produces a citation with no line at all.
+  if (citation.lineSpec === null) {
+    return checkSymbolOnlyCitation(citation, src, base, rp);
+  }
+
   const { points, isRangeOrMulti, max } = parseLineSpec(citation.lineSpec);
 
   if (max > src.length) {
@@ -428,6 +575,7 @@ function checkCitation(citation, index, fileCache) {
 
 function main() {
   const index = buildFileIndex(SEARCH_ROOTS);
+  const modelNames = buildModelNameIndex(SCHEMA_PATH); // MDF-91: gates pattern 6
   const fileCache = new Map();
 
   const results = [];
@@ -436,7 +584,7 @@ function main() {
     const docRel = rel(docPath);
     const docSrc = readFileSync(docPath, 'utf8');
     docSrc.split(/\r?\n/).forEach((line, i) => {
-      const { citations, masked } = extractCitations(line);
+      const { citations, masked } = extractCitations(line, modelNames);
       for (const c of citations) {
         results.push({ doc: docRel, docLine: i + 1, ...checkCitation(c, index, fileCache) });
       }
@@ -475,10 +623,17 @@ function main() {
     console.log(`by verdict: ${Object.entries(by).map(([verdict, count]) => `${verdict} ${count}`).join(', ')}`);
     console.log('');
     for (const r of results.filter((x) => x.verdict === 'DRIFTED')) {
-      console.log(
-        `DRIFTED   ${r.doc}:${r.docLine}  ${r.symbol}@${r.resolvedPath}:${r.citedLine} — cited line is "${r.citedLineText}"; ` +
-          `actually at ${r.actualLine ?? 'not found anywhere in file'}`,
-      );
+      // MDF-91: a pattern-6 symbol-only citation has no cited line at all — print the
+      // reason checkSymbolOnlyCitation already wrote into citedLineText instead of a
+      // "cited line is ... actually at ..." sentence that has nothing to compare.
+      if (r.citedLine === null) {
+        console.log(`DRIFTED   ${r.doc}:${r.docLine}  ${r.symbol}@${r.resolvedPath} (symbol-only, no line pinned) — ${r.citedLineText}`);
+      } else {
+        console.log(
+          `DRIFTED   ${r.doc}:${r.docLine}  ${r.symbol}@${r.resolvedPath}:${r.citedLine} — cited line is "${r.citedLineText}"; ` +
+            `actually at ${r.actualLine ?? 'not found anywhere in file'}`,
+        );
+      }
     }
     for (const r of results.filter((x) => x.verdict === 'PAST-EOF')) {
       console.log(`PAST-EOF  ${r.doc}:${r.docLine}  ${r.file}:${r.lineSpec} — file is only ${r.fileLength} lines`);
