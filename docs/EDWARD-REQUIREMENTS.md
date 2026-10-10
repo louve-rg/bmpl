@@ -51,6 +51,27 @@ fields specifically; a source-file-and-line citation still needs its line
 number, since that script has no model-block equivalent for TypeScript
 source.
 
+**"Done" is five different claims, and this document now separates
+them.** The owner's own distinction: IMPLEMENTED (the code exists),
+TESTED (a test exists that would fail without it, seen to pass),
+MERGED (an ancestor of `origin/main` — the anchor every row already
+carried), DEPLOYED (an ancestor of the *live* commit, checked with
+`git merge-base --is-ancestor` against the live commit, never inferred
+from a date or a position in a log — that specific substitution is how a
+report went wrong this same evening), and PRODUCTION-VERIFIED (someone
+has watched the behaviour work in production and it is recorded
+somewhere citable). Each requirement section below has an **Evidence
+ladder** stating which rungs it has reached, as of two checked facts:
+production web is `3aa35d6` and every commit between it and `origin/main`
+touches no `apps/web` file; production API is `9ec6764` and every commit
+between it and `origin/main` touches no `apps/api`/`packages` file — so a
+MERGED commit touching only one of those two areas is also DEPLOYED.
+**No equivalent fact exists for `apps/admin`**, so a row whose evidence
+touches an admin screen says DEPLOYED: not established for that part,
+rather than guessing. Most rows stop at DEPLOYED: that is not a defect in
+this document, it is the actual state of a repository where nobody has
+yet recorded watching most of this working live.
+
 ## Status summary
 
 | # | Requirement | Status | Evidence |
@@ -116,6 +137,20 @@ noted in the row itself rather than guessed at here.
 ---
 
 ## 1. Vendor location-level inventory & fulfilment origin
+
+**Evidence ladder:**
+- IMPLEMENTED: yes — `bad7b3f` (API), `74cbcd6` (UI).
+- TESTED: yes, an integration spec shipped in `bad7b3f` itself; not
+  independently re-run in this pass.
+- MERGED: yes — both an ancestor of `origin/main`.
+- DEPLOYED: **yes for the API and customer/vendor web surfaces** —
+  `bad7b3f` touches only `apps/api`/`packages/database`, within production
+  API currency; the web portion of `74cbcd6` is within production web
+  currency. **Not established for the admin screen** — `74cbcd6` also
+  touches `apps/admin`, and no live-admin-commit reference exists to
+  check it against (the two facts this pass has are web `3aa35d6` and API
+  `9ec6764` only).
+- PRODUCTION-VERIFIED: **no record.**
 
 **Status: done as of `74cbcd6`.** Merged `bad7b3f` (BMPL-175, PR #259) —
 `packages/database/prisma/migrations/20261104170800_vendor_location_inventory`.
@@ -190,6 +225,17 @@ the requirement, and neither extreme described what had actually shipped.
 
 ## 2. Package pickup/handoff photo
 
+**Evidence ladder:**
+- IMPLEMENTED: yes — `682b501` (API), `a568d6a` (web, courier/sender/staff),
+  `66487e4`/`0c322d6` (recipient access).
+- TESTED: yes, named integration coverage shipped with these PRs; not
+  independently re-run in this pass.
+- MERGED: yes — all four an ancestor of `origin/main`.
+- DEPLOYED: **yes.** Every one of these commits touches only `apps/api`
+  and/or `apps/web` (confirmed directly, `git show --stat`) — no `apps/admin`
+  file in any of them — so both production-currency facts apply in full.
+- PRODUCTION-VERIFIED: **no record.**
+
 **Status: done for sender, staff, courier and linked recipient as of
 `0c322d6`.** The linked-recipient piece landed as `66487e4` (PR #304) and
 `0c322d6` (BMPL-391, PR #305). Merged `682b501`
@@ -247,6 +293,19 @@ findings.
 
 ## 3. Recipient account linking & incoming-shipment tracking
 
+**Evidence ladder:**
+- IMPLEMENTED: yes — `a6b7d97` (three migrations plus the claim
+  controller/service).
+- TESTED: yes, named integration coverage shipped with the PR; not
+  independently re-run in this pass.
+- MERGED: yes — an ancestor of `origin/main`.
+- DEPLOYED: **yes.** Touches `apps/api`, `apps/web`, `packages/database`,
+  `packages/shared` only — no `apps/admin` file — both production-currency
+  facts apply.
+- PRODUCTION-VERIFIED: **no record.** (The two open policy questions,
+  BMPL-119, are the owner's to answer and are a separate axis from this
+  ladder — a question outstanding does not change what has shipped.)
+
 **Status: done, as Edward asked for it.** Merged `a6b7d97` (BMPL-179, PR
 #135) — `packages/database/prisma/migrations/20261104170000_shipment_recipient_link_audit`,
 `20261104180000_shipment_recipient_link`,
@@ -296,6 +355,16 @@ shipment answers an immediate repeat claim by the same account identically
 to the first success.
 
 ## 4. Granular driver service areas (district → city)
+
+**Evidence ladder:**
+- IMPLEMENTED: yes — `3950db0` (API), `99e98c1`/`2cbcf73` (web),
+  `a032771` (API, the merged endpoint).
+- TESTED: yes, named integration coverage shipped with these PRs; not
+  independently re-run in this pass.
+- MERGED: yes — all four an ancestor of `origin/main`.
+- DEPLOYED: **yes.** Every commit touches only `apps/api` or `apps/web` —
+  no `apps/admin` — both production-currency facts apply.
+- PRODUCTION-VERIFIED: **no record.**
 
 **Status: end-to-end as of `2cbcf73`.** Merged `3950db0` (PR #126) — `apps/api/src/driver/driver.controller.ts`,
 `driver.service.ts` and an integration spec only, zero `apps/web`/`apps/admin`
@@ -349,6 +418,24 @@ district is offered to a driver who selected it.
 
 ## 5. Operating hours & closed/soon-closing handling
 
+**Evidence ladder — for the five commits this row cites (`056b709`,
+`e498765`, `c2d1b0a`, `a072971`, `1161a6f`) only:**
+- IMPLEMENTED: yes.
+- TESTED: yes, named integration coverage shipped with these PRs; not
+  independently re-run in this pass.
+- MERGED: yes — all five an ancestor of `origin/main`.
+- DEPLOYED: **yes.** Every one touches only `apps/api` and/or `apps/web` —
+  no `apps/admin` — both production-currency facts apply.
+- PRODUCTION-VERIFIED: **no record.**
+
+**Gap in this ladder, stated rather than smoothed over:** the
+**terminal-half** hub-hours work and the **closed-now badge** (BMPL-335,
+BMPL-334) are both referenced below by card id only, with no commit SHA in
+this document to check — "shipped ahead of this matrix" means exactly
+that they predate this document's own citation discipline. This ladder
+cannot certify those two pieces' MERGED/DEPLOYED rungs without first
+finding their actual commits, which this pass did not do.
+
 **Status: done.** The **terminal half** is complete end to end: structured
 hub hours and dated exceptions, the write surface, and a consumer that
 actually defers dispatch outside hours and self-corrects (shipped ahead of
@@ -378,6 +465,22 @@ not a false negative badge. Confirm an out-of-hours marketplace pickup is
 deferred, not dropped, and self-corrects once hours reopen.
 
 ## 6. Handoff-chain security & an end-to-end walk test
+
+**Evidence ladder:**
+- IMPLEMENTED: yes — `6676d68` (the fix).
+- TESTED: yes — `cbc6765` added the walk test,
+  `apps/api/test/transport-leg-operations.integration.spec.ts`; seen
+  passing as part of CI on the merging PR, not independently re-run in
+  this pass.
+- MERGED: yes — both commits an ancestor of `origin/main`.
+- DEPLOYED: **yes.** Both touch only `apps/api` (`cbc6765`'s only non-test
+  file is this document itself) — production-API-current fact applies.
+- PRODUCTION-VERIFIED: **no record of the fix itself being watched live.**
+  BMPL-138 is a *production incident report* that a specific leg could not
+  be marked departed — the trace found no code defect and no schedule data
+  was invented to reproduce it, but that is an unresolved report, not a
+  confirmation that the fixed behaviour has been observed working. The
+  four facts asked of Edward to reproduce his case remain outstanding.
 
 **Status: done.** The defect — a handoff code alone released a shipment,
 with no check that the authenticated actor was the currently assigned
@@ -421,6 +524,25 @@ stays open until Edward supplies the four facts (shipment reference, leg
 rows, account grants, screen used) needed to reproduce his specific case.
 
 ## 7. Courier & vehicle identification once assigned
+
+**Evidence ladder — for the booking-customer piece and the recipient
+messaging piece that have actually shipped; identity-for-the-recipient has
+not implemented, so no ladder applies to it (see below):**
+- IMPLEMENTED: yes — `a4fb20d` (booking customer), `910d5b2`/`5c11021`/
+  `c7690a5` (recipient messaging, API + web).
+- TESTED: yes. Two separate commits added test coverage:
+  `apps/api/test/shipping-messaging.integration.spec.ts` on the API side,
+  and `RecipientCourierMessage.test.tsx` plus an extension of
+  `apps/web/app/track/[token]/page.test.tsx` on the web side. Their
+  commit ids are given in the IMPLEMENTED/MERGED rungs above; not
+  independently re-run in this pass.
+- MERGED: yes — all four an ancestor of `origin/main`.
+- DEPLOYED: **yes.** Every one of these commits touches only `apps/api`
+  and/or `apps/web` (`5c11021` confirmed `apps/api` only; `c7690a5`
+  confirmed `apps/web` only) — no `apps/admin` — both
+  production-currency facts apply.
+- PRODUCTION-VERIFIED: **no record**, for either the booking-customer
+  messaging link or the recipient's.
 
 **Status: done.** Merged `a4fb20d` (PR #119). Reuses the existing
 privacy-scoped `driverSummary()` shape and the moderated `publicAvatarUrl()`
@@ -489,6 +611,21 @@ criterion above is written so the row can flip the day that decision
 lands, without waiting on a second audit to define what "Done" means.
 
 ## 8. Expandable maps & A/B/C/D route stops (pre-acceptance)
+
+**Evidence ladder:**
+- IMPLEMENTED: yes — `4eac6e8`, `c99a596`, `1161a6f` (shipping), `16e4b4b`
+  (marketplace).
+- TESTED: yes, named integration/component coverage shipped with these
+  PRs, plus the 2026-09-26 real-browser mobile audit noted below; not
+  independently re-run in this pass.
+- MERGED: yes — all four an ancestor of `origin/main`.
+- DEPLOYED: **yes.** Every one touches only `apps/api` and/or `apps/web` —
+  no `apps/admin` — both production-currency facts apply.
+- PRODUCTION-VERIFIED: **no record.** The 2026-09-26 mobile audit
+  (described below) does not state which environment it ran against —
+  not named as production, so not counted as one. The one explicitly
+  uncertain item from that audit (a real-phone touch-drag pan) is also
+  still open.
 
 **Status: done for both shipping's multi-hub job maps and marketplace
 delivery, as of `16e4b4b`.** `apps/web/app/dashboard/driver/jobs/[id]` (the
@@ -564,6 +701,24 @@ pending their findings.
 
 ## 9. Saved addresses — label, CRUD, default, delete-safety
 
+**Evidence ladder:**
+- IMPLEMENTED: yes — `c4b9f2b` (web CRUD wiring over pre-existing API),
+  `444a1ec` (manage-addresses page), `9ec6764` (un-default-without-delete).
+- TESTED: yes, named — `apps/api/test/addresses.integration.spec.ts`
+  (extended by `9ec6764`); the cross-user negative test and duplicate-
+  detection behaviour are described in this document's body but not
+  independently named here.
+- MERGED: yes — all three an ancestor of `origin/main`.
+- DEPLOYED: **yes.** `c4b9f2b` and `9ec6764` touch only `apps/api`/
+  `apps/web`; `444a1ec` touches only `apps/web` — no `apps/admin` in any
+  of them — both production-currency facts apply.
+- PRODUCTION-VERIFIED: **partial, and attributed, not independently
+  re-checked by me.** `board.md` (2026-10-04, Oscar) records that
+  `/dashboard/addresses` resolves live behind the login gate after a
+  separate navigation change removed it from the public menu — that is
+  page *reachability*, not the CRUD/default behaviour itself, which has
+  no recorded live observation.
+
 **Status: done.** `SavedAddress` (label, full contact fields, address,
 district, lat/long, `isDefault`) plus API CRUD existed before this batch; the
 audit (merged `c4b9f2b`, PR #122) found the real gap was in the **web app**,
@@ -619,6 +774,37 @@ going through checkout. Attempt to edit or delete another account's
 address by id and confirm a 404 with the target row unchanged.
 
 ## 10. Cancellation before custody, failed delivery, return-to-sender
+
+**Evidence ladder — for the shipped pieces only; failed delivery has no
+code to ladder at all, see below:**
+- IMPLEMENTED: yes, for custody/cancellation (pre-existing,
+  `ShipmentService.cancel()`) and for return-to-sender/reroute as fixed
+  (`f8f89dd` then `0efd970`).
+- TESTED: yes, named —
+  `apps/api/test/bmpl-376-wallet-authorization-redteam.integration.spec.ts`
+  (`3ea4fa1`, retitled passing by `5b7dd1a`),
+  `apps/api/test/bmpl-378-escrow-sink-boundary.integration.spec.ts`
+  (`302a84c`), and
+  `apps/api/test/shipment-acceptance-and-tracking.integration.spec.ts`
+  (`d5b1dec`); not independently re-run in this pass.
+- MERGED: yes — `f8f89dd`, `0efd970`, `3ea4fa1`, `302a84c`, `e72da60`,
+  `5fe37cf`, `5b7dd1a`, `d5b1dec` all ancestors of `origin/main`.
+- DEPLOYED: **yes for the API fix and the customer confirmation web
+  surface** — `f8f89dd`/`0efd970`/test commits touch only `apps/api`
+  (plus `packages/*`); `e72da60`'s confirmation surface touches only
+  `apps/web`; both within production currency. **Not established for the
+  staff prepare panel** — `5fe37cf` touches only `apps/admin`, and no
+  live-admin-commit reference exists to check it against. Whether the
+  `20261104250000_shipment_routing_proposal` migration itself has been
+  applied to production is, separately, not established by this document
+  (stated already in the body below).
+- PRODUCTION-VERIFIED: **no record**, for any of the three (cancel,
+  return, reroute).
+
+**Failed delivery has no ladder at all:** IMPLEMENTED is already "no" — no
+trigger of any kind exists, so TESTED/MERGED/DEPLOYED/PRODUCTION-VERIFIED
+do not apply to a thing that was never built. This is the blank the ladder
+is supposed to make visible rather than hide behind "NOT complete."
 
 **Status: NOT complete as of `effc63e` (re-verified, no change since
 `e72da60`). The staff-alone charge defect under
@@ -712,6 +898,18 @@ failed delivery has no trigger to test against.
 
 ## 11. Recipient availability windows & updates
 
+**Evidence ladder:**
+- IMPLEMENTED: yes — `056b709`/`e498765` (sender windows, API),
+  `c2d1b0a` (sender UI), `42d658f` (customer travel date),
+  `a6f81bb` (recipient self-service).
+- TESTED: yes, named integration coverage shipped with each of these PRs;
+  not independently re-run in this pass.
+- MERGED: yes — all five an ancestor of `origin/main`.
+- DEPLOYED: **yes.** Every one touches only `apps/api` and/or `apps/web`
+  and/or `packages/*` — no `apps/admin` — both production-currency facts
+  apply.
+- PRODUCTION-VERIFIED: **no record.**
+
 **Status: done.**
 
 - **Sender-entered shipment availability windows**, end to end: the child
@@ -754,6 +952,33 @@ own availability window and confirm the sender's own window on the same
 shipment is untouched.
 
 ## 12. Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions
+
+**Evidence ladder — per piece, since the four pieces do not share one:**
+- **Multi-leg ETA** (`f1bbfce`): IMPLEMENTED/MERGED yes, ancestor of
+  `origin/main`; touches only `apps/api`/`packages/shared` — DEPLOYED yes.
+  TESTED: a test exists per the PR, not independently named here. The gap
+  this phase left is said to be closed by BMPL-346, but **no commit SHA
+  for BMPL-346 is cited anywhere in this document** — its own
+  MERGED/DEPLOYED rungs cannot be checked from this document as written.
+- **ETA-change notice** (`e7ef2ed`): IMPLEMENTED/MERGED yes, ancestor of
+  `origin/main`; touches `apps/api`/`packages/database`/`packages/shared`
+  only — DEPLOYED yes. TESTED: a test exists per the PR, not
+  independently named here. PRODUCTION-VERIFIED: no record, and its own
+  migration ships "additive and unapplied pending review" by the body
+  text below — whether it is applied in production is not established.
+- **Terminal hold/reroute** (`7ff34a1` API; `5fe37cf` staff screen):
+  IMPLEMENTED/MERGED yes, both ancestors of `origin/main`. DEPLOYED:
+  **yes for the API** (the non-admin files in `7ff34a1` are `apps/api`/
+  `packages/*`; production-API-current fact applies) — **not established
+  for the staff screen**, since `5fe37cf` and part of `7ff34a1` touch
+  `apps/admin` and no live-admin-commit reference exists to check against
+  (same gap as requirement 10's staff panel, which is the same commit).
+  TESTED: a test exists per the PR, not independently named here.
+- **Carrier schedule exceptions** (`fcc3592`, BMPL-186): IMPLEMENTED/
+  MERGED yes, ancestor of `origin/main`. DEPLOYED: **yes for the API**
+  (production-current); **not established for the admin half** — this
+  commit also touches `apps/admin`.
+- PRODUCTION-VERIFIED, all four pieces: **no record.**
 
 **Status as of `effc63e` (re-verified, no change since `e72da60`): every
 piece has a merged API, and every piece has a staff trigger (the
@@ -861,11 +1086,23 @@ date-specific `RouteScheduleException` and confirm a route otherwise open
 that day is refused with the schedule reason, then confirm it recovers
 once the exception is removed.
 
-The contract above exists in the repository. Whether a given commit is
-currently deployed is a question this document does not answer — a served
-commit is a fact that changes with the next deploy, and this document
-cannot hold that current; asking a running-API source (e.g.
-`pnpm deploy:status`) is the only way to actually know.
+The contract above exists in the repository. As of this 2026-10-10 pass,
+each requirement's Evidence ladder states DEPLOYED where it could be
+checked against the two live commits this pass used (web `3aa35d6`, API
+`9ec6764`) — but that check is only as current as this document, and a
+served commit is a fact that changes with the next deploy. Re-checking it
+is cheap (`git merge-base --is-ancestor <commit> <live-commit>`, or
+asking a running-API source such as `pnpm deploy:status` directly) and
+should be done again before trusting an old DEPLOYED rung, not assumed to
+still hold.
+
+**Reserved: UI-defect findings from Oscar and Jim's responsive-layout
+audit.** Not yet written — their measurements (375/414/768/1024/1440) are
+in progress as of this pass. When routed here, each confirmed defect
+touching requirements 1, 2, 4, 7 or 8 will be recorded with who
+reproduced it, which commit fixed it, and who re-verified the fix — the
+same evidence discipline as the rest of this document, not invented ahead
+of the findings.
 
 ---
 
