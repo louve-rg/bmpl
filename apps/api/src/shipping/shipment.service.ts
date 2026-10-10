@@ -1769,11 +1769,18 @@ export class ShipmentService {
       select: { id: true, shipmentId: true, status: true, handoffPin: true, handoffPinAttempts: true, assignedDriverProfileId: true },
     });
     if (!leg) throw new NotFoundException('Leg not found.');
-    if (leg.status !== 'IN_PROGRESS') {
-      throw new BadRequestException('That leg has not started, so there is nothing to hand over.');
-    }
+    // Checked BEFORE the status guard, not after: MDF-96's lockout now moves
+    // leg.status to EXCEPTION on the attempt that exhausts the counter (see
+    // below), so a leg caught by THIS check is no longer IN_PROGRESS by the
+    // time anyone tries again. Ordering it first keeps the specific, correct
+    // "locked, an administrator must verify" answer for every later attempt
+    // — before AND after this branch existed — rather than letting the
+    // generic "has not started" message mask it.
     if (leg.handoffPinAttempts >= MAX_PIN_ATTEMPTS) {
       throw new ForbiddenException('Too many incorrect codes. An administrator has to confirm this handoff.');
+    }
+    if (leg.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('That leg has not started, so there is nothing to hand over.');
     }
 
     const isAssignedCourier =
