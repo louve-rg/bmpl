@@ -478,6 +478,16 @@ courier has accepted. Confirm the same shipment's anonymous tracking link
 endpoint refuses an unauthenticated caller. Confirm no screen shown to a
 linked recipient displays the courier's name, photo or vehicle.
 
+**What would make this row Done for the recipient, precisely:**
+`RECIPIENT_VIEW_INCLUDE` would need to select `assignedDriver` through the
+same `driverSummary()`/`publicAvatarUrl()` shape already serialized to the
+booking customer, wired into the recipient serializer — confirmed to need
+no new capability and no schema change. The blocker is not engineering: it
+is an unmade product decision on whether a recipient should see courier
+identity at all, asked of the owner as `MDF-97` and still unanswered. The
+criterion above is written so the row can flip the day that decision
+lands, without waiting on a second audit to define what "Done" means.
+
 ## 8. Expandable maps & A/B/C/D route stops (pre-acceptance)
 
 **Status: done for both shipping's multi-hub job maps and marketplace
@@ -863,7 +873,7 @@ cannot hold that current; asking a running-API source (e.g.
 BMPL-247, BMPL-283 through BMPL-288, BMPL-337, BMPL-338, BMPL-340, BMPL-343,
 BMPL-344, BMPL-345, BMPL-346, BMPL-351, BMPL-352, BMPL-353, BMPL-354,
 BMPL-356, BMPL-359, BMPL-360, BMPL-364, BMPL-365, BMPL-368, BMPL-375,
-BMPL-376, BMPL-378, BMPL-391, hive card MDF-96, and
+BMPL-376, BMPL-378, BMPL-391, hive cards MDF-96 and MDF-97, and
 the owner rulings in
 [`OWNER-RULINGS.md`](./OWNER-RULINGS.md).
 Every commit cited above was confirmed to be an ancestor of `origin/main`
