@@ -145,7 +145,7 @@ function MessagesCenter() {
       />
 
       <Card className="overflow-hidden p-0">
-        <div className="grid min-h-[60vh] md:grid-cols-[minmax(0,22rem)_1fr]">
+        <div className="grid min-h-[60vh] grid-cols-1 md:grid-cols-[minmax(0,22rem)_1fr]">
           {/* -------------------------------------------------------- list pane */}
           <div
             className={`flex flex-col border-slate-200 md:border-r ${
