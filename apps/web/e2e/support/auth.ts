@@ -10,6 +10,18 @@ export const EMPLOYER_WITH_PROFILE_EMAIL = 'e2e-fixture.employer-with-profile@ex
 export const EMPLOYER_NO_PROFILE_EMAIL = 'do-not-create-a-profile.e2e-fixture@example.bz';
 
 /**
+ * The seeded SUPER_ADMIN account (packages/database/prisma/seed.ts,
+ * seedSuperAdmin()) -- a higher-privilege credential than the fixtures
+ * above, so unlike FIXTURE_PASSWORD this has NO hardcoded fallback here.
+ * Set SEED_SUPER_ADMIN_EMAIL / SEED_SUPER_ADMIN_PASSWORD in the environment
+ * (already in root .env for local dev) before running a spec that uses it;
+ * otherwise SUPER_ADMIN_PASSWORD is undefined and the spec must skip, not
+ * fall back to a string literal that would commit the seed default here.
+ */
+export const SUPER_ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
+export const SUPER_ADMIN_PASSWORD = process.env.SEED_SUPER_ADMIN_PASSWORD;
+
+/**
  * Logs in through the real login form and reports whether it landed on
  * /dashboard. A failure here is treated as "this environment cannot run the
  * journey" rather than a test failure — it means either no live API is
