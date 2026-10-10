@@ -42,11 +42,17 @@ const n = (v: bigint | null) => (v == null ? null : Number(v));
 const round2 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100) / 100);
 
 /**
- * Property listings (M25). Owner-authored, moderated before going public: the lister
- * can never bypass moderation (submit → admin approve → PUBLISHED). Every write is
- * ownership-scoped — an owner reaches only their own listings, an agent only ones with
- * an ACCEPTED assignment (or listing.agentProfileId) pointing to them; cross access is
- * a 404. Private documents and the exact address are NEVER exposed on public surfaces.
+ * Property listings (M25). Owner-authored. Moderation gates whether a listing becomes
+ * PUBLICLY DISCOVERABLE (submit → admin approve → PUBLISHED) — a lister cannot put an
+ * unapproved listing in front of a public search. That gate does NOT extend to every
+ * later write on an already-published listing: TEXT edits (update()) are locked back to
+ * EDITABLE statuses and need a fresh submission, but the image methods below
+ * (upload/replace/reorder/delete) go through requireManageable() only — ownership, not
+ * status — so a lister CAN add, swap or remove a published listing's photos with no
+ * re-review (MDF-22 audit, 2026-10-10). Every write is ownership-scoped — an owner
+ * reaches only their own listings, an agent only ones with an ACCEPTED assignment (or
+ * listing.agentProfileId) pointing to them; cross access is a 404. Private documents and
+ * the exact address are NEVER exposed on public surfaces.
  */
 @Injectable()
 export class PropertiesService {
