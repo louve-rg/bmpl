@@ -1167,9 +1167,20 @@ Four distinct pieces, per the owner's original requirement:
   are in the admin panel from PR #309 (`5fe37cf`, which replaced the closed
   PR #278); hold uses the existing exception-flag button on the admin
   logistics page (`flagException`,
-  `apps/admin/app/dashboard/logistics/[reference]/page.tsx`). Whether that
-  button does what requirement 12 asks for hold was not verified in this
-  pass. Adjacent to
+  `apps/admin/app/dashboard/logistics/[reference]/page.tsx:161`). **Verified
+  this pass that the button does what the requirement asks.** It posts to
+  the admin exception route
+  (`apps/api/src/shipping/shipping.controller.ts:646`), which calls
+  `ShipmentService.flagException`
+  (`apps/api/src/shipping/shipment.service.ts:1827`): inside the leg
+  transition it notifies admins — staff. The shared `transition()` helper
+  (`apps/api/src/shipping/shipment.service.ts:2760`) unconditionally calls
+  `notifyCustomer` (`apps/api/src/shipping/shipment.service.ts:2912`) on
+  every call, reaching the sender. After the transition resolves,
+  `flagException` separately notifies `recipientUserId` when one exists
+  (`apps/api/src/shipping/shipment.service.ts:1849`), reaching the
+  recipient. Staff, sender and recipient are all notified, exactly what
+  Ruling 1 and this requirement ask for. Adjacent to
   requirement 10 but proactive (before dispatch reaches
   the recipient) rather than reactive (after a failed delivery attempt).
   Tracked as BMPL-343.
