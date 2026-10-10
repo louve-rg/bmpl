@@ -157,6 +157,30 @@ export class OpsService {
   }
 
   // ===========================================================================
+  // Migration state (MDF-100) — gated, never @Public(). Nothing external can
+  // otherwise prove which migrations are applied: /health and /health/ready
+  // report the running CODE commit and a bare `SELECT 1` connectivity ping,
+  // neither of which reads _prisma_migrations. `prisma migrate deploy` applies
+  // in strict order and refuses to skip one, so the single most-recently-
+  // applied row already implies every earlier migration (all already public
+  // in this repo's own migrations/ directory) is applied too — no need to
+  // return the full history to answer "is migration X live yet". Migration
+  // timing is schema metadata, not user data, but it is still a release-timing
+  // fingerprint, so this stays behind ops.read rather than joining the two
+  // public health routes.
+  // ===========================================================================
+  async migrations() {
+    const rows = await this.prisma.$queryRaw<{ migration_name: string; finished_at: Date }[]>`
+      SELECT migration_name, finished_at FROM _prisma_migrations
+      WHERE finished_at IS NOT NULL
+      ORDER BY finished_at DESC
+      LIMIT 1
+    `;
+    const latest = rows[0];
+    return { latestMigration: latest?.migration_name ?? null, appliedAt: latest?.finished_at ?? null };
+  }
+
+  // ===========================================================================
   // Announcement / maintenance banner
   // ===========================================================================
   /** Get (or lazily create) the singleton platform-settings row. */
