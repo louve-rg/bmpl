@@ -7,8 +7,10 @@ import { OpsService } from './ops.service';
 
 /**
  * Platform operations console (M23). Aggregated action queues + audit export
- * (`ops.read`), and the announcement/maintenance banner (`ops.manage` to edit,
- * `audit.read` to export the audit log).
+ * (`ops.read`), the announcement/maintenance banner (`ops.manage` to edit,
+ * `audit.read` to export the audit log), and the latest-applied-migration
+ * check (MDF-100, `ops.read`) — the one external surface that can prove
+ * anything about production's _prisma_migrations table at all.
  */
 @Controller('admin/ops')
 export class AdminOpsController {
@@ -24,6 +26,13 @@ export class AdminOpsController {
   @RequirePermission('ops.read')
   settings() {
     return this.ops.getSettings();
+  }
+
+  /** MDF-100: the single most-recently-applied migration + when — see OpsService.migrations(). */
+  @Get('migrations')
+  @RequirePermission('ops.read')
+  migrations() {
+    return this.ops.migrations();
   }
 
   @Patch('settings')

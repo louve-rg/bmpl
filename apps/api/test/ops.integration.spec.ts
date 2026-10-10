@@ -172,6 +172,33 @@ describe('automatic dispatch status (BMPL-293)', () => {
   });
 });
 
+describe('migration state (ops.read) — MDF-100', () => {
+  it('reports the single most-recently-applied migration name + timestamp', async () => {
+    const res = await get(adminCookies, 'admin/ops/migrations');
+    expect(res.status).toBe(200);
+    // globalSetup runs `prisma migrate deploy` against the test database before
+    // any spec file runs, so by the time this test executes at least one
+    // migration is always applied — this is never null in CI/local integration.
+    expect(typeof res.body.latestMigration).toBe('string');
+    expect(res.body.latestMigration.length).toBeGreaterThan(0);
+    expect(res.body.appliedAt).not.toBeNull();
+    expect(new Date(res.body.appliedAt).toString()).not.toBe('Invalid Date');
+  });
+
+  it('gates the migration check (customer 403, guest 401, admin without ops.read 403)', async () => {
+    const cust = await register(`mig_${uniq()}@example.bz`);
+    expect((await get(cust.cookies, 'admin/ops/migrations')).status).toBe(403);
+    expect((await request(ctx.server).get('/api/admin/ops/migrations')).status).toBe(401);
+    const limited = await seedLimitedAdmin(ctx.prisma, `mla_${uniq()}@example.bz`, ['users.read']);
+    const lc = await login(limited.email, limited.password);
+    expect((await get(lc, 'admin/ops/migrations')).status).toBe(403);
+    // ops.read alone is sufficient — same tier as overview/settings reads.
+    const readOnly = await seedLimitedAdmin(ctx.prisma, `mro_${uniq()}@example.bz`, ['ops.read']);
+    const rc = await login(readOnly.email, readOnly.password);
+    expect((await get(rc, 'admin/ops/migrations')).status).toBe(200);
+  });
+});
+
 describe('announcement / maintenance banner', () => {
   it('lets ops.manage edit the banner and surfaces active notices publicly (display-only)', async () => {
     // initially nothing active
