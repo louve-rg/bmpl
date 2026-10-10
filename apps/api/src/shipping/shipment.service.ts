@@ -1790,6 +1790,23 @@ export class ShipmentService {
         newValue: { legId: leg.id, shipmentId: leg.shipmentId, wrongCourier: !isAssignedCourier },
       });
       const left = MAX_PIN_ATTEMPTS - leg.handoffPinAttempts - 1;
+      if (left <= 0) {
+        // MDF-96 parity fix: marketplace delivery already auto-notifies admins
+        // the instant ITS OWN PIN counter locks (driver-jobs.service.ts,
+        // ADMIN_FAILED_DELIVERY) — shipping's identical five-attempt cap had
+        // no second half at all, so a locked-out leg was invisible unless
+        // someone went looking. Reuses flagException exactly as a staff-flagged
+        // exception would (same transition, same notifyAdmins/notifyUsers), with
+        // the actor attributed to the SYSTEM (userId: null) since no person
+        // caused this — leg.status is still guaranteed IN_PROGRESS here (the
+        // guard above already refused anything else), so flagException's own
+        // isLegActionable check cannot have moved out from under this call.
+        await this.flagException(
+          leg.id,
+          { reason: `The handoff code was entered incorrectly ${MAX_PIN_ATTEMPTS} times and is now locked. Staff must verify this handoff manually.` },
+          { userId: null, label: 'System — handoff code locked' },
+        );
+      }
       throw new BadRequestException(
         left > 0
           ? `That code is not right. ${left} ${left === 1 ? 'try' : 'tries'} left.`
@@ -1824,7 +1841,7 @@ export class ShipmentService {
    * actually lands at one once that leg's own arrive/handoff writes the next
    * custody row). `flagException` already is the hold primitive.
    */
-  async flagException(legId: string, input: LegExceptionInput, actor: { userId: string; label?: string }) {
+  async flagException(legId: string, input: LegExceptionInput, actor: { userId: string | null; label?: string }) {
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
       await tx.shipmentLeg.update({
         where: { id: leg.id },
@@ -2759,7 +2776,12 @@ export class ShipmentService {
    */
   private async transition(
     legId: string,
-    actor: { userId: string; label?: string },
+    // Nullable: MDF-96's PIN-lockout auto-trigger attributes the exception to
+    // the SYSTEM, not a person (actorId: null, per apps/api/CLAUDE.md §7's own
+    // rule for a system-initiated action) — audit.record() already accepts
+    // null, so this only widens what the HELPER allows, not what a real actor
+    // may pass.
+    actor: { userId: string | null; label?: string },
     work: (
       tx: Prisma.TransactionClient,
       leg: Prisma.ShipmentLegGetPayload<Record<string, never>>,

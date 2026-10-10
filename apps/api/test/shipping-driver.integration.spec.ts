@@ -1292,3 +1292,88 @@ describe('courier and vehicle identification (BMPL-180)', () => {
     expect(r.body).not.toHaveProperty('legs');
   });
 });
+
+/**
+ * MDF-96 (Edward requirement 10, Option 2) — a courier reports a failed
+ * delivery attempt themselves, through the SAME exception gate staff already
+ * use (`ShipmentService.flagException`), reached a second way rather than
+ * duplicated. The gate's own behaviour (notify, recompute, resolve, return,
+ * reroute) is proven elsewhere and deliberately untouched here — this suite
+ * pins only what is new: who may call it, and from which courier status.
+ */
+describe('a courier reports a failed delivery attempt (MDF-96)', () => {
+  it('flags the leg exception, and the audit trail correctly names the DRIVER as the actor — not staff, not the system', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, {
+      reason: 'Arrived at the terminal counter and nobody could take the parcel.',
+    });
+    expect(r.status).toBe(201);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(after.status).toBe('EXCEPTION');
+    expect(after.exceptionReason).toBe('Arrived at the terminal counter and nobody could take the parcel.');
+    expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).status).toBe('EXCEPTION');
+
+    // The SAME audit action a staff-flagged exception uses — no new
+    // AuditAction value, no migration — but the actor is unmistakably the
+    // courier, not staff and not the system.
+    const entries = await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_EXCEPTION' } });
+    const entry = entries.find((e) => (e.newValue as { legId?: string }).legId === first.id);
+    expect(entry).toBeTruthy();
+    expect(entry!.actorId).toBe(driver.userId);
+  });
+
+  it('refuses a driver who has not yet picked up the parcel — there is no attempt to report', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Nobody was at the pickup address.' });
+    expect(r.status).toBe(400);
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).status).not.toBe('EXCEPTION');
+  });
+
+  it("refuses a driver reporting an issue on another driver's leg — 404, not 403, the same shape every other ownership miss gets here", async () => {
+    const mine = await makeDriver();
+    const other = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const holder = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId;
+    const holdingDriver = holder === mine.driverProfileId ? mine : other;
+    const intruder = holder === mine.driverProfileId ? other : mine;
+    await post(holdingDriver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    await post(holdingDriver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+
+    const r = await post(intruder.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Not my leg.' });
+    expect(r.status).toBe(404);
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).status).not.toBe('EXCEPTION');
+  });
+
+  it('refuses a second report once the leg is already in exception — the same guard a double staff-flag already hits', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'First report.' })).status).toBe(201);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Second report.' });
+    expect(r.status).toBe(400);
+  });
+
+  it('does not let a signed-out visitor report an issue on a courier leg', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    expect(
+      (await request(ctx.server).post(`/api/driver/shipping-jobs/${first.id}/report-issue`).send({ reason: 'x' })).status,
+    ).toBe(401);
+  });
+});
