@@ -415,6 +415,70 @@ describe('operations are told when a human is needed', () => {
     expect(to(fired, driver.userId).filter((n) => n.event === 'SHIPMENT_EXCEPTION')).toHaveLength(0);
   });
 
+  /**
+   * MDF-96 (Edward requirement 10, Option 2): the courier can now raise the
+   * SAME alert staff do, from the driver app, through the SAME event — no
+   * new notification was invented for this.
+   */
+  it('alerts an administrator when the courier reports a failed delivery attempt themselves', async () => {
+    const driver = await makeDriver();
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+
+    const fired = await capture(() =>
+      post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Nobody at the terminal could take the parcel.' }),
+    );
+    const opsAlerts = fired.filter((n) => n.event === 'SHIPMENT_EXCEPTION');
+    expect(opsAlerts.length).toBeGreaterThanOrEqual(1);
+    expect(opsAlerts.map((n) => n.userId)).toContain(adminUserId);
+    expect(opsAlerts[0]!.body).toBe('Nobody at the terminal could take the parcel.');
+    expect(opsAlerts[0]!.data.reference).toBe(s.reference);
+  });
+
+  /**
+   * MDF-96 (Edward requirement 10, Option 3): the parity fix. Marketplace
+   * delivery already alerts an administrator the instant its own PIN counter
+   * locks (ADMIN_FAILED_DELIVERY) — shipping's identical five-attempt cap had
+   * no second half at all until now. Nobody decided this leg needed
+   * attention; the lockout did, which is exactly why the audit trail below
+   * must name the SYSTEM, not whoever happened to be guessing.
+   */
+  it('automatically alerts an administrator once the handoff code locks, with nobody at fault', async () => {
+    const driver = await makeDriver();
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    // DELIVER (the handoff route's own courierStatus guard) is only legal
+    // from ARRIVING — the leg must walk all the way there before a PIN
+    // attempt of any kind is even reachable.
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/in-transit`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/arriving`);
+
+    // Four wrong guesses outside the capture window — only the fifth, the one
+    // that actually locks the code, is the event under test.
+    for (let i = 0; i < 4; i++) {
+      const bad = await post(driver.cookies, `driver/shipping-jobs/${first.id}/handoff`, { pin: '000000', receivedByName: 'Wrong' });
+      expect(bad.status).toBe(400);
+    }
+
+    const fired = await capture(() =>
+      post(driver.cookies, `driver/shipping-jobs/${first.id}/handoff`, { pin: '000000', receivedByName: 'Wrong' }),
+    );
+    const opsAlerts = fired.filter((n) => n.event === 'SHIPMENT_EXCEPTION');
+    expect(opsAlerts.length).toBeGreaterThanOrEqual(1);
+    expect(opsAlerts.map((n) => n.userId)).toContain(adminUserId);
+
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('EXCEPTION');
+
+    const entries = await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_EXCEPTION' } });
+    const entry = entries.find((e) => (e.newValue as { legId?: string }).legId === first.id);
+    expect(entry).toBeTruthy();
+    expect(entry!.actorId).toBeNull();
+  });
+
   it('alerts an administrator when dispatch runs out of drivers', async () => {
     const driver = await makeDriver();
     const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
