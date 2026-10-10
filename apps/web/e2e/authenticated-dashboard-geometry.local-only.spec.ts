@@ -273,3 +273,49 @@ test.describe('[LOCAL ONLY, skips in CI -- see file header] /dashboard/messages 
     });
   }
 });
+
+/**
+ * MDF-179: the authenticated header's hamburger + brand lockup + notification
+ * bell + avatar row has no element that can shrink below its own content
+ * size (hamburger, bell and avatar are deliberately `shrink-0` tap targets;
+ * the brand `Link` and its text had no `min-w-0`, so its default
+ * `min-width: auto` pinned it at full content width too). Below 344px the
+ * combined content width exceeds the viewport by up to 19px; the overflow
+ * is clipped invisibly by the dashboard shell's own `overflow-x-hidden`
+ * (app/dashboard/layout.tsx) rather than producing page-level horizontal
+ * scroll, so neither a `scrollWidth` check nor a casual look (the clipped
+ * sliver is the edge of the avatar's own tap target, not obviously broken)
+ * caught it. The required floor is 375px, which is already clean -- this
+ * surfaced only because the full 320-1440px stepped re-sweep went below it.
+ *
+ * Fix: `min-w-0` on the brand Link plus `min-w-0`/`truncate` inside
+ * BrandLockup's text column -- the brand text ellipsises exactly as far as
+ * it needs to (verified: real `text-overflow: ellipsis`, not a silent
+ * clip) while the hamburger, bell and avatar never move. 344px+ is bit-for-
+ * bit identical before and after (truncation only engages when genuinely
+ * needed), which is the scope proof this test pins alongside the red range.
+ */
+const HEADER_CLUSTER_WIDTHS = [320, 328, 336, 344, 352, 375, 414, 768, 1024, 1440];
+
+test.describe('[LOCAL ONLY, skips in CI -- see file header] authenticated header cluster never bleeds past the viewport below 344px (MDF-179)', () => {
+  for (const width of HEADER_CLUSTER_WIDTHS) {
+    test(`notification bell and avatar stay fully inside the viewport at ${width}px`, async ({ browser }) => {
+      skipIfNoSession();
+      const { page, close } = await authedPage(browser, width);
+      await page.goto('/dashboard');
+
+      const avatarLink = page.getByRole('link', { name: 'Your profile' });
+      await expect(avatarLink).toBeVisible();
+      const box = await avatarLink.boundingBox();
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      await close();
+
+      expect(box, `no avatar box at ${width}px`).not.toBeNull();
+      expect(box!.x + box!.width, `avatar right edge ${(box!.x + box!.width).toFixed(1)} at ${width}px (viewport ${width})`).toBeLessThanOrEqual(width + 1);
+      expect(scrollWidth, `page overflow at ${width}px`).toBeLessThanOrEqual(clientWidth + 1);
+    });
+  }
+});
