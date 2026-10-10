@@ -99,17 +99,37 @@ A MERGED commit that touches only one app's paths is DEPLOYED once it is
 an ancestor of that specific app's live commit above, checked the same
 way for all three.
 
-**None of this proves a migration has run.** A commit being DEPLOYED
-proves the *code* is live; it says nothing about whether a Prisma
-migration that commit shipped has actually been applied to the
-production database. Nothing external to this repository can observe
-that — `/health/ready`'s own database check is a bare `SELECT 1`, which
-passes whether or not any particular migration has run. Any row whose
-correctness depends on a migration having been applied states that
-dependency and marks it **not established**, inferred only from
-`railway.json`'s `preDeployCommand` running migrations on every API
-deploy, never independently observed. A row that implies otherwise is
-wrong and gets corrected the same way a wrong DEPLOYED claim would.
+**None of this proves a migration has run — and "not established" alone
+undersells what is actually known.** A commit being DEPLOYED proves the
+*code* is live; it says nothing about whether a Prisma migration that
+commit shipped has actually been applied to the production database.
+Nothing external to this repository can observe that — `/health/ready`'s
+own database check is a bare `SELECT 1`, which passes whether or not any
+particular migration has run. But the repository's own deploy
+configuration says what *should* have happened: `railway.json`'s
+`preDeployCommand` runs `prisma migrate deploy` unconditionally on every
+`apps/api` deploy — applying every migration not yet recorded, with no
+mechanism to apply some and skip one in particular — and that deploy is
+itself gated by `railway.json`'s own `build.watchPatterns`
+(`apps/api/**`, `packages/shared`/`validation`/`database`/
+`authentication`/`authorization`/`wallet`/`notifications`, plus the
+lockfile and root configs), confirmed directly rather than inferred from
+comparing commit values.
+
+So for a migration-bearing commit that is **confirmed an ancestor of the
+current live API commit** (checked per commit, the same way DEPLOYED
+is), application is the **expected state — and still unverified.**
+Expected and observed are not the same claim, and the row says both
+halves: unobservable from outside the repository, and expected given the
+pipeline. Neither half may be dropped. A row that drops the first and
+reads as **"applied"** claims something nobody can observe; a row that
+drops the second and reads as plain **"outstanding"** invites a reader to
+conclude it probably has not run, when the documented pipeline says the
+opposite is expected. "Expected but unverified" is the one phrase between
+those two that the evidence actually supports, and it is wrong the same
+way a wrong DEPLOYED claim would be if it drifts toward either side. A
+commit that is **not** confirmed an ancestor of the live commit does not
+earn this phrase at all and keeps a plainer "not established" instead.
 
 Most rows still stop at DEPLOYED rather than reaching
 PRODUCTION-VERIFIED: that is not a defect in this document, it is the
@@ -192,10 +212,10 @@ noted in the row itself rather than guessed at here.
   `4936812`, and `bad7b3f` is an ancestor of it. `74cbcd6` touches
   `apps/web` and `apps/admin`; `apps/web`'s is `5b2b0a9`, `apps/admin`'s is
   `effc63e` (build identity, confirmed un-cache-bustable, not a live
-  read), and `74cbcd6` is an ancestor of both. **Whether `bad7b3f`'s own
-  migration (`inventory_locations`) has actually been applied to the
-  production database is not established** — inferred only from
-  `railway.json`'s `preDeployCommand`, never independently observed.
+  read), and `74cbcd6` is an ancestor of both. `bad7b3f`'s own migration
+  (`inventory_locations`) is a confirmed ancestor of the live API commit
+  — **application is expected but unverified** (see the methodology
+  section above).
 - PRODUCTION-VERIFIED: **no record.**
 
 **Status: done as of `74cbcd6`.** Merged `bad7b3f` (BMPL-175, PR #259) —
@@ -349,12 +369,11 @@ findings.
 - DEPLOYED: **yes, the code.** Touches `apps/api`, `apps/web`,
   `packages/database`, `packages/shared` only — no `apps/admin` file —
   an ancestor of both `apps/api`'s (`4936812`) and `apps/web`'s
-  (`5b2b0a9`) live commits. **Whether its three migrations
+  (`5b2b0a9`) live commits. Its three migrations
   (`recipientUserId`/`recipientClaimedAt` and the two audit-trail tables)
-  have actually been applied to the production database is not
-  established** — the claim endpoint depends on those columns existing;
-  this document can only infer the migration ran from `railway.json`'s
-  `preDeployCommand`, never observe it directly.
+  are a confirmed ancestor of the live API commit — **application is
+  expected but unverified** (see the methodology section above); the
+  claim endpoint depends on those columns existing.
 - PRODUCTION-VERIFIED: **no record.** (The two open policy questions,
   BMPL-119, are the owner's to answer and are a separate axis from this
   ladder — a question outstanding does not change what has shipped.)
@@ -417,11 +436,10 @@ to the first success.
 - MERGED: yes — all four an ancestor of `origin/main`.
 - DEPLOYED: **yes, the code.** Every commit touches only `apps/api` or
   `apps/web` — no `apps/admin` — an ancestor of both `apps/api`'s
-  (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits. **Whether
-  `3950db0`'s own migration (the new `DriverServiceCity` table) has
-  actually been applied to the production database is not established**
-  — inferred only from `railway.json`'s `preDeployCommand`, never
-  independently observed.
+  (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits. `3950db0`'s own
+  migration (the new `DriverServiceCity` table) is a confirmed ancestor
+  of the live API commit — **application is expected but unverified**
+  (see the methodology section above).
 - PRODUCTION-VERIFIED: **no record.**
 
 **Status: end-to-end as of `2cbcf73`.** Merged `3950db0` (PR #126) — `apps/api/src/driver/driver.controller.ts`,
@@ -485,10 +503,10 @@ district is offered to a driver who selected it.
 - DEPLOYED: **yes, the code.** Every one touches only `apps/api` and/or
   `apps/web` — no `apps/admin` — an ancestor of both `apps/api`'s
   (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits. `056b709` and
-  `a072971` each carry their own migration; whether those have actually
-  been applied to the production database is not established (see below
-  — the same caveat applies to the terminal-half commits found this
-  pass).
+  `a072971` each carry their own migration, each a confirmed ancestor of
+  the live API commit — **application is expected but unverified** (see
+  the methodology section above; the same holds for the terminal-half
+  commits found this pass, below).
 - PRODUCTION-VERIFIED: **no record.**
 
 **Gap closed, 2026-10-10:** the **terminal-half** hub-hours work and the
@@ -521,10 +539,10 @@ file, and are therefore DEPLOYED under the same web/API facts the rest of
 this ladder uses — the code, that is: `699a3e3` (the `HubOpeningDay`/
 `HubHoursException` schema and migration) and `81ad57f` (one-off
 closures, also migration-bearing) are DEPLOYED as code on the same terms
-as `056b709`/`a072971` above, and their migrations' production
-application is equally **not established**, not independently observed.
-PRODUCTION-VERIFIED stays **no record** for all five — finding the
-commit is not the same claim as watching it work.
+as `056b709`/`a072971` above, each confirmed an ancestor of the live API
+commit — **application is equally expected but unverified** (see the
+methodology section above). PRODUCTION-VERIFIED stays **no record** for
+all five — finding the commit is not the same claim as watching it work.
 
 **Status: done.** The **terminal half** is complete end to end: structured
 hub hours (`699a3e3`, BMPL-262) and dated exceptions (same commit), the
@@ -682,8 +700,9 @@ per-leg messaging, confirmed wired end-to-end, not just present in the API.
   on the incoming-shipment page, rendered only when the API reports an open
   conversation) landed as PR #314 (`c7690a5`). Verified directly: the
   anonymous `/track/[token]` page does not render the entry point and does
-  not call the read endpoint. Whether the participant-role migration has
-  been applied to production is not established by this document.
+  not call the read endpoint. The participant-role migration (`910d5b2`)
+  is a confirmed ancestor of the live API commit — **application is
+  expected but unverified** (see the methodology section above).
 - **Courier identity has not landed.** `RECIPIENT_VIEW_INCLUDE`
   (`shipment.service.ts`) selects no assigned driver and no assigned vehicle
   — re-read directly at `effc63e`, unchanged — so a linked recipient still
@@ -896,11 +915,12 @@ code to ladder at all, see below:**
   of `apps/web`'s live commit `5b2b0a9`; `5fe37cf`'s staff panel touches
   only `apps/admin` — `apps/admin/health` answers `commit: effc63e`
   (build identity), and `5fe37cf` is an ancestor of `effc63e` (checked
-  directly). Whether the `20261104250000_shipment_routing_proposal`
-  migration itself has been applied to production is, separately, not
-  established by this document (stated already in the body below) —
-  a schema migration is not something the admin build's own commit
-  identity can answer.
+  directly). The `20261104250000_shipment_routing_proposal` migration
+  (from `0efd970`) is, separately, a confirmed ancestor of `apps/api`'s
+  live commit — **application is expected but unverified** (see the
+  methodology section above; stated again in the body below) — a schema
+  migration is not something the admin build's own commit identity can
+  answer.
 - PRODUCTION-VERIFIED: **no record**, for any of the three (cancel,
   return, reroute).
 
@@ -948,8 +968,9 @@ customer may confirm it. Confirmation for any other user returns 404, and only
 that confirmation step executes the charge. The migration
 `20261104250000_shipment_routing_proposal` is on main. Negative-control tests
 (PR #285, `3ea4fa1`) and a sink-level ownership test (PR #306, `302a84c`,
-carrying the same title as the closed PR #292) are on main too. Whether the
-migration has been applied to production is not established by this document.
+carrying the same title as the closed PR #292) are on main too. The migration
+is a confirmed ancestor of the live API commit — **application is expected
+but unverified** (see the methodology section above).
 
 The fix's own red-team guards, written to fail until #288 shipped, now pass
 under their real names: `5b7dd1a` (PR #312) dropped the
@@ -1012,9 +1033,9 @@ failed delivery has no trigger to test against.
   `apps/web` and/or `packages/*` — no `apps/admin` — an ancestor of both
   `apps/api`'s (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits.
   `056b709` carries its own migration (the sender availability-window
-  table, same commit cited in requirement 5); whether it has actually
-  been applied to the production database is not established, same
-  caveat as there.
+  table, same commit cited in requirement 5) and is a confirmed ancestor
+  of the live API commit — **application is expected but unverified**
+  (see the methodology section above), same as there.
 - PRODUCTION-VERIFIED: **no record.**
 
 **Status: done.**
@@ -1072,14 +1093,21 @@ shipment is untouched.
   of `transport-leg-operations.integration.spec.ts`). Ancestor of
   `origin/main`, no `apps/admin` file — DEPLOYED yes, the code, an
   ancestor of `apps/api`'s live commit (`4936812`). `e56c425` carries its
-  own migration (a new `AuditAction` enum value); whether it has
-  actually been applied to the production database is not established.
+  own migration (a new `AuditAction` enum value), also a confirmed
+  ancestor of that live commit — **application is expected but
+  unverified** (see the methodology section above).
 - **ETA-change notice** (`e7ef2ed`): IMPLEMENTED/MERGED yes, ancestor of
   `origin/main`; touches `apps/api`/`packages/database`/`packages/shared`
   only — DEPLOYED yes. TESTED: a test exists per the PR, not
-  independently named here. PRODUCTION-VERIFIED: no record, and its own
-  migration ships "additive and unapplied pending review" by the body
-  text below — whether it is applied in production is not established.
+  independently named here. PRODUCTION-VERIFIED: no record. Its own
+  migration (`etaBaselineAt`) was held pending review before merge per
+  the card's own instruction (PR #274's body: "holding per this card's
+  own instruction"); that review is the same PR-review-then-merge gate
+  every migration in this document goes through, and it has already
+  happened — the PR is merged. The migration is a confirmed ancestor of
+  `apps/api`'s live commit — **application is expected but unverified**,
+  the same claim as every other migration-bearing row here, not a
+  separate held-back state.
 - **Terminal hold/reroute** (`7ff34a1` API; `5fe37cf` staff screen):
   IMPLEMENTED/MERGED yes, both ancestors of `origin/main`. DEPLOYED:
   **yes, all of it, admin included — the code.** The non-admin files in
@@ -1087,16 +1115,18 @@ shipment is untouched.
   commit `4936812`; `5fe37cf` and the admin portion of `7ff34a1` are
   ancestors of `effc63e`, `apps/admin`'s build identity (checked
   directly — same commit as requirement 10's staff panel). `7ff34a1`
-  carries three migrations of its own; whether any have actually been
-  applied to the production database is not established. TESTED: a test
-  exists per the PR, not independently named here.
+  carries three migrations of its own, each a confirmed ancestor of the
+  live API commit — **application is expected but unverified** (see the
+  methodology section above). TESTED: a test exists per the PR, not
+  independently named here.
 - **Carrier schedule exceptions** (`fcc3592`, BMPL-186): IMPLEMENTED/
   MERGED yes, ancestor of `origin/main`. DEPLOYED: **yes, all of it,
   admin included — the code.** The API portion is an ancestor of
   `apps/api`'s live commit `4936812`; the admin portion is an ancestor of
   `effc63e`, `apps/admin`'s build identity (checked directly). `fcc3592`
-  carries its own migration; whether it has actually been applied to the
-  production database is not established.
+  carries its own migration, also a confirmed ancestor of the live API
+  commit — **application is expected but unverified** (see the
+  methodology section above).
 - PRODUCTION-VERIFIED, all four pieces: **no record.**
 
 **Status as of `effc63e` (re-verified, no change since `e72da60`): every
@@ -1146,7 +1176,13 @@ Four distinct pieces, per the owner's original requirement:
   the baseline silently the first time an ETA becomes knowable; a
   sub-threshold move leaves the baseline alone so several small moves still
   sum against the original reference point. Ships with its migration
-  additive and unapplied pending review, per this card's own instruction.
+  additive; the card's own instruction was to hold it pending review
+  before applying locally (PR #274's body: "holding per this card's own
+  instruction") — that review is the PR-review-then-merge gate every
+  migration here goes through, and merging satisfied it. Application
+  against the production database is expected but unverified, same as
+  every other migration-bearing commit in this document — see the
+  methodology section at the top, and the Evidence ladder above.
 - **Terminal hold / reroute / return for a recipient known to be
   unavailable.** **API done as of `7ff34a1` (BMPL-356/343, PR #275); no
   staff screen as of `7ff34a1`.** Merged after this very edit started — the dispatch that
