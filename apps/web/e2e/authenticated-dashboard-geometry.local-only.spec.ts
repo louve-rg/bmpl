@@ -214,3 +214,62 @@ test.describe('[LOCAL ONLY, skips in CI -- see file header] wallet balance at th
     });
   }
 });
+
+test.describe('[LOCAL ONLY, skips in CI -- see file header] /dashboard/messages conversation row never silently clips below md', () => {
+  // The seeded conversations on this account are a month-old incidental
+  // residue (god, 2026-10-10) -- short enough to never exercise this. A long
+  // subject/snippet is the only thing that reveals it: below md, the list/
+  // thread grid (`grid min-h-[60vh] md:grid-cols-[minmax(0,22rem)_1fr]`) has
+  // no column constraint at all, so the implicit track grows to fit the
+  // longest row instead of shrinking it -- `truncate`'s overflow:hidden never
+  // engages because its own box never gets narrower than the text. The
+  // overflow is then clipped by the Card's own `overflow-hidden` with no
+  // ellipsis and no page-level scrollWidth signal (document stays exactly
+  // viewport width), which is why neither prior sweep caught it.
+  const LONG_SUBJECT = 'Shipment BML-EXTREMELYLONGSHIPMENTREFERENCECODE1234567890ABCDEFGHIJ · delivery to a very long neighbourhood name';
+  const LONG_SNIPPET = 'This is a deliberately long last-message preview sentence meant to stress-test the truncating node and see whether it collapses to zero width or simply ellipsises as intended under real pressure.';
+  const MOCK_CONVERSATIONS = [
+    {
+      id: 'mock-long-1',
+      contextType: 'DELIVERY',
+      pairing: 'CUSTOMER_DRIVER',
+      subject: LONG_SUBJECT,
+      status: 'OPEN',
+      contextLabel: 'Delivery',
+      lastMessage: { preview: LONG_SNIPPET, type: 'TEXT', createdAt: new Date().toISOString() },
+      lastMessageAt: new Date().toISOString(),
+      unreadCount: 2,
+    },
+  ];
+
+  for (const width of WIDTHS) {
+    test(`conversation row ellipsises instead of silently clipping at ${width}px`, async ({ browser }) => {
+      skipIfNoSession();
+      const { page, close } = await authedPage(browser, width);
+      await page.route('**/api/conversations', (r) => r.fulfill({ json: MOCK_CONVERSATIONS }));
+      await page.goto('/dashboard/messages');
+
+      const row = page.locator('li button', { hasText: 'EXTREMELYLONG' });
+      await expect(row).toBeVisible();
+      const measured = await row.evaluate((node) => {
+        const truncs = Array.from(node.querySelectorAll('.truncate'));
+        return truncs.map((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+      });
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      await close();
+
+      // Each truncating node's own scrollWidth must never exceed its own
+      // clientWidth by more than ordinary ellipsis-worthy slack -- if the
+      // grid track grew to fit the content instead of constraining it, the
+      // node's clientWidth equals its scrollWidth (nothing to truncate
+      // against), which is exactly the bug this pins.
+      for (const node of measured) {
+        expect(node.clientWidth, `truncating node clientWidth ${node.clientWidth} should be far smaller than its scrollWidth ${node.scrollWidth} at ${width}px -- equal means the grid track never constrained it`).toBeLessThan(node.scrollWidth);
+      }
+      expect(scrollWidth, `page overflow at ${width}px with a long conversation row`).toBeLessThanOrEqual(clientWidth + 1);
+    });
+  }
+});
