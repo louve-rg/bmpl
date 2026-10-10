@@ -10,43 +10,38 @@ import { zeroWidthTextFindings } from './support/geometry';
  * confirmed live on production -- that the Platform Wallet card's
  * transaction labels render at literally zero width there. Neither existing
  * detector can see that shape by construction: nothing scrolls past the
- * viewport, and nothing's edge sits outside 0..width. The defect is a
+ * viewport, and nothing's edge sits outside 0..width. The defect was a
  * `min-w-0` flex child's OWN box collapsing to zero while it holds real,
  * non-empty text.
  *
- * FIRST GROUP proves the detector itself is sensitive, against the known
- * live defect, independent of this file's own existence -- the equivalent
- * of a negative control run against a known-bad fixture rather than a
- * mutation. Fix is open as PR #349 (fix/bento-card-tablet-breakpoint,
- * not merged at the time this file was written). Three widths, matching
- * the dispatch's own negative-control requirement: RED at 768 (inside the
- * sm-to-lg breakpoint gap the bug lives in), clean at 639 (below `sm`, the
- * card is still stacked) and 1024 (the grid has widened the card by then).
- * reproduced the exact same two labels Oscar found on production
- * ("Payment to vendor", "Wallet top-up") plus their date lines, which
- * collapse by the identical mechanism and were not separately named.
+ * FIRST GROUP is the regression guard for that fixed defect. Fix shipped as
+ * PR #349 (cc2e941, on main) and is now holding in production -- these three
+ * widths assert the Platform Wallet transaction labels ("Payment to vendor",
+ * "Wallet top-up") stay non-zero-width at 768px (inside the sm-to-lg
+ * breakpoint gap the bug lived in), 639px (below `sm`, the card is still
+ * stacked) and 1024px (the grid has widened the card by then). Before #349
+ * merged, this group instead proved the detector was sensitive against the
+ * live defect (768px asserted the collapse); once the fix landed, that
+ * negative-control assertion became a false-red on main, so it was flipped
+ * to a plain cleanliness check -- the detector itself is still exercised by
+ * the second group below.
  *
- * ONCE #349 MERGES, the first test below will go red (findings will drop
- * to zero) -- that is the signal to flip it from "reproduces the known
- * defect" to a plain "stays clean", not a regression in this file.
- *
- * SECOND GROUP is the actual regression guard: a sweep for this entire
- * bug CLASS across every other route and width this floor has already
- * audited for the other two detectors, so a future `min-w-0`/`shrink-0`
- * collapse anywhere else gets caught the same way. `/` itself is
- * deliberately excluded from this group (it is the subject of the first
- * group, and conflating "the known, tracked defect" with "an unexpected
- * new one" in the same assertion would hide a second regression behind
- * the first).
+ * SECOND GROUP is the regression guard for the bug CLASS: a sweep across
+ * every other route and width this floor has already audited for the other
+ * two detectors, so a future `min-w-0`/`shrink-0` collapse anywhere else
+ * gets caught the same way. `/` itself is deliberately excluded from this
+ * group (it is the subject of the first group, and conflating "the known,
+ * tracked defect" with "an unexpected new one" in the same assertion would
+ * hide a second regression behind the first).
  */
 
-test.describe('zero-width text detector proves itself against the known live defect (PR #349)', () => {
-  test('/ at 768px: the Platform Wallet transaction labels collapse to zero width', async ({ page }) => {
+test.describe('zero-width text stays clean on the Platform Wallet card (regression guard for PR #349)', () => {
+  test('/ at 768px: the Platform Wallet transaction labels are not zero width', async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1400 });
     await page.goto('/');
     const findings = await zeroWidthTextFindings(page);
     const texts = findings.map((f) => f.text);
-    expect(texts, 'zero-width findings at 768px on /').toEqual(
+    expect(texts, 'zero-width findings at 768px on /').not.toEqual(
       expect.arrayContaining(['Payment to vendor', 'Wallet top-up']),
     );
   });
