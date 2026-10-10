@@ -43,10 +43,6 @@ test.afterAll(() => {
   fs.rmSync(STORAGE_PATH, { force: true });
 });
 
-function skipIfNoSession() {
-  test.skip(!OPS_PASSWORD || !loginOk, 'Needs a live API + the UAT ops fixtures with UAT_OPS_PASSWORD set -- not provisioned in CI. See file header.');
-}
-
 async function authedPage(browser: Browser, width: number, height = 900): Promise<{ page: Page; close: () => Promise<void> }> {
   const context = await browser.newContext({ storageState: STORAGE_PATH, viewport: { width, height } });
   const page = await context.newPage();
@@ -54,9 +50,26 @@ async function authedPage(browser: Browser, width: number, height = 900): Promis
 }
 
 test.describe('[LOCAL ONLY, skips in CI -- see file header] PageHeader never silently clips its action row', () => {
+  // Hoisted out of each test body (where it used to be the ONLY check,
+  // alongside !loginOk below) -- a condition checked INSIDE a test body
+  // still makes Playwright resolve that test's `browser` fixture parameter
+  // first, which launches a real chromium even though the test immediately
+  // skips. Every CI run has no UAT_OPS_PASSWORD, so this was paying for a
+  // browser nobody used on every run (PR #358: two such "free" browsers in
+  // one CI job -- this one plus apps/web's own local-only file's -- after
+  // three app builds and the full unit suite, was enough to get the second
+  // one SIGKILLed for memory). Checked here, at the describe level, with no
+  // credentials the fixture is never resolved and no browser starts -- the
+  // five tests still each show up individually as skipped in the report,
+  // which is the point of this step existing at all. The failed-login case
+  // (credentials present but wrong, or fixtures not seeded) can't be known
+  // this early -- it depends on beforeAll's own login attempt -- so
+  // !loginOk stays as an in-body check below, same as before.
+  test.skip(!OPS_PASSWORD, 'Needs UAT_OPS_PASSWORD set -- not provisioned in CI. See file header.');
+
   for (const width of WIDTHS) {
     test(`/dashboard/logistics header actions stay reachable at ${width}px`, async ({ browser }) => {
-      skipIfNoSession();
+      test.skip(!loginOk, 'Needs a live API + the UAT ops fixtures seeded -- login did not succeed. See file header.');
       const { page, close } = await authedPage(browser, width);
       await page.goto('/dashboard/logistics');
 
