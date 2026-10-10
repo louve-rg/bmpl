@@ -273,3 +273,52 @@ test.describe('[LOCAL ONLY, skips in CI -- see file header] /dashboard/messages 
     });
   }
 });
+
+/**
+ * /dashboard/messages' two-pane split used to switch at `md` (768px), the
+ * same breakpoint where the dashboard shell (app/dashboard/layout.tsx)
+ * becomes a sidebar+main row. At that exact width the thread column's real
+ * available space drops to ~94px -- far under the EmptyState's own ~176px
+ * floor (icon + padding, even with zero text) -- and the Card's own
+ * `overflow-hidden` clips the overflow invisibly rather than scrolling the
+ * page, so neither a page-scrollWidth check nor a casual look at 768px
+ * (which looks fine without opening dev tools) would have caught it. The
+ * fix moves the split to `lg` (1024px) in lockstep across every pane. These
+ * widths are chosen to straddle the measured defect window (768-~848px)
+ * rather than reuse the file's five standard WIDTHS, which include 768 but
+ * not the interior of the window where the clip is worst.
+ */
+const MESSAGES_THREAD_PANE_WIDTHS = [375, 768, 800, 840, 900, 1024, 1440];
+
+test.describe('[LOCAL ONLY, skips in CI -- see file header] /dashboard/messages thread-pane empty state never clips the card', () => {
+  for (const width of MESSAGES_THREAD_PANE_WIDTHS) {
+    test(`the "Select a conversation" placeholder stays inside the card at ${width}px`, async ({ browser }) => {
+      skipIfNoSession();
+      const { page, close } = await authedPage(browser, width);
+      await page.goto('/dashboard/messages');
+
+      const placeholder = page.getByText('Select a conversation');
+      const visible = await placeholder.isVisible().catch(() => false);
+
+      if (!visible) {
+        // Below `lg`, the thread pane (and its EmptyState) isn't rendered at
+        // all -- the list pane fills the width instead. Nothing to clip.
+        const list = page.getByRole('list', { name: 'Conversations' }).or(page.getByText('No conversations yet'));
+        await expect(list.first()).toBeVisible();
+        await close();
+        return;
+      }
+
+      const box = page.getByText('Select a conversation').locator('xpath=ancestor::div[contains(@class,"rounded-bmpl-xl")]');
+      const card = page.locator('.bmpl-card').first();
+      const boxRect = await box.boundingBox();
+      const cardRect = await card.boundingBox();
+      await close();
+
+      expect(boxRect, `no EmptyState box at ${width}px`).not.toBeNull();
+      expect(cardRect, `no Card box at ${width}px`).not.toBeNull();
+      expect(boxRect!.x, `EmptyState left edge ${boxRect!.x.toFixed(1)} vs card left ${cardRect!.x.toFixed(1)} at ${width}px`).toBeGreaterThanOrEqual(cardRect!.x - 1);
+      expect(boxRect!.x + boxRect!.width, `EmptyState right edge ${(boxRect!.x + boxRect!.width).toFixed(1)} vs card right ${(cardRect!.x + cardRect!.width).toFixed(1)} at ${width}px`).toBeLessThanOrEqual(cardRect!.x + cardRect!.width + 1);
+    });
+  }
+});
