@@ -1049,8 +1049,8 @@ Four distinct pieces, per the owner's original requirement:
   closed: nothing anywhere wrote a `LINE_HAUL` leg's own
   `scheduledDepartureAt`/`scheduledArrivalAt`, so a multi-hub shipment's
   overall ETA read `UNKNOWN` even though its `FIRST_MILE`/`LAST_MILE` legs
-  resolved correctly. **Done (`e56c425`, BMPL-346** — found this pass via
-  `git log --all --grep=BMPL-346`; no commit was cited here before)**:**
+  resolved correctly. **Done (`e56c425`, BMPL-346)** — found this pass via
+  `git log --all --grep=BMPL-346`; no commit was cited here before:
   `ShipmentService.scheduleLeg` is
   the writer — established first that nothing configured could be derived
   instead (`LogisticsRoute.scheduleNote` is a free-text label by its own
