@@ -55,30 +55,61 @@ source.
 them.** The owner's own distinction: IMPLEMENTED (the code exists),
 TESTED (a test exists that would fail without it, seen to pass),
 MERGED (an ancestor of `origin/main` — the anchor every row already
-carried), DEPLOYED (an ancestor of the *live* commit, checked with
-`git merge-base --is-ancestor` against the live commit, never inferred
-from a date or a position in a log — that specific substitution is how a
-report went wrong this same evening), and PRODUCTION-VERIFIED (someone
-has watched the behaviour work in production and it is recorded
-somewhere citable). Each requirement section below has an **Evidence
-ladder** stating which rungs it has reached, as of two checked facts:
-production web is `3aa35d6` and every commit between it and `origin/main`
-touches no `apps/web` file; production API is `9ec6764` and every commit
-between it and `origin/main` touches no `apps/api`/`packages` file — so a
-MERGED commit touching only one of those two areas is also DEPLOYED.
+carried), DEPLOYED (an ancestor of the commit a specific app is actually
+*serving right now*, checked with `git merge-base --is-ancestor` against
+that app's own live commit, never inferred from a date or a position in
+a log — that specific substitution is how a report went wrong one
+evening), and PRODUCTION-VERIFIED (someone has watched the behaviour work
+in production and it is recorded somewhere citable).
 
-**A third rung-prover for `apps/admin` exists and this document's first
-pass at the ladder missed it.** `https://bmpl-admin.vercel.app/health`
-answers `{"status":"ok","commit":"effc63e"}` — confirmed directly, not
-taken on report. The route is `apps/admin/app/health/route.ts`, the exact
-mirror of the web and API health checks. The same trap applies as the
-API's own health check: `https://admin.bzemarketplace.com/health` and
-`https://www.bzemarketplace.com/admin/health` both 404 (confirmed) — only
-the `vercel.app` host answers. Production admin is therefore `effc63e`,
-the current `origin/main` tip — the **most** current of the three
-surfaces, not the least. A MERGED commit touching `apps/admin` is
-DEPLOYED whenever it is an ancestor of `effc63e`, checked the same way as
-the other two.
+**DEPLOYED is a property of one app, never of `origin/main`.** The three
+BMPL apps rebuild and redeploy independently, only when their own
+affected paths change — each one can sit on a different commit than the
+others, and all three can be, and currently are, behind `origin/main`.
+That is not three broken deploys: a PR whose check output literally says
+"Vercel - bmpl-admin: Skipped - Not affected" is a PR that correctly
+left admin's deployed commit where it was. **A row may only claim
+DEPLOYED by naming which app serves the change and which commit that
+app is currently on** — "an ancestor of `origin/main`" proves MERGED,
+nothing more; main moving forward does not deploy anything by itself.
+
+As of this pass, the three live facts (each independently re-checked,
+not taken on report) are:
+
+- **`apps/api`** is on `4936812` — `https://www.bzemarketplace.com/api/health`
+  answers a **live, per-request** read: `status`, `uptime` (seconds since
+  process start) and `startedAt` all vary request to request, confirmed
+  by hitting it twice. This is the one surface that proves the running
+  process, not just the build.
+- **`apps/web`** is on `5b2b0a9` — `https://www.bzemarketplace.com/health`.
+- **`apps/admin`** is on `effc63e` — `https://bmpl-admin.vercel.app/health`
+  (the same host trap as before: `admin.bzemarketplace.com/health` and
+  `www.bzemarketplace.com/admin/health` both 404; only the `vercel.app`
+  host answers).
+
+**web and admin's `commit` field is baked in at build time, not read live
+— both route files say so in their own source.** Confirmed directly: the
+value cannot be cache-busted, because there is nothing live to bust: it
+identifies which *build* is being served, not a running process. Only
+`apps/api`'s `/health` is evidence of liveness; `apps/web` and
+`apps/admin`'s are evidence of build identity, and should be cited as
+exactly that, never as proof a process is up.
+
+A MERGED commit that touches only one app's paths is DEPLOYED once it is
+an ancestor of that specific app's live commit above, checked the same
+way for all three.
+
+**None of this proves a migration has run.** A commit being DEPLOYED
+proves the *code* is live; it says nothing about whether a Prisma
+migration that commit shipped has actually been applied to the
+production database. Nothing external to this repository can observe
+that — `/health/ready`'s own database check is a bare `SELECT 1`, which
+passes whether or not any particular migration has run. Any row whose
+correctness depends on a migration having been applied states that
+dependency and marks it **not established**, inferred only from
+`railway.json`'s `preDeployCommand` running migrations on every API
+deploy, never independently observed. A row that implies otherwise is
+wrong and gets corrected the same way a wrong DEPLOYED claim would.
 
 Most rows still stop at DEPLOYED rather than reaching
 PRODUCTION-VERIFIED: that is not a defect in this document, it is the
@@ -156,11 +187,15 @@ noted in the row itself rather than guessed at here.
 - TESTED: yes, an integration spec shipped in `bad7b3f` itself; not
   independently re-run in this pass.
 - MERGED: yes — both an ancestor of `origin/main`.
-- DEPLOYED: **yes, all of it, admin included.** `bad7b3f` touches only
-  `apps/api`/`packages/database`, within production API currency; `74cbcd6`
-  touches `apps/web` and `apps/admin`, both within production currency —
-  `apps/admin/health` answers `commit: effc63e`, and `74cbcd6` is an
-  ancestor of `effc63e` (checked directly).
+- DEPLOYED: **yes, all of it, admin included — the code.** `bad7b3f`
+  touches only `apps/api`/`packages/database`; `apps/api`'s live commit is
+  `4936812`, and `bad7b3f` is an ancestor of it. `74cbcd6` touches
+  `apps/web` and `apps/admin`; `apps/web`'s is `5b2b0a9`, `apps/admin`'s is
+  `effc63e` (build identity, confirmed un-cache-bustable, not a live
+  read), and `74cbcd6` is an ancestor of both. **Whether `bad7b3f`'s own
+  migration (`inventory_locations`) has actually been applied to the
+  production database is not established** — inferred only from
+  `railway.json`'s `preDeployCommand`, never independently observed.
 - PRODUCTION-VERIFIED: **no record.**
 
 **Status: done as of `74cbcd6`.** Merged `bad7b3f` (BMPL-175, PR #259) —
@@ -242,9 +277,10 @@ the requirement, and neither extreme described what had actually shipped.
 - TESTED: yes, named integration coverage shipped with these PRs; not
   independently re-run in this pass.
 - MERGED: yes — all four an ancestor of `origin/main`.
-- DEPLOYED: **yes.** Every one of these commits touches only `apps/api`
-  and/or `apps/web` (confirmed directly, `git show --stat`) — no `apps/admin`
-  file in any of them — so both production-currency facts apply in full.
+- DEPLOYED: **yes, the code.** Every one of these commits touches only
+  `apps/api` and/or `apps/web` (confirmed directly, `git show --stat`) —
+  no `apps/admin` file in any of them — an ancestor of both `apps/api`'s
+  (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits.
 - PRODUCTION-VERIFIED: **no record.**
 
 **Status: done for sender, staff, courier and linked recipient as of
@@ -310,9 +346,15 @@ findings.
 - TESTED: yes, named integration coverage shipped with the PR; not
   independently re-run in this pass.
 - MERGED: yes — an ancestor of `origin/main`.
-- DEPLOYED: **yes.** Touches `apps/api`, `apps/web`, `packages/database`,
-  `packages/shared` only — no `apps/admin` file — both production-currency
-  facts apply.
+- DEPLOYED: **yes, the code.** Touches `apps/api`, `apps/web`,
+  `packages/database`, `packages/shared` only — no `apps/admin` file —
+  an ancestor of both `apps/api`'s (`4936812`) and `apps/web`'s
+  (`5b2b0a9`) live commits. **Whether its three migrations
+  (`recipientUserId`/`recipientClaimedAt` and the two audit-trail tables)
+  have actually been applied to the production database is not
+  established** — the claim endpoint depends on those columns existing;
+  this document can only infer the migration ran from `railway.json`'s
+  `preDeployCommand`, never observe it directly.
 - PRODUCTION-VERIFIED: **no record.** (The two open policy questions,
   BMPL-119, are the owner's to answer and are a separate axis from this
   ladder — a question outstanding does not change what has shipped.)
@@ -373,8 +415,13 @@ to the first success.
 - TESTED: yes, named integration coverage shipped with these PRs; not
   independently re-run in this pass.
 - MERGED: yes — all four an ancestor of `origin/main`.
-- DEPLOYED: **yes.** Every commit touches only `apps/api` or `apps/web` —
-  no `apps/admin` — both production-currency facts apply.
+- DEPLOYED: **yes, the code.** Every commit touches only `apps/api` or
+  `apps/web` — no `apps/admin` — an ancestor of both `apps/api`'s
+  (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits. **Whether
+  `3950db0`'s own migration (the new `DriverServiceCity` table) has
+  actually been applied to the production database is not established**
+  — inferred only from `railway.json`'s `preDeployCommand`, never
+  independently observed.
 - PRODUCTION-VERIFIED: **no record.**
 
 **Status: end-to-end as of `2cbcf73`.** Merged `3950db0` (PR #126) — `apps/api/src/driver/driver.controller.ts`,
@@ -435,8 +482,13 @@ district is offered to a driver who selected it.
 - TESTED: yes, named integration coverage shipped with these PRs; not
   independently re-run in this pass.
 - MERGED: yes — all five an ancestor of `origin/main`.
-- DEPLOYED: **yes.** Every one touches only `apps/api` and/or `apps/web` —
-  no `apps/admin` — both production-currency facts apply.
+- DEPLOYED: **yes, the code.** Every one touches only `apps/api` and/or
+  `apps/web` — no `apps/admin` — an ancestor of both `apps/api`'s
+  (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits. `056b709` and
+  `a072971` each carry their own migration; whether those have actually
+  been applied to the production database is not established (see below
+  — the same caveat applies to the terminal-half commits found this
+  pass).
 - PRODUCTION-VERIFIED: **no record.**
 
 **Gap closed, 2026-10-10:** the **terminal-half** hub-hours work and the
@@ -466,8 +518,13 @@ Found by `git log --all --grep` for the two badge card ids and by
 
 All five are confirmed ancestors of `origin/main`, touch no `apps/admin`
 file, and are therefore DEPLOYED under the same web/API facts the rest of
-this ladder uses. PRODUCTION-VERIFIED stays **no record** for all five —
-finding the commit is not the same claim as watching it work.
+this ladder uses — the code, that is: `699a3e3` (the `HubOpeningDay`/
+`HubHoursException` schema and migration) and `81ad57f` (one-off
+closures, also migration-bearing) are DEPLOYED as code on the same terms
+as `056b709`/`a072971` above, and their migrations' production
+application is equally **not established**, not independently observed.
+PRODUCTION-VERIFIED stays **no record** for all five — finding the
+commit is not the same claim as watching it work.
 
 **Status: done.** The **terminal half** is complete end to end: structured
 hub hours (`699a3e3`, BMPL-262) and dated exceptions (same commit), the
@@ -513,8 +570,9 @@ deferred, not dropped, and self-corrects once hours reopen.
   passing as part of CI on the merging PR, not independently re-run in
   this pass.
 - MERGED: yes — both commits an ancestor of `origin/main`.
-- DEPLOYED: **yes.** Both touch only `apps/api` (`cbc6765`'s only non-test
-  file is this document itself) — production-API-current fact applies.
+- DEPLOYED: **yes, the code.** Both touch only `apps/api` (`cbc6765`'s
+  only non-test file is this document itself) — an ancestor of
+  `apps/api`'s live commit, `4936812`.
 - PRODUCTION-VERIFIED: **no record of the fix itself being watched live.**
   BMPL-138 is a *production incident report* that a specific leg could not
   be marked departed — the trace found no code defect and no schedule data
@@ -576,10 +634,11 @@ not implemented, so no ladder applies to it (see below):**
   of `apps/web/app/track/[token]/page.test.tsx` on the web side; not
   independently re-run in this pass.
 - MERGED: yes — all four an ancestor of `origin/main`.
-- DEPLOYED: **yes.** Every one of these commits touches only `apps/api`
-  and/or `apps/web` (`5c11021` confirmed `apps/api` only; `c7690a5`
-  confirmed `apps/web` only) — no `apps/admin` — both
-  production-currency facts apply.
+- DEPLOYED: **yes, the code.** Every one of these commits touches only
+  `apps/api` and/or `apps/web` (`5c11021` confirmed `apps/api` only;
+  `c7690a5` confirmed `apps/web` only) — no `apps/admin` — an ancestor
+  of both `apps/api`'s (`4936812`) and `apps/web`'s (`5b2b0a9`) live
+  commits.
 - PRODUCTION-VERIFIED: **no record**, for either the booking-customer
   messaging link or the recipient's.
 
@@ -658,8 +717,9 @@ lands, without waiting on a second audit to define what "Done" means.
   PRs, plus the 2026-09-26 real-browser mobile audit noted below; not
   independently re-run in this pass.
 - MERGED: yes — all four an ancestor of `origin/main`.
-- DEPLOYED: **yes.** Every one touches only `apps/api` and/or `apps/web` —
-  no `apps/admin` — both production-currency facts apply.
+- DEPLOYED: **yes, the code.** Every one touches only `apps/api` and/or
+  `apps/web` — no `apps/admin` — an ancestor of both `apps/api`'s
+  (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits.
 - PRODUCTION-VERIFIED: **no record.** The 2026-09-26 mobile audit
   (described below) does not state which environment it ran against —
   not named as production, so not counted as one. The one explicitly
@@ -748,9 +808,10 @@ pending their findings.
   detection behaviour are described in this document's body but not
   independently named here.
 - MERGED: yes — all three an ancestor of `origin/main`.
-- DEPLOYED: **yes.** `c4b9f2b` and `9ec6764` touch only `apps/api`/
-  `apps/web`; `444a1ec` touches only `apps/web` — no `apps/admin` in any
-  of them — both production-currency facts apply.
+- DEPLOYED: **yes, the code.** `c4b9f2b` and `9ec6764` touch only
+  `apps/api`/`apps/web`; `444a1ec` touches only `apps/web` — no
+  `apps/admin` in any of them — an ancestor of both `apps/api`'s
+  (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits.
 - PRODUCTION-VERIFIED: **partial, and attributed, not independently
   re-checked by me.** `board.md` (2026-10-04, Oscar) records that
   `/dashboard/addresses` resolves live behind the login gate after a
@@ -828,11 +889,13 @@ code to ladder at all, see below:**
   (`d5b1dec`); not independently re-run in this pass.
 - MERGED: yes — `f8f89dd`, `0efd970`, `3ea4fa1`, `302a84c`, `e72da60`,
   `5fe37cf`, `5b7dd1a`, `d5b1dec` all ancestors of `origin/main`.
-- DEPLOYED: **yes, all of it, staff panel included.** `f8f89dd`/
-  `0efd970`/test commits touch only `apps/api` (plus `packages/*`);
-  `e72da60`'s confirmation surface touches only `apps/web`; `5fe37cf`'s
-  staff panel touches only `apps/admin` — `apps/admin/health` answers
-  `commit: effc63e`, and `5fe37cf` is an ancestor of `effc63e` (checked
+- DEPLOYED: **yes, all of it, staff panel included — the code.**
+  `f8f89dd`/`0efd970`/test commits touch only `apps/api` (plus
+  `packages/*`), an ancestor of `apps/api`'s live commit `4936812`;
+  `e72da60`'s confirmation surface touches only `apps/web`, an ancestor
+  of `apps/web`'s live commit `5b2b0a9`; `5fe37cf`'s staff panel touches
+  only `apps/admin` — `apps/admin/health` answers `commit: effc63e`
+  (build identity), and `5fe37cf` is an ancestor of `effc63e` (checked
   directly). Whether the `20261104250000_shipment_routing_proposal`
   migration itself has been applied to production is, separately, not
   established by this document (stated already in the body below) —
@@ -945,9 +1008,13 @@ failed delivery has no trigger to test against.
 - TESTED: yes, named integration coverage shipped with each of these PRs;
   not independently re-run in this pass.
 - MERGED: yes — all five an ancestor of `origin/main`.
-- DEPLOYED: **yes.** Every one touches only `apps/api` and/or `apps/web`
-  and/or `packages/*` — no `apps/admin` — both production-currency facts
-  apply.
+- DEPLOYED: **yes, the code.** Every one touches only `apps/api` and/or
+  `apps/web` and/or `packages/*` — no `apps/admin` — an ancestor of both
+  `apps/api`'s (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits.
+  `056b709` carries its own migration (the sender availability-window
+  table, same commit cited in requirement 5); whether it has actually
+  been applied to the production database is not established, same
+  caveat as there.
 - PRODUCTION-VERIFIED: **no record.**
 
 **Status: done.**
@@ -1003,7 +1070,10 @@ shipment is untouched.
   `packages/validation`, tested in
   `apps/api/test/carrier-org-access.integration.spec.ts` and an extension
   of `transport-leg-operations.integration.spec.ts`). Ancestor of
-  `origin/main`, no `apps/admin` file — DEPLOYED yes.
+  `origin/main`, no `apps/admin` file — DEPLOYED yes, the code, an
+  ancestor of `apps/api`'s live commit (`4936812`). `e56c425` carries its
+  own migration (a new `AuditAction` enum value); whether it has
+  actually been applied to the production database is not established.
 - **ETA-change notice** (`e7ef2ed`): IMPLEMENTED/MERGED yes, ancestor of
   `origin/main`; touches `apps/api`/`packages/database`/`packages/shared`
   only — DEPLOYED yes. TESTED: a test exists per the PR, not
@@ -1012,17 +1082,21 @@ shipment is untouched.
   text below — whether it is applied in production is not established.
 - **Terminal hold/reroute** (`7ff34a1` API; `5fe37cf` staff screen):
   IMPLEMENTED/MERGED yes, both ancestors of `origin/main`. DEPLOYED:
-  **yes, all of it, admin included** — the non-admin files in `7ff34a1`
-  are `apps/api`/`packages/*` (production-API-current); `5fe37cf` and the
-  admin portion of `7ff34a1` are ancestors of `effc63e`, the live admin
-  commit (`apps/admin/health`, checked directly — same commit as
-  requirement 10's staff panel). TESTED: a test exists per the PR, not
-  independently named here.
+  **yes, all of it, admin included — the code.** The non-admin files in
+  `7ff34a1` are `apps/api`/`packages/*`, an ancestor of `apps/api`'s live
+  commit `4936812`; `5fe37cf` and the admin portion of `7ff34a1` are
+  ancestors of `effc63e`, `apps/admin`'s build identity (checked
+  directly — same commit as requirement 10's staff panel). `7ff34a1`
+  carries three migrations of its own; whether any have actually been
+  applied to the production database is not established. TESTED: a test
+  exists per the PR, not independently named here.
 - **Carrier schedule exceptions** (`fcc3592`, BMPL-186): IMPLEMENTED/
   MERGED yes, ancestor of `origin/main`. DEPLOYED: **yes, all of it,
-  admin included** — the API portion is production-current; the admin
-  portion is an ancestor of `effc63e`, the live admin commit (checked
-  directly).
+  admin included — the code.** The API portion is an ancestor of
+  `apps/api`'s live commit `4936812`; the admin portion is an ancestor of
+  `effc63e`, `apps/admin`'s build identity (checked directly). `fcc3592`
+  carries its own migration; whether it has actually been applied to the
+  production database is not established.
 - PRODUCTION-VERIFIED, all four pieces: **no record.**
 
 **Status as of `effc63e` (re-verified, no change since `e72da60`): every
@@ -1135,13 +1209,23 @@ once the exception is removed.
 
 The contract above exists in the repository. As of this 2026-10-10 pass,
 each requirement's Evidence ladder states DEPLOYED where it could be
-checked against the two live commits this pass used (web `3aa35d6`, API
-`9ec6764`) — but that check is only as current as this document, and a
-served commit is a fact that changes with the next deploy. Re-checking it
-is cheap (`git merge-base --is-ancestor <commit> <live-commit>`, or
-asking a running-API source such as `pnpm deploy:status` directly) and
-should be done again before trusting an old DEPLOYED rung, not assumed to
-still hold.
+checked against each app's own live commit as of this pass — `apps/api`
+`4936812`, `apps/web` `5b2b0a9`, `apps/admin` `effc63e` — three different
+values, independent of each other and of `origin/main` (`4cf5dce`), since
+each app redeploys only when its own affected paths change. `apps/api`'s
+is a live per-request read (`uptime`/`startedAt` vary call to call);
+`apps/web` and `apps/admin`'s are the build each is currently serving,
+confirmed un-cache-bustable, not a liveness signal. Any of the three
+is only as current as the moment it was checked, and changes with that
+app's next deploy — re-checking is cheap (`git merge-base
+--is-ancestor <commit> <live-commit>`, or hitting that app's own
+`/health`) and should be done again before trusting an old DEPLOYED
+rung, not assumed to still hold. Separately, and for every migration
+cited above: nothing external to this repository observes whether a
+migration has actually run against the production database
+(`/health/ready`'s own check is a bare `SELECT 1`) — a DEPLOYED rung on
+a migration-bearing commit proves the code is live, never that its
+migration has executed.
 
 **Reserved: UI-defect findings from Oscar and Jim's responsive-layout
 audit.** Not yet written — their measurements (375/414/768/1024/1440) are
