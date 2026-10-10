@@ -66,11 +66,24 @@ production web is `3aa35d6` and every commit between it and `origin/main`
 touches no `apps/web` file; production API is `9ec6764` and every commit
 between it and `origin/main` touches no `apps/api`/`packages` file — so a
 MERGED commit touching only one of those two areas is also DEPLOYED.
-**No equivalent fact exists for `apps/admin`**, so a row whose evidence
-touches an admin screen says DEPLOYED: not established for that part,
-rather than guessing. Most rows stop at DEPLOYED: that is not a defect in
-this document, it is the actual state of a repository where nobody has
-yet recorded watching most of this working live.
+
+**A third rung-prover for `apps/admin` exists and this document's first
+pass at the ladder missed it.** `https://bmpl-admin.vercel.app/health`
+answers `{"status":"ok","commit":"effc63e"}` — confirmed directly, not
+taken on report. The route is `apps/admin/app/health/route.ts`, the exact
+mirror of the web and API health checks. The same trap applies as the
+API's own health check: `https://admin.bzemarketplace.com/health` and
+`https://www.bzemarketplace.com/admin/health` both 404 (confirmed) — only
+the `vercel.app` host answers. Production admin is therefore `effc63e`,
+the current `origin/main` tip — the **most** current of the three
+surfaces, not the least. A MERGED commit touching `apps/admin` is
+DEPLOYED whenever it is an ancestor of `effc63e`, checked the same way as
+the other two.
+
+Most rows still stop at DEPLOYED rather than reaching
+PRODUCTION-VERIFIED: that is not a defect in this document, it is the
+actual state of a repository where nobody has yet recorded watching most
+of this working live.
 
 ## Status summary
 
@@ -80,14 +93,14 @@ yet recorded watching most of this working live.
 | 2 | Package pickup/handoff photo | **Done for sender, staff, courier and linked recipient as of `0c322d6`** | `682b501` (PR #127) for the API; UI landed `a568d6a` (BMPL-352, PR #270) — courier upload, sender and staff view; linked-recipient access landed `66487e4` (PR #304) and `0c322d6` (BMPL-391, PR #305) |
 | 3 | Recipient account linking & incoming-shipment tracking | **Done** | `a6b7d97` (BMPL-179, PR #135); two policy questions open (BMPL-119), see below |
 | 4 | Granular driver service areas (district → city) | **End-to-end as of `2cbcf73`** | `3950db0` (PR #126) for the API; city picker landed `99e98c1` (BMPL-353, PR #272); wired to the lane-town endpoint by `2cbcf73` (BMPL-368, PR #279) — a lane-only town (e.g. Ladyville) is selectable as of `2cbcf73` |
-| 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255) |
+| 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255); terminal half `699a3e3` (BMPL-262), `4eac6be` (BMPL-271), `b12afb3` (BMPL-273); closed-now badge `0d50de2` (BMPL-335), one-off closures `81ad57f` (BMPL-334) — all five found and added `effc63e`-pass, none cited here before |
 | 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
 | 7 | Courier & vehicle identification once assigned | **Done for the booking customer as of `4d96bb0`; for a linked recipient, messaging is now wired end-to-end (API and web) as of `c7690a5`/`5c11021`, but courier identity is still not shown to the recipient as of `effc63e`** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient messaging API: PR #293 (BMPL-359), merged `910d5b2`; recipient messaging read + UI: PR #315 (`5c11021`) and PR #314 (`c7690a5`); `RECIPIENT_VIEW_INCLUDE` re-checked directly at `effc63e` — still no `assignedDriver`/`assignedVehicle` |
 | 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done for shipping and marketplace delivery, as of `16e4b4b`; whether the requirement was ever meant to cover marketplace's always-two-stop case is unsettled** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) for shipping; marketplace's driver job screen wired to the same `ExpandableRouteMap` by `16e4b4b` (BMPL-390, PR #302) — no API change, the pre-acceptance pin gate was already correct |
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done, and the two gaps this document used to flag as "what remains" are now also closed as of `444a1ec`/`9ec6764`** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below; standalone manage page `444a1ec` (PR #323); un-defaulting the current default without a delete `9ec6764` (PR #336) |
 | 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `effc63e` (re-verified, no change since `e72da60`): the staff-alone charge defect under Ruling 1 (BMPL-375) is fixed; failed delivery is still unbuilt** | Pre-custody half correct in shipped code. Return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) with a staff-alone charge defect, fixed by `0efd970` (BMPL-375, PR #288, merged); negative-control tests PR #285 (`3ea4fa1`) and a sink ownership test PR #306 (`302a84c`) are on main; customer confirmation `e72da60` (PR #308); staff prepare panel `5fe37cf` (PR #309); the fix's own red-team guards now pass under their real names, not a `[RED]` prefix, as of `5b7dd1a` (PR #312); acceptance-is-not-custody now has a named behavioural test as of `d5b1dec` (PR #318). Failed-delivery trigger does not exist as of `effc63e` |
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
-| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff triggers for all four as of `effc63e` (re-verified, no change since `e72da60`)** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by BMPL-346. ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen landed as PR #309 (`5fe37cf`; it replaced the closed PR #278) after `7ff34a1` |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff triggers for all four as of `effc63e` (re-verified, no change since `e72da60`)** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by `e56c425` (BMPL-346, found and added `effc63e`-pass; not cited here before). ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen landed as PR #309 (`5fe37cf`; it replaced the closed PR #278) after `7ff34a1` |
 
 **Three of twelve — requirements 1, 2 and 4 — shared one cause, not three
 separate ones: each had a real, merged, tested API and no user-facing
@@ -143,13 +156,11 @@ noted in the row itself rather than guessed at here.
 - TESTED: yes, an integration spec shipped in `bad7b3f` itself; not
   independently re-run in this pass.
 - MERGED: yes — both an ancestor of `origin/main`.
-- DEPLOYED: **yes for the API and customer/vendor web surfaces** —
-  `bad7b3f` touches only `apps/api`/`packages/database`, within production
-  API currency; the web portion of `74cbcd6` is within production web
-  currency. **Not established for the admin screen** — `74cbcd6` also
-  touches `apps/admin`, and no live-admin-commit reference exists to
-  check it against (the two facts this pass has are web `3aa35d6` and API
-  `9ec6764` only).
+- DEPLOYED: **yes, all of it, admin included.** `bad7b3f` touches only
+  `apps/api`/`packages/database`, within production API currency; `74cbcd6`
+  touches `apps/web` and `apps/admin`, both within production currency —
+  `apps/admin/health` answers `commit: effc63e`, and `74cbcd6` is an
+  ancestor of `effc63e` (checked directly).
 - PRODUCTION-VERIFIED: **no record.**
 
 **Status: done as of `74cbcd6`.** Merged `bad7b3f` (BMPL-175, PR #259) —
@@ -428,22 +439,53 @@ district is offered to a driver who selected it.
   no `apps/admin` — both production-currency facts apply.
 - PRODUCTION-VERIFIED: **no record.**
 
-**Gap in this ladder, stated rather than smoothed over:** the
-**terminal-half** hub-hours work and the **closed-now badge** (BMPL-335,
-BMPL-334) are both referenced below by card id only, with no commit SHA in
-this document to check — "shipped ahead of this matrix" means exactly
-that they predate this document's own citation discipline. This ladder
-cannot certify those two pieces' MERGED/DEPLOYED rungs without first
-finding their actual commits, which this pass did not do.
+**Gap closed, 2026-10-10:** the **terminal-half** hub-hours work and the
+**closed-now badge** used to be referenced below by card id only, with no
+commit SHA anywhere in this document — "shipped ahead of this matrix"
+meant exactly that they predated this document's own citation discipline.
+Found by `git log --all --grep` for the two badge card ids and by
+`git log -S` for the terminal-half's actual schema model name
+(`HubOpeningDay`), since no card id was ever written into those messages:
+
+- **Terminal half**, three pieces, test coverage named first and each
+  piece's commit given afterward with no file extension nearby: the
+  `HubOpeningDay`/`HubHoursException` schema, migration and pure resolver
+  (tested in `packages/shared/src/hub-hours.test.ts`) is commit
+  `699a3e3` (BMPL-262, PR #193); the admin-consumed read-only "is this
+  terminal open" endpoint (tested in
+  `apps/api/test/hub-hours.integration.spec.ts`) is commit `4eac6be`
+  (BMPL-271, PR #198); the dispatch consumer that actually warns and
+  reschedules around hub hours (tested in
+  `apps/api/test/shipment-hub-hours-dispatch.integration.spec.ts`) is
+  commit `b12afb3` (BMPL-273, PR #200).
+- **Closed-now badge** — `0d50de2` (BMPL-335, PR #251, `apps/api`+
+  `apps/web`, tested in `apps/api/test/storefront.integration.spec.ts`
+  and `apps/web/lib/vendor-hours.test.ts`).
+- **One-off closures** (the badge's own BMPL-334 dependency) — `81ad57f`
+  (PR #250, `apps/api` only, tested in
+  `apps/api/test/vendor-hours-exceptions.integration.spec.ts` and an
+  extension of `vendor-hours-dispatch.integration.spec.ts`).
+
+All five are confirmed ancestors of `origin/main`, touch no `apps/admin`
+file, and are therefore DEPLOYED under the same web/API facts the rest of
+this ladder uses. PRODUCTION-VERIFIED stays **no record** for all five —
+finding the commit is not the same claim as watching it work.
 
 **Status: done.** The **terminal half** is complete end to end: structured
-hub hours and dated exceptions, the write surface, and a consumer that
-actually defers dispatch outside hours and self-corrects (shipped ahead of
-this matrix — see [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) §12). The
-**business (vendor) half** — dispatch reading `VendorOpeningHours` and
-deferring a marketplace pickup while the vendor is closed — merged `a072971`
-(PR #248). A customer-facing "closed now" badge merged separately (BMPL-335,
-BMPL-334 for one-off closures).
+hub hours (`699a3e3`, BMPL-262) and dated exceptions (same commit), the
+read surface for admin (`4eac6be`, BMPL-271), and a dispatch consumer that
+actually defers outside hours and self-corrects (`b12afb3`, BMPL-273) —
+shipped ahead of this matrix, which is why none of the three had a commit
+cited here until this pass found them. **The "see PROJECT_STATUS.md §12"
+pointer this sentence used to carry was itself stale** — that document's
+current §12 is unrelated (deployed marketplace-checkout mobile QA), with
+no mention of hub hours anywhere in the file; removed rather than left
+for a reader to follow into the wrong section. The **business (vendor)
+half** — dispatch reading `VendorOpeningHours` and deferring a
+marketplace pickup while the vendor is closed — merged `a072971`
+(PR #248). A customer-facing "closed now" badge merged separately
+(`0d50de2`, BMPL-335, PR #251; one-off closures `81ad57f`, BMPL-334,
+PR #250 — both found this pass, see the Evidence ladder above).
 
 Edward's specific remaining ask — a warning that a location **may close
 before arrival** — merged `1161a6f` (PR #255, confirmed an ancestor of
@@ -789,15 +831,16 @@ code to ladder at all, see below:**
   (`d5b1dec`); not independently re-run in this pass.
 - MERGED: yes — `f8f89dd`, `0efd970`, `3ea4fa1`, `302a84c`, `e72da60`,
   `5fe37cf`, `5b7dd1a`, `d5b1dec` all ancestors of `origin/main`.
-- DEPLOYED: **yes for the API fix and the customer confirmation web
-  surface** — `f8f89dd`/`0efd970`/test commits touch only `apps/api`
-  (plus `packages/*`); `e72da60`'s confirmation surface touches only
-  `apps/web`; both within production currency. **Not established for the
-  staff prepare panel** — `5fe37cf` touches only `apps/admin`, and no
-  live-admin-commit reference exists to check it against. Whether the
-  `20261104250000_shipment_routing_proposal` migration itself has been
-  applied to production is, separately, not established by this document
-  (stated already in the body below).
+- DEPLOYED: **yes, all of it, staff panel included.** `f8f89dd`/
+  `0efd970`/test commits touch only `apps/api` (plus `packages/*`);
+  `e72da60`'s confirmation surface touches only `apps/web`; `5fe37cf`'s
+  staff panel touches only `apps/admin` — `apps/admin/health` answers
+  `commit: effc63e`, and `5fe37cf` is an ancestor of `effc63e` (checked
+  directly). Whether the `20261104250000_shipment_routing_proposal`
+  migration itself has been applied to production is, separately, not
+  established by this document (stated already in the body below) —
+  a schema migration is not something the admin build's own commit
+  identity can answer.
 - PRODUCTION-VERIFIED: **no record**, for any of the three (cancel,
   return, reroute).
 
@@ -956,10 +999,14 @@ shipment is untouched.
 **Evidence ladder — per piece, since the four pieces do not share one:**
 - **Multi-leg ETA** (`f1bbfce`): IMPLEMENTED/MERGED yes, ancestor of
   `origin/main`; touches only `apps/api`/`packages/shared` — DEPLOYED yes.
-  TESTED: a test exists per the PR, not independently named here. The gap
-  this phase left is said to be closed by BMPL-346, but **no commit SHA
-  for BMPL-346 is cited anywhere in this document** — its own
-  MERGED/DEPLOYED rungs cannot be checked from this document as written.
+  TESTED: a test exists per the PR, not independently named here. **The
+  gap this phase left, found to have no commit SHA in this document at
+  all, now has one:** `git log --all --grep=BMPL-346` found `e56c425`
+  (PR #267, `apps/api`/`packages/database`/`packages/shared`/
+  `packages/validation`, tested in
+  `apps/api/test/carrier-org-access.integration.spec.ts` and an extension
+  of `transport-leg-operations.integration.spec.ts`). Ancestor of
+  `origin/main`, no `apps/admin` file — DEPLOYED yes.
 - **ETA-change notice** (`e7ef2ed`): IMPLEMENTED/MERGED yes, ancestor of
   `origin/main`; touches `apps/api`/`packages/database`/`packages/shared`
   only — DEPLOYED yes. TESTED: a test exists per the PR, not
@@ -968,16 +1015,17 @@ shipment is untouched.
   text below — whether it is applied in production is not established.
 - **Terminal hold/reroute** (`7ff34a1` API; `5fe37cf` staff screen):
   IMPLEMENTED/MERGED yes, both ancestors of `origin/main`. DEPLOYED:
-  **yes for the API** (the non-admin files in `7ff34a1` are `apps/api`/
-  `packages/*`; production-API-current fact applies) — **not established
-  for the staff screen**, since `5fe37cf` and part of `7ff34a1` touch
-  `apps/admin` and no live-admin-commit reference exists to check against
-  (same gap as requirement 10's staff panel, which is the same commit).
-  TESTED: a test exists per the PR, not independently named here.
+  **yes, all of it, admin included** — the non-admin files in `7ff34a1`
+  are `apps/api`/`packages/*` (production-API-current); `5fe37cf` and the
+  admin portion of `7ff34a1` are ancestors of `effc63e`, the live admin
+  commit (`apps/admin/health`, checked directly — same commit as
+  requirement 10's staff panel). TESTED: a test exists per the PR, not
+  independently named here.
 - **Carrier schedule exceptions** (`fcc3592`, BMPL-186): IMPLEMENTED/
-  MERGED yes, ancestor of `origin/main`. DEPLOYED: **yes for the API**
-  (production-current); **not established for the admin half** — this
-  commit also touches `apps/admin`.
+  MERGED yes, ancestor of `origin/main`. DEPLOYED: **yes, all of it,
+  admin included** — the API portion is production-current; the admin
+  portion is an ancestor of `effc63e`, the live admin commit (checked
+  directly).
 - PRODUCTION-VERIFIED, all four pieces: **no record.**
 
 **Status as of `effc63e` (re-verified, no change since `e72da60`): every
@@ -1004,7 +1052,9 @@ Four distinct pieces, per the owner's original requirement:
   closed: nothing anywhere wrote a `LINE_HAUL` leg's own
   `scheduledDepartureAt`/`scheduledArrivalAt`, so a multi-hub shipment's
   overall ETA read `UNKNOWN` even though its `FIRST_MILE`/`LAST_MILE` legs
-  resolved correctly. **Done (BMPL-346)**: `ShipmentService.scheduleLeg` is
+  resolved correctly. **Done (`e56c425`, BMPL-346** — found this pass via
+  `git log --all --grep=BMPL-346`; no commit was cited here before)**:**
+  `ShipmentService.scheduleLeg` is
   the writer — established first that nothing configured could be derived
   instead (`LogisticsRoute.scheduleNote` is a free-text label by its own
   field comment; `PassengerTrip`'s own departure time is populated the same
@@ -1107,7 +1157,8 @@ of the findings.
 ---
 
 *Sources: kanban cards BMPL-119, BMPL-174 through BMPL-190, BMPL-201,
-BMPL-247, BMPL-283 through BMPL-288, BMPL-337, BMPL-338, BMPL-340, BMPL-343,
+BMPL-247, BMPL-262, BMPL-271, BMPL-273, BMPL-283 through BMPL-288,
+BMPL-334, BMPL-335, BMPL-337, BMPL-338, BMPL-340, BMPL-343,
 BMPL-344, BMPL-345, BMPL-346, BMPL-351, BMPL-352, BMPL-353, BMPL-354,
 BMPL-356, BMPL-359, BMPL-360, BMPL-364, BMPL-365, BMPL-368, BMPL-375,
 BMPL-376, BMPL-378, BMPL-391, hive cards MDF-96 and MDF-97, and
