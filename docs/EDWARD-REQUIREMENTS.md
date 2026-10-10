@@ -146,15 +146,15 @@ reported success exactly like a pass. The fix made that status impossible
 to miss rather than hidden: the file is named
 `authenticated-dashboard-geometry.local-only.spec.ts`, and every describe
 block it contains is prefixed `[LOCAL ONLY, skips in CI — see file
-header]`. The owner ruled on 2026-10-10: "retain the transparent
-local-only labels for authenticated tests for now. Do not build an
-expensive new authenticated CI environment without separate approval."
-**That makes the convention a decided state, not a gap waiting to be
-reported as closed.** A TESTED rung that names a `.local-only.spec.ts`
-file, or a describe block carrying the `[LOCAL ONLY, skips in CI]`
-prefix, should say exactly that — verified locally, not in CI, and that
-is the sanctioned state per the owner's 2026-10-10 ruling — rather than
-reading as an uncaught gap. A live authenticated CI environment (a
+header]`. [Ruling 15](./OWNER-RULINGS.md#ruling-15--authenticated-tests-stay-local-only-for-now)
+(2026-10-10): "retain the transparent local-only labels for authenticated
+tests for now. Do not build an expensive new authenticated CI environment
+without separate approval." **That makes the convention a decided state,
+not a gap waiting to be reported as closed.** A TESTED rung that names a
+`.local-only.spec.ts` file, or a describe block carrying the
+`[LOCAL ONLY, skips in CI]` prefix, should say exactly that — verified
+locally, not in CI, and that is the sanctioned state per Ruling 15 —
+rather than reading as an uncaught gap. A live authenticated CI environment (a
 services block, a seeded database, a running API inside the job) remains
 possible, but only on a separate owner approval; nothing in this document
 should imply one is pending by default.
@@ -728,12 +728,13 @@ per-leg messaging, confirmed wired end-to-end, not just present in the API.
   is a confirmed ancestor of the live API commit — **application is
   expected but unverified** (see the methodology section above).
 - **Courier identity is restricted to the booking customer by owner
-  ruling, not an unbuilt gap.** The owner ruled on 2026-10-10: "keep
-  courier identity restricted to the booking customer for now. Do not
-  expose additional personal information to recipients without a
-  confirmed product requirement. Keep the Edward clarification recorded."
-  `RECIPIENT_VIEW_INCLUDE` (`shipment.service.ts`) selects no assigned
-  driver and no assigned vehicle — re-read directly at `effc63e`,
+  ruling, not an unbuilt gap.**
+  [Ruling 13](./OWNER-RULINGS.md#ruling-13--courier-identity-toward-a-linked-recipient-for-now)
+  (2026-10-10): "keep courier identity restricted to the booking customer
+  for now. Do not expose additional personal information to recipients
+  without a confirmed product requirement. Keep the Edward clarification
+  recorded." `RECIPIENT_VIEW_INCLUDE` (`shipment.service.ts`) selects no
+  assigned driver and no assigned vehicle — re-read directly at `effc63e`,
   unchanged — and that is now the decided, correct state, not a thing
   left to build. Nothing in this document claims otherwise.
 
@@ -1041,11 +1042,12 @@ branch exists for the trigger was not checked in this pass.
 
 `MDF-96` asked whether the owner expects the courier themselves to report
 a failed attempt, or whether the existing staff-exception workflow is what
-he meant. **That is no longer sitting unanswered — the owner ruled on
-2026-10-10 that he wants this requirement finished, not left indefinitely
-blocked, and took the decision onto himself:** "bring me the exact
-failed-delivery workflow choices and your recommendation. I want us to
-finish this requirement, not leave it indefinitely blocked." A decision
+he meant. **That is no longer sitting unanswered — the owner took the
+decision onto himself,**
+[Ruling 14](./OWNER-RULINGS.md#ruling-14--failed-delivery-finish-it-dont-leave-it-indefinitely-blocked)
+(2026-10-10): "bring me the exact failed-delivery workflow choices and
+your recommendation. I want us to finish this requirement, not leave it
+indefinitely blocked." A decision
 memo covering the exact workflow choices and a recommendation is **in
 progress** (Pam is producing the workflow options). The trigger still does
 not exist in code today — that fact is unchanged — but the row's blocking
