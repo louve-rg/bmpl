@@ -447,17 +447,15 @@ Found by `git log --all --grep` for the two badge card ids and by
 `git log -S` for the terminal-half's actual schema model name
 (`HubOpeningDay`), since no card id was ever written into those messages:
 
-- **Terminal half**, three pieces, test coverage named first and each
-  piece's commit given afterward with no file extension nearby: the
-  `HubOpeningDay`/`HubHoursException` schema, migration and pure resolver
-  (tested in `packages/shared/src/hub-hours.test.ts`) is commit
-  `699a3e3` (BMPL-262, PR #193); the admin-consumed read-only "is this
-  terminal open" endpoint (tested in
-  `apps/api/test/hub-hours.integration.spec.ts`) is commit `4eac6be`
-  (BMPL-271, PR #198); the dispatch consumer that actually warns and
-  reschedules around hub hours (tested in
-  `apps/api/test/shipment-hub-hours-dispatch.integration.spec.ts`) is
-  commit `b12afb3` (BMPL-273, PR #200).
+- **Terminal half**, three pieces: the `HubOpeningDay`/`HubHoursException`
+  schema, migration and pure resolver is commit `699a3e3` (BMPL-262,
+  PR #193, tested in `packages/shared/src/hub-hours.test.ts`); the
+  admin-consumed read-only "is this terminal open" endpoint is commit
+  `4eac6be` (BMPL-271, PR #198, tested in
+  `apps/api/test/hub-hours.integration.spec.ts`); the dispatch consumer
+  that actually warns and reschedules around hub hours is commit
+  `b12afb3` (BMPL-273, PR #200, tested in
+  `apps/api/test/shipment-hub-hours-dispatch.integration.spec.ts`).
 - **Closed-now badge** — `0d50de2` (BMPL-335, PR #251, `apps/api`+
   `apps/web`, tested in `apps/api/test/storefront.integration.spec.ts`
   and `apps/web/lib/vendor-hours.test.ts`).
@@ -510,8 +508,8 @@ deferred, not dropped, and self-corrects once hours reopen.
 
 **Evidence ladder:**
 - IMPLEMENTED: yes — `6676d68` (the fix).
-- TESTED: yes — `cbc6765` added the walk test,
-  `apps/api/test/transport-leg-operations.integration.spec.ts`; seen
+- TESTED: yes — `cbc6765` added the walk test
+  (`apps/api/test/transport-leg-operations.integration.spec.ts`); seen
   passing as part of CI on the merging PR, not independently re-run in
   this pass.
 - MERGED: yes — both commits an ancestor of `origin/main`.
@@ -572,11 +570,10 @@ messaging piece that have actually shipped; identity-for-the-recipient has
 not implemented, so no ladder applies to it (see below):**
 - IMPLEMENTED: yes — `a4fb20d` (booking customer), `910d5b2`/`5c11021`/
   `c7690a5` (recipient messaging, API + web).
-- TESTED: yes. Two separate commits added test coverage:
+- TESTED: yes. Two separate commits added test coverage: `5c11021` added
   `apps/api/test/shipping-messaging.integration.spec.ts` on the API side,
-  and `RecipientCourierMessage.test.tsx` plus an extension of
-  `apps/web/app/track/[token]/page.test.tsx` on the web side. Their
-  commit ids are given in the IMPLEMENTED/MERGED rungs above; not
+  and `c7690a5` added `RecipientCourierMessage.test.tsx` plus an extension
+  of `apps/web/app/track/[token]/page.test.tsx` on the web side; not
   independently re-run in this pass.
 - MERGED: yes — all four an ancestor of `origin/main`.
 - DEPLOYED: **yes.** Every one of these commits touches only `apps/api`
@@ -1052,8 +1049,8 @@ Four distinct pieces, per the owner's original requirement:
   closed: nothing anywhere wrote a `LINE_HAUL` leg's own
   `scheduledDepartureAt`/`scheduledArrivalAt`, so a multi-hub shipment's
   overall ETA read `UNKNOWN` even though its `FIRST_MILE`/`LAST_MILE` legs
-  resolved correctly. **Done (`e56c425`, BMPL-346** — found this pass via
-  `git log --all --grep=BMPL-346`; no commit was cited here before)**:**
+  resolved correctly. **Done (`e56c425`, BMPL-346)** — found this pass via
+  `git log --all --grep=BMPL-346`; no commit was cited here before:
   `ShipmentService.scheduleLeg` is
   the writer — established first that nothing configured could be derived
   instead (`LogisticsRoute.scheduleNote` is a free-text label by its own
