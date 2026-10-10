@@ -259,6 +259,75 @@ for what is and is not built against this ruling.
 
 ---
 
+**Three further rulings, given individually on 2026-10-10, not as part of
+the 2026-09-28 batch.** Numbered as a continuation; rulings 1–12 above are
+unchanged.
+
+## Ruling 13 — courier identity toward a linked recipient, for now
+
+> Keep courier identity restricted to the booking customer for now. Do not
+> expose additional personal information to recipients without a confirmed
+> product requirement. Keep the Edward clarification recorded.
+
+**This changes a status, not a caveat.** Requirement 7's recipient-facing
+courier-identity piece had been reading as an unbuilt gap. It is not one:
+it is now **out of scope by this ruling**, and the code already matches
+it — `RECIPIENT_VIEW_INCLUDE` selects no `assignedDriver`/`assignedVehicle`
+for a linked recipient, confirmed directly against the source. Nothing is
+pending and nothing needs building for this piece.
+
+**What would reopen it:** a confirmed product requirement that says
+otherwise. `MDF-97` asked whether a recipient should see courier identity
+at all — this ruling answers what BMPL does for now, not what Edward
+originally intended. **That question stays recorded, not resolved.**
+
+Answered **MDF-97**. See [`EDWARD-REQUIREMENTS.md`](./EDWARD-REQUIREMENTS.md)
+requirement 7.
+
+## Ruling 14 — failed delivery: finish it, don't leave it indefinitely blocked
+
+> Bring me the exact failed-delivery workflow choices and your
+> recommendation. I want us to finish this requirement, not leave it
+> indefinitely blocked.
+
+**This does not change what's built — the failed-delivery trigger still
+does not exist in code, unchanged by this ruling.** What it changes is the
+blocking reason: `MDF-96` (does the owner expect the courier to report a
+failed attempt, or is the existing staff-exception workflow what he meant)
+moves off Edward and onto the owner himself. A decision memo covering the
+exact workflow choices and a recommendation is in progress.
+
+**What resolves it:** the decision memo, once delivered and acted on —
+not a further clarification from Edward.
+
+Answered **MDF-96**. See [`EDWARD-REQUIREMENTS.md`](./EDWARD-REQUIREMENTS.md)
+requirement 10.
+
+## Ruling 15 — authenticated tests stay local-only for now
+
+> Retain the transparent local-only labels for authenticated tests for
+> now. Do not build an expensive new authenticated CI environment without
+> separate approval.
+
+**This changes a convention's standing, not any code.** PR #351 found
+thirty authenticated specs silently skipping in CI and fixed the
+visibility, not the gap, by renaming the file to
+`authenticated-dashboard-geometry.local-only.spec.ts` and prefixing every
+describe block `[LOCAL ONLY, skips in CI — see file header]`. That
+convention was an engineering workaround until this ruling; it is now the
+**sanctioned state**. A TESTED rung naming such a file or prefix should
+read as decided, not as an evidence gap.
+
+**What would reopen it:** a separate owner approval to build a real
+authenticated CI environment (a services block, a seeded database, a
+running API inside the job) — not assumed by default.
+
+*Answered no open card — a process ruling.* See
+[`EDWARD-REQUIREMENTS.md`](./EDWARD-REQUIREMENTS.md)'s methodology
+section.
+
+---
+
 ## Risk accepted, with a trigger
 
 These are risks the owner has explicitly accepted for now, each with a
@@ -287,4 +356,7 @@ answered: BMPL-109, BMPL-183, BMPL-375 (1); BMPL-183, BMPL-201, BMPL-247 (2); BM
 (3); BMPL-232 (4); BMPL-194 (5); BMPL-283 (6); BMPL-180, BMPL-201, BMPL-247
 (9); BMPL-259 (10). If a ruling above and a dependent card's own notes ever
 disagree, the card is the primary source for that ruling — check it for the
-owner's exact words before trusting either restatement, including this one.*
+owner's exact words before trusting either restatement, including this one.
+Rulings 13–15 were given individually on 2026-10-10, not from the
+2026-09-28 batch: hive card MDF-97 (13), hive card MDF-96 (14); ruling 15
+answered no open card.*
