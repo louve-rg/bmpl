@@ -5,6 +5,20 @@ import * as path from 'node:path';
 import { tryLogin, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD } from './support/auth';
 
 /**
+ * *** THESE 30 TESTS NEVER RUN IN CI. THIS IS NOT A GAP IN THIS FILE --
+ * *** IT IS A HONEST DESCRIPTION OF WHAT IT CAN PROVE. Read this before
+ * *** trusting a green check that includes this file's run: the browser
+ * *** step always reports success for a SKIPPED test, same as for a
+ * *** PASSED one, and CI has no SUPER_ADMIN_EMAIL/PASSWORD, no seeded
+ * *** database and no live API for `tryLogin` to reach -- so every test
+ * *** below calls `test.skip()` on every CI run, every time, by design.
+ * *** A clean check here means "ran locally and was clean the last time a
+ * *** human or agent did," never "CI verified this." Confirmed concretely
+ * *** (god, 2026-10-10): main's e2e step read "57 passed, 2 skipped"
+ * *** before this file existed; this branch reads "57 passed, 32
+ * *** skipped" -- the same 57, plus exactly this file's 30 tests, all
+ * *** silently skipped, none of them run.
+ *
  * Independent real-browser audit of the AUTHENTICATED surfaces (MDF-128
  * follow-up, dispatched after the signed-out sweep in
  * public-nav-breakpoints.spec.ts came back clean). Every route a signed-out
@@ -27,11 +41,19 @@ import { tryLogin, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD } from './support/aut
  * context built from that saved state avoids the repeated-login traffic
  * entirely and was verified clean end to end once this changed.
  *
- * CI, same shape as employer-empty-state.spec.ts and for the same reason:
- * needs a live API backed by the seeded dev database. apps/web's own e2e CI
- * step provisions no services on purpose (see that file's header). SKIPS in
- * CI; runs for real locally against `pnpm infra:up && pnpm db:seed` plus a
- * running API, with SEED_SUPER_ADMIN_EMAIL/SEED_SUPER_ADMIN_PASSWORD set.
+ * CI STATUS, SAME SHAPE AS employer-empty-state.spec.ts AND FOR THE SAME
+ * REASON: needs a live API backed by the seeded dev database. apps/web's
+ * own e2e CI step (inside "Build, typecheck & unit tests") provisions no
+ * services on purpose -- see that file's header. Making this run in CI for
+ * real is not a small addition: it would mean either giving that job a
+ * services: block plus steps to build the API, apply migrations and seed a
+ * database (duplicating what the separate Integration job already does),
+ * or a new job entirely. That is a cross-cutting CI change and is not this
+ * PR's call to make. These 30 run for real locally against
+ * `pnpm infra:up && pnpm db:seed` plus a running API, with
+ * SEED_SUPER_ADMIN_EMAIL/SEED_SUPER_ADMIN_PASSWORD set -- the full 30/30
+ * local run this PR's description reports is genuine and was independently
+ * verified; it is simply never CI's own result to show.
  *
  * THE WALLET-BALANCE STRESS CASE (the lead this file exists to prove):
  * PR #338 fixed a wallet balance that overflowed its card by 2px at 375px at
@@ -82,7 +104,7 @@ async function openAccountMenu(page: Page, width: number) {
   await page.locator('[aria-haspopup="true"]:visible').first().click();
 }
 
-test.describe('authenticated dashboard surfaces, no horizontal overflow at any required width', () => {
+test.describe('[LOCAL ONLY, skips in CI -- see file header] authenticated dashboard surfaces, no horizontal overflow at any required width', () => {
   for (const width of WIDTHS) {
     for (const route of ['/dashboard', '/wallet', '/dashboard/addresses']) {
       test(`${route} at ${width}px has no horizontal overflow`, async ({ browser }) => {
@@ -100,7 +122,7 @@ test.describe('authenticated dashboard surfaces, no horizontal overflow at any r
   }
 });
 
-test.describe('account menu (JOBS/EARNINGS/WALLET) never clips the viewport', () => {
+test.describe('[LOCAL ONLY, skips in CI -- see file header] account menu (JOBS/EARNINGS/WALLET) never clips the viewport', () => {
   for (const width of WIDTHS) {
     test(`the open account-menu panel stays inside the viewport at ${width}px`, async ({ browser }) => {
       skipIfNoSession();
@@ -118,7 +140,7 @@ test.describe('account menu (JOBS/EARNINGS/WALLET) never clips the viewport', ()
   }
 });
 
-test.describe('wallet balance at the MDF-103 stress value never overflows its card', () => {
+test.describe('[LOCAL ONLY, skips in CI -- see file header] wallet balance at the MDF-103 stress value never overflows its card', () => {
   for (const width of WIDTHS) {
     test(`/wallet big balance wraps instead of overflowing at ${width}px`, async ({ browser }) => {
       skipIfNoSession();
