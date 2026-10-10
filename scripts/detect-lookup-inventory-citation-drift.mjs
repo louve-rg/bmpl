@@ -175,6 +175,13 @@
  * of this shape can mask each other into invisibility. That is exactly why `` `:N` `` needed
  * its own recognizer rather than being left to the net.)
  *
+ * 2026-10-10: the net ALSO fires on two shapes that are not citations at all — a git
+ * commit SHA and a BMPL/MDF card id, whenever either lands near one of the net's own
+ * keywords (EDWARD-REQUIREMENTS.md's evidence-ladder prose does this constantly: a
+ * commit next to the test file it added, a card id next to the word "schema"). Both are
+ * masked out before the digit-run scan runs — see `maskCandidateNoise` — because neither
+ * is ever how a real citation here is written.
+ *
  * Exit codes:
  *   0  OK        no citation is confirmed drifted or provably out of bounds, and the
  *                coverage net found nothing unclaimed; every unresolved-symbol case at
@@ -403,11 +410,39 @@ function extractCitations(line, modelNames) {
  */
 const CANDIDATE_WINDOW = 15;
 const CANDIDATE_KEYWORD_RE = /\.(?:ts|prisma)\b|\bschema\b|\bline\b/i;
+
+/**
+ * 2026-10-10: a git commit SHA and a BMPL/MDF card id both read to the digit-run
+ * scan below exactly like a missed citation whenever they land near one of this
+ * net's keywords — found live, four times in one evening, while EDWARD-
+ * REQUIREMENTS.md's evidence ladder started naming commits and cards next to the
+ * test files and schema work they correspond to (` `699a3e3` ... .spec.ts` `` and
+ * `` `699a3e3` (BMPL-262, schema/resolver)` `` are both real sentences that tripped
+ * it). Neither shape is how a real citation in these documents is ever written —
+ * every one of the six strict patterns above needs a colon, a parenthesised pair,
+ * or a dot, never a bare hex blob or a card-id token — so masking both out before
+ * the net looks for its fingerprint removes the false alarm without narrowing what
+ * the net can still catch. A SHA is always lower-case hex, 7-40 characters, alone
+ * between backticks (this convention never writes one any other way); a card id is
+ * always the literal prefix `BMPL-` or `MDF-` followed by digits, with or without
+ * backticks. Proven both directions in the PR that added this: the two shapes
+ * above now produce zero candidates, and three independent genuinely-unrecognised
+ * inputs (a bare "line N" mention, a bare "schema.prisma line N" mention with no
+ * digit-adjacent keyword inside 15 chars of a real pattern, each deliberately NOT
+ * SHA- or card-id-shaped) still fire exactly as before.
+ */
+const SHA_TOKEN_RE = /`[0-9a-f]{7,40}`/g;
+const CARD_ID_RE = /\b(?:BMPL|MDF)-\d+\b/g;
+function maskCandidateNoise(masked) {
+  return masked.replace(SHA_TOKEN_RE, (m) => ' '.repeat(m.length)).replace(CARD_ID_RE, (m) => ' '.repeat(m.length));
+}
+
 function findUnrecognizedCandidates(masked) {
   const found = [];
+  const scanTarget = maskCandidateNoise(masked);
   const digitRunRe = /\d{2,}/g;
   let m;
-  while ((m = digitRunRe.exec(masked)) !== null) {
+  while ((m = digitRunRe.exec(scanTarget)) !== null) {
     // A bare backtick nearby is NOT enough on its own — a migration filename
     // (`20260915120000_seed_job_categories`) or an event key is backtick-wrapped and
     // digit-heavy without being remotely citation-shaped, and tripped this net on
@@ -415,8 +450,8 @@ function findUnrecognizedCandidates(masked) {
     // sits next to one of these words or extensions; requiring one is what keeps the
     // net from being switched off after its first false alarm.
     const winStart = Math.max(0, m.index - CANDIDATE_WINDOW);
-    const winEnd = Math.min(masked.length, m.index + m[0].length + CANDIDATE_WINDOW);
-    const window = masked.slice(winStart, winEnd);
+    const winEnd = Math.min(scanTarget.length, m.index + m[0].length + CANDIDATE_WINDOW);
+    const window = scanTarget.slice(winStart, winEnd);
     if (CANDIDATE_KEYWORD_RE.test(window)) {
       found.push({ index: m.index, digits: m[0], context: window.trim() });
     }
