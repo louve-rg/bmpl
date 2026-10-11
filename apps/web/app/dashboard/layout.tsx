@@ -29,10 +29,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
           {/* Phone/tablet: hamburger + brand. Both are hidden from `md` up, where
               the sidebar carries the brand and the navigation. */}
           <MobileNavDrawer me={me} />
-          <Link href="/" className="rounded-bmpl-md bg-belize-navy px-2 py-1.5 md:hidden">
-            <BrandLockup />
+          <Link href="/" className="min-w-0 rounded-bmpl-md bg-belize-navy px-2 py-1.5 md:hidden">
+            <BrandLockup allowTruncate />
           </Link>
-          <div className="ml-auto flex items-center gap-1 md:gap-3">
+          <div className="ml-auto flex shrink-0 items-center gap-1 md:gap-3">
             {/* Approved roles only: a pending driver application should not make
                 delivery notifications open the driver job screen. */}
             <NotificationBell

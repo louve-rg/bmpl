@@ -29,15 +29,40 @@ export function Logo({ size = 44 }: { size?: number; withGlow?: boolean }) {
   );
 }
 
-export function BrandLockup({ subtitle = 'And Logistics' }: { subtitle?: string }) {
+export function BrandLockup({
+  subtitle = 'And Logistics',
+  allowTruncate = false,
+}: {
+  subtitle?: string;
+  /**
+   * Opt-in only (MDF-179): `truncate` forces `white-space: nowrap`, which
+   * changes the text's own intrinsic/min-content width calculation --
+   * wrappable text's min-content is just its longest unbreakable word,
+   * nowrap text's min-content is the whole line. Turning that on
+   * unconditionally widened this component's OTHER usage in the public
+   * landing header (components/landing/Header.tsx), which relies on the
+   * wordmark being able to wrap to stay inside its own `justify-between`
+   * row at exactly `lg` (1024px) -- confirmed by measurement: that header's
+   * brand block grew from 174px to 231px and pushed the row 16px past the
+   * viewport. Defaults to false so every other call site renders bit-for-
+   * bit the same DOM/classes as before this card; only the one call site
+   * that actually needs to shrink (the authenticated dashboard header,
+   * apps/web/app/dashboard/layout.tsx) passes it.
+   */
+  allowTruncate?: boolean;
+}) {
   return (
-    <span className="flex items-center gap-3">
+    <span className={`flex items-center gap-3 ${allowTruncate ? 'min-w-0' : ''}`}>
       <Logo size={44} />
-      <span className="flex flex-col leading-tight">
-        <span className="text-sm font-bold uppercase tracking-wide text-white sm:text-base">
+      <span className={`flex flex-col leading-tight ${allowTruncate ? 'min-w-0' : ''}`}>
+        <span
+          className={`text-sm font-bold uppercase tracking-wide text-white sm:text-base ${allowTruncate ? 'truncate' : ''}`}
+        >
           Belize Marketplace
         </span>
-        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-belize-light sm:text-xs">
+        <span
+          className={`text-[10px] font-semibold uppercase tracking-[0.18em] text-belize-light sm:text-xs ${allowTruncate ? 'truncate' : ''}`}
+        >
           {subtitle}
         </span>
       </span>
