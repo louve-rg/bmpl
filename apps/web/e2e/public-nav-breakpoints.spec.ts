@@ -13,10 +13,14 @@ import { test, expect, type Page } from '@playwright/test';
  * live backend (confirmed empirically: a transient third-party dev server
  * on the conventional API port produced two false reds here before this
  * file existed — see the MDF-128 report for the port-collision finding).
+ *
+ * `/terms` and `/privacy` (MDF-109) are the same shape: static placeholder
+ * content behind the shared Header/Footer, no API call, no auth -- so this
+ * sweep is their regression guard rather than new local-only infrastructure.
  */
 
 const WIDTHS = [375, 414, 768, 1024, 1440];
-const ROUTES = ['/', '/products', '/register', '/login'];
+const ROUTES = ['/', '/products', '/register', '/login', '/terms', '/privacy'];
 const MIN_HIT_PX = 44;
 
 async function noHorizontalOverflow(page: Page) {
