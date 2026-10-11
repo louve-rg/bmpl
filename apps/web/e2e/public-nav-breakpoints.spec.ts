@@ -95,13 +95,18 @@ test.describe('primary header controls meet the 44px hit-area floor, measured fr
  * compiles to `repeat(1, minmax(0, 1fr))` and so clamps the track to the
  * container regardless of content width. A separate describe block (not
  * added to WIDTHS) so it doesn't change what width the owner-named sweep
- * above asserts for every route.
+ * above asserts for every route -- but it loops over the SAME ROUTES list
+ * that sweep uses, so 320px gets the same route coverage as every other
+ * width rather than checking only the one route this defect happened to be
+ * found on.
  */
-test.describe('the landing page does not scroll sideways at 320px', () => {
-  test('/ at 320px has no horizontal overflow', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 900 });
-    await page.goto('/');
-    const { scrollWidth, clientWidth } = await noHorizontalOverflow(page);
-    expect(scrollWidth, `scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at 320px on /`).toBeLessThanOrEqual(clientWidth + 1);
-  });
+test.describe('no page scrolls sideways at 320px either', () => {
+  for (const route of ROUTES) {
+    test(`${route} at 320px has no horizontal overflow`, async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 900 });
+      await page.goto(route);
+      const { scrollWidth, clientWidth } = await noHorizontalOverflow(page);
+      expect(scrollWidth, `scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at 320px on ${route}`).toBeLessThanOrEqual(clientWidth + 1);
+    });
+  }
 });
