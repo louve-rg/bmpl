@@ -22,6 +22,16 @@ export const SUPER_ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bz
 export const SUPER_ADMIN_PASSWORD = process.env.SEED_SUPER_ADMIN_PASSWORD;
 
 /**
+ * The UAT DELIVERY_DRIVER fixture (packages/database/prisma/seed-uat-logistics.ts) --
+ * the only seeded account with an approved driver profile. Needed for any
+ * spec that exercises a driver-only surface; SUPER_ADMIN above holds no
+ * driver role. Same password convention as that script: an env override, or
+ * its own already-committed, already-public default -- not a private value.
+ */
+export const UAT_DRIVER_EMAIL = 'uat-driver@bzemarketplace.com';
+export const UAT_DRIVER_PASSWORD = process.env.UAT_SEED_PASSWORD ?? 'UatWalkthrough!123';
+
+/**
  * Logs in through the real login form and reports whether it landed on
  * /dashboard. A failure here is treated as "this environment cannot run the
  * journey" rather than a test failure — it means either no live API is
