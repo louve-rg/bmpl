@@ -99,6 +99,46 @@ A MERGED commit that touches only one app's paths is DEPLOYED once it is
 an ancestor of that specific app's live commit above, checked the same
 way for all three.
 
+**Tonight's release (2026-10-10/11) measured this thesis directly, rather
+than just arguing it — reported by Michael and Pam during the release and
+recorded here as given, not independently re-checked by this pass; a
+point-in-time production snapshot is not something this document reprobes
+after the fact.** A nine-commit release chain landed on `origin/main`
+(`4b92c38` → `b96b02e` → `cc2e941` → `b6b436e` → `9b69fa8` → `db9bb52` →
+`8e33a82` → `158ec35` → `c4d9855`), and at the moment the release
+finished, with nothing failing, each app was serving a different point in
+that chain: `apps/web` served `8e33a82` (read from the `X-Bmpl-Commit`
+header on `https://www.bzemarketplace.com`), `apps/api` served `db9bb52`
+(`/api/health`, `startedAt` `23:15:34.078Z`, `/api/health/ready`
+reporting `database: true`, `redis: true`, `storage: ok`), and
+`apps/admin` served `9b69fa8`. **Three apps, three different commits,
+none equal to `origin/main`'s own `c4d9855`** — at the same moment, with
+the release finished and nothing failing. That is this section's own
+claim, now a measurement rather than an argument.
+
+**An absent commit status is not an absent deployment, and the two facts
+come from two different APIs.** Railway posts no commit status until it
+begins a build; the GitHub Deployments API is the one that answers
+whether a deployment exists at all, and the commit-status API does not.
+For one release commit (`4b92c38`, #358's merge), the Deployment object
+existed at `22:48:52Z` — six seconds after the merge — while the commit
+status did not appear until `22:58:21Z`, a roughly ten-minute window in
+which the deploy was running and invisible to anyone checking commit
+status alone. Querying the Deployments API for that same commit is,
+separately, what proved four other fast "no deployment needed" answers
+that session had created no deployment at all — a check that commit
+status alone cannot make.
+
+**An API deploy takes roughly 12–13 minutes trigger-to-running, with the
+commit status absent for the first 9–10 — two samples, not a service
+level.** #358 took about 12.5 minutes; #354 took 12m44s. Both are observed
+points, not a guarantee, and this document treats them as exactly two
+data points, no more. **The cause of that duration is not established.**
+An earlier claim that it was driven by `pnpm-lock.yaml` invalidating
+Railway's cached dependency layer is wrong — #354 touches no lockfile and
+took almost the same time — and this document does not substitute a
+guessed cause for one that has not been established.
+
 **None of this proves a migration has run — and "not established" alone
 undersells what is actually known.** A commit being DEPLOYED proves the
 *code* is live; it says nothing about whether a Prisma migration that
