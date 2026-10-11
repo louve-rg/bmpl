@@ -1990,6 +1990,16 @@ export class ShipmentService {
         // by clearing columns — custody is append-only and real. What should
         // happen to a parcel stranded mid-carry is an owner decision that does
         // not exist yet; until it does, this fails closed.
+        //
+        // MDF-2: this guard is also the only reason RESUME alone is a
+        // sufficient fix for a PIN-locked leg — pickedUpAt is set before
+        // handoffPinAttempts can ever increment (see verifyHandoffPin's own
+        // call chain), so a PIN-locked leg can never reach RELEASE_DRIVER's
+        // counter-clearing code below today. If this guard is ever relaxed to
+        // allow releasing a mid-carry parcel, the RELEASE_DRIVER branch must
+        // also reset handoffPinAttempts when it is maxed, exactly as RESUME
+        // does above — otherwise the next driver inherits a dead PIN and the
+        // trap this fix closed reopens through this branch instead.
         if (leg.startedAt != null || leg.pickedUpAt != null) {
           throw new BadRequestException(
             'This driver has already collected the parcel, so they cannot be released here. Resume the leg, or cancel the shipment through support.',
