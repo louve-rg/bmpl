@@ -15,7 +15,7 @@ import {
   type DriverJobKind,
   type LegView,
 } from '@bmpl/shared';
-import type { LegHandoffInput, LegPickupPhotoInput } from '@bmpl/validation';
+import type { LegExceptionInput, LegHandoffInput, LegPickupPhotoInput } from '@bmpl/validation';
 import type { AuditAction, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -31,6 +31,14 @@ interface Actor {
   ipAddress?: string | null;
   sessionId?: string | null;
 }
+
+/**
+ * A driver may report a failed-delivery-shaped issue only once they actually
+ * hold the parcel — see `reportIssue`'s own comment for why. Positive
+ * allow-list, not "not yet delivered or cancelled": the same discipline
+ * apps/api/CLAUDE.md §6 asks for everywhere else in this class.
+ */
+const REPORTABLE_COURIER_STATUSES: readonly DeliveryStatus[] = ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'];
 
 /** A hub end is a public place — always safe to show in full, exact coordinates included. */
 const HUB_SELECT = {
@@ -318,6 +326,37 @@ export class ShipmentDriverService {
     if (to === 'ARRIVING' && (leg.kind === 'LAST_MILE' || leg.kind === 'DIRECT')) {
       await this.notifyCustomer(leg, 'Your driver is arriving.');
     }
+    return this.getJob(actor.userId, legId);
+  }
+
+  /**
+   * The courier reports something wrong — MDF-96 (Edward requirement 10),
+   * Option 2. The SAME exception gate staff already use
+   * (`ShipmentService.flagException`), reached a second way rather than
+   * duplicated: no new leg state, no new notification, no new audit action.
+   *
+   * `ownedLeg` is the one check every other driver-side write on this leg
+   * goes through — holding a driver profile is necessary, but it must also
+   * be THIS leg's assigned driver. A driver reporting an issue on someone
+   * else's leg is refused (404, same as every other ownership miss here)
+   * before this ever reaches the shared exception primitive.
+   *
+   * Only legal once the driver actually has the parcel: "attempted delivery,
+   * nobody was there" presupposes an attempt, and a driver who has not yet
+   * picked up has not attempted anything. Positive allow-list
+   * (`REPORTABLE_COURIER_STATUSES`), same discipline as every other
+   * courierStatus guard in this class — DELIVERED/CANCELLED are terminal and
+   * were never going to be members of it.
+   */
+  async reportIssue(actor: Actor, legId: string, input: LegExceptionInput) {
+    const { leg } = await this.ownedLeg(actor.userId, legId);
+    const status = leg.courierStatus ?? 'PENDING_ASSIGNMENT';
+    if (!REPORTABLE_COURIER_STATUSES.includes(status)) {
+      throw new BadRequestException(
+        `Cannot report a delivery issue while the job is "${DELIVERY_STATUS_LABELS[status]}" — report it once you have the parcel.`,
+      );
+    }
+    await this.shipments.flagException(legId, input, { userId: actor.userId, label: 'Driver' });
     return this.getJob(actor.userId, legId);
   }
 
