@@ -1,6 +1,8 @@
 import { Header } from '../../components/landing/Header';
 import { Footer } from '../../components/landing/Footer';
-import { Alert, PlaceholderBadge } from '../../components/ui';
+import { PlaceholderBadge } from '../../components/ui';
+import { LegalDocument } from '../../components/legal/LegalDocument';
+import { PRIVACY_POLICY_CONTENT } from '../../content/legal/privacy-policy';
 
 export const metadata = {
   title: 'Privacy Policy · Belize Marketplace & Logistics',
@@ -10,8 +12,11 @@ export const metadata = {
 /**
  * MDF-109: the sign-up flow's "Privacy Policy" consent link pointed at
  * nothing (`href="#"`, app/register/page.tsx). This route exists so that
- * link has a real destination. Content is the owner's and Angela's call,
- * not ours -- see the placeholder notice below. Do not add legal text here.
+ * link has a real destination. Content below is Angela's draft, cleared by
+ * the owner to publish here WITH its [OWNER DECISION: ...] placeholders
+ * still visible -- see content/legal/privacy-policy.ts. Do not edit the
+ * legal text in this file; a content change goes back through Angela/the
+ * owner.
  */
 export default function PrivacyPolicyPage() {
   return (
@@ -21,22 +26,10 @@ export default function PrivacyPolicyPage() {
         <div className="container-bmpl">
           <div className="max-w-3xl">
             <p className="bmpl-eyebrow">Legal</p>
-            <h1 className="bmpl-page-title mt-1">Privacy Policy</h1>
             <div className="mt-3">
-              <PlaceholderBadge>Content pending legal review</PlaceholderBadge>
+              <PlaceholderBadge>Draft -- awaiting owner review</PlaceholderBadge>
             </div>
-            <Alert tone="info" className="mt-6">
-              The Privacy Policy is being drafted and reviewed before publication. This page is a
-              placeholder so the sign-up page&apos;s consent link has somewhere real to go in the
-              meantime -- the final text will appear here once it is approved.
-            </Alert>
-            <p className="mt-8 text-sm leading-relaxed text-slate-600">
-              Questions in the meantime can go to{' '}
-              <a href="mailto:support@bzemarketplace.com" className="text-belize-blue hover:underline">
-                support@bzemarketplace.com
-              </a>
-              .
-            </p>
+            <LegalDocument content={PRIVACY_POLICY_CONTENT} />
           </div>
         </div>
       </main>
