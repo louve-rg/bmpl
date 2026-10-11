@@ -1951,6 +1951,18 @@ export class ShipmentService {
 
       let restored: LegStatus;
       let releasedDriverProfileId: string | null = null;
+      // MDF-2: a leg EXCEPTION-ed by the handoff PIN locking out
+      // (`verifyHandoffPin`, handoffPinAttempts reaching MAX_PIN_ATTEMPTS) is
+      // not actually un-stuck by RESUME alone — that guard reads the attempt
+      // counter, not status, and would refuse the very next try with the
+      // same "too many incorrect codes" error forever. Clearing the counter
+      // here, only when it is actually maxed, restores exactly the budget a
+      // never-flagged leg has. The PIN itself is untouched (no reason to
+      // believe it is wrong — handoffPin is the thing the physical recipient
+      // was told; the attempts were the problem), and every other exception
+      // cause (a flat tyre, a diverted flight, a self-reported failed
+      // delivery) leaves the counter exactly as RESUME always has.
+      const pinWasLocked = leg.handoffPinAttempts >= MAX_PIN_ATTEMPTS;
 
       if (input.resolution === 'RESUME') {
         restored = leg.startedAt ? 'IN_PROGRESS' : 'READY';
@@ -1958,7 +1970,12 @@ export class ShipmentService {
         // at the same exception, and exactly one resolution may land.
         const claimed = await tx.shipmentLeg.updateMany({
           where: { id: leg.id, status: 'EXCEPTION' },
-          data: { status: restored, exceptionAt: null, exceptionReason: null },
+          data: {
+            status: restored,
+            exceptionAt: null,
+            exceptionReason: null,
+            ...(pinWasLocked ? { handoffPinAttempts: 0 } : {}),
+          },
         });
         if (claimed.count === 0) throw new BadRequestException('This exception was already resolved by someone else.');
       } else {
@@ -2033,6 +2050,7 @@ export class ShipmentService {
             resolution: input.resolution,
             restoredStatus: restored,
             releasedDriverProfileId,
+            pinAttemptsReset: input.resolution === 'RESUME' && pinWasLocked,
           },
         },
         tx,
