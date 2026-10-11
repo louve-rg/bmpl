@@ -13,7 +13,12 @@
 // Scope is the Next.js build surface only — app/components/lib/middleware/
 // next.config.mjs — not test or e2e-support files, which run under a
 // different turbo task (or no task at all: turbo.json has no `e2e`/`test:e2e`
-// task) and are never bundled into the deployed app.
+// task) and are never bundled into the deployed app. apps/admin/e2e/** joined
+// apps/web/e2e/** in that exclusion once admin got its first e2e spec
+// (fix/admin-pageheader-overflow) — same reasoning, same task-boundary, not
+// a new exception: UAT_OPS_PASSWORD there is a seeded dev-fixture credential
+// read by a Playwright support file, never bundled into the deployed app and
+// never read inside next.config.mjs or anything turbo's build graph touches.
 import tsParser from '@typescript-eslint/parser';
 import turbo from 'eslint-plugin-turbo';
 
@@ -31,6 +36,7 @@ export default [
       '**/*.spec.tsx',
       '**/*.spec.mjs',
       'apps/web/e2e/**',
+      'apps/admin/e2e/**',
     ],
   },
   {

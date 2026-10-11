@@ -99,6 +99,46 @@ A MERGED commit that touches only one app's paths is DEPLOYED once it is
 an ancestor of that specific app's live commit above, checked the same
 way for all three.
 
+**Tonight's release (2026-10-10/11) measured this thesis directly, rather
+than just arguing it — reported by Michael and Pam during the release and
+recorded here as given, not independently re-checked by this pass; a
+point-in-time production snapshot is not something this document reprobes
+after the fact.** A nine-commit release chain landed on `origin/main`
+(`4b92c38` → `b96b02e` → `cc2e941` → `b6b436e` → `9b69fa8` → `db9bb52` →
+`8e33a82` → `158ec35` → `c4d9855`), and at the moment the release
+finished, with nothing failing, each app was serving a different point in
+that chain: `apps/web` served `8e33a82` (read from the `X-Bmpl-Commit`
+header on `https://www.bzemarketplace.com`), `apps/api` served `db9bb52`
+(`/api/health`, `startedAt` `23:15:34.078Z`, `/api/health/ready`
+reporting `database: true`, `redis: true`, `storage: ok`), and
+`apps/admin` served `9b69fa8`. **Three apps, three different commits,
+none equal to `origin/main`'s own `c4d9855`** — at the same moment, with
+the release finished and nothing failing. That is this section's own
+claim, now a measurement rather than an argument.
+
+**An absent commit status is not an absent deployment, and the two facts
+come from two different APIs.** Railway posts no commit status until it
+begins a build; the GitHub Deployments API is the one that answers
+whether a deployment exists at all, and the commit-status API does not.
+For one release commit (`4b92c38`, #358's merge), the Deployment object
+existed at `22:48:52Z` — six seconds after the merge — while the commit
+status did not appear until `22:58:21Z`, a roughly ten-minute window in
+which the deploy was running and invisible to anyone checking commit
+status alone. Querying the Deployments API for that same commit is,
+separately, what proved four other fast "no deployment needed" answers
+that session had created no deployment at all — a check that commit
+status alone cannot make.
+
+**An API deploy takes roughly 12–13 minutes trigger-to-running, with the
+commit status absent for the first 9–10 — two samples, not a service
+level.** #358 took about 12.5 minutes; #354 took 12m44s. Both are observed
+points, not a guarantee, and this document treats them as exactly two
+data points, no more. **The cause of that duration is not established.**
+An earlier claim that it was driven by `pnpm-lock.yaml` invalidating
+Railway's cached dependency layer is wrong — #354 touches no lockfile and
+took almost the same time — and this document does not substitute a
+guessed cause for one that has not been established.
+
 **None of this proves a migration has run — and "not established" alone
 undersells what is actually known.** A commit being DEPLOYED proves the
 *code* is live; it says nothing about whether a Prisma migration that
@@ -136,6 +176,29 @@ PRODUCTION-VERIFIED: that is not a defect in this document, it is the
 actual state of a repository where nobody has yet recorded watching most
 of this working live.
 
+**A TESTED rung may cite a test that only runs locally, when that is the
+owner's own approved decision, not an accreted default.** PR #351
+(`d40e2b7`) found thirty authenticated-dashboard-geometry specs that had
+been silently skipping in CI since they were first committed — no seeded
+database, no live API, and no `SUPER_ADMIN_EMAIL`/`PASSWORD` exist in the
+CI job that runs them, so `test.skip()` fired on all thirty and a skip
+reported success exactly like a pass. The fix made that status impossible
+to miss rather than hidden: the file is named
+`authenticated-dashboard-geometry.local-only.spec.ts`, and every describe
+block it contains is prefixed `[LOCAL ONLY, skips in CI — see file
+header]`. [Ruling 15](./OWNER-RULINGS.md#ruling-15--authenticated-tests-stay-local-only-for-now)
+(2026-10-10): "retain the transparent local-only labels for authenticated
+tests for now. Do not build an expensive new authenticated CI environment
+without separate approval." **That makes the convention a decided state,
+not a gap waiting to be reported as closed.** A TESTED rung that names a
+`.local-only.spec.ts` file, or a describe block carrying the
+`[LOCAL ONLY, skips in CI]` prefix, should say exactly that — verified
+locally, not in CI, and that is the sanctioned state per Ruling 15 —
+rather than reading as an uncaught gap. A live authenticated CI environment (a
+services block, a seeded database, a running API inside the job) remains
+possible, but only on a separate owner approval; nothing in this document
+should imply one is pending by default.
+
 ## Status summary
 
 | # | Requirement | Status | Evidence |
@@ -146,10 +209,10 @@ of this working live.
 | 4 | Granular driver service areas (district → city) | **End-to-end as of `2cbcf73`** | `3950db0` (PR #126) for the API; city picker landed `99e98c1` (BMPL-353, PR #272); wired to the lane-town endpoint by `2cbcf73` (BMPL-368, PR #279) — a lane-only town (e.g. Ladyville) is selectable as of `2cbcf73` |
 | 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255); terminal half `699a3e3` (BMPL-262), `4eac6be` (BMPL-271), `b12afb3` (BMPL-273); closed-now badge `0d50de2` (BMPL-335), one-off closures `81ad57f` (BMPL-334) — all five found and added `effc63e`-pass, none cited here before |
 | 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
-| 7 | Courier & vehicle identification once assigned | **Done for the booking customer as of `4d96bb0`; for a linked recipient, messaging is now wired end-to-end (API and web) as of `c7690a5`/`5c11021`, but courier identity is still not shown to the recipient as of `effc63e`** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient messaging API: PR #293 (BMPL-359), merged `910d5b2`; recipient messaging read + UI: PR #315 (`5c11021`) and PR #314 (`c7690a5`); `RECIPIENT_VIEW_INCLUDE` re-checked directly at `effc63e` — still no `assignedDriver`/`assignedVehicle` |
+| 7 | Courier & vehicle identification once assigned | **Done — for the booking customer as of `4d96bb0`; for a linked recipient, messaging is wired end-to-end (API and web) as of `c7690a5`/`5c11021`; courier identity for the recipient is restricted by owner ruling (2026-10-10), not an unbuilt gap** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient messaging API: PR #293 (BMPL-359), merged `910d5b2`; recipient messaging read + UI: PR #315 (`5c11021`) and PR #314 (`c7690a5`); `RECIPIENT_VIEW_INCLUDE` re-checked directly at `effc63e` — still no `assignedDriver`/`assignedVehicle`, now the ruled state, not a gap |
 | 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done for shipping and marketplace delivery, as of `16e4b4b`; whether the requirement was ever meant to cover marketplace's always-two-stop case is unsettled** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) for shipping; marketplace's driver job screen wired to the same `ExpandableRouteMap` by `16e4b4b` (BMPL-390, PR #302) — no API change, the pre-acceptance pin gate was already correct |
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done, and the two gaps this document used to flag as "what remains" are now also closed as of `444a1ec`/`9ec6764`** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below; standalone manage page `444a1ec` (PR #323); un-defaulting the current default without a delete `9ec6764` (PR #336) |
-| 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `effc63e` (re-verified, no change since `e72da60`): the staff-alone charge defect under Ruling 1 (BMPL-375) is fixed; failed delivery is still unbuilt** | Pre-custody half correct in shipped code. Return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) with a staff-alone charge defect, fixed by `0efd970` (BMPL-375, PR #288, merged); negative-control tests PR #285 (`3ea4fa1`) and a sink ownership test PR #306 (`302a84c`) are on main; customer confirmation `e72da60` (PR #308); staff prepare panel `5fe37cf` (PR #309); the fix's own red-team guards now pass under their real names, not a `[RED]` prefix, as of `5b7dd1a` (PR #312); acceptance-is-not-custody now has a named behavioural test as of `d5b1dec` (PR #318). Failed-delivery trigger does not exist as of `effc63e` |
+| 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `effc63e` (re-verified, no change since `e72da60`): the staff-alone charge defect under Ruling 1 (BMPL-375) is fixed; failed delivery has no trigger yet, and a decision memo to finish it is in progress per the owner's 2026-10-10 ruling — no longer indefinitely blocked on Edward** | Pre-custody half correct in shipped code. Return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) with a staff-alone charge defect, fixed by `0efd970` (BMPL-375, PR #288, merged); negative-control tests PR #285 (`3ea4fa1`) and a sink ownership test PR #306 (`302a84c`) are on main; customer confirmation `e72da60` (PR #308); staff prepare panel `5fe37cf` (PR #309); the fix's own red-team guards now pass under their real names, not a `[RED]` prefix, as of `5b7dd1a` (PR #312); acceptance-is-not-custody now has a named behavioural test as of `d5b1dec` (PR #318). Failed-delivery trigger does not exist as of `effc63e`; MDF-96's decision memo (owner ruling, 2026-10-10) is now in progress, with Pam producing the exact workflow options |
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
 | 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff triggers for all four as of `effc63e` (re-verified, no change since `e72da60`)** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by `e56c425` (BMPL-346, found and added `effc63e`-pass; not cited here before). ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen landed as PR #309 (`5fe37cf`; it replaced the closed PR #278) after `7ff34a1` |
 
@@ -642,8 +705,9 @@ rows, account grants, screen used) needed to reproduce his specific case.
 ## 7. Courier & vehicle identification once assigned
 
 **Evidence ladder — for the booking-customer piece and the recipient
-messaging piece that have actually shipped; identity-for-the-recipient has
-not implemented, so no ladder applies to it (see below):**
+messaging piece that have actually shipped; identity-for-the-recipient is
+out of scope by owner ruling, not unimplemented, so no ladder applies to
+it (see below):**
 - IMPLEMENTED: yes — `a4fb20d` (booking customer), `910d5b2`/`5c11021`/
   `c7690a5` (recipient messaging, API + web).
 - TESTED: yes. Two separate commits added test coverage: `5c11021` added
@@ -703,10 +767,16 @@ per-leg messaging, confirmed wired end-to-end, not just present in the API.
   not call the read endpoint. The participant-role migration (`910d5b2`)
   is a confirmed ancestor of the live API commit — **application is
   expected but unverified** (see the methodology section above).
-- **Courier identity has not landed.** `RECIPIENT_VIEW_INCLUDE`
-  (`shipment.service.ts`) selects no assigned driver and no assigned vehicle
-  — re-read directly at `effc63e`, unchanged — so a linked recipient still
-  sees no courier identity. Nothing in this document claims otherwise.
+- **Courier identity is restricted to the booking customer by owner
+  ruling, not an unbuilt gap.**
+  [Ruling 13](./OWNER-RULINGS.md#ruling-13--courier-identity-toward-a-linked-recipient-for-now)
+  (2026-10-10): "keep courier identity restricted to the booking customer
+  for now. Do not expose additional personal information to recipients
+  without a confirmed product requirement. Keep the Edward clarification
+  recorded." `RECIPIENT_VIEW_INCLUDE` (`shipment.service.ts`) selects no
+  assigned driver and no assigned vehicle — re-read directly at `effc63e`,
+  unchanged — and that is now the decided, correct state, not a thing
+  left to build. Nothing in this document claims otherwise.
 
 **Acceptance criteria:** as a linked recipient of a shipment whose
 LAST_MILE or DIRECT leg has an assigned, accepted courier, open the
@@ -717,15 +787,17 @@ courier has accepted. Confirm the same shipment's anonymous tracking link
 endpoint refuses an unauthenticated caller. Confirm no screen shown to a
 linked recipient displays the courier's name, photo or vehicle.
 
-**What would make this row Done for the recipient, precisely:**
-`RECIPIENT_VIEW_INCLUDE` would need to select `assignedDriver` through the
-same `driverSummary()`/`publicAvatarUrl()` shape already serialized to the
+**What would reopen this, precisely, if it ever does:** `MDF-97` asked
+whether a recipient should see courier identity at all. The owner's
+2026-10-10 ruling answers what BMPL does for now — restrict it to the
+booking customer — it does not answer what Edward originally intended;
+that clarification is **recorded, not resolved.** If a confirmed product
+requirement arrives later that says otherwise, `RECIPIENT_VIEW_INCLUDE`
+would need to select `assignedDriver` through the same
+`driverSummary()`/`publicAvatarUrl()` shape already serialized to the
 booking customer, wired into the recipient serializer — confirmed to need
-no new capability and no schema change. The blocker is not engineering: it
-is an unmade product decision on whether a recipient should see courier
-identity at all, asked of the owner as `MDF-97` and still unanswered. The
-criterion above is written so the row can flip the day that decision
-lands, without waiting on a second audit to define what "Done" means.
+no new capability and no schema change. Until then, requirement 7 is
+**satisfied as ruled**: there is nothing pending and nothing to build.
 
 ## 8. Expandable maps & A/B/C/D route stops (pre-acceptance)
 
@@ -932,7 +1004,9 @@ is supposed to make visible rather than hide behind "NOT complete."
 **Status: NOT complete as of `effc63e` (re-verified, no change since
 `e72da60`). The staff-alone charge defect under
 [Ruling 1](./OWNER-RULINGS.md#ruling-1--a-courier-accepting-a-job-is-not-custody)
-(tracked BMPL-375) is fixed on main; failed delivery is still entirely unbuilt.** The custody boundary itself — a
+(tracked BMPL-375) is fixed on main; failed delivery is still entirely
+unbuilt, with a decision memo to finish it in progress per the owner's
+2026-10-10 ruling (see below) — no longer indefinitely blocked on Edward.** The custody boundary itself — a
 courier *accepting* a job is not the same as *custody* — was already
 correct in shipped code before this card existed:
 `ShipmentService.cancel()` blocks once a leg reaches `IN_PROGRESS`, set only
@@ -1004,10 +1078,21 @@ hand, and `DeliveryStatus` has no `FAILED` value. A separate path exists for a
 locked delivery PIN (`deliveryVerificationStatus` `FAILED`, with an
 `ADMIN_FAILED_DELIVERY` notification, `driver-jobs.service.ts`). That records
 wrong PIN codes, not a failed attempt, and adds no `DeliveryStatus` value. Whether an open
-branch exists for the trigger was not checked in this pass. This is the
-piece `MDF-96` has asked the owner about (does he expect the courier
-themselves to report a failed attempt, or is the existing staff-exception
-workflow what he meant) — unanswered as of this document.
+branch exists for the trigger was not checked in this pass.
+
+`MDF-96` asked whether the owner expects the courier themselves to report
+a failed attempt, or whether the existing staff-exception workflow is what
+he meant. **That is no longer sitting unanswered — the owner took the
+decision onto himself,**
+[Ruling 14](./OWNER-RULINGS.md#ruling-14--failed-delivery-finish-it-dont-leave-it-indefinitely-blocked)
+(2026-10-10): "bring me the exact failed-delivery workflow choices and
+your recommendation. I want us to finish this requirement, not leave it
+indefinitely blocked." A decision
+memo covering the exact workflow choices and a recommendation is **in
+progress** (Pam is producing the workflow options). The trigger still does
+not exist in code today — that fact is unchanged — but the row's blocking
+reason has changed from "waiting on an unanswered owner question" to "a
+decision memo in progress, with a named owner commitment to finish it."
 
 **Acceptance criteria:** confirm `ShipmentService.cancel()` refuses once any
 leg reaches `IN_PROGRESS` and succeeds before. For return-to-sender: as the

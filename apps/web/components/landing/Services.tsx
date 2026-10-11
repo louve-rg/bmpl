@@ -335,9 +335,15 @@ function BelizeConnectCard() {
 function RealEstateCard() {
   return (
     <article className={`${CARD} min-h-[240px]`}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-stretch">
+      {/* Row layout needs more width than this card has between 640 and 1023px:
+          the bento grid only widens the card at lg (1024), so sm:flex-row used to
+          switch to a side-by-side layout one breakpoint before there was room for
+          it, squeezing the detail column into a sliver (BMPL-401). Switching at lg
+          keeps the card stacked through that whole range instead — identical to
+          how it already renders correctly below 640. */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
         {/* Listing visual */}
-        <div className="relative aspect-[16/10] w-full shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-violet-500/20 via-sky-400/15 to-white sm:aspect-auto sm:w-44" aria-hidden>
+        <div className="relative aspect-[16/10] w-full shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-violet-500/20 via-sky-400/15 to-white lg:aspect-auto lg:w-44" aria-hidden>
           <svg viewBox="0 0 200 130" className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid slice">
             <circle cx="150" cy="30" r="60" fill="#a78bfa" opacity="0.18" />
             <circle cx="150" cy="30" r="40" fill="#818cf8" opacity="0.18" />
@@ -428,9 +434,16 @@ function MarketingCard() {
 function WalletCard() {
   return (
     <article className={`${CARD} min-h-[240px]`}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-stretch">
+      {/* Same breakpoint-mismatch fix as RealEstateCard above (BMPL-401): the
+          fixed-width balance panel plus the row layout needs more space than
+          this card has between 640 and 1023px, which made the transaction
+          labels on the right collapse to zero width and disappear entirely
+          (not just look cramped — truncate on a 0px flex child renders nothing).
+          Switching the row breakpoint to lg keeps this stacked through that
+          range, matching the layout it already uses correctly below 640. */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
         {/* Balance card */}
-        <div className="relative w-full shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-teal-600 to-emerald-700 p-4 text-white sm:w-56" aria-hidden>
+        <div className="relative w-full shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-teal-600 to-emerald-700 p-4 text-white lg:w-56" aria-hidden>
           <div className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/15 blur-2xl" />
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-medium uppercase tracking-wide text-white/70">Wallet balance</span>

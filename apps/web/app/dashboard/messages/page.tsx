@@ -145,11 +145,17 @@ function MessagesCenter() {
       />
 
       <Card className="overflow-hidden p-0">
-        <div className="grid min-h-[60vh] grid-cols-1 md:grid-cols-[minmax(0,22rem)_1fr]">
+        <div className="grid min-h-[60vh] grid-cols-1 lg:grid-cols-[minmax(0,22rem)_1fr]">
           {/* -------------------------------------------------------- list pane */}
+          {/* The two-pane split engages at lg, not md: the dashboard shell
+              (app/dashboard/layout.tsx) already becomes a sidebar+main row at
+              md, so a grid that also switched at md was reasoning about the
+              viewport while its real container had just gotten much
+              narrower -- the thread pane's EmptyState was clipped as a
+              result. All panes below must switch in lockstep with this one. */}
           <div
-            className={`flex flex-col border-slate-200 md:border-r ${
-              selectedId || supportOpen ? 'hidden md:flex' : 'flex'
+            className={`flex flex-col border-slate-200 lg:border-r ${
+              selectedId || supportOpen ? 'hidden lg:flex' : 'flex'
             }`}
           >
             <ConversationList
@@ -167,7 +173,7 @@ function MessagesCenter() {
 
           {/* ------------------------------------------------------ thread pane */}
           <div
-            className={`min-w-0 flex-col ${selectedId || supportOpen ? 'flex' : 'hidden md:flex'}`}
+            className={`min-w-0 flex-col ${selectedId || supportOpen ? 'flex' : 'hidden lg:flex'}`}
           >
             {supportOpen ? (
               <SupportForm onCancel={() => setSupportOpen(false)} onCreated={onSupportCreated} onBack={backToList} />
@@ -180,7 +186,7 @@ function MessagesCenter() {
                 onMutated={loadList}
               />
             ) : (
-              <div className="hidden flex-1 items-center justify-center p-10 md:flex">
+              <div className="hidden flex-1 items-center justify-center p-10 lg:flex">
                 <EmptyState
                   title="Select a conversation"
                   description="Choose a conversation from the list to view messages."
@@ -367,7 +373,7 @@ function ThreadPane({
           type="button"
           onClick={onBack}
           aria-label="Back to conversations"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-belize-navy md:hidden"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-belize-navy lg:hidden"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
             <path d="M15 18l-6-6 6-6" />
@@ -785,7 +791,7 @@ function SupportForm({
           type="button"
           onClick={onBack}
           aria-label="Back to conversations"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-belize-navy md:hidden"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-belize-navy lg:hidden"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
             <path d="M15 18l-6-6 6-6" />

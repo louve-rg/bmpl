@@ -135,6 +135,30 @@ jobs:
       - name: Build admin
         run: pnpm --filter @bmpl/admin build
 
+      - name: Install Playwright's Chromium (admin)
+        run: pnpm --filter @bmpl/admin exec playwright install --with-deps chromium
+
+      # Same shape and same reasoning as "Browser tests" above for
+      # @bmpl/web: informational via continue-on-error, no services: block
+      # (apps/admin never talks to Postgres/Redis/MinIO directly either),
+      # no UAT_OPS_PASSWORD set here on purpose -- every test in this suite
+      # (apps/admin/e2e/page-header-overflow.spec.ts) calls test.skip() on
+      # its own when it's absent, so this step turns silence (CI never
+      # invoking the suite at all) into a labelled skip instead, which is
+      # the only change in scope.
+      - name: Browser tests (admin, informational)
+        id: e2e-admin
+        continue-on-error: true
+        run: pnpm --filter @bmpl/admin test:e2e
+
+      - name: Upload Playwright report (admin, only when it failed)
+        if: steps.e2e-admin.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-admin
+          path: apps/admin/test-results
+          retention-days: 7
+
       - name: Typecheck mobile
         run: pnpm --filter @bmpl/mobile exec tsc --noEmit
 
