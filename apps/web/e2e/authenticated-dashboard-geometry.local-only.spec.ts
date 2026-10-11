@@ -2,7 +2,7 @@ import { test, expect, type Page, type Browser } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { tryLogin, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD } from './support/auth';
+import { tryLogin, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD, UAT_DRIVER_EMAIL, UAT_DRIVER_PASSWORD } from './support/auth';
 
 /**
  * *** THESE 30 TESTS NEVER RUN IN CI. THIS IS NOT A GAP IN THIS FILE --
@@ -67,6 +67,16 @@ import { tryLogin, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD } from './support/aut
  * MDF-103's own notes used ($999999999.99) via page.route() -- no database
  * write, no fabricated account, a mock confined to one endpoint layered on
  * top of a real, once-per-file login.
+ *
+ * MDF-152 CANDIDATES 7 AND 8 (the two min-w-0+truncate / shrink-0-sibling
+ * pairings this floor checked and found CORRECT, as opposed to #349, #356,
+ * #358 and #363, where the same family was found broken) -- a mechanism
+ * that is only exercised by a throwaway script is cleared only for the day
+ * it ran; these two cases are what makes that clearance stand. Candidate 7
+ * reuses the super-admin session already logged in above. Candidate 8 needs
+ * the DELIVERY_DRIVER role, which the super-admin account does not hold, so
+ * it gets its own one-time login below using the same tryLogin+storageState
+ * pattern, not a second harness.
  */
 
 const WIDTHS = [375, 414, 768, 1024, 1440];
@@ -91,10 +101,40 @@ function skipIfNoSession() {
   test.skip(!SUPER_ADMIN_PASSWORD || !loginOk, 'Needs a live API + seeded dev database with SEED_SUPER_ADMIN_PASSWORD set -- not provisioned in CI. See file header.');
 }
 
-async function authedPage(browser: Browser, width: number, height = 900): Promise<{ page: Page; close: () => Promise<void> }> {
-  const context = await browser.newContext({ storageState: STORAGE_PATH, viewport: { width, height } });
+async function authedPage(
+  browser: Browser,
+  width: number,
+  height = 900,
+  storagePath: string = STORAGE_PATH,
+): Promise<{ page: Page; close: () => Promise<void> }> {
+  const context = await browser.newContext({ storageState: storagePath, viewport: { width, height } });
   const page = await context.newPage();
   return { page, close: () => context.close() };
+}
+
+// Candidate 8 (DeliveryQueue) needs the DELIVERY_DRIVER role -- a separate
+// one-time login, same tryLogin+storageState shape as above, not a second
+// harness. UAT_DRIVER_PASSWORD always has a value (an env override or its
+// own committed default -- see support/auth.ts), unlike SUPER_ADMIN_PASSWORD,
+// so this still needs its own loginOk flag to skip cleanly when no live API
+// or seeded database is reachable (CI).
+const DRIVER_STORAGE_PATH = path.join(os.tmpdir(), `bmpl-e2e-uat-driver-state-${process.pid}.json`);
+let driverLoginOk = false;
+
+test.beforeAll(async ({ browser }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  driverLoginOk = await tryLogin(page, UAT_DRIVER_EMAIL, UAT_DRIVER_PASSWORD);
+  if (driverLoginOk) await context.storageState({ path: DRIVER_STORAGE_PATH });
+  await context.close();
+});
+
+test.afterAll(() => {
+  fs.rmSync(DRIVER_STORAGE_PATH, { force: true });
+});
+
+function skipIfNoDriverSession() {
+  test.skip(!driverLoginOk, 'Needs a live API + seeded dev database with the UAT driver fixture (packages/database/prisma/seed-uat-logistics.ts) -- not provisioned in CI. See file header.');
 }
 
 async function openAccountMenu(page: Page, width: number) {
@@ -319,6 +359,182 @@ test.describe('[LOCAL ONLY, skips in CI -- see file header] /dashboard/messages 
       expect(cardRect, `no Card box at ${width}px`).not.toBeNull();
       expect(boxRect!.x, `EmptyState left edge ${boxRect!.x.toFixed(1)} vs card left ${cardRect!.x.toFixed(1)} at ${width}px`).toBeGreaterThanOrEqual(cardRect!.x - 1);
       expect(boxRect!.x + boxRect!.width, `EmptyState right edge ${(boxRect!.x + boxRect!.width).toFixed(1)} vs card right ${(cardRect!.x + cardRect!.width).toFixed(1)} at ${width}px`).toBeLessThanOrEqual(cardRect!.x + cardRect!.width + 1);
+    });
+  }
+});
+
+/**
+ * MDF-152 candidate 7 (dashboard/messages/page.tsx:261-277). The
+ * "conversation row never silently clips below md" block above already
+ * proves the grid track constrains a long row (clientWidth < scrollWidth on
+ * every `.truncate` node) -- but that comparison alone would pass even if
+ * clientWidth collapsed to ~0, because scrollWidth is the content's natural
+ * width regardless of whatever the box itself shrank to. This case asks the
+ * question that one doesn't: does the subject line and the last-message
+ * snippet actually RENDER (a real, non-trivial clientWidth), not just
+ * "shrink to something smaller than their content." Same instrument as the
+ * zero-width Platform Wallet defect this session (#349): a near-zero
+ * clientWidth beside a real-content scrollWidth is the collapse; a
+ * comfortably non-zero one beside a larger scrollWidth is genuine ellipsis.
+ */
+test.describe('[LOCAL ONLY, skips in CI -- see file header] MDF-152 candidate 7: messages row subject/snippet never collapse under long content', () => {
+  const LONG_SUBJECT =
+    'Re: question about my order delivery window and whether the courier can come back after 6pm because nobody will be home before then';
+  const LONG_SNIPPET =
+    'Hi, just wanted to follow up again on the delivery timing since the original message from yesterday afternoon seems to have gone unanswered and I would really like to know';
+  const MOCK_CONVERSATIONS = [
+    {
+      id: 'mock-convo-mdf152-c7',
+      contextType: 'VENDOR_ORDER',
+      pairing: 'CUSTOMER_VENDOR',
+      subject: LONG_SUBJECT,
+      status: 'OPEN',
+      contextLabel: 'Order #BML-MOCK01',
+      lastMessage: { preview: LONG_SNIPPET, type: 'TEXT', createdAt: new Date().toISOString() },
+      lastMessageAt: new Date().toISOString(),
+      unreadCount: 3,
+    },
+  ];
+
+  for (const width of WIDTHS) {
+    test(`subject and snippet render with real, non-zero width at ${width}px`, async ({ browser }) => {
+      skipIfNoSession();
+      const { page, close } = await authedPage(browser, width);
+      await page.route('**/api/conversations', (r) => r.fulfill({ json: MOCK_CONVERSATIONS }));
+      await page.goto('/dashboard/messages');
+
+      const row = page.locator('li button', { hasText: 'nobody will be home' });
+      await expect(row).toBeVisible();
+      const measured = await row.evaluate((node) => {
+        const truncs = Array.from(node.querySelectorAll('.truncate'));
+        return {
+          truncating: truncs.map((el) => ({ clientWidth: el.clientWidth, scrollWidth: el.scrollWidth })),
+          row: { clientWidth: node.clientWidth, scrollWidth: node.scrollWidth },
+        };
+      });
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      await close();
+
+      // Both the subject and the snippet carry `.truncate` -- two nodes
+      // expected here, not one. If either is missing, the row markup
+      // changed and this test should fail loudly rather than pass on zero
+      // nodes checked.
+      expect(measured.truncating.length, `expected 2 truncating nodes (subject + snippet) in the row at ${width}px, found ${measured.truncating.length}`).toBe(2);
+      for (const node of measured.truncating) {
+        // The property that actually separates "truncating" from "collapsed
+        // to zero width": a real rendered box, clearly bigger than a sliver.
+        // Not "clientWidth < scrollWidth" -- a node with enough room to show
+        // its full content needs no truncation at all, and that is also a
+        // safe outcome, not a failure of this check.
+        expect(node.clientWidth, `truncating node rendered at only ${node.clientWidth}px at ${width}px -- too close to the zero-width collapse this guards against`).toBeGreaterThan(20);
+        expect(node.clientWidth, `truncating node clientWidth ${node.clientWidth} should never exceed its own content scrollWidth ${node.scrollWidth} at ${width}px`).toBeLessThanOrEqual(node.scrollWidth + 1);
+      }
+      // The row's own box must never overflow itself either -- if either
+      // `min-w-0` partner were missing, the flex item's min-content floor
+      // (the whole nowrap line, for a `truncate` node) would force the row
+      // wider than its real container, and a sibling check alone (above)
+      // would not catch it: each node can be internally self-consistent
+      // while the row around it has already blown out. Confirmed this is
+      // load-bearing, not redundant, by a negative control: removing
+      // `min-w-0` from the subject <p> left every assertion above green but
+      // failed this one at every width (row scrollWidth ~900+ vs clientWidth
+      // ~300-350).
+      expect(measured.row.scrollWidth, `row's own scrollWidth ${measured.row.scrollWidth} should not exceed its clientWidth ${measured.row.clientWidth} at ${width}px -- the row should never overflow itself`).toBeLessThanOrEqual(measured.row.clientWidth + 1);
+      expect(scrollWidth, `page overflow at ${width}px with a long conversation row`).toBeLessThanOrEqual(clientWidth + 1);
+    });
+  }
+});
+
+/**
+ * MDF-152 candidate 8 (components/driver/DeliveryQueue.tsx:236-289). Mocks
+ * exactly 2 queue items -- the component returns null below that
+ * (`data.items.length < 2`, line 142), so a single real or mocked job can
+ * never reach this markup at all. Same non-zero-rendered-width instrument as
+ * candidate 7 for the title Link, plus a check the row's OWN box never
+ * overflows itself (its scrollWidth must not exceed its clientWidth) --
+ * distinct from the title node, which is SUPPOSED to scroll past its own
+ * clientWidth (that is what truncate is doing to it).
+ */
+test.describe('[LOCAL ONLY, skips in CI -- see file header] MDF-152 candidate 8: driver queue title never collapses under long content', () => {
+  const LONG_REFERENCE = 'BML-SHIP-99887766-VERY-LONG-REFERENCE-CODE';
+  const LONG_VENDOR = 'The Exceptionally Long Named Hardware And Building Supply Company Ltd';
+  const LONG_STOP_AREA = 'Unit 14B, Independence Plaza Commercial Complex, Mile 3 Northern Highway';
+
+  function mockItem(i: number) {
+    return {
+      id: `mock-item-${i}`,
+      status: 'ASSIGNED',
+      statusLabel: 'Assigned',
+      view: 'assigned',
+      kind: 'MARKETPLACE',
+      kindLabel: 'Marketplace delivery',
+      reference: `${LONG_REFERENCE}-${i}`,
+      orderNumber: `MOCK-ORDER-${LONG_REFERENCE}-${i}`,
+      vendor: LONG_VENDOR,
+      pickupArea: 'Belize City',
+      itemCount: 2,
+      city: 'Belize City',
+      district: 'Belize',
+      feeMinor: 1500,
+      position: i,
+      recommendedPosition: null,
+      stopKind: i === 1 ? 'PICKUP' : 'DROPOFF',
+      stopArea: LONG_STOP_AREA,
+      legDistanceKm: 4.2,
+      legMinutes: 12,
+      estimatePrecision: 'EXACT',
+      nextAction: { kind: 'CONFIRM_PICKUP', label: 'Confirm pickup' },
+      canReorder: true,
+      reorderBlockedReason: null,
+    };
+  }
+
+  for (const width of WIDTHS) {
+    test(`queue row title renders with real, non-zero width and the row itself never overflows at ${width}px`, async ({ browser }) => {
+      skipIfNoDriverSession();
+      const { page, close } = await authedPage(browser, width, 900, DRIVER_STORAGE_PATH);
+      await page.route('**/api/driver/jobs/queue', (r) =>
+        r.fulfill({
+          json: {
+            items: [mockItem(1), mockItem(2)],
+            route: {
+              totalDistanceKm: 8.4,
+              totalMinutes: 24,
+              precision: 'EXACT',
+              disclosure: 'Estimated from pickup and drop-off locations. Not a live ETA.',
+              recommendedOrder: ['mock-item-1', 'mock-item-2'],
+            },
+            followsRecommendation: true,
+          },
+        }),
+      );
+      await page.goto('/dashboard/driver/jobs');
+
+      await expect(page.getByText('Your delivery queue')).toBeVisible();
+      // Scoped to text unique to the mocked data -- `ol > li` also matches
+      // DriverBreadcrumb's own <ol> rendered above the queue on this page.
+      const row = page.locator('li', { hasText: LONG_REFERENCE }).first();
+      await expect(row).toBeVisible();
+      const title = row.locator('a', { hasText: LONG_REFERENCE }).first();
+
+      const titleSizes = await title.evaluate((el) => ({ clientWidth: el.clientWidth, scrollWidth: el.scrollWidth }));
+      const rowSizes = await row.evaluate((el) => ({ clientWidth: el.clientWidth, scrollWidth: el.scrollWidth }));
+      const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      await close();
+
+      // Not "clientWidth < scrollWidth" -- at the widest mandated width the
+      // row has room to show the reference in full, so clientWidth equals
+      // scrollWidth with no truncation at all, which is also a safe outcome.
+      expect(titleSizes.clientWidth, `title rendered at only ${titleSizes.clientWidth}px at ${width}px -- too close to the zero-width collapse this guards against`).toBeGreaterThan(20);
+      expect(titleSizes.clientWidth, `title clientWidth ${titleSizes.clientWidth} should never exceed its own content scrollWidth ${titleSizes.scrollWidth} at ${width}px`).toBeLessThanOrEqual(titleSizes.scrollWidth + 1);
+      expect(rowSizes.scrollWidth, `row's own scrollWidth ${rowSizes.scrollWidth} should not exceed its clientWidth ${rowSizes.clientWidth} at ${width}px -- the row should never overflow itself`).toBeLessThanOrEqual(rowSizes.clientWidth + 1);
+      expect(scrollWidth, `page overflow at ${width}px with a long driver queue row`).toBeLessThanOrEqual(clientWidth + 1);
     });
   }
 });
