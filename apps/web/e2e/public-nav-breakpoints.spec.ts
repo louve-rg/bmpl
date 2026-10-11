@@ -82,3 +82,26 @@ test.describe('primary header controls meet the 44px hit-area floor, measured fr
     }
   });
 });
+
+/**
+ * 320px is narrower than any width the owner-named WIDTHS set above covers
+ * (375 is the narrowest), but it's the exact width this landing-page defect
+ * was measured at (god/Jim, 2026-10-11): the Services bento grid's two outer
+ * `grid ... lg:grid-cols-12` containers had no grid-template-columns at all
+ * below `lg`, so the browser's default single implicit column sized itself
+ * to the MarketplaceCard's content instead of the viewport -- scrollWidth
+ * 340 against clientWidth 320. Fix: an explicit `grid-cols-1` at the base
+ * breakpoint, matching every other grid in this file, which Tailwind
+ * compiles to `repeat(1, minmax(0, 1fr))` and so clamps the track to the
+ * container regardless of content width. A separate describe block (not
+ * added to WIDTHS) so it doesn't change what width the owner-named sweep
+ * above asserts for every route.
+ */
+test.describe('the landing page does not scroll sideways at 320px', () => {
+  test('/ at 320px has no horizontal overflow', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.goto('/');
+    const { scrollWidth, clientWidth } = await noHorizontalOverflow(page);
+    expect(scrollWidth, `scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at 320px on /`).toBeLessThanOrEqual(clientWidth + 1);
+  });
+});
