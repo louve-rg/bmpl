@@ -267,8 +267,9 @@ noted in the row itself rather than guessed at here.
 
 **Evidence ladder:**
 - IMPLEMENTED: yes — `bad7b3f` (API), `74cbcd6` (UI).
-- TESTED: yes, an integration spec shipped in `bad7b3f` itself; not
-  independently re-run in this pass.
+- TESTED: yes, named —
+  `apps/api/test/vendor-location-inventory.integration.spec.ts` (shipped
+  in `bad7b3f`); not independently re-run in this pass.
 - MERGED: yes — both an ancestor of `origin/main`.
 - DEPLOYED: **yes, all of it, admin included — the code.** `bad7b3f`
   touches only `apps/api`/`packages/database`; `apps/api`'s live commit is
@@ -357,8 +358,18 @@ the requirement, and neither extreme described what had actually shipped.
 **Evidence ladder:**
 - IMPLEMENTED: yes — `682b501` (API), `a568d6a` (web, courier/sender/staff),
   `66487e4`/`0c322d6` (recipient access).
-- TESTED: yes, named integration coverage shipped with these PRs; not
-  independently re-run in this pass.
+- TESTED: yes, named —
+  `apps/api/test/shipping-pickup-photo.integration.spec.ts` (`682b501`,
+  extended by `66487e4`), `apps/web/lib/driver-shipping-job.test.ts`
+  (`a568d6a`, courier-upload UI) and
+  `apps/admin/app/dashboard/logistics/[reference]/page.test.tsx` (the
+  staff view's own test, `a568d6a`'s own citation — the staff logistics
+  screen has since moved from `apps/web` to `apps/admin`, so the file
+  this PR originally touched no longer exists; this is the current
+  equivalent), and
+  `apps/api/test/shipment-recipient-linking.integration.spec.ts`/
+  `apps/web/components/shipping/RecipientTracking.test.tsx` (recipient
+  access, `66487e4`/`0c322d6`); not independently re-run in this pass.
 - MERGED: yes — all four an ancestor of `origin/main`.
 - DEPLOYED: **yes, the code.** Every one of these commits touches only
   `apps/api` and/or `apps/web` (confirmed directly, `git show --stat`) —
@@ -426,7 +437,8 @@ findings.
 **Evidence ladder:**
 - IMPLEMENTED: yes — `a6b7d97` (three migrations plus the claim
   controller/service).
-- TESTED: yes, named integration coverage shipped with the PR; not
+- TESTED: yes, named —
+  `apps/api/test/shipment-recipient-linking.integration.spec.ts`; not
   independently re-run in this pass.
 - MERGED: yes — an ancestor of `origin/main`.
 - DEPLOYED: **yes, the code.** Touches `apps/api`, `apps/web`,
@@ -494,8 +506,10 @@ to the first success.
 **Evidence ladder:**
 - IMPLEMENTED: yes — `3950db0` (API), `99e98c1`/`2cbcf73` (web),
   `a032771` (API, the merged endpoint).
-- TESTED: yes, named integration coverage shipped with these PRs; not
-  independently re-run in this pass.
+- TESTED: yes, named — `apps/api/test/driver.integration.spec.ts`
+  (`3950db0`, extended by `a032771`) and
+  `apps/web/components/driver/ServiceAreasSection.test.tsx`
+  (`99e98c1`/`2cbcf73`); not independently re-run in this pass.
 - MERGED: yes — all four an ancestor of `origin/main`.
 - DEPLOYED: **yes, the code.** Every commit touches only `apps/api` or
   `apps/web` — no `apps/admin` — an ancestor of both `apps/api`'s
@@ -560,8 +574,19 @@ district is offered to a driver who selected it.
 **Evidence ladder — for the five commits this row cites (`056b709`,
 `e498765`, `c2d1b0a`, `a072971`, `1161a6f`) only:**
 - IMPLEMENTED: yes.
-- TESTED: yes, named integration coverage shipped with these PRs; not
-  independently re-run in this pass.
+- TESTED: yes, for the two commits that actually touch operating-hours
+  code — `apps/api/test/vendor-hours-dispatch.integration.spec.ts`
+  (`a072971`) and `apps/api/test/delivery.integration.spec.ts` /
+  `apps/web/lib/vendor-hours.test.ts` (`1161a6f`'s closing-soon half); not
+  independently re-run in this pass. **Found while fixing this citation,
+  flagged rather than fixed (outside this pass's scope):** `056b709`,
+  `e498765` and `c2d1b0a` — three of the five commits this row's own
+  header cites — touch no vendor-hours/closing-soon code at all; their
+  own tests
+  (`apps/api/test/shipment-availability-windows*.integration.spec.ts`)
+  prove requirement 11 (shipment availability windows), not this row.
+  This row's commit list appears to have picked up three commits that
+  belong to requirement 11 instead.
 - MERGED: yes — all five an ancestor of `origin/main`.
 - DEPLOYED: **yes, the code.** Every one touches only `apps/api` and/or
   `apps/web` — no `apps/admin` — an ancestor of both `apps/api`'s
@@ -804,9 +829,14 @@ no new capability and no schema change. Until then, requirement 7 is
 **Evidence ladder:**
 - IMPLEMENTED: yes — `4eac6e8`, `c99a596`, `1161a6f` (shipping), `16e4b4b`
   (marketplace).
-- TESTED: yes, named integration/component coverage shipped with these
-  PRs, plus the 2026-09-26 real-browser mobile audit noted below; not
-  independently re-run in this pass.
+- TESTED: yes, named — `apps/web/lib/trip-map.test.ts` (`4eac6e8`,
+  `c99a596`), `apps/api/test/shipping-driver.integration.spec.ts`
+  (`c99a596`), `apps/web/components/maps/LocationPicker.test.tsx`
+  (`1161a6f`'s pin-picker half), and
+  `apps/web/app/dashboard/driver/jobs/[id]/page.test.tsx` /
+  `apps/web/lib/driver-job.test.ts` (`16e4b4b`), plus the 2026-09-26
+  real-browser mobile audit noted below; not independently re-run in
+  this pass.
 - MERGED: yes — all four an ancestor of `origin/main`.
 - DEPLOYED: **yes, the code.** Every one touches only `apps/api` and/or
   `apps/web` — no `apps/admin` — an ancestor of both `apps/api`'s
@@ -1111,8 +1141,23 @@ failed delivery has no trigger to test against.
 - IMPLEMENTED: yes — `056b709`/`e498765` (sender windows, API),
   `c2d1b0a` (sender UI), `42d658f` (customer travel date),
   `a6f81bb` (recipient self-service).
-- TESTED: yes, named integration coverage shipped with each of these PRs;
-  not independently re-run in this pass.
+- TESTED: yes for three of the four —
+  `apps/api/test/shipment-availability-windows.integration.spec.ts`
+  (`056b709`, extended by `a6f81bb` for the recipient half),
+  `apps/api/test/shipment-availability-windows-dispatch.integration.spec.ts`/
+  `packages/shared/src/availability-windows.test.ts` (`e498765`), and
+  `apps/api/test/route-schedule-wiring.integration.spec.ts`/
+  `packages/shared/src/belize-time.test.ts` (`42d658f`); not
+  independently re-run in this pass. **`c2d1b0a` (the sender-UI piece)
+  has no behavioural test**: its own commit message says the add/save/
+  edit/locked-role/clear behaviour was "verified live against the real
+  API and a throwaway account," not by an automated test.
+  `apps/web/components/shipping/AvailabilityWindows.test.tsx` exists on
+  `origin/main` today, but it was added three weeks later by an
+  unrelated PR (`#287`, deploy-skew crash fixes) and covers only a
+  missing-field crash-safety case, not the add/save/edit/locked-role
+  behaviour this requirement actually describes — naming it here would
+  look like proof without being any.
 - MERGED: yes — all five an ancestor of `origin/main`.
 - DEPLOYED: **yes, the code.** Every one touches only `apps/api` and/or
   `apps/web` and/or `packages/*` — no `apps/admin` — an ancestor of both
@@ -1169,7 +1214,8 @@ shipment is untouched.
 **Evidence ladder — per piece, since the four pieces do not share one:**
 - **Multi-leg ETA** (`f1bbfce`): IMPLEMENTED/MERGED yes, ancestor of
   `origin/main`; touches only `apps/api`/`packages/shared` — DEPLOYED yes.
-  TESTED: a test exists per the PR, not independently named here. **The
+  TESTED: yes, named — `apps/api/test/shipment-eta.integration.spec.ts`
+  and `packages/shared/src/shipment-eta.test.ts`. **The
   gap this phase left, found to have no commit SHA in this document at
   all, now has one:** `git log --all --grep=BMPL-346` found `e56c425`
   (PR #267, `apps/api`/`packages/database`/`packages/shared`/
@@ -1183,8 +1229,9 @@ shipment is untouched.
   unverified** (see the methodology section above).
 - **ETA-change notice** (`e7ef2ed`): IMPLEMENTED/MERGED yes, ancestor of
   `origin/main`; touches `apps/api`/`packages/database`/`packages/shared`
-  only — DEPLOYED yes. TESTED: a test exists per the PR, not
-  independently named here. PRODUCTION-VERIFIED: no record. Its own
+  only — DEPLOYED yes. TESTED: yes, named —
+  `apps/api/test/shipment-eta-notification.integration.spec.ts`.
+  PRODUCTION-VERIFIED: no record. Its own
   migration (`etaBaselineAt`) was held pending review before merge per
   the card's own instruction (PR #274's body: "holding per this card's
   own instruction"); that review is the same PR-review-then-merge gate
@@ -1202,8 +1249,12 @@ shipment is untouched.
   directly — same commit as requirement 10's staff panel). `7ff34a1`
   carries three migrations of its own, each a confirmed ancestor of the
   live API commit — **application is expected but unverified** (see the
-  methodology section above). TESTED: a test exists per the PR, not
-  independently named here.
+  methodology section above). TESTED: yes, named —
+  `apps/api/test/shipment-reroute.integration.spec.ts` and
+  `apps/api/test/shipment-return-to-sender.integration.spec.ts`
+  (`7ff34a1`, API) and `apps/admin/components/logistics/ExceptionResolution.test.tsx`/
+  `apps/admin/lib/exception-resolution.test.ts` (`5fe37cf`, staff
+  screen).
 - **Carrier schedule exceptions** (`fcc3592`, BMPL-186): IMPLEMENTED/
   MERGED yes, ancestor of `origin/main`. DEPLOYED: **yes, all of it,
   admin included — the code.** The API portion is an ancestor of
