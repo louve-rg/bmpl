@@ -41,12 +41,9 @@ describe('promotion metric daily bucket', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-27T02:00:00.000Z'));
 
-    // placement is set explicitly - a pre-existing, unrelated defect means
-    // track() throws internally (caught; it never surfaces to the client)
-    // when placement is omitted/null, because the compound unique index
-    // [promotionId, day, placement] can't be queried with a null placement
-    // via Prisma's generated compound-key input. Reported separately; not a
-    // timezone/date defect, and not this test's concern.
+    // placement is set explicitly here only because this test is about day
+    // bucketing, not placement handling — see the "no placement given"
+    // describe block below (MDF-213) for that.
     const res = await request(ctx.server).post(`/api/marketing/promotions/${promo.id}/track`).send({ event: 'click', placement: 'HOMEPAGE_HERO' });
     expect(res.status).toBe(204);
 
@@ -152,6 +149,64 @@ describe('promotion events (BMPL-332)', () => {
     expect(events).toHaveLength(N);
     const daily = await ctx.prisma.promotionMetricDaily.findMany({ where: { promotionId: promo.id } });
     expect(daily).toHaveLength(1);
+    expect(daily[0]!.clicks).toBe(N);
+  });
+});
+
+/**
+ * MDF-213: a call that names no placement used to lose BOTH rows. Prisma's
+ * generated client rejects `null` inside `PromotionMetricDaily`'s compound
+ * unique key (`promotionId_day_placement`) before issuing any SQL, and that
+ * throw landed after the paired `promotionEvent.create()` in the same
+ * transaction — so the whole transaction rolled back silently. `placement`
+ * is optional on the public schema, so this was the default shape for most
+ * callers, not an edge case. Fixed by substituting the storage-only
+ * `UNSPECIFIED` sentinel for a null placement before the write (see
+ * promotion-discovery.service.ts's track() and migration
+ * 20261104270000_promotion_metric_no_placement_sentinel). These three tests
+ * FAIL on the pre-fix code (0 rows survive) and pass after it.
+ */
+describe('promotion tracking with no placement given (MDF-213)', () => {
+  it('a click with no placement writes both the event row and the daily counter', async () => {
+    const promo = await makePromo();
+    const res = await request(ctx.server).post(`/api/marketing/promotions/${promo.id}/track`).send({ event: 'click' });
+    expect(res.status).toBe(204);
+
+    const events = await ctx.prisma.promotionEvent.findMany({ where: { promotionId: promo.id } });
+    expect(events).toHaveLength(1);
+    expect(events[0]!.placement).toBeNull(); // the event row keeps the TRUE value — null, not the sentinel.
+
+    const daily = await ctx.prisma.promotionMetricDaily.findMany({ where: { promotionId: promo.id } });
+    expect(daily).toHaveLength(1);
+    expect(daily[0]!.placement).toBe('UNSPECIFIED');
+    expect(daily[0]!.clicks).toBe(1);
+  });
+
+  it('a second no-placement call merges into the same daily bucket instead of duplicating', async () => {
+    const promo = await makePromo();
+    await request(ctx.server).post(`/api/marketing/promotions/${promo.id}/track`).send({ event: 'click' });
+    const res = await request(ctx.server).post(`/api/marketing/promotions/${promo.id}/track`).send({ event: 'click' });
+    expect(res.status).toBe(204);
+
+    const events = await ctx.prisma.promotionEvent.findMany({ where: { promotionId: promo.id } });
+    expect(events).toHaveLength(2);
+    const daily = await ctx.prisma.promotionMetricDaily.findMany({ where: { promotionId: promo.id } });
+    expect(daily).toHaveLength(1);
+    expect(daily[0]!.clicks).toBe(2);
+  });
+
+  it('N concurrent no-placement calls produce exactly N events and N on the UNSPECIFIED counter', async () => {
+    const promo = await makePromo();
+    const N = 10;
+    await Promise.all(
+      Array.from({ length: N }, () => request(ctx.server).post(`/api/marketing/promotions/${promo.id}/track`).send({ event: 'click' })),
+    );
+
+    const events = await ctx.prisma.promotionEvent.findMany({ where: { promotionId: promo.id } });
+    expect(events).toHaveLength(N);
+    const daily = await ctx.prisma.promotionMetricDaily.findMany({ where: { promotionId: promo.id } });
+    expect(daily).toHaveLength(1);
+    expect(daily[0]!.placement).toBe('UNSPECIFIED');
     expect(daily[0]!.clicks).toBe(N);
   });
 });
