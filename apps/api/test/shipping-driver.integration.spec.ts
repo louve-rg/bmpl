@@ -145,6 +145,22 @@ async function pinOf(legId: string) {
   return leg.handoffPin!;
 }
 
+/**
+ * Deterministic replacement for a substring scan: walks the whole payload and
+ * reports true only if some field's EXACT value equals `needle` — never a
+ * coincidental substring (a phone number or timestamp can contain the same
+ * four digits as a PIN by chance; this does not flag that). A PASS on the
+ * caller's assertion means the value is genuinely absent; a FAIL means it is
+ * genuinely present somewhere in the tree.
+ */
+function containsExactValue(node: unknown, needle: string): boolean {
+  if (node == null) return false;
+  if (typeof node === 'string') return node === needle;
+  if (Array.isArray(node)) return node.some((n) => containsExactValue(n, needle));
+  if (typeof node === 'object') return Object.values(node as Record<string, unknown>).some((v) => containsExactValue(v, needle));
+  return false;
+}
+
 /** Operator drives a line-haul leg from its terminal to the next one. */
 async function flyLineHaul(legId: string) {
   expect((await post(admin, `admin/logistics/legs/${legId}/depart`, {})).status).toBe(201);
@@ -520,7 +536,17 @@ describe('what the driver is shown', () => {
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
     const job = await get(driver.cookies, `driver/shipping-jobs/${first.id}`);
-    expect(JSON.stringify(job.body)).not.toContain(await pinOf(first.id));
+    // The old version of this test substring-scanned the serialised payload
+    // for the raw PIN digits, which is not deterministic: a fixture phone
+    // number or a timestamp can contain the same four digits as the PIN by
+    // pure chance (observed in CI — a sender phone ending "...3333" collided
+    // with a randomly generated PIN of "3333"), failing a payload that never
+    // actually leaked anything. The field-and-exact-value checks below give
+    // the property a pass that actually means absent and a fail that actually
+    // means present, regardless of what else is in the payload.
+    expect(job.body).not.toHaveProperty('handoffPin');
+    expect(typeof job.body.pinAttemptsRemaining).toBe('number');
+    expect(containsExactValue(job.body, await pinOf(first.id))).toBe(false);
   });
 });
 
