@@ -206,6 +206,42 @@ describe('admin assignment + eligibility', () => {
     expect(row.deliveryPin).toMatch(/^\d{4}$/);
   });
 
+  it('two concurrent admin assignments for the same delivery resolve to exactly one winner (MDF-18)', async () => {
+    // assignInternal used to read the delivery's status once and then write
+    // with an UNCONDITIONAL update by id - no re-assertion of that status
+    // inside the write itself. Two concurrent assignment attempts could both
+    // pass the stale read and both reach the write; whichever committed LAST
+    // silently overwrote the first (new PINs, new driver, no error, no
+    // conflict). This fails on the pre-fix code: every one of the N calls
+    // below returns 201, not just one.
+    const vendor = await makeVendor();
+    const order = await makeDeliveryOrder(vendor);
+    const N = 6;
+    const drivers = await Promise.all(Array.from({ length: N }, () => makeDriver()));
+
+    const responses = await Promise.all(
+      drivers.map((d) => post(adminCookies, `admin/deliveries/${order.deliveryId}/assign`, { driverProfileId: d.driverProfileId, vehicleId: d.vehicleId })),
+    );
+
+    const wins = responses.filter((r) => r.status === 201);
+    const losses = responses.filter((r) => r.status === 409);
+    expect(wins).toHaveLength(1);
+    expect(losses).toHaveLength(N - 1);
+
+    // The winner recorded in the database is the SAME one the HTTP response
+    // named - not a different driver that happened to commit last underneath it.
+    const row = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: order.deliveryId } });
+    expect(drivers.map((d) => d.driverProfileId)).toContain(row.assignedDriverProfileId);
+    const winningProfile = await ctx.prisma.driverProfile.findUniqueOrThrow({ where: { id: row.assignedDriverProfileId! } });
+    expect(wins[0]!.body.driver.displayName).toBe(winningProfile.displayName);
+
+    // Exactly one ACTIVE assignment row exists - a losing call must never have
+    // reached deliveryAssignment.create either.
+    const active = await ctx.prisma.deliveryAssignment.findMany({ where: { orderDeliveryId: order.deliveryId, status: 'ACTIVE' } });
+    expect(active).toHaveLength(1);
+    expect(active[0]!.driverProfileId).toBe(row.assignedDriverProfileId);
+  });
+
   it('lists eligible drivers for the delivery district', async () => {
     const vendor = await makeVendor();
     const order = await makeDeliveryOrder(vendor);
