@@ -144,6 +144,21 @@ export class PromotionDiscoveryService {
    * the database level — there is no gap between "does a row exist" and
    * "write a row" for a second call to land in, so the race this exists to
    * close is gone rather than merely survived.
+   *
+   * SCOPED to a non-null `placement` only. A null placement hits a separate,
+   * pre-existing defect (the compound unique index can't be conflicted-on
+   * with a null member — see the comment on
+   * test/promotion-tracking.integration.spec.ts) that this fix does not
+   * touch: Postgres treats NULL as distinct in a plain unique index, so an
+   * `ON CONFLICT` here would never match for a null placement and would
+   * insert a brand-new row on every call instead — unbounded growth driven
+   * by this endpoint's unauthenticated, unthrottled traffic, breaking the
+   * bound the schema's own BMPL-332 comment states as a design property
+   * ("the right PERMANENT read path, bounded by promotions × days ×
+   * placements"). The real fix needs the unique index to treat NULLs as not
+   * distinct, which is a migration — out of scope here, carded separately.
+   * The null branch below is therefore left byte-for-byte as it already
+   * behaves on main, including its silent catch.
    */
   async track(promotionId: string, dto: TrackPromotionEventInput) {
     try {
@@ -159,6 +174,32 @@ export class PromotionDiscoveryService {
       const placement = dto.placement ?? null;
       const column = EVENT_COLUMN[dto.event];
       const kind = EVENT_KIND[dto.event];
+
+      if (placement === null) {
+        const create: Prisma.PromotionMetricDailyCreateInput = {
+          promotion: { connect: { id: promotionId } }, day, placement, impressions: 0, views: 0, clicks: 0, conversions: 0,
+        };
+        create[column] = 1;
+        try {
+          await this.prisma.$transaction(async (tx) => {
+            if (kind) {
+              await tx.promotionEvent.create({ data: { promotion: { connect: { id: promotionId } }, kind, placement, occurredAt: now } });
+            }
+            await tx.promotionMetricDaily.upsert({
+              // placement is a nullable member of the compound unique; Prisma accepts null at
+              // runtime though its generated type narrows to the enum — cast to satisfy TS.
+              where: { promotionId_day_placement: { promotionId, day, placement: placement as never } },
+              create,
+              update: { [column]: { increment: 1 } } as Prisma.PromotionMetricDailyUpdateInput,
+            });
+          });
+        } catch {
+          // Deliberately silent — unchanged from main for this known,
+          // separately-tracked defect. Not this fix's to log or resolve.
+        }
+        return;
+      }
+
       // Dynamic but not attacker-controlled: `column` only ever comes from the
       // fixed EVENT_COLUMN map above, never from the request body directly, so
       // splicing it in as a raw identifier (Prisma.raw, not a bound parameter —
@@ -186,9 +227,11 @@ export class PromotionDiscoveryService {
       // (MDF-211) — this codebase's convention (~20 sites, see the BMPL-388
       // comment in packages/database/src/index.ts) is to catch P2002
       // specifically and let anything else through to be logged. Nothing in
-      // this method's own writes is expected to raise P2002 anymore (the
-      // conflict is now handled inside the SQL itself), so in practice this
-      // now logs any real failure instead of discarding it with zero trace.
+      // the non-null path's own writes is expected to raise P2002 anymore
+      // (the conflict is now handled inside the SQL itself), so in practice
+      // this now logs any real failure on that path instead of discarding it
+      // with zero trace. (The null-placement branch above never reaches this
+      // catch — it has its own, deliberately silent one.)
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return;
       this.logger.error(`track() failed for promotion ${promotionId}: ${String(e)}`);
     }
