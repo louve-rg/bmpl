@@ -66,6 +66,12 @@ export default function OrderDetailPage() {
       await load();
     } catch (err) {
       setCancelError((err as ApiError).message ?? 'We could not cancel this order.');
+      // The realistic case for a refusal: a vendor started preparing while
+      // this page was open. Refetch here too, not only on success, so the
+      // button and the vendor-order display correct themselves while the
+      // customer is still looking at the error — not only after a manual
+      // reload.
+      await load();
     } finally {
       setCancelling(false);
     }
