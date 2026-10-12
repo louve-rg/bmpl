@@ -1295,8 +1295,8 @@ Four distinct pieces, per the owner's original requirement:
   `ShipmentService.flagException`
   (`apps/api/src/shipping/shipment.service.ts:1851`): inside the leg
   transition it notifies admins — staff. The shared `transition()` helper
-  (`apps/api/src/shipping/shipment.service.ts:2784`) unconditionally calls
-  `notifyCustomer` (`apps/api/src/shipping/shipment.service.ts:2941`) on
+  (`apps/api/src/shipping/shipment.service.ts:2812`) unconditionally calls
+  `notifyCustomer` (`apps/api/src/shipping/shipment.service.ts:2969`) on
   every call, reaching the sender. After the transition resolves,
   `flagException` separately notifies `recipientUserId` when one exists
   (`apps/api/src/shipping/shipment.service.ts:1877`), reaching the

@@ -154,6 +154,22 @@ async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
   })).status).toBe(201);
 }
 
+/**
+ * Drives a leg all the way to ARRIVING, then burns through five wrong codes —
+ * the fifth is the one that locks the leg (MDF-96's PIN-lockout auto-flag)
+ * and leaves it EXCEPTION with handoffPinAttempts at MAX_PIN_ATTEMPTS.
+ */
+async function driveToPinLockout(driver: { cookies: string[] }, legId: string) {
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
+  for (let i = 0; i < 5; i++) {
+    const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, { pin: '000000', receivedByName: 'Wrong' });
+    expect(r.status).toBe(400);
+  }
+}
+
 /** Book, manually assign the first mile, and return shipment + that leg. */
 async function bookedWithAssignedFirstMile(driver: { driverProfileId: string; vehicleId: string }) {
   const s = await book();
@@ -278,6 +294,94 @@ describe('resume', () => {
     expect((await post(admin, `admin/logistics/legs/${haul.id}/handoff`, {
       pin: await pinOf(haul.id), receivedByName: 'Counter staff',
     })).status).toBe(201);
+  });
+});
+
+/**
+ * MDF-2: before this, #365's PIN-lockout auto-flag told staff a leg was
+ * stuck but gave them no way out — RESUME restored the leg's status but
+ * left handoffPinAttempts at MAX_PIN_ATTEMPTS, so verifyHandoffPin's lockout
+ * guard (which reads the counter, not the status) refused the very next
+ * attempt the same way. The claim this suite defends: resuming a PIN-locked
+ * leg actually un-sticks it — the driver can hand off afterward — and
+ * nothing about this path is new permission, new audit action, or money.
+ */
+describe('resume — handoff PIN locked out (MDF-2)', () => {
+  it('resets the PIN attempt counter on resume, and the driver can hand off afterward', async () => {
+    const driver = await makeDriver();
+    const { shipment, legId } = await bookedWithAssignedFirstMile(driver);
+    await driveToPinLockout(driver, legId);
+
+    let leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.status).toBe('EXCEPTION');
+    expect(leg.handoffPinAttempts).toBe(5);
+    // The auto-flag's own actor: the system, not a person — #365's behaviour,
+    // unchanged and re-asserted here as the starting condition for this fix.
+    const lockoutAudit = (await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_EXCEPTION' } })).find(
+      (a) => (a.newValue as { legId?: string }).legId === legId,
+    );
+    expect(lockoutAudit!.actorId).toBeNull();
+
+    const r = await resolve(legId, { resolution: 'RESUME', note: 'Confirmed with the recipient by phone; PIN is correct, let the driver try again.' });
+    expect(r.status).toBe(201);
+
+    leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.status).toBe('IN_PROGRESS');
+    expect(leg.handoffPinAttempts).toBe(0);
+    expect(leg.handoffPin).not.toBeNull(); // unchanged — only the counter resets, not the code itself
+
+    // The actual proof: the shipment was stuck, and now it is not.
+    const done = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
+      pin: await pinOf(legId), receivedByName: 'Counter staff',
+    });
+    expect(done.status).toBe(201);
+
+    // The audit record for THIS resolution: a real staff actor (never null —
+    // this is a human override, not a system event), the required reason,
+    // and an explicit flag that the PIN counter was the thing reset.
+    const resolveAudit = (await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_EXCEPTION_RESOLVED' } })).find(
+      (a) => (a.newValue as { legId?: string }).legId === legId,
+    );
+    expect(resolveAudit).toBeTruthy();
+    expect(resolveAudit!.actorId).not.toBeNull();
+    expect(resolveAudit!.reason).toBe('Confirmed with the recipient by phone; PIN is correct, let the driver try again.');
+    expect((resolveAudit!.newValue as { pinAttemptsReset?: boolean }).pinAttemptsReset).toBe(true);
+  });
+
+  it('leaves the counter alone when the exception was not a PIN lockout', async () => {
+    const driver = await makeDriver();
+    const { shipment, legId } = await bookedWithAssignedFirstMile(driver);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+    expect((await flag(legId, 'Vehicle broke down, nothing to do with the PIN.')).status).toBe(201);
+
+    const r = await resolve(legId, { resolution: 'RESUME', note: 'Replacement vehicle arranged.' });
+    expect(r.status).toBe(201);
+
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.handoffPinAttempts).toBe(0); // was already 0 — untouched, not reset
+    const audit = (await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_EXCEPTION_RESOLVED' } })).find(
+      (a) => (a.newValue as { legId?: string }).legId === legId,
+    );
+    expect((audit!.newValue as { pinAttemptsReset?: boolean }).pinAttemptsReset).toBe(false);
+  });
+
+  it('a PIN-locked leg cannot be resumed by an admin who only holds logistics.read', async () => {
+    const driver = await makeDriver();
+    const { legId } = await bookedWithAssignedFirstMile(driver);
+    await driveToPinLockout(driver, legId);
+
+    const reader = await seedLimitedAdmin(ctx.prisma, `xreader_${uniq()}@example.com`, ['logistics.read']);
+    const readerCookies = cookiesOf(
+      await request(ctx.server).post('/api/auth/login').send({ email: reader.email, password: reader.password }),
+    );
+    const refused = await post(readerCookies, `admin/logistics/legs/${legId}/resolve-exception`, {
+      resolution: 'RESUME', note: 'Read-only admin trying to clear a lockout.',
+    });
+    expect(refused.status).toBe(403);
+
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.status).toBe('EXCEPTION');
+    expect(leg.handoffPinAttempts).toBe(5); // refused — nothing moved
   });
 });
 
