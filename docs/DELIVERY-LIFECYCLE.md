@@ -314,6 +314,20 @@ PIN:
 - **Staff serialization still returns null** — the reveal endpoint is the only
   staff path to a code.
 
+**Not every leg's code is "the customer delivery code."** The two bullets
+above are a hard split, not a spectrum: a `FIRST_MILE` or `LINE_HAUL` leg
+ends at a hub counter, never at a door, so the sender/customer is never
+shown that leg's PIN at all — only staff holding `logistics.verify` can
+reveal it, and only through the endpoint above. Discussing "the customer
+delivery code" as if it covered every leg of every shipment reaches a wrong
+conclusion the moment a hub leg is involved, and a support answer built on
+that assumption would be wrong in front of a customer. **Production-verified
+2026-10-12** (previously a code-read claim only): Jim walked a hub leg's
+handoff end to end — signed in as a second role (`uat-ops-full`) to reveal
+the code through `GET /admin/logistics/legs/:id/handoff-pin`, then acted as
+the assigned driver to enter it, and the leg moved `ASSIGNED` → `DELIVERED`.
+No PIN value is recorded here, or anywhere in this document.
+
 This closed what was gap 2 (PR #12). Still absent in this area: an admin
 **override** for a handoff locked by five failed attempts — the lockout
 message promises one, the permission for it is chosen (`logistics.verify`'s
