@@ -1,0 +1,69 @@
+-- MDF-213: a public `track()` call that names no placement has always lost
+-- data. `PromotionMetricDaily`'s compound unique key is
+-- (promotionId, day, placement), and `placement` is nullable in Postgres --
+-- but Prisma's *generated client* rejects `null` inside a structured
+-- compound-key `where` object before issuing any SQL at all. `track()`'s
+-- only write path for this table has been `tx.promotionMetricDaily.upsert({
+-- where: { promotionId_day_placement: { ..., placement } } })` since the
+-- table's first commit (4316fd8) -- so this has never once been able to
+-- succeed for a null placement, on any version of this code, in any
+-- environment. The client-side throw happens AFTER the paired
+-- `promotionEvent.create()` in the same transaction, so the whole
+-- transaction rolls back: 0 event rows, 0 daily rows, every time.
+--
+-- WHY NOT JUST "NULLS NOT DISTINCT"? That changes what Postgres's unique
+-- index does with two NULLs (treats them as a conflict instead of distinct
+-- rows) -- but it does nothing about the Prisma client throwing before any
+-- SQL reaches Postgres. Reaching the database at all requires either a raw,
+-- unstructured SQL statement (bypassing the client's compound-key
+-- validation) or giving the key a value the client will accept. This
+-- migration takes the second route.
+--
+-- THE FIX. One new enum value, `UNSPECIFIED`, meaning "no placement was
+-- given." `apps/api`'s `track()` substitutes it for a null `placement`
+-- before writing, so the existing compound unique key always has a
+-- concrete, non-null value to conflict on, and the single atomic
+-- `INSERT ... ON CONFLICT DO UPDATE` path MDF-211 already built for every
+-- other placement now covers this case too -- no second code path.
+--
+-- WHY NOT A FUNCTIONAL/EXPRESSION UNIQUE INDEX INSTEAD (keeping `placement`
+-- genuinely NULL in the row)? `schema.prisma`'s `@@unique` cannot declare an
+-- expression index (e.g. on `COALESCE(placement, 'x')`) -- the real
+-- constraint would have to be hand-maintained outside what `schema.prisma`
+-- declares, permanently diverging from it on every future `migrate diff`
+-- (see packages/database/CLAUDE.md sec 6 for exactly this class of problem
+-- with other objects). The enum value is representable natively instead.
+--
+-- NOT A CLIENT-VISIBLE CHANGE. `UNSPECIFIED` is never accepted as input
+-- (packages/shared's PROMOTION_PLACEMENTS, which
+-- `trackPromotionEventSchema.placement` validates against, is NOT widened
+-- to include it) and never returned to a client (the one read call site,
+-- MarketingAnalyticsService's per-placement breakdown, translates it back
+-- to `null` before responding, so the existing "Unattributed" display logic
+-- in apps/web is untouched).
+--
+-- NO BACKFILL. Grepped the whole repo: `track()` is the ONLY writer to
+-- `promotion_metrics_daily`, on any historical version of this file, and
+-- every version used this same compound-key upsert -- so no row with
+-- `placement IS NULL` has ever been successfully written. There is nothing
+-- to backfill; this migration only changes what a future write does.
+--
+-- ROLLBACK. Postgres cannot drop a single enum value directly. If
+-- `UNSPECIFIED` is ever written (it will be, as soon as the paired
+-- application code ships), the only clean way to remove it is to rebuild the
+-- type (rename old, create new without the value, migrate every column,
+-- drop old) -- the same heavyweight path any enum-value removal here would
+-- need, same as the precedent in 20261104260000_conversation_participant_role_recipient.
+-- The practical mitigation if this ships and needs reverting is to revert
+-- the APPLICATION code back to the pre-MDF-213 track() (restoring today's
+-- bounded, known defect) and leave the now-unused enum value in place --
+-- an unused enum member is inert and costs nothing.
+--
+-- Additive and idempotent (ADD VALUE IF NOT EXISTS). PG16, so this runs
+-- inside a transaction; the new value is not used anywhere in this same
+-- migration, so the restriction on using a freshly added enum value inside
+-- the transaction that added it does not apply here -- the application code
+-- that writes 'UNSPECIFIED' rows ships in a separate deploy, after this
+-- migration has already committed.
+
+ALTER TYPE "PromotionPlacementType" ADD VALUE IF NOT EXISTS 'UNSPECIFIED';

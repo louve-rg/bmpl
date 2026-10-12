@@ -4137,6 +4137,16 @@ enum PromotionPlacementType {
   REAL_ESTATE
   SEARCH
   DISCOVERY
+  /// MDF-213: storage-only sentinel for a `track()` call that named no
+  /// placement. NEVER accepted from a client (not a member of
+  /// `packages/shared`'s `PROMOTION_PLACEMENTS`, so `trackPromotionEventSchema`
+  /// rejects it as input and no admin placement-assignment UI can select it)
+  /// and never returned to a client either — `MarketingAnalyticsService`
+  /// translates it back to `null` at its one read call site, so every
+  /// existing "no placement" / "Unattributed" display path is unchanged.
+  /// Exists only so `PromotionMetricDaily`'s compound unique key always has
+  /// a non-null `placement` to conflict on (see that model's own comment).
+  UNSPECIFIED
 }
 
 enum PromotionAssetKind {
@@ -4386,6 +4396,10 @@ model PromotionMetricDaily {
   promotionId String
   promotion   Promotion               @relation(fields: [promotionId], references: [id], onDelete: Cascade)
   day         DateTime                @db.Date
+  /// MDF-213: track() writes `UNSPECIFIED`, never a genuine null, for "no
+  /// placement given" — Prisma's generated client rejects `null` inside this
+  /// model's compound unique key before issuing SQL. The column itself
+  /// stays nullable (no schema narrowing); nothing else writes this table.
   placement   PromotionPlacementType?
   impressions Int                     @default(0)
   views       Int                     @default(0)
