@@ -261,6 +261,73 @@ claim about behaviour. The API-side rows most likely to move further
 today are pending a parallel validation pass; where that is true it is
 noted in the row itself rather than guessed at here.
 
+**A sixth claim this document was missing: IMPLEMENTED is not ACCEPTED.**
+Owner instruction, 2026-10-12, prompted by requirement 10's failed-delivery
+trigger (`MDF-54`): "obtain or locate [Edward's] exact wording before
+declaring the requirement complete. Separate what is implemented from what
+he has actually accepted." Checked both halves against the record rather
+than inferred from either.
+
+**Requirement 10's exact wording search: NOT ON RECORD — and this is a
+known, standing fact confirmed again, not a new gap found today.**
+`hive/agents/god/edward-questions.md` already states it plainly: "every one
+of the twelve audit rows reported the same thing: our document does not
+quote Edward anywhere. Twelve for twelve." This document's own requirement
+10 history calls the staff `EXCEPTION`/`flagException`/`resolveException`
+path "the right mechanism to extend rather than duplicate" — that sentence
+is this document's paraphrase, never Edward's. Nothing searched for this
+pass (this document, `OWNER-RULINGS.md`, and every Edward-named file in the
+hive) contains a quote, transcript or dated message in his own words about
+the failed-delivery trigger.
+[Ruling 14](./OWNER-RULINGS.md#ruling-14--failed-delivery-finish-it-dont-leave-it-indefinitely-blocked)
+(2026-10-10) already moved this decision "off Edward and onto the owner
+himself" for exactly this reason — not a new search outcome, a
+standing, already-decided fact this pass confirms rather than discovers.
+
+**None of the twelve has a recorded acceptance from Edward himself — zero
+of twelve, not an estimate.** Searched this document, `OWNER-RULINGS.md`
+and every Edward-named file in the hive (`bmpl-edward-script.md`,
+`bmpl-edward-uat.md`, `bmpl-edward-uat-round2-findings.md`,
+`agents/god/EDWARD-MASTER-HANDOFF.md`, `EDWARD-MORNING-HANDOFF.md`,
+`EDWARD-FACTS-REQUEST.md`, `edward-questions.md`) for a quote, a dated
+reply, or an explicit "yes" in his own words against any of the twelve.
+Found none. What exists instead, repeatedly, is this team's own assessment
+of readiness: "EDWARD ACCEPTANCE PASS" (kanban `MDF-87` through `MDF-90`)
+explicitly means "could Edward actually perform this workflow through the
+product right now," checked by this team, not confirmation that he did it;
+requirement 3 below reads "done, as Edward asked for it," which is this
+document's judgment that the build matches the request, not his sign-off.
+Both are real and valuable, and neither is acceptance. The one place
+Edward's own words *are* quoted directly in this codebase is a different
+requirement set entirely — the responsive-navigation work (kanban
+`MDF-103`: "Edward said 'Mobile Menu'...", "His words: 'Do NOT force a
+mobile drawer onto desktop...'") — which shows this team does quote him
+verbatim when it has his words, and did not fabricate one here because it
+has none for these twelve.
+
+| # | Implemented (per the evidence ladder above) | Accepted by Edward |
+| - | --- | --- |
+| 1 | Yes | NO RECORD |
+| 2 | Yes | NO RECORD |
+| 3 | Yes (two policy questions open — not implementation gaps) | NO RECORD |
+| 4 | Yes | NO RECORD |
+| 5 | Yes | NO RECORD |
+| 6 | Yes | NO RECORD |
+| 7 | Yes for the booking customer; recipient-facing courier identity ruled out of scope by the owner (Ruling 13), not an Edward answer | NO RECORD |
+| 8 | Yes for shipping and marketplace delivery; whether the requirement was ever meant to cover marketplace's two-stop case is unsettled | NO RECORD |
+| 9 | Yes | NO RECORD |
+| 10 | **No** — the failed-delivery trigger does not exist; the pre-custody/return-to-sender half is implemented | NO RECORD (exact wording searched for and not found — see above) |
+| 11 | Yes | NO RECORD |
+| 12 | Yes, API and staff triggers on all four pieces; migration application expected but unverified | NO RECORD |
+
+**11 of 12 implemented; 0 of 12 have a recorded acceptance from Edward
+himself.** "Implemented" above follows each requirement's own evidence
+ladder, not this table's invention — requirement 10 is the sole exception,
+unchanged by this pass. Where this document or a kanban card has used the
+word "accepted," "done, as Edward asked," or "ready," read it as this
+team's own judgment unless a quote or a dated reply from Edward is cited
+next to it — none is, anywhere in this document, as of this pass.
+
 ---
 
 ## 1. Vendor location-level inventory & fulfilment origin
