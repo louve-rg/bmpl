@@ -3,14 +3,21 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// react-dom's act() checks this flag; see driver/shipping/[id]/page.test.tsx for the
-// same convention (no @testing-library/react dependency in this repo).
+// react-dom's act() checks this flag; see driver/shipping/[id]/page.test.tsx /
+// StorefrontView.test.tsx / LocationPicker.test.tsx for the same convention
+// (no @testing-library/react dependency in this repo).
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// Stable reference across renders, matching the real next/navigation hooks --
+// the page's own load effect lists `router` as a dependency, and a fresh
+// object literal on every call would refire it (and therefore re-fetch) on
+// every re-render instead of once.
+const mockRouter = { push: vi.fn(), refresh: vi.fn() };
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'order1' }),
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => mockRouter,
   useSearchParams: () => new URLSearchParams(),
+  usePathname: () => window.location.pathname,
 }));
 
 vi.mock('next/link', () => ({
@@ -21,20 +28,30 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+// Page chrome, irrelevant to either suite below; the real Header needs
+// window.matchMedia, which jsdom does not provide.
 vi.mock('../../../components/landing/Header', () => ({ Header: () => null }));
 vi.mock('../../../components/landing/Footer', () => ({ Footer: () => null }));
 
 const getOwn = vi.fn();
+const cancel = vi.fn();
 const pickupPin = vi.fn();
 vi.mock('../../../lib/orders', () => ({
+  money: (minor: number) => `$${(minor / 100).toFixed(2)}`,
   ordersApi: {
     getOwn: (...args: unknown[]) => getOwn(...args),
+    cancel: (...args: unknown[]) => cancel(...args),
     pickupPin: (...args: unknown[]) => pickupPin(...args),
   },
-  money: (minor: number) => `$${(minor / 100).toFixed(2)}`,
 }));
 
-const forOrder = vi.fn();
+// Defaults to a resolved `null` (no payment on record) so the cancel-affordance
+// suite below, which never touches this mock itself, gets the same outcome its
+// own file originally hard-coded (`forOrder: () => Promise.resolve(null)`).
+// Restored after every test's mockReset() in the shared afterEach, since
+// mockReset() clears a vi.fn's constructor-time implementation too (verified
+// empirically — mockClear() would have preserved it, mockReset() does not).
+const forOrder = vi.fn(() => Promise.resolve(null));
 vi.mock('../../../lib/payments', () => ({
   paymentsApi: { forOrder: (...args: unknown[]) => forOrder(...args) },
 }));
@@ -74,8 +91,43 @@ function order(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// Separate fixture for the cancel-affordance suite below: a different default
+// shape (DELIVERY, not PICKUP; a fuller item record) than `order()` above, so
+// it keeps its own name rather than being folded into `order()`/`vendorOrder()`.
+function cancelOrder(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'order1',
+    orderNumber: 'BML-0001',
+    status: 'PENDING',
+    currency: 'BZD',
+    itemCount: 1,
+    subtotalMinor: 1000,
+    deliveryFeeMinor: 0,
+    totalMinor: 1000,
+    placedAt: new Date().toISOString(),
+    deliveryAddress: null,
+    vendorOrders: [
+      {
+        id: 'vo1',
+        orderNumber: 'BML-0001-A',
+        status: 'PENDING',
+        deliveryMethod: 'DELIVERY',
+        customerNotes: null,
+        currency: 'BZD',
+        itemCount: 1,
+        subtotalMinor: 1000,
+        vendor: { businessName: 'Test Store', slug: 'test-store' },
+        items: [{ productTitle: 'A Widget', variantTitle: null, sku: null, unitPriceMinor: 1000, quantity: 1, subtotalMinor: 1000, currency: 'BZD', productId: 'p1', imageUrl: null }],
+        delivery: null,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
+let confirmSpy: { mockRestore: () => void } | null = null;
 
 afterEach(() => {
   if (root) act(() => root!.unmount());
@@ -83,8 +135,12 @@ afterEach(() => {
   root = null;
   container = null;
   getOwn.mockReset();
+  cancel.mockReset();
   pickupPin.mockReset();
   forOrder.mockReset();
+  forOrder.mockResolvedValue(null);
+  confirmSpy?.mockRestore();
+  confirmSpy = null;
 });
 
 async function mount() {
@@ -154,5 +210,110 @@ describe('OrderDetailPage — pickup order status is visible before the pickup c
     // contradiction to resolve by inventing a new combined status.
     expect(el.textContent).toContain('PENDING');
     expect(el.textContent).toContain('READY FOR PICKUP');
+  });
+});
+
+/**
+ * MDF — the cancel endpoint (apps/api orders.controller.ts) already existed,
+ * worked and was correctly restricted to PENDING orders, but had zero
+ * references anywhere in apps/web: a built, paid-for capability with no
+ * button. This is the button's own regression guard.
+ */
+describe('order detail page — cancel affordance', () => {
+  it('shows "Cancel order" while every vendor-order is PENDING', async () => {
+    getOwn.mockResolvedValue(cancelOrder());
+    const el = await mount();
+    expect(el.textContent).toContain('Cancel order');
+  });
+
+  it('hides "Cancel order" once a vendor-order has moved past PENDING', async () => {
+    getOwn.mockResolvedValue(cancelOrder({ vendorOrders: [{ ...cancelOrder().vendorOrders[0], status: 'PREPARING' }] }));
+    const el = await mount();
+    expect(el.textContent).not.toContain('Cancel order');
+  });
+
+  it('hides "Cancel order" once the order itself is CANCELLED', async () => {
+    getOwn.mockResolvedValue(cancelOrder({ status: 'CANCELLED' }));
+    const el = await mount();
+    expect(el.textContent).not.toContain('Cancel order');
+  });
+
+  it('asks for confirmation, calls the API, and reflects the new state without a manual reload', async () => {
+    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    getOwn.mockResolvedValueOnce(cancelOrder());
+    cancel.mockResolvedValue(undefined);
+    // The real cancelOwn() returns the fresh order; the page reloads via
+    // getOwn() afterwards, matching the existing addresses-page pattern
+    // (await load() rather than trusting the mutation's own response).
+    getOwn.mockResolvedValueOnce(cancelOrder({ status: 'CANCELLED', vendorOrders: [{ ...cancelOrder().vendorOrders[0], status: 'CANCELLED' }] }));
+
+    const el = await mount();
+    expect(el.textContent).toContain('Cancel order');
+
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Cancel order')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledWith('order1');
+    expect(getOwn).toHaveBeenCalledTimes(2);
+    expect(el.textContent).not.toContain('Cancel order');
+  });
+
+  it('declining the confirmation prompt never calls the API', async () => {
+    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    getOwn.mockResolvedValue(cancelOrder());
+
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Cancel order')!;
+    await act(async () => {
+      button.click();
+    });
+
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the server\'s real refusal message (the vendor-started-preparing race) instead of a generic error', async () => {
+    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    getOwn.mockResolvedValue(cancelOrder());
+    cancel.mockRejectedValue({ status: 409, message: 'The store has already started preparing this order, so it can no longer be cancelled.' });
+
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Cancel order')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(el.textContent).toContain('The store has already started preparing this order, so it can no longer be cancelled.');
+  });
+
+  it('a 409 refusal still re-fetches, so the stale button and PENDING vendor-order correct themselves without a manual reload', async () => {
+    // The race the server guards against: a vendor starts preparing while
+    // this page is still open. The refusal text is right either way, but
+    // the view must stop claiming the order is still cancellable once the
+    // server has said otherwise -- that claim is only true if THIS path
+    // re-fetches too, not only the success path.
+    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    getOwn.mockResolvedValueOnce(cancelOrder());
+    cancel.mockRejectedValue({ status: 409, message: 'The store has already started preparing this order, so it can no longer be cancelled.' });
+    getOwn.mockResolvedValueOnce(cancelOrder({ vendorOrders: [{ ...cancelOrder().vendorOrders[0], status: 'PREPARING' }] }));
+
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Cancel order')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getOwn).toHaveBeenCalledTimes(2);
+    expect(el.textContent).not.toContain('Cancel order');
+    expect(el.textContent).toContain('The store has already started preparing this order, so it can no longer be cancelled.');
   });
 });

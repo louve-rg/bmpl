@@ -133,6 +133,9 @@ export const ordersApi = {
   checkout: (body: CheckoutBody) => api.post<OrderView>('/checkout', body),
   listOwn: () => api.get<OrderListItem[]>('/orders'),
   getOwn: (id: string) => api.get<OrderView>(`/orders/${id}`),
+  // The whole order, only while every vendor-order is still PENDING — the
+  // server is the one source of truth for the window; this just calls it.
+  cancel: (id: string) => api.post<OrderView>(`/orders/${id}/cancel`, {}),
   vendorList: () => api.get<VendorOrderListItem[]>('/vendor/orders'),
   vendorGet: (id: string) => api.get<VendorOrderView>(`/vendor/orders/${id}`),
   // Fulfilment (M26.3) — works for BOTH delivery methods. Marking a DELIVERY

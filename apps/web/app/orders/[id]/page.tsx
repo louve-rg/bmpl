@@ -26,9 +26,11 @@ export default function OrderDetailPage() {
   const [order, setOrder] = useState<OrderView | null>(null);
   const [payment, setPayment] = useState<PaymentDetail | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading');
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
-  useEffect(() => {
-    ordersApi
+  function load() {
+    return ordersApi
       .getOwn(params.id)
       .then((o) => {
         setOrder(o);
@@ -42,7 +44,32 @@ export default function OrderDetailPage() {
         else if (err.status === 404) setState('notfound');
         else setState('error');
       });
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id, router]);
+
+  // Visible only while the server's own window is still open — every
+  // vendor-order still PENDING. The server re-checks this itself on submit
+  // (the realistic race: a vendor starts preparing while this page sits
+  // open), so this is a UI affordance, not the authority.
+  const cancellable = order?.status === 'PENDING' && order.vendorOrders.every((vo) => vo.status === 'PENDING');
+
+  async function cancelOrder() {
+    if (!window.confirm('Cancel this order? This cannot be undone.')) return;
+    setCancelError(null);
+    setCancelling(true);
+    try {
+      await ordersApi.cancel(params.id);
+      await load();
+    } catch (err) {
+      setCancelError((err as ApiError).message ?? 'We could not cancel this order.');
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   return (
     <>
@@ -75,9 +102,25 @@ export default function OrderDetailPage() {
               <PageHeader
                 title={order.orderNumber}
                 description={`Placed ${new Date(order.placedAt).toLocaleString()}`}
-                actions={<OrderStatusBadge status={order.status} />}
+                actions={
+                  <>
+                    {cancellable && (
+                      <button
+                        type="button"
+                        onClick={cancelOrder}
+                        disabled={cancelling}
+                        className="rounded-bmpl-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {cancelling ? 'Cancelling…' : 'Cancel order'}
+                      </button>
+                    )}
+                    <OrderStatusBadge status={order.status} />
+                  </>
+                }
               />
             </div>
+
+            {cancelError && <Alert tone="error" title="We couldn’t cancel this order." className="mt-4">{cancelError}</Alert>}
 
             {order.deliveryAddress && (
               <Card className="p-4 text-sm">
