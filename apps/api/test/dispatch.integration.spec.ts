@@ -524,10 +524,29 @@ describe('driver job workflow + verification', () => {
       ...Array.from({ length: N }, () => post(driver.cookies, `driver/jobs/${order.deliveryId}/confirm-pickup`, { pin })),
     ]);
 
+    // The invariant that matters is ONE winner and a coherent final row
+    // (checked below) - not a fixed tally of one particular refusal code.
+    // Both confirmPickup and cancel() read status, then assert, THEN open
+    // the conditional-write transaction (see their own comments). Losing
+    // can be observed at either point, and which one is pure scheduling
+    // luck, confirmed empirically across repeated real-DB runs:
+    //  - lost at the conditional write (the race this test targets): 409.
+    //  - this call's own pre-transaction read already saw the terminal
+    //    status the winner had already committed: assertAction's 400
+    //    ("Cannot cancel/confirm pickup a delivery that is \"...\"").
+    // A fixed count of 409s over-specifies the shape of losing and breaks
+    // on harmless timing variance (observed on CI: 4 of 9 losses were 400,
+    // not 409 - same invariant, different checkpoint). Anything outside
+    // this set (2xx beyond the one winner, 5xx, any other 4xx) is real.
     const wins = responses.filter((r) => r.status === 201);
-    const losses = responses.filter((r) => r.status === 409);
     expect(wins).toHaveLength(1);
+    const losses = responses.filter((r) => r !== wins[0]);
     expect(losses).toHaveLength(2 * N - 1);
+    for (const r of losses) {
+      if (r.status === 409) continue;
+      expect(r.status).toBe(400);
+      expect(r.body.message).toMatch(/^Cannot (cancel|confirm pickup) a delivery that is ".+"\.$/);
+    }
 
     const row = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: order.deliveryId } });
     if (row.status === 'CANCELLED') {
