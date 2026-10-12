@@ -1870,6 +1870,8 @@ export class ShipmentService {
       return { action: 'SHIPMENT_LEG_EXCEPTION' as const, note: input.reason };
     });
 
+    // EDWARD-REQ7-RECIPIENT-NOTIFY (docs/EDWARD-REQUIREMENTS.md): notifies the
+    // recipient after the exception transition above resolves.
     const withRecipient = await this.prisma.shipmentLeg.findUnique({
       where: { id: legId },
       select: { shipment: { select: { id: true, reference: true, recipientUserId: true } } },

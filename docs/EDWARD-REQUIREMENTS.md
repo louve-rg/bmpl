@@ -1287,19 +1287,20 @@ Four distinct pieces, per the owner's original requirement:
   since `e72da60`):** reroute and return-to-sender
   are in the admin panel from PR #309 (`5fe37cf`, which replaced the closed
   PR #278); hold uses the existing exception-flag button on the admin
-  logistics page (`flagException`,
-  `apps/admin/app/dashboard/logistics/[reference]/page.tsx:161`). **Verified
+  logistics page (`flagException` in
+  `apps/admin/app/dashboard/logistics/[reference]/page.tsx`). **Verified
   this pass that the button does what the requirement asks.** It posts to
-  the admin exception route
-  (`apps/api/src/shipping/shipping.controller.ts:646`), which calls
+  the admin exception route (`ShippingController.exception` in
+  `apps/api/src/shipping/shipping.controller.ts`), which calls
   `ShipmentService.flagException`
-  (`apps/api/src/shipping/shipment.service.ts:1851`): inside the leg
+  (`apps/api/src/shipping/shipment.service.ts`): inside the leg
   transition it notifies admins — staff. The shared `transition()` helper
-  (`apps/api/src/shipping/shipment.service.ts:2812`) unconditionally calls
-  `notifyCustomer` (`apps/api/src/shipping/shipment.service.ts:2969`) on
+  (`apps/api/src/shipping/shipment.service.ts`) unconditionally calls
+  `notifyCustomer` (`apps/api/src/shipping/shipment.service.ts`) on
   every call, reaching the sender. After the transition resolves,
   `flagException` separately notifies `recipientUserId` when one exists
-  (`apps/api/src/shipping/shipment.service.ts:1877`), reaching the
+  (`apps/api/src/shipping/shipment.service.ts`, marked
+  `EDWARD-REQ7-RECIPIENT-NOTIFY`), reaching the
   recipient. Staff, sender and recipient are all notified, exactly what
   Ruling 1 and this requirement ask for. Adjacent to
   requirement 10 but proactive (before dispatch reaches
