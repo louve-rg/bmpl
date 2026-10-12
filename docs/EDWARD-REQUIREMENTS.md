@@ -1298,9 +1298,9 @@ Four distinct pieces, per the owner's original requirement:
   (`apps/api/src/shipping/shipment.service.ts`) unconditionally calls
   `notifyCustomer` (`apps/api/src/shipping/shipment.service.ts`) on
   every call, reaching the sender. After the transition resolves,
-  `flagException` separately notifies `recipientUserId` when one exists
-  (`apps/api/src/shipping/shipment.service.ts`, marked
-  `EDWARD-REQ7-RECIPIENT-NOTIFY`), reaching the
+  `ShipmentService.flagException` separately notifies `recipientUserId`
+  when one exists (cited at the containing method, not its own branch —
+  `apps/api/src/shipping/shipment.service.ts`), reaching the
   recipient. Staff, sender and recipient are all notified, exactly what
   Ruling 1 and this requirement ask for. Adjacent to
   requirement 10 but proactive (before dispatch reaches
