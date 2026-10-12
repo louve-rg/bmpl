@@ -81,17 +81,17 @@ export function Services() {
 
         {/* Bento */}
         <div className="mt-14 space-y-4 sm:mt-16 sm:space-y-5">
-          <div className="grid gap-4 sm:gap-5 lg:grid-cols-12">
+          <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-12">
             <div className="lg:col-span-7">
               <MarketplaceCard />
             </div>
-            <div className="grid gap-4 sm:grid-cols-2 sm:gap-5 lg:col-span-5 lg:grid-cols-1">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:col-span-5 lg:grid-cols-1">
               <ShippingCard />
               <PassengerCard />
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-12">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-12">
             <div className="lg:col-span-5">
               <BelizeConnectCard />
             </div>
