@@ -505,6 +505,45 @@ describe('driver job workflow + verification', () => {
     expect(p.completedDeliveries).toBe(1);
   });
 
+  it('admin cancel racing the assigned driver confirming pickup resolves to exactly one winner, never a mixed state (MDF-18)', async () => {
+    // CANCEL's own legal `from` list includes DRIVER_ACCEPTED - the same
+    // status CONFIRM_PICKUP's only legal `from` is - so an admin and the
+    // assigned driver can both legally act on this exact row at the same
+    // instant. Before the fix, both unconditional writes could each commit:
+    // this test fires 5 of each concurrently and fails on the pre-fix code
+    // (more than one 201, or a mixed DB state - CANCELLED with inventory
+    // finalized, or PICKUP_CONFIRMED with cancelledAt set).
+    const { vendor, order, driver } = await assignedDelivery();
+    expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/accept`)).body.status).toBe('DRIVER_ACCEPTED');
+    const pinRes = await get(vendor.vendorCookies, `vendor/deliveries/${order.deliveryId}/pickup-pin`);
+    const pin = pinRes.body.pickupPin;
+
+    const N = 5;
+    const responses = await Promise.all([
+      ...Array.from({ length: N }, () => post(adminCookies, `admin/deliveries/${order.deliveryId}/cancel`, { reason: 'race test' })),
+      ...Array.from({ length: N }, () => post(driver.cookies, `driver/jobs/${order.deliveryId}/confirm-pickup`, { pin })),
+    ]);
+
+    const wins = responses.filter((r) => r.status === 201);
+    const losses = responses.filter((r) => r.status === 409);
+    expect(wins).toHaveLength(1);
+    expect(losses).toHaveLength(2 * N - 1);
+
+    const row = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: order.deliveryId } });
+    if (row.status === 'CANCELLED') {
+      // The cancel won - nothing from the losing confirm-pickup attempts
+      // leaked through: no inventory finalized, no pickup timestamp set.
+      expect(row.inventoryFinalizedAt).toBeNull();
+      expect(row.pickupConfirmedAt).toBeNull();
+    } else {
+      // A confirm-pickup won - nothing from the losing cancel attempts
+      // leaked through: never cancelled, inventory genuinely finalized.
+      expect(row.status).toBe('PICKUP_CONFIRMED');
+      expect(row.cancelledAt).toBeNull();
+      expect(row.inventoryFinalizedAt).not.toBeNull();
+    }
+  });
+
   it('invalid transition returns a clear error (in-transit before pickup)', async () => {
     const { order, driver } = await assignedDelivery();
     await post(driver.cookies, `driver/jobs/${order.deliveryId}/accept`);
