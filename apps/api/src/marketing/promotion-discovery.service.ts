@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { belizeCalendarDate, HOMEPAGE_PLACEMENTS, type PromotionPlacementType } from '@bmpl/shared';
 import type { PromotionReportInput, TrackPromotionEventInput } from '@bmpl/validation';
 import { Prisma, PromotionEventKind } from '@bmpl/database';
@@ -48,6 +49,8 @@ const dayBucket = (d = new Date()) => belizeCalendarDate(d);
  */
 @Injectable()
 export class PromotionDiscoveryService {
+  private readonly logger = new Logger(PromotionDiscoveryService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly promotions: PromotionsService,
@@ -130,6 +133,17 @@ export class PromotionDiscoveryService {
    * independent write to each table would leave a window where a failure
    * after the first and before the second could make them disagree; one
    * transaction cannot.
+   *
+   * MDF-211: the daily-counter write used to be `tx.promotionMetricDaily.upsert(...)`,
+   * which Prisma compiles into an attempted UPDATE followed by a CREATE if
+   * that affected no rows — two statements, not one. Two concurrent calls for
+   * the same (promotionId, day, placement) bucket could both reach the CREATE,
+   * and the loser's real unique-constraint violation (P2002) aborted the
+   * WHOLE transaction, silently rolling the paired event insert back with it.
+   * A single `INSERT ... ON CONFLICT DO UPDATE` is one atomic statement at
+   * the database level — there is no gap between "does a row exist" and
+   * "write a row" for a second call to land in, so the race this exists to
+   * close is gone rather than merely survived.
    */
   async track(promotionId: string, dto: TrackPromotionEventInput) {
     try {
@@ -145,24 +159,38 @@ export class PromotionDiscoveryService {
       const placement = dto.placement ?? null;
       const column = EVENT_COLUMN[dto.event];
       const kind = EVENT_KIND[dto.event];
-      const create: Prisma.PromotionMetricDailyCreateInput = {
-        promotion: { connect: { id: promotionId } }, day, placement, impressions: 0, views: 0, clicks: 0, conversions: 0,
-      };
-      create[column] = 1;
+      // Dynamic but not attacker-controlled: `column` only ever comes from the
+      // fixed EVENT_COLUMN map above, never from the request body directly, so
+      // splicing it in as a raw identifier (Prisma.raw, not a bound parameter —
+      // a column name can't be one) carries no injection risk.
+      const col = Prisma.raw(`"${column}"`);
       await this.prisma.$transaction(async (tx) => {
         if (kind) {
           await tx.promotionEvent.create({ data: { promotion: { connect: { id: promotionId } }, kind, placement, occurredAt: now } });
         }
-        await tx.promotionMetricDaily.upsert({
-          // placement is a nullable member of the compound unique; Prisma accepts null at
-          // runtime though its generated type narrows to the enum — cast to satisfy TS.
-          where: { promotionId_day_placement: { promotionId, day, placement: placement as never } },
-          create,
-          update: { [column]: { increment: 1 } } as Prisma.PromotionMetricDailyUpdateInput,
-        });
+        await tx.$executeRaw`
+          INSERT INTO "promotion_metrics_daily"
+            ("id", "promotionId", "day", "placement", "impressions", "views", "clicks", "conversions", "createdAt", "updatedAt")
+          VALUES
+            (${randomUUID()}, ${promotionId}, ${day}::date, ${placement}::"PromotionPlacementType",
+             ${column === 'impressions' ? 1 : 0}, ${column === 'views' ? 1 : 0},
+             ${column === 'clicks' ? 1 : 0}, ${column === 'conversions' ? 1 : 0},
+             now(), now())
+          ON CONFLICT ("promotionId", "day", "placement")
+          DO UPDATE SET ${col} = "promotion_metrics_daily".${col} + 1, "updatedAt" = now()
+        `;
       });
-    } catch {
-      // best-effort; tracking must never surface an error to the caller.
+    } catch (e) {
+      // Best-effort; tracking must never surface an error to the caller. But
+      // "best-effort" means swallowing an EXPECTED outcome, not every outcome
+      // (MDF-211) — this codebase's convention (~20 sites, see the BMPL-388
+      // comment in packages/database/src/index.ts) is to catch P2002
+      // specifically and let anything else through to be logged. Nothing in
+      // this method's own writes is expected to raise P2002 anymore (the
+      // conflict is now handled inside the SQL itself), so in practice this
+      // now logs any real failure instead of discarding it with zero trace.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return;
+      this.logger.error(`track() failed for promotion ${promotionId}: ${String(e)}`);
     }
   }
 
