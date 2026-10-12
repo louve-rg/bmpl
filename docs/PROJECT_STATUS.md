@@ -573,6 +573,17 @@ migrations were applied by CI against real Postgres before the merge.
 
 ## 12. Known gaps and what still needs a person
 
+### Five end-to-end journeys are now proven — on a local stack, not production
+
+Marketplace purchase-to-delivery, a three-leg shipping route with hub
+handoffs, passenger request-and-confirm transport, the failure/deviation
+paths for each, and the one real gap found along the way (a working
+order-cancel endpoint with no UI) are all written up in
+[`END-TO-END-JOURNEYS.md`](./END-TO-END-JOURNEYS.md), sourced from an
+agent's local walkthroughs. **Behaviour-verified on a local stack, not
+production-verified** — see that document for the distinction and for what
+it does not claim.
+
 ### The one thing blocking sign-off
 
 **Deployed browser and mobile QA of marketplace checkout has not been done.**
