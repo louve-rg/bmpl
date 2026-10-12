@@ -58,7 +58,12 @@ export class MarketingAnalyticsService {
       totals: this.summarize(totals._sum),
       redemptions,
       daily: daily.map((d) => ({ day: d.day, ...this.summarize(d._sum) })),
-      byPlacement: byPlacementRaw.map((p) => ({ placement: p.placement, ...this.summarize(p._sum) })),
+      // MDF-213: 'UNSPECIFIED' is a storage-only sentinel track() substitutes
+      // for a null placement (so the daily-rollup table's compound unique
+      // key always has a non-null value to conflict on) — translate it back
+      // to null here, the one place this column is read, so apps/web's
+      // existing `r.placement ? label : 'Unattributed'` display is unchanged.
+      byPlacement: byPlacementRaw.map((p) => ({ placement: p.placement === 'UNSPECIFIED' ? null : p.placement, ...this.summarize(p._sum) })),
     };
   }
 

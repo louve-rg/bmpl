@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { belizeCalendarDate, HOMEPAGE_PLACEMENTS, type PromotionPlacementType } from '@bmpl/shared';
 import type { PromotionReportInput, TrackPromotionEventInput } from '@bmpl/validation';
-import { Prisma, PromotionEventKind } from '@bmpl/database';
+import { Prisma, PromotionEventKind, PromotionPlacementType as DbPlacementType } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -30,6 +30,17 @@ const EVENT_KIND: Partial<Record<TrackPromotionEventInput['event'], PromotionEve
   view: PromotionEventKind.VIEW,
   click: PromotionEventKind.CLICK,
 };
+
+/**
+ * MDF-213: storage-only sentinel for `promotion_metrics_daily.placement`
+ * when a `track()` call named none. Never a client-facing value — not a
+ * member of `packages/shared`'s `PROMOTION_PLACEMENTS` (so it can never be
+ * submitted as input or assigned to a placement slot), and translated back
+ * to `null` by `MarketingAnalyticsService` before any response leaves the
+ * API. Exists only so this table's compound unique key always has a
+ * non-null value to `ON CONFLICT` on — see that model's schema comment.
+ */
+const NO_PLACEMENT = DbPlacementType.UNSPECIFIED;
 
 /**
  * The Belize calendar day, as a @db.Date bucket key, for a real instant.
@@ -145,20 +156,26 @@ export class PromotionDiscoveryService {
    * "write a row" for a second call to land in, so the race this exists to
    * close is gone rather than merely survived.
    *
-   * SCOPED to a non-null `placement` only. A null placement hits a separate,
-   * pre-existing defect (the compound unique index can't be conflicted-on
-   * with a null member — see the comment on
-   * test/promotion-tracking.integration.spec.ts) that this fix does not
-   * touch: Postgres treats NULL as distinct in a plain unique index, so an
-   * `ON CONFLICT` here would never match for a null placement and would
-   * insert a brand-new row on every call instead — unbounded growth driven
-   * by this endpoint's unauthenticated, unthrottled traffic, breaking the
-   * bound the schema's own BMPL-332 comment states as a design property
-   * ("the right PERMANENT read path, bounded by promotions × days ×
-   * placements"). The real fix needs the unique index to treat NULLs as not
-   * distinct, which is a migration — out of scope here, carded separately.
-   * The null branch below is therefore left byte-for-byte as it already
-   * behaves on main, including its silent catch.
+   * MDF-213: that fix originally covered a non-null `placement` only. A null
+   * `placement` hit a separate, pre-existing defect: Prisma's *generated
+   * client* rejects `null` inside the compound-key `where` object before any
+   * SQL is sent, so `track()` could never successfully write a row for it —
+   * the throw happens after the paired event insert, rolling the whole
+   * transaction back, 0 rows either way, every time a caller omits
+   * `placement` (which is most of them; it's optional on the public schema).
+   * Fixed by substituting `UNSPECIFIED` — a storage-only sentinel enum value,
+   * migration `20261104270000_promotion_metric_no_placement_sentinel` — for a
+   * null `placement` before the write, so the single atomic path below
+   * covers this case too; the two-branch special-case this method used to
+   * have is gone. `UNSPECIFIED` is never accepted as client input
+   * (`packages/shared`'s `PROMOTION_PLACEMENTS`, which validates
+   * `dto.placement`, is not widened to include it) and never returned to a
+   * client (`MarketingAnalyticsService`'s one read of this column translates
+   * it back to `null`, so the existing "Unattributed" display path in
+   * apps/web is unchanged). This keeps the table's documented row-count
+   * bound (promotions × days × placements) intact on this public,
+   * unauthenticated, unthrottled endpoint — it adds exactly one more
+   * placement bucket, not unbounded growth.
    */
   async track(promotionId: string, dto: TrackPromotionEventInput) {
     try {
@@ -171,34 +188,12 @@ export class PromotionDiscoveryService {
       // them would be capturable by a test that pins the clock.
       const now = new Date();
       const day = dayBucket(now);
-      const placement = dto.placement ?? null;
+      // dto.placement is the public-facing union (or null); NO_PLACEMENT is
+      // the DB-only sentinel outside that union — never a cast of a client
+      // value, always this one fixed constant.
+      const placement = dto.placement ?? NO_PLACEMENT;
       const column = EVENT_COLUMN[dto.event];
       const kind = EVENT_KIND[dto.event];
-
-      if (placement === null) {
-        const create: Prisma.PromotionMetricDailyCreateInput = {
-          promotion: { connect: { id: promotionId } }, day, placement, impressions: 0, views: 0, clicks: 0, conversions: 0,
-        };
-        create[column] = 1;
-        try {
-          await this.prisma.$transaction(async (tx) => {
-            if (kind) {
-              await tx.promotionEvent.create({ data: { promotion: { connect: { id: promotionId } }, kind, placement, occurredAt: now } });
-            }
-            await tx.promotionMetricDaily.upsert({
-              // placement is a nullable member of the compound unique; Prisma accepts null at
-              // runtime though its generated type narrows to the enum — cast to satisfy TS.
-              where: { promotionId_day_placement: { promotionId, day, placement: placement as never } },
-              create,
-              update: { [column]: { increment: 1 } } as Prisma.PromotionMetricDailyUpdateInput,
-            });
-          });
-        } catch {
-          // Deliberately silent — unchanged from main for this known,
-          // separately-tracked defect. Not this fix's to log or resolve.
-        }
-        return;
-      }
 
       // Dynamic but not attacker-controlled: `column` only ever comes from the
       // fixed EVENT_COLUMN map above, never from the request body directly, so
@@ -207,7 +202,7 @@ export class PromotionDiscoveryService {
       const col = Prisma.raw(`"${column}"`);
       await this.prisma.$transaction(async (tx) => {
         if (kind) {
-          await tx.promotionEvent.create({ data: { promotion: { connect: { id: promotionId } }, kind, placement, occurredAt: now } });
+          await tx.promotionEvent.create({ data: { promotion: { connect: { id: promotionId } }, kind, placement: dto.placement ?? null, occurredAt: now } });
         }
         await tx.$executeRaw`
           INSERT INTO "promotion_metrics_daily"
@@ -227,11 +222,9 @@ export class PromotionDiscoveryService {
       // (MDF-211) — this codebase's convention (~20 sites, see the BMPL-388
       // comment in packages/database/src/index.ts) is to catch P2002
       // specifically and let anything else through to be logged. Nothing in
-      // the non-null path's own writes is expected to raise P2002 anymore
-      // (the conflict is now handled inside the SQL itself), so in practice
-      // this now logs any real failure on that path instead of discarding it
-      // with zero trace. (The null-placement branch above never reaches this
-      // catch — it has its own, deliberately silent one.)
+      // this write is expected to raise P2002 anymore (the conflict is
+      // handled inside the SQL itself), so in practice this now logs any
+      // real failure instead of discarding it with zero trace.
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return;
       this.logger.error(`track() failed for promotion ${promotionId}: ${String(e)}`);
     }
