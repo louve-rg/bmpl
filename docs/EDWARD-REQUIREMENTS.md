@@ -207,7 +207,7 @@ should imply one is pending by default.
 | 2 | Package pickup/handoff photo | **Done for sender, staff, courier and linked recipient as of `0c322d6`** | `682b501` (PR #127) for the API; UI landed `a568d6a` (BMPL-352, PR #270) — courier upload, sender and staff view; linked-recipient access landed `66487e4` (PR #304) and `0c322d6` (BMPL-391, PR #305) |
 | 3 | Recipient account linking & incoming-shipment tracking | **Done** | `a6b7d97` (BMPL-179, PR #135); two policy questions open (BMPL-119), see below |
 | 4 | Granular driver service areas (district → city) | **End-to-end as of `2cbcf73`** | `3950db0` (PR #126) for the API; city picker landed `99e98c1` (BMPL-353, PR #272); wired to the lane-town endpoint by `2cbcf73` (BMPL-368, PR #279) — a lane-only town (e.g. Ladyville) is selectable as of `2cbcf73` |
-| 5 | Operating hours & closed/soon-closing handling | **Done** | `056b709`, `e498765`, `c2d1b0a`, `a072971`, `1161a6f` (PR #255); terminal half `699a3e3` (BMPL-262), `4eac6be` (BMPL-271), `b12afb3` (BMPL-273); closed-now badge `0d50de2` (BMPL-335), one-off closures `81ad57f` (BMPL-334) — all five found and added `effc63e`-pass, none cited here before |
+| 5 | Operating hours & closed/soon-closing handling | **Done** | vendor-hours dispatch `a072971` (PR #248), closing-soon warning `1161a6f` (PR #255); terminal half `699a3e3` (BMPL-262), `4eac6be` (BMPL-271), `b12afb3` (BMPL-273); closed-now badge `0d50de2` (BMPL-335), one-off closures `81ad57f` (BMPL-334) — the terminal-half/badge/closures five were found and added `effc63e`-pass, none cited here before; `056b709`/`e498765`/`c2d1b0a` removed `MDF-215`-pass — they are requirement 11's commits, not this row's |
 | 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
 | 7 | Courier & vehicle identification once assigned | **Done — for the booking customer as of `4d96bb0`; for a linked recipient, messaging is wired end-to-end (API and web) as of `c7690a5`/`5c11021`; courier identity for the recipient is restricted by owner ruling (2026-10-10), not an unbuilt gap** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient messaging API: PR #293 (BMPL-359), merged `910d5b2`; recipient messaging read + UI: PR #315 (`5c11021`) and PR #314 (`c7690a5`); `RECIPIENT_VIEW_INCLUDE` re-checked directly at `effc63e` — still no `assignedDriver`/`assignedVehicle`, now the ruled state, not a gap |
 | 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done for shipping and marketplace delivery, as of `16e4b4b`; whether the requirement was ever meant to cover marketplace's always-two-stop case is unsettled** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) for shipping; marketplace's driver job screen wired to the same `ExpandableRouteMap` by `16e4b4b` (BMPL-390, PR #302) — no API change, the pre-acceptance pin gate was already correct |
@@ -638,30 +638,37 @@ district is offered to a driver who selected it.
 
 ## 5. Operating hours & closed/soon-closing handling
 
-**Evidence ladder — for the five commits this row cites (`056b709`,
-`e498765`, `c2d1b0a`, `a072971`, `1161a6f`) only:**
+**Evidence ladder — for the seven commits that actually prove this row
+(MDF-215: `056b709`/`e498765`/`c2d1b0a` removed from this ladder — they
+are requirement 11's shipment-availability-window commits, PRs
+#209/#214/#218, and touch no vendor-hours/closing-soon code at all;
+their own tests
+(`apps/api/test/shipment-availability-windows*.integration.spec.ts`,
+`packages/shared/src/availability-windows.test.ts`) prove requirement
+11, see that row, not this one) — vendor-hours dispatch `a072971`,
+closing-soon warning `1161a6f`, terminal half `699a3e3`/`4eac6be`/
+`b12afb3`, closed-now badge `0d50de2`, one-off closures `81ad57f`:**
 - IMPLEMENTED: yes.
-- TESTED: yes, for the two commits that actually touch operating-hours
-  code — `apps/api/test/vendor-hours-dispatch.integration.spec.ts`
-  (`a072971`) and `apps/api/test/delivery.integration.spec.ts` /
-  `apps/web/lib/vendor-hours.test.ts` (`1161a6f`'s closing-soon half); not
-  independently re-run in this pass. **Found while fixing this citation,
-  flagged rather than fixed (outside this pass's scope):** `056b709`,
-  `e498765` and `c2d1b0a` — three of the five commits this row's own
-  header cites — touch no vendor-hours/closing-soon code at all; their
-  own tests
-  (`apps/api/test/shipment-availability-windows*.integration.spec.ts`)
-  prove requirement 11 (shipment availability windows), not this row.
-  This row's commit list appears to have picked up three commits that
-  belong to requirement 11 instead.
-- MERGED: yes — all five an ancestor of `origin/main`.
+- TESTED: yes, named —
+  `apps/api/test/vendor-hours-dispatch.integration.spec.ts`
+  (`a072971`); `apps/api/test/delivery.integration.spec.ts` and
+  `apps/web/lib/vendor-hours.test.ts` (`1161a6f`'s closing-soon half,
+  the latter extended again by `0d50de2` below);
+  `packages/shared/src/hub-hours.test.ts` (`699a3e3`);
+  `apps/api/test/hub-hours.integration.spec.ts` (`4eac6be`);
+  `apps/api/test/shipment-hub-hours-dispatch.integration.spec.ts`
+  (`b12afb3`); `apps/api/test/storefront.integration.spec.ts` and
+  `apps/web/lib/vendor-hours.test.ts` (`0d50de2`);
+  `apps/api/test/vendor-hours-exceptions.integration.spec.ts` and an
+  extension of `vendor-hours-dispatch.integration.spec.ts` (`81ad57f`);
+  not independently re-run in this pass.
+- MERGED: yes — all seven an ancestor of `origin/main`.
 - DEPLOYED: **yes, the code.** Every one touches only `apps/api` and/or
   `apps/web` — no `apps/admin` — an ancestor of both `apps/api`'s
-  (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits. `056b709` and
-  `a072971` each carry their own migration, each a confirmed ancestor of
-  the live API commit — **application is expected but unverified** (see
-  the methodology section above; the same holds for the terminal-half
-  commits found this pass, below).
+  (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits. `699a3e3`,
+  `81ad57f` and `a072971` each carry their own migration, each a
+  confirmed ancestor of the live API commit — **application is expected
+  but unverified** (see the methodology section above).
 - PRODUCTION-VERIFIED: **no record.**
 
 **Gap closed, 2026-10-10:** the **terminal-half** hub-hours work and the
@@ -690,13 +697,14 @@ Found by `git log --all --grep` for the two badge card ids and by
   extension of `vendor-hours-dispatch.integration.spec.ts`).
 
 All five are confirmed ancestors of `origin/main`, touch no `apps/admin`
-file, and are therefore DEPLOYED under the same web/API facts the rest of
-this ladder uses — the code, that is: `699a3e3` (the `HubOpeningDay`/
-`HubHoursException` schema and migration) and `81ad57f` (one-off
-closures, also migration-bearing) are DEPLOYED as code on the same terms
-as `056b709`/`a072971` above, each confirmed an ancestor of the live API
-commit — **application is equally expected but unverified** (see the
-methodology section above). PRODUCTION-VERIFIED stays **no record** for
+file, and are now folded into the evidence ladder above as part of this
+row's own seven commits rather than sitting separately from it — the
+code, that is: `699a3e3` (the `HubOpeningDay`/`HubHoursException` schema
+and migration) and `81ad57f` (one-off closures, also migration-bearing)
+are DEPLOYED as code on the same terms as `a072971` above, each
+confirmed an ancestor of the live API commit — **application is equally
+expected but unverified** (see the methodology section above).
+PRODUCTION-VERIFIED stays **no record** for
 all five — finding the commit is not the same claim as watching it work.
 
 **Status: done.** The **terminal half** is complete end to end: structured
