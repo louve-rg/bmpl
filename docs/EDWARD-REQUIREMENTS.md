@@ -225,9 +225,9 @@ should imply one is pending by default.
 | 7 | Courier & vehicle identification once assigned | **Done — for the booking customer as of `4d96bb0`; for a linked recipient, messaging is wired end-to-end (API and web) as of `c7690a5`/`5c11021`; courier identity for the recipient is restricted by owner ruling (2026-10-10), not an unbuilt gap** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient messaging API: PR #293 (BMPL-359), merged `910d5b2`; recipient messaging read + UI: PR #315 (`5c11021`) and PR #314 (`c7690a5`); `RECIPIENT_VIEW_INCLUDE` re-checked directly at `effc63e` — still no `assignedDriver`/`assignedVehicle`, now the ruled state, not a gap |
 | 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done for shipping and marketplace delivery, as of `16e4b4b`; whether the requirement was ever meant to cover marketplace's always-two-stop case is unsettled** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) for shipping; marketplace's driver job screen wired to the same `ExpandableRouteMap` by `16e4b4b` (BMPL-390, PR #302) — no API change, the pre-acceptance pin gate was already correct |
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done, and the two gaps this document used to flag as "what remains" are now also closed as of `444a1ec`/`9ec6764`** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below; standalone manage page `444a1ec` (PR #323); un-defaulting the current default without a delete `9ec6764` (PR #336) |
-| 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `e4b4be7` (corrected — the `effc63e` anchor this cell carried was stale): the staff-alone charge defect under Ruling 1 (BMPL-375) is fixed; failed delivery now has an API trigger (PR #365) but no web UI anywhere — a courier cannot reach it through the product** | Pre-custody half correct in shipped code. Return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) with a staff-alone charge defect, fixed by `0efd970` (BMPL-375, PR #288, merged); negative-control tests PR #285 (`3ea4fa1`) and a sink ownership test PR #306 (`302a84c`) are on main; customer confirmation `e72da60` (PR #308); staff prepare panel `5fe37cf` (PR #309); the fix's own red-team guards now pass under their real names, not a `[RED]` prefix, as of `5b7dd1a` (PR #312); acceptance-is-not-custody now has a named behavioural test as of `d5b1dec` (PR #318). Failed-delivery trigger now exists, API-only: courier self-report (`POST /driver/shipping-jobs/:id/report-issue`) and an auto-flagging PIN lockout, both `e4b4be7` (PR #365, MDF-96) — grep-confirmed zero `apps/web`/`apps/admin` files call either path; MDF-96's decision memo (owner ruling, 2026-10-10) may now be narrower in scope, Pam producing the exact workflow options |
+| 10 | Cancellation before custody, failed delivery, return-to-sender | **Trigger and screen both now exist. The staff-alone charge defect under Ruling 1 (BMPL-375) is fixed; failed delivery has an API trigger (`e4b4be7`, PR #365, merged) and a courier screen (PR #393, open, not yet merged) — Jim live-walked the screen and found one real overclaim, fixed on the same branch (fdfa925, not merged). The gap was always the missing screen, never the missing trigger — see below** | Pre-custody half correct in shipped code. Return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) with a staff-alone charge defect, fixed by `0efd970` (BMPL-375, PR #288, merged); negative-control tests PR #285 (`3ea4fa1`) and a sink ownership test PR #306 (`302a84c`) are on main; customer confirmation `e72da60` (PR #308); staff prepare panel `5fe37cf` (PR #309); the fix's own red-team guards now pass under their real names, not a `[RED]` prefix, as of `5b7dd1a` (PR #312); acceptance-is-not-custody now has a named behavioural test as of `d5b1dec` (PR #318). Failed-delivery trigger: courier self-report (`POST /driver/shipping-jobs/:id/report-issue`) and an auto-flagging PIN lockout, both `e4b4be7` (PR #365, MDF-96). Courier screen: 5b265ed (not merged) adds the "Report an issue" control to the driver shipping job page, gated client-side on the same reportable-status window the server enforces; fdfa925 (same PR #393 branch, not merged) corrects its confirmation copy, which had promised a hold ("this delivery is on hold") that the backend does not actually enforce — corrected to what `flagException` actually guarantees (team notified, human reviews) after Jim found a driver could still advance a leg from a reloaded page despite the on-hold claim. PR #393 is **open, not merged into `origin/main`** — a real courier cannot reach the screen through the deployed product until it merges and `apps/web` redeploys. MDF-96's decision memo (owner ruling, 2026-10-10) may now be narrower in scope, Pam producing the exact workflow options |
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
-| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff triggers for all four as of `effc63e` (re-verified, no change since `e72da60`)** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by `e56c425` (BMPL-346, found and added `effc63e`-pass; not cited here before). ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen landed as PR #309 (`5fe37cf`; it replaced the closed PR #278) after `7ff34a1` |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff triggers for all four as of `effc63e` (re-verified, no change since `e72da60`). The ETA-change-notice piece has a real coverage gap, found this pass: it fires on exactly two triggers and a sender/recipient availability-window change is neither — see below** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by `e56c425` (BMPL-346, found and added `effc63e`-pass; not cited here before). ETA-change notice: `e7ef2ed` (BMPL-345) — `ShipmentService.noticeEtaChange` (`apps/api/src/shipping/shipment.service.ts:3018`) is called from exactly two places, `ShipmentService.scheduleLeg` (`apps/api/src/shipping/shipment.service.ts:1610`) and `ShipmentService.transition` (`apps/api/src/shipping/shipment.service.ts:2812`); `ShipmentService.setAvailabilityWindows` (`apps/api/src/shipping/shipment.service.ts:3353`) recomputes nothing and calls neither, confirmed by direct read. Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen landed as PR #309 (`5fe37cf`; it replaced the closed PR #278) after `7ff34a1` |
 
 **Three of twelve — requirements 1, 2 and 4 — shared one cause, not three
 separate ones: each had a real, merged, tested API and no user-facing
@@ -318,31 +318,57 @@ mobile drawer onto desktop...'") — which shows this team does quote him
 verbatim when it has his words, and did not fabricate one here because it
 has none for these twelve.
 
-| # | Implemented (per the evidence ladder above) | Accepted by Edward |
-| - | --- | --- |
-| 1 | Yes | NO RECORD |
-| 2 | Yes | NO RECORD |
-| 3 | Yes (two policy questions open — not implementation gaps) | NO RECORD |
-| 4 | Yes | NO RECORD |
-| 5 | Yes | NO RECORD |
-| 6 | Yes | NO RECORD |
-| 7 | Yes for the booking customer; recipient-facing courier identity ruled out of scope by the owner (Ruling 13), not an Edward answer | NO RECORD |
-| 8 | Yes for shipping and marketplace delivery; whether the requirement was ever meant to cover marketplace's two-stop case is unsettled | NO RECORD |
-| 9 | Yes | NO RECORD |
-| 10 | **Partial** — the failed-delivery trigger now exists, API only (`e4b4be7`, PR #365); no web UI calls it. Pre-custody/return-to-sender half is implemented | NO RECORD (exact wording searched for and not found — see above) |
-| 11 | Yes | NO RECORD |
-| 12 | Yes, API and staff triggers on all four pieces; migration application expected but unverified | NO RECORD |
+**A seventh claim, added this pass: LIVE-VERIFIED is a different rung
+from IMPLEMENTED, and NOT-WALKED is not automatically a gap.** IMPLEMENTED
+means the code exists (checked by reading it); LIVE-VERIFIED means someone
+actually exercised the behaviour against a real database tonight, not
+just read the source — per the owner's own report, Jim walked
+requirements 1, 2, 3, 4, 5, 8, 9, 10 and 11 end-to-end this way, plus
+three of the five pieces that make up requirement 12 (which three is not
+broken out further than the owner's own report says; recorded here as
+given, the same way this document already treats other reported-not-
+independently-rechecked facts — see the methodology section above).
+Requirements 6 and 7 were **not walked, by choice, not by gap**: both
+have solid code evidence already (named tests, direct reads of the
+authorization and PIN-verification paths), so a walk would have been
+confirmation of something already established, not discovery of
+something unknown — and requirement 7's one open question (recipient-
+facing courier identity) is already settled by [Ruling 13](./OWNER-RULINGS.md#ruling-13--courier-identity-toward-a-linked-recipient-for-now),
+not a question a walk could have answered differently.
 
-**11 of 12 fully implemented, 1 of 12 (requirement 10) partially
-implemented; 0 of 12 have a recorded acceptance from Edward himself.**
-"Implemented" above follows each requirement's own evidence ladder, not
-this table's invention — requirement 10 is the sole exception, and this
-pass corrected it from "No" to "Partial": a failed-delivery trigger now
-exists in code (API only, no web UI), where the previous pass found none
-at all. Where this document or a kanban card has used the
-word "accepted," "done, as Edward asked," or "ready," read it as this
-team's own judgment unless a quote or a dated reply from Edward is cited
-next to it — none is, anywhere in this document, as of this pass.
+| # | Implemented (per the evidence ladder above) | Live-verified (walked against a real database) | Accepted by Edward |
+| - | --- | --- | --- |
+| 1 | Yes | Yes — Jim; confirmed admin-only display is the real behaviour (see below) | NO RECORD |
+| 2 | Yes | Yes — Jim | NO RECORD |
+| 3 | Yes (two policy questions open — not implementation gaps) | Yes — Jim | NO RECORD |
+| 4 | Yes | Yes — Jim | NO RECORD |
+| 5 | Yes | Yes — Jim | NO RECORD |
+| 6 | Yes | **Not walked, by choice** — code evidence already solid; see above | NO RECORD |
+| 7 | Yes for the booking customer; recipient-facing courier identity ruled out of scope by the owner (Ruling 13), not an Edward answer | **Not walked, by choice** — same reasoning as 6; Ruling 13 already settles the one question a walk would otherwise have tested | NO RECORD |
+| 8 | Yes for shipping and marketplace delivery; whether the requirement was ever meant to cover marketplace's two-stop case is unsettled | Yes — Jim | NO RECORD |
+| 9 | Yes | Yes — Jim | NO RECORD |
+| 10 | Yes — both pieces now exist in code: the trigger (`e4b4be7`, PR #365, merged) and the courier screen (PR #393, **open, not yet merged**; see below) | Yes — Jim walked PR #393's screen live and found one real defect (the confirmation copy promised a hold the backend does not enforce), fixed on the same branch (fdfa925, not merged); see below | NO RECORD (exact wording searched for and not found — see above) |
+| 11 | Yes | Yes — Jim | NO RECORD |
+| 12 | Yes for all four pieces as built; the ETA-change-notice piece has a real coverage gap found this pass (see below) | Three of five pieces walked (per the owner's report, not broken out further) | NO RECORD |
+
+**9 of 12 (1–5, 8, 9, 11) fully implemented with no open qualification;
+2 of 12 carry one each — requirement 10 (the screen exists but only on
+an unmerged PR) and requirement 12 (one of four pieces has a real
+coverage gap, found this pass); 1 of 12 (requirement 7) carries an
+owner-ruled scope boundary, not a gap; 0 of 12 have a recorded acceptance
+from Edward himself.** "Implemented" above follows each requirement's
+own evidence ladder, not this table's invention. This pass corrected
+requirement 10 from "Partial — API only" to "both pieces exist, screen
+unmerged" (the gap was always the missing screen, never the trigger —
+restated here, not newly found), corrected requirement 1's own section to
+say the "reaching all three audiences" claim was this team's invention,
+never Edward's (the API does send the field to all three; only admin
+renders it — see below), and found a new, real gap in requirement 12's
+ETA-change notification (see below). Where this document or a kanban
+card has used the word "accepted," "done, as Edward asked," or "ready,"
+read it as this team's own judgment unless a quote or a dated reply from
+Edward is cited next to it — none is, anywhere in this document, as of
+this pass.
 
 ---
 
@@ -1109,8 +1135,9 @@ ladder of its own once `e4b4be7` shipped (see below), after this section's
 previous `effc63e` anchor:**
 - IMPLEMENTED: yes, for custody/cancellation (pre-existing,
   `ShipmentService.cancel()`), for return-to-sender/reroute as fixed
-  (`f8f89dd` then `0efd970`), and now for a failed-delivery trigger — API
-  only, no web UI (`e4b4be7`, PR #365; see below).
+  (`f8f89dd` then `0efd970`), and now for failed delivery end to end — the
+  API trigger (`e4b4be7`, PR #365, merged) and the courier screen
+  (5b265ed/fdfa925, not merged, PR #393, **open, not yet merged**; see below).
 - TESTED: yes, named —
   `apps/api/test/bmpl-376-wallet-authorization-redteam.integration.spec.ts`
   (`3ea4fa1`, retitled passing by `5b7dd1a`),
@@ -1136,28 +1163,28 @@ previous `effc63e` anchor:**
   methodology section above; stated again in the body below) — a schema
   migration is not something the admin build's own commit identity can
   answer. `e4b4be7` carries no migration of its own (no new `AuditAction`,
-  no new notification event, no schema change). **Deployed code is not the
-  same claim as reachable product:** grep-confirmed directly, zero files
-  under `apps/web` or `apps/admin` reference the failed-delivery
-  endpoint or its service method — the code is live, but no screen calls
-  it.
+  no new notification event, no schema change). The screen (PR #393) is
+  **not** DEPLOYED — the PR is open, not merged into `origin/main`, so it
+  is an ancestor of nothing yet.
 - PRODUCTION-VERIFIED: **no record**, for any of the four (cancel, return,
   reroute, failed-delivery self-report/lockout-flag).
 
-**Status: NOT complete as of `e4b4be7` — corrected; the previous
-`effc63e` anchor was stale. PR #365 shipped a failed-delivery trigger
-after that anchor, and the drift-fix commits inside that same PR updated
-four line-number citations in this section without anyone updating the
-status claim next to them — exactly the failure mode this document's own
-"status rots, anchors don't" rule exists to catch. The staff-alone charge
-defect under
+**Status: the gap was always the missing screen, never the missing
+trigger — corrected again this pass, in the other direction from last
+time.** The previous `effc63e` anchor on this row was stale (PR #365's
+failed-delivery trigger had already shipped after it); the correction
+after that read "trigger exists, API-only, no web UI anywhere," which
+was accurate at the time but is now itself superseded — PR #393 adds
+exactly that screen. The staff-alone charge defect under
 [Ruling 1](./OWNER-RULINGS.md#ruling-1--a-courier-accepting-a-job-is-not-custody)
 (tracked BMPL-375) is fixed on main. Failed delivery now has a real
-trigger — a courier can self-report, and a PIN lockout auto-flags — but
-it exists only as a direct API call: no screen in `apps/web` or
-`apps/admin` calls either path, so no courier can reach it through the
-product today. A decision memo on the fuller workflow choice is still in
-progress per the owner's 2026-10-10 ruling (see below).** The custody boundary itself — a
+trigger (courier self-report, PIN-lockout auto-flag) and a real screen
+(courier "Report an issue" control) — both exist in code, and Jim walked
+the screen live against a real database and found one real overclaim in
+it (see below), fixed on the same branch. What remains is not a missing
+screen but a **merge**: PR #393 is open, and until it merges and
+`apps/web` redeploys, no courier reaches the screen through the live
+product. The custody boundary itself — a
 courier *accepting* a job is not the same as *custody* — was already
 correct in shipped code before this card existed:
 `ShipmentService.cancel()` blocks once a leg reaches `IN_PROGRESS`, set only
@@ -1221,9 +1248,9 @@ refused outright. If no valid price can be calculated, the return stays
 
 Failed delivery gained a real API trigger as of **`e4b4be7` (PR #365,
 MDF-96)** — merged after this document's own `effc63e` anchor, which is
-why the status above read "entirely unbuilt" until this correction. It
-reuses the existing `EXCEPTION`/`flagException` machinery rather than
-duplicating it, exactly as this row previously said it should:
+why the status once read "entirely unbuilt." It reuses the existing
+`EXCEPTION`/`flagException` machinery rather than duplicating it, exactly
+as this row previously said it should:
 
 - A courier can self-report their own leg's failed delivery attempt —
   `POST /driver/shipping-jobs/:id/report-issue`
@@ -1248,16 +1275,34 @@ duplicating it, exactly as this row previously said it should:
   staff-flagged one; what happens to money from there remains an explicit
   owner decision this PR does not touch.
 
-**What is still missing is the screen, not the trigger.** Grep-confirmed
-directly against `apps/web` and `apps/admin`: no file references the
-endpoint path or `reportIssue` — a real courier has no button, link or
-form anywhere in the product that calls it. The separate marketplace-side
-fact from before is unchanged and is not this row's gap: `DeliveryStatus`
-(a different enum, for marketplace delivery, not shipping) still has no
-`FAILED` value, and its own locked-PIN path
-(`deliveryVerificationStatus` `FAILED`, with an `ADMIN_FAILED_DELIVERY`
-notification, `driver-jobs.service.ts`) records wrong PIN codes only, not
-a failed delivery attempt.
+**The screen now exists too, on PR #393 (open, not merged) — and Jim's
+live walk of it found one real overclaim, since fixed.** 5b265ed (not merged) adds a
+"Report an issue" control to the driver shipping job screen
+(`apps/web/app/dashboard/driver/shipping/[id]/page.tsx`), visible only
+while the server would actually accept the call (mirroring, client-side,
+the same `PICKUP_CONFIRMED`–`ARRIVING` window the API already enforces —
+the server re-checks it on every POST regardless). Reaches the existing
+endpoint, invents no new reason-code taxonomy (free text only, matching
+what the API accepts). Jim walked PR #393 live against a real database
+and found the courier status machine has no check against `EXCEPTION` at
+all: a driver who reloads the page (an already-documented limitation —
+the confirmation is client-side only for that session) can still click
+the primary action and genuinely advance the leg in the database, even
+though `shipment_legs.status` stays `EXCEPTION`. The screen's
+confirmation copy had said "this delivery is on hold," which nothing in
+the backend actually keeps. fdfa925 (same branch, not merged) corrected the copy to
+what `flagException` actually guarantees — the team is notified and a
+human reviews it, no timeframe, no promise about what happens next — and
+added a permanent test asserting the corrected wording and that "on
+hold" never appears again. Whether `EXCEPTION` should block courier
+progression outright is left as an explicit open product decision for
+the owner, documented in the page's own top comment, not quietly closed
+by this screen. The separate marketplace-side fact from before is
+unchanged and is not this row's gap: `DeliveryStatus` (a different enum,
+for marketplace delivery, not shipping) still has no `FAILED` value, and
+its own locked-PIN path (`deliveryVerificationStatus` `FAILED`, with an
+`ADMIN_FAILED_DELIVERY` notification, `driver-jobs.service.ts`) records
+wrong PIN codes only, not a failed delivery attempt.
 
 `MDF-96` asked whether the owner expects the courier themselves to report
 a failed attempt, or whether the existing staff-exception workflow is what
@@ -1285,10 +1330,15 @@ you currently hold (`PICKUP_CONFIRMED` through `ARRIVING`), call
 `POST /driver/shipping-jobs/:id/report-issue` directly and confirm the leg
 reaches `EXCEPTION` and staff are alerted. Exhaust the handoff-PIN lockout
 (5 wrong codes) and confirm the leg auto-flags to `EXCEPTION` with
-`actorId: null`, not just a bare 403. **Not acceptance-testable through
-the product today:** neither failed-delivery path has a screen — confirm
-by calling the API directly, not by looking for a button in the driver
-app.
+`actorId: null`, not just a bare 403. On the courier shipping job screen
+(PR #393 branch), confirm the "Report an issue" control is visible only
+within the reportable status window, that submitting it reaches
+`EXCEPTION`, and that the confirmation copy names only what
+`flagException` guarantees — never "on hold" or any other promise the
+backend does not enforce. **Not acceptance-testable through the product
+today:** PR #393 is open, not merged — until it merges and `apps/web`
+redeploys, the screen exists in code but not in the live product; confirm
+the API path directly in the meantime.
 
 ## 11. Recipient availability windows & updates
 
@@ -1385,8 +1435,20 @@ shipment is untouched.
 - **ETA-change notice** (`e7ef2ed`): IMPLEMENTED/MERGED yes, ancestor of
   `origin/main`; touches `apps/api`/`packages/database`/`packages/shared`
   only — DEPLOYED yes. TESTED: yes, named —
-  `apps/api/test/shipment-eta-notification.integration.spec.ts`.
-  PRODUCTION-VERIFIED: no record. Its own
+  `apps/api/test/shipment-eta-notification.integration.spec.ts`. **Real
+  coverage gap found this pass, confirmed by direct read:**
+  `ShipmentService.noticeEtaChange` (`apps/api/src/shipping/shipment.service.ts:3018`) is called from exactly two places — `ShipmentService.scheduleLeg` (`apps/api/src/shipping/shipment.service.ts:1610`) and `ShipmentService.transition` (`apps/api/src/shipping/shipment.service.ts:2812`).
+  `ShipmentService.setAvailabilityWindows` (`apps/api/src/shipping/shipment.service.ts:3353`), which a sender or recipient uses
+  to set or change their own pickup/delivery window, calls neither: it
+  writes the `ShipmentAvailabilityWindow` rows and returns, with no eta
+  recomputation and no call to `noticeEtaChange` anywhere in its body
+  (confirmed by reading the full method). Since `estimateShipmentEta`
+  (`packages/shared/src/shipment-eta.ts`) anchors `LAST_MILE`/`DIRECT`
+  legs to exactly this window, setting or changing one can materially
+  move the shipment's computed `eta` the next time it is read — and
+  nobody is notified, because the only two triggers that call
+  `noticeEtaChange` never fire from this path. PRODUCTION-VERIFIED: no
+  record. Its own
   migration (`etaBaselineAt`) was held pending review before merge per
   the card's own instruction (PR #274's body: "holding per this card's
   own instruction"); that review is the same PR-review-then-merge gate
@@ -1423,7 +1485,10 @@ shipment is untouched.
 **Status as of `effc63e` (re-verified, no change since `e72da60`): every
 piece has a merged API, and every piece has a staff trigger (the
 reroute/return panel landed as `5fe37cf`, PR #309). This
-requirement never had a card until BMPL-340 was opened.**
+requirement never had a card until BMPL-340 was opened. One real gap
+found this pass, below: the ETA-change-notice piece's two triggers do
+not cover an availability-window change, even though that change can
+itself move the eta.**
 
 Four distinct pieces, per the owner's original requirement:
 
@@ -1457,23 +1522,39 @@ Four distinct pieces, per the owner's original requirement:
   before an earlier leg has even started.
 - **Material ETA-change notification, on the owner's already-approved
   30-minute threshold** ([Ruling 11](./OWNER-RULINGS.md#ruling-11--recipient-availability-and-eta-changes)).
-  **Done (`e7ef2ed`, BMPL-345).** The threshold is env-configurable
-  (`SHIPMENT_ETA_CHANGE_THRESHOLD_MINUTES`, default 30) rather than
-  hard-coded. The previous ETA is persisted on `Shipment.etaBaselineAt`,
-  compare-and-set via `updateMany` keyed on the old value so a restart,
-  redeploy or second worker can never re-notify or double-fire. Wired into
-  both real trigger points (every leg transition; `scheduleLeg`'s own
-  LINE_HAUL write). Never fires while the new ETA is `UNKNOWN`; establishes
-  the baseline silently the first time an ETA becomes knowable; a
-  sub-threshold move leaves the baseline alone so several small moves still
-  sum against the original reference point. Ships with its migration
-  additive; the card's own instruction was to hold it pending review
-  before applying locally (PR #274's body: "holding per this card's own
-  instruction") — that review is the PR-review-then-merge gate every
-  migration here goes through, and merging satisfied it. Application
-  against the production database is expected but unverified, same as
-  every other migration-bearing commit in this document — see the
-  methodology section at the top, and the Evidence ladder above.
+  **Done for its two built triggers (`e7ef2ed`, BMPL-345); a real gap
+  found this pass for a third way the eta can move.** The threshold is
+  env-configurable (`SHIPMENT_ETA_CHANGE_THRESHOLD_MINUTES`, default 30)
+  rather than hard-coded. The previous ETA is persisted on
+  `Shipment.etaBaselineAt`, compare-and-set via `updateMany` keyed on the
+  old value so a restart, redeploy or second worker can never re-notify
+  or double-fire. Wired into exactly two trigger points — every leg
+  transition (`ShipmentService.transition`, `apps/api/src/shipping/shipment.service.ts:2812`)
+  and `ShipmentService.scheduleLeg`'s own LINE_HAUL write (`apps/api/src/shipping/shipment.service.ts:1610`) — never fires while
+  the new ETA is `UNKNOWN`; establishes the baseline silently the first
+  time an ETA becomes knowable; a sub-threshold move leaves the baseline
+  alone so several small moves still sum against the original reference
+  point. **What those two triggers do not cover:** a sender or recipient
+  changing their own availability window via `ShipmentService.setAvailabilityWindows` (`apps/api/src/shipping/shipment.service.ts:3353`) can materially move a `LAST_MILE`/`DIRECT` leg's eta —
+  `estimateShipmentEta` anchors to exactly that window — but
+  `setAvailabilityWindows()` calls neither trigger and never recomputes
+  or re-baselines the eta itself, confirmed by reading its full body.
+  The customer who just moved their own delivery window, and anyone
+  sharing the shipment, gets no notice that the estimate changed, even
+  though the same move made through a leg transition would have fired
+  one. This was never carded or tested against: this pass found no test
+  in `shipment-eta-notification.integration.spec.ts` that exercises an
+  availability-window change at all. Whether this gap should be closed by
+  adding a third trigger, or is an acceptable omission because the person
+  who set the window already knows it changed, is a product decision this
+  document reports rather than makes. Ships with its migration additive;
+  the card's own instruction was to hold it pending review before applying
+  locally (PR #274's body: "holding per this card's own instruction") —
+  that review is the PR-review-then-merge gate every migration here goes
+  through, and merging satisfied it. Application against the production
+  database is expected but unverified, same as every other
+  migration-bearing commit in this document — see the methodology section
+  at the top, and the Evidence ladder above.
 - **Terminal hold / reroute / return for a recipient known to be
   unavailable.** **API done as of `7ff34a1` (BMPL-356/343, PR #275); no
   staff screen as of `7ff34a1`.** Merged after this very edit started — the dispatch that
@@ -1536,8 +1617,14 @@ configured schedule/hours/window to anchor to, and `UNKNOWN` (never a
 guess) when one does not — including a `LINE_HAUL` leg before
 `scheduleLeg` has been called on it. Move a leg's ETA by more than the
 configured threshold (`SHIPMENT_ETA_CHANGE_THRESHOLD_MINUTES`, default 30
-minutes) and confirm a notification fires exactly once, with a second
-sub-threshold move not re-triggering it. As admin, flag an exception on a
+minutes) via a leg transition or a `scheduleLeg` LINE_HAUL write and
+confirm a notification fires exactly once, with a second sub-threshold
+move not re-triggering it. **Known gap, not acceptance-testable as a
+pass today:** change a recipient's or sender's availability window via
+`setAvailabilityWindows()` by enough to move a `LAST_MILE`/`DIRECT` leg's
+eta past the same threshold and confirm no notification fires — this is
+the documented gap, so the correct result of this check is "nothing
+happens," not a defect to chase. As admin, flag an exception on a
 leg (`flagException`) and confirm the recipient is notified, not just
 staff and the sender. As admin, trigger a reroute/return from the panel
 PR #309 added and confirm it only *prepares* — see requirement 10's
