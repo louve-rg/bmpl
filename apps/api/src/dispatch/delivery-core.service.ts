@@ -31,6 +31,12 @@ export type DeliveryAudience = 'ADMIN' | 'DRIVER' | 'CUSTOMER' | 'VENDOR';
 
 export const AUDIT_FOR_ACTION: Record<DeliveryAction, AuditAction> = {
   ASSIGN: 'DELIVERY_ASSIGNED',
+  // MDF-18: a claim reaches the same ASSIGNED target an admin ASSIGN does -
+  // reuses the existing AuditAction rather than adding one (no migration).
+  // Distinguished from an admin assign by actorId (the claiming driver,
+  // never null) plus the newValue.method:'claim' marker passed at the
+  // call site, not by a separate enum member.
+  CLAIM: 'DELIVERY_ASSIGNED',
   REASSIGN: 'DELIVERY_REASSIGNED',
   CANCEL: 'DELIVERY_ASSIGNMENT_CANCELLED',
   ACCEPT: 'DELIVERY_ACCEPTED',
@@ -134,6 +140,21 @@ export class DeliveryCoreService {
   /** A numeric verification PIN (leading zeros preserved). */
   genPin(): string {
     return String(randomInt(0, 10 ** DELIVERY_PIN_LENGTH)).padStart(DELIVERY_PIN_LENGTH, '0');
+  }
+
+  /** A delivery's destination district — the one piece of geography every
+   *  eligibility check (admin assign, the engine, a driver's own claim)
+   *  matches against. Shared here rather than re-derived per caller. */
+  districtOrThrow(d: { vendorOrder: { order: { addresses: Array<{ district: string }> } } }): string {
+    const district = d.vendorOrder.order.addresses[0]?.district;
+    if (!district) throw new BadRequestException('This delivery has no destination district; cannot assign.');
+    return district;
+  }
+
+  /** Same address as districtOrThrow, the city half. Optional — a missing
+   *  city falls back to district-only eligibility, not a thrown error. */
+  cityOf(d: { vendorOrder: { order: { addresses: Array<{ city?: string | null }> } } }): string | null {
+    return d.vendorOrder.order.addresses[0]?.city ?? null;
   }
 
   /** Append an immutable timeline event (within the caller's transaction). */
