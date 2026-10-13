@@ -29,6 +29,8 @@ vi.mock('leaflet', () => {
     divIcon: vi.fn(() => ({})),
     marker: vi.fn(() => ({ addTo: vi.fn().mockReturnThis(), on: vi.fn().mockReturnThis(), remove: vi.fn() })),
     latLngBounds: vi.fn(() => ({})),
+    circle: vi.fn(() => ({ addTo: vi.fn().mockReturnThis(), remove: vi.fn(), getBounds: vi.fn(() => ({})) })),
+    Marker: { prototype: { options: {} as Record<string, unknown> } },
   };
   return { default: L };
 });
