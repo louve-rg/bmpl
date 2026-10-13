@@ -40,6 +40,19 @@ for a claim of more than the code delivers; nobody was looking for the
 opposite until a final-acceptance audit checked cards against rows directly
 and found it on requirements 1, 3 and 11 at once.
 
+**A third direction, found tonight on requirements 1 and 10 within minutes
+of each other: a citation can stay perfectly anchored while the sentence
+beside it goes false.** Both scripts this document runs
+(`detect-lookup-inventory-citation-drift.mjs`,
+`detect-commit-anchor-drift.mjs`) check that a citation still points at
+the symbol or commit it names — they say nothing about whether the prose
+next to that citation still matches what the code now does. Requirement
+10's own "fix(docs)" commits re-anchored four line numbers inside this
+document without anyone updating the status claim beside them; requirement
+1's "reaching all three audiences" survived an admin-only reality the same
+way. Re-anchored is not re-verified, and nothing currently run against this
+document can tell the two apart.
+
 **Citing a schema.prisma field: name it, don't pin it (MDF-91).** Write the
 backtick-wrapped model-and-field name alone, with no trailing colon and
 number for the schema line it sits on. `scripts/detect-lookup-inventory-
@@ -203,7 +216,7 @@ should imply one is pending by default.
 
 | # | Requirement | Status | Evidence |
 | - | --- | --- | --- |
-| 1 | Vendor location-level inventory & fulfilment origin | **Done as of `74cbcd6`** | `bad7b3f` (BMPL-175, PR #259) for the API; UI landed `74cbcd6` (BMPL-354, PR #273) |
+| 1 | Vendor location-level inventory & fulfilment origin | **Done as of `74cbcd6` for the mechanism and for admin's own display; the "Fulfilled from" label does not appear on the customer's or the vendor's own order view — corrected in this pass, see below** | `bad7b3f` (BMPL-175, PR #259) for the API; UI landed `74cbcd6` (BMPL-354, PR #273), admin-only display confirmed directly |
 | 2 | Package pickup/handoff photo | **Done for sender, staff, courier and linked recipient as of `0c322d6`** | `682b501` (PR #127) for the API; UI landed `a568d6a` (BMPL-352, PR #270) — courier upload, sender and staff view; linked-recipient access landed `66487e4` (PR #304) and `0c322d6` (BMPL-391, PR #305) |
 | 3 | Recipient account linking & incoming-shipment tracking | **Done** | `a6b7d97` (BMPL-179, PR #135); two policy questions open (BMPL-119), see below |
 | 4 | Granular driver service areas (district → city) | **End-to-end as of `2cbcf73`** | `3950db0` (PR #126) for the API; city picker landed `99e98c1` (BMPL-353, PR #272); wired to the lane-town endpoint by `2cbcf73` (BMPL-368, PR #279) — a lane-only town (e.g. Ladyville) is selectable as of `2cbcf73` |
@@ -396,10 +409,23 @@ the vendor's existing product-level inventory editor (`VariantCard`'s
 `InventoryField`) now carries a "Stock by location" breakdown against the
 same location-scoped endpoints `bad7b3f` already exposed — no parallel
 inventory system, no API change needed. The single shared
-`shapeVendorOrder()` now also serializes `originLocation: {id, label}`,
-reaching all three audiences that read it — the customer's own order, the
-owning vendor's, and admin's — shown as "Fulfilled from <location>"; a
-historical order with no recorded origin reads as `null`, never an error.
+`shapeVendorOrder()` serializes `originLocation: {id, label}` to all three
+callers that read it (`apps/api/src/orders/orders.service.ts:1083`,
+by its own in-code comment at the field: "exactly THREE callers ... all
+three see this field, INCLUDING the customer") — **that is the API
+response, not the screen.** Jim walked this live and confirmed only
+`apps/admin`'s order page actually renders it, as "Fulfilled from
+<location>" (`apps/admin/app/dashboard/orders/[id]/page.tsx:132-134`).
+**Neither the customer's own order view nor the vendor's own order view
+shows it, anywhere, today.** Grep-confirmed: zero references to
+`originLocation` under `apps/web`, and `apps/web/lib/orders.ts`'s own
+`VendorOrderView` type does not even declare the field — the data the API
+already sends to those two audiences is simply discarded on arrival. This
+was this document's own invented claim, not something Edward asked for or
+the owner approved; it is corrected here as a fact, not proposed as
+something that should be built. A historical order with no recorded
+origin reads as `null`, never an error — that half of the original claim
+is unaffected and still only checked against `apps/admin`.
 
 **Note for this pass:** Oscar and Jim are currently reproducing
 responsive-layout defects that may touch this requirement's screens; no
@@ -409,11 +435,15 @@ findings.
 
 **Acceptance criteria:** as a vendor with more than one `VendorLocation`,
 set stock for a product at a specific location in the inventory editor's
-"Stock by location" panel; place an order for it as a customer; confirm the
-order shows "Fulfilled from <location>" on the customer, vendor and admin
-order views; confirm an order placed before this feature shipped still
-shows no origin line (not an error, not a guess). Confirm deleting a
-`VendorLocation` that still carries a reservation is refused.
+"Stock by location" panel; place an order for it as a customer; confirm
+the order correctly sources from the location with stock over one at zero
+(mechanism, not display). Confirm admin's order view shows "Fulfilled
+from <location>"; confirm the customer's own order view and the vendor's
+own order view show **no** such line — that is today's correct behaviour,
+not a bug to silently fix here. Confirm an order placed before this
+feature shipped still shows no origin line on admin either (not an error,
+not a guess). Confirm deleting a `VendorLocation` that still carries a
+reservation is refused.
 
 **History:** this requirement was carried as "design approved, nothing
 built" through this document's original writing (BMPL-339); BMPL-175
