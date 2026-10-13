@@ -56,7 +56,7 @@ export default async function VendorsDirectoryPage({ searchParams }: { searchPar
                 <Link
                   key={v.slug}
                   href={`/store/${v.slug}`}
-                  className="group rounded-bmpl-lg border border-slate-200 bg-white p-5 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md"
+                  className="group min-w-0 rounded-bmpl-lg border border-slate-200 bg-white p-5 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md"
                 >
                   <div className="flex items-center gap-3">
                     {v.logoUrl ? (
@@ -67,8 +67,8 @@ export default async function VendorsDirectoryPage({ searchParams }: { searchPar
                         {v.businessName.slice(0, 2).toUpperCase()}
                       </span>
                     )}
-                    <div>
-                      <p className="font-semibold text-belize-navy group-hover:text-belize-blue">{v.businessName}</p>
+                    <div className="min-w-0">
+                      <p className="break-words font-semibold text-belize-navy group-hover:text-belize-blue">{v.businessName}</p>
                       <span
                         role="img"
                         aria-label={
