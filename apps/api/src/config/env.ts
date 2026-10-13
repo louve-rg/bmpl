@@ -63,6 +63,12 @@ const envSchema = z.object({
   THROTTLE_TTL_SECONDS: z.coerce.number().int().default(60),
   THROTTLE_LIMIT: z.coerce.number().int().default(300), // general per-IP per window
   THROTTLE_AUTH_LIMIT: z.coerce.number().int().default(10), // login/register/etc.
+  // Per-address (not per-IP) ceiling on password-reset/verification-resend
+  // requests for the SAME email, within one THROTTLE_TTL_SECONDS window
+  // (MDF-24) - a distributed caller (many IPs) still faces a limit per
+  // target address, not just per IP. Lower than THROTTLE_AUTH_LIMIT since
+  // it is scoped to one address rather than one caller.
+  EMAIL_NOTICE_ADDRESS_LIMIT: z.coerce.number().int().default(5),
   // In test, throttling is skipped unless this is set (keeps the suite deterministic).
   THROTTLE_TEST_ENABLED: boolFromString(false),
 
