@@ -21,6 +21,23 @@ interface VendorRow {
 
 const STATUSES = ['', 'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'DRAFT'];
 
+/**
+ * Names the ACTIVE filter in the empty-state sentence (god, conv-mission-
+ * 2026-10-13) -- "No vendors in this state" told the truth about a
+ * narrower question (this filter) than the one an operator reads it as
+ * ("no vendors at all"), the same shape as the dispatch-silence defect.
+ * The default filter itself stays PENDING on purpose (a moderation queue
+ * opens on the work that needs doing); only the wording changes.
+ */
+const EMPTY_STATE_LABEL: Record<string, string> = {
+  '': 'No vendors at all.',
+  PENDING: 'No vendors pending approval.',
+  APPROVED: 'No approved vendors.',
+  REJECTED: 'No rejected vendors.',
+  SUSPENDED: 'No suspended vendors.',
+  DRAFT: 'No draft vendors.',
+};
+
 export default function VendorsPage() {
   const [status, setStatus] = useState('PENDING');
   const [rows, setRows] = useState<VendorRow[]>([]);
@@ -107,7 +124,7 @@ export default function VendorsPage() {
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">
-                    No vendors in this state.
+                    {EMPTY_STATE_LABEL[status]}
                   </td>
                 </tr>
               )}
