@@ -161,48 +161,84 @@ function CreateForm({ onDone, onError }: { onDone: () => Promise<void>; onError:
 
 function StatusBar({ store, onDone, onError }: SectionProps) {
   const [busy, setBusy] = useState(false);
+  const [openBusy, setOpenBusy] = useState(false);
   const status = store.profile!.approvalStatus;
+  const storeStatus = store.profile!.storeStatus;
   const canSubmit = status === 'DRAFT' || status === 'REJECTED';
+  /**
+   * Owner ruling (god, conv-mission-2026-10-13): a vendor whose storefront
+   * is approved and live, but whose store is CLOSED, must clearly see that
+   * customers cannot order, with an action to open it -- surfacing only.
+   * The CLOSED-on-create default and the vendor's own PATCH /vendor/profile
+   * mechanism (ProfileForm below already uses it) are both untouched; this
+   * never opens a store on its own, only on the vendor's own click.
+   */
+  const closedWhileLive = status === 'APPROVED' && storeStatus === 'CLOSED';
+
+  async function openStore() {
+    setOpenBusy(true);
+    try {
+      await api.patch('/vendor/profile', { storeStatus: 'OPEN' });
+      await onDone();
+    } catch (e) {
+      onError(e);
+    } finally {
+      setOpenBusy(false);
+    }
+  }
+
   return (
-    <UiCard className="flex flex-wrap items-center gap-3 p-4">
-      <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
-        <span>Approval:</span>
-        <StatusBadge status={status} />
-        <span className="text-slate-300">·</span>
-        <span>
-          Store: <b className="text-belize-navy">{store.profile!.storeStatus}</b>
-        </span>
-        {store.profile!.rejectionReason && status === 'REJECTED' && (
-          <span className="text-red-600">Reason: {store.profile!.rejectionReason}</span>
-        )}
-      </div>
-      <div className="ml-auto flex items-center gap-3">
-        <ButtonLink href="/dashboard/store/preview" variant="outline" size="sm">
-          Preview storefront
-        </ButtonLink>
-        {canSubmit && (
-          <Button
-            size="sm"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await api.post('/vendor/profile/submit');
-                await onDone();
-              } catch (e) {
-                onError(e);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            Submit for review
-          </Button>
-        )}
-        {status === 'PENDING' && <span className="text-sm text-slate-500">Awaiting admin review…</span>}
-        {status === 'APPROVED' && <Badge tone="success">Live ✓</Badge>}
-      </div>
-    </UiCard>
+    <>
+      <UiCard className="flex flex-wrap items-center gap-3 p-4">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+          <span>Approval:</span>
+          <StatusBadge status={status} />
+          <span className="text-slate-300">·</span>
+          <span>
+            Store: <b className="text-belize-navy">{storeStatus}</b>
+          </span>
+          {store.profile!.rejectionReason && status === 'REJECTED' && (
+            <span className="text-red-600">Reason: {store.profile!.rejectionReason}</span>
+          )}
+        </div>
+        <div className="ml-auto flex items-center gap-3">
+          <ButtonLink href="/dashboard/store/preview" variant="outline" size="sm">
+            Preview storefront
+          </ButtonLink>
+          {canSubmit && (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await api.post('/vendor/profile/submit');
+                  await onDone();
+                } catch (e) {
+                  onError(e);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Submit for review
+            </Button>
+          )}
+          {status === 'PENDING' && <span className="text-sm text-slate-500">Awaiting admin review…</span>}
+          {status === 'APPROVED' && <Badge tone="success">Live ✓</Badge>}
+        </div>
+      </UiCard>
+      {closedWhileLive && (
+        <Alert tone="warning" title="Your store is not accepting orders" className="mt-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>Customers cannot place an order while your store is closed.</span>
+            <Button size="sm" disabled={openBusy} onClick={openStore}>
+              {openBusy ? 'Opening…' : 'Open my store'}
+            </Button>
+          </div>
+        </Alert>
+      )}
+    </>
   );
 }
 
