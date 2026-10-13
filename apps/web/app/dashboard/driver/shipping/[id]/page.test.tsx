@@ -146,3 +146,46 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
     expect(container!.textContent).toContain('BML-ABCD2345');
   });
 });
+
+/**
+ * Owner ruling (god, conv-mission-2026-10-13): an active delivery exception
+ * blocks further courier progression until staff resolve it — in apps/api's
+ * own guard AND here. `legStatus` is additive on the wire (see
+ * isExceptionBlocked in lib/driver-shipping-job.ts); these prove both states.
+ */
+describe('DriverShippingJobPage — an open exception blocks progression (owner ruling)', () => {
+  it('hides the primary action and explains why, once legStatus is EXCEPTION', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'EXCEPTION' }));
+    const el = await mount();
+
+    expect(el.textContent).not.toContain('Mark as arriving');
+    expect(el.textContent).toContain('This leg has an open issue');
+    expect(el.textContent).toContain('Nothing can move forward until our team resolves it.');
+  });
+
+  it('never states a timeframe or a promise about what happens next', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'EXCEPTION' }));
+    const el = await mount();
+
+    const text = el.textContent!.toLowerCase();
+    expect(text).not.toMatch(/within \d|\d+\s*(hours?|days?|minutes?)|will be (resolved|reopened)|refund|fee/);
+  });
+
+  it('shows the normal primary action when legStatus is absent (additive field not arrived yet)', async () => {
+    const raw = JSON.parse(JSON.stringify(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }))) as Record<string, unknown>;
+    delete raw.legStatus;
+    apiGet.mockResolvedValue(raw);
+    const el = await mount();
+
+    expect(el.textContent).toContain('Mark as arriving');
+    expect(el.textContent).not.toContain('This leg has an open issue');
+  });
+
+  it('shows the normal primary action when legStatus is a non-exception value', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'IN_PROGRESS' }));
+    const el = await mount();
+
+    expect(el.textContent).toContain('Mark as arriving');
+    expect(el.textContent).not.toContain('This leg has an open issue');
+  });
+});

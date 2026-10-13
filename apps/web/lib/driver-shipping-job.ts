@@ -31,3 +31,18 @@ export function pickupPhotoSection(
   if (job.pickupPhotoUrls && job.pickupPhotoUrls.length > 0) return 'existing';
   return canAct ? 'addable' : 'hidden';
 }
+
+/**
+ * Owner ruling (god, conv-mission-2026-10-13): an active delivery exception
+ * blocks further courier progression until authorized staff resolve it — in
+ * backend transitions (apps/api's own guard) AND here. `legStatus` is
+ * additive/optional on the wire — the leg's own `status` (PENDING / READY /
+ * IN_PROGRESS / EXCEPTION), distinct from the driver-facing `courierStatus`
+ * the rest of this job object is built from, and not guaranteed to have
+ * started arriving on every deploy yet (same BMPL-349/350 degrade-to-today
+ * pattern as `routeStops`/`pickupPhotoUrls`). Absent, this returns false —
+ * the pre-existing, unblocked behaviour — never a false block.
+ */
+export function isExceptionBlocked(job: { legStatus?: string | null }): boolean {
+  return job.legStatus === 'EXCEPTION';
+}

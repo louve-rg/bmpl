@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../../lib/api';
 import { tripMapPoints } from '../../../../../lib/trip-map';
 import { uploadFile } from '../../../../../lib/uploads';
-import { pickupPhotoSection } from '../../../../../lib/driver-shipping-job';
+import { isExceptionBlocked, pickupPhotoSection } from '../../../../../lib/driver-shipping-job';
 import { Alert, Badge, Button, Card, Label, PageHeader, Spinner, StatusBadge } from '../../../../../components/ui';
 import { DriverBreadcrumb } from '../../../../../components/driver/DriverBreadcrumb';
 import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRouteMap';
@@ -18,6 +18,16 @@ import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRou
  * Collect from" and "2 · Deliver to", a navigate button on each, then one
  * primary action. A driver switching between a store run and a parcel leg should
  * not have to relearn the page; only the words inside it change.
+ *
+ * EXCEPTION BLOCKS PROGRESSION (owner ruling, god conv-mission-2026-10-13):
+ * an active delivery exception blocks further courier progression until
+ * authorized staff resolve it. apps/api owns the actual guard on the
+ * transition endpoints; this screen's job is only to stop offering a control
+ * the API is about to refuse, and say why — see `isExceptionBlocked` in
+ * lib/driver-shipping-job.ts for the `legStatus` field this reads (additive,
+ * degrades to today's unblocked behaviour while absent). No timeframe or
+ * promise about what happens next is stated — same gate as the report-issue
+ * confirmation copy (MDF-96).
  */
 
 interface Place {
@@ -63,6 +73,13 @@ interface ShippingJob {
    * merge (BMPL-349); absence means nothing attached yet, same as empty.
    */
   pickupPhotoUrls?: string[];
+  /**
+   * The shipment layer's own view of this leg (PENDING/READY/IN_PROGRESS/
+   * EXCEPTION) — distinct from `status` above, which is the driver's
+   * `courierStatus` view of the same row. Optional/additive: see
+   * `isExceptionBlocked` in lib/driver-shipping-job.ts.
+   */
+  legStatus?: string | null;
 }
 
 const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
@@ -160,7 +177,8 @@ export default function DriverShippingJobPage() {
     void load();
   }, [load]);
 
-  const action = job ? actionFor(job.status) : null;
+  const blocked = job ? isExceptionBlocked(job) : false;
+  const action = job && !blocked ? actionFor(job.status) : null;
   const photoSection = job ? pickupPhotoSection(job, action !== null) : 'hidden';
 
   async function run() {
@@ -374,6 +392,16 @@ export default function DriverShippingJobPage() {
                 </p>
               )}
             </Card>
+          )}
+
+          {/* Owner ruling (god, conv-mission-2026-10-13): say why nothing can
+              move, with no timeframe or promise about what happens next —
+              the backend guard (apps/api) is what actually enforces the
+              hold; this is only the explanation. */}
+          {blocked && (
+            <Alert tone="warning" title="This leg has an open issue" className="mt-4">
+              Nothing can move forward until our team resolves it.
+            </Alert>
           )}
 
           {/* One primary action, full width, thumb-height. */}
