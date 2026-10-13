@@ -144,4 +144,93 @@ describe('ProductEditorManager — inventory for a product with no options (MDF-
     expect(applyButtons.length).toBe(1);
     expect(el.textContent).not.toContain('No options yet');
   });
+
+  it('a product that starts option-less, gets stock set, then gains an option: the card disappears and the variant inventory UI takes over cleanly (god follow-up)', async () => {
+    let optionAdded = false;
+    const optionLessView = manageView({ options: [] });
+    const optionLessInv = inventory({ product: productInvRow({ quantity: 7 }) });
+    const withOptionView = manageView({
+      options: [{ id: 'opt-1', name: 'Size', values: [{ id: 'val-1', value: 'Small' }] }],
+      variants: [
+        {
+          id: 'var-1',
+          title: 'Small',
+          displayName: null,
+          optionLabel: 'Small',
+          sku: null,
+          barcode: null,
+          priceMinor: null,
+          salePriceMinor: null,
+          isActive: true,
+          optionValueIds: ['val-1'],
+          quantity: 0,
+        },
+      ],
+    });
+    const withOptionInv = inventory({
+      // The product-level row is still there — nothing deleted or migrated it —
+      // it is simply no longer rendered anywhere once options exist.
+      product: productInvRow({ quantity: 7 }),
+      variants: [productInvRow({ inventoryId: 'inv-var-1', variantId: 'var-1', quantity: 0 })],
+    });
+
+    apiGet.mockImplementation((url: string) => {
+      if (url.endsWith('/variants')) return Promise.resolve(optionAdded ? withOptionView : optionLessView);
+      if (url.endsWith('/inventory')) return Promise.resolve(optionAdded ? withOptionInv : optionLessInv);
+      if (url.endsWith('/images')) return Promise.resolve(images);
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+    apiPost.mockImplementation((url: string) => {
+      if (url.endsWith('/options')) {
+        optionAdded = true;
+        return Promise.resolve({});
+      }
+      return Promise.resolve({});
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<ProductEditorManager productId="prod-1" />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Before: the product-level card is up, and the vendor sets stock through it.
+    expect(container.textContent).toContain('No options yet');
+    expect(container.textContent).toContain('Apply adjustment');
+    const applyButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Apply adjustment')!;
+    await act(async () => {
+      applyButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiPost).toHaveBeenCalledWith('/vendor/products/prod-1/inventory/adjust', { delta: 1, reason: 'RESTOCK' });
+
+    // Now add an option through the real AddOptionForm, same as a vendor would.
+    const nameInput = container.querySelector('input[aria-label="New option name"]') as HTMLInputElement;
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(nameInput, 'Size');
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await Promise.resolve();
+    });
+    const addOptionButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '+ Add option')!;
+    await act(async () => {
+      addOptionButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiPost).toHaveBeenCalledWith('/vendor/products/prod-1/options', { name: 'Size', values: [] });
+
+    // After: the product-level card is gone, the variant's own inventory UI is up instead —
+    // and there is still exactly ONE inventory control on the page, not two.
+    expect(container.textContent).not.toContain('No options yet');
+    expect(container.textContent).toContain('Small');
+    const applyButtonsAfter = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent === 'Apply adjustment');
+    expect(applyButtonsAfter.length).toBe(1);
+  });
 });
