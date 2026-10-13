@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DELIVERY_STATUS_LABELS, deliveryStage, type DeliveryStatus } from '@bmpl/shared';
 import type { AssignDeliveryInput, CancelDeliveryInput, ReassignDeliveryInput } from '@bmpl/validation';
 import type { Prisma } from '@bmpl/database';
@@ -255,19 +255,38 @@ export class DispatchService {
     if (!e.eligible) throw new BadRequestException(`Driver is not eligible: ${e.reasons.join('; ')}.`);
 
     const fromStatus = current.status;
-    await this.prisma.$transaction(async (tx) => {
-      // End any active assignment (append-only: mark REASSIGNED, never delete).
-      if (action === 'REASSIGN') {
-        await tx.deliveryAssignment.updateMany({
-          where: { orderDeliveryId: deliveryId, status: { in: ['ACTIVE', 'ACCEPTED'] } },
-          data: { status: 'REASSIGNED', endedAt: new Date(), endReason: reason },
-        });
-      }
-      // Generate fresh pickup + delivery PINs for this assignment.
-      const pickupPin = this.core.genPin();
-      const deliveryPin = this.core.genPin();
-      await tx.orderDelivery.update({
-        where: { id: deliveryId },
+    // Whatever this read actually saw holding the delivery — null for a fresh
+    // ASSIGN (REASSIGN's own legal-`from` list requires it to already be held;
+    // ASSIGN requires PENDING_ASSIGNMENT, which is never held). Re-asserted
+    // inside the write below alongside fromStatus, together they are exactly
+    // the state this call is allowed to act on — not state-in-general.
+    const fromDriverProfileId = current.assignedDriverProfileId;
+
+    // Generate fresh pickup + delivery PINs for this assignment outside the
+    // transaction — pure, no DB — so the guarded write below is the FIRST
+    // statement inside it, same shape as DriverJobService.accept()/decline().
+    const pickupPin = this.core.genPin();
+    const deliveryPin = this.core.genPin();
+
+    const won = await this.prisma.$transaction(async (tx) => {
+      // Conditional write, NOT an unconditional update by id. `current` above
+      // is a read taken before this transaction opened — a second writer
+      // (another admin, a concurrent reassign, or the dispatch engine's own
+      // systemAssign re-entering the same delivery) can act on it in between.
+      // An unconditional `update` would then silently discard whichever write
+      // commits first: same PINs column, same driver column, no unique
+      // constraint to catch it, no error either side. Re-asserting BOTH the
+      // status AND the driver this call actually read, inside the statement
+      // itself, makes the database the arbiter — exactly one writer's WHERE
+      // still matches when it executes, so the database is the arbiter, not
+      // a read that went stale the moment it was taken. `fromDriverProfileId`
+      // matters as much as `fromStatus`: a REASSIGN's `from` and `to` can
+      // both be 'ASSIGNED' (reassigning an already-assigned delivery to a
+      // different driver), so status alone cannot tell two concurrent
+      // reassigns apart — only re-asserting which driver was actually read
+      // closes that case too.
+      const claimed = await tx.orderDelivery.updateMany({
+        where: { id: deliveryId, status: fromStatus, assignedDriverProfileId: fromDriverProfileId },
         data: {
           status: 'ASSIGNED',
           assignedDriverProfileId: driverProfileId,
@@ -287,6 +306,17 @@ export class DispatchService {
           deliveryVerificationStatus: 'PENDING',
         },
       });
+      if (claimed.count === 0) return false;
+
+      // End any active assignment (append-only: mark REASSIGNED, never
+      // delete). Runs only after the guarded write above has already won —
+      // a losing call must not touch this either.
+      if (action === 'REASSIGN') {
+        await tx.deliveryAssignment.updateMany({
+          where: { orderDeliveryId: deliveryId, status: { in: ['ACTIVE', 'ACCEPTED'] } },
+          data: { status: 'REASSIGNED', endedAt: new Date(), endReason: reason },
+        });
+      }
       await tx.deliveryAssignment.create({
         data: { orderDeliveryId: deliveryId, driverProfileId, vehicleId, assignedByUserId: actor.userId, status: 'ACTIVE' },
       });
@@ -297,7 +327,14 @@ export class DispatchService {
         { event: action === 'REASSIGN' ? 'DRIVER_REASSIGNED' : 'DELIVERY_DRIVER_ASSIGNED', title: action === 'REASSIGN' ? 'Delivery reassigned' : 'Driver assigned', body: `Order ${current.vendorOrder.order.orderNumber}: a driver has been ${action === 'REASSIGN' ? 'reassigned' : 'assigned'}.`, data: { deliveryId } },
         tx,
       );
+      return true;
     });
+
+    if (!won) {
+      throw new ConflictException(
+        'This delivery changed state before the assignment could be written — reload and try again.',
+      );
+    }
     // NOTE: threads are deliberately NOT opened here. Being offered a job is not
     // the same as taking it — see DriverJobService.accept, which opens them once
     // the driver commits. M17 §4 specifies participants are "added on access",
