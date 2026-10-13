@@ -146,3 +146,94 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
     expect(container!.textContent).toContain('BML-ABCD2345');
   });
 });
+
+/**
+ * MDF-96 / Edward req 10 — the courier-facing screen for an endpoint
+ * (POST /driver/shipping-jobs/:id/report-issue) that already existed, worked
+ * and was correctly restricted server-side, but had zero references anywhere
+ * in apps/web. This is the button's own regression guard.
+ */
+describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
+  it('shows "Report an issue" once the driver actually holds the parcel (IN_TRANSIT)', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    const el = await mount();
+    expect(el.textContent).toContain('Report an issue');
+  });
+
+  it('hides "Report an issue" before pickup (ASSIGNED) — nothing attempted yet', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'ASSIGNED', nextActionLabel: 'Accept' }));
+    const el = await mount();
+    expect(el.textContent).not.toContain('Report an issue');
+  });
+
+  it('hides "Report an issue" once the leg is terminal (DELIVERED)', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'DELIVERED', nextActionLabel: null }));
+    const el = await mount();
+    expect(el.textContent).not.toContain('Report an issue');
+  });
+
+  it('declining the prompt never calls the API', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(null);
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    await act(async () => {
+      button.click();
+    });
+    expect(apiPost).not.toHaveBeenCalled();
+    promptSpy.mockRestore();
+  });
+
+  it('a reason under 4 characters never calls the API', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('no');
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    await act(async () => {
+      button.click();
+    });
+    expect(apiPost).not.toHaveBeenCalled();
+    promptSpy.mockRestore();
+  });
+
+  it('reporting posts the reason, shows the confirmation, and hides the primary action — the job reads as on hold, not continuable', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Nobody answered at the address');
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiPost.mockResolvedValue(undefined);
+
+    const el = await mount();
+    expect(el.textContent).toContain('Mark as arriving');
+
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiPost).toHaveBeenCalledWith('/driver/shipping-jobs/job1/report-issue', { reason: 'Nobody answered at the address' });
+    expect(el.textContent).toContain('Issue reported');
+    expect(el.textContent).toContain('Nobody answered at the address');
+    expect(el.textContent).not.toContain('Mark as arriving');
+    expect(el.textContent).not.toContain('Report an issue');
+    promptSpy.mockRestore();
+  });
+
+  it('does not invent a refund, fee or timeframe in the confirmation copy', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Could not find the recipient');
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiPost.mockResolvedValue(undefined);
+
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const text = el.textContent!.toLowerCase();
+    expect(text).not.toMatch(/refund|fee|within \d|hours?\b.*(credit|refund)/);
+    promptSpy.mockRestore();
+  });
+});
