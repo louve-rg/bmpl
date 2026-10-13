@@ -500,6 +500,119 @@ describe('refusal shapes', () => {
   });
 });
 
+describe('an active exception blocks every forward courier transition', () => {
+  it('ACCEPT is refused while the leg is flagged, and succeeds again once resolved', async () => {
+    const driver = await makeDriver();
+    const { legId } = await bookedWithAssignedFirstMile(driver);
+    expect((await flag(legId, 'Flagged before the driver could respond.')).status).toBe(201);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`);
+    expect(r.status).toBe(409);
+    expect(r.body.message).toMatch(/exception/i);
+    let leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.courierStatus).toBe('ASSIGNED');
+
+    expect((await resolve(legId, { resolution: 'RESUME', note: 'Cleared; driver may respond now.' })).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+    leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.courierStatus).toBe('DRIVER_ACCEPTED');
+  });
+
+  it('CONFIRM_PICKUP is refused while the leg is flagged', async () => {
+    const driver = await makeDriver();
+    const { legId } = await bookedWithAssignedFirstMile(driver);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+    expect((await flag(legId, 'Flagged after acceptance, before pickup.')).status).toBe(201);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`);
+    expect(r.status).toBe(409);
+    expect(r.body.message).toMatch(/exception/i);
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.courierStatus).toBe('DRIVER_ACCEPTED');
+    expect(leg.pickedUpAt).toBeNull();
+    expect(leg.status).toBe('EXCEPTION'); // untouched by the refused ShipmentService.startLeg() call
+  });
+
+  it('IN_TRANSIT is refused while the leg is flagged — the exact gap Jim reproduced live', async () => {
+    const driver = await makeDriver();
+    const { legId } = await bookedWithAssignedFirstMile(driver);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await flag(legId, 'Flagged mid-carry, before in-transit.')).status).toBe(201);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`);
+    expect(r.status).toBe(409);
+    expect(r.body.message).toMatch(/exception/i);
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.courierStatus).toBe('PICKUP_CONFIRMED');
+    expect(leg.inTransitAt).toBeNull();
+  });
+
+  it('ARRIVING is refused while the leg is flagged', async () => {
+    const driver = await makeDriver();
+    const { legId } = await bookedWithAssignedFirstMile(driver);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
+    expect((await flag(legId, 'Flagged en route, before arriving.')).status).toBe(201);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`);
+    expect(r.status).toBe(409);
+    expect(r.body.message).toMatch(/exception/i);
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.courierStatus).toBe('IN_TRANSIT');
+    expect(leg.arrivingAt).toBeNull();
+  });
+
+  it('DELIVER (handoff) is refused while the leg is flagged, even with a correct PIN', async () => {
+    const driver = await makeDriver();
+    const { legId } = await bookedWithAssignedFirstMile(driver);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
+    expect((await flag(legId, 'Flagged on arrival, before handoff.')).status).toBe(201);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
+      pin: await pinOf(legId), receivedByName: 'Counter staff',
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.message).toMatch(/exception/i);
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.courierStatus).toBe('ARRIVING');
+    expect(leg.status).toBe('EXCEPTION');
+  });
+
+  it('the driver\'s own GET carries legStatus, so the frontend has a signal to act on at all', async () => {
+    const driver = await makeDriver();
+    const { legId } = await bookedWithAssignedFirstMile(driver);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+
+    const before = await request(ctx.server).get(`/api/driver/shipping-jobs/${legId}`).set('Cookie', driver.cookies);
+    expect(before.status).toBe(200);
+    expect(before.body.legStatus).toBe('READY');
+
+    expect((await flag(legId, 'Flagged so the driver can see it.')).status).toBe(201);
+    const after = await request(ctx.server).get(`/api/driver/shipping-jobs/${legId}`).set('Cookie', driver.cookies);
+    expect(after.status).toBe(200);
+    expect(after.body.legStatus).toBe('EXCEPTION');
+    // `status` (courierStatus) is a different field and is untouched by flagging.
+    expect(after.body.status).toBe('DRIVER_ACCEPTED');
+  });
+
+  it('DECLINE is NOT blocked — giving the job back is not forward progression', async () => {
+    const driver = await makeDriver();
+    const { legId } = await bookedWithAssignedFirstMile(driver);
+    expect((await flag(legId, 'Flagged while still only offered.')).status).toBe(201);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/decline`, { reason: 'Cannot get there.' });
+    expect(r.status).toBe(201);
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.courierStatus).toBe('DRIVER_DECLINED');
+    expect(leg.status).toBe('EXCEPTION'); // the flag itself is untouched by a decline
+  });
+});
+
 describe('cancellation with an exception on board', () => {
   it('staff cancellation closes the driver half of an exception leg — no phantom job survives', async () => {
     const driver = await makeDriver();
