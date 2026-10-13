@@ -196,7 +196,7 @@ describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
     promptSpy.mockRestore();
   });
 
-  it('reporting posts the reason, shows the confirmation, and hides the primary action — the job reads as on hold, not continuable', async () => {
+  it('reporting posts the reason, shows the confirmation, and hides the primary action — this screen stops offering it, without claiming more than the system does', async () => {
     const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Nobody answered at the address');
     apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
     apiPost.mockResolvedValue(undefined);
@@ -216,6 +216,31 @@ describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
     expect(el.textContent).toContain('Nobody answered at the address');
     expect(el.textContent).not.toContain('Mark as arriving');
     expect(el.textContent).not.toContain('Report an issue');
+    promptSpy.mockRestore();
+  });
+
+  /**
+   * god, conv-mission-2026-10-13: Jim found the courier status machine has
+   * no check against EXCEPTION at all, so "this delivery is on hold" was a
+   * promise nothing in the backend keeps -- same overclaim class #385's own
+   * gate exists to catch. Permanent guard against that specific wording
+   * ever coming back, not just a happy-path assertion.
+   */
+  it('never claims the delivery is "on hold" — the backend does not enforce that', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Nobody answered at the address');
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiPost.mockResolvedValue(undefined);
+
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(el.textContent).toContain('our team has been notified and will review it');
+    expect(el.textContent?.toLowerCase()).not.toContain('on hold');
     promptSpy.mockRestore();
   });
 

@@ -37,6 +37,18 @@ import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRou
  * after a fresh load. That is an apps/api read-side gap (an additive field
  * on an existing response, not a new endpoint), out of scope for this
  * apps/web-only change — flagged to the team rather than crossed silently.
+ *
+ * SECOND GAP, found by Jim verifying this PR live (not introduced by this
+ * change, same pre-existing EXCEPTION status the staff-flag path has always
+ * used): the courier status machine (accept/pickup/in-transit/arriving) has
+ * NO check against EXCEPTION at all — a driver who reloads this page (the
+ * limitation above) can still click the primary action and it genuinely
+ * advances the leg in the database, even though `shipment_legs.status`
+ * stays EXCEPTION the whole time. Whether EXCEPTION should block courier
+ * progression is a product decision the owner is deciding, not an
+ * apps/web fix — the confirmation copy below was corrected (god,
+ * conv-mission-2026-10-13) to stop promising a hold the backend does not
+ * enforce, rather than this page pretending to close that gap itself.
  */
 
 interface Place {
@@ -421,15 +433,21 @@ export default function DriverShippingJobPage() {
             </Card>
           )}
 
-          {/* Reported this session: the job is on hold, so no further
-              movement action is offered even though the server's own
-              courierStatus (and therefore `action`) has not changed — see
-              the page's own top comment for why the server can't yet tell
-              us this survived a reload. Neutral copy only: no refund, fee
-              or timeframe promised, since the endpoint makes none. */}
+          {/* Reported this session: this screen stops offering a further
+              movement action, but that is THIS SCREEN's own choice, not a
+              backend guarantee -- the courier status machine has no check
+              against EXCEPTION at all (found live by Jim verifying this
+              PR: a driver who reloads, or otherwise reaches the primary
+              action, can still advance the leg). Copy must not claim more
+              than the system actually does: "on hold" was corrected to
+              what flagException actually guarantees (the team is
+              notified, a human reviews it) after god caught it as the
+              same class of overclaim #385's gate exists to catch. Neutral
+              copy only: no refund, fee or timeframe promised either,
+              since the endpoint makes none. */}
           {reportState === 'reported' && (
             <Alert tone="warning" title="Issue reported" className="mt-4">
-              “{reportedReason}” — our team has been notified and this delivery is on hold.
+              “{reportedReason}” — our team has been notified and will review it.
             </Alert>
           )}
 
