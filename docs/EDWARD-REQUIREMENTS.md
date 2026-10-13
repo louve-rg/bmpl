@@ -212,7 +212,7 @@ should imply one is pending by default.
 | 7 | Courier & vehicle identification once assigned | **Done — for the booking customer as of `4d96bb0`; for a linked recipient, messaging is wired end-to-end (API and web) as of `c7690a5`/`5c11021`; courier identity for the recipient is restricted by owner ruling (2026-10-10), not an unbuilt gap** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient messaging API: PR #293 (BMPL-359), merged `910d5b2`; recipient messaging read + UI: PR #315 (`5c11021`) and PR #314 (`c7690a5`); `RECIPIENT_VIEW_INCLUDE` re-checked directly at `effc63e` — still no `assignedDriver`/`assignedVehicle`, now the ruled state, not a gap |
 | 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done for shipping and marketplace delivery, as of `16e4b4b`; whether the requirement was ever meant to cover marketplace's always-two-stop case is unsettled** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) for shipping; marketplace's driver job screen wired to the same `ExpandableRouteMap` by `16e4b4b` (BMPL-390, PR #302) — no API change, the pre-acceptance pin gate was already correct |
 | 9 | Saved addresses — label, CRUD, default, delete-safety | **Done, and the two gaps this document used to flag as "what remains" are now also closed as of `444a1ec`/`9ec6764`** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below; standalone manage page `444a1ec` (PR #323); un-defaulting the current default without a delete `9ec6764` (PR #336) |
-| 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `effc63e` (re-verified, no change since `e72da60`): the staff-alone charge defect under Ruling 1 (BMPL-375) is fixed; failed delivery has no trigger yet, and a decision memo to finish it is in progress per the owner's 2026-10-10 ruling — no longer indefinitely blocked on Edward** | Pre-custody half correct in shipped code. Return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) with a staff-alone charge defect, fixed by `0efd970` (BMPL-375, PR #288, merged); negative-control tests PR #285 (`3ea4fa1`) and a sink ownership test PR #306 (`302a84c`) are on main; customer confirmation `e72da60` (PR #308); staff prepare panel `5fe37cf` (PR #309); the fix's own red-team guards now pass under their real names, not a `[RED]` prefix, as of `5b7dd1a` (PR #312); acceptance-is-not-custody now has a named behavioural test as of `d5b1dec` (PR #318). Failed-delivery trigger does not exist as of `effc63e`; MDF-96's decision memo (owner ruling, 2026-10-10) is now in progress, with Pam producing the exact workflow options |
+| 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `e4b4be7` (corrected — the `effc63e` anchor this cell carried was stale): the staff-alone charge defect under Ruling 1 (BMPL-375) is fixed; failed delivery now has an API trigger (PR #365) but no web UI anywhere — a courier cannot reach it through the product** | Pre-custody half correct in shipped code. Return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) with a staff-alone charge defect, fixed by `0efd970` (BMPL-375, PR #288, merged); negative-control tests PR #285 (`3ea4fa1`) and a sink ownership test PR #306 (`302a84c`) are on main; customer confirmation `e72da60` (PR #308); staff prepare panel `5fe37cf` (PR #309); the fix's own red-team guards now pass under their real names, not a `[RED]` prefix, as of `5b7dd1a` (PR #312); acceptance-is-not-custody now has a named behavioural test as of `d5b1dec` (PR #318). Failed-delivery trigger now exists, API-only: courier self-report (`POST /driver/shipping-jobs/:id/report-issue`) and an auto-flagging PIN lockout, both `e4b4be7` (PR #365, MDF-96) — grep-confirmed zero `apps/web`/`apps/admin` files call either path; MDF-96's decision memo (owner ruling, 2026-10-10) may now be narrower in scope, Pam producing the exact workflow options |
 | 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
 | 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff triggers for all four as of `effc63e` (re-verified, no change since `e72da60`)** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by `e56c425` (BMPL-346, found and added `effc63e`-pass; not cited here before). ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen landed as PR #309 (`5fe37cf`; it replaced the closed PR #278) after `7ff34a1` |
 
@@ -316,14 +316,17 @@ has none for these twelve.
 | 7 | Yes for the booking customer; recipient-facing courier identity ruled out of scope by the owner (Ruling 13), not an Edward answer | NO RECORD |
 | 8 | Yes for shipping and marketplace delivery; whether the requirement was ever meant to cover marketplace's two-stop case is unsettled | NO RECORD |
 | 9 | Yes | NO RECORD |
-| 10 | **No** — the failed-delivery trigger does not exist; the pre-custody/return-to-sender half is implemented | NO RECORD (exact wording searched for and not found — see above) |
+| 10 | **Partial** — the failed-delivery trigger now exists, API only (`e4b4be7`, PR #365); no web UI calls it. Pre-custody/return-to-sender half is implemented | NO RECORD (exact wording searched for and not found — see above) |
 | 11 | Yes | NO RECORD |
 | 12 | Yes, API and staff triggers on all four pieces; migration application expected but unverified | NO RECORD |
 
-**11 of 12 implemented; 0 of 12 have a recorded acceptance from Edward
-himself.** "Implemented" above follows each requirement's own evidence
-ladder, not this table's invention — requirement 10 is the sole exception,
-unchanged by this pass. Where this document or a kanban card has used the
+**11 of 12 fully implemented, 1 of 12 (requirement 10) partially
+implemented; 0 of 12 have a recorded acceptance from Edward himself.**
+"Implemented" above follows each requirement's own evidence ladder, not
+this table's invention — requirement 10 is the sole exception, and this
+pass corrected it from "No" to "Partial": a failed-delivery trigger now
+exists in code (API only, no web UI), where the previous pass found none
+at all. Where this document or a kanban card has used the
 word "accepted," "done, as Edward asked," or "ready," read it as this
 team's own judgment unless a quote or a dated reply from Edward is cited
 next to it — none is, anywhere in this document, as of this pass.
@@ -1071,22 +1074,27 @@ address by id and confirm a 404 with the target row unchanged.
 
 ## 10. Cancellation before custody, failed delivery, return-to-sender
 
-**Evidence ladder — for the shipped pieces only; failed delivery has no
-code to ladder at all, see below:**
+**Evidence ladder — now covers all three pieces; failed delivery gained a
+ladder of its own once `e4b4be7` shipped (see below), after this section's
+previous `effc63e` anchor:**
 - IMPLEMENTED: yes, for custody/cancellation (pre-existing,
-  `ShipmentService.cancel()`) and for return-to-sender/reroute as fixed
-  (`f8f89dd` then `0efd970`).
+  `ShipmentService.cancel()`), for return-to-sender/reroute as fixed
+  (`f8f89dd` then `0efd970`), and now for a failed-delivery trigger — API
+  only, no web UI (`e4b4be7`, PR #365; see below).
 - TESTED: yes, named —
   `apps/api/test/bmpl-376-wallet-authorization-redteam.integration.spec.ts`
   (`3ea4fa1`, retitled passing by `5b7dd1a`),
   `apps/api/test/bmpl-378-escrow-sink-boundary.integration.spec.ts`
-  (`302a84c`), and
+  (`302a84c`),
   `apps/api/test/shipment-acceptance-and-tracking.integration.spec.ts`
-  (`d5b1dec`); not independently re-run in this pass.
+  (`d5b1dec`), and for the failed-delivery trigger,
+  `apps/api/test/shipping-driver.integration.spec.ts` and
+  `apps/api/test/shipping-notifications.integration.spec.ts` (both
+  `e4b4be7`); not independently re-run in this pass.
 - MERGED: yes — `f8f89dd`, `0efd970`, `3ea4fa1`, `302a84c`, `e72da60`,
-  `5fe37cf`, `5b7dd1a`, `d5b1dec` all ancestors of `origin/main`.
+  `5fe37cf`, `5b7dd1a`, `d5b1dec`, `e4b4be7` all ancestors of `origin/main`.
 - DEPLOYED: **yes, all of it, staff panel included — the code.**
-  `f8f89dd`/`0efd970`/test commits touch only `apps/api` (plus
+  `f8f89dd`/`0efd970`/`e4b4be7`/test commits touch only `apps/api` (plus
   `packages/*`), an ancestor of `apps/api`'s live commit `4936812`;
   `e72da60`'s confirmation surface touches only `apps/web`, an ancestor
   of `apps/web`'s live commit `5b2b0a9`; `5fe37cf`'s staff panel touches
@@ -1097,21 +1105,29 @@ code to ladder at all, see below:**
   live commit — **application is expected but unverified** (see the
   methodology section above; stated again in the body below) — a schema
   migration is not something the admin build's own commit identity can
-  answer.
-- PRODUCTION-VERIFIED: **no record**, for any of the three (cancel,
-  return, reroute).
+  answer. `e4b4be7` carries no migration of its own (no new `AuditAction`,
+  no new notification event, no schema change). **Deployed code is not the
+  same claim as reachable product:** grep-confirmed directly, zero files
+  under `apps/web` or `apps/admin` reference the failed-delivery
+  endpoint or its service method — the code is live, but no screen calls
+  it.
+- PRODUCTION-VERIFIED: **no record**, for any of the four (cancel, return,
+  reroute, failed-delivery self-report/lockout-flag).
 
-**Failed delivery has no ladder at all:** IMPLEMENTED is already "no" — no
-trigger of any kind exists, so TESTED/MERGED/DEPLOYED/PRODUCTION-VERIFIED
-do not apply to a thing that was never built. This is the blank the ladder
-is supposed to make visible rather than hide behind "NOT complete."
-
-**Status: NOT complete as of `effc63e` (re-verified, no change since
-`e72da60`). The staff-alone charge defect under
+**Status: NOT complete as of `e4b4be7` — corrected; the previous
+`effc63e` anchor was stale. PR #365 shipped a failed-delivery trigger
+after that anchor, and the drift-fix commits inside that same PR updated
+four line-number citations in this section without anyone updating the
+status claim next to them — exactly the failure mode this document's own
+"status rots, anchors don't" rule exists to catch. The staff-alone charge
+defect under
 [Ruling 1](./OWNER-RULINGS.md#ruling-1--a-courier-accepting-a-job-is-not-custody)
-(tracked BMPL-375) is fixed on main; failed delivery is still entirely
-unbuilt, with a decision memo to finish it in progress per the owner's
-2026-10-10 ruling (see below) — no longer indefinitely blocked on Edward.** The custody boundary itself — a
+(tracked BMPL-375) is fixed on main. Failed delivery now has a real
+trigger — a courier can self-report, and a PIN lockout auto-flags — but
+it exists only as a direct API call: no screen in `apps/web` or
+`apps/admin` calls either path, so no courier can reach it through the
+product today. A decision memo on the fuller workflow choice is still in
+progress per the owner's 2026-10-10 ruling (see below).** The custody boundary itself — a
 courier *accepting* a job is not the same as *custody* — was already
 correct in shipped code before this card existed:
 `ShipmentService.cancel()` blocks once a leg reaches `IN_PROGRESS`, set only
@@ -1173,31 +1189,58 @@ Scope fence: non-vendor courier shipments only; a marketplace shipment is
 refused outright. If no valid price can be calculated, the return stays
 `PENDING_MANUAL` rather than guessing.
 
-Failed delivery remains **entirely unbuilt as of `effc63e`** (re-checked,
-no change since `e72da60`): the `EXCEPTION` state and
-`flagException`/`resolveException` already exist and are the right
-mechanism to extend rather than duplicate, but the *trigger* — any signal
-that a delivery attempt failed — does not exist anywhere; today a failed
-attempt only enters the system if staff hear about it and type it in by
-hand, and `DeliveryStatus` has no `FAILED` value. A separate path exists for a
-locked delivery PIN (`deliveryVerificationStatus` `FAILED`, with an
-`ADMIN_FAILED_DELIVERY` notification, `driver-jobs.service.ts`). That records
-wrong PIN codes, not a failed attempt, and adds no `DeliveryStatus` value. Whether an open
-branch exists for the trigger was not checked in this pass.
+Failed delivery gained a real API trigger as of **`e4b4be7` (PR #365,
+MDF-96)** — merged after this document's own `effc63e` anchor, which is
+why the status above read "entirely unbuilt" until this correction. It
+reuses the existing `EXCEPTION`/`flagException` machinery rather than
+duplicating it, exactly as this row previously said it should:
+
+- A courier can self-report their own leg's failed delivery attempt —
+  `POST /driver/shipping-jobs/:id/report-issue`
+  (`DriverShippingController.reportIssue`'s route,
+  `apps/api/src/shipping/driver-shipping.controller.ts:91`) →
+  `ShipmentDriverService.reportIssue`
+  (`apps/api/src/shipping/shipment-driver.service.ts:351`), gated by the
+  same `ownedLeg()` check every other driver route uses, once the courier
+  actually holds the parcel (`PICKUP_CONFIRMED` through `ARRIVING`).
+- The shipping handoff-PIN lockout (5 wrong codes) now also auto-flags the
+  leg exception, attributed to the system (`actorId: null`, since no
+  person caused it) — inside `ShipmentService.verifyHandoffPin`
+  (`apps/api/src/shipping/shipment.service.ts:1766`). It used to just
+  throw a 403 at the driver and go no further, unlike marketplace
+  delivery's identical lockout, which already pages an admin.
+- No new `AuditAction`, no new notification event, no schema change: both
+  paths share `flagException`'s existing `SHIPMENT_LEG_EXCEPTION` audit
+  action and `SHIPMENT_EXCEPTION` admin alert, distinguished only by
+  `actorId` (driver vs. null).
+- No automatic charge, refund or re-delivery fee anywhere in this change —
+  reaching `EXCEPTION` still only gets a human's attention, same as a
+  staff-flagged one; what happens to money from there remains an explicit
+  owner decision this PR does not touch.
+
+**What is still missing is the screen, not the trigger.** Grep-confirmed
+directly against `apps/web` and `apps/admin`: no file references the
+endpoint path or `reportIssue` — a real courier has no button, link or
+form anywhere in the product that calls it. The separate marketplace-side
+fact from before is unchanged and is not this row's gap: `DeliveryStatus`
+(a different enum, for marketplace delivery, not shipping) still has no
+`FAILED` value, and its own locked-PIN path
+(`deliveryVerificationStatus` `FAILED`, with an `ADMIN_FAILED_DELIVERY`
+notification, `driver-jobs.service.ts`) records wrong PIN codes only, not
+a failed delivery attempt.
 
 `MDF-96` asked whether the owner expects the courier themselves to report
 a failed attempt, or whether the existing staff-exception workflow is what
-he meant. **That is no longer sitting unanswered — the owner took the
-decision onto himself,**
+he meant.
 [Ruling 14](./OWNER-RULINGS.md#ruling-14--failed-delivery-finish-it-dont-leave-it-indefinitely-blocked)
-(2026-10-10): "bring me the exact failed-delivery workflow choices and
-your recommendation. I want us to finish this requirement, not leave it
-indefinitely blocked." A decision
-memo covering the exact workflow choices and a recommendation is **in
-progress** (Pam is producing the workflow options). The trigger still does
-not exist in code today — that fact is unchanged — but the row's blocking
-reason has changed from "waiting on an unanswered owner question" to "a
-decision memo in progress, with a named owner commitment to finish it."
+(2026-10-10) moved the decision onto the owner himself and asked for the
+exact workflow choices and a recommendation. `e4b4be7` shipped one
+concrete answer — courier self-report — before that memo landed, so the
+memo's remaining scope may now be narrower (whether self-report alone is
+sufficient, or a staff/UI path is still wanted) rather than starting from
+zero. A decision memo is still **in progress** (Pam producing the
+workflow options); whether it still needs to cover ground `e4b4be7`
+already answers is the owner's call, not this document's to decide.
 
 **Acceptance criteria:** confirm `ShipmentService.cancel()` refuses once any
 leg reaches `IN_PROGRESS` and succeeds before. For return-to-sender: as the
@@ -1207,8 +1250,15 @@ shipment's own customer can confirm it (any other account gets 404);
 confirm confirming is the only step that executes the charge, at a price
 recomputed fresh rather than trusted from the earlier preview. Confirm the
 same two behaviours for reroute. Confirm a marketplace (non-courier)
-shipment is refused outright for both. **Not acceptance-testable yet:**
-failed delivery has no trigger to test against.
+shipment is refused outright for both. As the assigned courier on a leg
+you currently hold (`PICKUP_CONFIRMED` through `ARRIVING`), call
+`POST /driver/shipping-jobs/:id/report-issue` directly and confirm the leg
+reaches `EXCEPTION` and staff are alerted. Exhaust the handoff-PIN lockout
+(5 wrong codes) and confirm the leg auto-flags to `EXCEPTION` with
+`actorId: null`, not just a bare 403. **Not acceptance-testable through
+the product today:** neither failed-delivery path has a screen — confirm
+by calling the API directly, not by looking for a button in the driver
+app.
 
 ## 11. Recipient availability windows & updates
 
