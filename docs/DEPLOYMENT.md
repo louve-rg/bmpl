@@ -125,9 +125,12 @@ Railway credentials are needed — this is plain `gh` against GitHub's API:
 ```bash
 # Every production deployment, newest first. The API service's environment
 # name is "carefree-achievement / production" — filter on it explicitly,
-# since web/admin deploy through Vercel and never appear here. per_page=100
-# is not optional here — see the paging trap below.
-gh api repos/louve-rg/bmpl/deployments --paginate -f per_page=100 \
+# since web/admin deploy through Vercel and never appear here. The per_page
+# query string is not optional — see the paging trap below. Put it in the
+# URL, never as a -f/-F parameter: gh api switches method to POST as soon
+# as any -f/-F is present, and this endpoint's POST verb creates a
+# deployment — the one mutation this whole section exists to warn against.
+gh api 'repos/louve-rg/bmpl/deployments?per_page=100' \
   -q '.[] | select(.environment == "carefree-achievement / production") | {id, sha: .sha[0:7], created_at}'
 
 # That deployment's own status history, oldest first in the array:
@@ -172,23 +175,38 @@ Nothing else. Not the deployment record's existence, not its `created_at`, not i
 `state`.
 
 **The paging trap — the kind of bug that returns a confident wrong answer, not an
-error.** `gh api repos/.../deployments` without `per_page=100` (plain `--paginate`
-does not supply this on its own) returns only the newest ~30 records across *all*
+error.** A **bare** `gh api repos/.../deployments`, with neither `--paginate` nor
+`per_page` in the query string, returns only the newest ~30 records across *all*
 environments. Vercel writes **four** deployment records per commit that touches
 `apps/web` or `apps/admin` (Preview web, Preview admin, Production web, Production
 admin) against Railway's **one** — so after only a handful of pushes, an older
-commit's single Railway record falls off the default page, and the
+commit's single Railway record falls off that default page, and the
 `select(.environment == ...)` filter above returns `null`. That `null` is
 **indistinguishable from "Railway never created a deployment for this commit"**
-unless `per_page=100` (or equivalent explicit pagination) is in the query.
+unless `per_page=100` (as a query-string parameter, never as `-f`/`-F` — see
+above) or `--paginate` is in the command. (`--paginate` alone already defaults to
+`per_page=100` and follows every page to the end — confirmed by running it and
+counting full pages of 100 down to a final partial page; the exact page count
+isn't worth citing here, since it grows with every commit that touches
+`apps/web` or `apps/admin`.)
+
+**A second trap sits on top of the first one, with the same shape.** With
+`--paginate`, `-q`/`--jq` is applied **to each page separately**, not to the
+combined result. `gh api ...deployments --paginate -q 'length'` prints one
+number **per page** (confirmed by running it — several lines, not one total)
+— so an index filter such as `[...][0]` returns the first match **per page**,
+silently yielding several answers where the reader expects exactly one. Use
+`--slurp` to combine pages before filtering, or query a single `?per_page=100`
+page directly when the question has one answer.
 
 **Railway does not wait for GitHub check suites — restated with the structural
 argument, not arrival order.** `1fec2bb`: pushed 20:31:00, CI concluded 20:40:33,
-app live 20:45:12 — **14m12s push-to-live**, inside the 11–15 minute window
-measured from three other clean deploys (`817bf5c` 11m18s, `90dadc5` 15m33s,
-`fbd8e7f` 14m20s). A build that only *started* when CI concluded at 20:40:33 would
-have gone live around 20:52–20:57; it went live at 20:45:12. The build was already
-running while the check suite was still `in_progress`. Watch patterns (§2a above)
+app live 20:45:12 — **14m12s push-to-live**, inside the 11–16 minute window
+measured from five clean deploys (`817bf5c` 11m18s, `90dadc5` 15m33s, `fbd8e7f`
+14m20s, `04a0f8e` 16m07s, `1fec2bb` 14m12s). A build that only *started* when CI
+concluded at 20:40:33 would have gone live around 20:52–20:57; it went live at
+20:45:12. The build was already running while the check suite was still
+`in_progress`. Watch patterns (§2a above)
 still decide **whether** a build starts; nothing measured so far decides **when**,
 except the push itself. What remains genuinely unestablished is whether the check
 suite's pass/fail *result* affects a deployment's outcome at all — do not assume a
