@@ -142,8 +142,6 @@ export const ordersApi = {
   vendorMarkReady: (vendorOrderId: string) =>
     api.post<{ id: string; status: string }>(`/vendor/orders/${vendorOrderId}/ready`),
   // Pickup fulfilment (M18.1) — PICKUP vendor-orders only.
-  vendorReadyForPickup: (vendorOrderId: string) =>
-    api.post<{ id: string; status: string }>(`/vendor/orders/${vendorOrderId}/ready-for-pickup`),
   vendorConfirmPickup: (vendorOrderId: string, pin: string) =>
     api.post<{ status: string }>(`/vendor/orders/${vendorOrderId}/confirm-pickup`, { pin }),
   pickupPin: (vendorOrderId: string) =>

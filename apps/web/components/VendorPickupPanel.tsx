@@ -23,12 +23,15 @@ import { Alert, Button, Card, Input, Spinner, StatusBadge } from './ui';
  * straight into a 409 on "Mark ready for pickup" that a vendor who skips it
  * never hits.
  *
- * "Mark ready" now calls `vendorMarkReady` (`/vendor/orders/:id/ready`, the
- * same call the delivery panel makes) instead of the older
- * `vendorReadyForPickup` (`/ready-for-pickup`, controller-flagged
- * `@deprecated` — "Prefer `:id/ready`, which handles both pickup and
- * delivery"). For a PICKUP order both routes delegate to the identical
- * `PickupService#markReadyForPickup` underneath, so this changes no
+ * "Mark ready" calls `vendorMarkReady` (`/vendor/orders/:id/ready`, the same
+ * call the delivery panel makes) — not the older `/ready-for-pickup` route,
+ * which the controller flags `@deprecated` in favour of `:id/ready` ("handles
+ * both pickup and delivery"). The client wrapper for that deprecated route
+ * (`ordersApi.vendorReadyForPickup`) has since been deleted as dead code —
+ * it had zero remaining call sites once this panel stopped using it. The
+ * API route itself is untouched; this retires only the client-side name. For
+ * a PICKUP order both routes delegate to the identical
+ * `PickupService#markReadyForPickup` underneath, so switching changed no
  * observable behaviour; it gives this one action the same shape as the
  * delivery panel's single `run('ready')` regardless of which state it is
  * called from, instead of needing two different calls depending on whether
