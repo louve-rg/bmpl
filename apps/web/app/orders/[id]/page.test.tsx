@@ -51,7 +51,7 @@ vi.mock('../../../lib/orders', () => ({
 // Restored after every test's mockReset() in the shared afterEach, since
 // mockReset() clears a vi.fn's constructor-time implementation too (verified
 // empirically — mockClear() would have preserved it, mockReset() does not).
-const forOrder = vi.fn(() => Promise.resolve(null));
+const forOrder = vi.fn((..._args: unknown[]) => Promise.resolve(null));
 vi.mock('../../../lib/payments', () => ({
   paymentsApi: { forOrder: (...args: unknown[]) => forOrder(...args) },
 }));
