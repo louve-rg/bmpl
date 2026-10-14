@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../../lib/api';
 import { tripMapPoints } from '../../../../../lib/trip-map';
 import { uploadFile } from '../../../../../lib/uploads';
-import { pickupPhotoSection, reportIssueState } from '../../../../../lib/driver-shipping-job';
+import { isExceptionBlocked, pickupPhotoSection, reportIssueState } from '../../../../../lib/driver-shipping-job';
 import { Alert, Badge, Button, Card, Label, PageHeader, Spinner, StatusBadge } from '../../../../../components/ui';
 import { DriverBreadcrumb } from '../../../../../components/driver/DriverBreadcrumb';
 import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRouteMap';
@@ -38,17 +38,26 @@ import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRou
  * on an existing response, not a new endpoint), out of scope for this
  * apps/web-only change — flagged to the team rather than crossed silently.
  *
- * SECOND GAP, found by Jim verifying this PR live (not introduced by this
- * change, same pre-existing EXCEPTION status the staff-flag path has always
- * used): the courier status machine (accept/pickup/in-transit/arriving) has
- * NO check against EXCEPTION at all — a driver who reloads this page (the
- * limitation above) can still click the primary action and it genuinely
- * advances the leg in the database, even though `shipment_legs.status`
- * stays EXCEPTION the whole time. Whether EXCEPTION should block courier
- * progression is a product decision the owner is deciding, not an
- * apps/web fix — the confirmation copy below was corrected (god,
- * conv-mission-2026-10-13) to stop promising a hold the backend does not
- * enforce, rather than this page pretending to close that gap itself.
+ * EXCEPTION BLOCKS PROGRESSION (owner ruling, god conv-mission-2026-10-13):
+ * an active delivery exception blocks further courier progression until
+ * authorized staff resolve it. apps/api owns the actual guard on the
+ * transition endpoints; this screen's job is only to stop offering a control
+ * the API is about to refuse, and say why — see `isExceptionBlocked` in
+ * lib/driver-shipping-job.ts for the `legStatus` field this reads (additive,
+ * degrades to today's unblocked behaviour while absent). No timeframe or
+ * promise about what happens next is stated.
+ *
+ * RESOLVED 2026-10-14 (reconciling this PR against that one): Report an
+ * issue is one of the controls EXCEPTION blocks, not an exception to the
+ * rule — `report-issue` calls `flagException`, which is routed through
+ * `transition()`, whose first gate (`isLegActionable`,
+ * packages/shared/src/shipping.ts) refuses any leg already in EXCEPTION.
+ * Offering the button while blocked would be offering a control the server
+ * is certain to refuse — exactly what the EXCEPTION-blocks-progression rule
+ * exists to stop. The gap noted above (the courier status machine's own
+ * accept/pickup/in-transit/arriving transitions having no EXCEPTION check)
+ * is now closed by that same gate for THIS action; whether it is closed for
+ * the primary action too lives in `isExceptionBlocked`, not here.
  */
 
 interface Place {
@@ -94,6 +103,13 @@ interface ShippingJob {
    * merge (BMPL-349); absence means nothing attached yet, same as empty.
    */
   pickupPhotoUrls?: string[];
+  /**
+   * The shipment layer's own view of this leg (PENDING/READY/IN_PROGRESS/
+   * EXCEPTION) — distinct from `status` above, which is the driver's
+   * `courierStatus` view of the same row. Optional/additive: see
+   * `isExceptionBlocked` in lib/driver-shipping-job.ts.
+   */
+  legStatus?: string | null;
 }
 
 const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
@@ -193,7 +209,8 @@ export default function DriverShippingJobPage() {
     void load();
   }, [load]);
 
-  const action = job ? actionFor(job.status) : null;
+  const blocked = job ? isExceptionBlocked(job) : false;
+  const action = job && !blocked ? actionFor(job.status) : null;
   const photoSection = job ? pickupPhotoSection(job, action !== null) : 'hidden';
   const reportState = job ? reportIssueState(job.status, reportedReason !== null) : 'unavailable';
 
@@ -433,12 +450,10 @@ export default function DriverShippingJobPage() {
             </Card>
           )}
 
-          {/* Reported this session: this screen stops offering a further
-              movement action, but that is THIS SCREEN's own choice, not a
-              backend guarantee -- the courier status machine has no check
-              against EXCEPTION at all (found live by Jim verifying this
-              PR: a driver who reloads, or otherwise reaches the primary
-              action, can still advance the leg). Copy must not claim more
+          {/* Reported this session (checked first: it's this driver's own,
+              fresher-than-a-reload knowledge of why) -- this screen stops
+              offering a further movement action, but that is THIS SCREEN's
+              own choice, not a backend guarantee. Copy must not claim more
               than the system actually does: "on hold" was corrected to
               what flagException actually guarantees (the team is
               notified, a human reviews it) after god caught it as the
@@ -448,6 +463,18 @@ export default function DriverShippingJobPage() {
           {reportState === 'reported' && (
             <Alert tone="warning" title="Issue reported" className="mt-4">
               “{reportedReason}” — our team has been notified and will review it.
+            </Alert>
+          )}
+
+          {/* Owner ruling (god, conv-mission-2026-10-13): say why nothing can
+              move, with no timeframe or promise about what happens next —
+              the backend guard (apps/api) is what actually enforces the
+              hold; this is only the explanation. Skipped when reportState
+              is 'reported': that banner above already explains it, and is
+              this driver's own fresher account of why. */}
+          {blocked && reportState !== 'reported' && (
+            <Alert tone="warning" title="This leg has an open issue" className="mt-4">
+              Nothing can move forward until our team resolves it.
             </Alert>
           )}
 
@@ -467,7 +494,7 @@ export default function DriverShippingJobPage() {
                 Pass on this job
               </button>
             )}
-            {reportState === 'available' && (
+            {reportState === 'available' && !blocked && (
               <button
                 onClick={reportIssue}
                 disabled={reportBusy}
