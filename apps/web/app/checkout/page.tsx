@@ -67,13 +67,13 @@ function CheckoutItem({ it }: { it: CartLine }) {
 
   return (
     <li className="flex items-start justify-between gap-4 py-3">
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
+      <dl className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1">
         <dt className="text-xs uppercase tracking-wide text-slate-400">Product</dt>
-        <dd className="font-medium text-belize-navy">{disp.primary || it.title}</dd>
+        <dd className="break-words font-medium text-belize-navy">{disp.primary || it.title}</dd>
         {pairs.map((o, i) => (
           <Fragment key={`${o.name}-${i}`}>
             <dt className="text-xs uppercase tracking-wide text-slate-400">{o.name}</dt>
-            <dd className="text-slate-700">{o.value}</dd>
+            <dd className="break-words text-slate-700">{o.value}</dd>
           </Fragment>
         ))}
         <dt className="text-xs uppercase tracking-wide text-slate-400">Cost</dt>
@@ -259,7 +259,7 @@ export default function CheckoutPage() {
 
         {state === 'ready' && cart && cart.vendors.length > 0 && (
           <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
-            <div className="space-y-6">
+            <div className="min-w-0 space-y-6">
               {cart.hasUnavailableItems && (
                 <Alert tone="error">
                   Some items are unavailable. <Link href="/cart" className="font-semibold underline">Edit your cart</Link> before checking out.
@@ -271,9 +271,9 @@ export default function CheckoutPage() {
                 const q = quoteByVendor.get(v.vendorProfileId);
                 return (
                   <Card key={v.vendorProfileId} className="p-4">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                      <span className="font-semibold text-belize-navy">{v.businessName}</span>
-                      <span className="text-sm text-slate-500">{money(v.subtotalMinor)}</span>
+                    <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                      <span className="min-w-0 break-words font-semibold text-belize-navy">{v.businessName}</span>
+                      <span className="shrink-0 text-sm text-slate-500">{money(v.subtotalMinor)}</span>
                     </div>
                     <ul className="divide-y divide-slate-100 text-sm">
                       {v.items.map((it) => (
