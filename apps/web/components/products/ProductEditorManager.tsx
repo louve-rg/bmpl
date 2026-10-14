@@ -8,6 +8,7 @@ import { asApiError } from './shared';
 import { OptionsManager } from './OptionsManager';
 import { VariantBuilder } from './VariantBuilder';
 import { VariantCard } from './VariantCard';
+import { InventoryControl } from './InventoryControl';
 import { ImageGallery, type VariantChoice } from './ImageGallery';
 import { BrandImageSlot } from './BrandImageSlot';
 import { StorefrontPreview } from './StorefrontPreview';
@@ -128,7 +129,13 @@ export function ProductEditorManager({ productId }: { productId: string }) {
       {/* Options */}
       <Card className="space-y-4 p-5 sm:p-6">
         <h2 className="bmpl-eyebrow">Options</h2>
-        <OptionsManager view={view} productId={productId} reload={reloadVariants} onError={setActionErr} />
+        <OptionsManager
+          view={view}
+          productId={productId}
+          reload={reloadVariants}
+          onError={setActionErr}
+          pendingStockWarning={view.options.length === 0 ? { quantity: inv.product.quantity, reserved: inv.product.reserved } : null}
+        />
       </Card>
 
       {/* Variants */}
@@ -167,6 +174,18 @@ export function ProductEditorManager({ productId }: { productId: string }) {
           </>
         )}
       </Card>
+
+      {/* Inventory — a product with no options has no variant to carry stock,
+          so it tracks it on its own product-level row instead (MDF-226: the
+          API already supported this via an omitted variantId; this card was
+          the missing frontend surface). Hidden once options exist — from
+          then on, stock lives on each variant's own card above. */}
+      {view.options.length === 0 && (
+        <Card className="space-y-4 p-5 sm:p-6">
+          <h2 className="bmpl-eyebrow">Inventory</h2>
+          <InventoryControl productId={productId} query="" invRow={inv.product} currentQty={inv.product.quantity} onChanged={reloadVariants} onError={setActionErr} />
+        </Card>
+      )}
 
       {/* Brand image — product-level marketplace listing image (at most one) */}
       <Card className="space-y-4 p-5 sm:p-6">
