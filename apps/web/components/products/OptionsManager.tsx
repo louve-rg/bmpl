@@ -10,14 +10,9 @@ interface Props {
   productId: string;
   reload: () => Promise<void>;
   onError: (msg: string) => void;
-  /** Set only while the product has no options yet and still carries
-   *  product-level stock (MDF-226 follow-up) — adding the first option is
-   *  the exact moment that stock's own card disappears, so AddOptionForm
-   *  warns with the real quantity before it submits. */
-  pendingStockWarning?: { quantity: number; reserved: number } | null;
 }
 
-export function OptionsManager({ view, productId, reload, onError, pendingStockWarning }: Props) {
+export function OptionsManager({ view, productId, reload, onError }: Props) {
   const locked = view.variants.length > 0;
 
   return (
@@ -44,7 +39,7 @@ export function OptionsManager({ view, productId, reload, onError, pendingStockW
           Options are fixed once variants exist — edit values instead. Delete all variants to change the option set.
         </p>
       ) : (
-        <AddOptionForm productId={productId} reload={reload} onError={onError} pendingStockWarning={pendingStockWarning} />
+        <AddOptionForm productId={productId} reload={reload} onError={onError} />
       )}
     </section>
   );
@@ -300,12 +295,10 @@ function AddOptionForm({
   productId,
   reload,
   onError,
-  pendingStockWarning,
 }: {
   productId: string;
   reload: () => Promise<void>;
   onError: (msg: string) => void;
-  pendingStockWarning?: { quantity: number; reserved: number } | null;
 }) {
   const [name, setName] = useState('');
   const [values, setValues] = useState('');
@@ -317,13 +310,6 @@ function AddOptionForm({
       onSubmit={async (e) => {
         e.preventDefault();
         if (!name.trim()) return;
-        if (pendingStockWarning && (pendingStockWarning.quantity !== 0 || pendingStockWarning.reserved !== 0)) {
-          const ok = window.confirm(
-            `This product has ${pendingStockWarning.quantity} unit(s) of stock set directly on it (${pendingStockWarning.reserved} reserved). ` +
-              `Adding an option hides that control — the stock stays recorded, but you won't be able to adjust it again until you create a matching variant. Continue?`,
-          );
-          if (!ok) return;
-        }
         setBusy(true);
         try {
           await api.post(`/vendor/products/${productId}/options`, {

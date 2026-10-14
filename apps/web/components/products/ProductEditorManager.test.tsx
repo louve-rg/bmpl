@@ -130,8 +130,10 @@ describe('ProductEditorManager — inventory for a product with no options (MDF-
         },
       ],
     });
+    // Explicitly zero on both fields — this test is about the with-options path
+    // in general, not about stranded stock (see the dedicated describe block below).
     const inv = inventory({
-      product: productInvRow({ quantity: 0 }),
+      product: productInvRow({ quantity: 0, reserved: 0 }),
       variants: [productInvRow({ inventoryId: 'inv-var-1', variantId: 'var-1', quantity: 12 })],
     });
     const el = await mount(view, inv);
@@ -139,14 +141,15 @@ describe('ProductEditorManager — inventory for a product with no options (MDF-
     // The variant's own inventory card is present (unchanged behavior)...
     expect(el.textContent).toContain('Small');
     expect(el.textContent).toContain('Apply adjustment');
-    // ...but there is exactly one inventory control, not a second product-level one.
+    // ...but there is exactly one inventory control — no stranded-stock card either,
+    // since there is nothing stranded (quantity and reserved both zero).
     const applyButtons = Array.from(el.querySelectorAll('button')).filter((b) => b.textContent === 'Apply adjustment');
     expect(applyButtons.length).toBe(1);
     expect(el.textContent).not.toContain('No options yet');
+    expect(el.textContent).not.toContain('Stranded stock');
   });
 
-  it('a product that starts option-less, gets stock set, then gains an option: the card disappears and the variant inventory UI takes over cleanly (god follow-up)', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('a product that starts option-less, gets stock set, then gains an option: the card is replaced by the Stranded stock card, not lost (god follow-up, superseded by the critical reconciliation fix)', async () => {
     let optionAdded = false;
     const optionLessView = manageView({ options: [] });
     const optionLessInv = inventory({ product: productInvRow({ quantity: 7 }) });
@@ -170,7 +173,8 @@ describe('ProductEditorManager — inventory for a product with no options (MDF-
     });
     const withOptionInv = inventory({
       // The product-level row is still there — nothing deleted or migrated it —
-      // it is simply no longer rendered anywhere once options exist.
+      // it is simply no longer the "Inventory" card once options exist. It is
+      // now the Stranded stock card instead (the reconciliation fix).
       product: productInvRow({ quantity: 7 }),
       variants: [productInvRow({ inventoryId: 'inv-var-1', variantId: 'var-1', quantity: 0 })],
     });
@@ -209,7 +213,9 @@ describe('ProductEditorManager — inventory for a product with no options (MDF-
     });
     expect(apiPost).toHaveBeenCalledWith('/vendor/products/prod-1/inventory/adjust', { delta: 1, reason: 'RESTOCK' });
 
-    // Now add an option through the real AddOptionForm, same as a vendor would.
+    // Now add an option through the real AddOptionForm, same as a vendor would —
+    // no confirmation prompt anymore: there is nothing to warn about once the
+    // Stranded stock card picks the row up immediately.
     const nameInput = container.querySelector('input[aria-label="New option name"]') as HTMLInputElement;
     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
@@ -224,70 +230,95 @@ describe('ProductEditorManager — inventory for a product with no options (MDF-
       await Promise.resolve();
       await Promise.resolve();
     });
-
-    // Owner's follow-up safeguard: adding the first option while product-level
-    // stock still exists must warn, with the real quantity, before it submits.
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy.mock.calls[0]![0]).toContain('7 unit(s)');
     expect(apiPost).toHaveBeenCalledWith('/vendor/products/prod-1/options', { name: 'Size', values: [] });
 
-    // After: the product-level card is gone, the variant's own inventory UI is up instead —
-    // and there is still exactly ONE inventory control on the page, not two.
+    // After: the plain "Inventory" card is gone, the variant's own inventory UI is
+    // up, AND the Stranded stock card is up too — TWO Apply-adjustment controls now,
+    // deliberately: one for the real variant, one for the 7 units nobody moved.
     expect(container.textContent).not.toContain('No options yet');
     expect(container.textContent).toContain('Small');
+    expect(container.textContent).toContain('Stranded stock');
+    expect(container.textContent).toContain('7 units recorded directly on it');
     const applyButtonsAfter = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent === 'Apply adjustment');
-    expect(applyButtonsAfter.length).toBe(1);
-    confirmSpy.mockRestore();
+    expect(applyButtonsAfter.length).toBe(2);
+  });
+});
+
+describe('ProductEditorManager — Stranded stock card (critical reconciliation fix)', () => {
+  let container: HTMLDivElement | null = null;
+  let root: Root | null = null;
+
+  beforeEach(() => {
+    apiGet.mockReset();
+    apiPost.mockReset();
   });
 
-  it('declining the warning keeps the option unadded and the stock still visible (owner follow-up)', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    apiPost.mockResolvedValue({});
-    const el = await mount(manageView({ options: [] }), inventory({ product: productInvRow({ quantity: 7 }) }));
-
-    const nameInput = el.querySelector('input[aria-label="New option name"]') as HTMLInputElement;
-    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
-    await act(async () => {
-      nativeSetter.call(nameInput, 'Size');
-      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-      await Promise.resolve();
-    });
-    const addOptionButton = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === '+ Add option')!;
-    await act(async () => {
-      addOptionButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(apiPost).not.toHaveBeenCalledWith('/vendor/products/prod-1/options', expect.anything());
-    // The product-level card is still up — nothing changed, so nothing was lost.
-    expect(el.textContent).toContain('No options yet');
-    expect(el.textContent).toContain('Apply adjustment');
-    confirmSpy.mockRestore();
+  afterEach(() => {
+    if (root) act(() => root!.unmount());
+    if (container) container.remove();
+    root = null;
+    container = null;
   });
 
-  it('adding the first option when there is no product-level stock to lose does not prompt (owner follow-up)', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm');
+  async function mount(view: ManageView, inv: Inventory) {
+    apiGet.mockImplementation((url: string) => {
+      if (url.endsWith('/variants')) return Promise.resolve(view);
+      if (url.endsWith('/inventory')) return Promise.resolve(inv);
+      if (url.endsWith('/images')) return Promise.resolve(images);
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<ProductEditorManager productId="prod-1" />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    return container;
+  }
+
+  it('appears as soon as options exist and the product-level row still carries stock, even with no variant generated yet', async () => {
+    const view = manageView({ options: [{ id: 'opt-1', name: 'Size', values: [{ id: 'val-1', value: 'Small' }] }], variants: [] });
+    const inv = inventory({ product: productInvRow({ quantity: 7, reserved: 1 }) });
+    const el = await mount(view, inv);
+
+    expect(el.textContent).toContain('Stranded stock');
+    expect(el.textContent).toContain('7 units recorded directly on it');
+    // No variant generated yet, so this is the ONLY inventory control — not a second one.
+    const applyButtons = Array.from(el.querySelectorAll('button')).filter((b) => b.textContent === 'Apply adjustment');
+    expect(applyButtons.length).toBe(1);
+  });
+
+  it('does not appear once the vendor has zeroed the stranded row out', async () => {
+    const view = manageView({ options: [{ id: 'opt-1', name: 'Size', values: [{ id: 'val-1', value: 'Small' }] }], variants: [] });
+    const inv = inventory({ product: productInvRow({ quantity: 0, reserved: 0 }) });
+    const el = await mount(view, inv);
+
+    expect(el.textContent).not.toContain('Stranded stock');
+  });
+
+  it('still appears when quantity is zero but a reservation is still outstanding against the dead row', async () => {
+    const view = manageView({ options: [{ id: 'opt-1', name: 'Size', values: [{ id: 'val-1', value: 'Small' }] }], variants: [] });
+    const inv = inventory({ product: productInvRow({ quantity: 0, reserved: 2 }) });
+    const el = await mount(view, inv);
+
+    expect(el.textContent).toContain('Stranded stock');
+  });
+
+  it("adjusts the stranded row directly, with no ?variantId= on the request — same endpoint the option-less product's own card already uses", async () => {
     apiPost.mockResolvedValue({});
-    const el = await mount(manageView({ options: [] }), inventory({ product: productInvRow({ quantity: 0, reserved: 0 }) }));
+    const view = manageView({ options: [{ id: 'opt-1', name: 'Size', values: [{ id: 'val-1', value: 'Small' }] }], variants: [] });
+    const inv = inventory({ product: productInvRow({ quantity: 7 }) });
+    const el = await mount(view, inv);
 
-    const nameInput = el.querySelector('input[aria-label="New option name"]') as HTMLInputElement;
-    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const applyButton = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Apply adjustment')!;
     await act(async () => {
-      nativeSetter.call(nameInput, 'Size');
-      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-      await Promise.resolve();
-    });
-    const addOptionButton = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === '+ Add option')!;
-    await act(async () => {
-      addOptionButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      applyButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(confirmSpy).not.toHaveBeenCalled();
-    expect(apiPost).toHaveBeenCalledWith('/vendor/products/prod-1/options', { name: 'Size', values: [] });
-    confirmSpy.mockRestore();
+    expect(apiPost).toHaveBeenCalledWith('/vendor/products/prod-1/inventory/adjust', { delta: 1, reason: 'RESTOCK' });
   });
 });
