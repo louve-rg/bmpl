@@ -129,7 +129,13 @@ export function ProductEditorManager({ productId }: { productId: string }) {
       {/* Options */}
       <Card className="space-y-4 p-5 sm:p-6">
         <h2 className="bmpl-eyebrow">Options</h2>
-        <OptionsManager view={view} productId={productId} reload={reloadVariants} onError={setActionErr} />
+        <OptionsManager
+          view={view}
+          productId={productId}
+          reload={reloadVariants}
+          onError={setActionErr}
+          pendingStockWarning={view.options.length === 0 ? { quantity: inv.product.quantity, reserved: inv.product.reserved } : null}
+        />
       </Card>
 
       {/* Variants */}

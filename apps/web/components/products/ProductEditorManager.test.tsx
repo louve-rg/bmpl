@@ -146,6 +146,7 @@ describe('ProductEditorManager — inventory for a product with no options (MDF-
   });
 
   it('a product that starts option-less, gets stock set, then gains an option: the card disappears and the variant inventory UI takes over cleanly (god follow-up)', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     let optionAdded = false;
     const optionLessView = manageView({ options: [] });
     const optionLessInv = inventory({ product: productInvRow({ quantity: 7 }) });
@@ -224,6 +225,10 @@ describe('ProductEditorManager — inventory for a product with no options (MDF-
       await Promise.resolve();
     });
 
+    // Owner's follow-up safeguard: adding the first option while product-level
+    // stock still exists must warn, with the real quantity, before it submits.
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy.mock.calls[0]![0]).toContain('7 unit(s)');
     expect(apiPost).toHaveBeenCalledWith('/vendor/products/prod-1/options', { name: 'Size', values: [] });
 
     // After: the product-level card is gone, the variant's own inventory UI is up instead —
@@ -232,5 +237,57 @@ describe('ProductEditorManager — inventory for a product with no options (MDF-
     expect(container.textContent).toContain('Small');
     const applyButtonsAfter = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent === 'Apply adjustment');
     expect(applyButtonsAfter.length).toBe(1);
+    confirmSpy.mockRestore();
+  });
+
+  it('declining the warning keeps the option unadded and the stock still visible (owner follow-up)', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    apiPost.mockResolvedValue({});
+    const el = await mount(manageView({ options: [] }), inventory({ product: productInvRow({ quantity: 7 }) }));
+
+    const nameInput = el.querySelector('input[aria-label="New option name"]') as HTMLInputElement;
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(nameInput, 'Size');
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await Promise.resolve();
+    });
+    const addOptionButton = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === '+ Add option')!;
+    await act(async () => {
+      addOptionButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(apiPost).not.toHaveBeenCalledWith('/vendor/products/prod-1/options', expect.anything());
+    // The product-level card is still up — nothing changed, so nothing was lost.
+    expect(el.textContent).toContain('No options yet');
+    expect(el.textContent).toContain('Apply adjustment');
+    confirmSpy.mockRestore();
+  });
+
+  it('adding the first option when there is no product-level stock to lose does not prompt (owner follow-up)', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    apiPost.mockResolvedValue({});
+    const el = await mount(manageView({ options: [] }), inventory({ product: productInvRow({ quantity: 0, reserved: 0 }) }));
+
+    const nameInput = el.querySelector('input[aria-label="New option name"]') as HTMLInputElement;
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(nameInput, 'Size');
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await Promise.resolve();
+    });
+    const addOptionButton = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === '+ Add option')!;
+    await act(async () => {
+      addOptionButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(apiPost).toHaveBeenCalledWith('/vendor/products/prod-1/options', { name: 'Size', values: [] });
+    confirmSpy.mockRestore();
   });
 });
