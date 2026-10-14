@@ -123,9 +123,17 @@ export default function OrderDetailPage() {
               {order.vendorOrders.map((vo) => (
                 <Card key={vo.id} className="overflow-hidden">
                   <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Link href={`/store/${vo.vendor.slug}`} className="font-semibold text-belize-navy hover:text-belize-blue">{vo.vendor.businessName}</Link>
                       <DeliveryBadge method={vo.deliveryMethod} />
+                      {/* This store's own progress (PENDING → PREPARING → …) — the
+                          sibling vendor-order detail page (dashboard/orders/[id])
+                          already shows this; previously only the top-level order
+                          badge above was shown here, which stays PENDING for the
+                          whole order even once a store has moved this vendor-order
+                          along, leaving a pickup customer with nothing to see
+                          between placing the order and the pickup code appearing. */}
+                      <OrderStatusBadge status={vo.status} />
                     </div>
                     <span className="text-xs text-slate-400">{vo.orderNumber}</span>
                   </header>
