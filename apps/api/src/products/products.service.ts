@@ -366,10 +366,21 @@ export class ProductsService {
       (SELECT SUM(il.quantity) - SUM(il.reserved) FROM inventory_locations il WHERE il."inventoryId" = i.id),
       i.quantity - i.reserved
     ) > 0)`;
+    // A variantId IS NULL row is the REAL stock for a product with no variants,
+    // but generateVariants() never reconciles it once sibling variant rows
+    // exist, so it is a dead orphan from then on — mirrors
+    // InventoryService.excludeOrphanProductRow() exactly (same rule, same
+    // source of truth: do other Inventory rows for this product carry a
+    // variantId), kept in sync by hand since one is SQL and the other
+    // TypeScript. A row counts here only when it is a variant row, or no
+    // variant row exists for this product at all.
+    const effectiveRowExpr = Prisma.sql`(i."variantId" IS NOT NULL OR NOT EXISTS (
+      SELECT 1 FROM inventory iv WHERE iv."productId" = i."productId" AND iv."variantId" IS NOT NULL
+    ))`;
     const inStockFilter = query.inStock
       ? Prisma.sql`AND (
           NOT EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id)
-          OR EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id AND ${purchasableExpr}))`
+          OR EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id AND ${effectiveRowExpr} AND ${purchasableExpr}))`
       : Prisma.empty;
     const searchFilter = q
       ? Prisma.sql`AND (p."searchVector" @@ websearch_to_tsquery('english', ${q}) OR p.title ILIKE ${`%${q}%`})`
@@ -379,7 +390,7 @@ export class ProductsService {
     const hideOosFilter = Prisma.sql`AND (
         vs."hideOutOfStock" IS NOT TRUE
         OR NOT EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id)
-        OR EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id AND ${purchasableExpr}))`;
+        OR EXISTS (SELECT 1 FROM inventory i WHERE i."productId" = p.id AND ${effectiveRowExpr} AND ${purchasableExpr}))`;
     const rankExpr = q
       ? Prisma.sql`ts_rank(p."searchVector", websearch_to_tsquery('english', ${q}))`
       : Prisma.sql`0`;
