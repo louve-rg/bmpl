@@ -3407,9 +3407,20 @@ export class ShipmentService {
       },
     });
 
+    // Edward requirement 12 (owner priority): a window is one of the
+    // configured signals `estimateShipmentEta` anchors LAST_MILE/DIRECT to
+    // (projectLastMile/projectDirect, packages/shared/src/shipment-eta.ts),
+    // so replacing it can genuinely move the baseline the same way a
+    // carrier's own `scheduleLeg` commitment or a real `transition()` can —
+    // this was the gap: those two were `noticeEtaChange`'s only callers,
+    // and this write reached neither, so a window change silently moved the
+    // real ETA while the customer went on believing the old one.
+    const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
+    const payload = await this.serialize(fresh, { audience: 'CUSTOMER' });
+    await this.noticeEtaChange(fresh, payload.eta);
+
     if (isSender) {
-      const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
-      return this.serialize(fresh, { audience: 'CUSTOMER' });
+      return payload;
     }
 
     // The recipient's own ack: exactly what is now stored for THEIR role,
