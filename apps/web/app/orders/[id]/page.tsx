@@ -123,7 +123,7 @@ export default function OrderDetailPage() {
               {order.vendorOrders.map((vo) => (
                 <Card key={vo.id} className="overflow-hidden">
                   <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Link href={`/store/${vo.vendor.slug}`} className="font-semibold text-belize-navy hover:text-belize-blue">{vo.vendor.businessName}</Link>
                       <DeliveryBadge method={vo.deliveryMethod} />
                       {/* This store's own progress (PENDING → PREPARING → …) — the
