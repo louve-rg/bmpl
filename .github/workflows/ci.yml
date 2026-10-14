@@ -6,9 +6,21 @@ on:
   pull_request:
     branches: [main]
 
+# cancel-in-progress is scoped off github.ref, not github.event_name, so it
+# only ever cancels a run for a ref that ISN'T main (in practice, a
+# pull_request run, whose ref is refs/pull/<n>/merge) - a push run building
+# refs/heads/main is never cancelled by a later push to main. That matters
+# because the main-branch suite IS the Railway deploy gate for apps/api
+# (see the Browser tests comment below): a later main push used to cancel an
+# in-flight suite before it could complete, which silently left the API
+# deployed at a stale commit with no failed check anywhere to point at it.
+# Confirmed twice in run history: 6c1ea8f's suite (run 38509705510, started
+# 04:06:40Z) was cancelled by the next main push's run (38510706826, started
+# 04:18:25Z, 11m45s later); eb186633's suite (run 38281282884, 2026-10-12)
+# was cancelled the same way.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   # Deterministic, non-secret values used only for CI builds/tests.
