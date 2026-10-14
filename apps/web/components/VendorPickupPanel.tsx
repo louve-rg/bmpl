@@ -3,12 +3,36 @@
 import { useState } from 'react';
 import { ordersApi } from '../lib/orders';
 import type { ApiError } from '../lib/api';
-import { Alert, Button, Card, Input, StatusBadge } from './ui';
+import { Alert, Button, Card, Input, Spinner, StatusBadge } from './ui';
 
 /**
  * Vendor pickup-fulfilment controls for a PICKUP vendor-order (M18.1).
- * PENDING → mark ready · READY_FOR_PICKUP → confirm collection with the
- * customer's PIN · PICKED_UP → collected confirmation.
+ * PENDING → optionally start preparing → mark ready · READY_FOR_PICKUP →
+ * confirm collection with the customer's PIN · PICKED_UP → collected
+ * confirmation.
+ *
+ * PREPARING mirrors VendorFulfilmentPanel's delivery flow (god,
+ * conv-modules-2026-10-14, Edward req 10 follow-on): once #409 gave a pickup
+ * customer a per-vendor status badge, that badge had nowhere to go but
+ * PENDING until it jumped straight to READY_FOR_PICKUP. The step is
+ * OPTIONAL — PENDING → ready remains valid, exactly as on the delivery
+ * panel — a vendor who skips preparing must still be able to mark ready
+ * directly. Needs PickupService#markReadyForPickup to accept PREPARING too
+ * (pickup.service.ts:66, landing separately) — do not open this without
+ * that merged first, or a vendor who DOES press "Start preparing" walks
+ * straight into a 409 on "Mark ready for pickup" that a vendor who skips it
+ * never hits.
+ *
+ * "Mark ready" now calls `vendorMarkReady` (`/vendor/orders/:id/ready`, the
+ * same call the delivery panel makes) instead of the older
+ * `vendorReadyForPickup` (`/ready-for-pickup`, controller-flagged
+ * `@deprecated` — "Prefer `:id/ready`, which handles both pickup and
+ * delivery"). For a PICKUP order both routes delegate to the identical
+ * `PickupService#markReadyForPickup` underneath, so this changes no
+ * observable behaviour; it gives this one action the same shape as the
+ * delivery panel's single `run('ready')` regardless of which state it is
+ * called from, instead of needing two different calls depending on whether
+ * preparing was pressed.
  */
 export function VendorPickupPanel({
   vendorOrderId,
@@ -21,27 +45,31 @@ export function VendorPickupPanel({
   pickedUpAt?: string | null;
   onChanged: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'prepare' | 'ready' | 'confirm' | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pin, setPin] = useState('');
 
-  async function markReady() {
-    setBusy(true);
+  async function run(step: 'prepare' | 'ready') {
+    setBusy(step);
     setErr(null);
     try {
-      await ordersApi.vendorReadyForPickup(vendorOrderId);
+      if (step === 'prepare') await ordersApi.vendorStartPreparing(vendorOrderId);
+      else await ordersApi.vendorMarkReady(vendorOrderId);
       onChanged();
     } catch (e) {
-      setErr((e as ApiError).message ?? 'Could not mark this order ready.');
+      setErr(
+        (e as ApiError).message ??
+          (step === 'prepare' ? 'Could not start preparing this order.' : 'Could not mark this order ready.'),
+      );
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   async function confirmPickup(e: React.FormEvent) {
     e.preventDefault();
     if (!pin.trim()) return;
-    setBusy(true);
+    setBusy('confirm');
     setErr(null);
     try {
       await ordersApi.vendorConfirmPickup(vendorOrderId, pin.trim());
@@ -50,7 +78,7 @@ export function VendorPickupPanel({
     } catch (e2) {
       setErr((e2 as ApiError).message ?? 'Could not confirm pickup.');
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -61,15 +89,39 @@ export function VendorPickupPanel({
         <StatusBadge status={status} />
       </div>
 
-      {status === 'PENDING' && (
+      {(status === 'PENDING' || status === 'PREPARING') && (
         <div className="space-y-3">
           <p className="text-sm text-slate-600">
-            When this order is packed and waiting at the counter, mark it ready so the customer gets
-            their pickup code.
+            {status === 'PENDING'
+              ? 'Let the customer know you’ve seen their order and started putting it together.'
+              : 'When this order is packed and waiting at the counter, mark it ready so the customer gets their pickup code.'}
           </p>
-          <Button type="button" size="sm" onClick={markReady} disabled={busy}>
-            {busy ? 'Marking…' : 'Mark ready for pickup'}
-          </Button>
+          {/* Stacks on narrow screens; full-width targets so a phone in one
+              hand at a counter is not a precision exercise — same shape as
+              VendorFulfilmentPanel's own button row. */}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {status === 'PENDING' && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full sm:w-auto"
+                disabled={busy !== null}
+                onClick={() => run('prepare')}
+              >
+                {busy === 'prepare' ? <Spinner className="h-4 w-4" /> : 'Start preparing'}
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              className="w-full sm:w-auto"
+              disabled={busy !== null}
+              onClick={() => run('ready')}
+            >
+              {busy === 'ready' ? <Spinner className="h-4 w-4" /> : 'Mark ready for pickup'}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -86,10 +138,10 @@ export function VendorPickupPanel({
               autoComplete="off"
               aria-label="Pickup code"
               className="max-w-[10rem] font-mono tracking-[0.2em]"
-              disabled={busy}
+              disabled={busy !== null}
             />
-            <Button type="submit" size="sm" disabled={busy || !pin.trim()}>
-              {busy ? 'Confirming…' : 'Confirm pickup'}
+            <Button type="submit" size="sm" disabled={busy !== null || !pin.trim()}>
+              {busy === 'confirm' ? 'Confirming…' : 'Confirm pickup'}
             </Button>
           </div>
         </form>
