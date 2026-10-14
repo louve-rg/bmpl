@@ -7,7 +7,7 @@ import {
 import { slugify } from '@bmpl/shared';
 import type { CreateProductInput, ProductQueryInput, UpdateProductInput } from '@bmpl/validation';
 import { Prisma } from '@bmpl/database';
-import type { Product, ProductStatus } from '@bmpl/database';
+import type { Product, ProductStatus, StoreStatus } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -417,7 +417,7 @@ export class ProductsService {
       where: { id: { in: ids } },
       include: {
         category: { select: { name: true, slug: true } },
-        vendorProfile: { select: { businessName: true, slug: true } },
+        vendorProfile: { select: { businessName: true, slug: true, storeStatus: true } },
       },
     });
     const byId = new Map(found.map((p) => [p.id, p]));
@@ -443,7 +443,7 @@ export class ProductsService {
       where: { slug, status: 'PUBLISHED', vendorProfile: { approvalStatus: 'APPROVED', isTest: false } },
       include: {
         category: { select: { name: true, slug: true } },
-        vendorProfile: { select: { businessName: true, slug: true } },
+        vendorProfile: { select: { businessName: true, slug: true, storeStatus: true } },
         tags: true,
       },
     });
@@ -485,7 +485,7 @@ export class ProductsService {
       take: limit,
       include: {
         category: { select: { name: true, slug: true } },
-        vendorProfile: { select: { businessName: true, slug: true } },
+        vendorProfile: { select: { businessName: true, slug: true, storeStatus: true } },
       },
     });
     // Hide out-of-stock products from the storefront grid when the vendor opts in.
@@ -514,7 +514,7 @@ export class ProductsService {
           where: { id: { in: ids }, status: 'PUBLISHED', vendorProfile: { approvalStatus: 'APPROVED' } },
           include: {
             category: { select: { name: true, slug: true } },
-            vendorProfile: { select: { businessName: true, slug: true } },
+            vendorProfile: { select: { businessName: true, slug: true, storeStatus: true } },
           },
         })
       : [];
@@ -659,7 +659,7 @@ export class ProductsService {
   private cardShape(
     p: Product & {
       category: { name: string; slug: string };
-      vendorProfile: { businessName: string; slug: string };
+      vendorProfile: { businessName: string; slug: string; storeStatus: StoreStatus };
     },
   ) {
     return {
@@ -674,7 +674,11 @@ export class ProductsService {
       ratingAverage: p.ratingAverage,
       ratingCount: p.ratingCount,
       category: p.category,
-      vendor: { businessName: p.vendorProfile.businessName, slug: p.vendorProfile.slug },
+      vendor: {
+        businessName: p.vendorProfile.businessName,
+        slug: p.vendorProfile.slug,
+        storeStatus: p.vendorProfile.storeStatus,
+      },
     };
   }
 }
