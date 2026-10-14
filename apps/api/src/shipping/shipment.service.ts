@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   belizeCalendarDateKey,
   belizeMidday,
@@ -1665,8 +1665,18 @@ export class ShipmentService {
     await this.verifyHandoffPin(legId, input.pin, actor);
 
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
-      await tx.shipmentLeg.update({
-        where: { id: leg.id },
+      // Conditional write, NOT an unconditional update by id. `leg.status` is
+      // a read taken moments earlier in this same transaction (transition()'s
+      // own findUnique) — a concurrent flagException() on this exact leg can
+      // commit in between that read and this write, since both start from
+      // the same IN_PROGRESS leg and neither's write previously re-asserted
+      // it. Before this guard, both unconditional writes could each commit,
+      // leaving a leg with status=EXCEPTION but completedAt AND exceptionAt
+      // both set (MDF-223). Re-asserting the status this call actually read,
+      // inside the write, closes it — same pattern as
+      // DriverJobService.confirmPickup / DispatchService.cancel.
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, status: leg.status },
         data: {
           status: 'COMPLETED',
           completedAt: new Date(),
@@ -1676,6 +1686,9 @@ export class ShipmentService {
           handoffReceivedByName: input.receivedByName,
         },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException('This leg changed state before the handoff could be recorded — reload and try again.');
+      }
 
       // Who holds it now depends on where this leg ended, not on who was carrying.
       const toHolder: CustodyHolder = leg.destinationHubId ? 'HUB' : 'RECIPIENT';
@@ -1850,10 +1863,19 @@ export class ShipmentService {
    */
   async flagException(legId: string, input: LegExceptionInput, actor: { userId: string | null; label?: string }) {
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
-      await tx.shipmentLeg.update({
-        where: { id: leg.id },
+      // Conditional write, NOT an unconditional update by id — same race and
+      // same fix as completeLeg() above (MDF-223): re-assert the status this
+      // call actually read (whatever it was — flagException is legal from
+      // several non-terminal statuses, not just IN_PROGRESS), inside the
+      // write, so a concurrent completeLeg() on the same leg cannot silently
+      // lose or be lost.
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, status: leg.status },
         data: { status: 'EXCEPTION', exceptionAt: new Date(), exceptionReason: input.reason },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException('This leg changed state before the exception could be recorded — reload and try again.');
+      }
       await tx.shipment.update({ where: { id: shipment.id }, data: { exceptionAt: new Date(), exceptionReason: input.reason } });
       await this.notifications.notifyAdmins(
         'logistics.read',
