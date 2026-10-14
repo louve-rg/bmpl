@@ -146,3 +146,47 @@ me today** — I have no way, within these boundaries, to rule out an
 undocumented Railway configuration change in the 36 days since. Do not read
 this as "probably still fine" or as "unknown" — it is a specific, dated,
 positive record with a specific unconfirmed gap.
+
+---
+
+## 5. Run this now — the procedure, for you to execute (4 steps, one sitting)
+
+Steps 1–2 are read-only checks, nothing is sent. Step 3 is the only step that
+sends anything, and only because you choose to trigger it. Never share the
+actual value of `RESEND_API_KEY` or any Railway variable with anyone while
+doing this — check for *presence*, not value.
+
+**1. Railway dashboard → API service → Variables → read `EMAIL_PROVIDER`.**
+- Absent, or set to `console` → **production is sending nothing right now.**
+  Stop here; that's the finding. Go to step 4.
+- Set to `smtp` → **also sends nothing** — that provider is an unimplemented
+  stub in the code regardless of `SMTP_URL`. Stop here; same finding. Go to
+  step 4.
+- Set to `resend` → go to step 2.
+
+**2. Same Variables tab → confirm `RESEND_API_KEY` is present** (just that it
+exists, not its value).
+- Absent → sending will fail every time; go to step 3 to see that confirmed
+  live.
+- Present → go to step 3.
+
+**3. Trigger one real send yourself**, on an account you control: sign in and
+request a password reset or a "resend verification email" through the live
+site.
+- **Did the email arrive within a few minutes?** Yes → email works, right
+  now. No → check the Railway API logs for the minute you requested it, for
+  these exact lines:
+  - `[email:console] to=... subject="..."` → still on `console`, no matter
+    what step 1 showed.
+  - `EMAIL_PROVIDER=resend but RESEND_API_KEY is missing; email not sent.` or
+    `Resend send failed: HTTP ...` → `resend` selected but failing; the
+    second line's detail is Resend's own error text (safe to read — never a
+    credential) and usually says why.
+  - **Neither line appears** → this proves **nothing by itself**. A
+    successful Resend send logs no line at all. The only thing that confirms
+    success is the email physically arriving in step 3 — never log silence.
+
+**4. Write down the result with today's date**, replacing this document's
+"2026-09-07, BMPL-73" reference as the new last-known state: either "confirmed
+working as of `<today's date>`" (email arrived) or the specific failure point
+found in steps 1–3.
