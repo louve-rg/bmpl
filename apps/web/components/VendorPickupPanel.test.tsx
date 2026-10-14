@@ -13,9 +13,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * PREPARING shows only "Mark ready for pickup", never "Start preparing"
  * again; "Mark ready for pickup" posts to the UNIFIED `/ready` endpoint
  * (`vendorMarkReady`) from either state, never the deprecated
- * `/ready-for-pickup` (`vendorReadyForPickup`); a failed action shows the
- * real error and recovers, never a false success; the existing
- * READY_FOR_PICKUP/PICKED_UP/CANCELLED states are untouched.
+ * `/ready-for-pickup` route (whose client wrapper, `vendorReadyForPickup`,
+ * has since been deleted from `lib/orders.ts` as dead code — this negative
+ * assertion now pins the HTTP call shape directly, not a wrapper that no
+ * longer exists); a failed action shows the real error and recovers, never
+ * a false success; the existing READY_FOR_PICKUP/PICKED_UP/CANCELLED states
+ * are untouched.
  */
 
 const apiPost = vi.fn();
