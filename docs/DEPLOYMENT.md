@@ -117,6 +117,61 @@ railway api 'query($s:String!,$e:String!){ serviceInstance(serviceId:$s, environ
 `watchPatterns` leaves the builder, start command, health check, pre-deploy hook and
 variables untouched.
 
+**Reading the deployment log directly — the instrument that would have settled the
+2026-10-14 #405 incident in minutes instead of ~15 hours.** Railway publishes every
+deployment it makes as a GitHub Deployment record on this repo, with its own status
+history. No Railway credentials are needed — this is plain `gh` against GitHub's API:
+
+```bash
+# Every production deployment, newest first. The API service's environment
+# name is "carefree-achievement / production" — filter on it explicitly,
+# since web/admin deploy through Vercel and never appear here.
+gh api repos/louve-rg/bmpl/deployments --paginate \
+  -q '.[] | select(.environment == "carefree-achievement / production") | {id, sha: .sha[0:7], created_at}'
+
+# That deployment's own status history, oldest first in the array:
+gh api repos/louve-rg/bmpl/deployments/<id>/statuses -q '.[] | {state, created_at}'
+```
+
+What the history actually shows (confirmed 2026-10-14, cross-referenced against the
+push/CI timestamps for the same commits):
+
+- A deployment record is created **within seconds of the push** that touches a
+  watched path — not after a CI check suite concludes. `6c1ea8f` (#405): pushed
+  04:06:40Z, deployment created 04:06:42Z.
+- A clean run goes `in_progress` → `success` in **11–15 minutes** end to end.
+  Observed: `817bf5c` 11m18s, `90dadc5` 15m33s, `fbd8e7f` 14m20s.
+- `in_progress` → **`inactive`** means the deployment was **superseded by a later
+  push**, not that it failed — there is no separate "it broke" status distinct from
+  this one. `6c1ea8f` went `in_progress` → `inactive` at 04:18:53Z, 28 seconds after
+  the *next* main push's own CI run started (04:18:25Z). That next push (`510c783`,
+  web-only) matched none of §2a's watch patterns and has **no `carefree-achievement
+  / production` (API) deployment record of its own** — confirmed by the same query
+  above returning nothing for its SHA under that environment, even though it has the
+  Vercel web/admin deployment records a web-only commit always gets. A web-only merge
+  superseded an in-flight API deployment without replacing it, and the API then kept
+  serving the deployment *before* the superseded one (`817bf5c`) for the next ~15
+  hours. The owner authorised rerunning `6c1ea8f`'s cancelled CI suite and it came
+  back `success` — but that produced **no new deployment attempt**: `6c1ea8f`'s
+  deployment record above never gained a status past that original `inactive`. A CI
+  suite rerun does not revive or recreate a Railway deployment for a commit that is
+  no longer `main`'s tip. The freeze actually ended when the next API-touching commit
+  (`fbd8e7f`, #407) reached `main` and deployed cleanly on its own.
+- **What this does *not* establish**: whether or how the GitHub Actions check suite's
+  own pass/fail result affects a Railway deployment's outcome at all. The evidence
+  above shows Railway does not wait for the suite to *start* a build — do not assume
+  a different, equally unverified mechanism (e.g. "it gates success instead of
+  start") in its place. If this is ever pinned down, document the evidence here
+  rather than inferring it again.
+
+**The rule this evidence establishes**: never merge anything to `main` while a
+production deployment is `in_progress` (check the query above first — the window is
+11–15 minutes). This applies **regardless of what the new commit touches**, watched
+path or not: a web-only merge is exactly what superseded `6c1ea8f`'s deployment on
+2026-10-14, and it cost ~15 hours of the API silently serving a stale commit before
+anyone noticed. If a deployment is in flight, wait for it to resolve (`success` or
+`inactive`) before the next merge to `main`.
+
 ### 2b. Deployment sequencing — changes that span API and web
 
 The API (Railway, Docker build) deploys in minutes; the web app (Vercel) deploys in
