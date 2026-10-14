@@ -298,6 +298,54 @@ describe('resume', () => {
 });
 
 /**
+ * MDF-223: completeLeg() and flagException() share transition(), which reads
+ * the leg's status once and asserts isLegActionable against that read, but
+ * (before the fix) each action's own write was unconditional (keyed on id
+ * alone). Both are legal from the same IN_PROGRESS leg at once — staff
+ * completing a handoff racing staff flagging an exception on the exact same
+ * leg could both commit, leaving a self-contradictory row: status=EXCEPTION
+ * with BOTH completedAt AND exceptionAt set. Proven by a scratch test run
+ * against bare main before this fix: 10 of 10 concurrent attempts (5
+ * handoffs + 5 exceptions) returned 201.
+ */
+describe('completeLeg racing flagException on the same IN_PROGRESS leg (MDF-223)', () => {
+  it('resolves to exactly one winner, and the leg is never left with completedAt AND exceptionAt both set', async () => {
+    const driver = await makeDriver();
+    const { legId } = await bookedWithAssignedFirstMile(driver);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
+    const pin = await pinOf(legId);
+
+    const N = 5;
+    const responses = await Promise.all([
+      ...Array.from({ length: N }, () =>
+        post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, { pin, receivedByName: 'Counter staff' }),
+      ),
+      ...Array.from({ length: N }, () => flag(legId, 'Vehicle broke down at the pickup.')),
+    ]);
+
+    // The invariant that matters (same lesson as MDF-18's #384 correction):
+    // exactly one winner and a coherent final row - not a fixed tally of one
+    // particular refusal code for the other nine.
+    const wins = responses.filter((r) => r.status === 201);
+    expect(wins).toHaveLength(1);
+
+    const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(leg.completedAt !== null && leg.exceptionAt !== null).toBe(false); // the exact defect
+    if (leg.status === 'COMPLETED') {
+      expect(leg.completedAt).not.toBeNull();
+      expect(leg.exceptionAt).toBeNull();
+    } else {
+      expect(leg.status).toBe('EXCEPTION');
+      expect(leg.exceptionAt).not.toBeNull();
+      expect(leg.completedAt).toBeNull();
+    }
+  });
+});
+
+/**
  * MDF-2: before this, #365's PIN-lockout auto-flag told staff a leg was
  * stuck but gave them no way out — RESUME restored the leg's status but
  * left handoffPinAttempts at MAX_PIN_ATTEMPTS, so verifyHandoffPin's lockout
