@@ -20,10 +20,13 @@ import { DispatchEngineService } from '../dispatch/dispatch-engine.service';
  * off to automatic dispatch for DELIVERY orders and issues a collection PIN for
  * PICKUP orders.
  *
- * PICKUP behaviour is deliberately UNCHANGED and still lives in PickupService —
- * this delegates to it rather than reimplementing PIN issuing, inventory
- * finalisation, or its notifications. Pickup already worked; the rule is to
- * protect what works.
+ * PICKUP delegates to PickupService rather than reimplementing PIN issuing,
+ * inventory finalisation, or its notifications — pickup already worked, and
+ * the point of delegating is reuse, not a rewrite. PickupService's own ready
+ * check accepts the same PENDING|PREPARING allow-list this method's DELIVERY
+ * path does, so a pickup order that went through startPreparing() is genuinely
+ * readyable here too — the entry point and the underlying status machine now
+ * agree, not just the entry point.
  */
 @Injectable()
 export class VendorFulfilmentService {

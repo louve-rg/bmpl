@@ -62,8 +62,10 @@ export class PickupService {
   async markReadyForPickup(userId: string, vendorOrderId: string) {
     const vo = await this.ownedByVendor(userId, vendorOrderId);
     this.assertPickup(vo);
-    if (vo.status === 'READY_FOR_PICKUP') return this.serialize(vo, { forVendor: true }); // idempotent
-    if (vo.status !== 'PENDING') throw new ConflictException(`Cannot ready a ${vo.status} order for pickup.`);
+    if (vo.status === 'READY_FOR_PICKUP') return this.serialize(vo, { forVendor: true }); // idempotent, checked before the allow-list below
+    // Same positive allow-list as VendorFulfilmentService.markReady()'s DELIVERY
+    // path: a pickup order that went through startPreparing() is still readyable.
+    if (vo.status !== 'PENDING' && vo.status !== 'PREPARING') throw new ConflictException(`Cannot ready a ${vo.status} order for pickup.`);
     const pin = this.genPin();
     const updated = await this.prisma.vendorOrder.update({ where: { id: vendorOrderId }, data: { status: 'READY_FOR_PICKUP', readyForPickupAt: new Date(), pickupPin: pin, pickupPinAttempts: 0 } });
     await this.audit.record({ action: 'VENDOR_ORDER_READY_FOR_PICKUP', actorId: userId, newValue: { vendorOrderId, orderNumber: vo.orderNumber } });
