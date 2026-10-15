@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickupPhotoSection } from './driver-shipping-job';
+import { pickupPhotoSection, reportIssueState } from './driver-shipping-job';
 
 describe('pickupPhotoSection', () => {
   it('is hidden before the driver has accepted — nothing to photograph at a locked door', () => {
@@ -26,5 +26,28 @@ describe('pickupPhotoSection', () => {
     const raw = JSON.parse(JSON.stringify({ addressUnlocked: true })) as { addressUnlocked: boolean; pickupPhotoUrls?: string[] };
     expect(() => pickupPhotoSection(raw, true)).not.toThrow();
     expect(pickupPhotoSection(raw, true)).toBe('addable');
+  });
+});
+
+describe('reportIssueState', () => {
+  it('is available once the driver actually holds the parcel — PICKUP_CONFIRMED, IN_TRANSIT, ARRIVING', () => {
+    expect(reportIssueState('PICKUP_CONFIRMED', false)).toBe('available');
+    expect(reportIssueState('IN_TRANSIT', false)).toBe('available');
+    expect(reportIssueState('ARRIVING', false)).toBe('available');
+  });
+
+  it('is unavailable before pickup — nothing attempted yet, matching the server\'s own refusal window', () => {
+    expect(reportIssueState('ASSIGNED', false)).toBe('unavailable');
+    expect(reportIssueState('DRIVER_ACCEPTED', false)).toBe('unavailable');
+  });
+
+  it('is unavailable once the leg is terminal — DELIVERED, CANCELLED', () => {
+    expect(reportIssueState('DELIVERED', false)).toBe('unavailable');
+    expect(reportIssueState('CANCELLED', false)).toBe('unavailable');
+  });
+
+  it('is "reported" once this session has already reported, regardless of status — a stale reportable status must never offer the control again', () => {
+    expect(reportIssueState('IN_TRANSIT', true)).toBe('reported');
+    expect(reportIssueState('ASSIGNED', true)).toBe('reported');
   });
 });

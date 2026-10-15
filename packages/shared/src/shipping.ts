@@ -188,6 +188,34 @@ export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
   CANCELLED: 'Cancelled',
 };
 
+/* ------------------------------------------------------- exception copy */
+
+/**
+ * Owner ruling (MDF-243): a customer, recipient or courier is told that an
+ * issue was reported and is being looked at — never the operator's own typed
+ * words, which can name a specific driver, a specific vendor, an internal
+ * reference, or a cause nobody has verified yet. Staff alone keep the full
+ * `exceptionReason` text; this is the one sentence anyone else ever sees for
+ * it. It deliberately does not say the issue is resolved, give a new arrival
+ * time, or say a refund is approved — none of those is known to be true the
+ * moment an exception is merely reported.
+ */
+export const EXCEPTION_CUSTOMER_MESSAGE =
+  'A delivery issue has been reported. We are reviewing the shipment and will provide an update.';
+
+/**
+ * The controlled mapping from a stored exception to what a non-staff
+ * audience is told. There is exactly one approved category today — nothing
+ * in `legExceptionSchema` classifies a reason beyond the free text an
+ * operator typed, so there is nothing safe to vary the wording on. An
+ * unset reason (no exception) maps to `null`, same as the field it stands
+ * in for; any non-empty reason — recognised or not, since none are
+ * "recognised" — maps to the one approved sentence, never to its own text.
+ */
+export function customerFacingExceptionReason(reason: string | null): string | null {
+  return reason ? EXCEPTION_CUSTOMER_MESSAGE : null;
+}
+
 /* -------------------------------------------------------------- custody */
 
 /** Who is holding the parcel. Every transfer is recorded. */

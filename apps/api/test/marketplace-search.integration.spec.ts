@@ -7,6 +7,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 
+/** Adds a single-value option to a product and returns that value's id. */
+async function addSingleOptionValue(server: TestContext['server'], cookies: string[], productId: string, name: string, value: string): Promise<string> {
+  await request(server).post(`/api/vendor/products/${productId}/options`).set('Cookie', cookies).send({ name, values: [value] }).expect(201);
+  const view = await request(server).get(`/api/vendor/products/${productId}/variants`).set('Cookie', cookies);
+  const option = view.body.options.find((o: { name: string }) => o.name === name);
+  return option.values[0].id as string;
+}
+
 let ctx: TestContext;
 let adminCookies: string[];
 let vendorCookies: string[];
@@ -130,5 +138,71 @@ describe('vendor directory search', () => {
     expect(hit.body.some((v: { slug: string }) => v.slug === 'gadget-hub')).toBe(true);
     const miss = await request(ctx.server).get('/api/marketplace/vendors?q=zzz-nothing');
     expect(miss.body).toHaveLength(0);
+  });
+});
+
+/**
+ * A `variantId IS NULL` inventory row is the REAL stock for a product with no
+ * variants, but a dead orphan once the product has variants (generateVariants()
+ * never reconciles it — see InventoryService.excludeOrphanProductRow). The
+ * inStock/hideOutOfStock filters here run their own raw SQL outside that
+ * service and must agree with it, or a product with zero real (variant) stock
+ * reads as "in stock" in search even though InventoryService itself now knows
+ * better (oversell-adjacent: a false availability signal, not a purchase hole
+ * — checkout's own guard at orders.service.ts still blocks the actual buy).
+ */
+describe('orphan product-level row vs. the public inStock/hideOutOfStock filters', () => {
+  it('a product whose real (variant) stock is zero does NOT appear under inStock=true just because a dead 17-unit orphan row is still sitting there', async () => {
+    const id = await publishProduct({ title: 'Ghost Stock Jacket', sku: 'GSJ', categoryId: apparelId, priceMinor: 9000 });
+    await request(ctx.server).post(`/api/vendor/products/${id}/inventory/adjust`).set('Cookie', vendorCookies).send({ delta: 17, reason: 'RESTOCK' }).expect(201);
+    const valueId = await addSingleOptionValue(ctx.server, vendorCookies, id, 'Size', 'S');
+    await request(ctx.server).post(`/api/vendor/products/${id}/variants`).set('Cookie', vendorCookies).send({ optionValueIds: [valueId], sku: 'GSJ-S', quantity: 0 }).expect(201);
+
+    const res = await request(ctx.server).get('/api/marketplace/products?inStock=true');
+    expect(titles(res.body)).not.toContain('Ghost Stock Jacket');
+  });
+
+  it('a product with NO variants still appears under inStock=true from its own real product-level row', async () => {
+    const id = await publishProduct({ title: 'Plain Backpack', sku: 'PB', categoryId: apparelId, priceMinor: 7000 });
+    await request(ctx.server).post(`/api/vendor/products/${id}/inventory/adjust`).set('Cookie', vendorCookies).send({ delta: 5, reason: 'RESTOCK' }).expect(201);
+
+    const res = await request(ctx.server).get('/api/marketplace/products?inStock=true');
+    expect(titles(res.body)).toContain('Plain Backpack');
+  });
+
+  it('a product WITH variants where a variant genuinely has stock still appears under inStock=true', async () => {
+    const id = await publishProduct({ title: 'Real Stock Hoodie', sku: 'RSH', categoryId: apparelId, priceMinor: 11000 });
+    const valueId = await addSingleOptionValue(ctx.server, vendorCookies, id, 'Size', 'M');
+    await request(ctx.server).post(`/api/vendor/products/${id}/variants`).set('Cookie', vendorCookies).send({ optionValueIds: [valueId], sku: 'RSH-M', quantity: 3 }).expect(201);
+
+    const res = await request(ctx.server).get('/api/marketplace/products?inStock=true');
+    expect(titles(res.body)).toContain('Real Stock Hoodie');
+  });
+
+  it('hideOutOfStock: a product whose real (variant) stock is zero stays hidden despite the dead orphan row; one with real variant stock stays visible', async () => {
+    const reg = await request(ctx.server).post('/api/auth/register').send({ email: 'oos_hide_v@example.bz', password: 'VendorPass123', firstName: 'V', lastName: 'E', acceptedTerms: true });
+    const cookies = cookiesOf(reg);
+    const u = await ctx.prisma.user.findUniqueOrThrow({ where: { email: 'oos_hide_v@example.bz' } });
+    await ctx.prisma.userRole.create({ data: { userId: u.id, roleCode: 'VENDOR', status: 'APPROVED', approvedAt: new Date() } });
+    const profile = await request(ctx.server).post('/api/vendor/profile').set('Cookie', cookies).send({ businessName: 'Hide OOS Co', contactEmail: 'oos_hide_v@example.bz' });
+    await request(ctx.server).post('/api/vendor/profile/submit').set('Cookie', cookies).expect(201);
+    await request(ctx.server).post(`/api/admin/vendors/${profile.body.profile.id}/approve`).set('Cookie', adminCookies).send({}).expect(201);
+    await request(ctx.server).patch('/api/vendor/settings').set('Cookie', cookies).send({ hideOutOfStock: true }).expect(200);
+
+    const ghost = await request(ctx.server).post('/api/vendor/products').set('Cookie', cookies).send({ title: 'Hidden Ghost Shirt', sku: 'HGS', categoryId: apparelId, priceMinor: 4000 });
+    const ghostId = ghost.body.id;
+    await request(ctx.server).post(`/api/vendor/products/${ghostId}/inventory/adjust`).set('Cookie', cookies).send({ delta: 17, reason: 'RESTOCK' }).expect(201);
+    const ghostValueId = await addSingleOptionValue(ctx.server, cookies, ghostId, 'Size', 'S');
+    await request(ctx.server).post(`/api/vendor/products/${ghostId}/variants`).set('Cookie', cookies).send({ optionValueIds: [ghostValueId], sku: 'HGS-S', quantity: 0 }).expect(201);
+
+    const real = await request(ctx.server).post('/api/vendor/products').set('Cookie', cookies).send({ title: 'Visible Real Shirt', sku: 'VRS', categoryId: apparelId, priceMinor: 4000 });
+    const realId = real.body.id;
+    const realValueId = await addSingleOptionValue(ctx.server, cookies, realId, 'Size', 'M');
+    await request(ctx.server).post(`/api/vendor/products/${realId}/variants`).set('Cookie', cookies).send({ optionValueIds: [realValueId], sku: 'VRS-M', quantity: 2 }).expect(201);
+
+    const res = await request(ctx.server).get('/api/marketplace/products');
+    const found = titles(res.body);
+    expect(found).not.toContain('Hidden Ghost Shirt');
+    expect(found).toContain('Visible Real Shirt');
   });
 });

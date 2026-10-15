@@ -157,4 +157,75 @@ describe('pickup fulfilment', () => {
     });
     expect((await post(vendor.cookies, `vendor/orders/${order.vendorOrders[0]!.id}/ready-for-pickup`)).status).toBe(400);
   });
+
+  /**
+   * startPreparing() has no deliveryMethod gate -- a PICKUP order can be moved
+   * PENDING -> PREPARING through it exactly like a DELIVERY order, but until now
+   * PickupService.markReadyForPickup() only accepted PENDING, so :id/ready (and
+   * the deprecated :id/ready-for-pickup it still delegates to) 409'd on a
+   * PREPARING pickup order -- a dead end for a vendor who had started preparing.
+   * Enumerated against the full VendorOrderStatus set rather than "every other
+   * status", so there is no ambiguity about what was actually covered.
+   */
+  describe('markReadyForPickup accepts the same PENDING|PREPARING allow-list as the DELIVERY path', () => {
+    it('PENDING -> ready-for-pickup still succeeds', async () => {
+      const vendor = await makeVendor();
+      const o = await makePickupOrder(vendor, 1);
+      const res = await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/ready-for-pickup`);
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('READY_FOR_PICKUP');
+    });
+
+    it('PREPARING -> ready-for-pickup now succeeds (was the trap: 409 "Cannot ready a PREPARING order for pickup.")', async () => {
+      const vendor = await makeVendor();
+      const o = await makePickupOrder(vendor, 1);
+      await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/start-preparing`).expect(201);
+      const res = await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/ready-for-pickup`);
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('READY_FOR_PICKUP');
+    });
+
+    it('PREPARING -> the unified :id/ready route also succeeds, matching its "handles both" claim', async () => {
+      const vendor = await makeVendor();
+      const o = await makePickupOrder(vendor, 1);
+      await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/start-preparing`).expect(201);
+      const res = await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/ready`);
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('READY_FOR_PICKUP');
+    });
+
+    it('READY_FOR_PICKUP stays idempotent -- a second ready-for-pickup call does not 409 or reissue a PIN', async () => {
+      const vendor = await makeVendor();
+      const o = await makePickupOrder(vendor, 1);
+      const first = await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/ready-for-pickup`).expect(201);
+      const second = await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/ready-for-pickup`);
+      expect(second.status).toBe(201);
+      expect(second.body.status).toBe('READY_FOR_PICKUP');
+      const pinAfterFirst = await get(o.customerCookies, `orders/vendor-orders/${o.vendorOrderId}/pickup-pin`);
+      // the PIN issued on the first call is still the one on record -- a second
+      // "ready" must not silently rotate the code the customer was already shown.
+      expect(first.body.status).toBe('READY_FOR_PICKUP');
+      expect(pinAfterFirst.body.pickupPin).toMatch(/^\d{4}$/);
+    });
+
+    it('PICKED_UP still 409s -- readying an already-collected order is refused, not silently accepted', async () => {
+      const vendor = await makeVendor();
+      const o = await makePickupOrder(vendor, 1);
+      await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/ready-for-pickup`).expect(201);
+      const pin = (await get(o.customerCookies, `orders/vendor-orders/${o.vendorOrderId}/pickup-pin`)).body.pickupPin;
+      await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/confirm-pickup`, { pin }).expect(201);
+      const res = await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/ready-for-pickup`);
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe('Cannot ready a PICKED_UP order for pickup.');
+    });
+
+    it('CANCELLED still 409s -- readying a cancelled order is refused, not silently accepted', async () => {
+      const vendor = await makeVendor();
+      const o = await makePickupOrder(vendor, 1);
+      await ctx.prisma.vendorOrder.update({ where: { id: o.vendorOrderId }, data: { status: 'CANCELLED' } });
+      const res = await post(vendor.cookies, `vendor/orders/${o.vendorOrderId}/ready-for-pickup`);
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe('Cannot ready a CANCELLED order for pickup.');
+    });
+  });
 });

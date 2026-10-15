@@ -86,19 +86,31 @@ DEPLOYED by naming which app serves the change and which commit that
 app is currently on** — "an ancestor of `origin/main`" proves MERGED,
 nothing more; main moving forward does not deploy anything by itself.
 
-As of this pass, the three live facts (each independently re-checked,
-not taken on report) are:
+As of this pass (2026-10-14), the three live facts (each independently
+re-checked just now — `curl`'d directly, not taken from a prior report or
+from the dispatch that requested this pass, which itself named a now-stale
+web commit) are:
 
-- **`apps/api`** is on `4936812` — `https://www.bzemarketplace.com/api/health`
+- **`apps/api`** is on `1fec2bb` — `https://www.bzemarketplace.com/api/health`
   answers a **live, per-request** read: `status`, `uptime` (seconds since
-  process start) and `startedAt` all vary request to request, confirmed
-  by hitting it twice. This is the one surface that proves the running
-  process, not just the build.
-- **`apps/web`** is on `5b2b0a9` — `https://www.bzemarketplace.com/health`.
-- **`apps/admin`** is on `effc63e` — `https://bmpl-admin.vercel.app/health`
+  process start) and `startedAt` all vary request to request. This is the
+  one surface that proves the running process, not just the build.
+- **`apps/web`** is on `68d7ff0` (read from the live `X-Bmpl-Commit`
+  response header) — **this is `origin/main`'s own current tip**, not merely
+  an ancestor of it. Every requirement-related commit on `main` as of this
+  pass is therefore DEPLOYED to web right now, with no further ancestor
+  check needed for the web side of anything below.
+- **`apps/admin`** is on `015d665` — `https://bmpl-admin.vercel.app/health`
   (the same host trap as before: `admin.bzemarketplace.com/health` and
   `www.bzemarketplace.com/admin/health` both 404; only the `vercel.app`
   host answers).
+
+All three new anchors (`1fec2bb`, `68d7ff0`, `015d665`) were confirmed
+ancestors of (or equal to) `origin/main`, and the document's previous anchors
+(`4936812`, `5b2b0a9`, `effc63e`) were confirmed ancestors of these new ones
+— `git merge-base --is-ancestor` both directions — so every DEPLOYED claim
+already established in this document under the old anchors transfers forward
+unchanged; nothing below needed re-deriving from zero, only re-anchoring.
 
 **web and admin's `commit` field is baked in at build time, not read live
 — both route files say so in their own source.** Confirmed directly: the
@@ -212,22 +224,55 @@ services block, a seeded database, a running API inside the job) remains
 possible, but only on a separate owner approval; nothing in this document
 should imply one is pending by default.
 
-## Status summary
+## Status summary — unified evidence matrix
 
-| # | Requirement | Status | Evidence |
-| - | --- | --- | --- |
-| 1 | Vendor location-level inventory & fulfilment origin | **Done as of `74cbcd6` for the mechanism and for admin's own display; the "Fulfilled from" label does not appear on the customer's or the vendor's own order view — corrected in this pass, see below** | `bad7b3f` (BMPL-175, PR #259) for the API; UI landed `74cbcd6` (BMPL-354, PR #273), admin-only display confirmed directly |
-| 2 | Package pickup/handoff photo | **Done for sender, staff, courier and linked recipient as of `0c322d6`** | `682b501` (PR #127) for the API; UI landed `a568d6a` (BMPL-352, PR #270) — courier upload, sender and staff view; linked-recipient access landed `66487e4` (PR #304) and `0c322d6` (BMPL-391, PR #305) |
-| 3 | Recipient account linking & incoming-shipment tracking | **Done** | `a6b7d97` (BMPL-179, PR #135); two policy questions open (BMPL-119), see below |
-| 4 | Granular driver service areas (district → city) | **End-to-end as of `2cbcf73`** | `3950db0` (PR #126) for the API; city picker landed `99e98c1` (BMPL-353, PR #272); wired to the lane-town endpoint by `2cbcf73` (BMPL-368, PR #279) — a lane-only town (e.g. Ladyville) is selectable as of `2cbcf73` |
-| 5 | Operating hours & closed/soon-closing handling | **Done** | vendor-hours dispatch `a072971` (PR #248), closing-soon warning `1161a6f` (PR #255); terminal half `699a3e3` (BMPL-262), `4eac6be` (BMPL-271), `b12afb3` (BMPL-273); closed-now badge `0d50de2` (BMPL-335), one-off closures `81ad57f` (BMPL-334) — the terminal-half/badge/closures five were found and added `effc63e`-pass, none cited here before; `056b709`/`e498765`/`c2d1b0a` removed `MDF-215`-pass — they are requirement 11's commits, not this row's |
-| 6 | Handoff-chain security & an end-to-end walk test | **Done** | `6676d68` (PR #117); walk test `cbc6765` (BMPL-337, PR #257) |
-| 7 | Courier & vehicle identification once assigned | **Done — for the booking customer as of `4d96bb0`; for a linked recipient, messaging is wired end-to-end (API and web) as of `c7690a5`/`5c11021`; courier identity for the recipient is restricted by owner ruling (2026-10-10), not an unbuilt gap** | `a4fb20d` (PR #119); phone exclusion also confirmed at `expectedAtHub` by BMPL-247; messaging wired in `ShipmentJourney.tsx`; recipient messaging API: PR #293 (BMPL-359), merged `910d5b2`; recipient messaging read + UI: PR #315 (`5c11021`) and PR #314 (`c7690a5`); `RECIPIENT_VIEW_INCLUDE` re-checked directly at `effc63e` — still no `assignedDriver`/`assignedVehicle`, now the ruled state, not a gap |
-| 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | **Done for shipping and marketplace delivery, as of `16e4b4b`; whether the requirement was ever meant to cover marketplace's always-two-stop case is unsettled** | `4eac6e8` (PR #121), `c99a596` (PR #129), `1161a6f` (PR #255) for shipping; marketplace's driver job screen wired to the same `ExpandableRouteMap` by `16e4b4b` (BMPL-390, PR #302) — no API change, the pre-acceptance pin gate was already correct |
-| 9 | Saved addresses — label, CRUD, default, delete-safety | **Done, and the two gaps this document used to flag as "what remains" are now also closed as of `444a1ec`/`9ec6764`** | `c4b9f2b` (PR #122); default and delete-safety re-verified directly against source, see below; standalone manage page `444a1ec` (PR #323); un-defaulting the current default without a delete `9ec6764` (PR #336) |
-| 10 | Cancellation before custody, failed delivery, return-to-sender | **NOT complete as of `e4b4be7` (corrected — the `effc63e` anchor this cell carried was stale): the staff-alone charge defect under Ruling 1 (BMPL-375) is fixed; failed delivery now has an API trigger (PR #365) but no web UI anywhere — a courier cannot reach it through the product** | Pre-custody half correct in shipped code. Return-to-sender/reroute shipped `f8f89dd` (BMPL-183/343, PR #271) with a staff-alone charge defect, fixed by `0efd970` (BMPL-375, PR #288, merged); negative-control tests PR #285 (`3ea4fa1`) and a sink ownership test PR #306 (`302a84c`) are on main; customer confirmation `e72da60` (PR #308); staff prepare panel `5fe37cf` (PR #309); the fix's own red-team guards now pass under their real names, not a `[RED]` prefix, as of `5b7dd1a` (PR #312); acceptance-is-not-custody now has a named behavioural test as of `d5b1dec` (PR #318). Failed-delivery trigger now exists, API-only: courier self-report (`POST /driver/shipping-jobs/:id/report-issue`) and an auto-flagging PIN lockout, both `e4b4be7` (PR #365, MDF-96) — grep-confirmed zero `apps/web`/`apps/admin` files call either path; MDF-96's decision memo (owner ruling, 2026-10-10) may now be narrower in scope, Pam producing the exact workflow options |
-| 11 | Recipient availability windows & updates | **Done** | `056b709`, `e498765`, `c2d1b0a`, `42d658f`, `a6b7d97` (BMPL-179), `a6f81bb` (BMPL-344) |
-| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | **API done on all four as of `7ff34a1`; staff triggers for all four as of `effc63e` (re-verified, no change since `e72da60`)** | ETA: `f1bbfce` (BMPL-340 phase 1), with its one gap (nothing wrote a LINE_HAUL leg's own scheduled time) closed by `e56c425` (BMPL-346, found and added `effc63e`-pass; not cited here before). ETA-change notice: `e7ef2ed` (BMPL-345). Schedule exceptions: `fcc3592`, which names BMPL-186 (the build); tracked/audited under BMPL-184, the card the audit was run against — see requirement 12 below for how the two relate. Hold/reroute: `7ff34a1` (BMPL-343, PR #275) — API-only as of `7ff34a1`; the staff screen landed as PR #309 (`5fe37cf`; it replaced the closed PR #278) after `7ff34a1` |
+**Owner-specified columns, used exactly as named, 2026-10-14.** This replaces
+the previous two-table format (a status/evidence summary plus a separate
+implemented/accepted table) with one table per the owner's own instruction.
+**The owner's rule this table exists to enforce: implementation, testing,
+deployment and formal acceptance are four different states, never
+collapsed.** "Relevant merged PRs" proves MERGED only. "Local integration
+evidence" cites a named test and, where stated, that it was seen to pass —
+never inferred from a PR title or description, per the owner's evidence
+standard (no PR description, title, or agent summary — this document's own
+included — counts as proof on its own). "Production verification" is listed
+only where someone has actually watched the behaviour live and recorded it;
+most rows say **NO RECORD**, which is the honest, current state of this
+repository, not a gap in this table. "Edward acceptance status" is **NOT
+ACCEPTED** for every row below, with zero exceptions — see the search
+documented above (zero of twelve found anywhere in the hive) — regardless
+of what engineering, this team's own QA passes, or this document's own
+language elsewhere says. Two rows (8, 10) have live verification work in
+progress (Dwight on 8, Jim on 10, per the owner's own framing) and are
+marked **IN VERIFICATION** in the column that work actually affects, with no
+outcome pre-written for either.
+
+| # | Exact requirement | Implemented functionality | Relevant merged PRs | Local integration evidence | Production verification where available | Remaining gap or owner decision | Edward acceptance status |
+| - | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Vendor location-level inventory & fulfilment origin | Per-location inventory derivation (API) and an admin-only "Fulfilled from" display | #259 (`bad7b3f`) API; #273 (`74cbcd6`) admin UI | See §1 below for named tests (carried forward, not re-run this pass) | DEPLOYED (api `1fec2bb`, admin `015d665` — both ancestors, transitively via `effc63e`); NO RECORD of a live-behaviour observation | "Fulfilled from" does not appear on the customer's or vendor's own order view — admin-only today | NOT ACCEPTED (no record) |
+| 2 | Package pickup/handoff photo | Upload/view for sender, staff, courier and linked recipient | #127 (`682b501`) API; #270 (`a568d6a`) UI; #304/#305 (`66487e4`/`0c322d6`) recipient access | See §2 below for named tests (carried forward, not re-run this pass) | DEPLOYED (api+web+admin, all ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 3 | Recipient account linking & incoming-shipment tracking | Linking + `listIncoming` tracking | #135 (`a6b7d97`, BMPL-179) | See §3 below for named tests (carried forward, not re-run this pass) | DEPLOYED (api, ancestor transitively); NO RECORD of a live-behaviour observation | Two policy questions open under BMPL-119 — not implementation gaps | NOT ACCEPTED (no record) |
+| 4 | Granular driver service areas (district → city) | API + city picker, wired to the lane-town endpoint | #126 (`3950db0`) API; #272 (`99e98c1`) picker; #279 (`2cbcf73`) wiring | See §4 below for named tests (carried forward, not re-run this pass) | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 5 | Operating hours & closed/soon-closing handling | Vendor-hours dispatch, closing-soon warning, terminal half, closed-now badge, one-off closures | #248/#255/BMPL-262/BMPL-271/BMPL-273/BMPL-335/BMPL-334 (nine commits, see §5) | See §5 below for named tests (carried forward, not re-run this pass) | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 6 | Handoff-chain security & an end-to-end walk test | Handoff-chain security + a named walk test | #117 (`6676d68`); #257 (`cbc6765`, BMPL-337) | `cbc6765`'s own walk test (named in §6) | DEPLOYED (api, ancestor transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 7 | Courier & vehicle identification once assigned | Identification for the booking customer; recipient messaging wired end-to-end (API+web) | #119 (`a4fb20d`); #293 (`910d5b2`, BMPL-359, API); #314/#315 (`c7690a5`/`5c11021`, UI) | `RECIPIENT_VIEW_INCLUDE` re-checked directly (no `assignedDriver`/`assignedVehicle`) — ruled state, not an unread gap | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | Recipient-facing courier identity restricted by [Ruling 13](./OWNER-RULINGS.md#ruling-13) — owner decision, not an engineering gap | NOT ACCEPTED (no record) |
+| 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | Full-screen multi-stop map for shipping and marketplace delivery driver screens | #121 (`4eac6e8`), #129 (`c99a596`), #255 (`1161a6f`), #302 (`16e4b4b`, marketplace) | 2026-09-26 real-browser mobile audit (environment not named as production); real-phone touch-drag pan still unconfirmed | DEPLOYED (api+web, ancestors transitively); NO RECORD of a production observation | **IN VERIFICATION (Dwight, MDF-247):** whether a two-stop marketplace delivery was ever meant to satisfy the A/B/C/D wording at all — unsettled, no outcome pre-written here | NOT ACCEPTED (no record) |
+| 9 | Saved addresses — label, CRUD, default, delete-safety | Full CRUD, default, delete-safety, standalone manage page, un-default-without-delete | #122 (`c4b9f2b`); #323 (`444a1ec`); #336 (`9ec6764`) | Default/delete-safety re-verified directly against source (§9) | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 10 | Cancellation before custody, failed delivery, return-to-sender | Custody-boundary cancel; return/reroute two-step charge fix (Ruling 1); failed-delivery API trigger **and, as of this pass, its web screen** — see correction below | #271/#288/#285/#306/#308/#309/#312/#318 (return/reroute chain); #365 (`e4b4be7`, MDF-96, API trigger); **#393 (`9f5c3c8`) — the "Report an issue" screen, closing the previously-reported "no screen anywhere" gap; #398/#401 reconcile it against the EXCEPTION-blocks-progression rule** | See §10 below for the five named API-side test files (not re-run this pass); **new this pass: `apps/web/app/dashboard/driver/shipping/[id]/page.test.tsx`'s "report an issue (MDF-96)" and "report-issue is itself blocked during an open exception" describe blocks, read directly from the diff** | DEPLOYED (api `1fec2bb` incl. `e4b4be7`; web `68d7ff0` incl. `9f5c3c8`/`e9eb27a`/`ecb83d5`; admin `015d665` incl. `5fe37cf`); **NO RECORD** of anyone watching any of it work in production | Decision memo on the fuller failed-delivery workflow still in progress (Ruling 14; Pam) — may be narrower now that #393 shipped one concrete answer. **Disclosed limitation in #393 itself: the "reported" confirmation is client-side only and does not survive a page reload** — `ShipmentDriverService#serialize` has no field to reconstruct it from. **IN VERIFICATION (Jim, MDF-238):** the broader 12-requirement walk is in progress; no outcome pre-written here | NOT ACCEPTED (no record) |
+| 11 | Recipient availability windows & updates | Availability windows, read + write, sender and recipient sides; **ETA now recomputes on a window change, as of this pass** | #179 (`a6b7d97`, BMPL-179); BMPL-344 (`a6f81bb`); **#403 (`817bf5c`) — `setAvailabilityWindows` now triggers the same ETA-change notice every other ETA-affecting write already does**; **#416 (`7151c95`) — the sender-UI piece gained a named behavioural test** | New this pass: `apps/api/test/shipment-availability-windows-eta.integration.spec.ts` and `AvailabilityWindows.test.tsx` (256 added lines) — both named in §11 below; sha already given in the merged-PRs column | DEPLOYED (api+web, both `#403`/`#416` ancestors of live `1fec2bb`/`68d7ff0`, confirmed directly); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | All four pieces have a merged API and a staff trigger; **the availability-window ETA gap (see req 11) also closes this requirement's own notice path** | ETA: `f1bbfce`/`e56c425` (BMPL-340/346); notice: `e7ef2ed` (BMPL-345); hold/reroute: `7ff34a1`/`5fe37cf` (BMPL-343, PR #275/#309); schedule exceptions: `fcc3592` (BMPL-186); **#403 (`817bf5c`) closes the availability-window gap** | Named per-piece tests in §12 (`shipment-eta...spec.ts`, `shipment-eta-notification...spec.ts`, `shipment-reroute...spec.ts`, `shipment-return-to-sender...spec.ts`, `ExceptionResolution.test.tsx`, plus #403's new test above) | DEPLOYED (api+web+admin, all ancestors transitively, re-confirmed against the new anchors this pass); all migration-bearing commits: **expected but unverified**, never "applied" (see methodology above); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+
+**Summary: 11 of 12 requirements have fully shipped, deployed functionality
+(every PR cited above confirmed an ancestor of this pass's live commit for
+the app it touches); requirement 10's failed-delivery piece gained its
+missing web screen this pass (#393) but still has an owner decision memo in
+progress and a disclosed reload limitation. Zero of twelve have a recorded
+acceptance from Edward himself — this is unchanged from every prior pass and
+is independent of how much engineering work has landed.** Where this table
+or any other part of this document has used "done," "ready," or similar
+language, read it as this team's own engineering judgment — never Edward's
+word — unless a dated quote from him is cited directly beside it, which, as
+of this pass, is true of none of the twelve rows.
 
 **Three of twelve — requirements 1, 2 and 4 — shared one cause, not three
 separate ones: each had a real, merged, tested API and no user-facing
@@ -1021,11 +1066,14 @@ accepted. **Not yet acceptance-testable:** whether a two-stop marketplace
 delivery was ever meant to satisfy the A/B/C/D wording — there is no
 criterion to write until Edward settles the scope question.
 
-**Note for this pass:** Oscar and Jim are currently reproducing
-responsive-layout defects that may touch this requirement's screens; no
-commit landed against this requirement's files between `e72da60` and
-`effc63e` (checked directly, not inferred), so this section is unchanged
-pending their findings.
+**Note, updated 2026-10-14:** the responsive-layout sweep noted in the
+previous pass concluded (MDF-240, done) with no defect reported against
+this requirement's screens, so this section's engineering content is
+unchanged. **The open item is the scope question above, now carded as
+MDF-247 ("was 2-stop marketplace delivery ever meant to satisfy the A/B/C/D
+route wording?"), status `doing`.** This is IN VERIFICATION, not a code
+gap — no outcome is pre-written here; whichever way it resolves, this
+document records it when it lands, not before.
 
 ## 9. Saved addresses — label, CRUD, default, delete-safety
 
@@ -1136,28 +1184,31 @@ previous `effc63e` anchor:**
   methodology section above; stated again in the body below) — a schema
   migration is not something the admin build's own commit identity can
   answer. `e4b4be7` carries no migration of its own (no new `AuditAction`,
-  no new notification event, no schema change). **Deployed code is not the
-  same claim as reachable product:** grep-confirmed directly, zero files
-  under `apps/web` or `apps/admin` reference the failed-delivery
-  endpoint or its service method — the code is live, but no screen calls
-  it.
+  no new notification event, no schema change). **CORRECTED 2026-10-14:**
+  ~~Deployed code is not the same claim as reachable product: grep-confirmed
+  directly, zero files under `apps/web` or `apps/admin` reference the
+  failed-delivery endpoint or its service method — the code is live, but no
+  screen calls it.~~ As of PR #393 (`9f5c3c8`), a screen does call it — see
+  the correction block below. Re-anchored to this pass's live commits:
+  `apps/api` is `1fec2bb` (incl. `e4b4be7`), `apps/web` is `68d7ff0` (incl.
+  `9f5c3c8`/`e9eb27a`/`ecb83d5`), `apps/admin` is `015d665` (incl.
+  `5fe37cf`) — all confirmed ancestors (or, for web, equal to `origin/main`
+  itself) directly, not carried forward from the prior anchors unchecked.
 - PRODUCTION-VERIFIED: **no record**, for any of the four (cancel, return,
-  reroute, failed-delivery self-report/lockout-flag).
+  reroute, failed-delivery self-report/lockout-flag) — unchanged by the
+  screen shipping; DEPLOYED and PRODUCTION-VERIFIED remain two different
+  claims.
 
-**Status: NOT complete as of `e4b4be7` — corrected; the previous
-`effc63e` anchor was stale. PR #365 shipped a failed-delivery trigger
-after that anchor, and the drift-fix commits inside that same PR updated
-four line-number citations in this section without anyone updating the
-status claim next to them — exactly the failure mode this document's own
-"status rots, anchors don't" rule exists to catch. The staff-alone charge
-defect under
+**Status, corrected again 2026-10-14: the failed-delivery piece now has
+BOTH a trigger and a screen, with two disclosed limitations and one
+decision still open.** PR #365 (`e4b4be7`) shipped the API trigger; PR #393
+(`9f5c3c8`) shipped the screen that calls it — see the correction block
+below for both. The staff-alone charge defect under
 [Ruling 1](./OWNER-RULINGS.md#ruling-1--a-courier-accepting-a-job-is-not-custody)
-(tracked BMPL-375) is fixed on main. Failed delivery now has a real
-trigger — a courier can self-report, and a PIN lockout auto-flags — but
-it exists only as a direct API call: no screen in `apps/web` or
-`apps/admin` calls either path, so no courier can reach it through the
-product today. A decision memo on the fuller workflow choice is still in
-progress per the owner's 2026-10-10 ruling (see below).** The custody boundary itself — a
+(tracked BMPL-375) is fixed on main. What remains open: the reload-state
+limitation disclosed in #393 itself, and the owner's fuller decision memo
+(Ruling 14) on the broader workflow, now possibly narrower in scope since
+#393 shipped one concrete answer. The custody boundary itself — a
 courier *accepting* a job is not the same as *custody* — was already
 correct in shipped code before this card existed:
 `ShipmentService.cancel()` blocks once a leg reaches `IN_PROGRESS`, set only
@@ -1248,10 +1299,37 @@ duplicating it, exactly as this row previously said it should:
   staff-flagged one; what happens to money from there remains an explicit
   owner decision this PR does not touch.
 
-**What is still missing is the screen, not the trigger.** Grep-confirmed
-directly against `apps/web` and `apps/admin`: no file references the
-endpoint path or `reportIssue` — a real courier has no button, link or
-form anywhere in the product that calls it. The separate marketplace-side
+**CORRECTED 2026-10-14 — the sentence below is now false and is kept, struck,
+rather than deleted, per this document's own anchor-vs-prose rule: a citation
+staying anchored does not mean the sentence beside it stays true.** ~~What is
+still missing is the screen, not the trigger. Grep-confirmed directly against
+`apps/web` and `apps/admin`: no file references the endpoint path or
+`reportIssue` — a real courier has no button, link or form anywhere in the
+product that calls it.~~ **PR #393 (`9f5c3c8`) shipped exactly that screen**:
+`apps/web/app/dashboard/driver/shipping/[id]/page.tsx` now has a real "Report
+an issue" button, gated to the same statuses the server accepts
+(`PICKUP_CONFIRMED`/`IN_TRANSIT`/`ARRIVING`), that calls
+`apiPost('/driver/shipping-jobs/:id/report-issue', { reason })` — confirmed
+directly from the PR's own diff, not from its title. Named tests exist in
+`page.test.tsx`'s "report an issue (MDF-96)" describe block, read directly
+this pass. `9f5c3c8` is a confirmed ancestor of `apps/web`'s live commit
+(`68d7ff0`) — DEPLOYED. **Two things this PR discloses about itself, carried
+forward rather than smoothed over:** (1) the "Issue reported" confirmation
+shown after a successful report is client-side only — it does not survive a
+page reload, because `ShipmentDriverService#serialize` returns only
+`courierStatus`, never the leg's own `status`/`exceptionReason`/`exceptionAt`
+fields `flagException` actually writes, so there is currently no field this
+screen could read back to reconstruct "already reported" state after a
+reload; (2) PR #398/#401 (`e9eb27a`/`ecb83d5`) separately established that an
+open EXCEPTION blocks further courier progression, and a follow-up
+reconciliation (dated 2026-10-14 inside #393's own diff) confirmed the Report
+an issue button is itself one of the controls that rule correctly hides
+once a leg is already EXCEPTION — report-issue calls `flagException`, which
+`isLegActionable` refuses on an already-EXCEPTION leg, so the button
+disappearing there is the server's own rule surfacing, not a second,
+untested rule invented in the UI. **PRODUCTION-VERIFIED still has no
+record** — a merged, deployed, tested screen is not the same claim as
+someone having watched a real courier use it. The separate marketplace-side
 fact from before is unchanged and is not this row's gap: `DeliveryStatus`
 (a different enum, for marketplace delivery, not shipping) still has no
 `FAILED` value, and its own locked-PIN path
@@ -1285,10 +1363,18 @@ you currently hold (`PICKUP_CONFIRMED` through `ARRIVING`), call
 `POST /driver/shipping-jobs/:id/report-issue` directly and confirm the leg
 reaches `EXCEPTION` and staff are alerted. Exhaust the handoff-PIN lockout
 (5 wrong codes) and confirm the leg auto-flags to `EXCEPTION` with
-`actorId: null`, not just a bare 403. **Not acceptance-testable through
-the product today:** neither failed-delivery path has a screen — confirm
-by calling the API directly, not by looking for a button in the driver
-app.
+`actorId: null`, not just a bare 403. **Updated 2026-10-14 — the
+self-report path now IS acceptance-testable through the product:** as a
+courier holding the parcel, open the shipping job screen and confirm a
+"Report an issue" button is visible, that declining the prompt or entering
+under 4 characters calls nothing, that a real reason posts to
+`/driver/shipping-jobs/:id/report-issue` and shows a confirmation without
+inventing a refund/fee/timeframe, and that the button disappears once the
+leg is already `EXCEPTION`. **Still not acceptance-testable through the
+product:** that the confirmation survives a page reload — it does not,
+disclosed by #393 itself, and there is no field to check this against
+after a reload. The PIN-lockout auto-flag path still has no screen of its
+own and remains API-only.
 
 ## 11. Recipient availability windows & updates
 
@@ -1303,27 +1389,48 @@ app.
   `packages/shared/src/availability-windows.test.ts` (`e498765`), and
   `apps/api/test/route-schedule-wiring.integration.spec.ts`/
   `packages/shared/src/belize-time.test.ts` (`42d658f`); not
-  independently re-run in this pass. **`c2d1b0a` (the sender-UI piece)
-  has no behavioural test**: its own commit message says the add/save/
-  edit/locked-role/clear behaviour was "verified live against the real
-  API and a throwaway account," not by an automated test.
-  `apps/web/components/shipping/AvailabilityWindows.test.tsx` exists on
-  `origin/main` today, but it was added three weeks later by an
+  independently re-run in this pass. **CORRECTED 2026-10-14 — the gap below
+  is closed:** ~~`c2d1b0a` (the sender-UI piece) has no behavioural test:
+  its own commit message says the add/save/edit/locked-role/clear behaviour
+  was "verified live against the real API and a throwaway account," not by
+  an automated test. `apps/web/components/shipping/AvailabilityWindows.test.tsx`
+  exists on `origin/main` today, but it was added three weeks later by an
   unrelated PR (`#287`, deploy-skew crash fixes) and covers only a
   missing-field crash-safety case, not the add/save/edit/locked-role
   behaviour this requirement actually describes — naming it here would
-  look like proof without being any.
-- MERGED: yes — all five an ancestor of `origin/main`.
-- DEPLOYED: **yes, the code.** Every one touches only `apps/api` and/or
-  `apps/web` and/or `packages/*` — no `apps/admin` — an ancestor of both
-  `apps/api`'s (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits.
-  `056b709` carries its own migration (the sender availability-window
-  table, same commit cited in requirement 5) and is a confirmed ancestor
-  of the live API commit — **application is expected but unverified**
-  (see the methodology section above), same as there.
+  look like proof without being any.~~ **PR #416 (`7151c95`) adds the real
+  behavioural tests this gap was waiting for**, to that same file — read
+  directly from the diff, not the title: `describe('AvailabilityWindows —
+  BMPL-288 (add)')`, `(edit)`, `(save)` and `(locked role)`, covering
+  exactly add/edit/save/locked-role/clear, the behaviour `c2d1b0a`'s commit
+  message had only described as manually verified. `7151c95` is a confirmed
+  ancestor of `apps/web`'s live commit (`68d7ff0`) — DEPLOYED.
+- **New piece found this pass: #403 (`817bf5c`)** — `setAvailabilityWindows`
+  (both the sender's own PUT and the linked recipient's own PUT) previously
+  called neither of `noticeEtaChange()`'s two existing callers, even though
+  `estimateShipmentEta` anchors `LAST_MILE`/`DIRECT` legs to that same
+  stored window — a window change could silently move the real ETA with no
+  baseline update and no notification. Both write surfaces now run the same
+  `noticeEtaChange` comparison every other ETA-affecting write already did.
+  TESTED: yes, named — `apps/api/test/shipment-availability-windows-eta.integration.spec.ts`
+  (two tests: a recipient window moved far from "now" moves the ETA and
+  notifies the sender; a sender window that still covers "now" does not).
+  MERGED/DEPLOYED: `817bf5c` confirmed an ancestor of `apps/api`'s live
+  commit (`1fec2bb`).
+- MERGED: yes — all seven (five original plus `7151c95`/`817bf5c`) an
+  ancestor of `origin/main`.
+- DEPLOYED: **yes, the code**, re-anchored this pass. Every commit touches
+  only `apps/api` and/or `apps/web` and/or `packages/*` — no `apps/admin` —
+  confirmed an ancestor of both `apps/api`'s (`1fec2bb`) and `apps/web`'s
+  (`68d7ff0`, `origin/main`'s own tip) live commits. `056b709` carries its
+  own migration (the sender availability-window table, same commit cited in
+  requirement 5) and is a confirmed ancestor of the live API commit —
+  **application is expected but unverified** (see the methodology section
+  above), same as there.
 - PRODUCTION-VERIFIED: **no record.**
 
-**Status: done.**
+**Status: done, and as of this pass the one remaining test gap (the
+sender-UI piece) is also closed.**
 
 - **Sender-entered shipment availability windows**, end to end: the child
   table and sender write surface (`056b709`, PR #209), dispatch actually
@@ -1378,10 +1485,19 @@ shipment is untouched.
   `apps/api/test/carrier-org-access.integration.spec.ts` and an extension
   of `transport-leg-operations.integration.spec.ts`). Ancestor of
   `origin/main`, no `apps/admin` file — DEPLOYED yes, the code, an
-  ancestor of `apps/api`'s live commit (`4936812`). `e56c425` carries its
+  ancestor of `apps/api`'s live commit (`4936812`, re-anchored this pass to
+  `1fec2bb`, still an ancestor). `e56c425` carries its
   own migration (a new `AuditAction` enum value), also a confirmed
   ancestor of that live commit — **application is expected but
   unverified** (see the methodology section above).
+  **New this pass — #403 (`817bf5c`):** `setAvailabilityWindows` had been
+  the one ETA-affecting write that did not trigger a recompute; see
+  requirement 11's own section for the full finding — it belongs to both
+  requirements at once, since `estimateShipmentEta` is what requirement 12
+  calls and an availability window is what requirement 11 writes. TESTED:
+  `apps/api/test/shipment-availability-windows-eta.integration.spec.ts`.
+  DEPLOYED: `817bf5c` confirmed an ancestor of `apps/api`'s live commit
+  (`1fec2bb`).
 - **ETA-change notice** (`e7ef2ed`): IMPLEMENTED/MERGED yes, ancestor of
   `origin/main`; touches `apps/api`/`packages/database`/`packages/shared`
   only — DEPLOYED yes. TESTED: yes, named —
