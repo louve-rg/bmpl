@@ -621,3 +621,175 @@ describe('conversation membership — authorization model (M17 §4)', () => {
     await post(second.cookies, `conversations/${conv.id}/messages`, { body: 'took over' }).expect(201);
   });
 });
+
+/**
+ * MDF-18: the claim fallback. Automatic dispatch stays primary and
+ * completely untouched (proven by every test above still passing unmodified);
+ * this is a PULL-only surface for exactly the deliveries the engine already
+ * gave up on (dispatchExhaustedAt set), narrowed to drivers who were already
+ * a legitimate automatic-dispatch candidate.
+ */
+describe('driver claim fallback (MDF-18)', () => {
+  const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
+
+  /** Exhausts a single-offer delivery's retry budget via real timeout, the
+   *  same mechanism the "I:" test above proves — not a hand-written column. */
+  async function exhaustedDelivery(vendor: { vendorProfileId: string; productId: string }, offeredDriver: { driverProfileId: string }) {
+    await enableDispatch({ dispatchMaxOffers: 1 });
+    const { deliveryId } = await readyDelivery(vendor);
+    const outcome = await engine.dispatch(deliveryId);
+    expect(outcome.result).toBe('ASSIGNED');
+    await ctx.prisma.orderDelivery.update({ where: { id: deliveryId }, data: { offerExpiresAt: new Date(Date.now() - 1000) } });
+    await engine.sweepExpiredOffers();
+    const d = await deliveryOf(deliveryId);
+    expect(d.dispatchExhaustedAt).not.toBeNull();
+    expect(d.assignedDriverProfileId).toBeNull();
+    void offeredDriver; // kept for readability at call sites; not asserted on here
+    return deliveryId;
+  }
+
+  it('lists an exhausted delivery to an eligible driver, claims it, and leaves an auditable trail', async () => {
+    const vendor = await makeVendor();
+    const a = await makeDriver(); // offered first, times out
+    const deliveryId = await exhaustedDelivery(vendor, a);
+    const b = await makeDriver(); // a second eligible driver who never saw an offer
+
+    const list = await get(b.cookies, 'driver/jobs/claimable').expect(200);
+    expect(list.body.some((j: { id: string }) => j.id === deliveryId)).toBe(true);
+
+    const claimed = await post(b.cookies, `driver/jobs/${deliveryId}/claim`).expect(201);
+    expect(claimed.body.status).toBe('ASSIGNED');
+
+    const d = await deliveryOf(deliveryId);
+    expect(d.assignedDriverProfileId).toBe(b.driverProfileId);
+    expect(d.assignedByUserId).toBeNull(); // a claim, not an admin act
+    expect(d.pickupPin).toBeTruthy();
+    expect(d.deliveryPin).toBeTruthy();
+    expect(d.dispatchExhaustedAt).not.toBeNull(); // a sticky historical fact, untouched by the claim
+
+    // Claimed, so no longer on the claimable list.
+    const after = await get(b.cookies, 'driver/jobs/claimable').expect(200);
+    expect(after.body.some((j: { id: string }) => j.id === deliveryId)).toBe(false);
+
+    const assignment = await ctx.prisma.deliveryAssignment.findFirstOrThrow({ where: { orderDeliveryId: deliveryId, status: 'ACTIVE' } });
+    expect(assignment.driverProfileId).toBe(b.driverProfileId);
+    expect(assignment.assignedByUserId).toBeNull();
+
+    const audit = await ctx.prisma.auditLog.findFirstOrThrow({
+      where: { action: 'DELIVERY_ASSIGNED', actorId: b.userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect((audit.newValue as { deliveryId?: string; method?: string }).deliveryId).toBe(deliveryId);
+    expect((audit.newValue as { method?: string }).method).toBe('claim');
+
+    const timeline = await ctx.prisma.deliveryTimelineEvent.findFirstOrThrow({ where: { orderDeliveryId: deliveryId, event: 'CLAIM' } });
+    expect(timeline.toStatus).toBe('ASSIGNED');
+    expect(timeline.actorUserId).toBe(b.userId);
+  });
+
+  it('never lists or allows a delivery not yet exhausted, or a driver\'s own order', async () => {
+    const vendor = await makeVendor();
+    const driver = await makeDriver();
+
+    // Not yet exhausted — automatic dispatch has not given up.
+    const fresh = await readyDelivery(vendor);
+    expect((await get(driver.cookies, 'driver/jobs/claimable')).body.some((j: { id: string }) => j.id === fresh.deliveryId)).toBe(false);
+    await post(driver.cookies, `driver/jobs/${fresh.deliveryId}/claim`).expect(400);
+
+    // Exhausted, but it is the driver's OWN order — never a candidate,
+    // same user-id rule assignInternal enforces.
+    const ownVendor = await makeVendor();
+    const s = `own${Date.now().toString(36)}`;
+    await ctx.prisma.userRole.upsert({
+      where: { userId_roleCode: { userId: driver.userId, roleCode: 'CUSTOMER' } },
+      create: { userId: driver.userId, roleCode: 'CUSTOMER', status: 'APPROVED', approvedAt: new Date() },
+      update: {},
+    });
+    const num = `OWN-${s}`;
+    const order = await ctx.prisma.order.create({
+      data: {
+        orderNumber: num,
+        userId: driver.userId,
+        status: 'PENDING',
+        itemCount: 1,
+        subtotalMinor: 1000n,
+        deliveryFeeMinor: 500n,
+        totalMinor: 1500n,
+        addresses: { create: { type: 'SHIPPING', fullName: 'Self', addressLine1: '1 St', city: 'Belize City', district: 'BELIZE' } },
+        vendorOrders: {
+          create: {
+            orderNumber: `${num}-1`,
+            vendorProfileId: ownVendor.vendorProfileId,
+            status: 'READY_FOR_PICKUP',
+            readyForPickupAt: new Date(),
+            deliveryMethod: 'DELIVERY',
+            itemCount: 1,
+            subtotalMinor: 1000n,
+            items: { create: { productId: ownVendor.productId, productTitle: 'Prod', unitPriceMinor: 1000n, quantity: 1, subtotalMinor: 1000n } },
+            delivery: { create: { status: 'PENDING_ASSIGNMENT', feeMinor: 500n, readyForDispatchAt: new Date(), dispatchExhaustedAt: new Date() } },
+          },
+        },
+      },
+      include: { vendorOrders: { include: { delivery: true } } },
+    });
+    const ownDeliveryId = order.vendorOrders[0]!.delivery!.id;
+    expect((await get(driver.cookies, 'driver/jobs/claimable')).body.some((j: { id: string }) => j.id === ownDeliveryId)).toBe(false);
+    await post(driver.cookies, `driver/jobs/${ownDeliveryId}/claim`).expect(404);
+  });
+
+  it('refuses an ineligible driver (wrong district) and lists nothing for them', async () => {
+    const vendor = await makeVendor();
+    const offered = await makeDriver();
+    const deliveryId = await exhaustedDelivery(vendor, offered);
+    const outsider = await makeDriver({ districts: ['CAYO'] }); // does not serve BELIZE
+
+    expect((await get(outsider.cookies, 'driver/jobs/claimable')).body.some((j: { id: string }) => j.id === deliveryId)).toBe(false);
+    const res = await post(outsider.cookies, `driver/jobs/${deliveryId}/claim`);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/not eligible/i);
+
+    // Untouched by the refusal.
+    expect((await deliveryOf(deliveryId)).assignedDriverProfileId).toBeNull();
+  });
+
+  it('respects the per-driver concurrent-job cap — the same one automatic dispatch enforces', async () => {
+    const vendor = await makeVendor();
+    const offered = await makeDriver();
+    // exhaustedDelivery() calls its own enableDispatch({dispatchMaxOffers:1})
+    // internally, which restates the FULL tuning set (including the default
+    // cap of 3) — so the cap is lowered AFTER this, not before, or it would
+    // be silently reset back to the default.
+    const deliveryId = await exhaustedDelivery(vendor, offered);
+    const driver = await makeDriver();
+
+    // Give the driver one live job already, THEN lower the cap to 1.
+    const busyVendor = await makeVendor();
+    const { deliveryId: busyId } = await readyDelivery(busyVendor);
+    await ctx.prisma.orderDelivery.update({
+      where: { id: busyId },
+      data: { status: 'ASSIGNED', assignedDriverProfileId: driver.driverProfileId, assignedVehicleId: driver.vehicleId },
+    });
+    await enableDispatch({ dispatchMaxConcurrentPerDriver: 1 });
+
+    expect((await get(driver.cookies, 'driver/jobs/claimable')).body).toHaveLength(0);
+    const res = await post(driver.cookies, `driver/jobs/${deliveryId}/claim`);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/maximum number of active jobs/i);
+  });
+
+  it('two drivers racing to claim the same exhausted delivery resolve to exactly one winner', async () => {
+    const vendor = await makeVendor();
+    const offered = await makeDriver();
+    const deliveryId = await exhaustedDelivery(vendor, offered);
+    const racers = await Promise.all(Array.from({ length: 4 }, () => makeDriver()));
+
+    const responses = await Promise.all(racers.map((r) => post(r.cookies, `driver/jobs/${deliveryId}/claim`)));
+    const wins = responses.filter((r) => r.status === 201);
+    expect(wins).toHaveLength(1);
+    expect(responses.filter((r) => r.status === 409)).toHaveLength(racers.length - 1);
+
+    const d = await deliveryOf(deliveryId);
+    expect(d.status).toBe('ASSIGNED');
+    expect(racers.map((r) => r.driverProfileId)).toContain(d.assignedDriverProfileId);
+  });
+});
