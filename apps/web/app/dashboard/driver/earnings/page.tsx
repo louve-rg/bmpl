@@ -73,7 +73,14 @@ export default function DriverEarningsPage() {
   const [data, setData] = useState<EarningsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [forbidden, setForbidden] = useState(false);
+  // The 403 message itself, not a flag — three structurally different guards
+  // can refuse this request (JwtAuthGuard, RolesGuard, and
+  // SettlementService.driverEarnings's own "No driver profile." case, which
+  // fires even for an approved role), and the server already tells them
+  // apart by message text. A single hardcoded sentence here used to discard
+  // that and tell an approved driver with no profile row that their role
+  // wasn't approved, which is false for their account.
+  const [forbidden, setForbidden] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -84,7 +91,7 @@ export default function DriverEarningsPage() {
       } catch (e) {
         const err = e as ApiError;
         if (!active) return;
-        if (err.status === 403) setForbidden(true);
+        if (err.status === 403) setForbidden(errMessage(e));
         else setError(errMessage(e));
       } finally {
         if (active) setLoading(false);
@@ -110,11 +117,11 @@ export default function DriverEarningsPage() {
         </div>
       )}
 
-      {!loading && forbidden && (
-        <Alert tone="warning" title="Driver access required">
-          Earnings are only available to approved delivery-driver accounts.
-        </Alert>
-      )}
+      {/* No hardcoded title or sentence here on purpose: "Driver access
+          required" is false for an approved driver with no profile row, and
+          "suspended" and "not approved" are different problems with
+          different next steps. The server already knows which one applies. */}
+      {!loading && forbidden && <Alert tone="warning">{forbidden}</Alert>}
 
       {!loading && error && !forbidden && <Alert tone="error">{error}</Alert>}
 
