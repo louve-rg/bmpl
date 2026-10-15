@@ -210,7 +210,7 @@ export default function DriverJobDetailPage() {
         <AddressBlock address={job.deliveryAddress} />
 
         {job.deliveryInstructions && (
-          <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p className="mt-2 break-words rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
             <span className="font-semibold">From the customer:</span> {job.deliveryInstructions}
           </p>
         )}
@@ -273,8 +273,8 @@ export default function DriverJobDetailPage() {
             {job.items.map((it, i) => (
               <li key={i} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2 last:border-0 last:pb-0">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-belize-navy">{it.productTitle}</p>
-                  {it.variantTitle && <p className="text-xs text-slate-500">{it.variantTitle}</p>}
+                  <p className="break-words text-sm font-medium text-belize-navy">{it.productTitle}</p>
+                  {it.variantTitle && <p className="break-words text-xs text-slate-500">{it.variantTitle}</p>}
                 </div>
                 <span className="shrink-0 text-sm text-slate-600">×{it.quantity}</span>
               </li>
@@ -287,7 +287,7 @@ export default function DriverJobDetailPage() {
       {job.instructions && (
         <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">Delivery instructions</h2>
-          <p className="text-sm text-slate-600">{job.instructions}</p>
+          <p className="break-words text-sm text-slate-600">{job.instructions}</p>
         </Card>
       )}
 
@@ -336,7 +336,7 @@ function PickupBlock({ pickup, vendorName }: { pickup: PickupLocation | null; ve
   const view = pickupView(pickup);
   return (
     <div className="text-sm text-slate-600">
-      {vendorName && <p className="font-semibold text-belize-navy">{vendorName}</p>}
+      {vendorName && <p className="break-words font-semibold text-belize-navy">{vendorName}</p>}
 
       {view.missing ? (
         <p className="mt-1 break-words text-slate-500">
@@ -351,7 +351,7 @@ function PickupBlock({ pickup, vendorName }: { pickup: PickupLocation | null; ve
           {view.cityLine && <p>{view.cityLine}</p>}
 
           {view.instructions && (
-            <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <p className="mt-2 break-words rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
               <span className="font-semibold">From the store:</span> {view.instructions}
             </p>
           )}
@@ -374,7 +374,7 @@ function PickupBlock({ pickup, vendorName }: { pickup: PickupLocation | null; ve
 function AddressBlock({ address }: { address: Address }) {
   return (
     <div className="text-sm text-slate-600">
-      {address.fullName && <p className="font-semibold text-belize-navy">{address.fullName}</p>}
+      {address.fullName && <p className="break-words font-semibold text-belize-navy">{address.fullName}</p>}
       {address.phone && (
         <p>
           <a href={`tel:${address.phone}`} className="text-belize-blue hover:underline">
@@ -382,9 +382,9 @@ function AddressBlock({ address }: { address: Address }) {
           </a>
         </p>
       )}
-      {address.addressLine1 && <p>{address.addressLine1}</p>}
-      {address.addressLine2 && <p>{address.addressLine2}</p>}
-      <p>{[address.city, districtLabel(address.district)].filter(Boolean).join(', ')}</p>
+      {address.addressLine1 && <p className="break-words">{address.addressLine1}</p>}
+      {address.addressLine2 && <p className="break-words">{address.addressLine2}</p>}
+      <p className="break-words">{[address.city, districtLabel(address.district)].filter(Boolean).join(', ')}</p>
     </div>
   );
 }
@@ -394,7 +394,7 @@ function VehicleBlock({ vehicle }: { vehicle: Vehicle }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
       {vehicle.type && <Badge tone="brand">{vehicle.type}</Badge>}
-      {parts && <span className="font-medium text-belize-navy">{parts}</span>}
+      {parts && <span className="min-w-0 break-words font-medium text-belize-navy">{parts}</span>}
       {vehicle.licencePlate && <Badge tone="neutral">Plate: {vehicle.licencePlate}</Badge>}
     </div>
   );
@@ -415,7 +415,7 @@ function Timeline({ entries }: { entries: TimelineEntry[] }) {
           <div className="pb-1">
             <p className="text-sm font-medium text-belize-navy">{e.label ?? (e.status ? e.status.replace(/_/g, ' ') : 'Update')}</p>
             {e.at && <p className="text-xs text-slate-400">{formatDate(e.at)}</p>}
-            {e.note && <p className="mt-0.5 text-sm text-slate-500">{e.note}</p>}
+            {e.note && <p className="mt-0.5 break-words text-sm text-slate-500">{e.note}</p>}
           </div>
         </li>
       ))}
@@ -533,7 +533,7 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
             This delivery is complete.
           </Alert>
           {job.recipientName && (
-            <p className="text-sm text-slate-600">
+            <p className="break-words text-sm text-slate-600">
               Received by <b className="text-belize-navy">{job.recipientName}</b>
             </p>
           )}
