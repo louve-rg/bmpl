@@ -219,7 +219,7 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
   }
 
   return (
-    <fieldset className="rounded-bmpl-md border border-slate-200 p-3">
+    <fieldset className="min-w-0 rounded-bmpl-md border border-slate-200 p-3">
       <legend className="bmpl-label px-1 text-sm">{districtLabel(district)}</legend>
       {msg && (
         <Alert tone="success" className="mb-3">
@@ -263,7 +263,7 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
                 <label
                   key={city}
                   htmlFor={id}
-                  className={`flex min-h-[44px] cursor-pointer items-center gap-2.5 rounded-bmpl-md border px-3 text-sm transition ${
+                  className={`flex min-w-0 min-h-[44px] cursor-pointer items-center gap-2.5 break-words rounded-bmpl-md border px-3 text-sm transition ${
                     checked ? 'border-belize-blue/40 bg-belize-blue/5 text-belize-navy' : 'border-slate-200 text-slate-700 hover:bg-slate-50'
                   }`}
                 >
