@@ -101,9 +101,9 @@ export default function AdminOrderDetailPage() {
       <Breadcrumbs items={adminCrumbs(['Orders', '/dashboard/orders'], order.orderNumber)} className="mb-3" />
       <Link href="/dashboard/orders" className="text-sm font-medium text-belize-blue hover:underline">← Orders</Link>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h1 className="bmpl-page-title">{order.orderNumber}</h1>
-          <p className="mt-1 text-sm text-slate-500">{order.customer.name} · {order.customer.email} · {new Date(order.placedAt).toLocaleString()}</p>
+          <p className="mt-1 min-w-0 break-words text-sm text-slate-500">{order.customer.name} · {order.customer.email} · {new Date(order.placedAt).toLocaleString()}</p>
         </div>
         <StatusBadge status={order.status} />
       </div>
@@ -122,8 +122,8 @@ export default function AdminOrderDetailPage() {
         {order.vendorOrders.map((vo) => (
           <Card key={vo.id} className="overflow-hidden p-0">
             <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
-              <span className="font-semibold text-belize-navy">{vo.vendor.businessName}</span>
-              <span className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+              <span className="min-w-0 break-words font-semibold text-belize-navy">{vo.vendor.businessName}</span>
+              <span className="flex shrink-0 flex-wrap items-center gap-1.5 text-xs text-slate-500">
                 {vo.orderNumber}
                 <Badge tone={vo.deliveryMethod === 'DELIVERY' ? 'info' : 'neutral'}>{vo.deliveryMethod === 'DELIVERY' ? 'Delivery' : 'Pickup'}</Badge>
                 <StatusBadge status={vo.status} />
