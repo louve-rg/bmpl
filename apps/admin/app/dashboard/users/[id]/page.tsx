@@ -81,7 +81,7 @@ export default async function UserDetailPage({ params }: { params: { id: string 
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Roles</h2>
         <ul className="divide-y divide-slate-100">
           {u.roles.map((r) => (
-            <li key={r.roleCode} className="flex items-center justify-between gap-3 py-3">
+            <li key={r.roleCode} className="flex flex-wrap items-center justify-between gap-3 py-3">
               <div>
                 <p className="font-medium text-belize-navy">{ROLE_DEFINITIONS[r.roleCode].label}</p>
                 {r.statusReason && <p className="text-xs text-slate-500">{r.statusReason}</p>}
