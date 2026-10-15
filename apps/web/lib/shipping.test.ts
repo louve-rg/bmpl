@@ -144,9 +144,17 @@ describe('headlineFor', () => {
     expect(headlineFor(s)).toBe('Ready to collect');
   });
 
-  it('leads with what went wrong rather than a status nobody can act on', () => {
-    const s = shipment({ status: 'EXCEPTION', statusLabel: 'Needs attention', exceptionReason: 'Flight cancelled by the carrier.' });
-    expect(headlineFor(s)).toBe('Flight cancelled by the carrier.');
+  it('leads with the exception explanation rather than a status nobody can act on', () => {
+    // MDF-243: the API already gated this by audience before it reached web —
+    // `exceptionReason` here is the one approved sentence, never the
+    // operator's own typed words. This fixture pins that headlineFor passes
+    // it through unchanged; it is not where that gate lives.
+    const s = shipment({
+      status: 'EXCEPTION',
+      statusLabel: 'Needs attention',
+      exceptionReason: 'A delivery issue has been reported. We are reviewing the shipment and will provide an update.',
+    });
+    expect(headlineFor(s)).toBe('A delivery issue has been reported. We are reviewing the shipment and will provide an update.');
   });
 
   it('says cancelled before anything else', () => {
