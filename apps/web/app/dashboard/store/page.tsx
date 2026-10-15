@@ -190,7 +190,7 @@ function StatusBar({ store, onDone, onError }: SectionProps) {
   return (
     <>
       <UiCard className="flex flex-wrap items-center gap-3 p-4">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+        <div className="min-w-0 flex flex-wrap items-center gap-2 text-sm text-slate-600">
           <span>Approval:</span>
           <StatusBadge status={status} />
           <span className="text-slate-300">·</span>
@@ -198,7 +198,7 @@ function StatusBar({ store, onDone, onError }: SectionProps) {
             Store: <b className="text-belize-navy">{storeStatus}</b>
           </span>
           {store.profile!.rejectionReason && status === 'REJECTED' && (
-            <span className="text-red-600">Reason: {store.profile!.rejectionReason}</span>
+            <span className="min-w-0 break-words text-red-600">Reason: {store.profile!.rejectionReason}</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-3">
