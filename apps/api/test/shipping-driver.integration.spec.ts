@@ -1402,4 +1402,34 @@ describe('a courier reports a failed delivery attempt (MDF-96)', () => {
       (await request(ctx.server).post(`/api/driver/shipping-jobs/${first.id}/report-issue`).send({ reason: 'x' })).status,
     ).toBe(401);
   });
+
+  // MDF-232, settling the open question: report-issue and the staff route
+  // (`admin/logistics/legs/:id/exception`) both write the SAME ShipmentLeg.status
+  // column through the SAME ShipmentService.flagException() — there is exactly one
+  // EXCEPTION writer, not two, so the forward-transition guard (#401,
+  // `assertNotException` + the conditional `status: { not: 'EXCEPTION' }` write in
+  // `simpleTransition`) cannot distinguish who flagged it and was never going to
+  // have a courier-flagged-only gap. This is the one path #401's own test suite
+  // never actually drove: every existing "blocks every forward courier transition"
+  // test flags via the admin route, none flag via report-issue. Proving it here,
+  // rather than reasoning about it, is the whole point of the question.
+  it("a courier's own self-reported issue blocks their next transition exactly as a staff flag does — the identical gap, closed the identical way", async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Flat tire, pulled over.' })).status).toBe(201);
+    const flagged = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(flagged.status).toBe('EXCEPTION');
+    expect(flagged.courierStatus).toBe('PICKUP_CONFIRMED'); // untouched, same as a staff flag
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/in-transit`);
+    expect(r.status).toBe(409);
+    expect(r.body.message).toMatch(/exception/i);
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(after.courierStatus).toBe('PICKUP_CONFIRMED');
+    expect(after.inTransitAt).toBeNull();
+  });
 });

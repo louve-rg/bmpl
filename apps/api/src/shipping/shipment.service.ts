@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   belizeCalendarDateKey,
   belizeMidday,
@@ -13,6 +13,7 @@ import {
   planRoute,
   resolveScheduleStatus,
   userInitials,
+  customerFacingExceptionReason,
   LEG_KIND_LABELS,
   SHIPMENT_STATUS_LABELS,
   SHIPPING_SERVICE_DESCRIPTIONS,
@@ -1665,8 +1666,18 @@ export class ShipmentService {
     await this.verifyHandoffPin(legId, input.pin, actor);
 
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
-      await tx.shipmentLeg.update({
-        where: { id: leg.id },
+      // Conditional write, NOT an unconditional update by id. `leg.status` is
+      // a read taken moments earlier in this same transaction (transition()'s
+      // own findUnique) — a concurrent flagException() on this exact leg can
+      // commit in between that read and this write, since both start from
+      // the same IN_PROGRESS leg and neither's write previously re-asserted
+      // it. Before this guard, both unconditional writes could each commit,
+      // leaving a leg with status=EXCEPTION but completedAt AND exceptionAt
+      // both set (MDF-223). Re-asserting the status this call actually read,
+      // inside the write, closes it — same pattern as
+      // DriverJobService.confirmPickup / DispatchService.cancel.
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, status: leg.status },
         data: {
           status: 'COMPLETED',
           completedAt: new Date(),
@@ -1676,6 +1687,9 @@ export class ShipmentService {
           handoffReceivedByName: input.receivedByName,
         },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException('This leg changed state before the handoff could be recorded — reload and try again.');
+      }
 
       // Who holds it now depends on where this leg ended, not on who was carrying.
       const toHolder: CustodyHolder = leg.destinationHubId ? 'HUB' : 'RECIPIENT';
@@ -1850,10 +1864,19 @@ export class ShipmentService {
    */
   async flagException(legId: string, input: LegExceptionInput, actor: { userId: string | null; label?: string }) {
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
-      await tx.shipmentLeg.update({
-        where: { id: leg.id },
+      // Conditional write, NOT an unconditional update by id — same race and
+      // same fix as completeLeg() above (MDF-223): re-assert the status this
+      // call actually read (whatever it was — flagException is legal from
+      // several non-terminal statuses, not just IN_PROGRESS), inside the
+      // write, so a concurrent completeLeg() on the same leg cannot silently
+      // lose or be lost.
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, status: leg.status },
         data: { status: 'EXCEPTION', exceptionAt: new Date(), exceptionReason: input.reason },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException('This leg changed state before the exception could be recorded — reload and try again.');
+      }
       await tx.shipment.update({ where: { id: shipment.id }, data: { exceptionAt: new Date(), exceptionReason: input.reason } });
       await this.notifications.notifyAdmins(
         'logistics.read',
@@ -3407,9 +3430,20 @@ export class ShipmentService {
       },
     });
 
+    // Edward requirement 12 (owner priority): a window is one of the
+    // configured signals `estimateShipmentEta` anchors LAST_MILE/DIRECT to
+    // (projectLastMile/projectDirect, packages/shared/src/shipment-eta.ts),
+    // so replacing it can genuinely move the baseline the same way a
+    // carrier's own `scheduleLeg` commitment or a real `transition()` can —
+    // this was the gap: those two were `noticeEtaChange`'s only callers,
+    // and this write reached neither, so a window change silently moved the
+    // real ETA while the customer went on believing the old one.
+    const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
+    const payload = await this.serialize(fresh, { audience: 'CUSTOMER' });
+    await this.noticeEtaChange(fresh, payload.eta);
+
     if (isSender) {
-      const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
-      return this.serialize(fresh, { audience: 'CUSTOMER' });
+      return payload;
     }
 
     // The recipient's own ack: exactly what is now stored for THEIR role,
@@ -3531,7 +3565,10 @@ export class ShipmentService {
         // is EXCEPTION/UNKNOWN — never a guess standing in for a real gap.
         eta: etaBySequence.get(l.sequence) ?? null,
         handoffReceivedByName: l.handoffReceivedByName,
-        exceptionReason: l.exceptionReason,
+        // MDF-243 (owner ruling): staff alone see the operator's own typed
+        // words. Everyone else gets the one approved sentence — see
+        // `customerFacingExceptionReason`'s own doc for why there is only one.
+        exceptionReason: opts.audience === 'STAFF' ? l.exceptionReason : customerFacingExceptionReason(l.exceptionReason),
         // The customer's own door code, and nothing else.
         handoffPin: this.pinFor(l, opts.audience, endsAtHub),
         // Per-leg, never pooled: a pickup photo belongs to the leg it was taken
@@ -3570,7 +3607,8 @@ export class ShipmentService {
       deliveredAt: s.deliveredAt,
       cancelledAt: s.cancelledAt,
       cancellationReason: s.cancellationReason,
-      exceptionReason: s.exceptionReason,
+      // MDF-243: same gate, shipment-level. See the leg-level comment above.
+      exceptionReason: opts.audience === 'STAFF' ? s.exceptionReason : customerFacingExceptionReason(s.exceptionReason),
       origin: {
         name: s.originName,
         phone: s.originPhone,

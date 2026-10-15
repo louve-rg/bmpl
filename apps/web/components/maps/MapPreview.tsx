@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { BELIZE_BOUNDS } from '@bmpl/shared';
 import type { MapPoint } from '../../lib/trip-map';
+import { attachCooperativeMapDrag } from './cooperative-map-drag';
 import 'leaflet/dist/leaflet.css';
 
 /** A point the map draws, optionally carrying its route-stop letter (BMPL-182: A, B, C…). */
@@ -68,6 +69,7 @@ export function MapPreview({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<import('leaflet').Map | null>(null);
   const markersRef = useRef<import('leaflet').Marker[]>([]);
+  const detachDragRef = useRef<(() => void) | null>(null);
   // Read inside Leaflet's own event callbacks without re-running the build effect.
   const onSelectRef = useRef(onSelectIndex);
   onSelectRef.current = onSelectIndex;
@@ -88,8 +90,16 @@ export function MapPreview({
       if (cancelled || !containerRef.current) return;
 
       const map = L.map(containerRef.current, {
-        // One-finger scroll must keep scrolling the PAGE when embedded; a
-        // full-screen host has no page underneath to protect and opts in.
+        // Desktop mouse-wheel zoom only -- off when embedded so an accidental
+        // wheel-over doesn't hijack the page's own scroll, on for a
+        // full-screen host with no page underneath to protect. Observed in
+        // Chromium with `hasTouch` at 375px, unfixed: this option alone
+        // (plus the container's `touchAction` style, below) did not stop a
+        // one-finger swipe on the embedded map from panning the map instead
+        // of scrolling the page. `attachCooperativeMapDrag`
+        // (./cooperative-map-drag.ts), wired up below once the map exists,
+        // is the actual fix for touch; this option by itself only ever
+        // covered the desktop wheel -- same shape as LocationPicker.tsx.
         scrollWheelZoom,
         maxBounds: L.latLngBounds(
           [BELIZE_BOUNDS.minLatitude, BELIZE_BOUNDS.minLongitude],
@@ -123,12 +133,20 @@ export function MapPreview({
       // render into a stale box and the map looks half-drawn.
       setTimeout(() => map.invalidateSize(), 0);
 
+      // Embedded only (scrollWheelZoom off): a full-screen host already owns
+      // every gesture, with no page scroll underneath to protect.
+      if (!scrollWheelZoom) {
+        detachDragRef.current = attachCooperativeMapDrag(map, containerRef.current);
+      }
+
       mapRef.current = map;
       markersRef.current = markers;
     })();
 
     return () => {
       cancelled = true;
+      detachDragRef.current?.();
+      detachDragRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
       markersRef.current = [];
@@ -158,6 +176,14 @@ export function MapPreview({
     <div
       ref={containerRef}
       className={`w-full overflow-hidden ${bordered ? 'rounded-bmpl-lg border border-slate-200' : ''} ${heightClassName} ${className}`}
+      // Embedded: pan-y disables the browser's own native pinch-zoom and
+      // horizontal pan on this element, matching LocationPicker's identical
+      // container style. Observed in Chromium with hasTouch at 375px: by
+      // itself (before `attachCooperativeMapDrag`, above) it did not stop a
+      // one-finger swipe here from panning the map instead of the page. A
+      // full-screen host (scrollWheelZoom=true) has no page underneath to
+      // protect, so the map owning every gesture there is intentional.
+      style={{ touchAction: scrollWheelZoom ? 'none' : 'pan-y' }}
     />
   );
 }

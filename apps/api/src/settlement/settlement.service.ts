@@ -118,7 +118,8 @@ export class SettlementService {
     const currency = payment.currency;
     const { config } = await this.ensureConfigRow();
 
-    return this.prisma.$transaction(async (tx) => {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
       const escrow = await this.wallet.ensureSystemAccount('SYSTEM_ESCROW', currency, tx);
       const platform = await this.wallet.ensureSystemAccount('SYSTEM_PLATFORM_FEES', currency, tx);
 
@@ -210,7 +211,27 @@ export class SettlementService {
       await this.audit.record({ action: 'WALLET_TRANSACTION_POSTED', actorId: actorId ?? null, newValue: { walletTransactionId: txn.id, type: 'ESCROW_RELEASE' } }, tx);
 
       return { settled: true };
-    });
+      });
+    } catch (e) {
+      // Idempotent replay: a concurrent settleShipment call for the same
+      // shipment already committed first and this one lost a unique
+      // constraint inside the transaction — confirmed empirically to be
+      // DriverEarning.shipmentLegId in practice, but the ledger's own
+      // `shipment:${shipment.id}:settle` reference (postTransaction above)
+      // is unique too, so either is possible depending on timing; this
+      // catches P2002 generically rather than naming one. Same gap
+      // settleVendorOrder already closes for itself. Unlike settleVendorOrder
+      // there is no dedicated settlement row to re-read here, so the
+      // idempotency check is the same one this method already uses up
+      // front: Payment.status. A genuine (non-P2002) failure is rethrown
+      // uncaught, same as before this change — there is no FAILED-settlement
+      // record to write for a shipment the way settleVendorOrder writes one.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        const fresh = await this.prisma.payment.findUnique({ where: { id: payment.id }, select: { status: true } });
+        if (fresh?.status === 'SETTLED') return { settled: true };
+      }
+      throw e;
+    }
   }
 
   async settleVendorOrder(vendorOrderId: string, actorId?: string | null): Promise<{ settled: boolean; reason?: string; settlementId?: string }> {

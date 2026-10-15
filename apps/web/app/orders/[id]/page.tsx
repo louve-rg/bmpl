@@ -26,9 +26,11 @@ export default function OrderDetailPage() {
   const [order, setOrder] = useState<OrderView | null>(null);
   const [payment, setPayment] = useState<PaymentDetail | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading');
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
-  useEffect(() => {
-    ordersApi
+  function load() {
+    return ordersApi
       .getOwn(params.id)
       .then((o) => {
         setOrder(o);
@@ -42,7 +44,43 @@ export default function OrderDetailPage() {
         else if (err.status === 404) setState('notfound');
         else setState('error');
       });
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id, router]);
+
+  // Visible only while the server's own window is still open — every
+  // vendor-order still PENDING. The server re-checks this itself on submit
+  // (the realistic race: a vendor starts preparing while this page sits
+  // open), so this is a UI affordance, not the authority.
+  const cancellable = order?.status === 'PENDING' && order.vendorOrders.every((vo) => vo.status === 'PENDING');
+
+  async function cancelOrder() {
+    if (
+      !window.confirm(
+        'Cancel this order? If payment was already authorized, the amount will be returned to your BML wallet balance. This cannot be undone.',
+      )
+    )
+      return;
+    setCancelError(null);
+    setCancelling(true);
+    try {
+      await ordersApi.cancel(params.id);
+      await load();
+    } catch (err) {
+      setCancelError((err as ApiError).message ?? 'We could not cancel this order.');
+      // The realistic case for a refusal: a vendor started preparing while
+      // this page was open. Refetch here too, not only on success, so the
+      // button and the vendor-order display correct themselves while the
+      // customer is still looking at the error — not only after a manual
+      // reload.
+      await load();
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   return (
     <>
@@ -75,9 +113,25 @@ export default function OrderDetailPage() {
               <PageHeader
                 title={order.orderNumber}
                 description={`Placed ${new Date(order.placedAt).toLocaleString()}`}
-                actions={<OrderStatusBadge status={order.status} />}
+                actions={
+                  <>
+                    {cancellable && (
+                      <button
+                        type="button"
+                        onClick={cancelOrder}
+                        disabled={cancelling}
+                        className="rounded-bmpl-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {cancelling ? 'Cancelling…' : 'Cancel order'}
+                      </button>
+                    )}
+                    <OrderStatusBadge status={order.status} />
+                  </>
+                }
               />
             </div>
+
+            {cancelError && <Alert tone="error" title="We couldn’t cancel this order." className="mt-4">{cancelError}</Alert>}
 
             {order.deliveryAddress && (
               <Card className="p-4 text-sm">
@@ -123,9 +177,17 @@ export default function OrderDetailPage() {
               {order.vendorOrders.map((vo) => (
                 <Card key={vo.id} className="overflow-hidden">
                   <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <Link href={`/store/${vo.vendor.slug}`} className="font-semibold text-belize-navy hover:text-belize-blue">{vo.vendor.businessName}</Link>
+                    <div className="flex flex-wrap min-w-0 items-center gap-2">
+                      <Link href={`/store/${vo.vendor.slug}`} className="min-w-0 break-words font-semibold text-belize-navy hover:text-belize-blue">{vo.vendor.businessName}</Link>
                       <DeliveryBadge method={vo.deliveryMethod} />
+                      {/* This store's own progress (PENDING → PREPARING → …) — the
+                          sibling vendor-order detail page (dashboard/orders/[id])
+                          already shows this; previously only the top-level order
+                          badge above was shown here, which stays PENDING for the
+                          whole order even once a store has moved this vendor-order
+                          along, leaving a pickup customer with nothing to see
+                          between placing the order and the pickup code appearing. */}
+                      <OrderStatusBadge status={vo.status} />
                     </div>
                     <span className="text-xs text-slate-400">{vo.orderNumber}</span>
                   </header>
