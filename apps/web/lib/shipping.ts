@@ -75,6 +75,9 @@ export interface ShipmentLegView {
   startedAt: string | null;
   completedAt: string | null;
   handoffReceivedByName: string | null;
+  /** MDF-243: already the one approved sentence, never the operator's own
+   *  typed words — the API gates that by audience before this ever reaches
+   *  the customer's own dashboard. */
   exceptionReason: string | null;
   /** Only ever set on the customer's own final delivery leg. */
   handoffPin: string | null;
@@ -185,6 +188,8 @@ export interface ShipmentView {
   deliveredAt: string | null;
   cancelledAt: string | null;
   cancellationReason: string | null;
+  /** MDF-243: the approved customer sentence, not the operator's own typed
+   *  words. See the identical field on {@link ShipmentLegView}. */
   exceptionReason: string | null;
   origin: ShipmentEndpoint;
   destination: ShipmentEndpoint;

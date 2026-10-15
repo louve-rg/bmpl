@@ -32,6 +32,7 @@ vi.mock('leaflet', () => {
       invalidateSize: vi.fn(),
       remove: vi.fn(),
       fitBounds: vi.fn(),
+      dragging: { enable: vi.fn(), disable: vi.fn() },
     };
   }
   const L = {
@@ -148,6 +149,122 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
 });
 
 /**
+ * MDF-96 / Edward req 10 — the courier-facing screen for an endpoint
+ * (POST /driver/shipping-jobs/:id/report-issue) that already existed, worked
+ * and was correctly restricted server-side, but had zero references anywhere
+ * in apps/web. This is the button's own regression guard.
+ */
+describe('DriverShippingJobPage — report an issue (MDF-96)', () => {
+  it('shows "Report an issue" once the driver actually holds the parcel (IN_TRANSIT)', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    const el = await mount();
+    expect(el.textContent).toContain('Report an issue');
+  });
+
+  it('hides "Report an issue" before pickup (ASSIGNED) — nothing attempted yet', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'ASSIGNED', nextActionLabel: 'Accept' }));
+    const el = await mount();
+    expect(el.textContent).not.toContain('Report an issue');
+  });
+
+  it('hides "Report an issue" once the leg is terminal (DELIVERED)', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'DELIVERED', nextActionLabel: null }));
+    const el = await mount();
+    expect(el.textContent).not.toContain('Report an issue');
+  });
+
+  it('declining the prompt never calls the API', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(null);
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    await act(async () => {
+      button.click();
+    });
+    expect(apiPost).not.toHaveBeenCalled();
+    promptSpy.mockRestore();
+  });
+
+  it('a reason under 4 characters never calls the API', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('no');
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    await act(async () => {
+      button.click();
+    });
+    expect(apiPost).not.toHaveBeenCalled();
+    promptSpy.mockRestore();
+  });
+
+  it('reporting posts the reason, shows the confirmation, and hides the primary action — this screen stops offering it, without claiming more than the system does', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Nobody answered at the address');
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiPost.mockResolvedValue(undefined);
+
+    const el = await mount();
+    expect(el.textContent).toContain('Mark as arriving');
+
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiPost).toHaveBeenCalledWith('/driver/shipping-jobs/job1/report-issue', { reason: 'Nobody answered at the address' });
+    expect(el.textContent).toContain('Issue reported');
+    expect(el.textContent).toContain('Nobody answered at the address');
+    expect(el.textContent).not.toContain('Mark as arriving');
+    expect(el.textContent).not.toContain('Report an issue');
+    promptSpy.mockRestore();
+  });
+
+  /**
+   * god, conv-mission-2026-10-13: Jim found the courier status machine has
+   * no check against EXCEPTION at all, so "this delivery is on hold" was a
+   * promise nothing in the backend keeps -- same overclaim class #385's own
+   * gate exists to catch. Permanent guard against that specific wording
+   * ever coming back, not just a happy-path assertion.
+   */
+  it('never claims the delivery is "on hold" — the backend does not enforce that', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Nobody answered at the address');
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiPost.mockResolvedValue(undefined);
+
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(el.textContent).toContain('our team has been notified and will review it');
+    expect(el.textContent?.toLowerCase()).not.toContain('on hold');
+    promptSpy.mockRestore();
+  });
+
+  it('does not invent a refund, fee or timeframe in the confirmation copy', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Could not find the recipient');
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving' }));
+    apiPost.mockResolvedValue(undefined);
+
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Report an issue')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const text = el.textContent!.toLowerCase();
+    expect(text).not.toMatch(/refund|fee|within \d|hours?\b.*(credit|refund)/);
+    promptSpy.mockRestore();
+  });
+});
+
+/**
  * Owner ruling (god, conv-mission-2026-10-13): an active delivery exception
  * blocks further courier progression until staff resolve it — in apps/api's
  * own guard AND here. `legStatus` is additive on the wire (see
@@ -187,5 +304,30 @@ describe('DriverShippingJobPage — an open exception blocks progression (owner 
 
     expect(el.textContent).toContain('Mark as arriving');
     expect(el.textContent).not.toContain('This leg has an open issue');
+  });
+});
+
+/**
+ * Resolved 2026-10-14, reconciling this PR (#393) against #398: report-issue
+ * calls `flagException`, which the backend refuses outright once a leg is
+ * already EXCEPTION (`isLegActionable`, packages/shared/src/shipping.ts) —
+ * so it is one of the controls the EXCEPTION-blocks-progression rule exists
+ * to hide, not an exception to it. Neither PR's own test set proved this
+ * combined behaviour on its own.
+ */
+describe('DriverShippingJobPage — report-issue is itself blocked during an open exception', () => {
+  it('hides "Report an issue" once legStatus is EXCEPTION, even while courierStatus is still reportable', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'EXCEPTION' }));
+    const el = await mount();
+
+    expect(el.textContent).toContain('This leg has an open issue');
+    expect(el.textContent).not.toContain('Report an issue');
+  });
+
+  it('still shows "Report an issue" when legStatus is a non-exception value', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'IN_PROGRESS' }));
+    const el = await mount();
+
+    expect(el.textContent).toContain('Report an issue');
   });
 });

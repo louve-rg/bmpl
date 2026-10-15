@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../../lib/api';
 import { tripMapPoints } from '../../../../../lib/trip-map';
 import { uploadFile } from '../../../../../lib/uploads';
-import { isExceptionBlocked, pickupPhotoSection } from '../../../../../lib/driver-shipping-job';
+import { isExceptionBlocked, pickupPhotoSection, reportIssueState } from '../../../../../lib/driver-shipping-job';
 import { Alert, Badge, Button, Card, Label, PageHeader, Spinner, StatusBadge } from '../../../../../components/ui';
 import { DriverBreadcrumb } from '../../../../../components/driver/DriverBreadcrumb';
 import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRouteMap';
@@ -19,6 +19,25 @@ import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRou
  * primary action. A driver switching between a store run and a parcel leg should
  * not have to relearn the page; only the words inside it change.
  *
+ * REPORT AN ISSUE (MDF-96 / Edward req 10): POST
+ * /driver/shipping-jobs/:id/report-issue (apps/api/src/shipping/
+ * driver-shipping.controller.ts) already existed, worked, and was correctly
+ * restricted server-side to a leg the parcel is actually held on
+ * (PICKUP_CONFIRMED/IN_TRANSIT/ARRIVING) — but had zero references anywhere
+ * in apps/web, same shape as the order-cancel affordance earlier tonight.
+ * This is the button.
+ *
+ * KNOWN LIMITATION, stated here rather than silently worked around: the
+ * confirmation shown after a successful report (`reportedReason` below) is
+ * client-side only and does not survive a page reload. The driver job view
+ * (ShipmentDriverService#serialize) returns `courierStatus` only — never the
+ * leg's separate `status`/`exceptionReason`/`exceptionAt` fields that
+ * `flagException` actually writes server-side, so there is currently no
+ * field this page could read back to reconstruct "a report is already in"
+ * after a fresh load. That is an apps/api read-side gap (an additive field
+ * on an existing response, not a new endpoint), out of scope for this
+ * apps/web-only change — flagged to the team rather than crossed silently.
+ *
  * EXCEPTION BLOCKS PROGRESSION (owner ruling, god conv-mission-2026-10-13):
  * an active delivery exception blocks further courier progression until
  * authorized staff resolve it. apps/api owns the actual guard on the
@@ -26,8 +45,19 @@ import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRou
  * the API is about to refuse, and say why — see `isExceptionBlocked` in
  * lib/driver-shipping-job.ts for the `legStatus` field this reads (additive,
  * degrades to today's unblocked behaviour while absent). No timeframe or
- * promise about what happens next is stated — same gate as the report-issue
- * confirmation copy (MDF-96).
+ * promise about what happens next is stated.
+ *
+ * RESOLVED 2026-10-14 (reconciling this PR against that one): Report an
+ * issue is one of the controls EXCEPTION blocks, not an exception to the
+ * rule — `report-issue` calls `flagException`, which is routed through
+ * `transition()`, whose first gate (`isLegActionable`,
+ * packages/shared/src/shipping.ts) refuses any leg already in EXCEPTION.
+ * Offering the button while blocked would be offering a control the server
+ * is certain to refuse — exactly what the EXCEPTION-blocks-progression rule
+ * exists to stop. The gap noted above (the courier status machine's own
+ * accept/pickup/in-transit/arriving transitions having no EXCEPTION check)
+ * is now closed by that same gate for THIS action; whether it is closed for
+ * the primary action too lives in `isExceptionBlocked`, not here.
  */
 
 interface Place {
@@ -161,6 +191,8 @@ export default function DriverShippingJobPage() {
   const [receivedBy, setReceivedBy] = useState('');
   const [photoKeys, setPhotoKeys] = useState<string[]>([]);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [reportedReason, setReportedReason] = useState<string | null>(null);
+  const [reportBusy, setReportBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -180,6 +212,7 @@ export default function DriverShippingJobPage() {
   const blocked = job ? isExceptionBlocked(job) : false;
   const action = job && !blocked ? actionFor(job.status) : null;
   const photoSection = job ? pickupPhotoSection(job, action !== null) : 'hidden';
+  const reportState = job ? reportIssueState(job.status, reportedReason !== null) : 'unavailable';
 
   async function run() {
     if (!job || !action) return;
@@ -240,6 +273,29 @@ export default function DriverShippingJobPage() {
     } catch (e) {
       setErr(errMessage(e));
       setBusy(false);
+    }
+  }
+
+  /**
+   * MDF-96 / Edward req 10. Mirrors decline()'s window.prompt shape — the
+   * one reason-collecting action already on this page — rather than
+   * introducing a new form pattern for a single field. The endpoint accepts
+   * free text only (packages/validation/src/shipping.ts legExceptionSchema,
+   * 4-500 chars) — no reason codes to pick from, so none are invented here.
+   */
+  async function reportIssue() {
+    if (!job) return;
+    const reason = window.prompt('What went wrong? (at least 4 characters)')?.trim();
+    if (!reason || reason.length < 4) return;
+    setReportBusy(true);
+    setErr(null);
+    try {
+      await api.post(`/driver/shipping-jobs/${job.id}/report-issue`, { reason });
+      setReportedReason(reason);
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setReportBusy(false);
     }
   }
 
@@ -394,11 +450,29 @@ export default function DriverShippingJobPage() {
             </Card>
           )}
 
+          {/* Reported this session (checked first: it's this driver's own,
+              fresher-than-a-reload knowledge of why) -- this screen stops
+              offering a further movement action, but that is THIS SCREEN's
+              own choice, not a backend guarantee. Copy must not claim more
+              than the system actually does: "on hold" was corrected to
+              what flagException actually guarantees (the team is
+              notified, a human reviews it) after god caught it as the
+              same class of overclaim #385's gate exists to catch. Neutral
+              copy only: no refund, fee or timeframe promised either,
+              since the endpoint makes none. */}
+          {reportState === 'reported' && (
+            <Alert tone="warning" title="Issue reported" className="mt-4">
+              “{reportedReason}” — our team has been notified and will review it.
+            </Alert>
+          )}
+
           {/* Owner ruling (god, conv-mission-2026-10-13): say why nothing can
               move, with no timeframe or promise about what happens next —
               the backend guard (apps/api) is what actually enforces the
-              hold; this is only the explanation. */}
-          {blocked && (
+              hold; this is only the explanation. Skipped when reportState
+              is 'reported': that banner above already explains it, and is
+              this driver's own fresher account of why. */}
+          {blocked && reportState !== 'reported' && (
             <Alert tone="warning" title="This leg has an open issue" className="mt-4">
               Nothing can move forward until our team resolves it.
             </Alert>
@@ -406,12 +480,12 @@ export default function DriverShippingJobPage() {
 
           {/* One primary action, full width, thumb-height. */}
           <div className="sticky bottom-0 mt-4 space-y-2 bg-white/95 py-3 backdrop-blur">
-            {action && (
+            {reportState !== 'reported' && action && (
               <Button onClick={run} disabled={busy} className="min-h-[48px] w-full text-base">
                 {busy ? 'Working…' : (job.nextActionLabel ?? 'Continue')}
               </Button>
             )}
-            {job.status === 'ASSIGNED' && (
+            {reportState !== 'reported' && job.status === 'ASSIGNED' && (
               <button
                 onClick={decline}
                 disabled={busy}
@@ -420,7 +494,16 @@ export default function DriverShippingJobPage() {
                 Pass on this job
               </button>
             )}
-            {!action && (
+            {reportState === 'available' && !blocked && (
+              <button
+                onClick={reportIssue}
+                disabled={reportBusy}
+                className="min-h-[44px] w-full rounded-bmpl-md border border-slate-300 text-sm font-semibold text-red-600"
+              >
+                {reportBusy ? 'Working…' : 'Report an issue'}
+              </button>
+            )}
+            {(!action || reportState === 'reported') && (
               <Link
                 href="/dashboard/driver/jobs"
                 className="flex min-h-[44px] w-full items-center justify-center rounded-bmpl-md border border-slate-300 text-sm font-semibold text-belize-navy"

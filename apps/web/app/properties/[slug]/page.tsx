@@ -62,7 +62,7 @@ export default async function PropertyDetailPage({ params }: { params: { slug: s
             ← All properties
           </Link>
 
-          <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_360px]">
+          <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
             {/* main */}
             <div className="space-y-6">
               <PropertyGallery images={p.images} title={p.title} />

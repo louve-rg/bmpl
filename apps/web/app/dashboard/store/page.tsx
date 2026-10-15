@@ -190,7 +190,7 @@ function StatusBar({ store, onDone, onError }: SectionProps) {
   return (
     <>
       <UiCard className="flex flex-wrap items-center gap-3 p-4">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+        <div className="min-w-0 flex flex-wrap items-center gap-2 text-sm text-slate-600">
           <span>Approval:</span>
           <StatusBadge status={status} />
           <span className="text-slate-300">·</span>
@@ -198,7 +198,7 @@ function StatusBar({ store, onDone, onError }: SectionProps) {
             Store: <b className="text-belize-navy">{storeStatus}</b>
           </span>
           {store.profile!.rejectionReason && status === 'REJECTED' && (
-            <span className="text-red-600">Reason: {store.profile!.rejectionReason}</span>
+            <span className="min-w-0 break-words text-red-600">Reason: {store.profile!.rejectionReason}</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-3">
@@ -434,7 +434,7 @@ function LocationsSection({ store, onDone, onError }: SectionProps) {
             key={l.id}
             className="flex flex-wrap items-center justify-between gap-2 rounded-bmpl-md border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-600"
           >
-            <span>
+            <span className="min-w-0 break-words">
               <b className="text-belize-navy">{l.label}</b>
               {l.isPrimary && (
                 <Badge tone="success" className="ml-2">
@@ -456,7 +456,7 @@ function LocationsSection({ store, onDone, onError }: SectionProps) {
               )}
             </span>
             <button
-              className="text-xs font-semibold text-red-600 hover:underline"
+              className="shrink-0 text-xs font-semibold text-red-600 hover:underline"
               onClick={async () => {
                 try {
                   await api.del(`/vendor/profile/locations/${l.id}`);

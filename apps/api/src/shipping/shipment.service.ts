@@ -13,6 +13,7 @@ import {
   planRoute,
   resolveScheduleStatus,
   userInitials,
+  customerFacingExceptionReason,
   LEG_KIND_LABELS,
   SHIPMENT_STATUS_LABELS,
   SHIPPING_SERVICE_DESCRIPTIONS,
@@ -3564,7 +3565,10 @@ export class ShipmentService {
         // is EXCEPTION/UNKNOWN — never a guess standing in for a real gap.
         eta: etaBySequence.get(l.sequence) ?? null,
         handoffReceivedByName: l.handoffReceivedByName,
-        exceptionReason: l.exceptionReason,
+        // MDF-243 (owner ruling): staff alone see the operator's own typed
+        // words. Everyone else gets the one approved sentence — see
+        // `customerFacingExceptionReason`'s own doc for why there is only one.
+        exceptionReason: opts.audience === 'STAFF' ? l.exceptionReason : customerFacingExceptionReason(l.exceptionReason),
         // The customer's own door code, and nothing else.
         handoffPin: this.pinFor(l, opts.audience, endsAtHub),
         // Per-leg, never pooled: a pickup photo belongs to the leg it was taken
@@ -3603,7 +3607,8 @@ export class ShipmentService {
       deliveredAt: s.deliveredAt,
       cancelledAt: s.cancelledAt,
       cancellationReason: s.cancellationReason,
-      exceptionReason: s.exceptionReason,
+      // MDF-243: same gate, shipment-level. See the leg-level comment above.
+      exceptionReason: opts.audience === 'STAFF' ? s.exceptionReason : customerFacingExceptionReason(s.exceptionReason),
       origin: {
         name: s.originName,
         phone: s.originPhone,
