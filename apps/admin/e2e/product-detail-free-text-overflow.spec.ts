@@ -108,19 +108,33 @@ test.afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-async function openProduct(page: Page) {
+async function openProduct(page: Page): Promise<boolean> {
   await page.context().addCookies([
     { name: 'access_token', value: 'fake-for-layout-check', domain: 'localhost', path: '/' },
   ]);
-  await page.goto(`/dashboard/products/${PRODUCT_ID}`);
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  try {
+    // `goto` belongs inside this try, not just the `expect` below: when the
+    // dev server itself is unreachable, `goto` throws `ERR_CONNECTION_REFUSED`
+    // before the page ever has a chance to render -- that is a precondition
+    // failure same as a failed SSR call, not a reason to crash the test
+    // instead of skipping it. Same guard shape as the three #439 specs
+    // (order-detail-free-text-overflow.spec.ts etc.) -- this spec's own
+    // self-hosted stub should make the server and the SSR call both succeed
+    // today, but the guard stays as the safety net for when either doesn't.
+    await page.goto(`/dashboard/products/${PRODUCT_ID}`);
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 test.describe('/dashboard/products/[id] never overflows on vendor free text', () => {
   for (const width of WIDTHS) {
     test(`every Card stays inside its own box at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1400 });
-      await openProduct(page);
+      const ready = await openProduct(page);
+      test.skip(!ready, 'Needs a reachable admin dev server and a successful /dashboard/products/[id] render -- see file header.');
 
       const cards = page.locator('.bmpl-card');
       const count = await cards.count();

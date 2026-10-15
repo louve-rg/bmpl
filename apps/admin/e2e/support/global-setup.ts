@@ -1,5 +1,4 @@
 import { ensurePortFree, startDevServer, stopDevServer, waitForRealReadiness, PORT } from './server';
-import { OPS_PASSWORD } from './auth';
 
 /**
  * Returning a teardown function (rather than a separate `globalTeardown`
@@ -8,36 +7,35 @@ import { OPS_PASSWORD } from './auth';
  * ./server.ts for why the PID itself still gets re-derived from the OS
  * rather than trusted from this closure.
  *
- * globalSetup is config-level: it runs regardless of whether every test in
- * the file is going to skip (unlike a per-test fixture, a describe-level
- * `test.skip()` doesn't touch it). Every CI run has no UAT_OPS_PASSWORD and
- * no SEED_SUPER_ADMIN_PASSWORD, so without this check, CI would still pay
- * for starting a full `next dev` server and waiting on it to become ready,
- * for a server no test will ever talk to -- a far bigger cost than the one
- * chromium launch that each spec's own describe-level skip already avoids
- * (see page-header-overflow.spec.ts's and master-detail-grid-overflow.spec.ts's
- * own comments). Checked here, before anything starts.
- *
- * This gate used to check ONLY `OPS_PASSWORD`, back when it was the one
- * credential any local-only spec in this suite needed. It stayed narrow
- * after a second spec (master-detail-grid-overflow.spec.ts) was added that
- * needs SEED_SUPER_ADMIN_PASSWORD instead -- that spec's own describe-level
- * skip correctly read ITS credential, but the shared server this whole file
- * (not per-spec) is responsible for starting never came up, because this
- * check never looked at it: every test in the file still "ran" and then
- * individually skipped once `loginOk` stayed false, with no page ever
- * reachable (`ERR_CONNECTION_REFUSED`, not a login failure) -- found live,
- * not assumed, while first verifying that new spec actually exercises the
- * grid-cols-1 fix end to end. Any credential a spec in this suite might use
- * needs to be named here, or that spec's server silently never starts.
+ * The server now starts unconditionally, the same way apps/web's own
+ * globalSetup always has. This used to gate on `OPS_PASSWORD` or
+ * `SEED_SUPER_ADMIN_PASSWORD` being set, on the reasoning that every CI run
+ * has neither, so without a gate CI would pay for a `next dev` server no
+ * test would ever talk to. That reasoning held while every spec in this
+ * suite needed a real login -- it stopped holding the day
+ * product-detail-free-text-overflow.spec.ts was added: it needs no login at
+ * all (a fake cookie plus its own self-hosted stub answering `/me` and the
+ * product endpoint), so the gate was silently preventing the one spec that
+ * could actually use this server from ever running, in any CI run, for
+ * months -- found live, not assumed (MDF-266). The other seven spec files
+ * keep skipping in CI exactly as before: four still need a real login
+ * (page-header-overflow.spec.ts, master-detail-grid-overflow.spec.ts,
+ * fieldset-min-width-audit.local-only.spec.ts,
+ * user-detail-role-row-overflow.spec.ts) and skip on their own
+ * describe-level `test.skip()` for the missing credential; three more
+ * (order-detail-free-text-overflow.spec.ts, order-detail-header-overflow.spec.ts,
+ * vendor-detail-rejection-reason-overflow.spec.ts) need no login but still
+ * need the dashboard shell's own `/me` SSR call to succeed against a live
+ * API, which CI doesn't have -- they already skip cleanly on that precondition
+ * (their own `try`/`catch` around `goto`, same shape as this spec's own
+ * guard below). Removing this gate only changes whether a server exists
+ * under any of them, not whether they run.
  */
 export default async function globalSetup() {
-  if (!OPS_PASSWORD && !process.env.SEED_SUPER_ADMIN_PASSWORD) return;
-
   if (!process.env.ADMIN_PUBLIC_API_URL) {
     throw new Error(
       'ADMIN_PUBLIC_API_URL is not set. Set it to a live API before running this suite, e.g. ' +
-        'ADMIN_PUBLIC_API_URL=http://localhost:4001 pnpm --filter @bmpl/admin test:e2e',
+        'ADMIN_PUBLIC_API_URL=http://localhost:4000 pnpm --filter @bmpl/admin test:e2e',
     );
   }
 
