@@ -29,6 +29,9 @@ async function makeVendor(email: string, business: string) {
   const vpId = profile.body.profile.id;
   await request(ctx.server).post('/api/vendor/profile/submit').set('Cookie', cookies).expect(201);
   await request(ctx.server).post(`/api/admin/vendors/${vpId}/approve`).set('Cookie', adminCookies).send({}).expect(201);
+  // New profiles default to CLOSED (MDF-216) - open the store so these
+  // vendors can take orders, matching every other spec's fixture convention.
+  await request(ctx.server).patch('/api/vendor/profile').set('Cookie', cookies).send({ storeStatus: 'OPEN' }).expect(200);
   return { cookies, vpId };
 }
 async function createProduct(cookies: string[], fields: Record<string, unknown>) {
@@ -242,6 +245,39 @@ describe('validation + transactional rollback', () => {
     await addToCart(customer, { productId: p, quantity: 1 }).expect(201);
     await ctx.prisma.vendorProfile.update({ where: { id: v.vpId }, data: { approvalStatus: 'SUSPENDED' } });
     expect((await checkout(customer)).status).toBe(409);
+  });
+
+  it('rejects a new purchase from a CLOSED store, cart and inventory untouched (MDF-216)', async () => {
+    const customer = await registerCustomer('ord_closed@example.bz');
+    const v = await makeVendor('ord_vclosed@example.bz', 'ClosedShop');
+    const p = await createProduct(v.cookies, { title: 'Prod C', sku: 'C1', priceMinor: 1000 });
+    await setStock(v.cookies, p, 5);
+    await addToCart(customer, { productId: p, quantity: 1 }).expect(201);
+    await request(ctx.server).patch('/api/vendor/profile').set('Cookie', v.cookies).send({ storeStatus: 'CLOSED' }).expect(200);
+
+    const res = await checkout(customer);
+    expect(res.status).toBe(409);
+    expect(await reservedFor(p)).toBe(0); // no reservation persisted
+    expect((await getCart(customer)).body.itemCount).toBe(1); // cart intact
+    expect(await ctx.prisma.order.count({ where: { user: { email: 'ord_closed@example.bz' } } })).toBe(0);
+  });
+
+  it('a CLOSED store does not affect an order placed before it closed (MDF-216)', async () => {
+    const customer = await registerCustomer('ord_closed2@example.bz');
+    const v = await makeVendor('ord_vclosed2@example.bz', 'ClosedShop2');
+    const p = await createProduct(v.cookies, { title: 'Prod C2', sku: 'C2', priceMinor: 1000 });
+    await setStock(v.cookies, p, 5);
+    await addToCart(customer, { productId: p, quantity: 1 }).expect(201);
+    const order = (await checkout(customer).expect(201)).body;
+    const vendorOrderId = order.vendorOrders[0].id;
+
+    await request(ctx.server).patch('/api/vendor/profile').set('Cookie', v.cookies).send({ storeStatus: 'CLOSED' }).expect(200);
+
+    // Customer can still view the order; vendor can still fulfil it.
+    await request(ctx.server).get(`/api/orders/${order.id}`).set('Cookie', customer).expect(200);
+    await request(ctx.server).get(`/api/vendor/orders/${vendorOrderId}`).set('Cookie', v.cookies).expect(200);
+    const started = await request(ctx.server).post(`/api/vendor/orders/${vendorOrderId}/start-preparing`).set('Cookie', v.cookies);
+    expect(started.status).toBe(201);
   });
 
   it('rejects insufficient inventory (stock dropped after add) and rolls back', async () => {

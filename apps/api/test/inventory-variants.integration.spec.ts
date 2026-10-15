@@ -153,6 +153,84 @@ describe('normalized variants + variant inventory', () => {
   });
 });
 
+describe('orphaned product-level row excluded from aggregates once variants exist (oversell risk)', () => {
+  /**
+   * publicAvailability/summaryFor/inStockMap all queried by productId with no
+   * variantId filter and summed every matched row — so the product-level
+   * (variantId: null) row created before this product had variants was never
+   * reconciled by generateVariants() and kept being added on top of real
+   * variant stock. Concrete shape named in the dispatch: 17 orphaned
+   * product-level units + 5 + 5 real variant units must read as 10 sellable,
+   * not 27, everywhere a customer or vendor can see a stock number.
+   */
+  it('17 orphaned product-level units + 5 + 5 variant units sums to 10 sellable, not 27, across all three aggregates', async () => {
+    const v = await makeVendorWithProduct('inv_orphan@example.bz', 'Orphan');
+    await request(ctx.server).post(`/api/vendor/products/${v.productId}/inventory/adjust`).set('Cookie', v.cookies).send({ delta: 17, reason: 'RESTOCK' }).expect(201);
+
+    await request(ctx.server).post(`/api/vendor/products/${v.productId}/options`).set('Cookie', v.cookies).send({ name: 'Size', values: ['S', 'M'] }).expect(201);
+    const view = await request(ctx.server).get(`/api/vendor/products/${v.productId}/variants`).set('Cookie', v.cookies);
+    const sizeOpt = view.body.options.find((o: { name: string }) => o.name === 'Size');
+    const valS = sizeOpt.values.find((x: { value: string }) => x.value === 'S').id;
+    const valM = sizeOpt.values.find((x: { value: string }) => x.value === 'M').id;
+    await request(ctx.server).post(`/api/vendor/products/${v.productId}/variants`).set('Cookie', v.cookies).send({ optionValueIds: [valS], sku: 'ORPH-S', quantity: 5 }).expect(201);
+    await request(ctx.server).post(`/api/vendor/products/${v.productId}/variants`).set('Cookie', v.cookies).send({ optionValueIds: [valM], sku: 'ORPH-M', quantity: 5 }).expect(201);
+
+    const avail = await inventoryService.publicAvailability(v.productId);
+    expect(avail.available).toBe(10); // not 27
+
+    const summary = await inventoryService.summaryFor([v.productId]);
+    expect(summary.get(v.productId)!.available).toBe(10);
+
+    const stockMap = await inventoryService.inStockMap([v.productId]);
+    expect(stockMap.get(v.productId)).toBe(true); // still has real stock -- the NUMBER is what's under test
+
+    // And the real customer-facing product detail page agrees.
+    const prod = await ctx.prisma.product.findUniqueOrThrow({ where: { id: v.productId } });
+    const detail = await request(ctx.server).get(`/api/marketplace/products/${prod.slug}`);
+    expect(detail.body.availability.available).toBe(10);
+  });
+
+  it('once real variant stock runs to zero, the dead orphan row alone no longer reports the product as in stock', async () => {
+    const v = await makeVendorWithProduct('inv_orphan2@example.bz', 'Orphan2');
+    await request(ctx.server).post(`/api/vendor/products/${v.productId}/inventory/adjust`).set('Cookie', v.cookies).send({ delta: 17, reason: 'RESTOCK' }).expect(201);
+    await request(ctx.server).post(`/api/vendor/products/${v.productId}/options`).set('Cookie', v.cookies).send({ name: 'Size', values: ['S'] }).expect(201);
+    const view = await request(ctx.server).get(`/api/vendor/products/${v.productId}/variants`).set('Cookie', v.cookies);
+    const valS = view.body.options[0].values[0].id;
+    await request(ctx.server).post(`/api/vendor/products/${v.productId}/variants`).set('Cookie', v.cookies).send({ optionValueIds: [valS], sku: 'ORPH2-S', quantity: 0 }).expect(201);
+
+    // The exact oversell failure mode: without the fix, the dead 17-unit
+    // orphan row alone keeps reporting the product in stock even though the
+    // only real (variant) stock is zero.
+    const avail = await inventoryService.publicAvailability(v.productId);
+    expect(avail.inStock).toBe(false);
+    expect(avail.outOfStock).toBe(true);
+    expect(avail.available).toBe(0);
+
+    const stockMap = await inventoryService.inStockMap([v.productId]);
+    expect(stockMap.get(v.productId)).toBe(false);
+  });
+
+  /**
+   * The regression half, and the one that could break #404's own feature: a
+   * product that has never had variants added must keep reading its
+   * product-level row exactly as before this fix.
+   */
+  it('a product with NO variants still reports its product-level row exactly as before', async () => {
+    const v = await makeVendorWithProduct('inv_novar@example.bz', 'NoVariants');
+    await request(ctx.server).post(`/api/vendor/products/${v.productId}/inventory/adjust`).set('Cookie', v.cookies).send({ delta: 9, reason: 'RESTOCK' }).expect(201);
+
+    const avail = await inventoryService.publicAvailability(v.productId);
+    expect(avail.available).toBe(9);
+    expect(avail.inStock).toBe(true);
+
+    const summary = await inventoryService.summaryFor([v.productId]);
+    expect(summary.get(v.productId)!.available).toBe(9);
+
+    const stockMap = await inventoryService.inStockMap([v.productId]);
+    expect(stockMap.get(v.productId)).toBe(true);
+  });
+});
+
 describe('inventory/variant authorization', () => {
   it('enforces ownership + roles', async () => {
     const a = await makeVendorWithProduct('inv_a@example.bz', 'AInv');
