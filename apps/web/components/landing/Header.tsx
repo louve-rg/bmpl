@@ -109,7 +109,15 @@ export function Header() {
           a 768px viewport — a tablet in portrait scrolled sideways on every
           public page. They fit from 1024px; below that the hamburger is correct. */}
       <nav className="container-bmpl flex h-16 items-center justify-between" aria-label="Primary">
-        <Link href="/" aria-label="Belize Marketplace & Logistics home">
+        {/* min-w-0: a flex item's default min-width is its own content, not 0 --
+            without this the brand text's min-content (its longest unbreakable
+            word) can outgrow the space this row has at 320px and push the
+            trailing icon row off-screen (MDF-279). This is deliberately NOT
+            `allowTruncate` -- MDF-179 already proved that forces
+            `white-space: nowrap` and breaks this same header's 1024px layout.
+            min-w-0 alone still lets the text wrap; do not "improve" it back to
+            allowTruncate. */}
+        <Link href="/" aria-label="Belize Marketplace & Logistics home" className="min-w-0">
           <BrandLockup />
         </Link>
 
