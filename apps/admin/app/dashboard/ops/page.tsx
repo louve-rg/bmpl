@@ -292,7 +292,7 @@ function SettingsSection({ initial }: { initial: PlatformSetting }) {
       )}
 
       <Card className="p-5">
-        <fieldset disabled={readOnly || busy} className="space-y-6">
+        <fieldset disabled={readOnly || busy} className="min-w-0 space-y-6">
           {/* Announcement */}
           <div className="space-y-4">
             <label className="flex items-start gap-3">
@@ -347,7 +347,7 @@ function SettingsSection({ initial }: { initial: PlatformSetting }) {
                   <span className="inline-flex shrink-0 items-center rounded-full bg-white/20 px-2 py-0.5 text-xs font-bold uppercase tracking-wide">
                     {announcementLevel}
                   </span>
-                  <span className="flex-1">{announcementMessage.trim()}</span>
+                  <span className="min-w-0 flex-1 break-words">{announcementMessage.trim()}</span>
                 </div>
               </div>
             )}
