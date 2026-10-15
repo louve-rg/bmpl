@@ -13,7 +13,7 @@
  *   shells out to `pnpm` with all-literal arguments.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { enforceWorkspaceBuild, ensureNodeModulesInstalled } from './run-integration.mjs';
+import { enforceWorkspaceBuild, ensureNodeModulesInstalled, decideDatabaseOwnership } from './run-integration.mjs';
 
 const TURBO_BIN = 'X:/repo/node_modules/turbo/bin/turbo';
 const NODE = 'X:/node/node.exe';
@@ -165,5 +165,49 @@ describe('ensureNodeModulesInstalled', () => {
 
     expect(result.ok).toBe(false);
     expect(deps.exit).toHaveBeenCalledWith(1);
+  });
+});
+
+/**
+ * Unit spec for guard 5's decision (MDF-214): the per-worktree database
+ * (guard 3) is not a per-AGENT database, so two agents sharing one
+ * worktree share one "isolated" database and truncate each other's tables
+ * mid-run. No real database is touched here — only the branch logic that
+ * decides what to do once the current owner row (or lack of one) is known.
+ */
+describe('decideDatabaseOwnership', () => {
+  const OWNER = { agentId: 'bmpl-jim', agentName: 'Jim', claimedAt: new Date('2026-10-12T02:00:00Z') };
+
+  it('no AGENT_ID in this environment: skips entirely, unchanged behaviour (a human developer, or CI)', () => {
+    expect(decideDatabaseOwnership({ agentId: undefined, owner: OWNER, forceClaim: false })).toEqual({ action: 'skip' });
+    expect(decideDatabaseOwnership({ agentId: '', owner: null, forceClaim: false })).toEqual({ action: 'skip' });
+  });
+
+  it('no owner row yet (fresh database): claims it for this agent', () => {
+    expect(decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: null, forceClaim: false })).toEqual({ action: 'claim' });
+  });
+
+  it('owner matches this agent: proceeds, every subsequent run from the same agent', () => {
+    const sameAgentOwner = { agentId: 'bmpl-qa-mtmcz0m1', agentName: 'Dwight', claimedAt: new Date() };
+    expect(decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: sameAgentOwner, forceClaim: false })).toEqual({ action: 'proceed' });
+  });
+
+  it('owner is a different agent, no force flag: refuses rather than silently renaming', () => {
+    expect(decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: OWNER, forceClaim: false })).toEqual({
+      action: 'refuse',
+      owner: OWNER,
+    });
+  });
+
+  it('owner is a different agent, BMPL_TEST_DB_FORCE_CLAIM=1: reassigns and reports who it took it from', () => {
+    expect(decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: OWNER, forceClaim: true })).toEqual({
+      action: 'reassign',
+      previousOwner: OWNER,
+    });
+  });
+
+  it('force flag set but owner already matches: still just proceeds (force is for disagreement, not re-stamping)', () => {
+    const sameAgentOwner = { agentId: 'bmpl-qa-mtmcz0m1', agentName: 'Dwight', claimedAt: new Date() };
+    expect(decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: sameAgentOwner, forceClaim: true })).toEqual({ action: 'proceed' });
   });
 });

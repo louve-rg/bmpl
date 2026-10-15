@@ -505,6 +505,64 @@ describe('driver job workflow + verification', () => {
     expect(p.completedDeliveries).toBe(1);
   });
 
+  it('admin cancel racing the assigned driver confirming pickup resolves to exactly one winner, never a mixed state (MDF-18)', async () => {
+    // CANCEL's own legal `from` list includes DRIVER_ACCEPTED - the same
+    // status CONFIRM_PICKUP's only legal `from` is - so an admin and the
+    // assigned driver can both legally act on this exact row at the same
+    // instant. Before the fix, both unconditional writes could each commit:
+    // this test fires 5 of each concurrently and fails on the pre-fix code
+    // (more than one 201, or a mixed DB state - CANCELLED with inventory
+    // finalized, or PICKUP_CONFIRMED with cancelledAt set).
+    const { vendor, order, driver } = await assignedDelivery();
+    expect((await post(driver.cookies, `driver/jobs/${order.deliveryId}/accept`)).body.status).toBe('DRIVER_ACCEPTED');
+    const pinRes = await get(vendor.vendorCookies, `vendor/deliveries/${order.deliveryId}/pickup-pin`);
+    const pin = pinRes.body.pickupPin;
+
+    const N = 5;
+    const responses = await Promise.all([
+      ...Array.from({ length: N }, () => post(adminCookies, `admin/deliveries/${order.deliveryId}/cancel`, { reason: 'race test' })),
+      ...Array.from({ length: N }, () => post(driver.cookies, `driver/jobs/${order.deliveryId}/confirm-pickup`, { pin })),
+    ]);
+
+    // The invariant that matters is ONE winner and a coherent final row
+    // (checked below) - not a fixed tally of one particular refusal code.
+    // Both confirmPickup and cancel() read status, then assert, THEN open
+    // the conditional-write transaction (see their own comments). Losing
+    // can be observed at either point, and which one is pure scheduling
+    // luck, confirmed empirically across repeated real-DB runs:
+    //  - lost at the conditional write (the race this test targets): 409.
+    //  - this call's own pre-transaction read already saw the terminal
+    //    status the winner had already committed: assertAction's 400
+    //    ("Cannot cancel/confirm pickup a delivery that is \"...\"").
+    // A fixed count of 409s over-specifies the shape of losing and breaks
+    // on harmless timing variance (observed on CI: 4 of 9 losses were 400,
+    // not 409 - same invariant, different checkpoint). Anything outside
+    // this set (2xx beyond the one winner, 5xx, any other 4xx) is real.
+    const wins = responses.filter((r) => r.status === 201);
+    expect(wins).toHaveLength(1);
+    const losses = responses.filter((r) => r !== wins[0]);
+    expect(losses).toHaveLength(2 * N - 1);
+    for (const r of losses) {
+      if (r.status === 409) continue;
+      expect(r.status).toBe(400);
+      expect(r.body.message).toMatch(/^Cannot (cancel|confirm pickup) a delivery that is ".+"\.$/);
+    }
+
+    const row = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: order.deliveryId } });
+    if (row.status === 'CANCELLED') {
+      // The cancel won - nothing from the losing confirm-pickup attempts
+      // leaked through: no inventory finalized, no pickup timestamp set.
+      expect(row.inventoryFinalizedAt).toBeNull();
+      expect(row.pickupConfirmedAt).toBeNull();
+    } else {
+      // A confirm-pickup won - nothing from the losing cancel attempts
+      // leaked through: never cancelled, inventory genuinely finalized.
+      expect(row.status).toBe('PICKUP_CONFIRMED');
+      expect(row.cancelledAt).toBeNull();
+      expect(row.inventoryFinalizedAt).not.toBeNull();
+    }
+  });
+
   it('invalid transition returns a clear error (in-transit before pickup)', async () => {
     const { order, driver } = await assignedDelivery();
     await post(driver.cookies, `driver/jobs/${order.deliveryId}/accept`);

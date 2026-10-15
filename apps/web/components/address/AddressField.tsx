@@ -221,7 +221,7 @@ export function AddressField({
     (savedRow.latitude !== coords.latitude || savedRow.longitude !== coords.longitude);
 
   return (
-    <fieldset className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5" disabled={disabled}>
+    <fieldset className="min-w-0 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5" disabled={disabled}>
       <legend className="px-1 text-sm font-semibold text-belize-navy">{heading}</legend>
       {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
 
@@ -505,9 +505,11 @@ export function AddressField({
       {contact !== 'NONE' && (
         <div className="mt-4 rounded-bmpl-md border border-dashed border-slate-300 p-3">
           {value.savedAddressId ? (
-            <p className="flex items-center gap-2 text-sm font-medium text-belize-navy">
-              <span aria-hidden="true" className="text-amber-500">★</span>
-              Saved in your address book{savedRow ? ` as “${savedRow.label}”` : ''}.
+            <p className="flex items-start gap-2 text-sm font-medium text-belize-navy">
+              <span aria-hidden="true" className="shrink-0 text-amber-500">★</span>
+              <span className="min-w-0 break-words">
+                Saved in your address book{savedRow ? ` as “${savedRow.label}”` : ''}.
+              </span>
             </p>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
