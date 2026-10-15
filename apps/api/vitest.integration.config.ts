@@ -18,5 +18,12 @@ export default defineConfig({
     fileParallelism: false,
     isolate: true,
     pool: 'forks',
+    // `isolate` gives each spec file its own process, not each `it()` its
+    // own mock state — a vi.spyOn left attached by a test that throws
+    // before its own cleanup still leaks into later tests in the same file
+    // (MDF-267, the integration-config half of MDF-265's gap).
+    clearMocks: true,
+    mockReset: true,
+    restoreMocks: true,
   },
 });
