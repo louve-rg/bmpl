@@ -137,14 +137,14 @@ export class DispatchService {
   /** Eligible drivers for a delivery's destination district. */
   async eligibleDrivers(deliveryId: string) {
     const d = await this.core.loadOrThrow(deliveryId);
-    const district = this.districtOrThrow(d);
+    const district = this.core.districtOrThrow(d);
     // Only the matching side of the simulation boundary, and never the customer
     // themselves — an admin should not be offered a choice the assignment would
     // then refuse.
     return this.drivers.eligibleDriversForDistrict(district, {
       isTest: d.vendorOrder.order.isTest,
       excludeUserId: d.vendorOrder.order.userId,
-      city: this.cityOf(d),
+      city: this.core.cityOf(d),
     });
   }
 
@@ -221,7 +221,7 @@ export class DispatchService {
   private async assignInternal(actor: AssigningActor, deliveryId: string, driverProfileId: string, vehicleId: string, reason: string | null, action: 'ASSIGN' | 'REASSIGN') {
     const current = await this.core.loadOrThrow(deliveryId);
     this.core.assertAction(action, current.status);
-    const district = this.districtOrThrow(current);
+    const district = this.core.districtOrThrow(current);
 
     // Re-check eligibility AT ASSIGNMENT TIME (spec requirement). Passing the
     // order's simulation flag makes the test/real boundary a hard server-side
@@ -250,7 +250,7 @@ export class DispatchService {
 
     const e = await this.drivers.assignmentEligibility(driverProfileId, district, vehicleId, {
       isTestDelivery: current.vendorOrder.order.isTest,
-      city: this.cityOf(current),
+      city: this.core.cityOf(current),
     });
     if (!e.eligible) throw new BadRequestException(`Driver is not eligible: ${e.reasons.join('; ')}.`);
 
@@ -397,17 +397,4 @@ export class DispatchService {
     return { pickupPin: d.pickupPin, deliveryPin: d.deliveryPin, pickupVerificationStatus: d.pickupVerificationStatus, deliveryVerificationStatus: d.deliveryVerificationStatus };
   }
 
-  // ---- helpers -----------------------------------------------------------
-
-  private districtOrThrow(d: { vendorOrder: { order: { addresses: Array<{ district: string }> } } }): string {
-    const district = d.vendorOrder.order.addresses[0]?.district;
-    if (!district) throw new BadRequestException('This delivery has no destination district; cannot assign.');
-    return district;
-  }
-
-  /** Same address as districtOrThrow, the city half. Optional — a missing city
-   *  falls back to district-only eligibility, not a thrown error. */
-  private cityOf(d: { vendorOrder: { order: { addresses: Array<{ city?: string | null }> } } }): string | null {
-    return d.vendorOrder.order.addresses[0]?.city ?? null;
-  }
 }

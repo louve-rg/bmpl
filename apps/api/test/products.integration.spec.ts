@@ -123,6 +123,23 @@ describe('product auto-publish + public visibility', () => {
     expect(byVendor.body.items.every((p: { vendor: { slug: string } }) => p.vendor.slug === vendor.slug)).toBe(true);
   });
 
+  /**
+   * MDF-230: a browsing customer must be able to see that the owning store is
+   * CLOSED, since the browse surfaces themselves apply no visibility rule on
+   * storeStatus (CLOSED does not mean unpublished — see the suite above). This
+   * vendor was never opened (makeApprovedVendor never sends storeStatus, so it
+   * stays at the schema default, CLOSED, per MDF-216's own note), so this
+   * requires no extra fixture setup at all.
+   */
+  it('carries the owning store\'s storeStatus on both the list card and the detail page, so a CLOSED store is visible as such', async () => {
+    const list = await request(ctx.server).get(`/api/marketplace/products?vendorSlug=${vendor.slug}`);
+    const card = list.body.items.find((p: { slug: string }) => p.slug === productSlug);
+    expect(card.vendor.storeStatus).toBe('CLOSED');
+
+    const detail = await request(ctx.server).get(`/api/marketplace/products/${productSlug}`);
+    expect(detail.body.vendor.storeStatus).toBe('CLOSED');
+  });
+
   it('archiving hides it; re-publishing brings it back', async () => {
     await request(ctx.server).post(`/api/vendor/products/${productId}/archive`).set('Cookie', vendor.cookies).expect(201);
     await request(ctx.server).get(`/api/marketplace/products/${productSlug}`).expect(404);

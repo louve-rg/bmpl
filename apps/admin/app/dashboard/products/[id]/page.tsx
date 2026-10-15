@@ -52,9 +52,9 @@ export default async function AdminProductDetail({ params }: { params: { id: str
       <Link href="/dashboard/products" className="text-sm font-medium text-belize-blue hover:underline">← Products</Link>
 
       <div className="mt-4 flex items-start justify-between">
-        <div>
-          <h1 className="bmpl-page-title">{p.title}</h1>
-          <p className="text-sm text-slate-500">
+        <div className="min-w-0">
+          <h1 className="bmpl-page-title break-words">{p.title}</h1>
+          <p className="break-words text-sm text-slate-500">
             {p.sku} · {p.category.name} · by{' '}
             <Link href={`/dashboard/vendors`} className="text-belize-blue hover:underline">{p.vendor.businessName}</Link>
           </p>
@@ -79,7 +79,7 @@ export default async function AdminProductDetail({ params }: { params: { id: str
           <Row label="Weight">{formatWeight(p.weightGrams) ?? '—'}</Row>
           <Row label="Featured">{p.featured ? 'Yes' : 'No'}</Row>
         </div>
-        {p.description && <p className="mt-4 whitespace-pre-wrap text-sm text-slate-600">{p.description}</p>}
+        {p.description && <p className="mt-4 whitespace-pre-wrap break-words text-sm text-slate-600">{p.description}</p>}
         {p.tags.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
             {p.tags.map((t) => (
@@ -89,8 +89,8 @@ export default async function AdminProductDetail({ params }: { params: { id: str
         )}
         {(p.metaTitle || p.metaDescription) && (
           <div className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
-            <p><b>SEO title:</b> {p.metaTitle ?? '—'}</p>
-            <p><b>SEO description:</b> {p.metaDescription ?? '—'}</p>
+            <p className="break-words"><b>SEO title:</b> {p.metaTitle ?? '—'}</p>
+            <p className="break-words"><b>SEO description:</b> {p.metaDescription ?? '—'}</p>
           </div>
         )}
       </Card>
@@ -118,7 +118,7 @@ export default async function AdminProductDetail({ params }: { params: { id: str
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Moderation history</h2>
         <ol className="space-y-2">
           {p.reviews.map((r, i) => (
-            <li key={i} className="text-sm text-slate-600">
+            <li key={i} className="break-words text-sm text-slate-600">
               <span className="font-medium text-belize-navy">{r.action}</span>
               {r.reviewer ? ` by ${r.reviewer}` : ''} · {new Date(r.createdAt).toLocaleString()}
               {r.note ? ` — ${r.note}` : ''}
@@ -133,7 +133,7 @@ export default async function AdminProductDetail({ params }: { params: { id: str
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <p className="text-sm text-slate-600">
+    <p className="min-w-0 break-words text-sm text-slate-600">
       <span className="font-medium text-slate-500">{label}:</span> {children}
     </p>
   );

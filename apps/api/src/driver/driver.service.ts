@@ -469,6 +469,21 @@ export class DriverService {
    *  engine's `pickVehicle`, admin assign and admin reassign all call this — so
    *  there is no second place for the rule to drift to, and no path that can skip
    *  it. Frontend filtering and TEST labels are cosmetic; this is the boundary. */
+  /**
+   * One driver's current live-job count, across BOTH job tables — same rule
+   * and same status set as `eligibleDriversForDistrict`'s own batched
+   * workload query below, specialized to a single driver for a one-off
+   * check (e.g. a driver's own claim attempt) rather than ranking many.
+   */
+  async activeJobCount(driverProfileId: string): Promise<number> {
+    const liveStatuses = ['ASSIGNED', 'DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'] as const;
+    const [deliveries, legs] = await Promise.all([
+      this.prisma.orderDelivery.count({ where: { assignedDriverProfileId: driverProfileId, status: { in: [...liveStatuses] } } }),
+      this.prisma.shipmentLeg.count({ where: { assignedDriverProfileId: driverProfileId, courierStatus: { in: [...liveStatuses] } } }),
+    ]);
+    return deliveries + legs;
+  }
+
   async assignmentEligibility(
     driverProfileId: string,
     district: string,
