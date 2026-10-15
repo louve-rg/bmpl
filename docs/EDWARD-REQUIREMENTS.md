@@ -389,20 +389,26 @@ has none for these twelve.
 | 7 | Yes for the booking customer; recipient-facing courier identity ruled out of scope by the owner (Ruling 13), not an Edward answer | NO RECORD |
 | 8 | Yes for shipping and marketplace delivery; whether the requirement was ever meant to cover marketplace's two-stop case is unsettled | NO RECORD |
 | 9 | Yes | NO RECORD |
-| 10 | **Partial** — the failed-delivery trigger now exists, API only (`e4b4be7`, PR #365); no web UI calls it. Pre-custody/return-to-sender half is implemented | NO RECORD (exact wording searched for and not found — see above) |
+| 10 | ~~Partial — the failed-delivery trigger now exists, API only (`e4b4be7`, PR #365); no web UI calls it.~~ **CORRECTED 2026-10-15 (MDF-238 acceptance audit, Jim — found self-contradicting this table's own §10 below): Yes.** Both pieces are merged and deployed — the trigger (`e4b4be7`, PR #365) and the screen (`9f5c3c8`, PR #393, "Report an issue" on the driver's own job screen). See §10 below for the full account, including a disclosed reload-confirmation limitation, the still-open Ruling 14 decision memo, and PR #433 (`a08b5d8`)'s customer-facing cancellation-reason-leak fix. Pre-custody/return-to-sender half is implemented | NO RECORD (exact wording searched for and not found — see above) |
 | 11 | Yes | NO RECORD |
 | 12 | Yes, API and staff triggers on all four pieces; migration application expected but unverified | NO RECORD |
 
-**11 of 12 fully implemented, 1 of 12 (requirement 10) partially
-implemented; 0 of 12 have a recorded acceptance from Edward himself.**
-"Implemented" above follows each requirement's own evidence ladder, not
-this table's invention — requirement 10 is the sole exception, and this
-pass corrected it from "No" to "Partial": a failed-delivery trigger now
-exists in code (API only, no web UI), where the previous pass found none
-at all. Where this document or a kanban card has used the
-word "accepted," "done, as Edward asked," or "ready," read it as this
-team's own judgment unless a quote or a dated reply from Edward is cited
-next to it — none is, anywhere in this document, as of this pass.
+**12 of 12 fully implemented; 0 of 12 have a recorded acceptance from
+Edward himself.** "Implemented" above follows each requirement's own
+evidence ladder, not this table's invention. **Corrected 2026-10-15 (MDF-238
+acceptance audit, Jim): this table's own requirement-10 row still read
+"Partial — API only, no web UI" while §10 below, written in the same
+editing pass, already said both the trigger and the screen had shipped —
+a summary table disagreeing with its own detailed section, not merely out
+of date. The row above is now re-anchored to agree with §10 and the
+commit evidence (`e4b4be7`/#365, `9f5c3c8`/#393), not re-derived from
+scratch.** Every other row in this table was checked against its own
+detailed section this pass and found consistent — see the reply this
+correction was reported in for the full list. Where this document or a
+kanban card has used the word "accepted," "done, as Edward asked," or
+"ready," read it as this team's own judgment unless a quote or a dated
+reply from Edward is cited next to it — none is, anywhere in this
+document, as of this pass.
 
 ---
 
