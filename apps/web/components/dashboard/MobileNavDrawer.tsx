@@ -107,7 +107,7 @@ export function MobileNavDrawer({ me }: { me: MeView }) {
               <DashboardNavList me={me} unread={unread} onNavigate={close} />
 
               <div className="mt-auto border-t border-slate-100 pt-4">
-                <AccountMenu me={me} tone="light" onNavigate={close} />
+                <AccountMenu me={me} tone="light" onNavigate={close} extraSignOutRow />
               </div>
             </div>
           </div>

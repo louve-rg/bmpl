@@ -112,4 +112,36 @@ describe('AccountMenu', () => {
     expect(onSignedOut).toHaveBeenCalledTimes(1);
     expect(push).toHaveBeenCalledWith('/login');
   });
+
+  it('without extraSignOutRow, Sign out does not exist in the DOM until the trigger is opened (the defect this fix answers)', () => {
+    mount();
+    const signOut = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Sign out');
+    expect(signOut).toBeUndefined();
+  });
+
+  describe('extraSignOutRow (the two mobile hosts — the dashboard drawer and the public header mobile list)', () => {
+    it('Sign out is visible immediately, with no tap on the avatar/name trigger needed', async () => {
+      const trigger = mount({ extraSignOutRow: true });
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+      const signOut = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Sign out');
+      expect(signOut).not.toBeUndefined();
+    });
+
+    it('renders exactly one Sign out button, even once the panel is also opened', async () => {
+      const trigger = mount({ extraSignOutRow: true });
+      await act(async () => trigger.click());
+      const signOuts = Array.from(container!.querySelectorAll('button')).filter((b) => b.textContent === 'Sign out');
+      expect(signOuts).toHaveLength(1);
+    });
+
+    it('the always-visible row signs out without the panel ever having been opened', async () => {
+      const onSignedOut = vi.fn();
+      mount({ extraSignOutRow: true, onSignedOut, afterSignOut: '/' });
+      const signOut = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Sign out')!;
+      await act(async () => signOut.click());
+      expect(apiPost).toHaveBeenCalledWith('/auth/logout');
+      expect(onSignedOut).toHaveBeenCalledTimes(1);
+      expect(push).toHaveBeenCalledWith('/');
+    });
+  });
 });
