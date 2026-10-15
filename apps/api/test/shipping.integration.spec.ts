@@ -954,6 +954,52 @@ describe('exceptions and cancellation', () => {
     expect(r.body.exceptionReason).toBe('Parcel damaged in the van.');
   });
 
+  // MDF-243 (owner ruling): the operator's own typed words are a staff tool,
+  // not a customer notice — they can name a specific driver, a specific
+  // vendor, or a cause nobody has verified yet. The customer reading their
+  // OWN shipment gets the one approved sentence; staff reading the same
+  // shipment through the ops endpoint still gets everything, unchanged.
+  it('tells the customer an issue was reported, never the operator\'s own words — staff still sees everything', async () => {
+    const s = await book();
+    const first = legIds(s)('FIRST_MILE_1');
+    await post(admin, `admin/logistics/legs/${first}/start`, {});
+    const rawReason = 'Driver reported the box smelled of gas; holding for vendor callback.';
+    await post(admin, `admin/logistics/legs/${first}/exception`, { reason: rawReason });
+
+    const asCustomer = await get(customer, `shipping/${s.reference}`);
+    expect(asCustomer.status).toBe(200);
+    expect(asCustomer.body.exceptionReason).toBe(
+      'A delivery issue has been reported. We are reviewing the shipment and will provide an update.',
+    );
+    expect(asCustomer.body.exceptionReason).not.toContain('gas');
+    expect(asCustomer.body.exceptionReason).not.toContain('vendor');
+    const customerLeg = asCustomer.body.legs.find((l: { id: string }) => l.id === first);
+    expect(customerLeg.exceptionReason).toBe(
+      'A delivery issue has been reported. We are reviewing the shipment and will provide an update.',
+    );
+    expect(customerLeg.exceptionReason).not.toContain('gas');
+
+    const asStaff = await get(admin, `admin/logistics/shipments/${s.reference}`);
+    expect(asStaff.status).toBe(200);
+    expect(asStaff.body.exceptionReason).toBe(rawReason);
+    const staffLeg = asStaff.body.legs.find((l: { id: string }) => l.id === first);
+    expect(staffLeg.exceptionReason).toBe(rawReason);
+  });
+
+  it('falls back to the same neutral message for any reason, never a passthrough default', async () => {
+    const s = await book();
+    const first = legIds(s)('FIRST_MILE_1');
+    await post(admin, `admin/logistics/legs/${first}/start`, {});
+    // Deliberately not the fixture used above — a passthrough default looks
+    // correct for one reason and leaks on the next one nobody anticipated.
+    await post(admin, `admin/logistics/legs/${first}/exception`, { reason: 'Customs flagged the parcel for inspection.' });
+
+    const asCustomer = await get(customer, `shipping/${s.reference}`);
+    expect(asCustomer.body.exceptionReason).toBe(
+      'A delivery issue has been reported. We are reviewing the shipment and will provide an update.',
+    );
+  });
+
   it('cancels the legs that have not happened and leaves the ones that have', async () => {
     const s = await book();
     const ids = legIds(s);
