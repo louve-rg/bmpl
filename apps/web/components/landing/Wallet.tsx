@@ -27,12 +27,23 @@ export function WalletSection() {
     <section id="wallet" className="bg-slate-50 py-20 sm:py-28">
       <div className="mx-auto grid w-full max-w-[1200px] items-center gap-10 px-4 sm:px-6 lg:grid-cols-2 lg:gap-16 lg:px-8">
         {/* Dashboard */}
-        <div className="order-2 lg:order-1">
+        {/* min-w-0 on both grid items (MDF-279): below `lg` this grid has no
+            explicit grid-template-columns, so the browser auto-sizes the
+            single implicit column to its items' own min-content -- and a
+            grid item's default min-width is `auto` (its content), not 0,
+            same as a flex item. Under a wide enough real font (globals.css
+            declares `--font-sans: 'Inter'` but never actually loads it, so
+            every visitor's browser substitutes whatever its OS resolves for
+            `system-ui` -- see MDF-279/Header.tsx), that min-content floor can
+            exceed the 320px viewport and the single column grows past it.
+            min-w-0 removes the floor; the copy below still wraps exactly as
+            before everywhere it already fit. */}
+        <div className="order-2 min-w-0 lg:order-1">
           <WalletDashboard />
         </div>
 
         {/* Copy */}
-        <div className="order-1 lg:order-2">
+        <div className="order-1 min-w-0 lg:order-2">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-belize-accent">Platform Wallet</p>
           <h2 className="mt-3 text-3xl font-bold leading-[1.1] tracking-tight text-belize-navy sm:text-4xl">
             One secure wallet.
