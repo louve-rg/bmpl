@@ -78,8 +78,13 @@ function order() {
 async function openOrderDetail(page: Page): Promise<boolean> {
   await page.context().addCookies([{ name: 'access_token', value: 'fake-for-layout-check', domain: 'localhost', path: '/' }]);
   await page.route('**/api/admin/orders/order-1', (r) => (r.request().method() === 'GET' ? r.fulfill({ json: order() }) : r.continue()));
-  await page.goto('/dashboard/orders/order-1');
   try {
+    // `goto` belongs inside this try, not just the `expect` below: when the
+    // dev server itself is unreachable, `goto` throws `ERR_CONNECTION_REFUSED`
+    // before the page ever has a chance to redirect on a failed `/me` --
+    // that is a precondition failure same as a failed SSR call, not a
+    // reason to crash the test instead of skipping it.
+    await page.goto('/dashboard/orders/order-1');
     await expect(page.getByText('ORD-0001')).toBeVisible({ timeout: 5000 });
     return true;
   } catch {
