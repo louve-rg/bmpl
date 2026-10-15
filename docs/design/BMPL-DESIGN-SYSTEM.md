@@ -40,7 +40,12 @@ declared in each app's `app/globals.css` `:root` for documentation and ad-hoc
 
 ## 3. Typography
 
-- Family: **Inter** (`--font-sans`), loaded in the root layout.
+- Family: **Inter** is declared in the `--font-sans` CSS variable
+  (`apps/web/app/globals.css`) and wired into `apps/web/tailwind.config.ts`'s
+  `fontFamily.sans`, but it is **not loaded by any mechanism** — no
+  `next/font` import, `@font-face` rule, or Google Fonts link exists anywhere
+  in `apps/web`. Every browser falls back to `system-ui`, the next token in
+  the stack. Open as **MDF-282**.
 - Page title: `bmpl-page-title` → `text-2xl sm:text-3xl font-bold tracking-tight text-belize-navy`.
 - Section headline (marketing): `text-3xl sm:text-4xl lg:text-[2.75rem] font-bold tracking-tight`.
 - Eyebrow / label: `bmpl-eyebrow` → `text-xs font-semibold uppercase tracking-[0.22em] text-belize-accent`.
