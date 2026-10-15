@@ -68,13 +68,19 @@ export function Breadcrumbs({ items, className = '' }: { items: Crumb[]; classNa
         {items.map((item, i) => {
           const last = i === items.length - 1;
           return (
-            <li key={`${item.label}-${i}`} className="flex items-center gap-1.5">
+            <li key={`${item.label}-${i}`} className="flex min-w-0 items-center gap-1.5">
               {item.href && !last ? (
-                <Link href={item.href} className="font-medium text-belize-blue hover:underline">
+                <Link
+                  href={item.href}
+                  className="min-w-0 break-words font-medium text-belize-blue hover:underline"
+                >
                   {item.label}
                 </Link>
               ) : (
-                <span className={last ? 'font-medium text-belize-navy' : ''} aria-current={last ? 'page' : undefined}>
+                <span
+                  className={`min-w-0 break-words ${last ? 'font-medium text-belize-navy' : ''}`}
+                  aria-current={last ? 'page' : undefined}
+                >
                   {item.label}
                 </span>
               )}
@@ -110,8 +116,8 @@ export function PageHeader({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           {eyebrow && <p className="bmpl-eyebrow">{eyebrow}</p>}
-          <h1 className="bmpl-page-title mt-1">{title}</h1>
-          {description && <p className="mt-1.5 text-sm text-slate-500">{description}</p>}
+          <h1 className="bmpl-page-title mt-1 break-words">{title}</h1>
+          {description && <p className="mt-1.5 break-words text-sm text-slate-500">{description}</p>}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>

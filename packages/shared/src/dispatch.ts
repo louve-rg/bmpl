@@ -55,6 +55,18 @@ export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
  */
 export const DELIVERY_ACTIONS = {
   ASSIGN: { actor: 'ADMIN', from: ['PENDING_ASSIGNMENT'], to: 'ASSIGNED' },
+  // MDF-18: a driver pulling a delivery automatic dispatch already gave up
+  // on (dispatchExhaustedAt set). Same from/to edge as ASSIGN, different
+  // actor, but TWO legal `from` statuses, not one: dispatch()'s own
+  // dispatchable-status guard treats PENDING_ASSIGNMENT and DRIVER_DECLINED
+  // identically ("DRIVER_DECLINED is included deliberately - a decline
+  // should roll straight to the next driver"), so markExhausted can commit
+  // with EITHER as the delivery's status at that instant - confirmed by the
+  // existing exhaustion test (dispatch-engine.integration.spec.ts), which
+  // itself accepts both. A narrower `from` here would silently miss exactly
+  // the single-offer-timeout case, one of the two ways a delivery actually
+  // reaches this state.
+  CLAIM: { actor: 'DRIVER', from: ['PENDING_ASSIGNMENT', 'DRIVER_DECLINED'], to: 'ASSIGNED' },
   REASSIGN: { actor: 'ADMIN', from: ['ASSIGNED', 'DRIVER_ACCEPTED', 'DRIVER_DECLINED'], to: 'ASSIGNED' },
   ACCEPT: { actor: 'DRIVER', from: ['ASSIGNED'], to: 'DRIVER_ACCEPTED' },
   DECLINE: { actor: 'DRIVER', from: ['ASSIGNED'], to: 'DRIVER_DECLINED' },

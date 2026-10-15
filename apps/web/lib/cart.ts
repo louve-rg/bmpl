@@ -36,7 +36,17 @@ export type CartIssue =
   | 'VARIANT_REQUIRED'
   | 'VARIANT_UNAVAILABLE'
   | 'OUT_OF_STOCK'
-  | 'INSUFFICIENT_STOCK';
+  | 'INSUFFICIENT_STOCK'
+  // Paired with #387: storeStatus was already read and returned by
+  // cart.service.ts's buildView() but never added to `issues`, so a
+  // CLOSED-store line looked purchasable right up to the checkout submit.
+  // Deliberately its own value, not a reuse of VENDOR_INACTIVE -- that one
+  // means approvalStatus !== APPROVED specifically (see its own comment
+  // below), a genuinely different condition from a store temporarily
+  // closed by its own owner. This half (the union member + its label) is
+  // harmless and unused until the API side (Pam, cart.service.ts) actually
+  // sends it -- independent work, neither side waits on the other.
+  | 'STORE_CLOSED';
 
 export interface CartVendorGroup {
   vendorProfileId: string;
@@ -96,6 +106,9 @@ export const ISSUE_LABELS: Record<CartIssue, string> = {
   VARIANT_UNAVAILABLE: 'Option unavailable',
   OUT_OF_STOCK: 'Out of stock',
   INSUFFICIENT_STOCK: 'Not enough in stock',
+  // No fee, no timeframe, no reopening promise -- we do not know when (or
+  // whether) the store reopens and must not imply we do (owner constraint).
+  STORE_CLOSED: 'Store closed',
 };
 
 export const money = (c: number): string => `$${(c / 100).toFixed(2)}`;

@@ -27,6 +27,7 @@ import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../products/inventory.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { SettlementService } from '../settlement/settlement.service';
+import { DriverService } from '../driver/driver.service';
 import { DeliveryCoreService } from './delivery-core.service';
 import { DispatchEngineService } from './dispatch-engine.service';
 
@@ -74,6 +75,32 @@ const LIST_INCLUDE = {
 type DeliveryListRow = Prisma.OrderDeliveryGetPayload<{ include: typeof LIST_INCLUDE }>;
 
 /**
+ * Rows needed for the claim-fallback list (MDF-18). Separate from
+ * LIST_INCLUDE: this one also carries the order's `userId` (never shown —
+ * only used to exclude a driver's own order) and `isTest`, neither of
+ * which LIST_INCLUDE's own callers need.
+ */
+const CLAIMABLE_INCLUDE = {
+  vendorOrder: {
+    select: {
+      orderNumber: true,
+      itemCount: true,
+      vendorProfile: { select: { businessName: true, userId: true } },
+      order: {
+        select: {
+          orderNumber: true,
+          userId: true,
+          isTest: true,
+          addresses: { select: { city: true, district: true } },
+        },
+      },
+    },
+  },
+} satisfies Prisma.OrderDeliveryInclude;
+
+type ClaimableRow = Prisma.OrderDeliveryGetPayload<{ include: typeof CLAIMABLE_INCLUDE }>;
+
+/**
  * Driver job feed + operational transitions. A driver only ever sees/acts on
  * deliveries assigned to THEIR driver profile. Pickup/delivery are gated by a PIN
  * the driver submits (held by the vendor / recipient); attempts are rate-limited
@@ -93,6 +120,7 @@ export class DriverJobService {
     private readonly messaging: MessagingService,
     private readonly settlement: SettlementService,
     private readonly engine: DispatchEngineService,
+    private readonly drivers: DriverService,
   ) {}
 
   private async myProfileId(userId: string): Promise<string> {
@@ -450,6 +478,161 @@ export class DriverJobService {
     }
     // Declined jobs leave the driver's active feed; return a light ack.
     return { ok: true, status: 'DRIVER_DECLINED' as const };
+  }
+
+  // ---- claim fallback (MDF-18) --------------------------------------------
+
+  /**
+   * Deliveries automatic dispatch has already given up on
+   * (`dispatchExhaustedAt` set — `DispatchEngineService.markExhausted`'s own
+   * considered statement that the retry budget is spent), narrowed to
+   * exactly the ones THIS driver is already a legitimate candidate for.
+   *
+   * Pull-only and deliberately separate from `listJobs`/`queue` — nothing
+   * here is ever merged into the push feed, so a driver has to come
+   * looking for stuck work rather than have it appear alongside an offer.
+   * Automatic dispatch is completely untouched by this list existing.
+   */
+  async claimableJobs(userId: string) {
+    const profileId = await this.myProfileId(userId);
+    const exhausted = await this.prisma.orderDelivery.findMany({
+      // Both statuses dispatch()'s own dispatchable-status guard treats as
+      // open — see the CLAIM action's own comment in packages/shared/dispatch.ts.
+      where: { status: { in: ['PENDING_ASSIGNMENT', 'DRIVER_DECLINED'] }, dispatchExhaustedAt: { not: null }, assignedDriverProfileId: null, ...notOwnOrder(userId) },
+      orderBy: { dispatchExhaustedAt: 'asc' },
+      take: 50,
+      include: CLAIMABLE_INCLUDE,
+    });
+    if (exhausted.length === 0) return [];
+
+    // Same per-driver concurrent-job cap the engine's own ranker enforces
+    // (DispatchSettings.maxConcurrentPerDriver) — otherwise a driver could
+    // pull manually past a limit automatic dispatch would never have
+    // offered them. Checked once here, not per candidate.
+    const settings = await this.engine.settings();
+    const activeJobs = await this.drivers.activeJobCount(profileId);
+    if (activeJobs >= settings.maxConcurrentPerDriver) return [];
+
+    const claimable = [];
+    for (const d of exhausted) {
+      const district = d.vendorOrder.order.addresses[0]?.district;
+      if (!district) continue; // nobody can be a legitimate candidate without one
+      const e = await this.drivers.assignmentEligibility(profileId, district, undefined, {
+        isTestDelivery: d.vendorOrder.order.isTest,
+        city: d.vendorOrder.order.addresses[0]?.city ?? null,
+      });
+      if (e.eligible) claimable.push(this.summarizeClaimable(d));
+    }
+    return claimable;
+  }
+
+  /**
+   * A driver pulls a delivery automatic dispatch has already given up on.
+   *
+   * Same conditional-write pattern as accept()/DispatchService.cancel(): the
+   * WHERE re-asserts status, exhaustion, AND the null driver slot inside
+   * the write itself — of a concurrent claim, a fresh engine offer, or an
+   * admin assignment racing this one, exactly one writer's WHERE still
+   * matches when it executes. `assignedByUserId` stays null, the same
+   * convention `systemAssign` uses, so the audit trail distinguishes a
+   * claim (actorId = the claiming driver, assignedByUserId = null) from an
+   * admin assign (both non-null, different people) without a new column.
+   */
+  async claim(actor: Actor, deliveryId: string) {
+    const profileId = await this.myProfileId(actor.userId);
+    const d = await this.prisma.orderDelivery.findUnique({ where: { id: deliveryId }, include: CLAIMABLE_INCLUDE });
+    if (!d) throw new NotFoundException('Job not found.');
+    // 404, not 400/403 — same reasoning as ownedDelivery: to this driver, as
+    // a driver, their own order simply does not exist.
+    if (d.vendorOrder.order.userId === actor.userId) throw new NotFoundException('Job not found.');
+    this.core.assertAction('CLAIM', d.status);
+    if (!d.dispatchExhaustedAt) {
+      throw new BadRequestException('Automatic dispatch has not given up on this delivery yet.');
+    }
+    const district = d.vendorOrder.order.addresses[0]?.district;
+    if (!district) throw new BadRequestException('This delivery has no destination district; cannot claim.');
+    const city = d.vendorOrder.order.addresses[0]?.city ?? null;
+
+    const e = await this.drivers.assignmentEligibility(profileId, district, undefined, {
+      isTestDelivery: d.vendorOrder.order.isTest,
+      city,
+    });
+    if (!e.eligible) throw new BadRequestException(`You are not eligible for this delivery: ${e.reasons.join('; ')}.`);
+    // No specific vehicle was requested, so pick the same way the engine's
+    // own pickVehicle does — prefer the primary, else the first usable one.
+    const vehicle = e.usableVehicles.find((v) => v.isPrimary) ?? e.usableVehicles[0];
+    if (!vehicle) throw new BadRequestException('You need an approved, active vehicle before you can claim a job.');
+
+    const settings = await this.engine.settings();
+    const activeJobs = await this.drivers.activeJobCount(profileId);
+    if (activeJobs >= settings.maxConcurrentPerDriver) {
+      throw new BadRequestException('You already have the maximum number of active jobs.');
+    }
+
+    // Fresh PINs generated outside the transaction — pure, no DB — so the
+    // guarded write below is the FIRST statement inside it, same shape as
+    // DispatchService.assignInternal/DriverJobService.accept().
+    const pickupPin = this.core.genPin();
+    const deliveryPin = this.core.genPin();
+
+    const won = await this.prisma.$transaction(async (tx) => {
+      // Re-asserts the status this call actually read (either legal `from`
+      // CLAIM allows — PENDING_ASSIGNMENT or DRIVER_DECLINED), not a
+      // hardcoded literal, same shape as DispatchService.assignInternal's
+      // fromStatus.
+      const claimed = await tx.orderDelivery.updateMany({
+        where: { id: deliveryId, status: d.status, dispatchExhaustedAt: { not: null }, assignedDriverProfileId: null },
+        data: {
+          status: 'ASSIGNED',
+          assignedDriverProfileId: profileId,
+          assignedVehicleId: vehicle.id,
+          assignedByUserId: null, // a claim, not an admin act — same convention as systemAssign
+          assignedAt: new Date(),
+          acceptedAt: null,
+          declinedAt: null,
+          declineReason: null,
+          pickupPin,
+          pickupPinAttempts: 0,
+          pickupVerificationStatus: 'PENDING',
+          deliveryPin,
+          deliveryPinAttempts: 0,
+          deliveryVerificationStatus: 'PENDING',
+          offerExpiresAt: null,
+        },
+      });
+      if (claimed.count === 0) return false;
+
+      await tx.deliveryAssignment.create({
+        data: { orderDeliveryId: deliveryId, driverProfileId: profileId, vehicleId: vehicle.id, assignedByUserId: null, status: 'ACTIVE' },
+      });
+      await this.core.appendTimeline(tx, deliveryId, { fromStatus: 'PENDING_ASSIGNMENT', toStatus: 'ASSIGNED', event: 'CLAIM', actorRole: 'DRIVER', actorUserId: actor.userId });
+      await this.core.auditTransition('CLAIM', actor.userId, deliveryId, { method: 'claim' }, tx);
+      await this.core.notify(
+        [d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId],
+        { event: 'DELIVERY_DRIVER_ASSIGNED', title: 'Driver assigned', body: `A driver claimed the delivery for order ${d.vendorOrder.order.orderNumber}.`, data: { deliveryId } },
+        tx,
+      );
+      return true;
+    });
+
+    if (!won) {
+      throw new ConflictException('This delivery was just claimed or reassigned — reload and try again.');
+    }
+    return this.getJob(actor.userId, deliveryId);
+  }
+
+  private summarizeClaimable(d: ClaimableRow) {
+    const address = d.vendorOrder.order.addresses[0] ?? null;
+    return {
+      id: d.id,
+      orderNumber: d.vendorOrder.order.orderNumber,
+      vendor: d.vendorOrder.vendorProfile.businessName,
+      itemCount: d.vendorOrder.itemCount,
+      city: address?.city ?? null,
+      district: address?.district ?? null,
+      feeMinor: Number(d.feeMinor),
+      dispatchExhaustedAt: d.dispatchExhaustedAt,
+    };
   }
 
   async confirmPickup(actor: Actor, deliveryId: string, dto: ConfirmPickupInput) {

@@ -244,7 +244,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
   return (
     <>
     <RecordView productId={product.id} />
-    <div className="mt-4 grid gap-8 md:grid-cols-2">
+    <div className="mt-4 grid grid-cols-1 gap-8 md:grid-cols-2">
       <div>
         {/* key resets the active thumbnail when the shown image set changes */}
         <Gallery key={selectedVariant?.id ?? 'base'} images={galleryImages} />
@@ -264,11 +264,11 @@ export function ProductView({ product }: { product: ProductDetail }) {
       <div>
         <p className="bmpl-eyebrow">{product.category.name}</p>
         {/* Hierarchy: variant name → remaining option values (own lines) → base product family. */}
-        <h1 className="mt-1 text-3xl font-bold tracking-tight text-belize-navy">{disp.primary || product.title}</h1>
+        <h1 className="mt-1 break-words text-3xl font-bold tracking-tight text-belize-navy">{disp.primary || product.title}</h1>
         {disp.secondary.map((s) => (
-          <p key={s} className="text-sm text-slate-600">{s}</p>
+          <p key={s} className="break-words text-sm text-slate-600">{s}</p>
         ))}
-        {disp.family && <p className="text-sm text-slate-500">{disp.family}</p>}
+        {disp.family && <p className="break-words text-sm text-slate-500">{disp.family}</p>}
         {reviewAggregate && reviewAggregate.count > 0 && (
           <a href="#reviews" className="mt-1.5 inline-flex items-center gap-1.5 hover:underline">
             <StarRating value={reviewAggregate.average} size="sm" showValue count={reviewAggregate.count} />
@@ -399,14 +399,16 @@ export function ProductView({ product }: { product: ProductDetail }) {
           )}
         </div>
 
-        <p className="mt-3 text-sm text-slate-500">
+        <p className="mt-3 break-words text-sm text-slate-500">
           Sold by{' '}
           <Link href={`/store/${product.vendor.slug}`} className="font-medium text-belize-blue hover:underline">
             {product.vendor.businessName}
           </Link>
         </p>
 
-        {product.description && <p className="mt-5 whitespace-pre-wrap text-slate-600">{product.description}</p>}
+        {product.description && (
+          <p className="mt-5 whitespace-pre-wrap break-words text-slate-600">{product.description}</p>
+        )}
 
         {(() => {
           // Imperial display (Belize) — canonical values are stored metric and
