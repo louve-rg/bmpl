@@ -167,7 +167,7 @@ export default function SupportPage() {
           You do not have permission to view support conversations. The <code>support.read</code> permission is required.
         </Alert>
       ) : (
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
           {/* Conversation list */}
           <div className="rounded-bmpl-xl border border-slate-200 bg-white">
             {listState === 'loading' ? (
