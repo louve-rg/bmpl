@@ -58,7 +58,7 @@ export default function OrderDetailPage() {
   const cancellable = order?.status === 'PENDING' && order.vendorOrders.every((vo) => vo.status === 'PENDING');
 
   async function cancelOrder() {
-    if (!window.confirm('Cancel this order? This cannot be undone.')) return;
+    if (!window.confirm('Cancel this order? If payment was already authorized, the amount will be returned to your BMPL wallet balance. This cannot be undone.')) return;
     setCancelError(null);
     setCancelling(true);
     try {
