@@ -149,7 +149,7 @@ export function EndpointPicker({
           onChange={(a) => onChange(fromAddress(value, a))}
         />
       ) : (
-        <fieldset className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
+        <fieldset className="min-w-0 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
           <legend className="px-1 text-sm font-semibold text-belize-navy">{label}</legend>
 
           <label className="mt-3 block">
@@ -172,7 +172,7 @@ export function EndpointPicker({
 
           {/* Whatever the operator configured, shown at the point it matters. */}
           {hubs.find((h) => h.id === value.hubId)?.instructions && (
-            <p className="mt-2 rounded-bmpl-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            <p className="mt-2 break-words rounded-bmpl-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
               {hubs.find((h) => h.id === value.hubId)!.instructions}
             </p>
           )}
