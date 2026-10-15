@@ -69,13 +69,13 @@ export default function VendorOrderDetailPage() {
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <Card className="p-4 text-sm">
               <p className="bmpl-label">Customer</p>
-              <p className="mt-1 text-slate-700">{vo.customerName}</p>
-              {vo.customerNotes && <p className="mt-2 text-slate-500">Notes: {vo.customerNotes}</p>}
+              <p className="mt-1 break-words text-slate-700">{vo.customerName}</p>
+              {vo.customerNotes && <p className="mt-2 break-words text-slate-500">Notes: {vo.customerNotes}</p>}
             </Card>
             {vo.deliveryMethod === 'DELIVERY' && vo.deliveryAddress && (
               <Card className="p-4 text-sm">
                 <p className="bmpl-label">Deliver to</p>
-                <p className="mt-1 text-slate-700">
+                <p className="mt-1 break-words text-slate-700">
                   {vo.deliveryAddress.fullName}{vo.deliveryAddress.phone ? ` · ${vo.deliveryAddress.phone}` : ''}<br />
                   {addressLines(vo.deliveryAddress).map((line) => (
                     <Fragment key={line}>
@@ -98,7 +98,7 @@ export default function VendorOrderDetailPage() {
                     <> · Est. {vo.delivery.estimate.label ?? `${vo.delivery.estimate.minHours}–${vo.delivery.estimate.maxHours} h`}</>
                   )}
                 </p>
-                {vo.delivery.instructions && <p className="mt-2 text-slate-500">Instructions: {vo.delivery.instructions}</p>}
+                {vo.delivery.instructions && <p className="mt-2 break-words text-slate-500">Instructions: {vo.delivery.instructions}</p>}
               </Card>
             )}
           </div>
