@@ -88,6 +88,17 @@ export class DriverJobsController {
     return this.jobs.reorderQueue(this.actor(u, req), b);
   }
 
+  /**
+   * MDF-18: deliveries automatic dispatch has already given up on, narrowed
+   * to the ones this driver personally qualifies for. Declared BEFORE `:id`
+   * for the same reason `queue` is — a static segment below the
+   * parameterized route would otherwise be swallowed as a delivery id.
+   */
+  @Get('claimable')
+  claimable(@CurrentUser() u: AuthContext) {
+    return this.jobs.claimableJobs(u.userId);
+  }
+
   @Get(':id')
   get(@CurrentUser() u: AuthContext, @Param('id') id: string) {
     return this.jobs.getJob(u.userId, id);
@@ -101,6 +112,12 @@ export class DriverJobsController {
   @Post(':id/decline')
   decline(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string, @Body(ZodBody(declineJobSchema)) b: DeclineJobInput) {
     return this.jobs.decline(this.actor(u, req), id, b);
+  }
+
+  /** MDF-18: claim a delivery automatic dispatch has already given up on. */
+  @Post(':id/claim')
+  claim(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
+    return this.jobs.claim(this.actor(u, req), id);
   }
 
   @StrictThrottle()
