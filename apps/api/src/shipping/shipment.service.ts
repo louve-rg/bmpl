@@ -1284,7 +1284,11 @@ export class ShipmentService {
     // shipment (`serialize` would otherwise re-run it per call) and not one per
     // leg — up to 50 shipments here, each with several legs.
     const conversationIds = await this.legConversationIds(rows.flatMap((s) => s.legs.map((l) => l.id)));
-    return Promise.all(rows.map((s) => this.serialize(s, { audience: 'CUSTOMER', conversationIds })));
+    // Same batching for cancellationReason's authorship check — one query for
+    // the whole page (zero if nothing on it is both cancelled and reasoned),
+    // never one per shipment. See `cancellationAuthorshipFor()`'s own doc.
+    const cancellationAuthorship = await this.cancellationAuthorshipFor(rows);
+    return Promise.all(rows.map((s) => this.serialize(s, { audience: 'CUSTOMER', conversationIds, cancellationAuthorship })));
   }
 
   /**
@@ -3494,13 +3498,75 @@ export class ShipmentService {
   /* ------------------------------------------------------------- reading */
 
   /**
+   * MDF-243 follow-up: `cancellationReason` is free text written through the
+   * SAME method (`cancel()`) by either the customer cancelling their own
+   * shipment or staff cancelling on their behalf — the column itself cannot
+   * say which. Unlike `exceptionReason`, this one must NOT be blanket-gated:
+   * a customer reading back their own stated reason is legitimate and
+   * arguably desirable, so the gate has to actually determine authorship,
+   * not just hide the field.
+   *
+   * Authorship is recovered from the one place it IS recorded: the
+   * `SHIPMENT_CANCELLED` audit row's `actorId`, correlated via
+   * `newValue.shipmentId` (checked: `AuditLog` has no indexed scalar column
+   * identifying the subject entity — only `action` and `actorId` are
+   * indexed, so the JSON path is the only way in). The ownership guard in
+   * `cancel()` (`if (!actor.isStaff && s.customerUserId !== actor.userId)
+   * throw NotFoundException`) is what makes `actorId === customerUserId` an
+   * EXACT test rather than a heuristic: a non-staff caller can only ever
+   * reach `cancel()` as the shipment's own customer, so there is no third
+   * case to misread.
+   *
+   * Fails closed on every other outcome, including the one nobody writes a
+   * test for: a missing audit row (a historical cancellation from before
+   * this gate existed, or any other reason the row isn't there) is
+   * UNDETERMINABLE, not "assume customer" — it maps to `false`, same as a
+   * staff-authored row.
+   *
+   * Batched, never per-row: `listMine` can return up to 50 shipments, and
+   * Prisma's `JsonFilter` has no `in`/`notIn` (checked against the
+   * generated client for the version installed here), so this is one `OR`
+   * of per-id equality checks — one query, filtered first by the indexed
+   * `action` column — rather than one query per shipment. Skipped entirely
+   * when no shipment on the page is both cancelled and reasoned, which is
+   * the overwhelmingly common case.
+   */
+  private async cancellationAuthorshipFor(
+    shipments: Array<{ id: string; cancellationReason: string | null; customerUserId: string | null }>,
+  ): Promise<Map<string, boolean>> {
+    const result = new Map<string, boolean>();
+    const candidates = shipments.filter((s) => s.cancellationReason != null);
+    if (candidates.length === 0) return result; // zero extra queries — the common case
+    const rows = await this.prisma.auditLog.findMany({
+      where: {
+        action: 'SHIPMENT_CANCELLED',
+        OR: candidates.map((s) => ({ newValue: { path: ['shipmentId'], equals: s.id } })),
+      },
+      select: { actorId: true, newValue: true },
+    });
+    const actorByShipmentId = new Map<string, string | null>();
+    for (const r of rows) {
+      const shipmentId = (r.newValue as { shipmentId?: string } | null)?.shipmentId;
+      if (shipmentId) actorByShipmentId.set(shipmentId, r.actorId);
+    }
+    for (const s of candidates) {
+      const actorId = actorByShipmentId.get(s.id);
+      result.set(s.id, actorId != null && actorId === s.customerUserId);
+    }
+    return result;
+  }
+
+  /**
    * One journey, told once.
    *
    * The handoff PIN is the only field that differs by audience, and it never
    * appears for a customer except on the leg that ends at their own door — that
    * is the code THEY hold, and the driver has to produce it.
    */
-  private async serialize(s: ShipmentWithGraph, opts: { audience: 'CUSTOMER' | 'STAFF'; conversationIds?: Map<string, string> }) {
+  private async serialize(
+    s: ShipmentWithGraph,
+    opts: { audience: 'CUSTOMER' | 'STAFF'; conversationIds?: Map<string, string>; cancellationAuthorship?: Map<string, boolean> },
+  ) {
     const endsAtHub = !needsLastMile(s.service);
     const live = s.legs.filter((l) => l.status !== 'CANCELLED');
     const current = live.find((l) => l.status !== 'COMPLETED') ?? null;
@@ -3508,6 +3574,10 @@ export class ShipmentService {
     // on the page and pass it in; a single-shipment caller has none to pass, so
     // it is resolved here, bounded to this one shipment's own legs.
     const conversationIds = opts.conversationIds ?? (await this.legConversationIds(s.legs.map((l) => l.id)));
+    // Same batching discipline as conversationIds above: a single-shipment
+    // caller resolves this bounded to just this one row (0 or 1 candidate),
+    // listMine resolves it once for the whole page and passes it in.
+    const cancellationAuthorship = opts.cancellationAuthorship ?? (await this.cancellationAuthorshipFor([s]));
     const eta = await this.etaFor(
       this.toEtaLegInputs(s.legs),
       s.availabilityWindows.map((w) => ({ role: w.role, startTime: w.startTime, endTime: w.endTime })),
@@ -3606,7 +3676,12 @@ export class ShipmentService {
       bookedAt: s.bookedAt,
       deliveredAt: s.deliveredAt,
       cancelledAt: s.cancelledAt,
-      cancellationReason: s.cancellationReason,
+      // MDF-243 follow-up: fails closed — raw only when authorship is
+      // positively established as the customer's own. See
+      // `cancellationAuthorshipFor()`'s own doc for why there is no third
+      // case, and why a missing audit row must not read as "show it".
+      cancellationReason:
+        opts.audience === 'STAFF' || cancellationAuthorship.get(s.id) === true ? s.cancellationReason : null,
       // MDF-243: same gate, shipment-level. See the leg-level comment above.
       exceptionReason: opts.audience === 'STAFF' ? s.exceptionReason : customerFacingExceptionReason(s.exceptionReason),
       origin: {

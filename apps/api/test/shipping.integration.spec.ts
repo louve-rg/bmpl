@@ -1025,6 +1025,85 @@ describe('exceptions and cancellation', () => {
   });
 });
 
+// MDF-243 follow-up: cancellationReason has the identical "free text written
+// by either side through the same method" shape exceptionReason had, but
+// cannot be blanket-gated the same way — a customer reading back their OWN
+// stated reason is legitimate. The gate instead recovers authorship from the
+// SHIPMENT_CANCELLED audit row's actorId and fails closed on anything else,
+// including a missing audit row (simulating historical data).
+describe('cancellationReason authorship (MDF-243 follow-up)', () => {
+  it('a customer reads back their own cancellation reason', async () => {
+    const s = await book();
+    const ownWords = 'Booked by mistake, wrong recipient address.';
+    await post(customer, `shipping/${s.id}/cancel`, { reason: ownWords }).expect(201);
+
+    const asCustomer = await get(customer, `shipping/${s.reference}`);
+    expect(asCustomer.status).toBe(200);
+    expect(asCustomer.body.cancellationReason).toBe(ownWords);
+  });
+
+  it("a customer never sees a staff member's own cancellation words — staff still sees everything", async () => {
+    const s = await book();
+    const staffWords = 'Driver pool exhausted in Stann Creek; releasing per ops call.';
+    await post(admin, `admin/logistics/shipments/${s.id}/cancel`, { reason: staffWords }).expect(201);
+
+    const asCustomer = await get(customer, `shipping/${s.reference}`);
+    expect(asCustomer.status).toBe(200);
+    expect(asCustomer.body.cancellationReason).toBeNull();
+
+    const asStaff = await get(admin, `admin/logistics/shipments/${s.reference}`);
+    expect(asStaff.status).toBe(200);
+    expect(asStaff.body.cancellationReason).toBe(staffWords);
+  });
+
+  it('a missing audit row (historical data) falls back to neutral, even though the words really were the customer\'s own', async () => {
+    const s = await book();
+    const ownWords = 'Changed my mind.';
+    await post(customer, `shipping/${s.id}/cancel`, { reason: ownWords }).expect(201);
+
+    // Confirms the normal case first: raw text shown while the audit trail exists.
+    expect((await get(customer, `shipping/${s.reference}`)).body.cancellationReason).toBe(ownWords);
+
+    // Simulates a historical cancellation recorded before this audit action
+    // existed (or any other reason the row is gone) — "cannot determine"
+    // must not degrade to "show it", even for a reason that genuinely was
+    // the customer's own.
+    await ctx.prisma.auditLog.deleteMany({ where: { action: 'SHIPMENT_CANCELLED' } });
+
+    const after = await get(customer, `shipping/${s.reference}`);
+    expect(after.status).toBe(200);
+    expect(after.body.cancellationReason).toBeNull();
+  });
+
+  // The batching itself (one query for the whole page, zero when the
+  // cancelled-and-reasoned subset is empty) is a code-shape property of
+  // `cancellationAuthorshipFor()` — a single `findMany` behind an
+  // early-return guard, never one per row — not something this test proves
+  // at runtime. Spying on the shared `ctx.prisma.auditLog.findMany` here
+  // was tried and dropped: an assertion failure mid-test left the spy
+  // attached for the rest of the file (no `restoreMocks` configured), and
+  // it corrupted two unrelated later tests' real calls to the same method.
+  // A mock that can silently break tests three describe-blocks away is a
+  // worse trade than the coverage it bought. This test instead proves the
+  // LIST's actual per-row correctness on a mixed page, with no mocking.
+  it('gets every row right on one mixed page — untouched, self-cancelled, and staff-cancelled together', async () => {
+    const untouched = await book();
+    const selfCancelled = await book();
+    const staffCancelled = await book();
+    await post(customer, `shipping/${selfCancelled.id}/cancel`, { reason: 'Self-cancel reason.' }).expect(201);
+    await post(admin, `admin/logistics/shipments/${staffCancelled.id}/cancel`, { reason: 'Staff cancel reason.' }).expect(201);
+
+    const list = await get(customer, 'shipping');
+    expect(list.status).toBe(200);
+    expect(list.body).toHaveLength(3);
+
+    const byId = (id: string) => list.body.find((r: { id: string }) => r.id === id);
+    expect(byId(untouched.id).cancellationReason).toBeNull();
+    expect(byId(selfCancelled.id).cancellationReason).toBe('Self-cancel reason.');
+    expect(byId(staffCancelled.id).cancellationReason).toBeNull();
+  });
+});
+
 describe('who may see and do what', () => {
   it('does not let one customer track another customer\'s shipment', async () => {
     const s = await book();
