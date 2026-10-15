@@ -458,8 +458,33 @@ export class DriverJobService {
     this.core.assertAction('CONFIRM_PICKUP', d.status);
     await this.verifyPinOrThrow(actor, d, 'pickup', dto.pin);
 
-    await this.prisma.$transaction(async (tx) => {
-      // Exactly-once inventory finalization guarded by inventoryFinalizedAt.
+    // Conditional write, NOT an unconditional update by id. CONFIRM_PICKUP's
+    // only legal `from` is DRIVER_ACCEPTED (DELIVERY_ACTIONS), and CANCEL's
+    // own legal `from` list also includes DRIVER_ACCEPTED — so an admin
+    // cancelling and the assigned driver confirming pickup can both legally
+    // act on the SAME row at the same instant. An unconditional update here
+    // let whichever committed last silently win: inventory finalized on an
+    // order that ends up CANCELLED, or a cancelled order resurrecting to
+    // PICKUP_CONFIRMED with inventory finalized and "picked up" notified
+    // after everyone was already told it was cancelled. Re-asserting the
+    // status this call actually read, inside the write, closes it — same
+    // pattern as DriverJobService.accept()/DispatchService.assignInternal.
+    const won = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.orderDelivery.updateMany({
+        where: { id: deliveryId, status: 'DRIVER_ACCEPTED' },
+        data: {
+          status: 'PICKUP_CONFIRMED',
+          pickupConfirmedAt: new Date(),
+          pickupVerifiedAt: new Date(),
+          pickupVerificationStatus: 'VERIFIED',
+        },
+      });
+      if (claimed.count === 0) return false;
+
+      // Exactly-once inventory finalization guarded by inventoryFinalizedAt —
+      // a separate, orthogonal idempotency concern (the same call retried),
+      // not the cross-actor race above. Only reached once this call has
+      // already proven exclusive ownership of the transition.
       const fresh = await tx.orderDelivery.findUniqueOrThrow({ where: { id: deliveryId }, select: { inventoryFinalizedAt: true } });
       if (!fresh.inventoryFinalizedAt) {
         for (const item of d.vendorOrder.items) {
@@ -477,22 +502,17 @@ export class DriverJobService {
             await this.inventory.finalizeReservation(inv.id, item.quantity, actor.userId, tx);
           }
         }
+        await tx.orderDelivery.update({ where: { id: deliveryId }, data: { inventoryFinalizedAt: new Date() } });
+        await this.audit.record({ action: 'INVENTORY_FULFILLED', actorId: actor.userId, newValue: { deliveryId } }, tx);
       }
-      await tx.orderDelivery.update({
-        where: { id: deliveryId },
-        data: {
-          status: 'PICKUP_CONFIRMED',
-          pickupConfirmedAt: new Date(),
-          pickupVerifiedAt: new Date(),
-          pickupVerificationStatus: 'VERIFIED',
-          inventoryFinalizedAt: fresh.inventoryFinalizedAt ?? new Date(),
-        },
-      });
       await this.core.appendTimeline(tx, deliveryId, { fromStatus: 'DRIVER_ACCEPTED', toStatus: 'PICKUP_CONFIRMED', event: 'CONFIRM_PICKUP', actorRole: 'DRIVER', actorUserId: actor.userId });
       await this.core.auditTransition('CONFIRM_PICKUP', actor.userId, deliveryId, undefined, tx);
-      if (!fresh.inventoryFinalizedAt) await this.audit.record({ action: 'INVENTORY_FULFILLED', actorId: actor.userId, newValue: { deliveryId } }, tx);
       await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId], { event: 'DELIVERY_PICKUP_CONFIRMED', title: 'Order picked up', body: `Your order ${d.vendorOrder.order.orderNumber} was picked up and is on its way soon.`, data: { deliveryId } }, tx);
+      return true;
     });
+    if (!won) {
+      throw new ConflictException('This delivery changed state before pickup could be confirmed — reload and try again.');
+    }
     await this.messaging.onDeliveryEvent(deliveryId, 'Order picked up.');
     return this.getJob(actor.userId, deliveryId);
   }
@@ -517,15 +537,26 @@ export class DriverJobService {
     this.core.assertAction(action, d.status);
     const fromStatus = d.status;
     const stampField = action === 'IN_TRANSIT' ? 'inTransitAt' : 'arrivingAt';
-    await this.prisma.$transaction(async (tx) => {
-      await tx.orderDelivery.update({ where: { id: deliveryId }, data: { status: toStatus, [stampField]: new Date() } });
+    // Conditional write, same shape as confirmPickup/accept() — closes a
+    // genuine concurrent double-submit (two taps of the same button landing
+    // as two in-flight requests) even though no OTHER actor can reach these
+    // statuses once past DRIVER_ACCEPTED (CANCEL/REASSIGN's own legal `from`
+    // lists stop there). The end state would be correct either way here;
+    // this only prevents a duplicated timeline/audit/notification.
+    const won = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.orderDelivery.updateMany({ where: { id: deliveryId, status: fromStatus }, data: { status: toStatus, [stampField]: new Date() } });
+      if (claimed.count === 0) return false;
       await this.core.appendTimeline(tx, deliveryId, { fromStatus, toStatus, event: action, actorRole: 'DRIVER', actorUserId: actor.userId });
       await this.core.auditTransition(action, actor.userId, deliveryId, undefined, tx);
       if (notify.customer) {
         const body = action === 'IN_TRANSIT' ? `Your order ${d.vendorOrder.order.orderNumber} is on the way.` : `Your driver is arriving with order ${d.vendorOrder.order.orderNumber}.`;
         await this.core.notify([d.vendorOrder.order.userId], { event: action === 'IN_TRANSIT' ? 'DELIVERY_IN_TRANSIT' : 'DELIVERY_ARRIVING', title: action === 'IN_TRANSIT' ? 'On the way' : 'Arriving', body, data: { deliveryId } }, tx);
       }
+      return true;
     });
+    if (!won) {
+      throw new ConflictException('This delivery changed state before it could be updated — reload and try again.');
+    }
     return this.getJob(actor.userId, deliveryId);
   }
 
@@ -536,9 +567,14 @@ export class DriverJobService {
     await this.verifyPinOrThrow(actor, d, 'delivery', dto.pin);
     const podKeys = dto.podPhotoKeys ? await this.resolvePodKeys(actor.userId, dto.podPhotoKeys) : undefined;
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.orderDelivery.update({
-        where: { id: deliveryId },
+    // Conditional write, same reasoning as simpleTransition above — no other
+    // ADMIN action can reach ARRIVING per DELIVERY_ACTIONS, so this guards a
+    // concurrent double-submit (otherwise harmless here on its own, but a
+    // second commit would also re-trigger settlement below) rather than a
+    // cross-actor state-machine race.
+    const won = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.orderDelivery.updateMany({
+        where: { id: deliveryId, status: 'ARRIVING' },
         data: {
           status: 'DELIVERED',
           deliveredAt: new Date(),
@@ -549,6 +585,7 @@ export class DriverJobService {
           ...(podKeys ? { podPhotoKeys: podKeys } : {}),
         },
       });
+      if (claimed.count === 0) return false;
       await tx.deliveryAssignment.updateMany({ where: { orderDeliveryId: deliveryId, status: { in: ['ACTIVE', 'ACCEPTED'] } }, data: { status: 'COMPLETED', endedAt: new Date() } });
       // Increment the driver's completed-deliveries counter (placeholder metric; NO money).
       if (d.assignedDriverProfileId) await tx.driverProfile.update({ where: { id: d.assignedDriverProfileId }, data: { completedDeliveries: { increment: 1 } } });
@@ -556,7 +593,11 @@ export class DriverJobService {
       await this.core.auditTransition('DELIVER', actor.userId, deliveryId, { recipientName: dto.recipientName }, tx);
       if (podKeys?.length) await this.core.auditTransition('POD', actor.userId, deliveryId, { count: podKeys.length }, tx);
       await this.core.notify([d.vendorOrder.order.userId, d.vendorOrder.vendorProfile.userId, actor.userId], { event: 'DELIVERY_DELIVERED', title: 'Delivered', body: `Order ${d.vendorOrder.order.orderNumber} was delivered${dto.recipientName ? ` to ${dto.recipientName}` : ''}.`, data: { deliveryId } }, tx);
+      return true;
     });
+    if (!won) {
+      throw new ConflictException('This delivery changed state before delivery could be confirmed — reload and try again.');
+    }
     await this.messaging.onDeliveryEvent(deliveryId, 'Order delivered.');
     // Delivery completion triggers internal settlement (M18) — its own atomic,
     // idempotent transaction. Never blocks/reverts the delivery; a failure records

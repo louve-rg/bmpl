@@ -39,6 +39,7 @@ async function makeVendorWithProduct(title: string): Promise<Vendor> {
   const profile = await post(cookies, 'vendor/profile', { businessName: `Store ${s}`, contactEmail: email });
   await post(cookies, 'vendor/profile/submit').expect(201);
   await post(adminCookies, `admin/vendors/${profile.body.profile.id}/approve`).expect(201);
+  await patch(cookies, 'vendor/profile', { storeStatus: 'OPEN' }).expect(200);
   const p = await post(cookies, 'vendor/products', { title, sku: `SKU-${s}`, categoryId, priceMinor: 1000 });
   const prod = await ctx.prisma.product.findUniqueOrThrow({ where: { id: p.body.id } });
   return { cookies, productId: p.body.id, vendorProfileId: profile.body.profile.id, slug: prod.slug };

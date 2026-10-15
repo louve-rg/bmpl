@@ -350,14 +350,27 @@ export class DispatchService {
     const current = await this.core.loadOrThrow(deliveryId);
     this.core.assertAction('CANCEL', current.status);
     const fromStatus = current.status;
-    await this.prisma.$transaction(async (tx) => {
+    // Conditional write, NOT an unconditional update by id. CANCEL's own
+    // legal `from` list includes DRIVER_ACCEPTED — the same status
+    // CONFIRM_PICKUP's only legal `from` is — so an admin cancelling and the
+    // assigned driver confirming pickup can both legally act on the same row
+    // at the same instant. An unconditional update here let whichever
+    // committed last silently win: a cancelled order resurrecting to
+    // PICKUP_CONFIRMED with inventory finalized after everyone was told it
+    // was cancelled, or inventory finalized on an order that then ends up
+    // CANCELLED underneath the driver who just picked it up. Re-asserting
+    // the status this call actually read, inside the write, closes it — same
+    // pattern as DriverJobService.accept()/confirmPickup and
+    // DispatchService.assignInternal.
+    const won = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.orderDelivery.updateMany({
+        where: { id: deliveryId, status: fromStatus },
+        data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: dto.reason },
+      });
+      if (claimed.count === 0) return false;
       await tx.deliveryAssignment.updateMany({
         where: { orderDeliveryId: deliveryId, status: { in: ['ACTIVE', 'ACCEPTED'] } },
         data: { status: 'CANCELLED', endedAt: new Date(), endReason: dto.reason },
-      });
-      await tx.orderDelivery.update({
-        where: { id: deliveryId },
-        data: { status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: dto.reason },
       });
       await this.core.appendTimeline(tx, deliveryId, { fromStatus, toStatus: 'CANCELLED', event: 'CANCEL', actorRole: 'ADMIN', actorUserId: actor.userId, note: dto.reason });
       await this.core.auditTransition('CANCEL', actor.userId, deliveryId, { reason: dto.reason }, tx);
@@ -366,7 +379,11 @@ export class DispatchService {
         { event: 'DELIVERY_CANCELLED', title: 'Delivery cancelled', body: `The delivery for order ${current.vendorOrder.order.orderNumber} was cancelled.`, data: { deliveryId } },
         tx,
       );
+      return true;
     });
+    if (!won) {
+      throw new ConflictException('This delivery changed state before it could be cancelled — reload and try again.');
+    }
     await this.messaging.onDeliveryEvent(deliveryId, 'This delivery was cancelled.', null);
     return this.get(deliveryId);
   }
