@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  customerFacingExceptionReason,
   deriveShipmentStatus,
+  EXCEPTION_CUSTOMER_MESSAGE,
   isLegActionable,
   needsFirstMile,
   needsLastMile,
@@ -40,6 +42,37 @@ describe('service types', () => {
     expect([needsFirstMile('DOOR_TO_HUB'), needsLastMile('DOOR_TO_HUB')]).toEqual([true, false]);
     expect([needsFirstMile('HUB_TO_DOOR'), needsLastMile('HUB_TO_DOOR')]).toEqual([false, true]);
     expect([needsFirstMile('HUB_TO_HUB'), needsLastMile('HUB_TO_HUB')]).toEqual([false, false]);
+  });
+});
+
+describe('customerFacingExceptionReason', () => {
+  it('maps no exception to no message', () => {
+    expect(customerFacingExceptionReason(null)).toBeNull();
+  });
+
+  // MDF-243's own trap: a passthrough default looks correct on every reason
+  // you happen to try, and leaks on the first one nobody anticipated. These
+  // are deliberately varied — operational jargon, a named person, an
+  // internal reference, a cause nobody has verified — and every single one
+  // must come back as the SAME approved sentence, never its own text.
+  it('never returns the raw reason, for any reason staff might type', () => {
+    const rawReasons = [
+      'Flight cancelled by the carrier.',
+      'Driver Marcus Pou reported the recipient was not home at 4pm.',
+      'Vendor claims the box was damaged — see internal ticket OPS-4471.',
+      'Suspected theft at the San Pedro hub, pending investigation.',
+      'x',
+    ];
+    for (const reason of rawReasons) {
+      const result = customerFacingExceptionReason(reason);
+      expect(result).toBe(EXCEPTION_CUSTOMER_MESSAGE);
+      expect(result).not.toContain(reason);
+    }
+  });
+
+  it('does not imply the issue is resolved, a new eta, or a refund', () => {
+    const message = customerFacingExceptionReason('anything')!;
+    expect(message.toLowerCase()).not.toMatch(/resolved|refund|guarantee/);
   });
 });
 

@@ -117,6 +117,141 @@ railway api 'query($s:String!,$e:String!){ serviceInstance(serviceId:$s, environ
 `watchPatterns` leaves the builder, start command, health check, pre-deploy hook and
 variables untouched.
 
+**Reading the deployment log directly — useful evidence, but not a timing
+instrument (see the warning below).** Railway publishes every deployment it makes
+as a GitHub Deployment record on this repo, with its own status history. No
+Railway credentials are needed — this is plain `gh` against GitHub's API:
+
+```bash
+# Every production deployment, newest first. The API service's environment
+# name is "carefree-achievement / production" — filter on it explicitly,
+# since web/admin deploy through Vercel and never appear here. The per_page
+# query string is not optional — see the paging trap below. Put it in the
+# URL, never as a -f/-F parameter: gh api switches method to POST as soon
+# as any -f/-F is present, and this endpoint's POST verb creates a
+# deployment — the one mutation this whole section exists to warn against.
+gh api 'repos/louve-rg/bmpl/deployments?per_page=100' \
+  -q '.[] | select(.environment == "carefree-achievement / production") | {id, sha: .sha[0:7], created_at}'
+
+# That deployment's own status history, oldest first in the array:
+gh api repos/louve-rg/bmpl/deployments/<id>/statuses -q '.[] | {state, created_at}'
+```
+
+**This section has now been wrong twice on the night of 2026-10-14, in two
+different ways, before the correction below was written** — first a paging bug
+that silently returned `null` for a real deployment, then (after that was fixed) a
+reasoning error that treated a missing deployment record as a possible production
+blocker. Both are recorded here rather than quietly fixed, because a doc that has
+already been wrong twice needs its reader to know these claims are hard-won, not
+obvious. (A separate, earlier claim in this section — that Railway does not gate a
+build's *start* on the GitHub check suite — was correct both times and is restated
+below with stronger evidence; it is not part of either mistake.)
+
+> **THE GITHUB DEPLOYMENT RECORD IS NOT A TIMING INSTRUMENT. ABSENCE OF A RECORD
+> PROVES NOTHING.** Its `created_at` has been observed on both sides of the app
+> actually going live, for the same endpoint and the same environment:
+> - `6c1ea8f` (#405): pushed 04:06:40Z, deployment record created 04:06:42Z — **2
+>   seconds after the push**, with a normal `in_progress` phase.
+> - `1fec2bb` (#417): pushed 20:31:00, main CI concluded 20:40:33, the API process
+>   started serving the commit at 20:45:12.584 — and the deployment record was
+>   created 20:45:22, marked `success` 20:45:23: **10 seconds after the app was
+>   already live**, with **no `in_progress` phase at all**.
+>
+> Same mechanism, opposite ordering. A record that can be created before the build
+> even starts or after the app is already serving traffic cannot be read as "when
+> this deploy started or finished," and its absence from a query cannot be read as
+> "no deployment happened" — the paging trap below is one concrete way a real
+> deployment disappears from the query without ever failing.
+
+**The only valid proof a commit is live in production:**
+
+- `GET /api/health` reporting that commit **with a dropped/reset `uptime`** —
+  compare `uptime`, not `startedAt`. `startedAt` is a derived timestamp string and
+  can jitter by a millisecond between otherwise-identical reads; `uptime` resetting
+  to near-zero is the actual signal that the process restarted on the new commit.
+- The `X-Bmpl-Api-Commit` response header at the edge.
+
+Nothing else. Not the deployment record's existence, not its `created_at`, not its
+`state`.
+
+**The paging trap — the kind of bug that returns a confident wrong answer, not an
+error.** A **bare** `gh api repos/.../deployments`, with neither `--paginate` nor
+`per_page` in the query string, returns only the newest ~30 records across *all*
+environments. Vercel writes **four** deployment records per commit that touches
+`apps/web` or `apps/admin` (Preview web, Preview admin, Production web, Production
+admin) against Railway's **one** — so after only a handful of pushes, an older
+commit's single Railway record falls off that default page, and the
+`select(.environment == ...)` filter above returns `null`. That `null` is
+**indistinguishable from "Railway never created a deployment for this commit"**
+unless `per_page=100` (as a query-string parameter, never as `-f`/`-F` — see
+above) or `--paginate` is in the command. (`--paginate` alone already defaults to
+`per_page=100` and follows every page to the end — confirmed by running it and
+counting full pages of 100 down to a final partial page; the exact page count
+isn't worth citing here, since it grows with every commit that touches
+`apps/web` or `apps/admin`.)
+
+**A second trap sits on top of the first one, with the same shape.** With
+`--paginate`, `-q`/`--jq` is applied **to each page separately**, not to the
+combined result. `gh api ...deployments --paginate -q 'length'` prints one
+number **per page** (confirmed by running it — several lines, not one total)
+— so an index filter such as `[...][0]` returns the first match **per page**,
+silently yielding several answers where the reader expects exactly one. Use
+`--slurp` to combine pages before filtering, or query a single `?per_page=100`
+page directly when the question has one answer.
+
+**Railway does not wait for GitHub check suites — restated with the structural
+argument, not arrival order.** `1fec2bb`: pushed 20:31:00, CI concluded 20:40:33,
+app live 20:45:12 — **14m12s push-to-live**, inside the 11–16 minute window
+measured from five clean deploys (`817bf5c` 11m18s, `90dadc5` 15m33s, `fbd8e7f`
+14m20s, `04a0f8e` 16m07s, `1fec2bb` 14m12s). A build that only *started* when CI
+concluded at 20:40:33 would have gone live around 20:52–20:57; it went live at
+20:45:12. The build was already running while the check suite was still
+`in_progress`. Watch patterns (§2a above)
+still decide **whether** a build starts; nothing measured so far decides **when**,
+except the push itself. What remains genuinely unestablished is whether the check
+suite's pass/fail *result* affects a deployment's outcome at all — do not assume a
+different, equally unverified mechanism (e.g. "it gates success instead of start")
+in its place. If this is ever pinned down, document the evidence here rather than
+inferring it again.
+
+**One thing the record is still useful for, once the uptime/header check above has
+already confirmed what is actually live: telling a normal supersede apart from a
+failure.**
+
+- `in_progress` → **`inactive`** means the deployment was **superseded by a later
+  push**, not that it failed — there is no separate "it broke" status distinct from
+  this one. `6c1ea8f` went `in_progress` → `inactive` at 04:18:53Z, 28 seconds after
+  the *next* main push's own CI run started (04:18:25Z). That next push (`510c783`,
+  web-only) matched none of §2a's watch patterns and has **no `carefree-achievement
+  / production` (API) deployment record of its own** — confirmed by the same query
+  above returning nothing for its SHA under that environment, even though it has the
+  Vercel web/admin deployment records a web-only commit always gets. A web-only merge
+  superseded an in-flight API deployment without replacing it, and the API then kept
+  serving the deployment *before* the superseded one (`817bf5c`) for the next ~15
+  hours. The owner authorised rerunning `6c1ea8f`'s cancelled CI suite and it came
+  back `success` — but that produced **no new deployment attempt**: `6c1ea8f`'s
+  deployment record above never gained a status past that original `inactive`. A CI
+  suite rerun does not revive or recreate a Railway deployment for a commit that is
+  no longer `main`'s tip. The freeze actually ended when the next API-touching commit
+  (`fbd8e7f`, #407) reached `main` and deployed cleanly on its own.
+
+**The rule this evidence establishes — unchanged by the correction above, for a
+reason that has nothing to do with record timing:** never merge anything to `main`
+while a production API deployment is in flight, **regardless of what the new
+commit touches**. A web-only or docs-only merge is the *dangerous* kind, because it
+supersedes an in-flight API deployment **without creating a replacement** — that is
+the exact mechanism that froze the API on a stale commit for ~15 hours on
+2026-10-14 (`6c1ea8f` superseded by the web-only `510c783`). The rule was never
+justified by how fast or how visibly the deployment record appeared; it is
+justified by this supersede-without-replace behaviour, which this correction has
+not disproved.
+
+**How to tell a deploy is in flight — the test itself changes, not just the rule
+it serves:** an API deployment is in flight if **an API-touching commit (§2a) has
+landed on `main` whose sha `/api/health` is not yet reporting** — not "if the
+deployment record says `in_progress`." Check `/api/health` before any merge to
+`main`, not the deployment record.
+
 ### 2b. Deployment sequencing — changes that span API and web
 
 The API (Railway, Docker build) deploys in minutes; the web app (Vercel) deploys in

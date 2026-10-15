@@ -16,7 +16,7 @@ import {
   type LegView,
 } from '@bmpl/shared';
 import type { LegExceptionInput, LegHandoffInput, LegPickupPhotoInput } from '@bmpl/validation';
-import type { AuditAction, Prisma } from '@bmpl/database';
+import type { AuditAction, LegStatus, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -136,13 +136,15 @@ export class ShipmentDriverService {
     const { leg, profileId } = await this.ownedLeg(actor.userId, legId);
     if (leg.courierStatus === 'DRIVER_ACCEPTED') return this.serialize(leg); // idempotent
     this.assertAction('ACCEPT', leg.courierStatus);
+    this.assertNotException(leg);
 
     const won = await this.prisma.$transaction(async (tx) => {
       // Conditional write, exactly as delivery acceptance does it: the sweeper
-      // may be expiring this very offer between the read above and this write.
-      // Re-asserting status AND ownership makes the database the arbiter.
+      // may be expiring this very offer between the read above and this write,
+      // and staff may be flagging an exception in the same window. Re-asserting
+      // status, exception state AND ownership makes the database the arbiter.
       const claimed = await tx.shipmentLeg.updateMany({
-        where: { id: legId, courierStatus: 'ASSIGNED', assignedDriverProfileId: profileId },
+        where: { id: legId, courierStatus: 'ASSIGNED', assignedDriverProfileId: profileId, status: { not: 'EXCEPTION' } },
         data: { courierStatus: 'DRIVER_ACCEPTED', acceptedAt: new Date(), offerExpiresAt: null },
       });
       if (claimed.count === 0) return false;
@@ -213,14 +215,21 @@ export class ShipmentDriverService {
   async confirmPickup(actor: Actor, legId: string) {
     const { leg } = await this.ownedLeg(actor.userId, legId);
     this.assertAction('CONFIRM_PICKUP', leg.courierStatus);
+    this.assertNotException(leg);
     if (!isLegActionable(leg.shipment.legs as LegView[], leg.sequence)) {
       throw new BadRequestException('The parcel has not reached this leg yet.');
     }
 
-    await this.prisma.shipmentLeg.update({
-      where: { id: legId },
+    // Conditional, not an update by id: staff may flag the exception in the
+    // same window the driver is confirming pickup. The database, not the read
+    // above, is the arbiter.
+    const claimed = await this.prisma.shipmentLeg.updateMany({
+      where: { id: legId, courierStatus: 'DRIVER_ACCEPTED', status: { not: 'EXCEPTION' } },
       data: { courierStatus: 'PICKUP_CONFIRMED', pickedUpAt: new Date() },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException('This leg has an open exception and must be resolved by staff before it can be picked up.');
+    }
     // Records custody, moves the leg to IN_PROGRESS and recomputes the shipment.
     await this.shipments.startLeg(legId, { userId: actor.userId, label: 'Driver' });
     // A photo attached before this call already recorded the pickup itself
@@ -321,7 +330,19 @@ export class ShipmentDriverService {
   ) {
     const { leg } = await this.ownedLeg(actor.userId, legId);
     this.assertAction(action, leg.courierStatus);
-    await this.prisma.shipmentLeg.update({ where: { id: legId }, data: { courierStatus: to, [stamp]: new Date() } });
+    this.assertNotException(leg);
+    // Conditional, not an update by id: re-asserting the courier status just
+    // read closes the same window a concurrent exception flag (or a second
+    // tap of this same button) would otherwise land in.
+    const claimed = await this.prisma.shipmentLeg.updateMany({
+      where: { id: legId, courierStatus: leg.courierStatus, status: { not: 'EXCEPTION' } },
+      data: { courierStatus: to, [stamp]: new Date() },
+    });
+    if (claimed.count === 0) {
+      throw new ConflictException(
+        `This leg has an open exception or already moved on, so it cannot ${action.toLowerCase().replace(/_/g, ' ')}.`,
+      );
+    }
     await this.audit.record({ action: auditAction, actorId: actor.userId, newValue: { legId, reference: leg.shipment.reference } });
     if (to === 'ARRIVING' && (leg.kind === 'LAST_MILE' || leg.kind === 'DIRECT')) {
       await this.notifyCustomer(leg, 'Your driver is arriving.');
@@ -372,7 +393,13 @@ export class ShipmentDriverService {
   async completeHandoff(actor: Actor, legId: string, dto: LegHandoffInput) {
     const { leg } = await this.ownedLeg(actor.userId, legId);
     this.assertAction('DELIVER', leg.courierStatus);
+    this.assertNotException(leg);
 
+    // `completeLeg` already runs through `ShipmentService.transition()`,
+    // which re-reads the leg and refuses it via `isLegActionable` the moment
+    // `status` is EXCEPTION, inside the same transaction as its write — this
+    // check only gives the driver the specific, honest reason on the request
+    // that hits the common case rather than the race window.
     const shipment = await this.shipments.completeLeg(legId, dto, { userId: actor.userId, label: dto.receivedByName });
     await this.prisma.shipmentLeg.update({
       where: { id: legId },
@@ -406,6 +433,25 @@ export class ShipmentDriverService {
     if (!canPerform(action, status)) {
       throw new BadRequestException(
         `Cannot ${action.toLowerCase().replace(/_/g, ' ')} a job that is "${DELIVERY_STATUS_LABELS[status]}".`,
+      );
+    }
+  }
+
+  /**
+   * Owner ruling: an active exception blocks every forward courier
+   * transition until authorized staff resolve it
+   * (`ShipmentService.resolveException`) — never an automatic status, fee or
+   * settlement side effect. `courierStatus` and `status` are two separate
+   * columns on the same row; nothing upstream kept them in step, so each
+   * transition must check `status` itself rather than inferring it from
+   * `courierStatus`. This is the clear, same-request rejection; the
+   * conditional write each caller makes right after is what actually closes
+   * the race against staff flagging the exception a moment later.
+   */
+  private assertNotException(leg: { status: LegStatus; shipment: { reference: string } }) {
+    if (leg.status === 'EXCEPTION') {
+      throw new ConflictException(
+        `Shipment ${leg.shipment.reference} has an open exception on this leg. Staff must resolve it before the job can move forward.`,
       );
     }
   }
@@ -513,6 +559,13 @@ export class ShipmentDriverService {
       statusLabel: DELIVERY_STATUS_LABELS[status],
       view: driverViewForStatus(status, leg.acceptedAt),
       nextActionLabel: driverJobActionLabel(kind, status),
+      // The leg's OWN status (PENDING/READY/IN_PROGRESS/COMPLETED/CANCELLED/
+      // EXCEPTION) — a separate column from `status` above, which is this
+      // leg's courierStatus. Additive: the frontend's own exception-aware
+      // controls feature-detect on this field and degrade to today's
+      // behaviour when it is absent, so exposing it changes nothing for an
+      // older client.
+      legStatus: leg.status,
       mode: leg.mode,
       modeLabel: TRANSPORT_MODE_LABELS[leg.mode],
       addressUnlocked: committed,
