@@ -127,7 +127,7 @@ function cancelOrder(overrides: Record<string, unknown> = {}) {
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
-let confirmSpy: { mockRestore: () => void } | null = null;
+let confirmSpy: { mockRestore: () => void; mock: { calls: unknown[][] } } | null = null;
 
 afterEach(() => {
   if (root) act(() => root!.unmount());
@@ -236,6 +236,24 @@ describe('order detail page — cancel affordance', () => {
     getOwn.mockResolvedValue(cancelOrder({ status: 'CANCELLED' }));
     const el = await mount();
     expect(el.textContent).not.toContain('Cancel order');
+  });
+
+  it('the confirmation prompt names the BML wallet, and only conditionally -- the owner release condition this PR shipped under', async () => {
+    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    getOwn.mockResolvedValue(cancelOrder());
+
+    const el = await mount();
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Cancel order')!;
+    await act(async () => {
+      button.click();
+    });
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    const message = confirmSpy.mock.calls[0]![0] as string;
+    expect(message).toContain('BML wallet');
+    // Conditional, not an unconditional promise -- a never-authorized
+    // payment has nothing to return, and the copy must not claim it does.
+    expect(message).toContain('If payment was already authorized');
   });
 
   it('asks for confirmation, calls the API, and reflects the new state without a manual reload', async () => {
