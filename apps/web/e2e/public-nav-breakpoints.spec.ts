@@ -26,6 +26,80 @@ async function noHorizontalOverflow(page: Page) {
   }));
 }
 
+/**
+ * MDF-279 diagnostic, temporary: a CI-only "scrollWidth 331 vs clientWidth
+ * 320" at the 320px width below reproduces on NO environment this floor
+ * could construct (real local backend, backend genuinely unreachable at
+ * CI's own API port, a forced different font, a real Linux container, and
+ * the literal CI-captured DOM re-measured from its own trace) -- yet it is
+ * route-selective within the SAME CI run: `/` and `/products` (both fetch
+ * data) fail, `/register` and `/login` (static forms) pass. Logged for
+ * every route in this 320px block, not just the failing ones, so the
+ * passing routes serve as a same-run baseline to diff against -- this is
+ * the question CI's own log needs to answer directly rather than guessed
+ * at again from outside. Remove once MDF-279 is resolved.
+ */
+async function logOverflowDiagnostic(page: Page, route: string, scrollWidth: number, clientWidth: number) {
+  const widest = await page.evaluate(() => {
+    const vw = document.documentElement.clientWidth;
+    let best: { tag: string; cls: string; rectWidth: number; computedWidth: string; offsetParent: string; fontFamily: string } | null =
+      null;
+    document.querySelectorAll('*').forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (!best || r.width > best.rectWidth) {
+        const cs = getComputedStyle(el);
+        best = {
+          tag: el.tagName,
+          cls: (el.className || '').toString().slice(0, 200),
+          rectWidth: Math.round(r.width * 10) / 10,
+          computedWidth: cs.width,
+          offsetParent: (el as HTMLElement).offsetParent ? (el as HTMLElement).offsetParent!.tagName : 'null',
+          fontFamily: cs.fontFamily,
+        };
+      }
+    });
+    // Also the widest element whose own right edge actually clears the
+    // viewport, separate from "widest by width" -- a short, far-right-offset
+    // element could overflow without being the single widest box on the page.
+    const pastViewport: Array<{ tag: string; cls: string; right: number }> = [];
+    document.querySelectorAll('*').forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.right > vw + 0.5 && r.width > 0) {
+        pastViewport.push({ tag: el.tagName, cls: (el.className || '').toString().slice(0, 120), right: Math.round(r.right * 10) / 10 });
+      }
+    });
+    pastViewport.sort((a, b) => b.right - a.right);
+
+    // getComputedStyle().fontFamily only ever reports the AUTHORED CSS stack
+    // ("Inter, system-ui, ...Segoe UI, Roboto, sans-serif") -- 'Inter' is
+    // declared in globals.css but never actually loaded anywhere (no
+    // @font-face, no next/font, no Google Fonts link), so every platform's
+    // browser silently falls through to whichever real font its OS resolves
+    // for `system-ui`/`sans-serif`, and getComputedStyle cannot name that.
+    // Canvas measureText(), run with that same declared stack, DOES reflect
+    // whatever font the browser actually substituted -- a comparable,
+    // OS-dependent NUMBER instead of an unchanging string, which is the
+    // thing that would actually explain a cross-environment width delta.
+    const probeText = 'Belize Marketplace And Logistics 0123456789';
+    const bodyFont = getComputedStyle(document.body).fontFamily;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    let fontProbe: { declaredStack: string; measuredWidthPx: number | null } = { declaredStack: bodyFont, measuredWidthPx: null };
+    if (ctx) {
+      ctx.font = `700 16px ${bodyFont}`;
+      fontProbe = { declaredStack: bodyFont, measuredWidthPx: Math.round(ctx.measureText(probeText).width * 100) / 100 };
+    }
+
+    return { widest: best, pastViewport: pastViewport.slice(0, 5), fontProbe };
+  });
+  // eslint-disable-next-line no-console
+  console.log(
+    `[MDF-279 diagnostic] route=${route} scrollWidth=${scrollWidth} clientWidth=${clientWidth} widest=${JSON.stringify(
+      widest.widest,
+    )} pastViewport=${JSON.stringify(widest.pastViewport)} fontProbe=${JSON.stringify(widest.fontProbe)}`,
+  );
+}
+
 test.describe('no page ever scrolls sideways, at any required breakpoint', () => {
   for (const width of WIDTHS) {
     for (const route of ROUTES) {
@@ -106,6 +180,7 @@ test.describe('no page scrolls sideways at 320px either', () => {
       await page.setViewportSize({ width: 320, height: 900 });
       await page.goto(route);
       const { scrollWidth, clientWidth } = await noHorizontalOverflow(page);
+      await logOverflowDiagnostic(page, route, scrollWidth, clientWidth);
       expect(scrollWidth, `scrollWidth ${scrollWidth} vs clientWidth ${clientWidth} at 320px on ${route}`).toBeLessThanOrEqual(clientWidth + 1);
     });
   }
