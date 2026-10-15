@@ -129,16 +129,25 @@ describe('public Header mobile menu (P2)', () => {
     expect(panel()!.textContent).not.toContain('Sign out');
   });
 
-  it('shows sign out for a signed-in member, inside the account menu', async () => {
+  it('shows sign out as its own always-visible row for a signed-in member — no second tap on the account menu needed (mobile logout-undiscoverable fix)', async () => {
     await mount('signed-in');
     await openMenu();
     // Guard: the mobile list rendered and holds the account menu.
     expect(panel()!.textContent).toContain('Rae');
     expect(panel()!.textContent).not.toContain('Sign in');
-    expect(panel()!.textContent).not.toContain('Sign out');
+    // The defect this answers: Sign out used to exist in the DOM only after
+    // tapping the avatar/name row, which is itself an undisclosed disclosure
+    // trigger. It is now visible the moment the mobile list itself is open.
+    expect(panel()!.textContent).toContain('Sign out');
+    // Tapping the account-menu trigger still works, and still offers the
+    // account actions — this fix adds a row, it does not remove the panel.
     const trigger = panel()!.querySelector<HTMLButtonElement>('button[aria-haspopup="true"]')!;
     await act(async () => trigger.click());
-    expect(panel()!.textContent).toContain('Sign out');
+    expect(panel()!.textContent).toContain('Dashboard');
+    expect(panel()!.textContent).toContain('Profile');
+    // Exactly one Sign out, not a second one inside the now-open panel.
+    const signOuts = Array.from(panel()!.querySelectorAll('button')).filter((b) => b.textContent === 'Sign out');
+    expect(signOuts).toHaveLength(1);
   });
 
   it('closes the list when the window grows to desktop width', async () => {

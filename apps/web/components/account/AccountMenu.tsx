@@ -27,6 +27,18 @@ export type AccountMenuTone = 'dark' | 'light';
  *
  * Sign-out is UX only. The server still decides every request; this only
  * clears the session cookie and moves the person to a signed-out page.
+ *
+ * `extraSignOutRow` exists because both mobile hosts of this component (the
+ * dashboard drawer and the public header's own mobile list) embed it as the
+ * very last thing already open on the screen — so its own avatar/name button
+ * reads as a second, unlabelled disclosure a person has to find and tap
+ * before Sign out exists in the DOM at all. Measured live (real browser,
+ * three viewports): reachable by scroll, never discoverable without that
+ * extra tap. This prop renders Sign out a second time, always visible, as a
+ * flat top-level row — same handler, same behaviour, no route/guard/session
+ * change — and hides the one inside the panel so there is exactly one
+ * visible Sign out, not two. Desktop callers never pass it, so desktop is
+ * unchanged.
  */
 export function AccountMenu({
   me,
@@ -34,6 +46,7 @@ export function AccountMenu({
   afterSignOut = '/login',
   onSignedOut,
   onNavigate,
+  extraSignOutRow = false,
 }: {
   me: MeView;
   tone: AccountMenuTone;
@@ -43,6 +56,8 @@ export function AccountMenu({
   onSignedOut?: () => void;
   /** Lets a host close itself on navigation (the phone drawer). */
   onNavigate?: () => void;
+  /** Mobile hosts only — see the doc comment above. */
+  extraSignOutRow?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -145,10 +160,20 @@ export function AccountMenu({
           <Link href="/orders" onClick={close} className={itemClass}>
             My orders
           </Link>
-          <button type="button" onClick={signOut} className={`${itemClass} w-full text-left`}>
-            Sign out
-          </button>
+          {!extraSignOutRow && (
+            <button type="button" onClick={signOut} className={`${itemClass} w-full text-left`}>
+              Sign out
+            </button>
+          )}
         </div>
+      )}
+
+      {/* Always in the DOM, no tap on the avatar required to reach it — the
+          fix for the mobile logout-undiscoverable defect. */}
+      {extraSignOutRow && (
+        <button type="button" onClick={signOut} className={`${itemClass} mt-1 w-full text-left`}>
+          Sign out
+        </button>
       )}
     </div>
   );

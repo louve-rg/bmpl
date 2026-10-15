@@ -250,7 +250,7 @@ export function Header() {
 
             {me === undefined ? null : me ? (
               <div className="mt-2 border-t border-white/10 pt-2">
-                <AccountMenu me={me} tone="dark" afterSignOut="/" onSignedOut={signedOut} onNavigate={() => setOpen(false)} />
+                <AccountMenu me={me} tone="dark" afterSignOut="/" onSignedOut={signedOut} onNavigate={() => setOpen(false)} extraSignOutRow />
               </div>
             ) : (
               <div className="mt-2 flex gap-3">
