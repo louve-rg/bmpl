@@ -36,7 +36,7 @@ export interface ProductCardData {
  */
 export function ProductCard({ product: p, className = '' }: { product: ProductCardData; className?: string }) {
   return (
-    <div className={`relative h-full ${className}`}>
+    <div className={`relative h-full min-w-0 ${className}`}>
       <Link
         href={`/products/${p.slug}`}
         className="group flex h-full flex-col rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md"
@@ -49,7 +49,7 @@ export function ProductCard({ product: p, className = '' }: { product: ProductCa
             'No image'
           )}
         </div>
-        <p className="mt-3 font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
+        <p className="mt-3 break-words font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
         <p className="text-xs text-slate-400">
           {p.vendor.businessName}
           {p.category?.name ? ` · ${p.category.name}` : ''}

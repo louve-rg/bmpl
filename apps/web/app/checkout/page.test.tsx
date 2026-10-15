@@ -144,7 +144,7 @@ vi.mock('../../lib/api', () => ({
 // LocationPicker only mounts once a vendor is switched to DELIVERY below.
 vi.mock('leaflet', () => ({
   default: {
-    map: vi.fn(() => ({ setView: vi.fn(), on: vi.fn(), getZoom: vi.fn(() => 13), invalidateSize: vi.fn(), remove: vi.fn(), fitBounds: vi.fn() })),
+    map: vi.fn(() => ({ setView: vi.fn(), on: vi.fn(), getZoom: vi.fn(() => 13), invalidateSize: vi.fn(), remove: vi.fn(), fitBounds: vi.fn(), dragging: { enable: vi.fn(), disable: vi.fn() } })),
     tileLayer: vi.fn(() => ({ addTo: vi.fn().mockReturnThis() })),
     divIcon: vi.fn(() => ({})),
     marker: vi.fn(() => ({

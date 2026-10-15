@@ -242,25 +242,40 @@ repository, not a gap in this table. "Edward acceptance status" is **NOT
 ACCEPTED** for every row below, with zero exceptions — see the search
 documented above (zero of twelve found anywhere in the hive) — regardless
 of what engineering, this team's own QA passes, or this document's own
-language elsewhere says. Two rows (8, 10) have live verification work in
-progress (Dwight on 8, Jim on 10, per the owner's own framing) and are
-marked **IN VERIFICATION** in the column that work actually affects, with no
-outcome pre-written for either.
+language elsewhere says.
+
+**Update, 2026-10-15 — Jim's MDF-238 live walk is complete and folded into
+every row's "Local integration evidence" cell below, and nothing else.**
+Method: real browser/manual + direct API calls + direct Postgres reads
+against real fixture accounts on the local stack (`bmpl-jim`, real
+Postgres/Redis/MinIO) — not unit tests, and **not production**. 12 of 12
+requirements now have at least one live walk (or a verified null-diff
+against an earlier one) on record; 0 of 12 have a recorded acceptance from
+Edward, unchanged. **This evidence fills "Local integration evidence" only
+— it does not touch "Production verification" (unchanged below) or "Edward
+acceptance status" (still NOT ACCEPTED, zero exceptions), by Jim's own
+explicit statement for all twelve and by this document's standing rule that
+the three are never collapsed.** One row (8) still carries an **IN
+VERIFICATION** tag, now narrowed by a separate pass (Dwight/QA, MDF-247) to
+the single owner/Edward scope question that remains blocked; that same pass
+independently resolved requirement 8's other open item (the real-phone
+touch-drag question) as a **testing gap, confirmed working**, so it no
+longer carries an IN VERIFICATION tag — see row 8 and §8 below.
 
 | # | Exact requirement | Implemented functionality | Relevant merged PRs | Local integration evidence | Production verification where available | Remaining gap or owner decision | Edward acceptance status |
 | - | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Vendor location-level inventory & fulfilment origin | Per-location inventory derivation (API) and an admin-only "Fulfilled from" display | #259 (`bad7b3f`) API; #273 (`74cbcd6`) admin UI | See §1 below for named tests (carried forward, not re-run this pass) | DEPLOYED (api `1fec2bb`, admin `015d665` — both ancestors, transitively via `effc63e`); NO RECORD of a live-behaviour observation | "Fulfilled from" does not appear on the customer's or vendor's own order view — admin-only today | NOT ACCEPTED (no record) |
-| 2 | Package pickup/handoff photo | Upload/view for sender, staff, courier and linked recipient | #127 (`682b501`) API; #270 (`a568d6a`) UI; #304/#305 (`66487e4`/`0c322d6`) recipient access | See §2 below for named tests (carried forward, not re-run this pass) | DEPLOYED (api+web+admin, all ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
-| 3 | Recipient account linking & incoming-shipment tracking | Linking + `listIncoming` tracking | #135 (`a6b7d97`, BMPL-179) | See §3 below for named tests (carried forward, not re-run this pass) | DEPLOYED (api, ancestor transitively); NO RECORD of a live-behaviour observation | Two policy questions open under BMPL-119 — not implementation gaps | NOT ACCEPTED (no record) |
-| 4 | Granular driver service areas (district → city) | API + city picker, wired to the lane-town endpoint | #126 (`3950db0`) API; #272 (`99e98c1`) picker; #279 (`2cbcf73`) wiring | See §4 below for named tests (carried forward, not re-run this pass) | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
-| 5 | Operating hours & closed/soon-closing handling | Vendor-hours dispatch, closing-soon warning, terminal half, closed-now badge, one-off closures | #248/#255/BMPL-262/BMPL-271/BMPL-273/BMPL-335/BMPL-334 (nine commits, see §5) | See §5 below for named tests (carried forward, not re-run this pass) | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
-| 6 | Handoff-chain security & an end-to-end walk test | Handoff-chain security + a named walk test | #117 (`6676d68`); #257 (`cbc6765`, BMPL-337) | `cbc6765`'s own walk test (named in §6) | DEPLOYED (api, ancestor transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
-| 7 | Courier & vehicle identification once assigned | Identification for the booking customer; recipient messaging wired end-to-end (API+web) | #119 (`a4fb20d`); #293 (`910d5b2`, BMPL-359, API); #314/#315 (`c7690a5`/`5c11021`, UI) | `RECIPIENT_VIEW_INCLUDE` re-checked directly (no `assignedDriver`/`assignedVehicle`) — ruled state, not an unread gap | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | Recipient-facing courier identity restricted by [Ruling 13](./OWNER-RULINGS.md#ruling-13) — owner decision, not an engineering gap | NOT ACCEPTED (no record) |
-| 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | Full-screen multi-stop map for shipping and marketplace delivery driver screens | #121 (`4eac6e8`), #129 (`c99a596`), #255 (`1161a6f`), #302 (`16e4b4b`, marketplace) | 2026-09-26 real-browser mobile audit (environment not named as production); real-phone touch-drag pan still unconfirmed | DEPLOYED (api+web, ancestors transitively); NO RECORD of a production observation | **IN VERIFICATION (Dwight, MDF-247):** whether a two-stop marketplace delivery was ever meant to satisfy the A/B/C/D wording at all — unsettled, no outcome pre-written here | NOT ACCEPTED (no record) |
-| 9 | Saved addresses — label, CRUD, default, delete-safety | Full CRUD, default, delete-safety, standalone manage page, un-default-without-delete | #122 (`c4b9f2b`); #323 (`444a1ec`); #336 (`9ec6764`) | Default/delete-safety re-verified directly against source (§9) | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
-| 10 | Cancellation before custody, failed delivery, return-to-sender | Custody-boundary cancel; return/reroute two-step charge fix (Ruling 1); failed-delivery API trigger **and, as of this pass, its web screen** — see correction below | #271/#288/#285/#306/#308/#309/#312/#318 (return/reroute chain); #365 (`e4b4be7`, MDF-96, API trigger); **#393 (`9f5c3c8`) — the "Report an issue" screen, closing the previously-reported "no screen anywhere" gap; #398/#401 reconcile it against the EXCEPTION-blocks-progression rule** | See §10 below for the five named API-side test files (not re-run this pass); **new this pass: `apps/web/app/dashboard/driver/shipping/[id]/page.test.tsx`'s "report an issue (MDF-96)" and "report-issue is itself blocked during an open exception" describe blocks, read directly from the diff** | DEPLOYED (api `1fec2bb` incl. `e4b4be7`; web `68d7ff0` incl. `9f5c3c8`/`e9eb27a`/`ecb83d5`; admin `015d665` incl. `5fe37cf`); **NO RECORD** of anyone watching any of it work in production | Decision memo on the fuller failed-delivery workflow still in progress (Ruling 14; Pam) — may be narrower now that #393 shipped one concrete answer. **Disclosed limitation in #393 itself: the "reported" confirmation is client-side only and does not survive a page reload** — `ShipmentDriverService#serialize` has no field to reconstruct it from. **IN VERIFICATION (Jim, MDF-238):** the broader 12-requirement walk is in progress; no outcome pre-written here | NOT ACCEPTED (no record) |
-| 11 | Recipient availability windows & updates | Availability windows, read + write, sender and recipient sides; **ETA now recomputes on a window change, as of this pass** | #179 (`a6b7d97`, BMPL-179); BMPL-344 (`a6f81bb`); **#403 (`817bf5c`) — `setAvailabilityWindows` now triggers the same ETA-change notice every other ETA-affecting write already does**; **#416 (`7151c95`) — the sender-UI piece gained a named behavioural test** | New this pass: `apps/api/test/shipment-availability-windows-eta.integration.spec.ts` and `AvailabilityWindows.test.tsx` (256 added lines) — both named in §11 below; sha already given in the merged-PRs column | DEPLOYED (api+web, both `#403`/`#416` ancestors of live `1fec2bb`/`68d7ff0`, confirmed directly); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
-| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | All four pieces have a merged API and a staff trigger; **the availability-window ETA gap (see req 11) also closes this requirement's own notice path** | ETA: `f1bbfce`/`e56c425` (BMPL-340/346); notice: `e7ef2ed` (BMPL-345); hold/reroute: `7ff34a1`/`5fe37cf` (BMPL-343, PR #275/#309); schedule exceptions: `fcc3592` (BMPL-186); **#403 (`817bf5c`) closes the availability-window gap** | Named per-piece tests in §12 (`shipment-eta...spec.ts`, `shipment-eta-notification...spec.ts`, `shipment-reroute...spec.ts`, `shipment-return-to-sender...spec.ts`, `ExceptionResolution.test.tsx`, plus #403's new test above) | DEPLOYED (api+web+admin, all ancestors transitively, re-confirmed against the new anchors this pass); all migration-bearing commits: **expected but unverified**, never "applied" (see methodology above); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 1 | Vendor location-level inventory & fulfilment origin | Per-location inventory derivation (API) and an admin-only "Fulfilled from" display | #259 (`bad7b3f`) API; #273 (`74cbcd6`) admin UI | See §1 below for named tests (carried forward, not re-run this pass); Jim's MDF-238 pass (2026-10-15) did not re-walk this a second time, citing the admin-only live finding already captured above as current | DEPLOYED (api `1fec2bb`, admin `015d665` — both ancestors, transitively via `effc63e`); NO RECORD of a live-behaviour observation | "Fulfilled from" does not appear on the customer's or vendor's own order view — admin-only today | NOT ACCEPTED (no record) |
+| 2 | Package pickup/handoff photo | Upload/view for sender, staff, courier and linked recipient | #127 (`682b501`) API; #270 (`a568d6a`) UI; #304/#305 (`66487e4`/`0c322d6`) recipient access | See §2 below for named tests (carried forward, not re-run this pass); **Jim's MDF-238 live walk (2026-10-15): clean** — all four audiences confirmed live (sender sees the real MinIO URL, linked recipient sees the same photo under `steps[].pickupPhotoUrls`, staff via the admin route, anonymous tracking shows none); the one item that had rested only on a named test (re-upload not duplicating the pickup-audit row) was walked live: a second upload grew `handoffPhotoKeys` to 2, the audit row count stayed at 1, same row id both times | DEPLOYED (api+web+admin, all ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 3 | Recipient account linking & incoming-shipment tracking | Linking + `listIncoming` tracking | #135 (`a6b7d97`, BMPL-179) | See §3 below for named tests (carried forward, not re-run this pass); **Jim's MDF-238 live walk (2026-10-15): clean** — a same-`isTest` claim succeeds; a cross-`isTest` claim (real account claiming a test shipment) correctly refuses even with an exact email match, so the `isTest` boundary holds, not just the email check. **The 5-failed-attempt rate limit was not exercised** (named as a time-budget limitation, not a skipped check) | DEPLOYED (api, ancestor transitively); NO RECORD of a live-behaviour observation | Two policy questions open under BMPL-119 — not implementation gaps | NOT ACCEPTED (no record) |
+| 4 | Granular driver service areas (district → city) | API + city picker, wired to the lane-town endpoint | #126 (`3950db0`) API; #272 (`99e98c1`) picker; #279 (`2cbcf73`) wiring | See §4 below for named tests (carried forward, not re-run this pass); **Jim's MDF-238 live walk (2026-10-15): clean** — narrowed a real driver to one city, a delivery to a different city sat `PENDING_ASSIGNMENT` through two dispatch sweeps, widened back, same delivery auto-assigned next sweep; both directions proven live and reversible — the live demonstration behind the "service-area, not home-district" hypothesis | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 5 | Operating hours & closed/soon-closing handling | Vendor-hours dispatch, closing-soon warning, terminal half, closed-now badge, one-off closures | #248/#255/BMPL-262/BMPL-271/BMPL-273/BMPL-335/BMPL-334 (nine commits, see §5) | See §5 below for named tests (carried forward, not re-run this pass); **Jim's MDF-238 live walk (2026-10-15): clean** — closed store shows the real badge, order still placeable while closed (hours gate dispatch, not ordering), reopened store makes the driver eligible again immediately; re-walked after an unrelated PR (#400) touched the same screen, confirming a real DB write (`storeStatus` CLOSED→OPEN, not client-only) before restoring the shared fixture back to CLOSED for other agents' walks | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 6 | Handoff-chain security & an end-to-end walk test | Handoff-chain security + a named walk test | #117 (`6676d68`); #257 (`cbc6765`, BMPL-337) | `cbc6765`'s own walk test (named in §6); **Jim's MDF-238 live walk (2026-10-15): clean** — wrong PIN refused and counted; a different courier (staff impersonating via the admin route) refused on the same shared `handoffPinAttempts` counter, not a per-actor one; right PIN by the right courier succeeds with the custody count +1 exactly; the PIN never leaks on the driver's own job view, anonymous tracking, or staff's default read, only the dedicated `logistics.verify` endpoint returns it. **Walked live exactly once, by deliberate choice** — nothing since has touched the handoff/lockout code, and the owner explicitly forbade repeating unchanged work | DEPLOYED (api, ancestor transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 7 | Courier & vehicle identification once assigned | Identification for the booking customer; recipient messaging wired end-to-end (API+web) | #119 (`a4fb20d`); #293 (`910d5b2`, BMPL-359, API); #314/#315 (`c7690a5`/`5c11021`, UI) | `RECIPIENT_VIEW_INCLUDE` re-checked directly (no `assignedDriver`/`assignedVehicle`) — ruled state, not an unread gap; **Jim's MDF-238 live walk (2026-10-15): clean** — booking-customer messaging confirmed to materialize only after accept (a real null-to-real transition), a real message round-trips driver↔customer, and the same anonymous-tracking response confirms `assignedDriver`/`assignedVehicle` absent from both the shipment and the leg, matching Ruling 13 structurally and empirically at once. **Walked live exactly once, by deliberate choice** — nothing since has touched the messaging/anonymous-tracking code, and the owner explicitly forbade repeating unchanged work | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | Recipient-facing courier identity restricted by [Ruling 13](./OWNER-RULINGS.md#ruling-13) — owner decision, not an engineering gap | NOT ACCEPTED (no record) |
+| 8 | Expandable maps & A/B/C/D route stops (pre-acceptance) | Full-screen multi-stop map for shipping and marketplace delivery driver screens | #121 (`4eac6e8`), #129 (`c99a596`), #255 (`1161a6f`), #302 (`16e4b4b`, marketplace) | 2026-09-26 real-browser mobile audit (environment not named as production); **Jim's MDF-238 live walk (2026-10-15): clean** — pre-acceptance pin gating confirmed identical in both the marketplace and shipping code paths; multi-stop route data confirmed real (4 points via requirement 12's own shipment, not capped at 2). **Touch-drag pan resolved this pass (Dwight/QA, MDF-247, and Ryan):** structurally a TESTING gap, not a functional one — the only two `L.map()` sites (`MapPreview.tsx:90-99`, `LocationPicker.tsx:271-275`) set no `dragging`/`touchZoom` override, so both inherit Leaflet's unmodified defaults; Ryan then dispatched real touch events through the Chrome DevTools Protocol and observed touch panning actually work on both Leaflet maps — the 2026-09-26 audit's inability to confirm it was a headless pointer-event-emulation harness artifact, not a product defect | DEPLOYED (api+web, ancestors transitively); NO RECORD of a production observation | **IN VERIFICATION (Dwight/QA, MDF-247 — narrowed 2026-10-15):** the only item still open is the owner/Edward scope question — whether a two-stop marketplace delivery was ever meant to satisfy the A/B/C/D wording at all; unsettled, no outcome pre-written here. The touch-drag question (left column) is no longer open | NOT ACCEPTED (no record) |
+| 9 | Saved addresses — label, CRUD, default, delete-safety | Full CRUD, default, delete-safety, standalone manage page, un-default-without-delete | #122 (`c4b9f2b`); #323 (`444a1ec`); #336 (`9ec6764`) | Default/delete-safety re-verified directly against source (§9); **Jim's MDF-238 live walk (2026-10-15): clean** — add/edit-label/default/delete all confirmed working live; deleting the current default while a second address exists auto-promotes the remaining one live, with no manual step | DEPLOYED (api+web, ancestors transitively); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 10 | Cancellation before custody, failed delivery, return-to-sender | Custody-boundary cancel; return/reroute two-step charge fix (Ruling 1); failed-delivery API trigger **and, as of this pass, its web screen** — see correction below | #271/#288/#285/#306/#308/#309/#312/#318 (return/reroute chain); #365 (`e4b4be7`, MDF-96, API trigger); **#393 (`9f5c3c8`) — the "Report an issue" screen, closing the previously-reported "no screen anywhere" gap; #398/#401 reconcile it against the EXCEPTION-blocks-progression rule**; #428 (`8d84c59`) closes a courier-self-report test gap | See §10 below for the five named API-side test files (not re-run this pass); **new this pass: `apps/web/app/dashboard/driver/shipping/[id]/page.test.tsx`'s "report an issue (MDF-96)" and "report-issue is itself blocked during an open exception" describe blocks, read directly from the diff; Jim's MDF-238 live walk (2026-10-13 through 2026-10-15) is recorded in full in §10 below, including a live-proven defect he found on 2026-10-13 (same-window fix: #398/#401) and his own later, separately retracted re-finding of what looked like the same gap — both named, not smoothed over** | DEPLOYED (api `1fec2bb` incl. `e4b4be7`; web `68d7ff0` incl. `9f5c3c8`/`e9eb27a`/`ecb83d5`; admin `015d665` incl. `5fe37cf`); **NO RECORD** of anyone watching any of it work in production | Decision memo on the fuller failed-delivery workflow still in progress (Ruling 14; Pam) — may be narrower now that #393 shipped one concrete answer. **Disclosed limitation in #393 itself: the "reported" confirmation is client-side only and does not survive a page reload** — `ShipmentDriverService#serialize` has no field to reconstruct it from. Jim's MDF-238 walk is complete for this row (no longer IN VERIFICATION) — see §10 below for the full account | NOT ACCEPTED (no record) |
+| 11 | Recipient availability windows & updates | Availability windows, read + write, sender and recipient sides; **ETA now recomputes on a window change, as of this pass** | #179 (`a6b7d97`, BMPL-179); BMPL-344 (`a6f81bb`); **#403 (`817bf5c`) — `setAvailabilityWindows` now triggers the same ETA-change notice every other ETA-affecting write already does**; **#416 (`7151c95`) — the sender-UI piece gained a named behavioural test** | New this pass: `apps/api/test/shipment-availability-windows-eta.integration.spec.ts` and `AvailabilityWindows.test.tsx` (256 added lines) — both named in §11 below; sha already given in the merged-PRs column; **Jim's MDF-238 live walk (2026-10-15): clean** — sender and recipient set independent windows on the same shipment, each side's own row isolated from the other's, structural (`allowedRoles` differs by role, not incidental) | DEPLOYED (api+web, both `#403`/`#416` ancestors of live `1fec2bb`/`68d7ff0`, confirmed directly); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
+| 12 | Multi-leg ETA, material ETA-change notice, terminal hold/reroute, carrier schedule exceptions | All four pieces have a merged API and a staff trigger; **the availability-window ETA gap (see req 11) also closes this requirement's own notice path** | ETA: `f1bbfce`/`e56c425` (BMPL-340/346); notice: `e7ef2ed` (BMPL-345); hold/reroute: `7ff34a1`/`5fe37cf` (BMPL-343, PR #275/#309); schedule exceptions: `fcc3592` (BMPL-186); **#403 (`817bf5c`) closes the availability-window gap** | Named per-piece tests in §12 (`shipment-eta...spec.ts`, `shipment-eta-notification...spec.ts`, `shipment-reroute...spec.ts`, `shipment-return-to-sender...spec.ts`, `ExceptionResolution.test.tsx`, plus #403's new test above); **Jim's MDF-238 live walk (2026-10-15): clean on all 5 pieces, including the 2 originally time-boxed on his first pass (reroute-prepares-only, date-specific schedule exception) — see §12 below for the per-piece account, including the ETA-notification fix he walked live himself** | DEPLOYED (api+web+admin, all ancestors transitively, re-confirmed against the new anchors this pass); all migration-bearing commits: **expected but unverified**, never "applied" (see methodology above); NO RECORD of a live-behaviour observation | None open as of this pass | NOT ACCEPTED (no record) |
 
 **Summary: 11 of 12 requirements have fully shipped, deployed functionality
 (every PR cited above confirmed an ancestor of this pass's live commit for
@@ -996,9 +1011,10 @@ no new capability and no schema change. Until then, requirement 7 is
   (`4936812`) and `apps/web`'s (`5b2b0a9`) live commits.
 - PRODUCTION-VERIFIED: **no record.** The 2026-09-26 mobile audit
   (described below) does not state which environment it ran against —
-  not named as production, so not counted as one. The one explicitly
-  uncertain item from that audit (a real-phone touch-drag pan) is also
-  still open.
+  not named as production, so not counted as one. The touch-drag question
+  that audit left open is resolved as of 2026-10-15 (see below) — but by a
+  local-stack live walk and a Chrome-DevTools-Protocol touch dispatch,
+  neither of which is production, so this rung is unchanged.
 
 **Status: done for both shipping's multi-hub job maps and marketplace
 delivery, as of `16e4b4b`.** `apps/web/app/dashboard/driver/jobs/[id]` (the
@@ -1057,9 +1073,7 @@ this half either.
 **Acceptance criteria:** as a driver on a multi-hub shipping job, open the
 job's map and confirm it expands full-screen and shows every real stop the
 leg actually routes through (not capped at two points), with zoom/scroll
-working on both desktop and a real mobile device (the one unresolved item
-from the 2026-09-26 audit is a real-phone touch-drag pan check — confirm
-that specifically, not just the emulated one). As a marketplace delivery
+working on both desktop and a real mobile device. As a marketplace delivery
 driver, open a job before the customer has accepted and confirm the
 door-end pin is absent, not merely hidden; confirm it appears once
 accepted. **Not yet acceptance-testable:** whether a two-stop marketplace
@@ -1071,9 +1085,46 @@ previous pass concluded (MDF-240, done) with no defect reported against
 this requirement's screens, so this section's engineering content is
 unchanged. **The open item is the scope question above, now carded as
 MDF-247 ("was 2-stop marketplace delivery ever meant to satisfy the A/B/C/D
-route wording?"), status `doing`.** This is IN VERIFICATION, not a code
-gap — no outcome is pre-written here; whichever way it resolves, this
-document records it when it lands, not before.
+route wording?"), status `blocked`** — on that one owner/Edward scope
+reading only, per the owner's own instruction not to interpret an ambiguous
+requirement on Edward's behalf. This is IN VERIFICATION, not a code gap —
+no outcome is pre-written here; whichever way it resolves, this document
+records it when it lands, not before.
+
+**Update, 2026-10-15 — the real-phone touch-drag question (the other open
+item from the 2026-09-26 audit, separate from the MDF-247 scope question
+above) is resolved, not merely re-asserted:**
+
+- MDF-247's own working pass (QA/Dwight) confirmed structurally that this
+  is a **TESTING gap, not a functional one**: the only two places a Leaflet
+  map is constructed in this codebase — `apps/web/components/maps/MapPreview.tsx:90-99`
+  and `apps/web/components/maps/LocationPicker.tsx:271-275` — pass option
+  objects with no `dragging`, `touchZoom`, or `tap` override at all, so both
+  inherit Leaflet's unmodified defaults (`dragging: true`, `touchZoom: true`
+  on any touch-capable browser). There is no conditional, feature flag, or
+  device-detection branch in either file that could make touch input take a
+  different path from mouse input — there is no code slot for a missing
+  touch-drag feature to occupy.
+- The diagnostic for why the 2026-09-26 audit could not confirm it: that
+  audit saw the *same* map pan correctly under synthetic mouse-drag events,
+  and a *different* map on the identical Leaflet defaults pan correctly
+  under synthetic touch events on desktop. A missing or disabled handler
+  fails the same way in every context; behaviour that changes with the
+  harness and not with the code is a harness artifact, not a product defect.
+- Ryan then dispatched real touch events through the Chrome DevTools
+  Protocol (a lower-level, more faithful touch simulation than the original
+  DOM-synthetic events) against both maps and **observed touch panning
+  actually work**. This is not literally a physical-phone check — that
+  remains, strictly, not done — but it is accepted on this floor as closing
+  the testing gap, consistent with the structural finding above that there
+  is no touch-specific code path left to fail.
+- One unrelated finding surfaced by the same touch-dispatch pass: a
+  one-finger page-scroll trap on `LocationPicker` (checkout) and
+  `MapPreview`, where the existing `touch-action: pan-y` CSS never prevented
+  it (Leaflet pans in its own JavaScript, which `touch-action` does not
+  govern). **This is not a requirement-8 matter** and is tracked on its own
+  card, noted here only so a reader does not mistake it for part of this
+  requirement's gap.
 
 ## 9. Saved addresses — label, CRUD, default, delete-safety
 
@@ -1337,6 +1388,68 @@ fact from before is unchanged and is not this row's gap: `DeliveryStatus`
 notification, `driver-jobs.service.ts`) records wrong PIN codes only, not
 a failed delivery attempt.
 
+**Jim's MDF-238 live walk — the full story, including his own retracted
+finding, named not omitted (2026-10-15):**
+
+1. **Original live walk (2026-10-13), a real finding.** Clicked "Report an
+   issue" as a real courier, confirmed `shipment_legs.status` flipped to
+   `EXCEPTION` in Postgres with the real reason text. Went further than the
+   known reload-confirmation gap already disclosed above: on the stale
+   post-reload screen, clicked "Start the trip" anyway — it worked. Reading
+   the live API response and a raw Postgres row at the same instant: the API
+   said `status: 'IN_TRANSIT'`, the database said
+   `shipment_legs.status: 'EXCEPTION'`, same row. The courier status machine
+   had no check against `EXCEPTION` at all, and the screen's own
+   confirmation copy claimed a hold ("this delivery is on hold") the backend
+   did not enforce. Reported as a live-proven defect — the same-instant
+   API-and-DB read rules out a stale-cache explanation.
+2. **Real fix shipped the same window.** PR #398/#401 (`e9eb27a`/`ecb83d5`,
+   merged 2026-10-13) established that an open `EXCEPTION` blocks further
+   courier progression, and PR #393's own branch corrected the "on hold"
+   copy to what `flagException` actually guarantees.
+3. **A separate, later mistaken re-finding (2026-10-14/15), named rather
+   than hidden.** On a later, unrelated task — reading code only, to verify
+   #385's release conditions, not a live walk and not authorized to run the
+   integration suite for that job — Jim read `markInTransit`/`markArriving`
+   (`simpleTransition`, `shipment-driver.service.ts:306-330`) in isolation
+   and concluded they checked only `assertAction` against the courier-facing
+   `DeliveryStatus` enum (which has no `EXCEPTION` value) and never touched
+   `leg.status` — the same shape as the original gap, apparently regressed.
+   He reported this as a functional gap. **It was wrong:** `simpleTransition`
+   on current `main` calls `this.assertNotException(leg)` immediately after
+   `assertAction`, one line past where his own read stopped. God
+   independently made the identical mistake reading the same function with a
+   line-range window that happened to end one line short of the same guard.
+   Both retracted it once the full function boundary was read. **Standing
+   lesson:** an absence can only be established by reading a function's
+   whole boundary, never a line-range window; a correct structural read of
+   one mechanism (the enum has no `EXCEPTION` value) does not prove the
+   absence of a second, independent guard in the same call path.
+4. **What survived from the mistaken re-finding.** No existing test had
+   exercised the courier-self-report path specifically — only the
+   staff-flagged path had a named test. That testing gap was real. PR #428
+   (`8d84c59`) closed it with a historical red-before-green-after proof:
+   cutting a throwaway branch from the commit immediately before `ecb83d5`,
+   cherry-picking only the new test, confirming it failed with the exact
+   false-success shape (`in-transit` returning `201` while the leg sat in
+   `EXCEPTION`), then confirming it passes on current `main`.
+
+**Current net state of requirement 10, per the same pass:** both the
+trigger (#365) and the screen (#393) are merged and deployed; the
+`EXCEPTION`-blocks-progression guard is real and on `main` (#401); the
+courier-reason-exposure concern is clean — `ShipmentDriverService#serialize`
+has no `exceptionReason` field anywhere in its shape. The separate,
+already-escalated **customer**-facing `exceptionReason` leak
+(`shipment.service.ts`, `ShipmentJourney.tsx`) was Pam's MDF-243 — not this
+requirement's gap — and has since merged as `35caa61` (PR #425,
+2026-10-15): raw staff-entered exception reasons no longer reach a customer,
+recipient or courier; staff keep the complete internal record through the
+same audience-gate precedent `carrierBookingRef`/`courierStatus` already
+used. **Not independently re-verified by this document for this pass** —
+cited from the merged PR and the kanban record, consistent with this
+document's rule that a merge is MERGED, not yet re-read as a fact here; §10
+above still correctly says PRODUCTION-VERIFIED has no record for any of this.
+
 `MDF-96` asked whether the owner expects the courier themselves to report
 a failed attempt, or whether the existing staff-exception workflow is what
 he meant.
@@ -1590,6 +1703,15 @@ Four distinct pieces, per the owner's original requirement:
   against the production database is expected but unverified, same as
   every other migration-bearing commit in this document — see the
   methodology section at the top, and the Evidence ladder above.
+  **Jim's MDF-238 live walk (2026-10-15) found a real gap on this exact
+  path and then closed it live, same pass:** a recipient's own
+  availability-window change moved the real ETA but fired no notification
+  at all, since the trigger only lived on leg-transition/`scheduleLeg` —
+  reported as a finding-plus-product-question, not fixed by him; **closed
+  once #403 (`817bf5c`) added the window-change trigger**, which he then
+  walked live himself — moved a recipient's window, watched a real
+  `SHIPMENT_ETA_CHANGED` notification fire with the exact before/after ETA
+  in its body, matching his own independent before/after reads.
 - **Terminal hold / reroute / return for a recipient known to be
   unavailable.** **API done as of `7ff34a1` (BMPL-356/343, PR #275); no
   staff screen as of `7ff34a1`.** Merged after this very edit started — the dispatch that
@@ -1627,14 +1749,26 @@ Four distinct pieces, per the owner's original requirement:
   Ruling 1 and this requirement ask for. Adjacent to
   requirement 10 but proactive (before dispatch reaches
   the recipient) rather than reactive (after a failed delivery attempt).
-  Tracked as BMPL-343.
+  Tracked as BMPL-343. **Jim's MDF-238 live walk (2026-10-15), closing an
+  item he had originally time-boxed on an earlier pass:** `flagException`
+  correctly notifies the recipient, not just staff/sender, confirmed live;
+  separately, the reroute/return "only prepares" claim above was walked
+  live end to end — staff's call creates a `ShipmentRoutingProposal` row and
+  no new shipment, and the shipment's own customer's confirm call is what
+  actually creates the new shipment and payment, matching Ruling 1 exactly,
+  amount matching to the minor unit.
 - **Date-specific carrier schedule exceptions.** **The one slice that is
   done** — `RouteOperatingDay` + `RouteScheduleException` (BMPL-186, merged
   `fcc3592`) already provide the weekly default and date-specific overrides,
   found by audit rather than built again. It shipped and is documented under
   BMPL-184 because that is the card the audit was run against — a card
   boundary, not a requirement boundary; it belongs here on the owner's own
-  list.
+  list. **Jim's MDF-238 live walk (2026-10-15), closing the other item he
+  had originally time-boxed:** a route-schedule exception entered for
+  today's date correctly refuses departure with the staff-entered reason,
+  the leg's status provably untouched in the database, and a no-exception
+  baseline on the same route departs cleanly first, isolating the refusal
+  to the exception itself.
 
 **Why this mattered more than a missing row:** this requirement was never
 carded by the BMPL-185 dependency-mapping pass that produced BMPL-174

@@ -44,6 +44,7 @@ vi.mock('leaflet', () => {
       invalidateSize: vi.fn(),
       remove: vi.fn(),
       fitBounds: vi.fn(),
+      dragging: { enable: vi.fn(), disable: vi.fn() },
     };
   }
   const L = {
