@@ -60,13 +60,13 @@ export default function OrdersPage() {
               <li key={o.id}>
                 <Link href={`/orders/${o.id}`} className="block transition hover:-translate-y-0.5">
                   <Card className="flex flex-wrap items-center justify-between gap-3 p-4 transition hover:border-belize-accent hover:shadow-bmpl-md">
-                    <div>
+                    <div className="min-w-0">
                       <p className="font-semibold text-belize-navy">{o.orderNumber}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="break-words text-xs text-slate-500">
                         {new Date(o.placedAt).toLocaleDateString()} · {o.itemCount} item{o.itemCount === 1 ? '' : 's'} · {o.vendorCount} store{o.vendorCount === 1 ? '' : 's'} · {o.vendors.join(', ')}
                       </p>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex shrink-0 items-center gap-3">
                       <OrderStatusBadge status={o.status} />
                       <span className="font-semibold text-belize-navy">{money(o.totalMinor)}</span>
                     </div>

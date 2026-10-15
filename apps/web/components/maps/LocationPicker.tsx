@@ -9,6 +9,7 @@ import { BELIZE_BOUNDS, DISTRICT_CENTROIDS, OUT_OF_BOUNDS_MESSAGE, asDistrict, i
 import { api } from '../../lib/api';
 import { Alert, Button, Spinner } from '../ui';
 import { FullScreenMapModal } from './FullScreenMapModal';
+import { attachCooperativeMapDrag } from './cooperative-map-drag';
 
 interface GeocodeResult {
   label: string;
@@ -155,6 +156,7 @@ function LocationPickerBody({
   /** The translucent "somewhere in here" circle drawn around a GPS fix. */
   const accuracyRef = useRef<LeafletNS.Circle | null>(null);
   const leafletRef = useRef<typeof LeafletNS | null>(null);
+  const detachDragRef = useRef<(() => void) | null>(null);
   // Read inside the map callbacks without re-running the setup effect.
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -271,11 +273,16 @@ function LocationPickerBody({
       const map = L.map(containerRef.current, {
         center: [start.latitude, start.longitude],
         zoom: value ? PINNED_ZOOM : DEFAULT_ZOOM,
-        // Embedded: a map that swallows one-finger scroll traps the customer
-        // mid-checkout, so wheel/pinch-zoom stays off and dragging still pans.
-        // In the full-screen modal there is no page scroll to protect, so the
-        // map may as well own every gesture, the way a dedicated map screen
-        // normally does.
+        // Desktop mouse-wheel zoom only -- off when embedded so an accidental
+        // wheel-over doesn't hijack the page's own scroll, on for the
+        // full-screen modal with no page underneath to protect. Observed in
+        // Chromium with `hasTouch` at 375px, unfixed: this option alone (plus
+        // the container's `touchAction: 'pan-y'`, below) did not stop a
+        // one-finger swipe on the embedded map from panning the map instead
+        // of scrolling the page -- a longer swipe never advanced `scrollY`
+        // at all. `attachCooperativeMapDrag` (./cooperative-map-drag.ts),
+        // wired up below once the map exists, is the actual fix for touch;
+        // this option by itself only ever covered the desktop wheel.
         scrollWheelZoom: inModal,
         // Keep the customer inside the country they are ordering in.
         maxBounds: L.latLngBounds(
@@ -292,6 +299,12 @@ function LocationPickerBody({
       // Tapping the map is the manual placement path — no GPS required.
       map.on('click', (e: LeafletNS.LeafletMouseEvent) => place(e.latlng.lat, e.latlng.lng));
 
+      // Embedded only: the modal owns every gesture already (no page scroll
+      // underneath to protect), so this is deliberately skipped there.
+      if (!inModal) {
+        detachDragRef.current = attachCooperativeMapDrag(map, containerRef.current);
+      }
+
       mapRef.current = map;
       L.Marker.prototype.options.icon = icon;
       if (value) place(value.latitude, value.longitude, { pan: true, zoom: PINNED_ZOOM });
@@ -303,6 +316,8 @@ function LocationPickerBody({
 
     return () => {
       cancelled = true;
+      detachDragRef.current?.();
+      detachDragRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
       markerRef.current = null;
@@ -563,9 +578,12 @@ function LocationPickerBody({
           ? 'relative min-h-0 flex-1 bg-slate-100'
           : '-mx-2.5 mt-3 h-64 overflow-hidden border-y border-slate-200 bg-slate-100 sm:mx-0 sm:rounded-bmpl-md sm:border'
       }
-      // Embedded: pan-y lets a one-finger swipe keep scrolling the page past
-      // the map. In the modal there is no page underneath to protect, so the
-      // map owns every gesture (pinch-zoom included) directly.
+      // Embedded: pan-y disables the browser's own native pinch-zoom and
+      // horizontal pan on this element. Observed in Chromium with hasTouch
+      // at 375px: by itself (before `attachCooperativeMapDrag`, above) it
+      // did not stop a one-finger swipe here from panning the map instead
+      // of the page. In the modal there is no page underneath to protect,
+      // so the map owning every gesture is intentional, not a gap.
       style={{ touchAction: inModal ? 'none' : 'pan-y' }}
       role="application"
       aria-label="Map for choosing your delivery location. Use the current-location button, or tap the map to place the pin."

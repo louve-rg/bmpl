@@ -586,10 +586,11 @@ export class InventoryService {
     if (rows.length === 0) {
       return { inStock: true, lowStock: false, outOfStock: false, available: null, unlimited: false, allowBackorders: false };
     }
+    const effectiveRows = this.excludeOrphanProductRow(rows);
     // BMPL-175: a row that has adopted per-location tracking reports the SUM
     // across its locations, not its own (stale once adopted) columns.
-    const locMap = await this.locationMapFor(rows.map((r) => r.id));
-    const avails = rows.map((r) => this.effectiveFromMap(r, locMap));
+    const locMap = await this.locationMapFor(effectiveRows.map((r) => r.id));
+    const avails = effectiveRows.map((r) => this.effectiveFromMap(r, locMap));
     const unlimited = avails.some((a) => a.unlimited);
     return {
       inStock: avails.some((a) => a.inStock),
@@ -612,10 +613,11 @@ export class InventoryService {
     const out = new Map<string, { available: number | null; unlimited: boolean; status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'UNTRACKED' }>();
     if (!productIds.length) return out;
     const rows = await this.prisma.inventory.findMany({ where: { productId: { in: productIds } } });
+    const effectiveRows = this.excludeOrphanProductRow(rows);
     // BMPL-175: batched once for every row here, same reasoning as publicAvailability.
-    const locMap = await this.locationMapFor(rows.map((r) => r.id));
+    const locMap = await this.locationMapFor(effectiveRows.map((r) => r.id));
     const byProduct = new Map<string, ReturnType<InventoryService['availability']>[]>();
-    for (const r of rows) {
+    for (const r of effectiveRows) {
       const list = byProduct.get(r.productId) ?? [];
       list.push(this.effectiveFromMap(r, locMap));
       byProduct.set(r.productId, list);
@@ -645,10 +647,11 @@ export class InventoryService {
     const out = new Map<string, boolean>();
     if (!productIds.length) return out;
     const rows = await this.prisma.inventory.findMany({ where: { productId: { in: productIds } } });
+    const effectiveRows = this.excludeOrphanProductRow(rows);
     // BMPL-175: batched once for every row here, same reasoning as publicAvailability.
-    const locMap = await this.locationMapFor(rows.map((r) => r.id));
+    const locMap = await this.locationMapFor(effectiveRows.map((r) => r.id));
     const byProduct = new Map<string, Inventory[]>();
-    for (const r of rows) {
+    for (const r of effectiveRows) {
       const list = byProduct.get(r.productId) ?? [];
       list.push(r);
       byProduct.set(r.productId, list);
@@ -661,6 +664,34 @@ export class InventoryService {
   }
 
   // ---- helpers ----
+
+  /**
+   * Oversell risk: `generateVariants()` never reads, zeroes or migrates the
+   * product-level (`variantId: null`) row created before a product had
+   * variants — it is a pure read-time orphan once sibling variant rows
+   * exist, not real sellable stock, and there is no reconciliation path
+   * anywhere that touches it (by design — see the owner boundary below).
+   * publicAvailability/summaryFor/inStockMap all summed every row matched
+   * by productId with no variantId filter, so that dead row was being
+   * added on top of the real variant stock. Excludes it from a row set per
+   * product WITHOUT deleting, zeroing or transferring it — only the READ
+   * changes. A product with no variant rows at all (the common case, and
+   * #404's own feature) keeps its product-level row exactly as before.
+   */
+  private excludeOrphanProductRow(rows: Inventory[]): Inventory[] {
+    const byProduct = new Map<string, Inventory[]>();
+    for (const r of rows) {
+      const list = byProduct.get(r.productId) ?? [];
+      list.push(r);
+      byProduct.set(r.productId, list);
+    }
+    const out: Inventory[] = [];
+    for (const list of byProduct.values()) {
+      const hasVariantRows = list.some((r) => r.variantId !== null);
+      out.push(...(hasVariantRows ? list.filter((r) => r.variantId !== null) : list));
+    }
+    return out;
+  }
 
   private async resolveTarget(productId: string, variantId: string | null): Promise<Inventory> {
     if (variantId) {

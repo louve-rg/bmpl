@@ -49,7 +49,12 @@ export class VendorOrdersController {
   }
 
   // ---- Pickup fulfilment (M18.1) ----
-  /** @deprecated Prefer `:id/ready`, which handles both pickup and delivery. */
+  /**
+   * @deprecated Prefer `:id/ready`, which handles both pickup and delivery —
+   * PickupService's own ready check now accepts the same PENDING|PREPARING
+   * allow-list the DELIVERY path does, so this is no longer just an entry-point
+   * alias with a narrower underlying status machine behind it.
+   */
   @Post(':id/ready-for-pickup')
   readyForPickup(@CurrentUser() user: AuthContext, @Param('id') id: string) {
     return this.pickup.markReadyForPickup(user.userId, id);

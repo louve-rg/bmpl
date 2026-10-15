@@ -30,6 +30,7 @@ async function makeVendor(email: string, business: string) {
   const vpId = profile.body.profile.id;
   await request(ctx.server).post('/api/vendor/profile/submit').set('Cookie', cookies).expect(201);
   await request(ctx.server).post(`/api/admin/vendors/${vpId}/approve`).set('Cookie', adminCookies).send({}).expect(201);
+  await request(ctx.server).patch('/api/vendor/profile').set('Cookie', cookies).send({ storeStatus: 'OPEN' }).expect(200);
   return { cookies, vpId };
 }
 async function createProduct(cookies: string[], fields: Record<string, unknown>) {
