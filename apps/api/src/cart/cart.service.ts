@@ -14,7 +14,8 @@ export type CartIssue =
   | 'VARIANT_REQUIRED' // product has variants but the line has none
   | 'VARIANT_UNAVAILABLE' // variant missing / not this product's / disabled
   | 'OUT_OF_STOCK' // no units available and no backorder/unlimited
-  | 'INSUFFICIENT_STOCK'; // fewer units available than the requested quantity
+  | 'INSUFFICIENT_STOCK' // fewer units available than the requested quantity
+  | 'STORE_CLOSED'; // owning storefront is OPEN/CLOSED-switched off by its own vendor, distinct from VENDOR_INACTIVE's approvalStatus
 
 const money = (v: bigint) => Number(v);
 
@@ -267,6 +268,7 @@ export class CartService {
 
       if (p.status !== 'PUBLISHED') issues.push('PRODUCT_UNAVAILABLE');
       if (p.vendorProfile.approvalStatus !== 'APPROVED') issues.push('VENDOR_INACTIVE');
+      if (p.vendorProfile.storeStatus !== 'OPEN') issues.push('STORE_CLOSED');
       if (!item.variantId && variantProducts.has(item.productId)) issues.push('VARIANT_REQUIRED');
       if (item.variantId && (!v || !v.isActive || v.productId !== item.productId)) {
         issues.push('VARIANT_UNAVAILABLE');

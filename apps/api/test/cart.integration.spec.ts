@@ -35,6 +35,10 @@ async function makeVendor(email: string, business: string) {
   const vpId = profile.body.profile.id;
   await request(ctx.server).post('/api/vendor/profile/submit').set('Cookie', cookies).expect(201);
   await request(ctx.server).post(`/api/admin/vendors/${vpId}/approve`).set('Cookie', adminCookies).send({}).expect(201);
+  // New profiles default to CLOSED (MDF-216) — open the store so these fixture
+  // vendors can be added to a cart as purchasable, matching the same
+  // storeStatus:'OPEN' convention orders.integration.spec.ts's makeVendor uses.
+  await request(ctx.server).patch('/api/vendor/profile').set('Cookie', cookies).send({ storeStatus: 'OPEN' }).expect(200);
   return { cookies, vpId };
 }
 
@@ -265,6 +269,28 @@ describe('unavailable products + inactive storefronts', () => {
     await ctx.prisma.vendorProfile.update({ where: { id: vendor.vpId }, data: { approvalStatus: 'SUSPENDED' } });
     const res = await addItem(customer, { productId: p, quantity: 1 });
     expect(res.status).toBe(409);
+  });
+
+  /**
+   * MDF-230: unlike PRODUCT_UNAVAILABLE/VENDOR_INACTIVE above, storeStatus is
+   * deliberately NOT a second add-time blocking rule — #387's checkout guard
+   * already blocks the order and stays the sole enforcement point here. The
+   * add itself still succeeds (201); this is an earlier, honest SIGNAL on the
+   * line so the customer isn't told everything is fine until checkout.
+   */
+  it('still accepts adding a CLOSED-store product (no new blocking rule), but flags STORE_CLOSED on the line', async () => {
+    const customer = await registerCustomer('cart_c8@example.bz');
+    const vendor = await makeVendor('cart_v8@example.bz', 'Shop Eight');
+    const p = await createProduct(vendor.cookies, { title: 'Closed Shop Item', sku: 'CSI', categoryId, priceMinor: 1000 });
+    await request(ctx.server).patch('/api/vendor/profile').set('Cookie', vendor.cookies).send({ storeStatus: 'CLOSED' }).expect(200);
+
+    const res = await addItem(customer, { productId: p, quantity: 1 });
+    expect(res.status).toBe(201); // not a new blocking rule — #387's checkout guard stays the only one
+    const line = res.body.vendors[0].items[0];
+    expect(line.issues).toContain('STORE_CLOSED');
+    expect(line.purchasable).toBe(false);
+    expect(res.body.vendors[0].storeStatus).toBe('CLOSED');
+    expect(res.body.hasUnavailableItems).toBe(true);
   });
 });
 
