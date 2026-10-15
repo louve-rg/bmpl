@@ -476,7 +476,7 @@ function ListingsTab({ queue, canModerate }: { queue: boolean; canModerate: bool
         </Alert>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         <div className="rounded-bmpl-xl border border-slate-200 bg-white">
           {listState === 'loading' ? (
             <div className="flex items-center gap-2 p-4 text-sm text-slate-500">
@@ -1256,7 +1256,7 @@ function OwnersTab({ canModerate }: { canModerate: boolean }) {
         </Alert>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         <div className="rounded-bmpl-xl border border-slate-200 bg-white">
           {listState === 'loading' ? (
             <div className="flex items-center gap-2 p-4 text-sm text-slate-500">
@@ -1391,7 +1391,7 @@ function AgentsTab({ canModerate }: { canModerate: boolean }) {
         </Alert>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         <div className="rounded-bmpl-xl border border-slate-200 bg-white">
           {listState === 'loading' ? (
             <div className="flex items-center gap-2 p-4 text-sm text-slate-500">

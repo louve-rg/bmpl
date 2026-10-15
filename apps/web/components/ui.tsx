@@ -198,8 +198,8 @@ const ALERT_STYLES: Record<Tone, string> = {
 export function Alert({ tone = 'info', title, children, className = '' }: { tone?: Tone; title?: string; children?: ReactNode; className?: string }) {
   return (
     <div role="alert" className={`rounded-bmpl-lg border px-4 py-3 text-sm ${ALERT_STYLES[tone]} ${className}`}>
-      {title && <p className="font-semibold">{title}</p>}
-      {children && <div className={title ? 'mt-0.5' : ''}>{children}</div>}
+      {title && <p className="break-words font-semibold">{title}</p>}
+      {children && <div className={`break-words ${title ? 'mt-0.5' : ''}`}>{children}</div>}
     </div>
   );
 }

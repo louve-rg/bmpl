@@ -6,9 +6,81 @@ on:
   pull_request:
     branches: [main]
 
+# PRODUCTION DEPLOY MECHANISM, EVIDENCED (gh api repos/.../deployments +
+# /statuses against environment "carefree-achievement / production"; full
+# instrument in docs/DEPLOYMENT.md §2a) — this corrects a wrong claim this
+# comment used to make, and the matching one below on "Browser tests":
+# Railway does NOT wait for this check suite before starting an apps/api
+# build. 6c1ea8f's (#405) production deployment went in_progress TWO
+# SECONDS after the push (04:06:42Z; the push was 04:06:40Z) — long before
+# any check suite here could possibly have concluded. What IS evidenced: a
+# LATER push to main marks an already-in-flight deployment INACTIVE
+# (superseded), whether or not that later push creates a production
+# deployment of its own. 6c1ea8f's deployment went in_progress → INACTIVE
+# at 04:18:53Z, 28 seconds after the NEXT main push's own CI run started
+# (04:18:25Z) — and that next push (510c783, #406) was web-only, matched
+# none of railway.json's build.watchPatterns, and created NO production
+# deployment of its own. A web-only merge killed an in-flight API deploy
+# without replacing it, and the API then kept serving the superseded
+# commit's predecessor (817bf5c) for the next ~15 hours. Rerunning
+# 6c1ea8f's cancelled suite came back SUCCESS but produced NO new
+# deployment attempt — a suite rerun does not revive/recreate a Railway
+# deployment for a commit that is no longer main's tip. The freeze ended
+# when the next API-touching commit (fbd8e7f, #407) reached main and
+# deployed cleanly on its own; see docs/DEPLOYMENT.md §2a for the full
+# evidence trail.
+#
+# Whether or how THIS check suite's own pass/fail result factors into
+# Railway's deployment outcome at all is UNESTABLISHED — we have no
+# evidence either way, and this comment will not assert a second unverified
+# mechanism in place of the first. Do not restate "Railway waits for check
+# suites" anywhere in this file; cite the deployment status history above
+# instead, and see docs/DEPLOYMENT.md §2a before theorising further.
+#
+# THE REAL PROTECTIVE RULE: never merge anything to main while a production
+# deployment is in_progress (observed 11–15 minutes end to end, per the
+# status history in docs/DEPLOYMENT.md §2a) — no matter what the new commit
+# touches. A docs-only or web-only merge is NOT safe during that window; it
+# is precisely the thing that killed #405's deploy.
+#
+# THE CONCURRENCY REASONING BELOW STANDS ON ITS OWN regardless of the
+# above correction: a main commit with no successful CI suite is a real
+# problem on its own terms — at minimum it is one of this repo's required
+# status checks for merging to main — independent of whatever Railway does
+# or does not key off it. cancel-in-progress alone is not enough to protect
+# that: GitHub's own docs on `concurrency` state "When a concurrent job or
+# workflow is queued, if another job or workflow using the same concurrency
+# group in the repository is in progress, the queued job or workflow will be
+# pending. Any previously pending job or workflow in the concurrency group
+# will be canceled" — that PENDING-run cancellation happens unconditionally,
+# regardless of cancel-in-progress (which only controls whether the RUNNING
+# one is also killed). With a single ci-refs/heads/main group shared by every
+# main commit, a three-push burst (A, B, C in quick succession) would still
+# lose B's suite even with cancel-in-progress:false for main: A runs, B goes
+# pending behind it, C arrives and cancels PENDING-never-run B — same
+# "no successful suite" outcome, reached by a different path. So the group
+# itself must be per-commit on main, not just per-ref: github.sha is the
+# full 40-char commit SHA, guaranteeing every main commit gets its own group
+# and is therefore NEVER second-in-group, so neither in-progress nor pending
+# cancellation can ever reach it on main. cancel-in-progress stays false for
+# main as belt-and-braces (it would never fire given the group is already
+# unique per commit) and PR runs are unaffected — they still group per-ref
+# with cancellation on, so the de-dup behaviour that was never the problem
+# keeps working exactly as before.
+#
+# ACCEPTED CONSEQUENCE, do not "simplify" this back to a plain ref-based
+# group: two main merges close together now run two full suites IN PARALLEL
+# instead of de-duplicating to one. That is deliberate — it is CI minutes
+# spent buying each main commit its own successful suite. Confirmed twice in
+# run history that the old single-group behaviour cost real suites: 6c1ea8f's
+# suite (run 38509705510, started 04:06:40Z) was cancelled by the next main
+# push's run (38510706826, started 04:18:25Z, 11m45s later); eb186633's suite
+# (run 38281282884, 2026-10-12) was cancelled the same way. (This is about the
+# CI suite being lost, not about the deploy mechanism corrected above — the
+# two are adjacent facts, not cause and effect; see docs/DEPLOYMENT.md §2a.)
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   # Deterministic, non-secret values used only for CI builds/tests.
@@ -106,19 +178,34 @@ jobs:
       # INFORMATIONAL ON PURPOSE, same mechanism as Format check/Lint above:
       # `continue-on-error: true` at the STEP level means a red result here
       # cannot fail this job, and therefore cannot fail this job's check run
-      # — which matters because Railway's GitHub integration waits for check
-      # suites before deploying the API, so any job that CAN fail becomes
-      # part of that deploy gate whether or not it has anything to do with
-      # the API. A flaky browser suite is a classic source of exactly that
-      # kind of unrelated block (BMPL-217/BMPL-213). Needs no infrastructure
-      # of its own (no services: block) — apps/web never talks to Postgres/
-      # Redis/MinIO directly (root CLAUDE.md §2), confirmed by this same job
-      # already building @bmpl/web above with none running. `retries` is
-      # deliberately left at the config default of 0, not raised for CI: this
-      # job cannot block a deploy either way, so there is no gate to protect
-      # by retrying past a flake, and retrying until green would hide a real
-      # intermittent defect behind a false green — exactly the failure shape
-      # this floor spent 2026-09-26 finding five separate instances of.
+      # — which matters because "Build, typecheck & unit tests" (this job) is
+      # one of this repo's required status checks for merging to main
+      # (gh api .../branches/main/protection), so a red result here would
+      # block every open PR on pure browser-test flakiness regardless of
+      # whether it has anything to do with the change under review. A flaky
+      # browser suite is a classic source of exactly that kind of unrelated
+      # block (BMPL-217/BMPL-213).
+      #
+      # CORRECTION: this comment used to justify the above by claiming
+      # "Railway's GitHub integration waits for check suites before
+      # deploying the API." That claim is unevidenced and likely wrong —
+      # see the concurrency comment above and docs/DEPLOYMENT.md §2a: a
+      # production deployment has been observed starting TWO SECONDS after
+      # a push, before any check suite here could possibly have concluded.
+      # Whether this suite's result affects the deploy at all is
+      # UNESTABLISHED. The required-status-check reason above stands on its
+      # own regardless and needs no deploy-gate claim to justify keeping
+      # this step informational.
+      #
+      # Needs no infrastructure of its own (no services: block) — apps/web
+      # never talks to Postgres/Redis/MinIO directly (root CLAUDE.md §2),
+      # confirmed by this same job already building @bmpl/web above with
+      # none running. `retries` is deliberately left at the config default
+      # of 0, not raised for CI: a flake here cannot be retried past to
+      # protect a gate we have no evidence this step gates, and retrying
+      # until green would hide a real intermittent defect behind a false
+      # green — exactly the failure shape this floor spent 2026-09-26
+      # finding five separate instances of.
       - name: Browser tests (BMPL-217, informational)
         id: e2e
         continue-on-error: true
