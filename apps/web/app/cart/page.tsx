@@ -138,7 +138,7 @@ export default function CartPage() {
         )}
 
         {state === 'ready' && cart && cart.vendors.length > 0 && (
-          <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
             <div className="space-y-6">
               {cart.hasUnavailableItems && (
                 <Alert tone="warning">
@@ -276,7 +276,7 @@ function CartRow({
           </p>
         )}
 
-        <div className="mt-2 flex items-center gap-3">
+        <div className="mt-2 flex flex-wrap items-center gap-3">
           <div className="inline-flex items-center rounded-bmpl-sm border border-slate-300">
             <button
               type="button"
