@@ -34,9 +34,9 @@ export default async function ProductDetailPage({ params }: { params: { slug: st
               "Visit {vendor}" so it never implies going back in history. */}
           <Link
             href={productBackHref(p.vendor.slug)}
-            className="mt-2 inline-flex text-sm font-medium text-belize-blue hover:underline"
+            className="mt-2 inline-flex max-w-full text-sm font-medium text-belize-blue hover:underline"
           >
-            Visit {p.vendor.businessName}
+            <span className="min-w-0 break-words">Visit {p.vendor.businessName}</span>
           </Link>
           <ProductView product={p} />
         </div>

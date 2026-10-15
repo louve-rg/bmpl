@@ -250,14 +250,17 @@ export function Breadcrumbs({
         {items.map((item, i) => {
           const last = i === items.length - 1;
           return (
-            <li key={`${item.label}-${i}`} className="flex items-center gap-1.5">
+            <li key={`${item.label}-${i}`} className="flex min-w-0 items-center gap-1.5">
               {item.href && !last ? (
-                <Link href={item.href} className="font-medium text-belize-blue hover:underline">
+                <Link
+                  href={item.href}
+                  className="min-w-0 break-words font-medium text-belize-blue hover:underline"
+                >
                   {item.label}
                 </Link>
               ) : (
                 <span
-                  className={last ? 'font-medium text-belize-navy' : ''}
+                  className={`min-w-0 break-words ${last ? 'font-medium text-belize-navy' : ''}`}
                   aria-current={last ? 'page' : undefined}
                 >
                   {item.label}
