@@ -12,7 +12,12 @@
     "./tokens": {
       "types": "./dist/tokens.d.ts",
       "default": "./dist/tokens.js"
-    }
+    },
+    "./tailwind-preset": {
+      "types": "./dist/tailwind-preset.d.ts",
+      "default": "./dist/tailwind-preset.js"
+    },
+    "./glass.css": "./src/glass.css"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -25,6 +30,7 @@
   },
   "devDependencies": {
     "rimraf": "^6.0.1",
+    "tailwindcss": "^3.4.10",
     "typescript": "^5.5.4"
   }
 }

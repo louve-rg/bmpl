@@ -83,7 +83,7 @@ export default function AdminOrderDetailPage() {
     return (
       <div>
         <Breadcrumbs items={adminCrumbs(['Orders', '/dashboard/orders'], 'Order')} className="mb-3" />
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       </div>
@@ -92,7 +92,7 @@ export default function AdminOrderDetailPage() {
     return (
       <div>
         <Breadcrumbs items={adminCrumbs(['Orders', '/dashboard/orders'], 'Order')} className="mb-3" />
-        <p className="text-sm text-slate-500">Order not found.</p>
+        <p className="text-sm text-[color:var(--bmpl-text-muted)]">Order not found.</p>
       </div>
     );
 
@@ -103,18 +103,18 @@ export default function AdminOrderDetailPage() {
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="bmpl-page-title">{order.orderNumber}</h1>
-          <p className="mt-1 min-w-0 break-words text-sm text-slate-500">{order.customer.name} · {order.customer.email} · {new Date(order.placedAt).toLocaleString()}</p>
+          <p className="mt-1 min-w-0 break-words text-sm text-[color:var(--bmpl-text-muted)]">{order.customer.name} · {order.customer.email} · {new Date(order.placedAt).toLocaleString()}</p>
         </div>
         <StatusBadge status={order.status} />
       </div>
 
       {order.deliveryAddress && (
         <Card className="mt-4 p-4 text-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Delivery address</p>
-          <p className="mt-1 break-words text-slate-700">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">Delivery address</p>
+          <p className="mt-1 break-words text-[color:var(--bmpl-text-muted)]">
             {order.deliveryAddress.fullName} — {addressLines(order.deliveryAddress).join(', ')}
           </p>
-          <p className="mt-1 text-slate-500">{order.deliveryAddress.phone}</p>
+          <p className="mt-1 text-[color:var(--bmpl-text-muted)]">{order.deliveryAddress.phone}</p>
         </Card>
       )}
 
@@ -130,8 +130,8 @@ export default function AdminOrderDetailPage() {
               </span>
             </header>
             {vo.originLocation && (
-              <p className="break-words border-b border-slate-100 px-4 py-1.5 text-xs text-slate-500">
-                Fulfilled from <span className="font-medium text-slate-700">{vo.originLocation.label}</span>
+              <p className="break-words border-b border-slate-100 px-4 py-1.5 text-xs text-[color:var(--bmpl-text-muted)]">
+                Fulfilled from <span className="font-medium text-[color:var(--bmpl-text-muted)]">{vo.originLocation.label}</span>
               </p>
             )}
             <div className="overflow-x-auto">
@@ -140,42 +140,42 @@ export default function AdminOrderDetailPage() {
                   {vo.items.map((it, i) => (
                     <tr key={i} className="border-t border-slate-100 first:border-t-0">
                       <td className="px-4 py-2">{it.productTitle}{it.variantTitle ? ` · ${it.variantTitle}` : ''}</td>
-                      <td className="px-4 py-2 text-slate-500">{it.sku ?? '—'}</td>
-                      <td className="px-4 py-2 text-slate-600">{money(it.unitPriceMinor)} × {it.quantity}</td>
-                      <td className="px-4 py-2 text-right font-semibold text-belize-navy">{money(it.subtotalMinor)}</td>
+                      <td className="px-4 py-2 text-[color:var(--bmpl-text-muted)]">{it.sku ?? '—'}</td>
+                      <td className="px-4 py-2 text-[color:var(--bmpl-text-muted)]">{money(it.unitPriceMinor)} × {it.quantity}</td>
+                      <td className="px-4 py-2 text-right font-semibold text-[color:var(--bmpl-text)]">{money(it.subtotalMinor)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             {vo.deliveryMethod === 'DELIVERY' && vo.delivery && (
-              <div className="space-y-1 border-t border-slate-100 px-4 py-2.5 text-xs text-slate-600">
+              <div className="space-y-1 border-t border-slate-100 px-4 py-2.5 text-xs text-[color:var(--bmpl-text-muted)]">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-semibold text-slate-500">Delivery:</span>
+                  <span className="font-semibold text-[color:var(--bmpl-text-muted)]">Delivery:</span>
                   <span>{vo.delivery.freeApplied ? 'Free delivery' : money(vo.delivery.feeMinor)}</span>
                   {vo.delivery.estimate && (
-                    <span className="text-slate-500">
+                    <span className="text-[color:var(--bmpl-text-muted)]">
                       · {vo.delivery.estimate.label ?? `${vo.delivery.estimate.minHours}–${vo.delivery.estimate.maxHours} h`}
                     </span>
                   )}
                   <StatusBadge status={vo.delivery.status} />
                 </div>
-                {vo.delivery.instructions && <p className="break-words text-slate-500">Instructions: {vo.delivery.instructions}</p>}
+                {vo.delivery.instructions && <p className="break-words text-[color:var(--bmpl-text-muted)]">Instructions: {vo.delivery.instructions}</p>}
               </div>
             )}
-            {vo.customerNotes && <p className="break-words border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Notes: {vo.customerNotes}</p>}
+            {vo.customerNotes && <p className="break-words border-t border-slate-100 px-4 py-2 text-xs text-[color:var(--bmpl-text-muted)]">Notes: {vo.customerNotes}</p>}
           </Card>
         ))}
       </div>
 
       <div className="mt-4 flex justify-end">
         <Card className="w-full max-w-xs p-4 text-sm">
-          <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{money(order.subtotalMinor)}</span></div>
-          <div className="flex justify-between text-slate-600">
+          <div className="flex justify-between text-[color:var(--bmpl-text-muted)]"><span>Subtotal</span><span>{money(order.subtotalMinor)}</span></div>
+          <div className="flex justify-between text-[color:var(--bmpl-text-muted)]">
             <span>Delivery</span>
             <span>{order.vendorOrders.some((vo) => vo.deliveryMethod === 'DELIVERY') ? (order.deliveryFeeMinor === 0 ? 'Free' : money(order.deliveryFeeMinor)) : '—'}</span>
           </div>
-          <div className="mt-1 flex justify-between border-t border-slate-100 pt-2 text-base"><span className="font-semibold text-belize-navy">Total</span><span className="font-bold text-belize-navy">{money(order.totalMinor)} {order.currency}</span></div>
+          <div className="mt-1 flex justify-between border-t border-slate-100 pt-2 text-base"><span className="font-semibold text-[color:var(--bmpl-text)]">Total</span><span className="font-bold text-[color:var(--bmpl-text)]">{money(order.totalMinor)} {order.currency}</span></div>
         </Card>
       </div>
     </div>

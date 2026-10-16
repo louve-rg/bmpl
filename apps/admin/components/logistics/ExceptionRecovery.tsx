@@ -93,23 +93,23 @@ export function ExceptionRecovery({
   }
 
   return (
-    <div className="mt-3 rounded-bmpl-md border border-slate-200 bg-slate-50/60 p-3">
+    <div className="bmpl-panel mt-3 p-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-900">
+        <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">
           {resolution === 'RESUME' ? 'Resume this leg' : 'Release the assigned driver'}
         </h3>
-        <button type="button" onClick={reset} className="text-xs font-medium text-slate-500 hover:underline">
+        <button type="button" onClick={reset} className="text-xs font-medium text-[color:var(--bmpl-text-muted)] hover:underline">
           Cancel
         </button>
       </div>
 
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
         {resolution === 'RESUME'
           ? 'The leg continues from where it stood. If the exception was a PIN lockout, the attempt counter is cleared.'
           : 'Only possible while the parcel has not yet been collected — the leg goes back to the dispatch pool.'}
       </p>
 
-      <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor={`recovery-note-${legId}`}>
+      <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor={`recovery-note-${legId}`}>
         Note
       </label>
       <Textarea

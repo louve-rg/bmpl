@@ -1,0 +1,238 @@
+/*
+ * Shared design tokens for apps/web + apps/admin.
+ *
+ * SCOPE: this file defines BOTH the existing flat/light BMPL tokens (used
+ * everywhere today -- public pages, marketing, login/register) AND the new
+ * Liquid Glass theme, which only activates inside `[data-theme="glass"]`.
+ * That scope is applied at exactly two places in the whole platform: the
+ * authenticated web dashboard shell (`apps/web/app/dashboard/layout.tsx`)
+ * and the admin console shell (`apps/admin/components/AdminShell.tsx`).
+ * Nothing else changes -- marketing/landing pages, the public storefront,
+ * and both apps' /login screens keep the current light theme untouched,
+ * per the mandate's explicit "entire AUTHENTICATED platform" scope.
+ *
+ * This is the single token definition Dwight's inventory asked for -- both
+ * apps' globals.css `@import '@bmpl/ui/glass.css';`. The `.bmpl-*`
+ * COMPONENT classes that CONSUME these tokens still live one copy per app
+ * (see each app's own globals.css `@layer components` block): Tailwind's
+ * `@layer`/`@apply` requires the `@tailwind components` directive to be
+ * present in the SAME file being processed, which an `@import`-ed partial
+ * is not (confirmed empirically -- `next dev` refuses to compile with
+ * "`@layer components` is used but no matching `@tailwind components`
+ * directive is present" when that block lived here instead). The two
+ * copies are kept textually identical; what they CONSUME (the values
+ * below) is the single source.
+ */
+
+:root {
+  --font-sans: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+
+  /* ---- BMPL light-theme tokens (source of truth: production landing page) ---- */
+  --bmpl-primary: #1e40af; /* belize-blue */
+  --bmpl-primary-hover: #1e3a8a; /* belize-deep */
+  --bmpl-secondary: #0f172a; /* belize-navy */
+  --bmpl-accent: #0ea5e9; /* belize-accent */
+  --bmpl-accent-soft: #60a5fa; /* belize-light */
+
+  --bmpl-bg: #f8fafc; /* slate-50 page background */
+  --bmpl-surface: #ffffff; /* elevated cards */
+  --bmpl-surface-muted: #f1f5f9; /* slate-100 muted panels */
+  --bmpl-surface-dense: #ffffff; /* no light-theme equivalent needed -- same as surface */
+  --bmpl-overlay-fill: #ffffff;
+  --bmpl-overlay-fill-solid: #ffffff;
+
+  --bmpl-text: #0f172a; /* slate-900/navy */
+  --bmpl-text-muted: #64748b; /* slate-500 */
+  --bmpl-border: #e2e8f0; /* slate-200 hairline */
+
+  --bmpl-success: #059669; /* emerald-600 */
+  --bmpl-warning: #d97706; /* amber-600 */
+  --bmpl-error: #dc2626; /* red-600 */
+  --bmpl-info: #0284c7; /* sky-600 */
+  --bmpl-focus: #0ea5e9; /* focus ring */
+
+  --bmpl-radius-sm: 8px;
+  --bmpl-radius-md: 12px;
+  --bmpl-radius-lg: 16px;
+  --bmpl-radius-xl: 24px;
+
+  --bmpl-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --bmpl-shadow-md: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px -18px rgba(15, 23, 42, 0.18);
+  --bmpl-shadow-lg: 0 1px 2px rgba(15, 23, 42, 0.06), 0 28px 50px -24px rgba(30, 64, 175, 0.28);
+
+  /* Backdrop filter/blur is inert outside the glass scope -- kept as a
+     token so component CSS can reference it unconditionally and get a
+     correct no-op on every light-theme page. */
+  --bmpl-backdrop-filter: none;
+  --bmpl-backdrop-filter-dense: none;
+}
+
+/* =====================================================================
+   LIQUID GLASS THEME -- active only inside [data-theme="glass"].
+
+   THE MATERIAL CARRIES THE CONTRAST, NOT THE TEXT. This is the owner's
+   direct design-direction call, reached the hard way: an earlier pass at
+   the prototype (hive/agents/bmpl-web-mtmd0uea/liquid-glass-preview) gave
+   every text run its own local scrim pill and passed all 749 measured
+   samples -- then was rejected on sight as "covered in sticky labels",
+   dozens of small hard-edged dark rectangles. The fix that actually
+   looked right: raise each SURFACE's own fill until plain text passes on
+   the surface alone, with the fill's base COLOR switched from a light
+   blue tint to navy first (raising a light color's alpha can never reach
+   a dark result). These exact numbers are carried verbatim from that
+   prototype's Round 6 (see its comparison.md), re-measured there with a
+   DOM-derived, not hand-picked, contrast sample set: 749 samples, 0
+   failures, worst case 5.41:1 (lowest plain-text sample 5.54:1).
+
+   Four fill LEVELS, not one -- how much raw text a surface carries
+   determines how dark it needs to be:
+     ambient  (--bmpl-surface-muted) -- topbar/rail navigation furniture,
+              sparse text, most of it in its own chip/pill already.
+     card     (--bmpl-surface)       -- stat cards, dropdowns, popovers.
+     dense    (--bmpl-surface-dense) -- lists/tables carrying raw or
+              SATURATED-colour text (status words, amounts) with no
+              per-row treatment of their own.
+     chip     (see .bmpl-chip below) -- a tag/badge OBJECT (a role pill,
+              a count summary) -- legitimately owns a fill by definition,
+              same category as a badge, not "text wearing a box".
+   ===================================================================== */
+[data-theme='glass'] {
+  --bmpl-bg: #0a1526;
+  --bmpl-surface: rgba(10, 20, 38, 0.56);
+  --bmpl-surface-muted: rgba(10, 20, 38, 0.52);
+  --bmpl-surface-dense: rgba(8, 16, 32, 0.74);
+  --bmpl-chip-fill: rgba(6, 14, 28, 0.78);
+  /* A floating control that MUST open directly over other scrolling glass
+     content, by construction, with no geometric fix available (the
+     account menu anchored at the sidebar's own foot, opening upward over
+     the nav list directly above it -- there's no "move it so it doesn't
+     overlap" option when the trigger lives at the end of the very list
+     it would need to clear). Two stacked backdrop-filter surfaces still
+     bleed text through at --bmpl-surface-dense's 0.74 (confirmed on a
+     real screenshot, not assumed) -- this is deliberately higher. */
+  --bmpl-overlay-fill: rgba(6, 12, 24, 0.94);
+  /* A menu anchored by construction over the exact list it must hide, where
+     even 0.94 alpha still read as legible ghost text on a real screenshot
+     (nine nav rows readable through the account panel, overlapping every
+     row including Sign out) -- alpha was never going to close that last
+     gap, because the panel and the thing behind it are still two images
+     blended, however faintly. This is the one surface in the system that
+     gives up translucency on purpose: fully opaque, same dark palette, so
+     it still belongs visually, but nothing behind it shows through at all.
+     A menu is the one element nobody is meant to see through. */
+  --bmpl-overlay-fill-solid: #101f38;
+  --bmpl-text: #f4f8ff;
+  --bmpl-text-muted: rgba(244, 248, 255, 0.82);
+  --bmpl-text-faint: rgba(244, 248, 255, 0.64);
+  --bmpl-border: rgba(255, 255, 255, 0.32);
+  --bmpl-border-soft: rgba(255, 255, 255, 0.16);
+  --bmpl-focus: #7dd3fc;
+
+  --bmpl-shadow-sm: 0 8px 24px -12px rgba(2, 8, 20, 0.55), 0 0 20px rgba(96, 165, 250, 0.14);
+  --bmpl-shadow-md: 0 18px 50px -20px rgba(2, 8, 20, 0.65), 0 2px 10px -4px rgba(2, 8, 20, 0.4), 0 0 32px rgba(96, 165, 250, 0.22);
+  --bmpl-shadow-lg: var(--bmpl-shadow-md);
+
+  --bmpl-backdrop-filter: blur(22px) saturate(145%);
+  --bmpl-backdrop-filter-card: blur(18px) saturate(135%);
+  --bmpl-backdrop-filter-dense: blur(26px) saturate(135%) brightness(0.92);
+
+  /* Text with no card/surface ancestor at all (a page H1 sitting
+     directly on the open mural) can't inherit a raised container fill
+     -- there's no container. The fallback, hers: calm the BACKDROP
+     itself locally, a broad feathered wash with no detectable edge, not
+     a box around the text. `.bmpl-header-wash` below is this, as a
+     reusable utility (apply it to any page-header block that sits
+     directly on the mural). */
+  --bmpl-header-wash: radial-gradient(ellipse 100% 100% at 30% 35%, rgba(3, 9, 18, 0.78) 0%, rgba(3, 9, 18, 0.58) 55%, rgba(3, 9, 18, 0.15) 88%, rgba(3, 9, 18, 0) 100%);
+
+  /* Visible-on-glass focus ring: a bright core against a dark halo holds
+     contrast at both ends of the mural's brightness range -- a single
+     mid-tone ring washes out the same way plain text did before the
+     fill levels above were raised. */
+  --bmpl-focus-ring-core: #7dd3fc;
+  --bmpl-focus-ring-halo: rgba(4, 10, 20, 0.85);
+
+  --bmpl-motion-fast: 120ms;
+  --bmpl-motion-base: 200ms;
+  --bmpl-motion-slow: 320ms;
+
+  background-color: var(--bmpl-bg);
+  color: var(--bmpl-text);
+}
+
+/* The painted backdrop every glass surface blurs/shows through. Pure CSS
+   gradients (no image asset to vendor into two apps' public/ dirs): a
+   dusk-over-water scene in the brand palette, warm glow low, deep
+   teal-navy through the middle. Applied to the glass-scope root so normal
+   document scroll carries real hue/brightness variation under the sticky
+   glass chrome, same recipe as the approved prototype. */
+[data-theme='glass'].bml-mural,
+[data-theme='glass'] .bml-mural {
+  background-color: #0a1526;
+  background-image:
+    radial-gradient(1100px 700px at 15% -10%, rgba(251, 191, 36, 0.22), transparent 60%),
+    radial-gradient(900px 650px at 85% 15%, rgba(14, 165, 233, 0.28), transparent 55%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30, 58, 138, 0.55), transparent 60%),
+    linear-gradient(180deg, #13263f 0%, #0f1e33 35%, #0b1829 70%, #081322 100%);
+  background-attachment: fixed;
+}
+
+/* The header-wash utility -- see --bmpl-header-wash above. inset reaches
+   well past the text on every side; a feathered gradient has no edge to
+   see, which is the whole point. */
+[data-theme='glass'] .bmpl-header-wash {
+  position: relative;
+  z-index: 0;
+}
+[data-theme='glass'] .bmpl-header-wash::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -40px -60px -60px;
+  background: var(--bmpl-header-wash);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme='glass'] * {
+    background-attachment: scroll !important;
+  }
+}
+
+/* =====================================================================
+   ACCESSIBILITY -- shared across both themes, both apps.
+   ===================================================================== */
+
+/* Respect users who prefer reduced motion. Previously only in apps/web's
+   globals.css; apps/admin had no equivalent rule at all. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Visible focus ring on glass: a flat single-color ring (the light
+   theme's `outline-belize-accent`, already used throughout both apps via
+   Tailwind's `focus-visible:outline` utilities) can wash out against a
+   bright patch of mural the same way plain text did before the fill
+   levels above were raised. Inside the glass scope, every focusable
+   element gets a halo + bright-core ring instead, applied once here
+   rather than per-component. Components that already set their own
+   `focus-visible:outline-*` utility classes are unaffected outside the
+   glass scope and get this stronger treatment automatically inside it,
+   since this rule has higher specificity (attribute selector) and comes
+   later in the cascade. */
+[data-theme='glass'] :focus-visible {
+  outline: 2px solid var(--bmpl-focus-ring-core);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--bmpl-focus-ring-halo);
+  border-radius: var(--bmpl-radius-sm);
+}

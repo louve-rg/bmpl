@@ -2,39 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --font-sans: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-
-  /* ---- BMPL design tokens (source of truth: production landing page) ---- */
-  --bmpl-primary: #1e40af; /* belize-blue */
-  --bmpl-primary-hover: #1e3a8a; /* belize-deep */
-  --bmpl-secondary: #0f172a; /* belize-navy */
-  --bmpl-accent: #0ea5e9; /* belize-accent */
-  --bmpl-accent-soft: #60a5fa; /* belize-light */
-
-  --bmpl-bg: #f8fafc; /* slate-50 page background */
-  --bmpl-surface: #ffffff; /* elevated cards */
-  --bmpl-surface-muted: #f1f5f9; /* slate-100 muted panels */
-
-  --bmpl-text: #0f172a; /* slate-900/navy */
-  --bmpl-text-muted: #64748b; /* slate-500 */
-  --bmpl-border: #e2e8f0; /* slate-200 hairline */
-
-  --bmpl-success: #059669; /* emerald-600 */
-  --bmpl-warning: #d97706; /* amber-600 */
-  --bmpl-error: #dc2626; /* red-600 */
-  --bmpl-info: #0284c7; /* sky-600 */
-  --bmpl-focus: #0ea5e9; /* focus ring */
-
-  --bmpl-radius-sm: 8px;
-  --bmpl-radius-md: 12px;
-  --bmpl-radius-lg: 16px;
-  --bmpl-radius-xl: 24px;
-
-  --bmpl-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
-  --bmpl-shadow-md: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px -18px rgba(15, 23, 42, 0.18);
-  --bmpl-shadow-lg: 0 1px 2px rgba(15, 23, 42, 0.06), 0 28px 50px -24px rgba(30, 64, 175, 0.28);
-}
+/* Design tokens, the shared `.bmpl-*` component classes, the Liquid Glass
+   theme (scoped to `[data-theme="glass"]` -- see that file's own header
+   comment for exactly where that scope is applied), and the
+   reduced-motion rule all live in @bmpl/ui now, single-sourced with
+   apps/admin instead of two copies that had already drifted. */
+@import '@bmpl/ui/glass.css';
 
 html {
   scroll-behavior: smooth;
@@ -44,36 +17,164 @@ body {
   @apply bg-white text-slate-800 antialiased;
 }
 
+/* Consumes the tokens from @bmpl/ui/glass.css (imported above) -- kept as
+   its own `@layer components` block, identical in apps/admin's
+   globals.css, because Tailwind's `@layer`/`@apply` requires
+   `@tailwind components` to be present in the SAME file (confirmed: this
+   block doesn't compile when it lives inside an `@import`-ed partial
+   instead). The VALUES are single-sourced; this structure is the
+   smallest change that actually works. */
 @layer components {
-  /* Reusable surface + control classes so screens share one visual language. */
   .bmpl-card {
-    @apply rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm;
+    @apply rounded-bmpl-xl border shadow-bmpl-sm;
+    background-color: var(--bmpl-surface);
+    border-color: var(--bmpl-border);
+    color: var(--bmpl-text);
+    -webkit-backdrop-filter: var(--bmpl-backdrop-filter-card, var(--bmpl-backdrop-filter));
+    backdrop-filter: var(--bmpl-backdrop-filter-card, var(--bmpl-backdrop-filter));
   }
   .bmpl-panel {
-    @apply rounded-bmpl-lg border border-slate-200 bg-white;
+    @apply rounded-bmpl-lg border;
+    background-color: var(--bmpl-surface);
+    border-color: var(--bmpl-border);
+    color: var(--bmpl-text);
+    -webkit-backdrop-filter: var(--bmpl-backdrop-filter-card, var(--bmpl-backdrop-filter));
+    backdrop-filter: var(--bmpl-backdrop-filter-card, var(--bmpl-backdrop-filter));
   }
   .bmpl-input {
-    @apply w-full rounded-bmpl-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-belize-navy shadow-bmpl-sm outline-none transition placeholder:text-slate-400 focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70;
+    @apply w-full rounded-bmpl-md border px-3 py-2.5 text-sm shadow-bmpl-sm outline-none transition disabled:cursor-not-allowed disabled:opacity-70;
+    background-color: var(--bmpl-surface);
+    border-color: var(--bmpl-border);
+    color: var(--bmpl-text);
+  }
+  .bmpl-input::placeholder {
+    color: var(--bmpl-text-muted);
+  }
+  .bmpl-input:focus {
+    border-color: var(--bmpl-focus);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--bmpl-focus) 30%, transparent);
   }
   .bmpl-label {
-    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide;
+    color: var(--bmpl-text-muted);
   }
   .bmpl-eyebrow {
-    @apply text-xs font-semibold uppercase tracking-[0.22em] text-belize-accent;
+    @apply text-xs font-semibold uppercase tracking-[0.22em];
+    color: var(--bmpl-accent, var(--bmpl-focus));
   }
   .bmpl-page-title {
-    @apply text-2xl font-bold tracking-tight text-belize-navy sm:text-3xl;
+    @apply text-2xl font-bold tracking-tight sm:text-3xl;
+    color: var(--bmpl-text);
   }
-}
 
-/* Respect users who prefer reduced motion. */
-@media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
+  /* Glass-only primitives -- inert (no background/blur) outside
+     `[data-theme="glass"]`, since the tokens they read resolve to `none`
+     there. */
+  .glass-chrome {
+    background-color: var(--bmpl-surface-muted);
+    -webkit-backdrop-filter: var(--bmpl-backdrop-filter);
+    backdrop-filter: var(--bmpl-backdrop-filter);
   }
-  * {
-    animation-duration: 0.001ms !important;
-    transition-duration: 0.001ms !important;
+  [data-theme='glass'] .glass-chrome {
+    border: 1px solid var(--bmpl-border);
+    box-shadow: var(--bmpl-shadow-md);
+  }
+  /* Dense tabular surfaces (a list/table carrying raw or
+     SATURATED-colour text -- status words, amounts) need more than the
+     ambient chrome fill above; this is that stronger level, read off a
+     SURFACE, never a per-row scrim (see glass.css's own header comment
+     for why that distinction matters). */
+  .bmpl-dense {
+    background-color: var(--bmpl-surface-dense);
+    border-color: var(--bmpl-border);
+    color: var(--bmpl-text);
+    -webkit-backdrop-filter: var(--bmpl-backdrop-filter-dense, var(--bmpl-backdrop-filter));
+    backdrop-filter: var(--bmpl-backdrop-filter-dense, var(--bmpl-backdrop-filter));
+  }
+  /* For a floating control that MUST overlap other glass content with no
+     geometric fix available -- see glass.css's own comment on
+     --bmpl-overlay-fill for why this is a separate, stronger level than
+     .bmpl-dense. */
+  .bmpl-overlay {
+    background-color: var(--bmpl-overlay-fill, var(--bmpl-surface-dense));
+    border-color: var(--bmpl-border);
+    color: var(--bmpl-text);
+    -webkit-backdrop-filter: var(--bmpl-backdrop-filter-dense, var(--bmpl-backdrop-filter));
+    backdrop-filter: var(--bmpl-backdrop-filter-dense, var(--bmpl-backdrop-filter));
+  }
+  /* A menu anchored by construction over the exact content it must hide,
+     where even .bmpl-overlay's 0.94 alpha still let nine nav rows read
+     through on a real screenshot -- alpha alone was never going to close
+     that gap, it is still two images blended, however faintly. This gives
+     up translucency on purpose: no backdrop-filter, full opacity, same
+     dark palette so it still belongs to the system -- the one surface in
+     this set nobody is meant to see through. See glass.css's own comment
+     on --bmpl-overlay-fill-solid. */
+  .bmpl-overlay-solid {
+    background-color: var(--bmpl-overlay-fill-solid, var(--bmpl-surface-dense));
+    border-color: var(--bmpl-border);
+    color: var(--bmpl-text);
+  }
+  /* A tag/badge OBJECT (a role pill, a count summary) -- legitimately
+     owns its own fill by definition, the same category as a solid
+     badge, never a scrim wrapped around plain text. */
+  .bmpl-chip {
+    @apply rounded-full;
+    background-color: var(--bmpl-chip-fill, var(--bmpl-surface-muted));
+  }
+
+  /* Nav row / collapsible group heading -- shared by the dashboard
+     sidebar, the mobile drawer and (structurally, if admin ever wants
+     collapsible groups) the admin console. Outside the glass scope
+     these resolve to the light-theme token values and look like the
+     nav styling that already existed; nothing changes for a
+     non-glass-scoped caller. */
+  .bmpl-nav-item {
+    @apply relative flex min-h-[44px] items-center gap-3 rounded-bmpl-md px-3 py-2 text-sm font-medium transition;
+    color: var(--bmpl-text-muted);
+  }
+  .bmpl-nav-item:hover {
+    background-color: var(--bmpl-surface-muted);
+    color: var(--bmpl-text);
+  }
+  .bmpl-nav-item[aria-current='page'] {
+    color: var(--bmpl-text);
+    background-color: color-mix(in srgb, var(--bmpl-primary) 10%, transparent);
+  }
+  [data-theme='glass'] .bmpl-nav-item[aria-current='page'] {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.55), rgba(14, 165, 233, 0.4));
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+  }
+  .bmpl-nav-heading {
+    @apply flex w-full items-center justify-between gap-2 rounded-bmpl-md px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.18em] transition;
+    color: var(--bmpl-text-faint, var(--bmpl-text-muted));
+  }
+  [data-theme='glass'] .bmpl-nav-heading {
+    background-color: var(--bmpl-surface-muted);
+  }
+  .bmpl-nav-heading:hover {
+    color: var(--bmpl-text);
+  }
+  .bmpl-nav-heading .bmpl-chev {
+    transition: transform var(--bmpl-motion-base, 150ms) ease;
+  }
+  .bmpl-nav-heading[aria-expanded='true'] .bmpl-chev {
+    transform: rotate(180deg);
+  }
+
+  /* The account/sign-out surface anchored at the foot of the nav rail.
+     MDF-319 (production, desktop): the equivalent control sits in
+     normal document flow at the end of the nav list, so a nav list
+     taller than the viewport pushes it past y:1300 regardless of
+     window height (swept 600-1300px, never fits) -- unreachable by a
+     mouse user, since the sidebar's own scroll has no visible
+     scrollbar hint and a click on an off-screen trigger does nothing.
+     `.bmpl-nav-footer` is NOT part of the scrolling nav region -- see
+     Sidebar.tsx/MobileNavDrawer.tsx for the flex layout that keeps it
+     pinned and always visible regardless of how many nav rows render
+     above it. */
+  .bmpl-nav-footer {
+    border-top: 1px solid var(--bmpl-border);
   }
 }
 

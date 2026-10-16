@@ -32,7 +32,7 @@ const NOT_APPLICABLE = 'Not applicable';
  * extra calls. A failed call shows "Not available" on its own line and never
  * becomes a 0 or hides the other lines.
  */
-export function AccountSummary({ me, tone }: { me: MeView; tone: 'dark' | 'light' }) {
+export function AccountSummary({ me, tone }: { me: MeView; tone: 'dark' | 'light' | 'glass' }) {
   const [boxes, setBoxes] = useState<Box[] | null>(null);
 
   useEffect(() => {
@@ -89,17 +89,19 @@ export function AccountSummary({ me, tone }: { me: MeView; tone: 'dark' | 'light
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const muted = tone === 'dark' ? 'text-blue-100/60' : 'text-slate-500';
-  const strong = tone === 'dark' ? 'text-white' : 'text-belize-navy';
+  const muted = tone === 'dark' ? 'text-blue-100/60' : tone === 'glass' ? 'text-[color:var(--bmpl-text-muted)]' : 'text-slate-500';
+  const strong = tone === 'dark' ? 'text-white' : tone === 'glass' ? 'text-[color:var(--bmpl-text)]' : 'text-belize-navy';
+  const borderClass = tone === 'dark' ? 'border-white/10' : tone === 'glass' ? 'border-[color:var(--bmpl-border-soft)]' : 'border-slate-100';
+  const headingClass = tone === 'dark' ? 'text-belize-light' : tone === 'glass' ? 'text-[color:var(--bmpl-text-faint)]' : 'text-slate-500';
 
   return (
-    <div className={`mb-2 border-b pb-2 ${tone === 'dark' ? 'border-white/10' : 'border-slate-100'}`} aria-busy={boxes === null}>
+    <div className={`mb-2 border-b pb-2 ${borderClass}`} aria-busy={boxes === null}>
       {boxes === null ? (
         <p className={`px-3 py-2 text-xs ${muted}`}>Loading…</p>
       ) : (
         boxes.map((box) => (
           <div key={box.heading} className="px-3 py-1">
-            <p className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${tone === 'dark' ? 'text-belize-light' : 'text-slate-500'}`}>
+            <p className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${headingClass}`}>
               {box.heading}
             </p>
             {box.lines.map((l, i) => (

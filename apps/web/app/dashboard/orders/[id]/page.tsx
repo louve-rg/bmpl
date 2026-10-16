@@ -36,7 +36,7 @@ export default function VendorOrderDetailPage() {
       <Link href="/dashboard/orders" className="text-sm text-belize-blue hover:underline">← Store orders</Link>
 
       {state === 'loading' && (
-        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
+        <div className="mt-6 flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       )}
@@ -56,7 +56,7 @@ export default function VendorOrderDetailPage() {
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="bmpl-page-title">{vo.orderNumber}</h1>
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-[color:var(--bmpl-text-muted)]">
                 Part of order {vo.parentOrderNumber} · placed {vo.placedAt ? new Date(vo.placedAt).toLocaleString() : ''}
               </p>
             </div>
@@ -69,13 +69,13 @@ export default function VendorOrderDetailPage() {
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <Card className="p-4 text-sm">
               <p className="bmpl-label">Customer</p>
-              <p className="mt-1 break-words text-slate-700">{vo.customerName}</p>
-              {vo.customerNotes && <p className="mt-2 break-words text-slate-500">Notes: {vo.customerNotes}</p>}
+              <p className="mt-1 break-words text-[color:var(--bmpl-text-muted)]">{vo.customerName}</p>
+              {vo.customerNotes && <p className="mt-2 break-words text-[color:var(--bmpl-text-muted)]">Notes: {vo.customerNotes}</p>}
             </Card>
             {vo.deliveryMethod === 'DELIVERY' && vo.deliveryAddress && (
               <Card className="p-4 text-sm">
                 <p className="bmpl-label">Deliver to</p>
-                <p className="mt-1 break-words text-slate-700">
+                <p className="mt-1 break-words text-[color:var(--bmpl-text-muted)]">
                   {vo.deliveryAddress.fullName}{vo.deliveryAddress.phone ? ` · ${vo.deliveryAddress.phone}` : ''}<br />
                   {addressLines(vo.deliveryAddress).map((line) => (
                     <Fragment key={line}>
@@ -92,13 +92,13 @@ export default function VendorOrderDetailPage() {
                   <p className="bmpl-label">Delivery</p>
                   <DeliveryStatusBadge delivery={vo.delivery} />
                 </div>
-                <p className="mt-1 text-slate-700">
+                <p className="mt-1 text-[color:var(--bmpl-text-muted)]">
                   {vo.delivery.freeApplied ? 'Free delivery' : money(vo.delivery.feeMinor)}
                   {vo.delivery.estimate && (
                     <> · Est. {vo.delivery.estimate.label ?? `${vo.delivery.estimate.minHours}–${vo.delivery.estimate.maxHours} h`}</>
                   )}
                 </p>
-                {vo.delivery.instructions && <p className="mt-2 break-words text-slate-500">Instructions: {vo.delivery.instructions}</p>}
+                {vo.delivery.instructions && <p className="mt-2 break-words text-[color:var(--bmpl-text-muted)]">Instructions: {vo.delivery.instructions}</p>}
               </Card>
             )}
           </div>
@@ -157,8 +157,8 @@ export default function VendorOrderDetailPage() {
 
           <div className="mt-4 flex justify-end">
             <Card className="flex w-full max-w-xs justify-between p-4 text-sm">
-              <span className="font-semibold text-belize-navy">Store subtotal</span>
-              <span className="font-bold text-belize-navy">{money(vo.subtotalMinor)} {vo.currency}</span>
+              <span className="font-semibold text-[color:var(--bmpl-text)]">Store subtotal</span>
+              <span className="font-bold text-[color:var(--bmpl-text)]">{money(vo.subtotalMinor)} {vo.currency}</span>
             </Card>
           </div>
         </>

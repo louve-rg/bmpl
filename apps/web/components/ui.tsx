@@ -7,7 +7,7 @@ const base =
 const variants = {
   primary: 'bg-belize-blue text-white shadow-bmpl-sm hover:bg-belize-deep',
   accent: 'bg-belize-accent text-white shadow-bmpl-sm hover:brightness-110',
-  outline: 'border border-slate-300 text-belize-navy hover:border-belize-blue hover:bg-belize-blue/5',
+  outline: 'border border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text)] hover:border-belize-blue hover:bg-belize-blue/5',
   ghost: 'text-belize-blue hover:bg-belize-blue/5',
   ghostLight: 'text-white/90 hover:text-white',
   destructive: 'bg-red-600 text-white shadow-bmpl-sm hover:bg-red-700',
@@ -111,7 +111,13 @@ export function PlaceholderBadge({ children }: { children: ReactNode }) {
 export function Card({ className = '', title, children, ...props }: ComponentProps<'div'>) {
   return (
     <div className={`bmpl-card ${className}`} {...props}>
-      {title && <h2 className="mb-3 text-lg font-semibold text-belize-navy">{title}</h2>}
+      {/* No explicit text color -- .bmpl-card already sets its own `color`
+          from the active theme token (light-theme navy outside the glass
+          scope, light text inside it). A hardcoded text-belize-navy here
+          fought that and read as near-invisible dark-on-dark once a Card
+          could render on the glass dashboard (confirmed on a real logged-in
+          screenshot of /dashboard, not just reasoned about). */}
+      {title && <h2 className="mb-3 text-lg font-semibold">{title}</h2>}
       {children}
     </div>
   );

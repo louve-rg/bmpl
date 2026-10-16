@@ -49,17 +49,17 @@ export default function AdminWalletPage() {
 
       {err && <Alert tone="warning" className="mb-4">{err}</Alert>}
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       ) : (
         <>
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">System / escrow balances</h2>
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">System / escrow balances</h2>
           <div className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {accounts.map((a) => (
               <Card key={a.id} className="p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{a.type.replace(/_/g, ' ')}</p>
-                <p className="mt-1.5 text-xl font-bold text-belize-navy">{money(a.cachedBalanceMinor)} <span className="text-xs font-normal text-slate-400">{a.currency}</span></p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">{a.type.replace(/_/g, ' ')}</p>
+                <p className="mt-1.5 text-xl font-bold text-[color:var(--bmpl-text)]">{money(a.cachedBalanceMinor)} <span className="text-xs font-normal text-[color:var(--bmpl-text-faint)]">{a.currency}</span></p>
                 <div className="mt-2">
                   <StatusBadge status={a.status} />
                 </div>
@@ -72,7 +72,7 @@ export default function AdminWalletPage() {
             )}
           </div>
 
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Transactions</h2>
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">Transactions</h2>
           {txns.length === 0 ? (
             <EmptyState title="No transactions yet" description="Ledger transactions will appear here as they are posted." />
           ) : (

@@ -222,7 +222,7 @@ export default function ShipmentOpsPage() {
       />
 
       {loading && (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       )}
@@ -244,9 +244,9 @@ export default function ShipmentOpsPage() {
                   <Badge tone="neutral">{s.serviceLabel}</Badge>
                   {s.isTest && <Badge tone="neutral">Simulation</Badge>}
                 </div>
-                <p className="mt-2 break-words text-sm text-slate-600">{s.explanation}</p>
+                <p className="mt-2 break-words text-sm text-[color:var(--bmpl-text-muted)]">{s.explanation}</p>
               </div>
-              <p className="shrink-0 text-lg font-bold tabular-nums text-slate-900">
+              <p className="shrink-0 text-lg font-bold tabular-nums text-[color:var(--bmpl-text)]">
                 ${(s.quotedTotalMinor / 100).toFixed(2)}
               </p>
             </div>
@@ -259,10 +259,10 @@ export default function ShipmentOpsPage() {
                 ] as const
               ).map(([label, end]) => (
                 <div key={label}>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-                  <p className="mt-0.5 break-words text-sm text-slate-800">{end.name ?? '—'}</p>
-                  {end.address && <p className="break-words text-sm text-slate-600">{end.address}</p>}
-                  <p className="text-sm text-slate-500">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">{label}</p>
+                  <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text)]">{end.name ?? '—'}</p>
+                  {end.address && <p className="break-words text-sm text-[color:var(--bmpl-text-muted)]">{end.address}</p>}
+                  <p className="text-sm text-[color:var(--bmpl-text-muted)]">
                     {[end.city, end.district?.replace(/_/g, ' ')].filter(Boolean).join(', ')}
                   </p>
                 </div>
@@ -286,25 +286,25 @@ export default function ShipmentOpsPage() {
           )}
 
           <Card className="p-4">
-            <h2 className="text-sm font-semibold text-slate-900">Legs</h2>
+            <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Legs</h2>
             <ol className="mt-3 space-y-3">
               {s.legs.map((leg) => {
                 const c = controlsFor(leg);
                 const h = handoff[leg.id] ?? { pin: '', who: '' };
                 return (
-                  <li key={leg.id} className="rounded-bmpl-md border border-slate-200 p-3">
+                  <li key={leg.id} className="rounded-bmpl-md border border-[color:var(--bmpl-border)] p-3">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="break-words text-sm font-medium text-slate-900">
+                        <p className="break-words text-sm font-medium text-[color:var(--bmpl-text)]">
                           {leg.sequence}. {leg.description ?? `${leg.modeLabel} leg`}
                         </p>
-                        <p className="mt-0.5 text-xs text-slate-500">
+                        <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted)]">
                           {leg.kind.replace(/_/g, ' ').toLowerCase()} · {leg.modeLabel}
                           {leg.carrier ? ` · ${leg.carrier}` : ''}
                           {leg.carrierBookingRef ? ` · ref ${leg.carrierBookingRef}` : ''}
                           {leg.scheduleNote ? ` · ${leg.scheduleNote}` : ''}
                         </p>
-                        <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500">
+                        <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-[color:var(--bmpl-text-muted)]">
                           {leg.departedAt == null && when(leg.scheduledDepartureAt) && (
                             <span>Scheduled to depart {when(leg.scheduledDepartureAt)}</span>
                           )}
@@ -317,7 +317,7 @@ export default function ShipmentOpsPage() {
                           {leg.handoffReceivedByName && <span>Taken by {leg.handoffReceivedByName}</span>}
                         </div>
                         {leg.exceptionReason && (
-                          <p className="mt-1 break-words text-xs font-medium text-amber-800">{leg.exceptionReason}</p>
+                          <p className="mt-1 break-words text-xs font-medium text-[color:var(--bmpl-warning)]">{leg.exceptionReason}</p>
                         )}
                         {leg.pickupPhotoUrls && leg.pickupPhotoUrls.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-2">
@@ -327,7 +327,7 @@ export default function ShipmentOpsPage() {
                                 key={i}
                                 src={url}
                                 alt={`Pickup photo ${i + 1}`}
-                                className="h-14 w-14 rounded-bmpl-md border border-slate-200 object-cover"
+                                className="h-14 w-14 rounded-bmpl-md border border-[color:var(--bmpl-border)] object-cover"
                               />
                             ))}
                           </div>
@@ -339,7 +339,7 @@ export default function ShipmentOpsPage() {
                     </div>
 
                     {canOperate && (c.depart || c.arrive || c.handoff) && (
-                      <div className="mt-3 border-t border-slate-100 pt-3">
+                      <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
                         <div className="flex flex-wrap gap-2">
                           {c.depart && (
                             <Button variant="outline" disabled={busy != null} onClick={() => void act(leg.id, 'depart')}>
@@ -385,7 +385,7 @@ export default function ShipmentOpsPage() {
                     {canOperate && leg.status !== 'COMPLETED' && leg.status !== 'CANCELLED' && leg.status !== 'EXCEPTION' && (
                       <button
                         onClick={() => void flagException(leg.id)}
-                        className="mt-2 text-xs font-medium text-amber-700 hover:underline"
+                        className="mt-2 text-xs font-medium text-[color:var(--bmpl-warning)] hover:underline"
                       >
                         Report a problem with this leg
                       </button>
@@ -403,8 +403,8 @@ export default function ShipmentOpsPage() {
                      * the real refusal message below, not a silently wrong UI.
                      */}
                     {canOperate && canScheduleLeg(leg) && (
-                      <div className="mt-3 border-t border-slate-100 pt-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Carrier schedule</p>
+                      <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">Carrier schedule</p>
                         <div className="mt-2 flex flex-wrap items-end gap-2">
                           <Field label="Departs">
                             <Input
@@ -474,18 +474,18 @@ export default function ShipmentOpsPage() {
           </Card>
 
           <Card className="p-4">
-            <h2 className="text-sm font-semibold text-slate-900">Chain of custody</h2>
-            <p className="mt-0.5 text-xs text-slate-500">Append-only. Nothing on this screen can rewrite it.</p>
+            <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Chain of custody</h2>
+            <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted)]">Append-only. Nothing on this screen can rewrite it.</p>
             <ul className="mt-3 space-y-2">
               {s.custody.map((c) => (
-                <li key={c.id} className="flex flex-wrap gap-x-2 text-xs text-slate-600">
-                  <span className="font-medium text-slate-800">
+                <li key={c.id} className="flex flex-wrap gap-x-2 text-xs text-[color:var(--bmpl-text-muted)]">
+                  <span className="font-medium text-[color:var(--bmpl-text)]">
                     {c.fromHolder ? `${c.fromHolder.toLowerCase()} → ` : ''}
                     {c.toHolder.toLowerCase()}
                   </span>
                   {c.actorLabel && <span>{c.actorLabel}</span>}
-                  {c.note && <span className="text-slate-500">{c.note}</span>}
-                  <span className="text-slate-400">{when(c.occurredAt)}</span>
+                  {c.note && <span className="text-[color:var(--bmpl-text-muted)]">{c.note}</span>}
+                  <span className="text-[color:var(--bmpl-text-faint)]">{when(c.occurredAt)}</span>
                 </li>
               ))}
             </ul>
