@@ -17,8 +17,13 @@ import {
 
 interface Earning {
   id: string;
-  orderDeliveryId: string;
-  vendorOrderId: string;
+  orderDeliveryId: string | null;
+  // Exactly one of vendorOrderId / shipmentReference is set per row
+  // (DriverEarning's CHECK: orderDeliveryId/shipmentLegId are never both
+  // set, never both null) — a marketplace delivery carries the former, a
+  // shipment courier leg carries the latter.
+  vendorOrderId: string | null;
+  shipmentReference: string | null;
   currency: string;
   method: string;
   grossMinor: number;
@@ -198,7 +203,9 @@ function RowGroup({ earning: e, open, onToggle }: { earning: Earning; open: bool
   return (
     <>
       <tr className="border-t border-[color:var(--bmpl-border-soft)] hover:bg-[color:var(--bmpl-surface-muted)]">
-        <td className="px-4 py-3 font-mono text-xs text-[color:var(--bmpl-text)]">#{e.vendorOrderId.slice(0, 8)}</td>
+        <td className="px-4 py-3 font-mono text-xs text-[color:var(--bmpl-text)]">
+          {e.vendorOrderId ? `#${e.vendorOrderId.slice(0, 8)}` : e.shipmentReference}
+        </td>
         <td className="px-4 py-3 text-[color:var(--bmpl-text-muted)]">{methodLabel(e.method)}</td>
         <td className="px-4 py-3 text-right text-[color:var(--bmpl-text-muted)]">{money(e.grossMinor, e.currency)}</td>
         <td className="px-4 py-3 text-right font-semibold text-[color:var(--bmpl-text)]">{money(e.netMinor, e.currency)}</td>
