@@ -133,7 +133,7 @@ export function DeliveryQueue({ onChanged }: { onChanged?: () => void }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading your queue…
       </div>
     );
@@ -180,7 +180,7 @@ export function DeliveryQueue({ onChanged }: { onChanged?: () => void }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <h2 className="bmpl-eyebrow">Your delivery queue</h2>
-          <p className="mt-0.5 text-xs text-slate-500">
+          <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted)]">
             {data.items.length} deliver{data.items.length === 1 ? 'y' : 'ies'} in progress
             {data.route.totalDistanceKm != null && (
               <>
@@ -199,7 +199,7 @@ export function DeliveryQueue({ onChanged }: { onChanged?: () => void }) {
       </div>
 
       {/* Never presented as a live ETA — there is no traffic data behind it. */}
-      <p className="mt-2 text-[11px] text-slate-400">{data.route.disclosure}</p>
+      <p className="mt-2 text-[11px] text-[color:var(--bmpl-text-faint)]">{data.route.disclosure}</p>
 
       {error && (
         <Alert tone="error" className="mt-3">
