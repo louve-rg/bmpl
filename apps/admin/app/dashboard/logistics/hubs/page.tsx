@@ -46,7 +46,7 @@ function ModesPicker({ modes, onToggle }: { modes: string[]; onToggle: (m: strin
           type="button"
           onClick={() => onToggle(m)}
           className={`min-h-[40px] rounded-full border px-4 text-sm font-medium ${
-            modes.includes(m) ? 'border-belize-blue bg-belize-blue text-white' : 'border-slate-300 text-slate-700'
+            modes.includes(m) ? 'border-belize-blue bg-belize-blue text-white' : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)]'
           }`}
         >
           {m}

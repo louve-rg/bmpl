@@ -66,7 +66,7 @@ export function DeparturesList() {
         action={
           <Link
             href="/dashboard/passenger/services"
-            className="rounded-bmpl-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5"
+            className="rounded-bmpl-md border border-[color:var(--bmpl-border)] px-3 py-1.5 text-sm font-semibold text-[color:var(--bmpl-text)] transition hover:border-belize-blue hover:bg-belize-blue/5"
           >
             Browse services
           </Link>

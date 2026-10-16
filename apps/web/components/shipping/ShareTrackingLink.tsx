@@ -78,7 +78,7 @@ export function ShareTrackingLink({ token, reference }: { token: string; referen
             type="button"
             onClick={copy}
             disabled={!url}
-            className="inline-flex min-h-[44px] items-center justify-center rounded-bmpl-md border border-slate-300 px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 disabled:opacity-50"
+            className="inline-flex min-h-[44px] items-center justify-center rounded-bmpl-md border border-[color:var(--bmpl-border)] px-4 text-sm font-semibold text-[color:var(--bmpl-text-muted)] transition hover:border-[color:var(--bmpl-text-faint)] disabled:opacity-50"
           >
             {copied ? 'Copied' : 'Copy link'}
           </button>

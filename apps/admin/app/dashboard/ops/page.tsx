@@ -112,7 +112,7 @@ export default function OpsPage() {
           <a
             href="/api/admin/ops/audit.csv"
             download="audit-log.csv"
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-semibold text-belize-navy shadow-bmpl-sm transition hover:border-belize-blue hover:bg-belize-blue/5"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-[color:var(--bmpl-border)] px-5 py-2.5 text-sm font-semibold text-[color:var(--bmpl-text)] shadow-bmpl-sm transition hover:border-belize-blue hover:bg-belize-blue/5"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
               <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />

@@ -125,7 +125,7 @@ function ActionBtn({
       className={`rounded-bmpl-md border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
         danger
           ? 'border-red-300 text-red-700 hover:bg-red-50'
-          : 'border-slate-300 text-slate-700 hover:bg-slate-50'
+          : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:bg-belize-blue/5'
       }`}
     >
       {label}

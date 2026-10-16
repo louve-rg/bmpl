@@ -280,7 +280,7 @@ export default function NewShipmentPage() {
       {/* 2. The quote. One price, and the journey that produced it. */}
       <div className="mt-4">
         {!ready && (
-          <p className="rounded-bmpl-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+          <p className="rounded-bmpl-xl border border-dashed border-[color:var(--bmpl-border)] p-4 text-sm text-[color:var(--bmpl-text-muted)]">
             Tell us the town at each end and we will price the whole journey.
           </p>
         )}

@@ -101,7 +101,7 @@ export default function PromotionManagePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading…
       </div>
     );
@@ -236,7 +236,7 @@ export default function PromotionManagePage() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[26rem] text-sm">
                   <thead>
-                    <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
+                    <tr className="text-left text-xs uppercase tracking-wide text-[color:var(--bmpl-text-faint)]">
                       <th className="pb-2 pr-3 font-semibold">Placement</th>
                       <th className="pb-2 pr-3 font-semibold">Impr.</th>
                       <th className="pb-2 pr-3 font-semibold">Clicks</th>
@@ -245,13 +245,13 @@ export default function PromotionManagePage() {
                   </thead>
                   <tbody>
                     {analytics.byPlacement.map((r, i) => (
-                      <tr key={`${r.placement ?? 'none'}-${i}`} className="border-t border-slate-100">
-                        <td className="py-2 pr-3 text-slate-600">
+                      <tr key={`${r.placement ?? 'none'}-${i}`} className="border-t border-[color:var(--bmpl-border-soft)]">
+                        <td className="py-2 pr-3 text-[color:var(--bmpl-text-muted)]">
                           {r.placement ? PROMOTION_PLACEMENT_LABELS[r.placement] : 'Unattributed'}
                         </td>
-                        <td className="py-2 pr-3 text-slate-600">{r.impressions.toLocaleString()}</td>
-                        <td className="py-2 pr-3 text-slate-600">{r.clicks.toLocaleString()}</td>
-                        <td className="py-2 text-slate-600">{formatCtr(r.ctr)}</td>
+                        <td className="py-2 pr-3 text-[color:var(--bmpl-text-muted)]">{r.impressions.toLocaleString()}</td>
+                        <td className="py-2 pr-3 text-[color:var(--bmpl-text-muted)]">{r.clicks.toLocaleString()}</td>
+                        <td className="py-2 text-[color:var(--bmpl-text-muted)]">{formatCtr(r.ctr)}</td>
                       </tr>
                     ))}
                   </tbody>

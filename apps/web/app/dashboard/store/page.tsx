@@ -336,7 +336,7 @@ function ImagePicker({ label, url, onPick, wide }: { label: string; url: string 
         <img src={url} alt="" className={`rounded-bmpl-md border border-slate-200 object-cover ${wide ? 'h-20 w-56' : 'h-20 w-20'}`} />
       ) : (
         <span
-          className={`flex items-center justify-center rounded-bmpl-lg border-2 border-dashed border-slate-300 text-xs text-slate-400 transition group-hover:border-belize-accent group-hover:text-belize-blue ${wide ? 'h-20 w-56' : 'h-20 w-20'}`}
+          className={`flex items-center justify-center rounded-bmpl-lg border-2 border-dashed border-[color:var(--bmpl-border)] text-xs text-[color:var(--bmpl-text-faint)] transition group-hover:border-belize-accent group-hover:text-belize-blue ${wide ? 'h-20 w-56' : 'h-20 w-20'}`}
         >
           Upload
         </span>

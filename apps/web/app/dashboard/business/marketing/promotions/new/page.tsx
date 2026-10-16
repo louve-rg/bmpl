@@ -65,7 +65,7 @@ export default function NewPromotionPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading…
       </div>
     );
@@ -91,17 +91,17 @@ export default function NewPromotionPage() {
 
       <Card className="p-5">
         <h2 className="bmpl-eyebrow mb-1">Placements</h2>
-        <p className="mb-4 text-sm text-slate-500">Where should this promotion appear?</p>
+        <p className="mb-4 text-sm text-[color:var(--bmpl-text-muted)]">Where should this promotion appear?</p>
         <PlacementPicker value={placements} onChange={setPlacements} disabled={submitting} />
       </Card>
 
       <Card className="p-5">
         <h2 className="bmpl-eyebrow mb-1">Targets</h2>
-        <p className="mb-4 text-sm text-slate-500">What does this promotion link to? You must own each target.</p>
+        <p className="mb-4 text-sm text-[color:var(--bmpl-text-muted)]">What does this promotion link to? You must own each target.</p>
         <TargetPicker value={targets} onChange={setTargets} disabled={submitting} />
       </Card>
 
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-[color:var(--bmpl-text-faint)]">
         Placements and targets are saved with the draft. You can refine them, add creative assets, and submit for review
         on the next screen.
       </p>

@@ -37,7 +37,7 @@ export default function MarketingOverviewPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading…
       </div>
     );
@@ -79,7 +79,7 @@ export default function MarketingOverviewPage() {
         <ByStatus byStatus={data.byStatus} />
         <Card className="p-5">
           <h2 className="bmpl-eyebrow mb-3">Tips</h2>
-          <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-600">
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-[color:var(--bmpl-text-muted)]">
             <li>Promotions are reviewed by our team before they go live.</li>
             <li>Only content you own can be targeted — ownership is verified automatically.</li>
             <li>Add clear banner creative for the best placement performance.</li>

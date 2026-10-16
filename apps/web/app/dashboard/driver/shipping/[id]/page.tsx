@@ -137,12 +137,12 @@ function PlaceBlock({ step, label, place, locked }: { step: number; label: strin
   if (!place) return null;
   return (
     <Card className="p-4 sm:p-5">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+      <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">
         {step} · {label}
       </p>
-      <p className="mt-1 break-words text-base font-semibold text-belize-navy">{place.name ?? place.area ?? '—'}</p>
-      {place.address && <p className="mt-0.5 break-words text-sm text-slate-600">{place.address}</p>}
-      {place.area && place.name && <p className="mt-0.5 break-words text-sm text-slate-500">{place.area}</p>}
+      <p className="mt-1 break-words text-base font-semibold text-[color:var(--bmpl-text)]">{place.name ?? place.area ?? '—'}</p>
+      {place.address && <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">{place.address}</p>}
+      {place.area && place.name && <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">{place.area}</p>}
 
       {place.instructions && (
         <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">{place.instructions}</p>
@@ -151,7 +151,7 @@ function PlaceBlock({ step, label, place, locked }: { step: number; label: strin
       {locked && place.kind === 'ADDRESS' && (
         // Said plainly rather than shown as an error. The driver has not done
         // anything wrong; they simply have not taken the job yet.
-        <p className="mt-2 text-sm text-slate-500">The full address and phone number appear once you accept.</p>
+        <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted)]">The full address and phone number appear once you accept.</p>
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -168,7 +168,7 @@ function PlaceBlock({ step, label, place, locked }: { step: number; label: strin
         {place.phone && (
           <a
             href={`tel:${place.phone}`}
-            className="inline-flex min-h-[44px] items-center rounded-bmpl-md border border-slate-300 px-4 text-sm font-semibold text-belize-navy"
+            className="inline-flex min-h-[44px] items-center rounded-bmpl-md border border-[color:var(--bmpl-border)] px-4 text-sm font-semibold text-[color:var(--bmpl-text)]"
           >
             Call
           </a>
@@ -393,7 +393,7 @@ export default function DriverShippingJobPage() {
                         Photo added
                       </Badge>
                     ))}
-                    <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5">
+                    <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-[color:var(--bmpl-border)] px-3 py-1.5 text-sm font-semibold text-[color:var(--bmpl-text)] transition hover:border-belize-blue hover:bg-belize-blue/5">
                       {photoBusy ? <Spinner className="h-4 w-4" /> : 'Add photo'}
                       <input
                         type="file"
@@ -489,7 +489,7 @@ export default function DriverShippingJobPage() {
               <button
                 onClick={decline}
                 disabled={busy}
-                className="min-h-[44px] w-full rounded-bmpl-md border border-slate-300 text-sm font-semibold text-slate-600"
+                className="min-h-[44px] w-full rounded-bmpl-md border border-[color:var(--bmpl-border)] text-sm font-semibold text-[color:var(--bmpl-text-muted)]"
               >
                 Pass on this job
               </button>
@@ -506,7 +506,7 @@ export default function DriverShippingJobPage() {
             {(!action || reportState === 'reported') && (
               <Link
                 href="/dashboard/driver/jobs"
-                className="flex min-h-[44px] w-full items-center justify-center rounded-bmpl-md border border-slate-300 text-sm font-semibold text-belize-navy"
+                className="flex min-h-[44px] w-full items-center justify-center rounded-bmpl-md border border-[color:var(--bmpl-border)] text-sm font-semibold text-[color:var(--bmpl-text)]"
               >
                 Back to my deliveries
               </Link>

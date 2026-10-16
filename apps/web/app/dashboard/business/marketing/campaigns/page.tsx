@@ -36,7 +36,7 @@ export default function CampaignsListPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading…
       </div>
     );
@@ -86,8 +86,8 @@ export default function CampaignsListPage() {
             <Link key={c.id} href={`/dashboard/business/marketing/campaigns/${c.id}`} className="block">
               <Card className="flex flex-wrap items-center justify-between gap-3 p-4 transition hover:border-belize-light/60 hover:shadow-bmpl-md">
                 <div className="min-w-0">
-                  <p className="truncate font-semibold text-belize-navy">{c.name}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="truncate font-semibold text-[color:var(--bmpl-text)]">{c.name}</p>
+                  <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted)]">
                     {campaignTypeLabel(c.type)} · {c.promotionCount} promotions · {c.couponCount} coupons · Updated {fmtDate(c.updatedAt)}
                   </p>
                 </div>

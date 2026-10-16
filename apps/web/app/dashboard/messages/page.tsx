@@ -707,7 +707,7 @@ function Composer({
 
       <div className="flex items-end gap-2">
         <label
-          className="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-bmpl-md border border-slate-300 text-slate-500 transition hover:border-belize-blue hover:text-belize-blue"
+          className="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-bmpl-md border border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] transition hover:border-belize-blue hover:text-belize-blue"
           title="Attach a file"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>

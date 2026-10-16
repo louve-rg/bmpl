@@ -119,7 +119,7 @@ export default function AnalyticsPage() {
           <a
             href="/api/admin/analytics/reports/orders.csv"
             download="orders.csv"
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-semibold text-belize-navy shadow-bmpl-sm transition hover:border-belize-blue hover:bg-belize-blue/5"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-[color:var(--bmpl-border)] px-5 py-2.5 text-sm font-semibold text-[color:var(--bmpl-text)] shadow-bmpl-sm transition hover:border-belize-blue hover:bg-belize-blue/5"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
               <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />
@@ -134,7 +134,7 @@ export default function AnalyticsPage() {
           You don&apos;t have the <code>analytics.read</code> permission.
         </Alert>
       ) : state === 'loading' ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading analytics…
         </div>
       ) : state === 'error' || !overview ? (
@@ -178,9 +178,9 @@ function KpiGrid({ o }: { o: Overview }) {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         {cards.map((c) => (
           <Card key={c.label} className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{c.label}</p>
-            <p className="mt-1.5 text-2xl font-bold text-belize-navy">{c.value}</p>
-            {c.sub && <p className="mt-1 text-xs text-slate-400">{c.sub}</p>}
+            <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">{c.label}</p>
+            <p className="mt-1.5 text-2xl font-bold text-[color:var(--bmpl-text)]">{c.value}</p>
+            {c.sub && <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">{c.sub}</p>}
           </Card>
         ))}
       </div>
@@ -213,9 +213,9 @@ function SalesSection() {
   return (
     <section aria-label="Daily sales">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <h2 className="text-sm font-semibold text-belize-navy">Daily sales</h2>
+        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Daily sales</h2>
         <div className="flex items-center gap-2">
-          <label htmlFor="sales-range" className="text-xs font-medium text-slate-500">
+          <label htmlFor="sales-range" className="text-xs font-medium text-[color:var(--bmpl-text-muted)]">
             Range
           </label>
           <Select
@@ -235,7 +235,7 @@ function SalesSection() {
 
       <Card className="p-5">
         {state === 'loading' ? (
-          <div className="flex h-56 items-center justify-center gap-2 text-sm text-slate-500">
+          <div className="flex h-56 items-center justify-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
             <Spinner className="h-4 w-4" /> Loading sales…
           </div>
         ) : state === 'forbidden' ? (
@@ -276,17 +276,17 @@ function BarChart({ series }: { series: SalesPoint[] }) {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-slate-500">
+      <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-[color:var(--bmpl-text-muted)]">
         <span>
-          Total gross <span className="font-semibold text-belize-navy">{money(totalGross)}</span>
+          Total gross <span className="font-semibold text-[color:var(--bmpl-text)]">{money(totalGross)}</span>
         </span>
         <span>
-          Orders <span className="font-semibold text-belize-navy">{int(totalOrders)}</span>
+          Orders <span className="font-semibold text-[color:var(--bmpl-text)]">{int(totalOrders)}</span>
         </span>
       </div>
 
       {allZero && (
-        <p className="mb-3 text-sm font-medium text-slate-400">No sales in this period.</p>
+        <p className="mb-3 text-sm font-medium text-[color:var(--bmpl-text-faint)]">No sales in this period.</p>
       )}
 
       <div className="overflow-x-auto">
@@ -343,12 +343,12 @@ function BarChart({ series }: { series: SalesPoint[] }) {
               );
             })}
           </div>
-          <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Orders per day</p>
+          <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-[color:var(--bmpl-text-faint)]">Orders per day</p>
 
           {/* Date axis */}
           <div className="mt-2 flex gap-[2px]" aria-hidden>
             {series.map((p, i) => (
-              <div key={p.date} className="flex-1 overflow-hidden text-center text-[10px] text-slate-400">
+              <div key={p.date} className="flex-1 overflow-hidden text-center text-[10px] text-[color:var(--bmpl-text-faint)]">
                 {i % labelEvery === 0 ? fmtDay(p.date) : ''}
               </div>
             ))}
@@ -365,7 +365,7 @@ function TopProductsTable({ rows }: { rows: TopProduct[] }) {
   return (
     <section aria-label="Top products">
       <div className="mb-3 flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-belize-navy">Top products</h2>
+        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Top products</h2>
         <Badge tone="brand">By revenue</Badge>
       </div>
       {rows.length === 0 ? (
@@ -402,7 +402,7 @@ function TopVendorsTable({ rows }: { rows: TopVendor[] }) {
   return (
     <section aria-label="Top vendors">
       <div className="mb-3 flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-belize-navy">Top vendors</h2>
+        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Top vendors</h2>
         <Badge tone="brand">By revenue</Badge>
       </div>
       {rows.length === 0 ? (

@@ -151,7 +151,13 @@ export default function AdminSettlementsPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader breadcrumbs={adminCrumbs('Settlements')} eyebrow="Finance" title="Settlements & Escrow" description="Reconciliation, internal balances, settlement history and platform fee configuration. Money is read-only — no manual balance or ledger edits." />
+      <PageHeader
+        breadcrumbs={adminCrumbs('Settlements')}
+        eyebrow="Finance"
+        title="Settlements & Escrow"
+        description="Reconciliation, internal balances, settlement history and platform fee configuration. Money is read-only — no manual balance or ledger edits."
+        descriptionClassName="text-[color:var(--bmpl-text-muted)]"
+      />
 
       <ReconciliationSection />
       <AccountsSection />
@@ -188,7 +194,7 @@ function ReconciliationSection() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading reconciliation…
       </div>
     );
@@ -262,11 +268,11 @@ function AccountsSection() {
 
   return (
     <section>
-      <h2 className="mb-3 text-sm font-semibold text-belize-navy">Internal system accounts</h2>
+      <h2 className="mb-3 text-sm font-semibold text-[color:var(--bmpl-text)]">Internal system accounts</h2>
       {error ? (
         <Alert tone="error">{error}</Alert>
       ) : !rows ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       ) : rows.length === 0 ? (
@@ -276,11 +282,11 @@ function AccountsSection() {
           {rows.map((a) => (
             <Card key={a.id} className="p-4">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{accountLabel(a.type)}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">{accountLabel(a.type)}</p>
                 <StatusBadge status={a.status} />
               </div>
-              <p className="mt-1.5 text-2xl font-bold text-belize-navy">{money(a.cachedBalanceMinor, a.currency)}</p>
-              <p className="mt-1 text-xs text-slate-400">{a.currency}</p>
+              <p className="mt-1.5 text-2xl font-bold text-[color:var(--bmpl-text)]">{money(a.cachedBalanceMinor, a.currency)}</p>
+              <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">{a.currency}</p>
             </Card>
           ))}
         </div>
@@ -313,7 +319,7 @@ function FeeConfigSection({ canManage }: { canManage: boolean }) {
   return (
     <section>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-belize-navy">Fee configuration</h2>
+        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Fee configuration</h2>
         {config && !editing && canManage && (
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
             Edit rates
@@ -324,7 +330,7 @@ function FeeConfigSection({ canManage }: { canManage: boolean }) {
       {error ? (
         <Alert tone="error">{error}</Alert>
       ) : !config ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       ) : editing ? (
@@ -338,7 +344,7 @@ function FeeConfigSection({ canManage }: { canManage: boolean }) {
         />
       ) : (
         <Card className="p-5">
-          <p className="mb-4 text-xs text-slate-500">
+          <p className="mb-4 text-xs text-[color:var(--bmpl-text-muted)]">
             These are configurable platform fee rates. Commission and driver-share are shown as percentages (basis points ÷ 100).
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -478,7 +484,7 @@ function SettlementsSection() {
 
   return (
     <section>
-      <h2 className="mb-3 text-sm font-semibold text-belize-navy">Settlements</h2>
+      <h2 className="mb-3 text-sm font-semibold text-[color:var(--bmpl-text)]">Settlements</h2>
 
       <div className="mb-4 flex flex-wrap gap-2">
         {STATUS_FILTERS.map((f) => {
@@ -490,7 +496,9 @@ function SettlementsSection() {
               onClick={() => setStatus(f.value)}
               aria-pressed={active}
               className={`rounded-full px-3.5 py-1.5 text-sm font-semibold transition ${
-                active ? 'bg-belize-blue text-white' : 'border border-slate-300 text-slate-600 hover:bg-slate-50'
+                active
+                  ? 'bg-belize-blue text-white'
+                  : 'border border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:bg-belize-blue/5'
               }`}
             >
               {f.label}
@@ -502,7 +510,7 @@ function SettlementsSection() {
       {error ? (
         <Alert tone="error">{error}</Alert>
       ) : !rows ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       ) : rows.length === 0 ? (
@@ -701,11 +709,11 @@ function ExceptionsSection({ canManage }: { canManage: boolean }) {
 
   return (
     <section>
-      <h2 className="mb-3 text-sm font-semibold text-belize-navy">Failed settlements &amp; exceptions</h2>
+      <h2 className="mb-3 text-sm font-semibold text-[color:var(--bmpl-text)]">Failed settlements &amp; exceptions</h2>
       {error ? (
         <Alert tone="error">{error}</Alert>
       ) : !rows ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       ) : rows.length === 0 ? (

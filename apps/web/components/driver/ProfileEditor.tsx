@@ -192,7 +192,7 @@ export function ProfileEditor({ profile, onDone }: { profile: DriverProfile | nu
             <Avatar name={f.displayName || f.legalName || 'Driver'} src={profile?.profilePhotoUrl} size="lg" />
             <div className="flex flex-col gap-1.5">
               {profile?.hasProfilePhoto ? <Badge tone="success">Photo on file</Badge> : <Badge tone="neutral">No photo yet</Badge>}
-              <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5">
+              <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-[color:var(--bmpl-border)] px-3 py-1.5 text-sm font-semibold text-[color:var(--bmpl-text)] transition hover:border-belize-blue hover:bg-belize-blue/5">
                 {photoBusy ? <Spinner className="h-4 w-4" /> : profile?.hasProfilePhoto ? 'Replace photo' : 'Upload photo'}
                 <input
                   type="file"

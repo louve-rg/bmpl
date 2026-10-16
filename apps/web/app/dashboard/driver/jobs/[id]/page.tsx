@@ -767,7 +767,7 @@ function CompleteDeliveryForm({
               Photo added
             </Badge>
           ))}
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[color:var(--bmpl-border)] px-3 py-1.5 text-sm font-semibold text-[color:var(--bmpl-text)] transition hover:border-belize-blue hover:bg-belize-blue/5">
             {photoBusy ? <Spinner className="h-4 w-4" /> : 'Add photo'}
             <input
               type="file"
