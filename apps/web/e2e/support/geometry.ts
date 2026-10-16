@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /**
  * A third class of responsive defect, alongside horizontal overflow
@@ -93,4 +93,43 @@ export async function zeroWidthTextFindings(page: Page): Promise<ZeroWidthFindin
     }
     return out;
   });
+}
+
+/**
+ * Pairwise bounding-box intersection over a CURATED set of locators — not a
+ * generic whole-page solver, which would false-positive constantly on
+ * elements that are SUPPOSED to share screen space (a badge over an avatar,
+ * an icon inside its own button). Pass exactly the elements that must never
+ * overlap each other (nav items, a button row, a modal's own controls vs
+ * its backdrop) and this reports any pair whose visible boxes actually
+ * intersect by more than a rounding-tolerance sliver.
+ */
+export interface OverlapFinding {
+  aLabel: string;
+  bLabel: string;
+  overlapPx: { width: number; height: number };
+}
+
+export async function findOverlaps(labeled: Array<{ label: string; locator: Locator }>): Promise<OverlapFinding[]> {
+  const boxes = await Promise.all(
+    labeled.map(async (l) => ({ label: l.label, box: await l.locator.boundingBox() })),
+  );
+  const out: OverlapFinding[] = [];
+  for (let i = 0; i < boxes.length; i++) {
+    const current = boxes[i];
+    if (!current) continue;
+    for (let j = i + 1; j < boxes.length; j++) {
+      const other = boxes[j];
+      if (!other) continue;
+      const a = current.box;
+      const b = other.box;
+      if (!a || !b) continue; // not visible -- absence is not overlap
+      const overlapWidth = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+      const overlapHeight = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+      if (overlapWidth > 1 && overlapHeight > 1) {
+        out.push({ aLabel: current.label, bLabel: other.label, overlapPx: { width: overlapWidth, height: overlapHeight } });
+      }
+    }
+  }
+  return out;
 }

@@ -245,6 +245,45 @@ async function ensureUser(admin: Client, who: { email: string; firstName: string
   return row.id;
 }
 
+/**
+ * Verifies the signed-in client's own email through the REAL flow — never a
+ * direct write, never a bypass on the gate itself
+ * (apps/api/src/roles/roles.service.ts requireVerifiedEmail). Fetches the
+ * captured verification email from the dev-only mailbox
+ * (apps/api/src/notifications/dev-mailbox.service.ts, exposed at
+ * GET /dev/emails/latest — never registered when NODE_ENV=production) and
+ * consumes its token through POST /auth/verify-email, the same sequence
+ * apps/api/test/email-verification-gate.integration.spec.ts already uses.
+ *
+ * Checks current state first and treats already-verified as success: on any
+ * database where this account's role application predates the gate, or a
+ * prior run of this script already verified it, this returns immediately
+ * without touching the mailbox — so there is no stale-token risk on a
+ * re-run, and a long-lived local API process is never asked to re-verify an
+ * account that already passed.
+ */
+async function ensureEmailVerified(client: Client, email: string): Promise<void> {
+  const me = await client.get<{ emailVerified: boolean }>('/me');
+  if (me.emailVerified) {
+    console.info(`  • ${email} already verified`);
+    return;
+  }
+  type CapturedEmail = { to: string; subject: string; body: string; createdAt: string };
+  let captured: CapturedEmail;
+  try {
+    captured = await client.get<CapturedEmail>(`/dev/emails/latest?email=${encodeURIComponent(email)}`);
+  } catch (e) {
+    throw new Error(
+      `${email} is not verified and no verification email was captured at /dev/emails/latest — cannot proceed. ` +
+        `(${isFailure(e) ? e.message : String(e)})`,
+    );
+  }
+  const token = /token=([A-Za-z0-9_-]+)/.exec(captured.body)?.[1];
+  if (!token) throw new Error(`Captured email for ${email} had no verification token in its body.`);
+  await client.post('/auth/verify-email', { token });
+  console.info(`  ✓ ${email} verified via the dev mailbox, through the real /auth/verify-email flow`);
+}
+
 async function main(): Promise<void> {
   assertDevelopmentEnvironment();
 
@@ -413,6 +452,11 @@ async function main(): Promise<void> {
   const myApps = await driver.get<MyApplication[]>('/roles/applications');
   let application = myApps.find((a) => a.roleCode === 'DELIVERY_DRIVER');
   if (!application) {
+    // Required before applying — DELIVERY_DRIVER cannot be applied for with
+    // an unverified email. Inside this guard on purpose: on any database
+    // where an application already exists (including one that predates the
+    // verification gate entirely), this block — and this call — never runs.
+    await ensureEmailVerified(driver, USERS.driver.email);
     // The role requires supporting documents, so one goes through the real
     // upload path: raw bytes to the API, storage key back, key on the form.
     const pdf = new TextEncoder().encode(

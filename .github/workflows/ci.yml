@@ -339,6 +339,224 @@ jobs:
         # globalSetup runs `prisma migrate deploy` against TEST_DATABASE_URL.
         run: pnpm --filter @bmpl/api test:integration
 
+  visual-regression:
+    # Priority 6 remediation (owner directive, 2026-10-16): a pixel-baseline
+    # visual-regression suite, which needs a live API + seeded database in
+    # CI for the first time — the exact "expensive new authenticated CI
+    # infrastructure" the owner's directive explicitly, and newly,
+    # authorizes (superseding the prior "local-only authenticated browser
+    # tests" ruling, god 2026-10-10 — see hive/agents/jim-mv09alb5/
+    # priority6-visual-baseline-approach-2026-10-16.md for the full design
+    # this job implements, and docs/visual-baseline-exit-log.md for the
+    # written, falsifiable criterion that has to be satisfied before this
+    # job's own `continue-on-error` comes off).
+    #
+    # VALIDATED END TO END IN A REAL CI RUN: 38948367691, headSha 981706f,
+    # 2026-10-16 — all five jobs green, this job's own seed/API/Playwright
+    # chain included (seed base role fixtures -> build+start the API ->
+    # readiness gate -> seed UAT logistics against the live API -> Playwright
+    # for both web and admin). Three earlier draft-PR runs went red first, on
+    # three distinct real causes (a step-ordering bug, then a pre-existing
+    # gap in seed-uat-logistics.ts's own email-verification handling, then a
+    # call-site placement bug in the fix for that gap) — none of them a
+    # missing env var. The question this draft existed to answer is
+    # answered: the env block below is complete as written.
+    #
+    # Phase 1 ships exactly ONE spec (apps/web/e2e/visual/smoke.spec.ts) and
+    # it is deliberately not a baseline -- no toHaveScreenshot, no committed
+    # PNG. It exists only to prove the chain below actually works end to
+    # end (seed -> live API -> dev server on 3177 under Linux -> browser ->
+    # login), per god's 2026-10-16 review: a validated run that only proves
+    # "the steps executed" is not validated at all. apps/admin's e2e/visual
+    # is still empty (Phase 2 adds specs there) -- its own step below is
+    # EXPECTED to exit non-zero during Phase 1 for a harmless reason
+    # (Playwright exits non-zero on "no tests found"), absorbed by
+    # continue-on-error same as always; that is not a finding either.
+    name: Visual regression baseline (Priority 6)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bmpl
+          POSTGRES_PASSWORD: bmpl_ci_password
+          # DELIBERATE, DO NOT "TIDY" THIS TO SOMETHING MORE DESCRIPTIVE LIKE
+          # bmpl_visual (which is what this was originally named, until a real
+          # CI run refused to seed). It must be exactly "bmpl":
+          # prisma/seed-uat-logistics.ts's own assertDevelopmentEnvironment()
+          # hard-refuses any database name other than "bmpl" or "bmpl_test"
+          # (the latter reserved for the Integration job above) -- see that
+          # function for the actual check. This name clears that dev-only
+          # assertion on purpose; it is harmless here because this Postgres
+          # container is a throwaway on its own isolated runner VM for this
+          # one job, destroyed at the end of it -- never the same "bmpl" any
+          # human's local dev database, or the Integration job's bmpl_test,
+          # refers to. If you want this to read less alarmingly, propose an
+          # explicit opt-in flag on the guard itself -- that touches a safety
+          # assertion, so it needs its own review, not a drive-by rename here.
+          POSTGRES_DB: bmpl
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U bmpl -d bmpl"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Same services shape as the Integration job above, duplicated rather
+      # than shared across jobs (GitHub Actions jobs don't share services) —
+      # a separate runner VM per job, so this "bmpl" database never collides
+      # with that job's own bmpl_test despite reusing the same in-VM port.
+      DATABASE_URL: postgresql://bmpl:bmpl_ci_password@localhost:5432/bmpl?schema=public
+      DIRECT_URL: postgresql://bmpl:bmpl_ci_password@localhost:5432/bmpl?schema=public
+      REDIS_URL: redis://localhost:6379
+      STORAGE_PROVIDER: minio
+      STORAGE_ENDPOINT: http://localhost:9000
+      STORAGE_ACCESS_KEY_ID: bmpl
+      STORAGE_SECRET_ACCESS_KEY: bmpl_ci_password
+      STORAGE_BUCKET: bmpl-documents
+      STORAGE_PUBLIC_BUCKET: bmpl-public
+      STORAGE_FORCE_PATH_STYLE: 'true'
+      JWT_ACCESS_SECRET: ci-access-secret-value-000000000000
+      JWT_REFRESH_SECRET: ci-refresh-secret-value-00000000000
+      COOKIE_SECRET: ci-cookie-secret-value-0000000000000
+      API_PORT: '4000'
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      ADMIN_PUBLIC_API_URL: http://localhost:4000
+      # Deterministic, CI-only, non-secret fixture credentials (root
+      # CLAUDE.md §9 — never a real credential) so the suite's seeded role
+      # fixtures (apps/web/e2e/support/auth.ts: SUPER_ADMIN, UAT_DRIVER,
+      # etc.) are reachable here, unlike the plain e2e job above, which
+      # deliberately provisions none of this.
+      SEED_SUPER_ADMIN_EMAIL: visual-ci-admin@bzemarketplace.com
+      SEED_SUPER_ADMIN_PASSWORD: VisualCiFixtureOnly!000
+      UAT_SEED_PASSWORD: VisualCiFixtureOnly!000
+      SEED_DEMO_PASSWORD: VisualCiFixtureOnly!000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR (pull our own MinIO mirror)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=bmpl -e MINIO_ROOT_PASSWORD=bmpl_ci_password \
+            ghcr.io/louve-rg/minio-mirror@sha256:52dfd5c0bbd38d3219f2058c7af216d9f9a27a994b7b5baad09bbd38866015ff server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/ready >/dev/null; then echo "minio ready"; break; fi
+            sleep 1
+          done
+          # Hard gate (god, 2026-10-16): the loop above falls through silently
+          # if MinIO never becomes ready -- same no-exit idiom the Integration
+          # job above already uses, defensible to copy, but a copied idiom
+          # still needs a floor. Fail loudly here rather than let every step
+          # after this one run against a storage backend that never came up.
+          curl -sf http://localhost:9000/minio/health/ready >/dev/null || { echo "MinIO never became ready within 30s" >&2; exit 1; }
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages (also runs prisma generate -- @bmpl/database's own build script)
+        run: pnpm -r --filter "./packages/*" build
+
+      - name: Migrate the visual-suite database
+        run: pnpm --filter @bmpl/database exec prisma migrate deploy
+
+      - name: Seed base role fixtures
+        run: pnpm --filter @bmpl/database exec tsx prisma/seed.ts
+
+      - name: Build API
+        run: pnpm --filter @bmpl/api build
+
+      - name: Start API and wait for real readiness
+        id: start-api
+        run: |
+          node apps/api/dist/main.js > /tmp/api.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:4000/api/health >/dev/null; then echo "API ready"; break; fi
+            sleep 1
+          done
+          # Hard gate (god, 2026-10-16): the loop above falls through
+          # silently if the API never comes up, which would let this step
+          # exit 0 and, because both visual steps below are
+          # continue-on-error, the WHOLE JOB would report green with no API
+          # running at all -- exactly the shape already caught once this
+          # same night in tsc's own incremental cache. continue-on-error must
+          # absorb test redness, never infrastructure redness.
+          curl -sf http://localhost:4000/api/health >/dev/null || {
+            echo "API never became ready within 60s -- see the uploaded log for why" >&2
+            cat /tmp/api.log >&2
+            exit 1
+          }
+
+      - name: Upload API boot log (only when the API never became ready)
+        if: steps.start-api.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-api-log
+          path: /tmp/api.log
+          retention-days: 7
+
+      # Must run AFTER the API is live: seed-uat-logistics.ts seeds its
+      # fixtures through real HTTP calls to the running API
+      # (packages/database/prisma/seed-uat-logistics.ts, API_BASE default
+      # http://localhost:4000), not direct DB writes -- confirmed the hard
+      # way on 2026-10-16 (run 38943499250) when this ran before "Start API"
+      # and failed on the script's own correct "API is not reachable" guard.
+      - name: Seed UAT logistics fixtures (needs the live API)
+        run: pnpm --filter @bmpl/database exec tsx prisma/seed-uat-logistics.ts
+
+      - name: Install Playwright's Chromium (web)
+        run: pnpm --filter @bmpl/web exec playwright install --with-deps chromium
+
+      - name: Visual regression baseline (web)
+        id: visual-web
+        continue-on-error: true
+        run: pnpm --filter @bmpl/web test:visual
+
+      - name: Upload visual diff report (web, only when it failed)
+        if: steps.visual-web.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff-report-web
+          path: apps/web/playwright-report
+          retention-days: 7
+
+      - name: Install Playwright's Chromium (admin)
+        run: pnpm --filter @bmpl/admin exec playwright install --with-deps chromium
+
+      - name: Visual regression baseline (admin)
+        id: visual-admin
+        continue-on-error: true
+        run: pnpm --filter @bmpl/admin test:visual
+
+      - name: Upload visual diff report (admin, only when it failed)
+        if: steps.visual-admin.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff-report-admin
+          path: apps/admin/playwright-report
+          retention-days: 7
+
   repo-drift-checks:
     name: Repo drift checks (docs, notification & permission catalogs)
     runs-on: ubuntu-latest
