@@ -136,7 +136,7 @@ export default function DriverJobDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading…
       </div>
     );
@@ -221,18 +221,18 @@ export default function DriverJobDetailPage() {
           <div className="mt-3">
             <p className="text-sm font-semibold text-emerald-700">📍 Customer pinned an exact location</p>
             <NavigateButton url={job.navigationUrl} label="Navigate to the customer" />
-            <p className="mt-1 text-xs text-slate-400">Opens in your maps app for turn-by-turn directions.</p>
+            <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">Opens in your maps app for turn-by-turn directions.</p>
           </div>
         ) : (
           job.addressUnlocked !== false && (
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-[color:var(--bmpl-text-faint)]">
               The customer didn&rsquo;t pin a location — use the written address above.
             </p>
           )
         )}
 
         {job.addressUnlocked === false && (
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-[color:var(--bmpl-text-faint)]">
             The customer&rsquo;s name, phone, street address and pinned location appear once you accept this delivery.
           </p>
         )}
@@ -253,7 +253,7 @@ export default function DriverJobDetailPage() {
           <Card className="p-4 sm:p-6">
             <ExpandableRouteMap points={points} title={`Order #${job.orderNumber} · route`} />
             {points.length < 2 && job.addressUnlocked === false && (
-              <p className="mt-2 text-xs text-slate-500">
+              <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">
                 The customer&rsquo;s pin appears here once you accept this delivery.
               </p>
             )}
@@ -264,30 +264,30 @@ export default function DriverJobDetailPage() {
       <Card className="p-4 sm:p-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="bmpl-eyebrow">Items</h2>
-          <span className="text-sm font-semibold text-belize-navy">Fee {money(job.feeMinor)}</span>
+          <span className="text-sm font-semibold text-[color:var(--bmpl-text)]">Fee {money(job.feeMinor)}</span>
         </div>
         {job.items.length === 0 ? (
-          <p className="text-sm text-slate-500">No items listed.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted)]">No items listed.</p>
         ) : (
           <ul className="space-y-2">
             {job.items.map((it, i) => (
-              <li key={i} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+              <li key={i} className="flex items-start justify-between gap-3 border-b border-[color:var(--bmpl-border-soft)] pb-2 last:border-0 last:pb-0">
                 <div className="min-w-0">
-                  <p className="break-words text-sm font-medium text-belize-navy">{it.productTitle}</p>
-                  {it.variantTitle && <p className="break-words text-xs text-slate-500">{it.variantTitle}</p>}
+                  <p className="break-words text-sm font-medium text-[color:var(--bmpl-text)]">{it.productTitle}</p>
+                  {it.variantTitle && <p className="break-words text-xs text-[color:var(--bmpl-text-muted)]">{it.variantTitle}</p>}
                 </div>
-                <span className="shrink-0 text-sm text-slate-600">×{it.quantity}</span>
+                <span className="shrink-0 text-sm text-[color:var(--bmpl-text-muted)]">×{it.quantity}</span>
               </li>
             ))}
           </ul>
         )}
-        {job.estimate && <p className="mt-3 text-xs text-slate-400">Estimate: {job.estimate}</p>}
+        {job.estimate && <p className="mt-3 text-xs text-[color:var(--bmpl-text-faint)]">Estimate: {job.estimate}</p>}
       </Card>
 
       {job.instructions && (
         <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">Delivery instructions</h2>
-          <p className="break-words text-sm text-slate-600">{job.instructions}</p>
+          <p className="break-words text-sm text-[color:var(--bmpl-text-muted)]">{job.instructions}</p>
         </Card>
       )}
 
@@ -335,17 +335,17 @@ function PickupBlock({ pickup, vendorName }: { pickup: PickupLocation | null; ve
   // vendor has no pickup location, and this page must still render.
   const view = pickupView(pickup);
   return (
-    <div className="text-sm text-slate-600">
-      {vendorName && <p className="break-words font-semibold text-belize-navy">{vendorName}</p>}
+    <div className="text-sm text-[color:var(--bmpl-text-muted)]">
+      {vendorName && <p className="break-words font-semibold text-[color:var(--bmpl-text)]">{vendorName}</p>}
 
       {view.missing ? (
-        <p className="mt-1 break-words text-slate-500">
+        <p className="mt-1 break-words text-[color:var(--bmpl-text-muted)]">
           The store hasn&rsquo;t added a pickup address yet. Contact the store or support to confirm where to collect
           this order before you set off.
         </p>
       ) : (
         <>
-          {view.label && <p className="text-xs uppercase tracking-wide text-slate-400">{view.label}</p>}
+          {view.label && <p className="text-xs uppercase tracking-wide text-[color:var(--bmpl-text-faint)]">{view.label}</p>}
           {view.addressLine1 && <p className="mt-1 break-words">{view.addressLine1}</p>}
           {view.addressLine2 && <p className="break-words">{view.addressLine2}</p>}
           {view.cityLine && <p>{view.cityLine}</p>}
@@ -360,7 +360,7 @@ function PickupBlock({ pickup, vendorName }: { pickup: PickupLocation | null; ve
             <NavigateButton url={view.navigationUrl} label="Navigate to the store" />
           ) : (
             view.hasAddress && (
-              <p className="mt-2 text-xs text-slate-400">
+              <p className="mt-2 text-xs text-[color:var(--bmpl-text-faint)]">
                 This store hasn&rsquo;t pinned its location — use the written address above.
               </p>
             )
@@ -373,8 +373,8 @@ function PickupBlock({ pickup, vendorName }: { pickup: PickupLocation | null; ve
 
 function AddressBlock({ address }: { address: Address }) {
   return (
-    <div className="text-sm text-slate-600">
-      {address.fullName && <p className="break-words font-semibold text-belize-navy">{address.fullName}</p>}
+    <div className="text-sm text-[color:var(--bmpl-text-muted)]">
+      {address.fullName && <p className="break-words font-semibold text-[color:var(--bmpl-text)]">{address.fullName}</p>}
       {address.phone && (
         <p>
           <a href={`tel:${address.phone}`} className="text-belize-blue hover:underline">
@@ -392,9 +392,9 @@ function AddressBlock({ address }: { address: Address }) {
 function VehicleBlock({ vehicle }: { vehicle: Vehicle }) {
   const parts = [vehicle.color, vehicle.make, vehicle.model].filter(Boolean).join(' ');
   return (
-    <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+    <div className="flex flex-wrap items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
       {vehicle.type && <Badge tone="brand">{vehicle.type}</Badge>}
-      {parts && <span className="min-w-0 break-words font-medium text-belize-navy">{parts}</span>}
+      {parts && <span className="min-w-0 break-words font-medium text-[color:var(--bmpl-text)]">{parts}</span>}
       {vehicle.licencePlate && <Badge tone="neutral">Plate: {vehicle.licencePlate}</Badge>}
     </div>
   );
@@ -402,7 +402,7 @@ function VehicleBlock({ vehicle }: { vehicle: Vehicle }) {
 
 function Timeline({ entries }: { entries: TimelineEntry[] }) {
   if (!entries || entries.length === 0) {
-    return <p className="text-sm text-slate-500">No activity yet.</p>;
+    return <p className="text-sm text-[color:var(--bmpl-text-muted)]">No activity yet.</p>;
   }
   return (
     <ol className="space-y-3">
@@ -413,9 +413,9 @@ function Timeline({ entries }: { entries: TimelineEntry[] }) {
             {i < entries.length - 1 && <span className="mt-1 w-px flex-1 bg-slate-200" aria-hidden />}
           </div>
           <div className="pb-1">
-            <p className="text-sm font-medium text-belize-navy">{e.label ?? (e.status ? e.status.replace(/_/g, ' ') : 'Update')}</p>
-            {e.at && <p className="text-xs text-slate-400">{formatDate(e.at)}</p>}
-            {e.note && <p className="mt-0.5 break-words text-sm text-slate-500">{e.note}</p>}
+            <p className="text-sm font-medium text-[color:var(--bmpl-text)]">{e.label ?? (e.status ? e.status.replace(/_/g, ' ') : 'Update')}</p>
+            {e.at && <p className="text-xs text-[color:var(--bmpl-text-faint)]">{formatDate(e.at)}</p>}
+            {e.note && <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">{e.note}</p>}
           </div>
         </li>
       ))}
@@ -453,7 +453,7 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
       return (
         <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">New delivery request</h2>
-          <p className="mb-4 text-sm text-slate-600">Accept this job to start the delivery, or decline it with a reason.</p>
+          <p className="mb-4 text-sm text-[color:var(--bmpl-text-muted)]">Accept this job to start the delivery, or decline it with a reason.</p>
           {errAlert}
           <AssignedActions job={job} busy={busy} setBusy={setBusy} setErr={setErr} onDone={onDone} router={router} />
         </Card>
@@ -463,7 +463,7 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
       return (
         <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">Confirm pickup</h2>
-          <p className="mb-4 text-sm text-slate-600">Enter the pickup PIN the vendor gives you at hand-off.</p>
+          <p className="mb-4 text-sm text-[color:var(--bmpl-text-muted)]">Enter the pickup PIN the vendor gives you at hand-off.</p>
           {errAlert}
           <PinAction
             label="Confirm pickup"
@@ -481,7 +481,7 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
       return (
         <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">On the way</h2>
-          <p className="mb-4 text-sm text-slate-600">Start the delivery once you&rsquo;re heading to the customer.</p>
+          <p className="mb-4 text-sm text-[color:var(--bmpl-text-muted)]">Start the delivery once you&rsquo;re heading to the customer.</p>
           {errAlert}
           <Button
             className="w-full sm:w-auto"
@@ -500,7 +500,7 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
       return (
         <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">In transit</h2>
-          <p className="mb-4 text-sm text-slate-600">Let the customer know you&rsquo;re almost there.</p>
+          <p className="mb-4 text-sm text-[color:var(--bmpl-text-muted)]">Let the customer know you&rsquo;re almost there.</p>
           {errAlert}
           <Button
             className="w-full sm:w-auto"
@@ -519,7 +519,7 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
       return (
         <Card className="p-4 sm:p-6">
           <h2 className="bmpl-eyebrow mb-2">Complete delivery</h2>
-          <p className="mb-4 text-sm text-slate-600">Enter the delivery PIN the recipient gives you and confirm the drop-off.</p>
+          <p className="mb-4 text-sm text-[color:var(--bmpl-text-muted)]">Enter the delivery PIN the recipient gives you and confirm the drop-off.</p>
           {errAlert}
           <CompleteDeliveryForm job={job} busy={busy} setBusy={setBusy} setErr={setErr} onDone={onDone} />
         </Card>
@@ -533,8 +533,8 @@ function ActionPanel({ job, onDone }: { job: JobDetail; onDone: () => Promise<vo
             This delivery is complete.
           </Alert>
           {job.recipientName && (
-            <p className="break-words text-sm text-slate-600">
-              Received by <b className="text-belize-navy">{job.recipientName}</b>
+            <p className="break-words text-sm text-[color:var(--bmpl-text-muted)]">
+              Received by <b className="text-[color:var(--bmpl-text)]">{job.recipientName}</b>
             </p>
           )}
           {job.podPhotoUrls.length > 0 && (
@@ -779,7 +779,7 @@ function CompleteDeliveryForm({
             />
           </label>
         </div>
-        <p className="mt-1 text-xs text-slate-400">Optional</p>
+        <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">Optional</p>
       </div>
 
       <Button type="submit" className="w-full sm:w-auto" disabled={busy || photoBusy || pin.trim().length === 0 || recipientName.trim().length === 0}>

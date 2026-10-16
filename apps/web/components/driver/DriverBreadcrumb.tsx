@@ -12,16 +12,16 @@ import Link from 'next/link';
 export function DriverBreadcrumb({ current }: { current: string }) {
   return (
     <nav aria-label="Breadcrumb" className="text-sm">
-      <ol className="flex flex-wrap items-center gap-1.5 text-slate-500">
+      <ol className="flex flex-wrap items-center gap-1.5 text-[color:var(--bmpl-text-muted)]">
         <li>
           <Link href="/dashboard/driver" className="font-medium text-belize-blue transition hover:text-belize-deep hover:underline">
             Driver Dashboard
           </Link>
         </li>
-        <li aria-hidden className="text-slate-300">
+        <li aria-hidden className="text-[color:var(--bmpl-text-faint)]">
           /
         </li>
-        <li aria-current="page" className="min-w-0 truncate font-medium text-slate-600">
+        <li aria-current="page" className="min-w-0 truncate font-medium text-[color:var(--bmpl-text)]">
           {current}
         </li>
       </ol>

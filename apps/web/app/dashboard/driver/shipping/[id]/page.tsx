@@ -304,7 +304,7 @@ export default function DriverShippingJobPage() {
       <DriverBreadcrumb current="Shipping job" />
 
       {loading && (
-        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
+        <div className="mt-6 flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       )}
@@ -323,7 +323,7 @@ export default function DriverShippingJobPage() {
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <StatusBadge status={job.status} />
-            <span className="text-sm font-semibold tabular-nums text-belize-navy">{money(job.feeMinor)}</span>
+            <span className="text-sm font-semibold tabular-nums text-[color:var(--bmpl-text)]">{money(job.feeMinor)}</span>
           </div>
 
           <div className="mt-4 space-y-3">
@@ -348,19 +348,19 @@ export default function DriverShippingJobPage() {
                 <Card className="p-4 sm:p-5">
                   <ExpandableRouteMap points={points} title={`${job.reference} · route`} />
                   {points.length < routeStops.length && !job.addressUnlocked && (
-                    <p className="mt-2 text-xs text-slate-500">The other end shows its area above until you accept.</p>
+                    <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">The other end shows its area above until you accept.</p>
                   )}
                 </Card>
               );
             })()}
 
             <Card className="p-4 sm:p-5">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">What you are moving</p>
-              <p className="mt-1 break-words text-sm text-slate-700">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">What you are moving</p>
+              <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text)]">
                 {job.parcel.description || `${job.parcel.pieces} ${job.parcel.pieces === 1 ? 'parcel' : 'parcels'}`}
               </p>
               {job.parcel.weightGrams != null && (
-                <p className="mt-0.5 text-sm text-slate-500">About {(job.parcel.weightGrams / 453.6).toFixed(1)} lb</p>
+                <p className="mt-0.5 text-sm text-[color:var(--bmpl-text-muted)]">About {(job.parcel.weightGrams / 453.6).toFixed(1)} lb</p>
               )}
             </Card>
 
@@ -406,7 +406,7 @@ export default function DriverShippingJobPage() {
                     </label>
                   </div>
                 )}
-                <p className="mt-1 text-xs text-slate-400">Optional</p>
+                <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">Optional</p>
               </Card>
             )}
           </div>
@@ -415,11 +415,11 @@ export default function DriverShippingJobPage() {
               needs to know who to ask before they arrive. */}
           {action?.needsCode && (
             <Card className="mt-3 p-4 sm:p-5">
-              <p className="text-sm font-semibold text-belize-navy">Finish the handover</p>
-              <p className="mt-1 text-sm text-slate-600">
+              <p className="text-sm font-semibold text-[color:var(--bmpl-text)]">Finish the handover</p>
+              <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
                 Ask {job.handoffCodeHeldBy} for the code and enter it here.
               </p>
-              <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="code">
+              <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="code">
                 Handover code
               </label>
               <input
@@ -428,17 +428,17 @@ export default function DriverShippingJobPage() {
                 autoComplete="one-time-code"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-lg tracking-[0.3em]"
+                className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-lg tracking-[0.3em] text-slate-900"
                 placeholder="0000"
               />
-              <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="who">
+              <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="who">
                 Who took it
               </label>
               <input
                 id="who"
                 value={receivedBy}
                 onChange={(e) => setReceivedBy(e.target.value)}
-                className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-base"
+                className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-base text-slate-900"
                 placeholder="Name of the person receiving it"
               />
               {job.pinAttemptsRemaining < 5 && (
@@ -478,7 +478,13 @@ export default function DriverShippingJobPage() {
             </Alert>
           )}
 
-          {/* One primary action, full width, thumb-height. */}
+          {/* One primary action, full width, thumb-height. This bar is its own
+              literal bg-white/95 regardless of theme (a sticky footer must stay
+              legible over whatever scrolls under it, light or dark mural alike),
+              so its bare buttons need the SAME explicit-dark-value treatment as
+              Edward's white-box controls -- --bmpl-text would resolve to near-
+              white under glass and vanish on this white bar exactly like it did
+              there. */}
           <div className="sticky bottom-0 mt-4 space-y-2 bg-white/95 py-3 backdrop-blur">
             {reportState !== 'reported' && action && (
               <Button onClick={run} disabled={busy} className="min-h-[48px] w-full text-base">
@@ -489,7 +495,7 @@ export default function DriverShippingJobPage() {
               <button
                 onClick={decline}
                 disabled={busy}
-                className="min-h-[44px] w-full rounded-bmpl-md border border-[color:var(--bmpl-border)] text-sm font-semibold text-[color:var(--bmpl-text-muted)]"
+                className="min-h-[44px] w-full rounded-bmpl-md border border-slate-300 text-sm font-semibold text-slate-700"
               >
                 Pass on this job
               </button>
@@ -506,7 +512,7 @@ export default function DriverShippingJobPage() {
             {(!action || reportState === 'reported') && (
               <Link
                 href="/dashboard/driver/jobs"
-                className="flex min-h-[44px] w-full items-center justify-center rounded-bmpl-md border border-[color:var(--bmpl-border)] text-sm font-semibold text-[color:var(--bmpl-text)]"
+                className="flex min-h-[44px] w-full items-center justify-center rounded-bmpl-md border border-slate-300 text-sm font-semibold text-slate-900"
               >
                 Back to my deliveries
               </Link>

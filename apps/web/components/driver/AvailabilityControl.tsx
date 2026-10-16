@@ -75,7 +75,7 @@ export function AvailabilityControl({
       )}
 
       {suspended ? (
-        <p className="mt-3 text-sm text-slate-600">
+        <p className="mt-3 text-sm text-[color:var(--bmpl-text-muted)]">
           Your driver role is suspended, so availability can&rsquo;t be changed. An administrator has to lift the
           suspension.
         </p>
