@@ -473,7 +473,12 @@ export class SettlementService {
   async driverEarnings(userId: string) {
     const p = await this.prisma.driverProfile.findUnique({ where: { userId }, select: { id: true } });
     if (!p) throw new ForbiddenException('No driver profile.');
-    const rows = await this.prisma.driverEarning.findMany({ where: { driverProfileId: p.id }, orderBy: { createdAt: 'desc' }, take: 300 });
+    const rows = await this.prisma.driverEarning.findMany({
+      where: { driverProfileId: p.id },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+      include: { shipmentLeg: { select: { shipment: { select: { reference: true } } } } },
+    });
     const totals = { pendingMinor: 0, postedMinor: 0, completedDeliveries: rows.filter((r) => r.status === 'POSTED').length };
     for (const r of rows) {
       if (r.status === 'POSTED') totals.postedMinor += money(r.netMinor);
@@ -574,11 +579,17 @@ export class SettlementService {
     };
   }
 
-  private shapeEarning(r: { id: string; orderDeliveryId: string | null; vendorOrderId: string | null; shipmentLegId?: string | null; currency: string; method: string; grossMinor: bigint; adjustmentsMinor: bigint; netMinor: bigint; status: string; calculatedAt: Date; postedAt: Date | null }) {
+  private shapeEarning(r: { id: string; orderDeliveryId: string | null; vendorOrderId: string | null; shipmentLegId?: string | null; shipmentLeg?: { shipment: { reference: string } } | null; currency: string; method: string; grossMinor: bigint; adjustmentsMinor: bigint; netMinor: bigint; status: string; calculatedAt: Date; postedAt: Date | null }) {
     return {
       id: r.id,
       orderDeliveryId: r.orderDeliveryId,
       vendorOrderId: r.vendorOrderId,
+      // Set when, and only when, this earning came from a shipment courier
+      // leg rather than a marketplace delivery (DriverEarning's CHECK:
+      // orderDeliveryId/shipmentLegId are never both set, never both null).
+      // The leg's own id is an opaque cuid with no meaning to a driver; the
+      // shipment's customer-facing tracking reference is the display value.
+      shipmentReference: r.shipmentLeg?.shipment.reference ?? null,
       currency: r.currency,
       method: r.method,
       grossMinor: money(r.grossMinor),
