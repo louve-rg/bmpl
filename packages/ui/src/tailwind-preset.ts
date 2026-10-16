@@ -49,4 +49,14 @@ const bmplTailwindPreset: Pick<Config, 'theme'> = {
   },
 };
 
-export default bmplTailwindPreset;
+// `export =` (not `export default`): compiles to a literal
+// `module.exports = bmplTailwindPreset` with no `{ default: ... }` wrapper
+// and no `__esModule` interop marker. Tailwind CSS loads `.ts` config
+// files (and whatever they import) via `jiti`, not a plain TS-compiled
+// `require()` -- `export default` here produced a wrapper object that
+// silently carried an EMPTY preset into a real `next build` (confirmed in
+// an isolated worktree: `rounded-bmpl-xl` and every other custom utility
+// this preset defines did not exist), while `next dev` never hit the same
+// code path and masked it completely. This shape removes the ambiguity
+// instead of trying to out-guess which loader is involved.
+export = bmplTailwindPreset;
