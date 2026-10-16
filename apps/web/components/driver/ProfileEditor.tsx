@@ -183,7 +183,7 @@ export function ProfileEditor({ profile, onDone }: { profile: DriverProfile | nu
 
         <div>
           <Label>Profile photo</Label>
-          <p className="mt-0.5 text-xs text-slate-500">
+          <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted)]">
             Customers see this photo when you’re on your way to them, so they know who to expect.
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -206,7 +206,7 @@ export function ProfileEditor({ profile, onDone }: { profile: DriverProfile | nu
           </div>
         </div>
 
-        <label className="flex items-start gap-2 text-sm text-slate-700">
+        <label className="flex items-start gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <input
             type="checkbox"
             className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-belize-blue focus:ring-2 focus:ring-belize-accent/30"
