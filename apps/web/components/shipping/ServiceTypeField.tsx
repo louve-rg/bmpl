@@ -87,7 +87,7 @@ export function ServiceTypeField({
         id="service-type"
         value={value}
         onChange={(e) => onChange(e.target.value as ShippingService)}
-        className="mt-1 w-full min-h-[48px] rounded-bmpl-md border border-slate-300 bg-white px-3 text-base"
+        className="mt-1 w-full min-h-[48px] rounded-bmpl-md border border-slate-300 bg-white px-3 text-base text-slate-900"
       >
         {ORDER.map((s) => (
           <option key={s} value={s}>
