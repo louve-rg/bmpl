@@ -253,10 +253,10 @@ export function ExceptionResolution({
   const priced = preview ? canPrice(preview) : false;
 
   return (
-    <div className="mt-3 rounded-bmpl-md border border-slate-200 bg-slate-50/60 p-3">
+    <div className="bmpl-panel mt-3 p-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-900">{action === 'RETURN' ? 'Return to sender' : 'Reroute to a new address'}</h3>
-        <button type="button" onClick={reset} className="text-xs font-medium text-slate-500 hover:underline">
+        <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">{action === 'RETURN' ? 'Return to sender' : 'Reroute to a new address'}</h3>
+        <button type="button" onClick={reset} className="text-xs font-medium text-[color:var(--bmpl-text-muted)] hover:underline">
           Cancel
         </button>
       </div>
@@ -271,7 +271,9 @@ export function ExceptionResolution({
                 aria-pressed={destination.mode === m}
                 onClick={() => setDestination({ ...EMPTY_DESTINATION, mode: m })}
                 className={`rounded-bmpl-sm px-3 py-1.5 text-xs font-semibold transition ${
-                  destination.mode === m ? 'bg-belize-blue text-white' : 'bg-white text-slate-600 border border-slate-300'
+                  destination.mode === m
+                    ? 'bg-belize-blue text-white'
+                    : 'border border-[color:var(--bmpl-border)] bg-[color:var(--bmpl-surface)] text-[color:var(--bmpl-text-muted)]'
                 }`}
               >
                 {m === 'ADDRESS' ? 'Door address' : 'Terminal'}
@@ -282,7 +284,7 @@ export function ExceptionResolution({
           {destination.mode === 'HUB' ? (
             <Field label="Terminal">
               {hubs === null ? (
-                <div className="flex items-center gap-2 text-xs text-slate-500">
+                <div className="flex items-center gap-2 text-xs text-[color:var(--bmpl-text-muted)]">
                   <Spinner className="h-3.5 w-3.5" /> Loading terminals…
                 </div>
               ) : (
@@ -337,7 +339,7 @@ export function ExceptionResolution({
       )}
 
       {action === 'RETURN' && previewing && (
-        <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+        <div className="mt-3 flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Pricing the return…
         </div>
       )}
@@ -345,7 +347,7 @@ export function ExceptionResolution({
       {preview && (
         <div className="mt-3 space-y-3">
           {priced ? (
-            <p className="text-sm text-slate-700">
+            <p className="text-sm text-[color:var(--bmpl-text-muted)]">
               This is a new transport service at BML's normal configured pricing:{' '}
               <span className="font-semibold tabular-nums">${((preview.totalMinor ?? 0) / 100).toFixed(2)}</span>.
               {action === 'REROUTE' &&
@@ -370,7 +372,7 @@ export function ExceptionResolution({
               {confirming ? 'Submitting…' : confirmLabel(action, preview)}
             </Button>
           ) : (
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-[color:var(--bmpl-text-muted)]">
               You can preview this, but preparing it needs the stronger logistics-manage permission.
             </p>
           )}
