@@ -127,6 +127,11 @@ Web: `apps/web/components/ui.tsx`. Admin: `apps/admin/components/ui.tsx`
 
 ## 13. Accessibility rules
 
+- **Foreground/background contrast is governed by a dedicated, permanent
+  owner standard — [`CONTRAST-STANDARD.md`](./CONTRAST-STANDARD.md) — not by
+  this bullet.** Read it before touching any glass-scoped or light-surface
+  color pairing; the platform does not fully meet it yet, and that document
+  records the honest gap.
 - WCAG AA contrast on text/controls. Visible `focus-visible` outlines
   (belize-accent). All form controls labelled; errors wired via `role="alert"`.
 - Icon-only buttons carry `aria-label`. Status is never conveyed by color alone

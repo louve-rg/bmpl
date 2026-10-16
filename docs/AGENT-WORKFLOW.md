@@ -111,6 +111,15 @@ pnpm test:unit
 | `apps/admin` | `pnpm --filter @bmpl/admin build` (no test suite exists yet) |
 | Any user-facing copy | `pnpm turbo run test --filter=@bmpl/shared` (brand copy: it is **BML**, never BMPL) |
 
+**Any foreground/background color pairing** (glass-scoped or light-surface)
+is governed by a permanent owner standard, not style preference —
+[`docs/design/CONTRAST-STANDARD.md`](design/CONTRAST-STANDARD.md).
+Automated CI contrast checks (its requirement 7) are not built yet, so
+there is no command to run here; until there is, verify any touched pairing
+by hand against its actual rendered background, not its parent's declared
+theme — that distinction is exactly how the platform's known violations were
+missed.
+
 The integration suite needs `TEST_DATABASE_URL` and a live Postgres, Redis and
 MinIO (`pnpm infra:up`). **If you cannot run it, say so explicitly in your
 report** — do not silently omit it, and do not present unit tests as though they
