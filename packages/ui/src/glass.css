@@ -81,19 +81,37 @@
      exists to close.
 
      Values computed (sRGB relative luminance, WCAG formula), not eyeballed:
-       #0f172a (text)       on #ffffff (bg)       = 17.85:1
-       #0f172a (text)       on #f8fafc (bg-muted) = 17.06:1
-       #475569 (text-muted) on #ffffff            =  7.58:1
-       #475569 (text-muted) on #f8fafc            =  7.24:1
+       #0f172a (text)        on #ffffff (bg)       = 17.85:1
+       #0f172a (text)        on #f8fafc (bg-muted) = 17.06:1
+       #475569 (text-muted)  on #ffffff            =  7.58:1
+       #475569 (text-muted)  on #f8fafc            =  7.24:1
      (an earlier draft used #64748b for text-muted -- 4.55:1 on #f8fafc,
      passing AA by 0.05 of headroom, rejected as too fragile a margin for
      requirement 4's "muted must stay readable, not just technically
-     compliant".) */
+     compliant". #64748b is still a good value -- just not at THIS
+     threshold; see border-strong below, where the bar is 3:1 not 4.5:1
+     and the same colour measures 4.76.)
+
+     TWO BORDER TOKENS, not one, because one token was doing two jobs
+     with two different thresholds. A hairline divider (a card edge, a
+     row separator) is decorative -- requirement 5's 3:1 floor is for
+     "essential interface graphics" and doesn't apply to it. The
+     boundary of an actual control (an input, a select -- requirement 6
+     names inputs explicitly) is NOT decorative: it is the only thing
+     that tells a user where the control begins and ends, and that is
+     exactly the "essential interface graphics" case 3:1 governs.
+       --bmpl-oncolor-light-border         (hairline only, decorative):
+         #e2e8f0 on #ffffff = 1.23:1, on #f8fafc = 1.18:1 -- fails 3:1,
+         fine for a divider, NEVER use it as a control's own boundary.
+       --bmpl-oncolor-light-border-strong  (the control boundary itself):
+         #7f8899 on #ffffff = 3.57:1, on #f8fafc = 3.41:1 -- passes both
+         with real margin. */
   --bmpl-oncolor-light-bg: #ffffff;
   --bmpl-oncolor-light-bg-muted: #f8fafc;
   --bmpl-oncolor-light-text: #0f172a;
   --bmpl-oncolor-light-text-muted: #475569;
   --bmpl-oncolor-light-border: #e2e8f0;
+  --bmpl-oncolor-light-border-strong: #7f8899;
 
   /* Opaque by construction -- NOT the glass theme's translucent
      --bmpl-surface/--bmpl-border (rgba with alpha). Those composite
@@ -102,8 +120,12 @@
      a mid-grey, and white text on that measures 4.21:1 -- a straight
      fail. A fixed dark box is BY DEFINITION meant for a light page, so it
      needs its own solid values:
-       #f4f8ff (text)       on #0a1526 (bg) = 18.29:1
-       #cbd5e1 (text-muted) on #0a1526      = 12.33:1 */
+       #f4f8ff (text)       on #0a1526 (bg) = 17.17:1
+       #cbd5e1 (text-muted) on #0a1526      = 12.32:1
+       #64748b (border)     on #0a1526      =  3.84:1, passes 3:1 -- one
+         border value suffices here; nothing on the dark side has yet
+         needed a hairline/control-boundary split the way the light side
+         did. */
   --bmpl-oncolor-dark-bg: #0a1526;
   --bmpl-oncolor-dark-text: #f4f8ff;
   --bmpl-oncolor-dark-text-muted: #cbd5e1;
