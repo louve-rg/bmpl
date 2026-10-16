@@ -62,11 +62,11 @@ function DocumentsView({ data }: { data: DashboardData }) {
         {data.application ? (
           <div className="space-y-2 text-sm">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-slate-500">Status:</span>
+              <span className="text-[color:var(--bmpl-text-muted)]">Status:</span>
               <StatusBadge status={data.application.status} />
-              <span className="text-xs text-slate-400">Submitted {formatDate(data.application.createdAt)}</span>
+              <span className="text-xs text-[color:var(--bmpl-text-faint)]">Submitted {formatDate(data.application.createdAt)}</span>
             </div>
-            {data.application.message && <p className="break-words text-slate-600">{data.application.message}</p>}
+            {data.application.message && <p className="break-words text-[color:var(--bmpl-text-muted)]">{data.application.message}</p>}
             {data.application.reviewerNote && (
               <Alert tone="info" title="Note from reviewer">
                 {data.application.reviewerNote}
@@ -74,7 +74,7 @@ function DocumentsView({ data }: { data: DashboardData }) {
             )}
           </div>
         ) : (
-          <p className="text-sm text-slate-500">You haven’t submitted a driver application yet.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted)]">You haven’t submitted a driver application yet.</p>
         )}
         <div className="mt-4">
           <ButtonLink href="/dashboard/roles" variant="outline" size="sm">
@@ -84,11 +84,11 @@ function DocumentsView({ data }: { data: DashboardData }) {
       </Card>
 
       <Card title="Your documents">
-        <p className="mb-3 text-sm text-slate-500">
+        <p className="mb-3 text-sm text-[color:var(--bmpl-text-muted)]">
           Required documents — ID, driver&rsquo;s licence, vehicle registration, insurance, and vehicle &amp; profile
           photos — are uploaded as part of your role application.
         </p>
-        <ul className="divide-y divide-slate-100 text-sm">
+        <ul className="divide-y divide-[color:var(--bmpl-border-soft)] text-sm">
           <DocumentRow
             label="Driver’s licence"
             detail={data.profile?.licenceNumber ? `No. ${data.profile.licenceNumber}` : 'Not on file'}
@@ -104,10 +104,10 @@ function DocumentsView({ data }: { data: DashboardData }) {
           {data.vehicles.map((v) => (
             <li key={v.id} className="py-3">
               <div className="flex flex-wrap items-center gap-2">
-                <b className="text-belize-navy">
+                <b className="text-[color:var(--bmpl-text)]">
                   {v.make} {v.model}
                 </b>
-                <span className="text-xs text-slate-400">{v.licencePlate}</span>
+                <span className="text-xs text-[color:var(--bmpl-text-faint)]">{v.licencePlate}</span>
                 <StatusBadge status={v.approvalStatus} />
               </div>
               {v.rejectionReason && <p className="mt-1 break-words text-xs text-red-600">Reason: {v.rejectionReason}</p>}
@@ -118,7 +118,7 @@ function DocumentsView({ data }: { data: DashboardData }) {
             </li>
           ))}
           {data.vehicles.length === 0 && (
-            <li className="py-3 text-slate-500">
+            <li className="py-3 text-[color:var(--bmpl-text-muted)]">
               No vehicle documents yet —{' '}
               <a className="font-semibold text-belize-blue hover:underline" href="/dashboard/driver/vehicles">
                 add a vehicle
@@ -146,11 +146,11 @@ function DocumentRow({
   return (
     <li className="flex flex-wrap items-center justify-between gap-2 py-3">
       <span className="min-w-0">
-        <span className="block font-semibold text-belize-navy">{label}</span>
-        <span className="block break-words text-xs text-slate-500">{detail}</span>
+        <span className="block font-semibold text-[color:var(--bmpl-text)]">{label}</span>
+        <span className="block break-words text-xs text-[color:var(--bmpl-text-muted)]">{detail}</span>
       </span>
       <span className="flex items-center gap-2">
-        {expiry && <span className="text-xs text-slate-400">Expires {formatDate(expiry)}</span>}
+        {expiry && <span className="text-xs text-[color:var(--bmpl-text-faint)]">Expires {formatDate(expiry)}</span>}
         {status && <Badge tone={expiryTone(status)}>{status.replace('_', ' ')}</Badge>}
       </span>
     </li>
@@ -160,8 +160,8 @@ function DocumentRow({
 function ExpiryLine({ label, expiry, status }: { label: string; expiry?: string | null; status: ExpiryStatus }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="text-slate-500">{label}:</span>
-      <span className="text-slate-400">{formatDate(expiry)}</span>
+      <span className="text-[color:var(--bmpl-text-muted)]">{label}:</span>
+      <span className="text-[color:var(--bmpl-text-faint)]">{formatDate(expiry)}</span>
       {status ? <Badge tone={expiryTone(status)}>{status.replace('_', ' ')}</Badge> : <Badge tone="neutral">Not provided</Badge>}
     </div>
   );

@@ -93,7 +93,7 @@ export function ServiceAreasSection({ serviceAreas, onDone }: { serviceAreas: Se
                 key={d}
                 htmlFor={id}
                 className={`flex min-h-[44px] cursor-pointer items-center gap-2.5 rounded-bmpl-md border px-3 text-sm transition ${
-                  checked ? 'border-belize-blue/40 bg-belize-blue/5 text-belize-navy' : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                  checked ? 'border-belize-blue/40 bg-belize-blue/5 text-belize-navy' : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:bg-belize-blue/5'
                 }`}
               >
                 <input
@@ -116,13 +116,13 @@ export function ServiceAreasSection({ serviceAreas, onDone }: { serviceAreas: Se
       <div className="mt-6 space-y-4 border-t border-slate-200 pt-5">
         <div>
           <h3 className="bmpl-label">Narrow a district to specific towns (optional)</h3>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
             Pick particular towns only if you do not want the whole district. A district with no towns picked still
             means you cover all of it — nothing here narrows a district until you choose towns in it.
           </p>
         </div>
         {selected.filter((d) => servedDistricts.has(d)).length === 0 ? (
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-[color:var(--bmpl-text-muted)]">
             Save at least one service area above, then come back here to narrow it to specific towns.
           </p>
         ) : (
@@ -232,7 +232,7 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
         </Alert>
       )}
       {loadingOptions ? (
-        <p className="text-sm text-slate-500">Loading configured towns…</p>
+        <p className="text-sm text-[color:var(--bmpl-text-muted)]">Loading configured towns…</p>
       ) : loadErr ? (
         // A load failure is never shown as "no configured towns" — that would
         // tell the driver something untrue about where BML operates, and they
@@ -245,12 +245,12 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
           </button>
         </div>
       ) : options.length === 0 ? (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-[color:var(--bmpl-text-muted)]">
           No configured towns in {districtLabel(district)} yet — you serve the whole district.
         </p>
       ) : (
         <>
-          <p className="mb-2 text-xs text-slate-500">
+          <p className="mb-2 text-xs text-[color:var(--bmpl-text-muted)]">
             {selectedCities.length === 0
               ? `Serving all of ${districtLabel(district)}.`
               : `Narrowed to ${selectedCities.length} town${selectedCities.length === 1 ? '' : 's'}.`}
@@ -264,7 +264,7 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
                   key={city}
                   htmlFor={id}
                   className={`flex min-w-0 min-h-[44px] cursor-pointer items-center gap-2.5 break-words rounded-bmpl-md border px-3 text-sm transition ${
-                    checked ? 'border-belize-blue/40 bg-belize-blue/5 text-belize-navy' : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                    checked ? 'border-belize-blue/40 bg-belize-blue/5 text-belize-navy' : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:bg-belize-blue/5'
                   }`}
                 >
                   <input

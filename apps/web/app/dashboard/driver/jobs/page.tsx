@@ -209,13 +209,13 @@ export default function DriverJobsPage() {
         </div>
       </div>
 
-      {view && <p className="text-sm text-slate-500">{DRIVER_VIEW_DESCRIPTIONS[view]}</p>}
+      {view && <p className="text-sm text-[color:var(--bmpl-text-muted)]">{DRIVER_VIEW_DESCRIPTIONS[view]}</p>}
 
       {error && <Alert tone="error">{error}</Alert>}
 
       <div id="driver-jobs-panel" role="tabpanel">
         {view === null || loading ? (
-          <div className="flex items-center gap-2 text-sm text-slate-500">
+          <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
             <Spinner className="h-4 w-4" /> Loading…
           </div>
         ) : jobs.length === 0 ? (
@@ -275,22 +275,22 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
               <StatusBadge status={job.status} />
             </div>
 
-            <p className="mt-1.5 break-words text-sm font-semibold text-belize-navy">
+            <p className="mt-1.5 break-words text-sm font-semibold text-[color:var(--bmpl-text)]">
               {shipping ? job.reference : `Order #${job.orderNumber}`}
             </p>
 
             {/* Both ends on their own lines. On a 320px screen a single
                 "A → B" line wraps in the middle of an address and reads as one
                 place; two labelled lines never do. */}
-            <p className="mt-1 break-words text-sm text-slate-600">
-              <span className="text-slate-400">Collect</span> {from ?? '—'}
+            <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text-muted)]">
+              <span className="text-[color:var(--bmpl-text-faint)]">Collect</span> {from ?? '—'}
             </p>
-            <p className="mt-0.5 break-words text-sm text-slate-600">
-              <span className="text-slate-400">Deliver</span> {to ?? '—'}
+            <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
+              <span className="text-[color:var(--bmpl-text-faint)]">Deliver</span> {to ?? '—'}
             </p>
-            <p className="mt-0.5 break-words text-xs text-slate-500">{job.load}</p>
+            <p className="mt-0.5 break-words text-xs text-[color:var(--bmpl-text-muted)]">{job.load}</p>
 
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">
               {view === 'completed' && job.completedAt
                 ? `Completed ${formatDate(job.completedAt)}`
                 : view === 'available' && job.offerExpiresAt
@@ -303,8 +303,8 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
             </p>
           </div>
           <div className="shrink-0 text-right">
-            <p className="text-base font-bold tabular-nums text-belize-navy">{money(job.feeMinor)}</p>
-            <p className="mt-0.5 text-xs text-slate-400">fee</p>
+            <p className="text-base font-bold tabular-nums text-[color:var(--bmpl-text)]">{money(job.feeMinor)}</p>
+            <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-faint)]">fee</p>
           </div>
         </div>
       </Card>
