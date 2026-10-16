@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { legScheduleSchema } from '@bmpl/validation';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Spinner } from '../../../../components/ui';
 import { ExceptionResolution } from '../../../../components/logistics/ExceptionResolution';
+import { ExceptionRecovery } from '../../../../components/logistics/ExceptionRecovery';
 
 /**
  * Operating one shipment.
@@ -38,6 +40,13 @@ interface Leg {
   exceptionReason: string | null;
   originHub: { name: string } | null;
   destinationHub: { name: string } | null;
+  /**
+   * BMPL-346 — the only writer is `scheduleLeg()`, a real carrier-committed
+   * time, never a guess. Line-haul only; null means no commitment recorded
+   * yet, same meaning as every other not-yet-happened timestamp on this leg.
+   */
+  scheduledDepartureAt: string | null;
+  scheduledArrivalAt: string | null;
   /**
    * BMPL-178/352 (Edward req 2): the courier's own pickup evidence for THIS
    * leg. Optional — web and api deploy independently, so a required field
@@ -94,6 +103,16 @@ function controlsFor(leg: Leg): { depart: boolean; arrive: boolean; handoff: boo
   };
 }
 
+/**
+ * Mirrors `SCHEDULABLE_LEG_STATUSES` (`shipment.service.ts`) — a positive
+ * allow-list, not "not finished yet", same discipline the API's own CLAUDE.md
+ * names. This list only decides whether the control is worth showing; the
+ * server's own guard is what actually enforces it, and its refusal — should
+ * this list ever drift from the server's — surfaces verbatim through `act()`.
+ */
+const SCHEDULABLE_LEG_STATUSES = new Set(['PENDING', 'READY', 'IN_PROGRESS', 'EXCEPTION']);
+const canScheduleLeg = (leg: Leg) => leg.kind === 'LINE_HAUL' && SCHEDULABLE_LEG_STATUSES.has(leg.status);
+
 export default function ShipmentOpsPage() {
   const params = useParams<{ reference: string }>();
   const reference = decodeURIComponent(String(params.reference ?? ''));
@@ -103,6 +122,7 @@ export default function ShipmentOpsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [handoff, setHandoff] = useState<Record<string, { pin: string; who: string }>>({});
+  const [schedule, setSchedule] = useState<Record<string, { departure: string; arrival: string }>>({});
   const [canOperate, setCanOperate] = useState(false);
   const [canManage, setCanManage] = useState(false);
 
@@ -162,6 +182,20 @@ export default function ShipmentOpsPage() {
     const reason = window.prompt('What went wrong? The customer sees this.')?.trim();
     if (!reason || reason.length < 4) return;
     await act(legId, 'exception', { reason });
+  }
+
+  /** Requirement 12's gap: recording a real carrier-committed departure/arrival for one line-haul leg. */
+  async function submitSchedule(legId: string) {
+    const f = schedule[legId] ?? { departure: '', arrival: '' };
+    const body: Record<string, string> = {};
+    if (f.departure) body.scheduledDepartureAt = new Date(f.departure).toISOString();
+    if (f.arrival) body.scheduledArrivalAt = new Date(f.arrival).toISOString();
+    const check = legScheduleSchema.safeParse(body);
+    if (!check.success) {
+      setErr(check.error.issues[0]?.message ?? 'Give a valid departure or arrival time.');
+      return;
+    }
+    await act(legId, 'schedule', body);
   }
 
   async function recordCollection() {
@@ -271,6 +305,12 @@ export default function ShipmentOpsPage() {
                           {leg.scheduleNote ? ` · ${leg.scheduleNote}` : ''}
                         </p>
                         <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500">
+                          {leg.departedAt == null && when(leg.scheduledDepartureAt) && (
+                            <span>Scheduled to depart {when(leg.scheduledDepartureAt)}</span>
+                          )}
+                          {leg.arrivedAt == null && when(leg.scheduledArrivalAt) && (
+                            <span>Scheduled to arrive {when(leg.scheduledArrivalAt)}</span>
+                          )}
                           {when(leg.departedAt) && <span>Departed {when(leg.departedAt)}</span>}
                           {when(leg.arrivedAt) && <span>Arrived {when(leg.arrivedAt)}</span>}
                           {when(leg.completedAt) && <span>Handed over {when(leg.completedAt)}</span>}
@@ -351,6 +391,56 @@ export default function ShipmentOpsPage() {
                       </button>
                     )}
 
+                    {/*
+                     * Requirement 12's gap: scheduleLeg() (POST legs/:id/schedule)
+                     * already exists, is tested and already writes these two
+                     * columns — this is its only caller anywhere. Line-haul only
+                     * (a courier leg's timing is dispatch, not a published
+                     * schedule), mirroring SCHEDULABLE_LEG_STATUSES so the control
+                     * is not even offered on a leg the server would refuse — but
+                     * the server's own guard is what actually enforces that, and
+                     * any drift between this list and that one surfaces through
+                     * the real refusal message below, not a silently wrong UI.
+                     */}
+                    {canOperate && canScheduleLeg(leg) && (
+                      <div className="mt-3 border-t border-slate-100 pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Carrier schedule</p>
+                        <div className="mt-2 flex flex-wrap items-end gap-2">
+                          <Field label="Departs">
+                            <Input
+                              type="datetime-local"
+                              value={schedule[leg.id]?.departure ?? ''}
+                              onChange={(e) =>
+                                setSchedule({
+                                  ...schedule,
+                                  [leg.id]: { departure: e.target.value, arrival: schedule[leg.id]?.arrival ?? '' },
+                                })
+                              }
+                            />
+                          </Field>
+                          <Field label="Arrives">
+                            <Input
+                              type="datetime-local"
+                              value={schedule[leg.id]?.arrival ?? ''}
+                              onChange={(e) =>
+                                setSchedule({
+                                  ...schedule,
+                                  [leg.id]: { departure: schedule[leg.id]?.departure ?? '', arrival: e.target.value },
+                                })
+                              }
+                            />
+                          </Field>
+                          <Button
+                            variant="outline"
+                            disabled={busy != null || !((schedule[leg.id]?.departure || schedule[leg.id]?.arrival))}
+                            onClick={() => void submitSchedule(leg.id)}
+                          >
+                            {busy === `${leg.id}:schedule` ? 'Saving…' : 'Save schedule'}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
                     {/* BMPL-364: once a return has already been booked against
                         this shipment, s.status flips to RETURNED (BMPL-356) —
                         that is read here, not re-derived, same "client
@@ -361,8 +451,21 @@ export default function ShipmentOpsPage() {
                         caught honestly by the confirm endpoint's own guard
                         and surfaced through this panel's existing error
                         state, not pre-empted here. */}
+                    {/*
+                     * Requirement 10's gap, distinct from the return/reroute
+                     * panel above: resuming the SAME leg, or releasing an
+                     * assigned driver, with no new transport service booked
+                     * and nothing charged. Both panels mount side by side on
+                     * the same EXCEPTION leg — an operator picks whichever
+                     * fate actually applies; resolveException's own guards
+                     * (settled return/reroute, already resolved, etc.) are
+                     * the real gate, this is only where the trigger shows.
+                     */}
                     {canOperate && leg.status === 'EXCEPTION' && s.status !== 'RETURNED' && (
-                      <ExceptionResolution legId={leg.id} canManage={canManage} onResolved={load} />
+                      <>
+                        <ExceptionResolution legId={leg.id} canManage={canManage} onResolved={load} />
+                        <ExceptionRecovery legId={leg.id} legKind={leg.kind} onResolved={load} />
+                      </>
                     )}
                   </li>
                 );
