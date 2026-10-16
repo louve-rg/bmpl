@@ -31,3 +31,33 @@ export async function tryLogin(page: Page, email: string, password: string): Pro
     return false;
   }
 }
+
+/**
+ * The seeded SUPER_ADMIN account (packages/database/prisma/seed.ts) — no
+ * hardcoded fallback, same reasoning as apps/web/e2e/support/auth.ts's own
+ * SUPER_ADMIN_PASSWORD.
+ */
+export const SUPER_ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
+export const SUPER_ADMIN_PASSWORD = process.env.SEED_SUPER_ADMIN_PASSWORD;
+
+/**
+ * One fixture per role this app has a reproducible account for (Priority 6
+ * Phase 2, 2026-10-16) — mirrors apps/web/e2e/support/auth.ts's ROLE_FIXTURES
+ * / loginAsRole for the admin console's own two roles. OPS_FULL is the
+ * default ADMIN fixture (full logistics.* permissions); OPS_LIMITED stays
+ * directly importable for a spec that specifically needs the #12 permission
+ * split.
+ */
+export const ROLE_FIXTURES = {
+  ADMIN: { email: OPS_FULL_EMAIL, password: OPS_PASSWORD },
+  SUPER_ADMIN: { email: SUPER_ADMIN_EMAIL, password: SUPER_ADMIN_PASSWORD },
+} as const satisfies Record<string, { email: string; password: string | undefined }>;
+
+export type FixtureRoleCode = keyof typeof ROLE_FIXTURES;
+
+/** "Run as ADMIN" for a spec — same contract as tryLogin. */
+export async function loginAsRole(page: Page, roleCode: FixtureRoleCode): Promise<boolean> {
+  const fixture = ROLE_FIXTURES[roleCode];
+  if (!fixture.password) return false;
+  return tryLogin(page, fixture.email, fixture.password);
+}

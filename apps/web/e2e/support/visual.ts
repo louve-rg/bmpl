@@ -9,13 +9,36 @@ import type { Page } from '@playwright/test';
  *
  * NOT a determinism tool: the viewport width/height. Pass those through
  * Playwright's own `test.use({ viewport })`/`browser.newContext({ viewport })` —
- * VISUAL_VIEWPORTS below just names the three canonical profiles so every
- * spec uses the same three, not five slightly different ones.
+ * VISUAL_VIEWPORTS below just names the six canonical profiles so every spec
+ * uses the same six, not a dozen slightly different ones.
+ *
+ * The six (god's ruling, 2026-10-16, Phase 2): neither Tailwind config in
+ * this repo (apps/web or apps/admin) overrides `screens`, so both run stock
+ * breakpoints (sm 640, md 768, lg 1024, xl 1280, 2xl 1536 — 2xl is unused,
+ * zero files). A width earns a slot for one of two reasons: it crosses a
+ * breakpoint (a genuinely new layout), or it is the NARROW edge of a tier
+ * (less room is strictly harder, never easier, so the narrow edge dominates
+ * every wider width sharing its tier). Applying that rule across the
+ * breakpoints above produces exactly these six — nothing wider in the same
+ * tier adds information a machine-compared baseline needs.
  */
 
 export const VISUAL_VIEWPORTS = {
+  // Narrow edge of the sub-640 tier. Worst-case overflow; nothing narrower.
+  mobileNarrow: { width: 320, height: 568 },
+  // Common real-device width, and the profile already validated in Phase 1
+  // (apps/web/e2e/visual/smoke.spec.ts). Continuity, not a breakpoint.
   mobile: { width: 375, height: 812 },
+  // sm: trigger AND narrow edge of [640,767] — the single most-used
+  // breakpoint class in the tree (139 files), untested by any width before
+  // this one existed.
+  smBreakpoint: { width: 640, height: 960 },
+  // md: trigger AND narrowest tablet width — catches a breakpoint-boundary
+  // off-by-one a wider tablet width never would.
   tablet: { width: 768, height: 1024 },
+  // lg: trigger.
+  laptop: { width: 1024, height: 768 },
+  // xl tier (thin usage) and the existing desktop profile. Continuity.
   desktop: { width: 1440, height: 900 },
 } as const;
 
