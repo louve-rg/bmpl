@@ -44,9 +44,15 @@ export default async function AdminDashboard() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (
           <Link key={c.label} href={c.href} className="block">
+            {/* No hardcoded text-belize-navy/text-slate-500 -- same bug as
+                apps/web's dashboard home page: .bmpl-card already sets its
+                own theme-aware `color`, and an explicit override just
+                fights it (confirmed on a real logged-in screenshot: these
+                numbers were near-invisible dark-on-dark on the glass
+                console). bmpl-label is already token-aware. */}
             <Card className="p-5 transition hover:border-belize-light hover:shadow-bmpl-md">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{c.label}</p>
-              <p className="mt-1.5 text-3xl font-bold text-belize-navy">{c.value}</p>
+              <p className="bmpl-label">{c.label}</p>
+              <p className="mt-1.5 text-3xl font-bold">{c.value}</p>
             </Card>
           </Link>
         ))}

@@ -27,7 +27,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <Sidebar me={me} />
       <main className="flex min-w-0 flex-1 flex-col">
         <header
-          className="sticky top-0 z-30 flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 md:justify-end md:px-8 md:py-2.5"
+          className="glass-chrome sticky top-0 z-30 flex items-center gap-2 px-3 py-2 md:justify-end md:px-8 md:py-2.5"
           style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}
         >
           {/* Phone/tablet: hamburger + brand. Both are hidden from `md` up, where

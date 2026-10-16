@@ -8,7 +8,7 @@ import type { MeView } from '../../lib/types';
 import { Avatar } from '../Avatar';
 import { AccountSummary } from './AccountSummary';
 
-export type AccountMenuTone = 'dark' | 'light';
+export type AccountMenuTone = 'dark' | 'light' | 'glass';
 
 /**
  * The one account menu for a signed-in person (P5 of the nav plan).
@@ -67,6 +67,7 @@ export function AccountMenu({
   // must be unique per instance, not per tone.
   const panelId = `account-menu-${useId()}`;
   const dark = tone === 'dark';
+  const glass = tone === 'glass';
 
   // Outside click or tap closes the panel.
   useEffect(() => {
@@ -115,7 +116,9 @@ export function AccountMenu({
   // min-h-[44px]: each item is a touch target (measured at 36px before this).
   const itemClass = dark
     ? 'flex min-h-[44px] items-center rounded px-3 py-2 text-sm text-blue-100 hover:bg-white/5 hover:text-white'
-    : 'flex min-h-[44px] items-center rounded-bmpl-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-belize-navy';
+    : glass
+      ? 'bmpl-nav-item'
+      : 'flex min-h-[44px] items-center rounded-bmpl-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-belize-navy';
 
   return (
     <div ref={wrapRef} className="relative min-w-0">
@@ -129,15 +132,23 @@ export function AccountMenu({
         className={
           dark
             ? 'flex min-h-[44px] max-w-full items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm font-medium text-white transition hover:bg-white/10'
-            : 'flex w-full items-center gap-3 rounded-bmpl-md px-3 py-1.5 text-left transition hover:bg-slate-50'
+            : glass
+              ? 'glass-chrome flex w-full items-center gap-3 rounded-bmpl-md px-3 py-2 text-left transition'
+              : 'flex w-full items-center gap-3 rounded-bmpl-md px-3 py-1.5 text-left transition hover:bg-slate-50'
         }
       >
         <Avatar name={`${me.firstName} ${me.lastName}`} src={me.avatarUrl} size={dark ? 'sm' : 'md'} />
         <span className="min-w-0">
-          <span className={`block truncate ${dark ? 'max-w-[10rem]' : ''} text-sm font-semibold ${dark ? 'text-white' : 'text-belize-navy'}`}>
+          <span
+            className={`block truncate ${dark ? 'max-w-[10rem]' : ''} text-sm font-semibold ${
+              dark ? 'text-white' : glass ? 'text-[color:var(--bmpl-text)]' : 'text-belize-navy'
+            }`}
+          >
             {me.firstName} {me.lastName}
           </span>
-          {!dark && <span className="block truncate text-xs text-slate-500">{me.email}</span>}
+          {!dark && (
+            <span className={`block truncate text-xs ${glass ? 'text-[color:var(--bmpl-text-muted)]' : 'text-slate-500'}`}>{me.email}</span>
+          )}
         </span>
       </button>
 
@@ -147,7 +158,27 @@ export function AccountMenu({
           className={
             dark
               ? 'absolute right-0 z-50 mt-2 w-56 rounded-bmpl-md border border-white/10 bg-belize-navy p-2 shadow-bmpl-md'
-              : 'mt-2 rounded-bmpl-md border border-slate-100 bg-slate-50 p-2'
+              : glass
+                ? // Opens UPWARD (bottom-full, not mt-2 downward): this trigger
+                  // lives in the sidebar's pinned footer, near the bottom of
+                  // the viewport by construction, so a downward panel would
+                  // clip off-screen exactly the way MDF-319's footer control
+                  // does today -- the fix for that defect would be undone by
+                  // the open panel if it opened the same broken direction.
+                  // `.bmpl-overlay`: this panel ALWAYS overlaps the nav
+                  // list directly above it -- there is no geometric fix
+                  // available the way the prototype found for its
+                  // account-panel-over-content case, since the trigger
+                  // lives at the very foot of that same scrolling list by
+                  // construction. Confirmed on real screenshots: .bmpl-card
+                  // let nav text bleed through visibly; .bmpl-dense
+                  // reduced it but didn't eliminate it either (two stacked
+                  // backdrop-filter surfaces -- the sidebar's own
+                  // glass-chrome, then this panel -- same rendering
+                  // limitation the prototype hit). .bmpl-overlay is the
+                  // "no geometric fix is possible here" level.
+                  'bmpl-overlay absolute bottom-full right-0 z-50 mb-2 max-h-[70vh] w-64 overflow-y-auto rounded-bmpl-md border p-2 shadow-bmpl-md'
+                : 'mt-2 rounded-bmpl-md border border-slate-100 bg-slate-50 p-2'
           }
         >
           <AccountSummary me={me} tone={tone} />

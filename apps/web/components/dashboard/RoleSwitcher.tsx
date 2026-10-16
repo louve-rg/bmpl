@@ -40,11 +40,17 @@ export function RoleSwitcher({ me }: { me: MeView }) {
 
   if (selectable.length <= 1) {
     return (
-      <div className="rounded-bmpl-md bg-belize-blue/5 px-3 py-2 text-sm">
-        <span className="font-semibold text-belize-navy">
-          {me.activeRole ? ROLE_DEFINITIONS[me.activeRole].label : 'Customer'}
+      // No hardcoded text-belize-navy/text-slate-500 here (same bug as the
+      // dashboard home page's stat cards): this sits directly inside the
+      // glass-scoped sidebar now, so it needs to inherit the ambient
+      // theme's text color rather than assume a white background.
+      <div className="bmpl-nav-item cursor-default">
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold">
+            {me.activeRole ? ROLE_DEFINITIONS[me.activeRole].label : 'Customer'}
+          </span>
+          <span className="block text-xs text-[color:var(--bmpl-text-muted)]">Request more roles to unlock the switcher.</span>
         </span>
-        <p className="text-xs text-slate-500">Request more roles to unlock the switcher.</p>
       </div>
     );
   }

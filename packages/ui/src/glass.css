@@ -38,6 +38,7 @@
   --bmpl-surface: #ffffff; /* elevated cards */
   --bmpl-surface-muted: #f1f5f9; /* slate-100 muted panels */
   --bmpl-surface-dense: #ffffff; /* no light-theme equivalent needed -- same as surface */
+  --bmpl-overlay-fill: #ffffff;
 
   --bmpl-text: #0f172a; /* slate-900/navy */
   --bmpl-text-muted: #64748b; /* slate-500 */
@@ -100,6 +101,15 @@
   --bmpl-surface-muted: rgba(10, 20, 38, 0.52);
   --bmpl-surface-dense: rgba(8, 16, 32, 0.74);
   --bmpl-chip-fill: rgba(6, 14, 28, 0.78);
+  /* A floating control that MUST open directly over other scrolling glass
+     content, by construction, with no geometric fix available (the
+     account menu anchored at the sidebar's own foot, opening upward over
+     the nav list directly above it -- there's no "move it so it doesn't
+     overlap" option when the trigger lives at the end of the very list
+     it would need to clear). Two stacked backdrop-filter surfaces still
+     bleed text through at --bmpl-surface-dense's 0.74 (confirmed on a
+     real screenshot, not assumed) -- this is deliberately higher. */
+  --bmpl-overlay-fill: rgba(6, 12, 24, 0.94);
   --bmpl-text: #f4f8ff;
   --bmpl-text-muted: rgba(244, 248, 255, 0.82);
   --bmpl-text-faint: rgba(244, 248, 255, 0.64);

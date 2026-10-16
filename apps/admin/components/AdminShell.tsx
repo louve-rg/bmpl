@@ -59,12 +59,10 @@ function AdminNav({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
             href={item.href}
             onClick={onNavigate}
             aria-current={active ? 'page' : undefined}
-            className={`group flex items-center gap-3 rounded-bmpl-md px-3 py-2 text-sm font-medium transition ${
-              active ? 'bg-white/10 text-white' : 'text-blue-100/80 hover:bg-white/5 hover:text-white'
-            }`}
+            className="bmpl-nav-item group"
           >
-            <span className={`h-4 w-0.5 rounded-full transition ${active ? 'bg-belize-accent' : 'bg-transparent'}`} aria-hidden />
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={`h-4 w-4 ${active ? 'text-belize-light' : 'text-blue-100/60 group-hover:text-blue-100'}`} aria-hidden>
+            <span className="h-4 w-0.5 shrink-0 rounded-full bg-current opacity-0 transition group-aria-[current=page]:opacity-100" aria-hidden />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden>
               <path d={item.icon} />
             </svg>
             {item.label}
@@ -77,11 +75,8 @@ function AdminNav({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
 
 function SignOutButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      className="mt-auto flex items-center gap-2 rounded-bmpl-md px-3 py-2 text-left text-sm font-medium text-blue-100/80 transition hover:bg-white/5 hover:text-white"
-    >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
+    <button onClick={onClick} className="bmpl-nav-item w-full text-left text-red-300 hover:text-red-200">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden>
         <path d="M15 12H4m0 0 4-4m-4 4 4 4M14 4h5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-5" />
       </svg>
       Sign out
@@ -165,19 +160,35 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     // keeps the existing light theme untouched.
     <div data-theme="glass" className="min-h-screen overflow-x-hidden bml-mural md:flex">
       {/* Desktop sidebar. Hidden below md — on a phone the drawer carries it,
-          rather than the full nav stacking above every screen's content. */}
-      <aside className="hidden bg-belize-navy p-4 md:flex md:h-screen md:w-64 md:shrink-0 md:flex-col md:gap-5 md:p-5">
-        <Link href="/dashboard" className="px-1 pt-1">
+          rather than the full nav stacking above every screen's content.
+
+          Layout fix: the previous version had NO scroll mechanism at all on
+          this `<aside>` (no overflow-y-auto anywhere in it or an ancestor) --
+          worse than MDF-319's "scroll-reachable but non-obvious", this was
+          UNREACHABLE by any input method once the 24-item nav plus brand
+          plus Sign out exceeded the viewport height (measures to roughly
+          1060-1100px of content against ~860px available at a 900px-tall
+          window: the last several nav items and Sign out simply didn't
+          render on screen and had nothing to scroll to). Same cure as
+          apps/web/Sidebar.tsx: brand header and the Sign out footer are
+          `shrink-0` outside the scrolling region; only the nav list itself
+          (`flex-1 overflow-y-auto`) scrolls. */}
+      <aside className="glass-chrome hidden p-4 md:flex md:h-screen md:w-64 md:shrink-0 md:flex-col md:p-5">
+        <Link href="/dashboard" className="shrink-0 px-1 pb-5 pt-1">
           <BrandLockup />
         </Link>
-        <AdminNav pathname={pathname} />
-        <SignOutButton onClick={logout} />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <AdminNav pathname={pathname} />
+        </div>
+        <div className="bmpl-nav-footer shrink-0 pt-4">
+          <SignOutButton onClick={logout} />
+        </div>
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col bg-slate-100">
+      <main className="flex min-w-0 flex-1 flex-col">
         <AnnouncementBanner />
         <header
-          className="sticky top-0 z-30 flex items-center gap-2 border-b border-slate-200 bg-white px-4 py-2.5 md:justify-end md:px-8"
+          className="glass-chrome sticky top-0 z-30 flex items-center gap-2 px-4 py-2.5 md:justify-end md:px-8"
           style={{ paddingTop: 'max(0.625rem, env(safe-area-inset-top))' }}
         >
           {/* Phone/tablet: hamburger + brand, both hidden from md up where the
@@ -189,7 +200,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             aria-expanded={open}
             aria-controls="admin-mobile-nav"
             aria-label="Open navigation menu"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-bmpl-md text-slate-600 transition hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent md:hidden"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-bmpl-md text-[color:var(--bmpl-text-muted)] transition hover:bg-white/10 hover:text-[color:var(--bmpl-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent md:hidden"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-5 w-5" aria-hidden>
               <path d="M4 7h16M4 12h16M4 17h16" />
@@ -216,14 +227,19 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             role="dialog"
             aria-modal="true"
             aria-label="Admin navigation"
-            className="absolute inset-y-0 left-0 flex w-[min(18rem,85vw)] max-w-full flex-col gap-5 overflow-y-auto overscroll-contain bg-belize-navy p-4 shadow-bmpl-md"
+            // .bmpl-overlay, not .glass-chrome: same reasoning as
+            // apps/web's mobile drawer -- a modal panel over the whole
+            // page needs to read as solid, not just ambient-chrome
+            // translucent (confirmed as a real bleed-through defect on a
+            // screenshot of web's equivalent drawer before this fix).
+            className="bmpl-overlay absolute inset-y-0 left-0 flex w-[min(18rem,85vw)] max-w-full flex-col overscroll-contain"
             style={{
               paddingTop: 'env(safe-area-inset-top)',
               paddingBottom: 'env(safe-area-inset-bottom)',
               paddingLeft: 'env(safe-area-inset-left)',
             }}
           >
-            <div className="flex items-center justify-between gap-2 px-1">
+            <div className="flex shrink-0 items-center justify-between gap-2 p-4 pb-2">
               <Link href="/dashboard" onClick={close}>
                 <BrandLockup />
               </Link>
@@ -231,7 +247,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 type="button"
                 onClick={close}
                 aria-label="Close navigation menu"
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-bmpl-md text-blue-100/80 transition hover:bg-white/5 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-bmpl-md text-[color:var(--bmpl-text-muted)] transition hover:bg-white/10 hover:text-[color:var(--bmpl-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-5 w-5" aria-hidden>
                   <path d="M6 6l12 12M18 6L6 18" />
@@ -239,8 +255,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               </button>
             </div>
 
-            <AdminNav pathname={pathname} onNavigate={close} />
-            <SignOutButton onClick={logout} />
+            <div className="min-h-0 flex-1 overflow-y-auto px-4">
+              <AdminNav pathname={pathname} onNavigate={close} />
+            </div>
+            <div className="bmpl-nav-footer shrink-0 p-4 pt-3">
+              <SignOutButton onClick={logout} />
+            </div>
           </div>
         </div>
       )}
