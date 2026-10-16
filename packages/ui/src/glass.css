@@ -39,6 +39,7 @@
   --bmpl-surface-muted: #f1f5f9; /* slate-100 muted panels */
   --bmpl-surface-dense: #ffffff; /* no light-theme equivalent needed -- same as surface */
   --bmpl-overlay-fill: #ffffff;
+  --bmpl-overlay-fill-solid: #ffffff;
 
   --bmpl-text: #0f172a; /* slate-900/navy */
   --bmpl-text-muted: #64748b; /* slate-500 */
@@ -110,6 +111,16 @@
      bleed text through at --bmpl-surface-dense's 0.74 (confirmed on a
      real screenshot, not assumed) -- this is deliberately higher. */
   --bmpl-overlay-fill: rgba(6, 12, 24, 0.94);
+  /* A menu anchored by construction over the exact list it must hide, where
+     even 0.94 alpha still read as legible ghost text on a real screenshot
+     (nine nav rows readable through the account panel, overlapping every
+     row including Sign out) -- alpha was never going to close that last
+     gap, because the panel and the thing behind it are still two images
+     blended, however faintly. This is the one surface in the system that
+     gives up translucency on purpose: fully opaque, same dark palette, so
+     it still belongs visually, but nothing behind it shows through at all.
+     A menu is the one element nobody is meant to see through. */
+  --bmpl-overlay-fill-solid: #101f38;
   --bmpl-text: #f4f8ff;
   --bmpl-text-muted: rgba(244, 248, 255, 0.82);
   --bmpl-text-faint: rgba(244, 248, 255, 0.64);

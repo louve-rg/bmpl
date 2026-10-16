@@ -165,19 +165,23 @@ export function AccountMenu({
                   // clip off-screen exactly the way MDF-319's footer control
                   // does today -- the fix for that defect would be undone by
                   // the open panel if it opened the same broken direction.
-                  // `.bmpl-overlay`: this panel ALWAYS overlaps the nav
+                  // `.bmpl-overlay-solid`: this panel ALWAYS overlaps the nav
                   // list directly above it -- there is no geometric fix
                   // available the way the prototype found for its
                   // account-panel-over-content case, since the trigger
                   // lives at the very foot of that same scrolling list by
                   // construction. Confirmed on real screenshots: .bmpl-card
-                  // let nav text bleed through visibly; .bmpl-dense
-                  // reduced it but didn't eliminate it either (two stacked
-                  // backdrop-filter surfaces -- the sidebar's own
-                  // glass-chrome, then this panel -- same rendering
-                  // limitation the prototype hit). .bmpl-overlay is the
-                  // "no geometric fix is possible here" level.
-                  'bmpl-overlay absolute bottom-full right-0 z-50 mb-2 max-h-[70vh] w-64 overflow-y-auto rounded-bmpl-md border p-2 shadow-bmpl-md'
+                  // let nav text bleed through visibly, .bmpl-dense reduced
+                  // it but didn't eliminate it, and even .bmpl-overlay's
+                  // 0.94 alpha still read as legible ghost text across the
+                  // whole panel (nine nav rows, every row including Sign
+                  // out) -- alpha alone cannot close that last gap, it is
+                  // still two images blended, however faintly. A menu is
+                  // the one surface nobody is meant to see through to what
+                  // is behind it, so this one gives up translucency on
+                  // purpose: fully opaque, same dark palette, keeping only
+                  // the border/radius/shadow so it still belongs visually.
+                  'bmpl-overlay-solid absolute bottom-full right-0 z-50 mb-2 max-h-[70vh] w-64 overflow-y-auto rounded-bmpl-md border p-2 shadow-bmpl-md'
                 : 'mt-2 rounded-bmpl-md border border-slate-100 bg-slate-50 p-2'
           }
         >

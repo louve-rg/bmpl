@@ -102,6 +102,19 @@ body {
     -webkit-backdrop-filter: var(--bmpl-backdrop-filter-dense, var(--bmpl-backdrop-filter));
     backdrop-filter: var(--bmpl-backdrop-filter-dense, var(--bmpl-backdrop-filter));
   }
+  /* A menu anchored by construction over the exact content it must hide,
+     where even .bmpl-overlay's 0.94 alpha still let nine nav rows read
+     through on a real screenshot -- alpha alone was never going to close
+     that gap, it is still two images blended, however faintly. This gives
+     up translucency on purpose: no backdrop-filter, full opacity, same
+     dark palette so it still belongs to the system -- the one surface in
+     this set nobody is meant to see through. See glass.css's own comment
+     on --bmpl-overlay-fill-solid. */
+  .bmpl-overlay-solid {
+    background-color: var(--bmpl-overlay-fill-solid, var(--bmpl-surface-dense));
+    border-color: var(--bmpl-border);
+    color: var(--bmpl-text);
+  }
   /* A tag/badge OBJECT (a role pill, a count summary) -- legitimately
      owns its own fill by definition, the same category as a solid
      badge, never a scrim wrapped around plain text. */
