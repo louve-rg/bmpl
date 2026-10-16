@@ -10,9 +10,15 @@ import type { Page } from '@playwright/test';
  * convention here). Keep the two files in sync by hand if either changes.
  */
 
+// The six (god's ruling, 2026-10-16, Phase 2) — see apps/web/e2e/support/visual.ts
+// for the full rationale; kept identical here by hand, same convention as
+// the rest of this file.
 export const VISUAL_VIEWPORTS = {
+  mobileNarrow: { width: 320, height: 568 },
   mobile: { width: 375, height: 812 },
+  smBreakpoint: { width: 640, height: 960 },
   tablet: { width: 768, height: 1024 },
+  laptop: { width: 1024, height: 768 },
   desktop: { width: 1440, height: 900 },
 } as const;
 
