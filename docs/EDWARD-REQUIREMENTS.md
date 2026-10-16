@@ -1746,7 +1746,7 @@ Four distinct pieces, per the owner's original requirement:
   a positive allow-list of eligible leg statuses rather than the existing
   transition machinery, since a carrier's fixed sailing time is knowable
   before an earlier leg has even started. **"Reachable" above describes who
-  is *authorized* to call the endpoint, not that any screen called it with
+  is *authorized* to call the endpoint, not that any screen called it
   — grep-confirmed directly, zero files under `apps/web` or `apps/admin`
   referenced `scheduleLeg` or its route before tonight.** **New tonight
   (2026-10-16) — PR #455 (`5dbede8`) adds the UI this backend never had:**
