@@ -90,10 +90,10 @@ function QuickActions() {
             className="flex min-h-[52px] items-center gap-3 rounded-bmpl-md px-3 py-2.5 transition hover:bg-slate-50"
           >
             <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold text-belize-navy">{item.label}</span>
-              <span className="block truncate text-xs text-slate-500">{item.hint}</span>
+              <span className="block text-sm font-semibold text-[color:var(--bmpl-text)]">{item.label}</span>
+              <span className="block truncate text-xs text-[color:var(--bmpl-text-muted)]">{item.hint}</span>
             </span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-4 w-4 shrink-0 text-slate-400" aria-hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-4 w-4 shrink-0 text-[color:var(--bmpl-text-faint)]" aria-hidden>
               <path d="M9 6l6 6-6 6" />
             </svg>
           </Link>
@@ -115,8 +115,8 @@ function PrimaryAction({ href, title, description, icon }: { href: string; title
         </svg>
       </span>
       <span className="min-w-0">
-        <span className="block text-sm font-bold text-belize-navy">{title}</span>
-        <span className="mt-0.5 block text-xs text-slate-500">{description}</span>
+        <span className="block text-sm font-bold text-[color:var(--bmpl-text)]">{title}</span>
+        <span className="mt-0.5 block text-xs text-[color:var(--bmpl-text-muted)]">{description}</span>
       </span>
     </Link>
   );

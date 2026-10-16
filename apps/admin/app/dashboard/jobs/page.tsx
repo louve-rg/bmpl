@@ -251,7 +251,7 @@ export default function JobsPage() {
               className={`rounded-full px-3.5 py-1.5 text-sm font-semibold transition ${
                 active
                   ? 'bg-belize-blue text-white shadow-bmpl-sm'
-                  : 'border border-slate-300 text-belize-navy hover:border-belize-blue hover:bg-belize-blue/5'
+                  : 'border border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text)] hover:border-belize-blue hover:bg-belize-blue/5'
               }`}
             >
               {t.label}

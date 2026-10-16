@@ -103,7 +103,7 @@ export default function CouponsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading…
       </div>
     );
@@ -150,8 +150,8 @@ export default function CouponsPage() {
             <Card key={c.id} className="p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-mono text-sm font-bold text-belize-navy">{c.code}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="font-mono text-sm font-bold text-[color:var(--bmpl-text)]">{c.code}</p>
+                  <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted)]">
                     {formatDiscount(c)}
                     {c.minSpendMinor != null ? ` · min ${formatBZD(c.minSpendMinor)}` : ''}
                     {` · used ${c.usedCount}${c.maxUses != null ? `/${c.maxUses}` : ''}`}
@@ -185,7 +185,7 @@ export default function CouponsPage() {
               </div>
 
               {editingId === c.id && (
-                <div className="mt-4 border-t border-slate-100 pt-4">
+                <div className="mt-4 border-t border-[color:var(--bmpl-border-soft)] pt-4">
                   <CouponForm
                     initial={c}
                     submitting={busy}

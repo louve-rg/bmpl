@@ -66,12 +66,12 @@ export function RatingSummary({ profile }: { profile: DriverProfile }) {
     <Card title="Your rating">
       <div className="flex flex-wrap items-center gap-6">
         <div className="flex flex-col">
-          <span className="text-3xl font-bold text-belize-navy">{average > 0 ? average.toFixed(1) : '—'}</span>
+          <span className="text-3xl font-bold text-[color:var(--bmpl-text)]">{average > 0 ? average.toFixed(1) : '—'}</span>
           <StarRating value={average} size="md" className="mt-1" />
         </div>
-        <div className="text-sm text-slate-500">
+        <div className="text-sm text-[color:var(--bmpl-text-muted)]">
           <p>
-            <span className="font-semibold text-belize-navy">{completed}</span> completed deliver{completed === 1 ? 'y' : 'ies'}
+            <span className="font-semibold text-[color:var(--bmpl-text)]">{completed}</span> completed deliver{completed === 1 ? 'y' : 'ies'}
           </p>
           {average === 0 && <p className="mt-0.5 text-xs">No ratings yet — complete deliveries to start building your rating.</p>}
         </div>

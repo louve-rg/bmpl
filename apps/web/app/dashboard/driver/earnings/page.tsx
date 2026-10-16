@@ -112,7 +112,7 @@ export default function DriverEarningsPage() {
       />
 
       {loading && (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       )}
@@ -134,9 +134,9 @@ export default function DriverEarningsPage() {
           </div>
 
           <Card className="p-0 overflow-hidden">
-            <div className="border-b border-slate-100 px-5 py-4">
-              <h2 className="text-sm font-semibold text-belize-navy">Earnings history</h2>
-              <p className="text-xs text-slate-500">Expand a row to see how the earning was calculated.</p>
+            <div className="border-b border-[color:var(--bmpl-border-soft)] px-5 py-4">
+              <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Earnings history</h2>
+              <p className="text-xs text-[color:var(--bmpl-text-muted)]">Expand a row to see how the earning was calculated.</p>
             </div>
             {data.earnings.length === 0 ? (
               <div className="p-5">
@@ -156,10 +156,10 @@ function TotalCard({ label, value, tone }: { label: string; value: string; tone:
   return (
     <Card className="p-5">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">{label}</p>
         <Badge tone={tone}>{tone === 'brand' ? 'Total' : tone === 'success' ? 'Posted' : 'Pending'}</Badge>
       </div>
-      <p className="mt-1.5 text-3xl font-bold text-belize-navy">{value}</p>
+      <p className="mt-1.5 text-3xl font-bold text-[color:var(--bmpl-text)]">{value}</p>
     </Card>
   );
 }
@@ -197,15 +197,15 @@ function EarningsTable({ earnings }: { earnings: Earning[] }) {
 function RowGroup({ earning: e, open, onToggle }: { earning: Earning; open: boolean; onToggle: () => void }) {
   return (
     <>
-      <tr className="border-t border-slate-100 hover:bg-slate-50">
-        <td className="px-4 py-3 font-mono text-xs text-belize-navy">#{e.vendorOrderId.slice(0, 8)}</td>
-        <td className="px-4 py-3 text-slate-600">{methodLabel(e.method)}</td>
-        <td className="px-4 py-3 text-right text-slate-600">{money(e.grossMinor, e.currency)}</td>
-        <td className="px-4 py-3 text-right font-semibold text-belize-navy">{money(e.netMinor, e.currency)}</td>
+      <tr className="border-t border-[color:var(--bmpl-border-soft)] hover:bg-[color:var(--bmpl-surface-muted)]">
+        <td className="px-4 py-3 font-mono text-xs text-[color:var(--bmpl-text)]">#{e.vendorOrderId.slice(0, 8)}</td>
+        <td className="px-4 py-3 text-[color:var(--bmpl-text-muted)]">{methodLabel(e.method)}</td>
+        <td className="px-4 py-3 text-right text-[color:var(--bmpl-text-muted)]">{money(e.grossMinor, e.currency)}</td>
+        <td className="px-4 py-3 text-right font-semibold text-[color:var(--bmpl-text)]">{money(e.netMinor, e.currency)}</td>
         <td className="px-4 py-3">
           <StatusBadge status={e.status} />
         </td>
-        <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(e.postedAt ?? e.calculatedAt)}</td>
+        <td className="px-4 py-3 text-xs text-[color:var(--bmpl-text-faint)]">{fmtDate(e.postedAt ?? e.calculatedAt)}</td>
         <td className="px-4 py-3 text-right">
           <button type="button" onClick={onToggle} aria-expanded={open} className="font-semibold text-belize-blue hover:underline">
             {open ? 'Hide' : 'Details'}

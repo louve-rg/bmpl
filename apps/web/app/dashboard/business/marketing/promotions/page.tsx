@@ -37,7 +37,7 @@ export default function PromotionsListPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading…
       </div>
     );
@@ -66,8 +66,8 @@ export default function PromotionsListPage() {
             <Link key={p.id} href={`/dashboard/business/marketing/promotions/${p.id}`} className="block">
               <Card className="flex flex-wrap items-center justify-between gap-3 p-4 transition hover:border-belize-light/60 hover:shadow-bmpl-md">
                 <div className="min-w-0">
-                  <p className="truncate font-semibold text-belize-navy">{p.title}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="truncate font-semibold text-[color:var(--bmpl-text)]">{p.title}</p>
+                  <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted)]">
                     {promotionTypeLabel(p.type)} · {formatPromoWindow(p.startAt, p.endAt)} · Updated {fmtDate(p.updatedAt)}
                   </p>
                 </div>

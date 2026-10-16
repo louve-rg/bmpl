@@ -133,7 +133,7 @@ export default function DispatchPage() {
                   className={`min-h-[44px] rounded-bmpl-md border px-4 text-sm font-medium transition ${
                     autoDispatch === opt.on
                       ? 'border-belize-blue bg-belize-blue text-white'
-                      : 'border-slate-300 text-slate-700 hover:border-slate-400'
+                      : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:border-[color:var(--bmpl-text-faint)]'
                   }`}
                 >
                   {opt.label}

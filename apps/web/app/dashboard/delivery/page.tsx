@@ -89,7 +89,7 @@ export default function DeliveryPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading…
       </div>
     );
@@ -130,10 +130,10 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
 
 function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex items-center gap-2 text-sm text-slate-700">
+    <label className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
       <input
         type="checkbox"
-        className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-2 focus:ring-belize-accent/30"
+        className="h-4 w-4 rounded border-[color:var(--bmpl-border)] text-belize-blue focus:ring-2 focus:ring-belize-accent/30"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
       />
@@ -159,7 +159,7 @@ function DistrictCheckboxes({
           const id = `${idPrefix}-${d}`;
           const checked = value.includes(d);
           return (
-            <label key={d} htmlFor={id} className="flex items-center gap-1.5 text-sm text-slate-700">
+            <label key={d} htmlFor={id} className="flex items-center gap-1.5 text-sm text-[color:var(--bmpl-text-muted)]">
               <input
                 id={id}
                 type="checkbox"

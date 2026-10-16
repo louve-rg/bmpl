@@ -72,7 +72,7 @@ export function ExpandableRouteMap({
             <button
               type="button"
               onClick={() => setExpanded(true)}
-              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-bmpl-md border border-slate-300 px-4 text-sm font-semibold text-belize-navy"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-bmpl-md border border-[color:var(--bmpl-border)] px-4 text-sm font-semibold text-[color:var(--bmpl-text)]"
             >
               <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
                 <path
@@ -89,7 +89,7 @@ export function ExpandableRouteMap({
           <button
             type="button"
             onClick={() => setRevealed((v) => !v)}
-            className="inline-flex min-h-[44px] items-center rounded-bmpl-md border border-slate-300 px-4 text-sm font-semibold text-belize-navy"
+            className="inline-flex min-h-[44px] items-center rounded-bmpl-md border border-[color:var(--bmpl-border)] px-4 text-sm font-semibold text-[color:var(--bmpl-text)]"
           >
             {revealed ? 'Hide map' : 'Show map'}
           </button>

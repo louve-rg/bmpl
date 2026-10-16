@@ -100,7 +100,7 @@ export default function VendorAnalyticsPage() {
             <a
               href="/api/vendor/analytics/reports/orders.csv"
               download
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-semibold text-belize-navy shadow-bmpl-sm transition hover:border-belize-blue hover:bg-belize-blue/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-[color:var(--bmpl-border)] px-5 py-2.5 text-sm font-semibold text-[color:var(--bmpl-text)] shadow-bmpl-sm transition hover:border-belize-blue hover:bg-belize-blue/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
                 <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
@@ -112,7 +112,7 @@ export default function VendorAnalyticsPage() {
       />
 
       {loading && (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       )}
@@ -166,9 +166,9 @@ function KpiGrid({ o }: { o: Overview }) {
 function KpiCard({ label, value, hint, accent }: { label: string; value: string; hint: string; accent?: boolean }) {
   return (
     <Card className="p-4 sm:p-5">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`mt-1.5 text-2xl font-bold sm:text-3xl ${accent ? 'text-belize-blue' : 'text-belize-navy'}`}>{value}</p>
-      <p className="mt-1 text-xs text-slate-400">{hint}</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">{label}</p>
+      <p className={`mt-1.5 text-2xl font-bold sm:text-3xl ${accent ? 'text-belize-blue' : 'text-[color:var(--bmpl-text)]'}`}>{value}</p>
+      <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">{hint}</p>
     </Card>
   );
 }
@@ -208,8 +208,8 @@ function SalesSection() {
     <Card className="p-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-belize-navy">Daily sales</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Daily sales</h2>
+          <p className="text-xs text-[color:var(--bmpl-text-muted)]">
             Gross sales per day{series.length > 0 ? ` — ${money(totalGross)} across ${intFmt(totalOrders)} order${totalOrders === 1 ? '' : 's'}` : ''}.
           </p>
         </div>
@@ -227,7 +227,7 @@ function SalesSection() {
 
       <div className="mt-5">
         {loading ? (
-          <div className="flex h-48 items-center justify-center gap-2 text-sm text-slate-500">
+          <div className="flex h-48 items-center justify-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
             <Spinner className="h-4 w-4" /> Loading…
           </div>
         ) : error ? (
@@ -279,9 +279,9 @@ function BarChart({ series }: { series: SalesPoint[] }) {
             );
           })}
         </div>
-        <div className="mt-2 flex gap-[2px] border-t border-slate-100 pt-1.5">
+        <div className="mt-2 flex gap-[2px] border-t border-[color:var(--bmpl-border-soft)] pt-1.5">
           {series.map((p, i) => (
-            <div key={p.date} className="flex-1 text-center text-[10px] text-slate-400">
+            <div key={p.date} className="flex-1 text-center text-[10px] text-[color:var(--bmpl-text-faint)]">
               {i % step === 0 ? shortDate(p.date) : ''}
             </div>
           ))}
@@ -317,12 +317,12 @@ function TopProductsSection() {
 
   return (
     <Card className="p-0 overflow-hidden">
-      <div className="border-b border-slate-100 px-5 py-4">
-        <h2 className="text-sm font-semibold text-belize-navy">Top products</h2>
-        <p className="text-xs text-slate-500">Your best sellers by units sold.</p>
+      <div className="border-b border-[color:var(--bmpl-border-soft)] px-5 py-4">
+        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Top products</h2>
+        <p className="text-xs text-[color:var(--bmpl-text-muted)]">Your best sellers by units sold.</p>
       </div>
       {loading ? (
-        <div className="flex items-center gap-2 p-5 text-sm text-slate-500">
+        <div className="flex items-center gap-2 p-5 text-sm text-[color:var(--bmpl-text-muted)]">
           <Spinner className="h-4 w-4" /> Loading…
         </div>
       ) : error ? (
@@ -345,10 +345,10 @@ function TopProductsSection() {
             </thead>
             <tbody>
               {items.map((p) => (
-                <tr key={p.productId} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium text-belize-navy">{p.title}</td>
-                  <td className="px-4 py-3 text-right text-slate-600">{intFmt(p.unitsSold)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-belize-navy">{money(p.revenueMinor)}</td>
+                <tr key={p.productId} className="border-t border-[color:var(--bmpl-border-soft)] hover:bg-[color:var(--bmpl-surface-muted)]">
+                  <td className="px-4 py-3 font-medium text-[color:var(--bmpl-text)]">{p.title}</td>
+                  <td className="px-4 py-3 text-right text-[color:var(--bmpl-text-muted)]">{intFmt(p.unitsSold)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-[color:var(--bmpl-text)]">{money(p.revenueMinor)}</td>
                 </tr>
               ))}
             </tbody>

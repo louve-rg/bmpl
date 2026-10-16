@@ -53,7 +53,7 @@ export default function CampaignManagePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading…
       </div>
     );
@@ -88,9 +88,9 @@ export default function CampaignManagePage() {
 
       {/* status transitions */}
       <Card className="flex flex-wrap items-center gap-3 p-4">
-        <span className="text-sm text-slate-500">Move to:</span>
+        <span className="text-sm text-[color:var(--bmpl-text-muted)]">Move to:</span>
         {nextStatuses.length === 0 ? (
-          <span className="text-sm text-slate-400">No further transitions.</span>
+          <span className="text-sm text-[color:var(--bmpl-text-faint)]">No further transitions.</span>
         ) : (
           nextStatuses.map((s) => (
             <Button
@@ -128,18 +128,18 @@ export default function CampaignManagePage() {
       <Card className="p-5">
         <h2 className="bmpl-eyebrow mb-3">Promotions in this campaign</h2>
         {detail.promotions.length === 0 ? (
-          <p className="text-sm text-slate-400">No promotions linked yet. Assign a campaign when editing a promotion.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-faint)]">No promotions linked yet. Assign a campaign when editing a promotion.</p>
         ) : (
           <ul className="space-y-2">
             {detail.promotions.map((p) => (
               <li key={p.id}>
                 <Link
                   href={`/dashboard/business/marketing/promotions/${p.id}`}
-                  className="flex items-center justify-between gap-3 rounded-bmpl-md border border-slate-200 p-3 text-sm transition hover:border-belize-light/60"
+                  className="flex items-center justify-between gap-3 rounded-bmpl-md border border-[color:var(--bmpl-border)] p-3 text-sm transition hover:border-belize-light/60"
                 >
                   <span className="min-w-0">
-                    <span className="truncate font-medium text-belize-navy">{p.title}</span>
-                    <span className="ml-2 text-xs text-slate-400">{promotionTypeLabel(p.type)}</span>
+                    <span className="truncate font-medium text-[color:var(--bmpl-text)]">{p.title}</span>
+                    <span className="ml-2 text-xs text-[color:var(--bmpl-text-faint)]">{promotionTypeLabel(p.type)}</span>
                   </span>
                   <StatusBadge status={p.status} kind="promotion" />
                 </Link>

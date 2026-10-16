@@ -145,7 +145,7 @@ export function InventoryControl({
               aria-label="Decrease amount"
               disabled={busy || qty <= 0}
               onClick={() => bump(-1)}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-bmpl-md border border-slate-300 text-xl leading-none text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-bmpl-md border border-[color:var(--bmpl-border)] text-xl leading-none text-[color:var(--bmpl-text-muted)] transition hover:bg-[color:var(--bmpl-surface-muted)] disabled:opacity-40"
             >
               −
             </button>
@@ -163,7 +163,7 @@ export function InventoryControl({
               aria-label="Increase amount"
               disabled={busy}
               onClick={() => bump(1)}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-bmpl-md border border-slate-300 text-xl leading-none text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-bmpl-md border border-[color:var(--bmpl-border)] text-xl leading-none text-[color:var(--bmpl-text-muted)] transition hover:bg-[color:var(--bmpl-surface-muted)] disabled:opacity-40"
             >
               +
             </button>

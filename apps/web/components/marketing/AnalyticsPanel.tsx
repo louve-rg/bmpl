@@ -16,8 +16,8 @@ export function StatGrid({ stats }: { stats: Stat[] }) {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {stats.map((s) => (
           <div key={s.label}>
-            <p className="text-2xl font-bold text-belize-navy">{s.value}</p>
-            <p className="text-xs text-slate-500">{s.label}</p>
+            <p className="text-2xl font-bold text-[color:var(--bmpl-text)]">{s.value}</p>
+            <p className="text-xs text-[color:var(--bmpl-text-muted)]">{s.label}</p>
           </div>
         ))}
       </div>
@@ -32,24 +32,24 @@ export function EngagementTotals({ totals, title = 'Engagement' }: { totals: Met
       <h2 className="bmpl-eyebrow mb-3">{title}</h2>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <div>
-          <p className="text-2xl font-bold text-belize-navy">{totals.impressions.toLocaleString()}</p>
-          <p className="text-xs text-slate-500">Impressions</p>
+          <p className="text-2xl font-bold text-[color:var(--bmpl-text)]">{totals.impressions.toLocaleString()}</p>
+          <p className="text-xs text-[color:var(--bmpl-text-muted)]">Impressions</p>
         </div>
         <div>
-          <p className="text-2xl font-bold text-belize-navy">{totals.views.toLocaleString()}</p>
-          <p className="text-xs text-slate-500">Views</p>
+          <p className="text-2xl font-bold text-[color:var(--bmpl-text)]">{totals.views.toLocaleString()}</p>
+          <p className="text-xs text-[color:var(--bmpl-text-muted)]">Views</p>
         </div>
         <div>
-          <p className="text-2xl font-bold text-belize-navy">{totals.clicks.toLocaleString()}</p>
-          <p className="text-xs text-slate-500">Clicks</p>
+          <p className="text-2xl font-bold text-[color:var(--bmpl-text)]">{totals.clicks.toLocaleString()}</p>
+          <p className="text-xs text-[color:var(--bmpl-text-muted)]">Clicks</p>
         </div>
         <div>
-          <p className="text-2xl font-bold text-belize-navy">{totals.conversions.toLocaleString()}</p>
-          <p className="text-xs text-slate-500">Conversions</p>
+          <p className="text-2xl font-bold text-[color:var(--bmpl-text)]">{totals.conversions.toLocaleString()}</p>
+          <p className="text-xs text-[color:var(--bmpl-text-muted)]">Conversions</p>
         </div>
         <div>
-          <p className="text-2xl font-bold text-belize-navy">{formatCtr(totals.ctr)}</p>
-          <p className="text-xs text-slate-500">CTR</p>
+          <p className="text-2xl font-bold text-[color:var(--bmpl-text)]">{formatCtr(totals.ctr)}</p>
+          <p className="text-xs text-[color:var(--bmpl-text-muted)]">CTR</p>
         </div>
       </div>
     </Card>
@@ -66,7 +66,7 @@ export function ByStatus({ byStatus }: { byStatus: Array<{ status: PromotionStat
         {byStatus.map((r) => (
           <div key={r.status} className="flex items-center justify-between gap-3 text-sm">
             <StatusBadge status={r.status} kind="promotion" />
-            <span className="font-semibold text-belize-navy">{r.count}</span>
+            <span className="font-semibold text-[color:var(--bmpl-text)]">{r.count}</span>
           </div>
         ))}
       </div>
@@ -83,7 +83,7 @@ export function TopPromotions({ items }: { items: TopPromotion[] }) {
       <div className="overflow-x-auto">
         <table className="w-full min-w-[28rem] text-sm">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
+            <tr className="text-left text-xs uppercase tracking-wide text-[color:var(--bmpl-text-faint)]">
               <th className="pb-2 pr-3 font-semibold">Promotion</th>
               <th className="pb-2 pr-3 font-semibold">Views</th>
               <th className="pb-2 pr-3 font-semibold">Clicks</th>
@@ -92,14 +92,14 @@ export function TopPromotions({ items }: { items: TopPromotion[] }) {
           </thead>
           <tbody>
             {items.map((p) => (
-              <tr key={p.id} className="border-t border-slate-100">
+              <tr key={p.id} className="border-t border-[color:var(--bmpl-border-soft)]">
                 <td className="py-2 pr-3">
-                  <span className="font-medium text-belize-navy">{p.title}</span>
-                  <span className="ml-2 text-xs text-slate-400">{PROMOTION_STATUS_LABELS[p.status]}</span>
+                  <span className="font-medium text-[color:var(--bmpl-text)]">{p.title}</span>
+                  <span className="ml-2 text-xs text-[color:var(--bmpl-text-faint)]">{PROMOTION_STATUS_LABELS[p.status]}</span>
                 </td>
-                <td className="py-2 pr-3 text-slate-600">{p.views.toLocaleString()}</td>
-                <td className="py-2 pr-3 text-slate-600">{p.clicks.toLocaleString()}</td>
-                <td className="py-2 text-slate-600">{formatCtr(p.ctr)}</td>
+                <td className="py-2 pr-3 text-[color:var(--bmpl-text-muted)]">{p.views.toLocaleString()}</td>
+                <td className="py-2 pr-3 text-[color:var(--bmpl-text-muted)]">{p.clicks.toLocaleString()}</td>
+                <td className="py-2 text-[color:var(--bmpl-text-muted)]">{formatCtr(p.ctr)}</td>
               </tr>
             ))}
           </tbody>

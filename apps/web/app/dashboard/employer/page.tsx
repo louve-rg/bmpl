@@ -59,7 +59,7 @@ export default function EmployerHomePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
         <Spinner className="h-4 w-4" /> Loading…
       </div>
     );
@@ -87,7 +87,7 @@ export default function EmployerHomePage() {
 
       {profile ? (
         <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-500">Approval status:</span>
+          <span className="text-sm text-[color:var(--bmpl-text-muted)]">Approval status:</span>
           <StatusBadge status={profile.approvalStatus} />
         </div>
       ) : (
@@ -117,8 +117,8 @@ function AnalyticsCard({ a }: { a: EmployerAnalytics }) {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {stats.map((s) => (
           <div key={s.label}>
-            <p className="text-2xl font-bold text-belize-navy">{s.value}</p>
-            <p className="text-xs text-slate-500">{s.label}</p>
+            <p className="text-2xl font-bold text-[color:var(--bmpl-text)]">{s.value}</p>
+            <p className="text-xs text-[color:var(--bmpl-text-muted)]">{s.label}</p>
           </div>
         ))}
       </div>
@@ -163,7 +163,7 @@ function ImageManager({ profile, onChanged }: { profile: EmployerProfile; onChan
               accept="image/png,image/jpeg,image/webp"
               disabled={busy === 'logo'}
               onChange={(e) => upload('logo', e.target.files?.[0] ?? null)}
-              className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue"
+              className="block w-full text-xs text-[color:var(--bmpl-text-muted)] file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue"
             />
           </div>
         </div>
@@ -181,7 +181,7 @@ function ImageManager({ profile, onChanged }: { profile: EmployerProfile; onChan
               accept="image/png,image/jpeg,image/webp"
               disabled={busy === 'banner'}
               onChange={(e) => upload('banner', e.target.files?.[0] ?? null)}
-              className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue"
+              className="block w-full text-xs text-[color:var(--bmpl-text-muted)] file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue"
             />
           </div>
         </div>

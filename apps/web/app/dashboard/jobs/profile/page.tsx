@@ -327,7 +327,7 @@ function CheckChip({ label, checked, onChange }: { label: string; checked: boole
   return (
     <label
       className={`cursor-pointer rounded-full border px-3 py-1 text-xs font-medium transition ${
-        checked ? 'border-belize-blue bg-belize-blue/10 text-belize-blue' : 'border-slate-300 text-slate-600 hover:border-belize-light/60'
+        checked ? 'border-belize-blue bg-belize-blue/10 text-belize-blue' : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:border-belize-light/60'
       }`}
     >
       <input type="checkbox" checked={checked} onChange={onChange} className="sr-only" />

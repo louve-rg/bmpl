@@ -22,8 +22,8 @@ export function AnalyticsPanel({
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {stats.map((s) => (
             <div key={s.label}>
-              <p className="text-2xl font-bold text-belize-navy">{s.value}</p>
-              <p className="text-xs text-slate-500">{s.label}</p>
+              <p className="text-2xl font-bold text-[color:var(--bmpl-text)]">{s.value}</p>
+              <p className="text-xs text-[color:var(--bmpl-text-muted)]">{s.label}</p>
             </div>
           ))}
         </div>
@@ -36,7 +36,7 @@ export function AnalyticsPanel({
             {byStatus.map((r) => (
               <div key={r.status} className="flex items-center justify-between gap-3 text-sm">
                 <StatusBadge status={r.status} />
-                <span className="font-semibold text-belize-navy">{r.count}</span>
+                <span className="font-semibold text-[color:var(--bmpl-text)]">{r.count}</span>
               </div>
             ))}
           </div>
