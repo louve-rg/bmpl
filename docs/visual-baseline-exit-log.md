@@ -54,6 +54,11 @@ measured 4-of-9 runs landing on the "wrong" status code before its fix).
 ## Review-before-update workflow (the same document records this because the
 same failure shape applies — the easy path must be the safe one)
 
+The short version is below; the full step-by-step runbook — what to run,
+what to review, who approves, and the one open mechanical gap (no CI
+update-mode trigger exists yet) — is
+[`docs/visual-baseline-update-procedure.md`](visual-baseline-update-procedure.md).
+
 - The main run command (`pnpm test:visual`, and the CI job) never carries
   `--update-snapshots`. A mismatch always fails loud, never silently heals.
 - A failure uploads Playwright's own expected/actual/diff triptych as a CI
