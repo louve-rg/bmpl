@@ -456,7 +456,12 @@ function LocationPickerBody({
         size="sm"
         // The primary action here, tapped one-handed. `size="sm"` renders 34px,
         // which is below a comfortable target, so the height is set explicitly.
-        className="min-h-[44px] flex-1 sm:flex-none"
+        // !border/!text: this row sits in a literal bg-white box regardless of theme
+        // (map controls, never the dark mural), so the outline variant's theme-aware
+        // --bmpl-border/--bmpl-text tokens are wrong here -- under glass they resolve
+        // to near-white-on-white (Edward #1, ratio 1.07). Same override Header/Hero
+        // already use for the inverse case (light text on a dark hero).
+        className="min-h-[44px] flex-1 sm:flex-none !border-slate-300 !text-slate-900"
         disabled={disabled || geo.kind === 'locating'}
         onClick={useCurrentLocation}
         aria-label="Use my current location to place the delivery pin"
@@ -467,7 +472,7 @@ function LocationPickerBody({
         type="button"
         variant="outline"
         size="sm"
-        className="min-h-[44px] flex-1 sm:flex-none"
+        className="min-h-[44px] flex-1 sm:flex-none !border-slate-300 !text-slate-900"
         disabled={disabled || lookup.busy}
         onClick={findAddress}
         aria-label="Show the address you typed on the map"
@@ -475,7 +480,7 @@ function LocationPickerBody({
         {lookup.busy ? <Spinner className="h-4 w-4" /> : '🔎 Show my address'}
       </Button>
       {value && (
-        <Button type="button" variant="outline" size="sm" className="min-h-[44px]" disabled={disabled} onClick={clear}>
+        <Button type="button" variant="outline" size="sm" className="min-h-[44px] !border-slate-300 !text-slate-900" disabled={disabled} onClick={clear}>
           Remove pin
         </Button>
       )}
@@ -484,7 +489,7 @@ function LocationPickerBody({
           type="button"
           variant="outline"
           size="sm"
-          className="min-h-[44px]"
+          className="min-h-[44px] !border-slate-300 !text-slate-900"
           disabled={disabled}
           onClick={onExpand}
           aria-label="Open the map full screen to place the pin more precisely"
