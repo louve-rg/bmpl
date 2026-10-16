@@ -14,6 +14,12 @@ import type { PrismaService } from '../prisma/prisma.service';
 const planRouteSpy = vi.fn();
 vi.mock('@bmpl/shared', () => ({ planRoute: planRouteSpy }));
 
+// If this file ever fails with a hoisting error ("Cannot access 'planRouteSpy'
+// before initialization") instead of a normal assertion failure, that is the
+// invariant being violated, not a broken test: it means the pricing path under
+// test has started importing `@bmpl/shared` itself, which collides with this
+// mock's hoisting. Treat it exactly like a failed `expect(planRouteSpy)` call.
+
 afterEach(() => {
   planRouteSpy.mockClear();
 });
