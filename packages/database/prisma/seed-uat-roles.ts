@@ -165,6 +165,9 @@ const isFailure = (e: unknown): e is ApiFailure =>
 const PASSWORD = process.env.UAT_SEED_PASSWORD ?? 'UatWalkthrough!123';
 const USERS = {
   vendor: { email: 'uat-vendor@bzemarketplace.com', firstName: 'Uat', lastName: 'Vendor' },
+  jobSeeker: { email: 'uat-job-seeker@bzemarketplace.com', firstName: 'Uat', lastName: 'Seeker' },
+  passengerDriver: { email: 'uat-passenger-driver@bzemarketplace.com', firstName: 'Uat', lastName: 'PassengerDriver' },
+  passengerProvider: { email: 'uat-passenger-provider@bzemarketplace.com', firstName: 'Uat', lastName: 'PassengerProvider' },
 };
 
 /* ------------------------------------------------------------------- steps */
@@ -340,7 +343,199 @@ async function main(): Promise<void> {
   await superAdmin.patch(`/admin/vendors/${profile.id}/test-mode`, { isTest: true, reason: 'UAT role-coverage seed' });
   console.info('  ✓ storefront flagged isTest via PATCH admin/vendors/:id/test-mode (idempotent)');
 
-  console.info('\nUAT role-coverage seed complete (VENDOR).');
+  // ---- JOB_SEEKER --------------------------------------------------------
+  // requiresApproval: false — exempt from email verification (roleRequiresVerifiedEmail
+  // is requiresApproval && !isAdminRole; confirmed by reading packages/shared/src/roles.ts
+  // rather than assumed from the VENDOR/DELIVERY_DRIVER pattern). Applying auto-approves:
+  // roles.service.ts's submitApplication upserts UserRole straight to APPROVED and never
+  // creates a RoleApplication row at all for a !needsApproval role, so there is nothing to
+  // find via GET /roles/applications — idempotency is checked against GET /me's own roles
+  // instead. Worth seeding anyway even though the profile API itself only requires
+  // CUSTOMER (@Roles('CUSTOMER') on JobSeekerController): the dashboard nav's "Belize
+  // Connect" section is gated on actually holding JOB_SEEKER
+  // (apps/web/lib/dashboard-nav-items.ts, ROLE_GROUPS) — a baseline without it would be
+  // missing nav, one of the owner's own named defect classes.
+  console.info('• Job seeker');
+  await ensureUser(superAdmin, USERS.jobSeeker);
+  const seeker = new Client('job seeker');
+  await seeker.login(USERS.jobSeeker.email, PASSWORD);
+
+  type MeRoles = { roles: Array<{ roleCode: string; status: string }> };
+  const seekerMe = await seeker.get<MeRoles>('/me');
+  const hasJobSeeker = seekerMe.roles.some((r) => r.roleCode === 'JOB_SEEKER' && r.status === 'APPROVED');
+  if (!hasJobSeeker) {
+    await seeker.post('/roles/applications', { roleCode: 'JOB_SEEKER', message: 'UAT role-coverage seed' });
+    console.info('  ✓ JOB_SEEKER role self-granted (no approval needed) via POST roles/applications');
+  } else {
+    console.info('  • JOB_SEEKER role already held');
+  }
+
+  // The profile page renders nothing below its header when the profile is
+  // null (apps/web/app/dashboard/jobs/profile/page.tsx — `profile ? (...) :
+  // null`, no explicit empty state) — a real, populated profile is needed
+  // for a baseline worth anything. PUT is upsert-backed server-side
+  // (job-seeker.service.ts's upsertProfile), safe to call every run.
+  await seeker.call('PUT', '/job-seeker/profile', { preferredName: 'Uat Seeker' });
+  console.info('  ✓ job-seeker profile upserted via PUT job-seeker/profile');
+
+  // ---- PASSENGER_DRIVER --------------------------------------------------
+  console.info('• Passenger driver');
+  await ensureUser(superAdmin, USERS.passengerDriver);
+  const paxDriver = new Client('passenger driver');
+  await paxDriver.login(USERS.passengerDriver.email, PASSWORD);
+
+  const inAYear = new Date();
+  inAYear.setFullYear(inAYear.getFullYear() + 1);
+
+  await paxDriver.call('PUT', '/passenger/driver/profile', {
+    legalName: 'UAT Passenger Driver',
+    displayName: 'UAT Passenger Driver',
+    phone: '+501-600-0001',
+    homeDistrict: 'BELIZE',
+    licenceNumber: 'UAT-PAX-000001',
+    licenceExpiry: inAYear.toISOString(),
+    termsAccepted: true,
+  });
+  console.info('  ✓ passenger-driver profile upserted via PUT passenger/driver/profile');
+
+  type PaxVehicle = { id: string; licencePlate: string; approvalStatus: string };
+  let paxVehicles = await paxDriver.get<PaxVehicle[]>('/passenger/driver/vehicles');
+  if (!paxVehicles.some((v) => v.licencePlate === 'UAT-PAX-0001')) {
+    await paxDriver.post('/passenger/driver/vehicles', {
+      type: 'CAR',
+      make: 'UAT',
+      model: 'Passenger Sedan',
+      licencePlate: 'UAT-PAX-0001',
+      registrationExpiry: inAYear.toISOString(),
+      insuranceExpiry: inAYear.toISOString(),
+      seatCapacity: 4,
+      isPrimary: true,
+    });
+    paxVehicles = await paxDriver.get<PaxVehicle[]>('/passenger/driver/vehicles');
+    console.info('  ✓ passenger vehicle added (registration + insurance valid a year out)');
+  }
+  const paxVehicle = paxVehicles.find((v) => v.licencePlate === 'UAT-PAX-0001');
+  if (!paxVehicle) throw new Error('The UAT passenger vehicle disappeared between POST and GET.');
+
+  type PaxApplication = { id: string; roleCode: string; status: string };
+  const paxApps = await paxDriver.get<PaxApplication[]>('/roles/applications');
+  let paxApplication = paxApps.find((a) => a.roleCode === 'PASSENGER_DRIVER');
+  if (!paxApplication) {
+    // Inside the guard, same reasoning as VENDOR and seed-uat-logistics.ts's
+    // DELIVERY_DRIVER — see those call sites for why.
+    await ensureEmailVerified(paxDriver, USERS.passengerDriver.email);
+    const pdf = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n' +
+        '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\nxref\n0 4\ntrailer<</Size 4/Root 1 0 R>>\n%%EOF\n',
+    );
+    const keys: string[] = [];
+    for (const label of ['licence', 'vehicle-registration', 'insurance', 'police-record']) {
+      const uploaded = await paxDriver.upload<{ key?: string; storageKey?: string }>(
+        `/roles/applications/PASSENGER_DRIVER/documents/upload?filename=uat-pax-driver-${label}.pdf`,
+        pdf,
+        'application/pdf',
+      );
+      const key = uploaded.key ?? uploaded.storageKey;
+      if (!key) throw new Error(`Document upload (${label}) returned no key: ${JSON.stringify(uploaded)}`);
+      keys.push(key);
+    }
+    console.info('  ✓ four supporting documents uploaded via POST roles/applications/PASSENGER_DRIVER/documents/upload');
+    await paxDriver.post('/roles/applications', {
+      roleCode: 'PASSENGER_DRIVER',
+      message: 'UAT role-coverage seed',
+      documentKeys: keys,
+    });
+    console.info('  ✓ PASSENGER_DRIVER application submitted');
+    const refreshed = await paxDriver.get<PaxApplication[]>('/roles/applications');
+    paxApplication = refreshed.find((a) => a.roleCode === 'PASSENGER_DRIVER');
+    if (!paxApplication) throw new Error('The PASSENGER_DRIVER application did not appear in /roles/applications.');
+  }
+  if (paxApplication.status !== 'APPROVED') {
+    await superAdmin.post('/admin/applications/approve', { applicationId: paxApplication.id, note: 'UAT role-coverage seed' });
+    console.info('  ✓ PASSENGER_DRIVER role approved via POST admin/applications/approve');
+  } else {
+    console.info('  • PASSENGER_DRIVER role already approved');
+  }
+
+  if (paxVehicle.approvalStatus !== 'APPROVED') {
+    await superAdmin.post(`/admin/passengers/vehicles/${paxVehicle.id}/approve`, {});
+    console.info('  ✓ passenger vehicle approved via POST admin/passengers/vehicles/:id/approve');
+  }
+
+  type PaxDriverDirectoryRow = { id: string; email: string };
+  const paxDirectory = await superAdmin.get<PaxDriverDirectoryRow[]>('/admin/passengers/drivers');
+  const paxDriverRow = paxDirectory.find((d) => d.email === USERS.passengerDriver.email);
+  if (!paxDriverRow) throw new Error('Passenger-driver profile not found in /admin/passengers/drivers.');
+  await superAdmin.patch(`/admin/passengers/drivers/${paxDriverRow.id}/test-mode`, { isTest: true, reason: 'UAT role-coverage seed' });
+  console.info('  ✓ passenger-driver flagged isTest via PATCH admin/passengers/drivers/:id/test-mode (idempotent)');
+
+  await paxDriver.patch('/passenger/driver/availability', { availability: 'ONLINE' });
+  console.info('  ✓ passenger driver ONLINE');
+
+  // ---- PASSENGER_PROVIDER ------------------------------------------------
+  // A fresh operator with zero fleet affiliations is a real, valid state —
+  // apps/web/components/passenger-operator/FleetRosterCard.tsx's own comment
+  // says as much. No affiliation/vehicle data created here on purpose.
+  console.info('• Passenger provider');
+  await ensureUser(superAdmin, USERS.passengerProvider);
+  const paxProvider = new Client('passenger provider');
+  await paxProvider.login(USERS.passengerProvider.email, PASSWORD);
+
+  type PaxProviderApplication = { id: string; roleCode: string; status: string };
+  const paxProviderApps = await paxProvider.get<PaxProviderApplication[]>('/roles/applications');
+  let paxProviderApplication = paxProviderApps.find((a) => a.roleCode === 'PASSENGER_PROVIDER');
+  if (!paxProviderApplication) {
+    await ensureEmailVerified(paxProvider, USERS.passengerProvider.email);
+    const pdf = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n' +
+        '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\nxref\n0 4\ntrailer<</Size 4/Root 1 0 R>>\n%%EOF\n',
+    );
+    const keys: string[] = [];
+    for (const label of ['business-registration', 'public-transport-licence']) {
+      const uploaded = await paxProvider.upload<{ key?: string; storageKey?: string }>(
+        `/roles/applications/PASSENGER_PROVIDER/documents/upload?filename=uat-pax-provider-${label}.pdf`,
+        pdf,
+        'application/pdf',
+      );
+      const key = uploaded.key ?? uploaded.storageKey;
+      if (!key) throw new Error(`Document upload (${label}) returned no key: ${JSON.stringify(uploaded)}`);
+      keys.push(key);
+    }
+    console.info('  ✓ two supporting documents uploaded via POST roles/applications/PASSENGER_PROVIDER/documents/upload');
+    await paxProvider.post('/roles/applications', {
+      roleCode: 'PASSENGER_PROVIDER',
+      message: 'UAT role-coverage seed',
+      documentKeys: keys,
+    });
+    console.info('  ✓ PASSENGER_PROVIDER application submitted');
+    const refreshed = await paxProvider.get<PaxProviderApplication[]>('/roles/applications');
+    paxProviderApplication = refreshed.find((a) => a.roleCode === 'PASSENGER_PROVIDER');
+    if (!paxProviderApplication) throw new Error('The PASSENGER_PROVIDER application did not appear in /roles/applications.');
+  }
+  if (paxProviderApplication.status !== 'APPROVED') {
+    await superAdmin.post('/admin/applications/approve', { applicationId: paxProviderApplication.id, note: 'UAT role-coverage seed' });
+    console.info('  ✓ PASSENGER_PROVIDER role approved via POST admin/applications/approve');
+  } else {
+    console.info('  • PASSENGER_PROVIDER role already approved');
+  }
+
+  await paxProvider.call('PUT', '/passenger/provider/profile', {
+    businessName: 'UAT Walkthrough Transport Co.',
+    contactEmail: USERS.passengerProvider.email,
+  });
+  console.info('  ✓ passenger-provider profile upserted via PUT passenger/provider/profile');
+
+  // NOTE: listProviders() names this field accountEmail, not email — unlike
+  // listDrivers()'s flat `email` field. Confirmed by reading
+  // admin-passenger.service.ts rather than assuming the two endpoints match.
+  type PaxProviderDirectoryRow = { id: string; accountEmail: string };
+  const paxProviderDirectory = await superAdmin.get<PaxProviderDirectoryRow[]>('/admin/passengers/providers');
+  const paxProviderRow = paxProviderDirectory.find((p) => p.accountEmail === USERS.passengerProvider.email);
+  if (!paxProviderRow) throw new Error('Passenger-provider profile not found in /admin/passengers/providers.');
+  await superAdmin.patch(`/admin/passengers/providers/${paxProviderRow.id}/test-mode`, { isTest: true, reason: 'UAT role-coverage seed' });
+  console.info('  ✓ passenger-provider flagged isTest via PATCH admin/passengers/providers/:id/test-mode (idempotent)');
+
+  console.info('\nUAT role-coverage seed complete (VENDOR, JOB_SEEKER, PASSENGER_DRIVER, PASSENGER_PROVIDER).');
 }
 
 main().catch((e) => {
