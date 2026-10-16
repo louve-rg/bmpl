@@ -37,6 +37,20 @@ The new "Visual regression baseline" CI job starts, and stays,
 flake history (one proven 30s `locator.click` flake already on record for
 the plain e2e suite, BMPL-217/213) than to a token minimum of 1 or 2.
 
+**Clause 3 precedent, from the integration suite rather than this one** —
+proof the rule describes a real event, not a hypothetical. On 2026-10-16,
+PR #459's integration run (unrelated 47-file presentation-only diff, zero
+`apps/api` files touched) went red on
+`test/dispatch-engine.integration.spec.ts:789` (MDF-18 driver-claim-fallback
+race) and was reverified green on a rerun of the *identical* commit. That is
+exactly clause 3's red-then-rerun-to-green: it would reset this suite's own
+streak to zero and earn its own row, not be waved through as "the PR must
+have fixed itself." Carded as MDF-18 follow-up (god → Jim, not fixed on the
+spot per explicit instruction); cheap git-log precedent found the same
+over-specified-loser-assertion shape was already fixed once in a sibling
+file (`717aa58`, 2026-10-12, `apps/api/test/dispatch.integration.spec.ts`,
+measured 4-of-9 runs landing on the "wrong" status code before its fix).
+
 ## Review-before-update workflow (the same document records this because the
 same failure shape applies — the easy path must be the safe one)
 
