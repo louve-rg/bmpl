@@ -382,10 +382,19 @@ jobs:
         env:
           POSTGRES_USER: bmpl
           POSTGRES_PASSWORD: bmpl_ci_password
-          POSTGRES_DB: bmpl_visual
+          # Must be exactly "bmpl" (not e.g. bmpl_visual, which is what this
+          # was originally named) -- discovered by a real CI failure, not
+          # reasoned out in advance: prisma/seed-uat-logistics.ts's own
+          # assertDevelopmentEnvironment() hard-refuses any database name
+          # other than "bmpl" or "bmpl_test" (the latter reserved for the
+          # Integration job). Safe here because this is a throwaway
+          # container on its own isolated runner VM, destroyed at the end of
+          # this job -- it is never the same "bmpl" the Integration job's
+          # bmpl_test guard, or any human's local dev database, refers to.
+          POSTGRES_DB: bmpl
         ports: ['5432:5432']
         options: >-
-          --health-cmd "pg_isready -U bmpl -d bmpl_visual"
+          --health-cmd "pg_isready -U bmpl -d bmpl"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
         image: redis:7-alpine
@@ -395,10 +404,10 @@ jobs:
     env:
       # Same services shape as the Integration job above, duplicated rather
       # than shared across jobs (GitHub Actions jobs don't share services) —
-      # a separate runner VM per job, so bmpl_visual never collides with
-      # that job's own bmpl_test despite reusing the same in-VM port.
-      DATABASE_URL: postgresql://bmpl:bmpl_ci_password@localhost:5432/bmpl_visual?schema=public
-      DIRECT_URL: postgresql://bmpl:bmpl_ci_password@localhost:5432/bmpl_visual?schema=public
+      # a separate runner VM per job, so this "bmpl" database never collides
+      # with that job's own bmpl_test despite reusing the same in-VM port.
+      DATABASE_URL: postgresql://bmpl:bmpl_ci_password@localhost:5432/bmpl?schema=public
+      DIRECT_URL: postgresql://bmpl:bmpl_ci_password@localhost:5432/bmpl?schema=public
       REDIS_URL: redis://localhost:6379
       STORAGE_PROVIDER: minio
       STORAGE_ENDPOINT: http://localhost:9000
