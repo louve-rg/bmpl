@@ -1456,6 +1456,35 @@ cited from the merged PR and the kanban record, consistent with this
 document's rule that a merge is MERGED, not yet re-read as a fact here; §10
 above still correctly says PRODUCTION-VERIFIED has no record for any of this.
 
+**New tonight (2026-10-16) — PR #455 (`5dbede8`) ships a screen for the one
+piece of requirement 10 that had none: resuming an exception in place, or
+releasing an assigned driver, through the admin logistics page.** The
+backend (`resolveException`, RESUME and RELEASE_DRIVER,
+`shipment.service.ts:1945`) has been live since `cde4e19` (2026-09-09) and
+was never the gap — the gap was that no screen anywhere called it.
+`5dbede8` adds `ExceptionRecovery.tsx`, mounted on the same admin logistics
+page alongside the existing return/reroute panel whenever a leg is
+`EXCEPTION` and the shipment is not `RETURNED`, gated by the same
+`logistics.operate` permission, with every refusal shown as the server's
+own message verbatim. Four-state ladder for this specific piece, each axis
+held separate per this document's own rule:
+- IMPLEMENTED: yes — backend since `cde4e19`; UI since `5dbede8` (PR #455,
+  merged `2026-10-16T05:15:55Z`).
+- PRODUCTION-DEPLOYED: yes, admin — confirmed directly just now,
+  `https://bmpl-admin.vercel.app/` returns `X-Bmpl-Commit: 5dbede875ffe` on
+  two independent reads, and `5dbede8` is `origin/main`'s own tip.
+- BEHAVIOURALLY VERIFIED: **partial, and the two halves must not be
+  merged into one.** Dwight exercised the RELEASE_DRIVER *refusal* path in
+  a real browser, on a local stack against existing `isTest` data —
+  reproduced the collected-parcel precondition through a genuine product
+  action, clicked "Release driver," and confirmed the on-screen message
+  matched the server's own refusal text byte-for-byte. Nobody has exercised
+  a successful RESUME or a successful RELEASE_DRIVER through this screen,
+  on any stack, and nobody has observed any of it in production — unchanged
+  from this document's standing convention.
+- AWAITING EDWARD ACCEPTANCE: yes, unchanged — zero of twelve, no
+  exceptions.
+
 `MDF-96` asked whether the owner expects the courier themselves to report
 a failed attempt, or whether the existing staff-exception workflow is what
 he meant.
@@ -1492,8 +1521,35 @@ inventing a refund/fee/timeframe, and that the button disappears once the
 leg is already `EXCEPTION`. **Still not acceptance-testable through the
 product:** that the confirmation survives a page reload — it does not,
 disclosed by #393 itself, and there is no field to check this against
-after a reload. The PIN-lockout auto-flag path still has no screen of its
-own and remains API-only.
+after a reload.
+
+**Updated 2026-10-16 — resuming an exception or releasing a driver is now
+acceptance-testable through the product:** as staff holding
+`logistics.operate`, open a shipment with a leg in `EXCEPTION`, use the new
+"Resume" or "Release driver" control, and confirm the on-screen result (or
+the server's own refusal) matches. Not yet exercised beyond Dwight's single
+RELEASE_DRIVER-refusal walk described above — a successful RESUME, a
+successful RELEASE_DRIVER, and any production use of either are all still
+unwalked.
+
+The sentence that followed here through 2026-10-15 — "the PIN-lockout
+auto-flag path still has no screen of its own and remains API-only" — is
+**partly false as of tonight, not wholly false and not still true; say
+which, don't round either way.** The auto-flag *trigger* is unchanged and
+the claim about it stays true: five wrong handoff-PIN codes trips
+`flagException` automatically, with no screen involved on either side —
+that was never meant to have one and still doesn't. But "remains API-only"
+is now false for the *resulting* exception: `ExceptionRecovery.tsx`'s
+RESUME action, shipped in `5dbede8` above, explicitly clears a
+PIN-lockout-caused exception's attempt counter — its own on-screen copy
+says "If the exception was a PIN lockout, the attempt counter is
+cleared" — through the same admin logistics screen used for every other
+exception cause. That screen does not distinguish a PIN-lockout cause from
+any other one (an operator sees a generic `EXCEPTION` leg and a "Resume"
+button, never a flag reading "this was a PIN lockout"), so read narrowly —
+a screen *dedicated to this one cause* — "has no screen of its own" stays
+literally true. Read as "nothing with a screen ever touches it," it is now
+false. Net for the whole original sentence: **partly false.**
 
 ## 11. Recipient availability windows & updates
 
@@ -1689,7 +1745,43 @@ Four distinct pieces, per the owner's original requirement:
   and by the carrier's own organization (`assertMyLeg`), LINE_HAUL only, on
   a positive allow-list of eligible leg statuses rather than the existing
   transition machinery, since a carrier's fixed sailing time is knowable
-  before an earlier leg has even started.
+  before an earlier leg has even started. **"Reachable" above describes who
+  is *authorized* to call the endpoint, not that any screen called it
+  — grep-confirmed directly, zero files under `apps/web` or `apps/admin`
+  referenced `scheduleLeg` or its route before tonight.** **New tonight
+  (2026-10-16) — PR #455 (`5dbede8`) adds the UI this backend never had:**
+  an inline "Departs"/"Arrives" control on the admin logistics page, shown
+  only for a `LINE_HAUL` leg in one of the server's own schedulable
+  statuses, posting to `POST legs/:id/schedule` and showing the server's
+  own refusal verbatim on any guard it trips (including the asymmetric
+  past-time guard, deliberately not re-derived client-side). Four-state
+  ladder, held separate per this document's own rule:
+  - IMPLEMENTED: yes — backend since `e56c425`; UI since `5dbede8` (PR
+    #455, merged `2026-10-16T05:15:55Z`).
+  - PRODUCTION-DEPLOYED: yes, admin — confirmed directly just now,
+    `https://bmpl-admin.vercel.app/` returns `X-Bmpl-Commit: 5dbede875ffe`
+    on two independent reads, and `5dbede8` is `origin/main`'s own tip.
+  - BEHAVIOURALLY VERIFIED: **yes, locally — updated 2026-10-16T05:35Z,
+    eight minutes after this cell was first written as "no."** Dwight
+    exercised the success path in a real browser against a real admin
+    server, a real NestJS API, and real `isTest` Postgres — the PR's own
+    unmodified `lib/api.ts`, no mock anywhere in the chain. He filled the
+    "Arrives" field on the `LINE_HAUL` leg of shipment `BML-JVVCP4CQ`,
+    clicked "Save schedule," the `POST` returned `201`, and "Scheduled to
+    arrive" rendered in the DOM. Screenshot:
+    `hive/agents/bmpl-qa-mtmcz0m1/mdf318-schedule-success.png` — leg 2 reads
+    "Scheduled to depart 01-Nov-2026, 22:00 · Scheduled to arrive
+    01-Nov-2026, 22:00" as rendered text. **The limits, stated as precisely
+    as this document states them anywhere else:** local stack only, `isTest`
+    data only, one leg of one shipment, exercised once. **Zero production
+    observation** — nobody has watched this work on
+    `bmpl-admin.vercel.app`, only on a laptop; PRODUCTION-DEPLOYED (above)
+    and BEHAVIOURALLY-VERIFIED-LOCALLY are two different cells, now both
+    true, and production-observed is a third thing that is still empty.
+    This does not change requirement 10's own RESUME/RELEASE_DRIVER cell —
+    Dwight's walk there covered only the RELEASE_DRIVER refusal path, on a
+    different leg, and that cell is unchanged.
+  - AWAITING EDWARD ACCEPTANCE: yes, unchanged.
 - **Material ETA-change notification, on the owner's already-approved
   30-minute threshold** ([Ruling 11](./OWNER-RULINGS.md#ruling-11--recipient-availability-and-eta-changes)).
   **Done (`e7ef2ed`, BMPL-345).** The threshold is env-configurable
@@ -1800,7 +1892,14 @@ PR #309 added and confirm it only *prepares* — see requirement 10's
 acceptance criteria for the charge-side confirmation. Configure a
 date-specific `RouteScheduleException` and confirm a route otherwise open
 that day is refused with the schedule reason, then confirm it recovers
-once the exception is removed.
+once the exception is removed. **Updated 2026-10-16:** the per-leg
+Departs/Arrives control is now acceptance-testable through the product —
+as staff holding `logistics.operate`, open a `LINE_HAUL` leg and save a
+departure and/or arrival time, then confirm the shipment's own ETA stops
+reading `UNKNOWN` for that leg once saved. **Exercised once, locally, by
+Dwight (2026-10-16T05:35Z)** — see this requirement's own Evidence-ladder
+entry above for the full limits (`isTest` data, one leg, one shipment,
+zero production observation). Not yet exercised on production.
 
 The contract above exists in the repository. As of this 2026-10-10 pass,
 each requirement's Evidence ladder states DEPLOYED where it could be
