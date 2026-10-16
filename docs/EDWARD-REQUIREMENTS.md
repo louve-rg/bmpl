@@ -1761,11 +1761,26 @@ Four distinct pieces, per the owner's original requirement:
   - PRODUCTION-DEPLOYED: yes, admin — confirmed directly just now,
     `https://bmpl-admin.vercel.app/` returns `X-Bmpl-Commit: 5dbede875ffe`
     on two independent reads, and `5dbede8` is `origin/main`'s own tip.
-  - BEHAVIOURALLY VERIFIED: **no.** Nobody has saved a real schedule
-    through this control on any stack, and nobody has observed it in
-    production. Dwight's local-stack walk tonight covered requirement 10's
-    RELEASE_DRIVER refusal only (see that requirement's own entry); this
-    control was not part of that walk and has no walk of its own yet.
+  - BEHAVIOURALLY VERIFIED: **yes, locally — updated 2026-10-16T05:35Z,
+    eight minutes after this cell was first written as "no."** Dwight
+    exercised the success path in a real browser against a real admin
+    server, a real NestJS API, and real `isTest` Postgres — the PR's own
+    unmodified `lib/api.ts`, no mock anywhere in the chain. He filled the
+    "Arrives" field on the `LINE_HAUL` leg of shipment `BML-JVVCP4CQ`,
+    clicked "Save schedule," the `POST` returned `201`, and "Scheduled to
+    arrive" rendered in the DOM. Screenshot:
+    `hive/agents/bmpl-qa-mtmcz0m1/mdf318-schedule-success.png` — leg 2 reads
+    "Scheduled to depart 01-Nov-2026, 22:00 · Scheduled to arrive
+    01-Nov-2026, 22:00" as rendered text. **The limits, stated as precisely
+    as this document states them anywhere else:** local stack only, `isTest`
+    data only, one leg of one shipment, exercised once. **Zero production
+    observation** — nobody has watched this work on
+    `bmpl-admin.vercel.app`, only on a laptop; PRODUCTION-DEPLOYED (above)
+    and BEHAVIOURALLY-VERIFIED-LOCALLY are two different cells, now both
+    true, and production-observed is a third thing that is still empty.
+    This does not change requirement 10's own RESUME/RELEASE_DRIVER cell —
+    Dwight's walk there covered only the RELEASE_DRIVER refusal path, on a
+    different leg, and that cell is unchanged.
   - AWAITING EDWARD ACCEPTANCE: yes, unchanged.
 - **Material ETA-change notification, on the owner's already-approved
   30-minute threshold** ([Ruling 11](./OWNER-RULINGS.md#ruling-11--recipient-availability-and-eta-changes)).
@@ -1881,7 +1896,10 @@ once the exception is removed. **Updated 2026-10-16:** the per-leg
 Departs/Arrives control is now acceptance-testable through the product —
 as staff holding `logistics.operate`, open a `LINE_HAUL` leg and save a
 departure and/or arrival time, then confirm the shipment's own ETA stops
-reading `UNKNOWN` for that leg once saved. Not yet exercised on any stack.
+reading `UNKNOWN` for that leg once saved. **Exercised once, locally, by
+Dwight (2026-10-16T05:35Z)** — see this requirement's own Evidence-ladder
+entry above for the full limits (`isTest` data, one leg, one shipment,
+zero production observation). Not yet exercised on production.
 
 The contract above exists in the repository. As of this 2026-10-10 pass,
 each requirement's Evidence ladder states DEPLOYED where it could be
