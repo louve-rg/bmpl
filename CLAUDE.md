@@ -464,6 +464,13 @@ component or table:
    implementation.
 3. A second way to do something that already works is a defect, not a feature.
 
+**Foreground/background contrast is a permanent, platform-wide design-system
+standard**, not a style preference — see
+[`docs/design/CONTRAST-STANDARD.md`](docs/design/CONTRAST-STANDARD.md) before
+touching any glass-scoped or light-surface color pairing. The platform does
+not fully meet it yet; that document records the honest gap rather than
+claiming compliance.
+
 **Do not duplicate existing functionality.** Two funding mechanisms, two address
 validators, two ways to price a courier leg — each of these has already been a
 bug here.
