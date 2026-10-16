@@ -1,10 +1,12 @@
 # Pixel-baseline visual-regression specs
 
-Intentionally empty in Phase 1 (infra only — Priority 6, owner directive
-2026-10-16). `pnpm test:visual` will report "no tests found" and exit
-non-zero until Phase 2 adds the first spec here — that is expected, not a
-finding; see the CI job comment in `.github/workflows/ci.yml` for why this
-step is `continue-on-error` during this phase regardless.
+Phase 1 (infra only — Priority 6, owner directive 2026-10-16) ships exactly
+one spec here, `smoke.spec.ts`, and it is not a baseline: no
+`toHaveScreenshot`, no committed PNG. It proves the new CI job's chain
+actually works end to end (seed → live API → dev server on 3177 under Linux
+→ browser → login) rather than just "the steps executed" — see its own
+header comment. Delete it once Phase 2 adds a real baseline spec that
+exercises the same login path with an actual screenshot assertion.
 
 Baseline PNGs committed under this directory are never captured locally —
 see `../support/visual.ts` and `docs/visual-baseline-exit-log.md` for the

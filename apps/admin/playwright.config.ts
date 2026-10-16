@@ -14,6 +14,9 @@ import { BASE_URL } from './e2e/support/server';
  */
 export default defineConfig({
   testDir: './e2e',
+  // e2e/visual belongs to playwright.visual.config.ts -- see apps/web's own
+  // config for the full reasoning; identical here.
+  testIgnore: ['**/visual/**'],
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,

@@ -361,12 +361,16 @@ jobs:
     # first validation run (a draft PR, never merged to main until this
     # comment is removed) is expected to surface any that are missing.
     #
-    # Phase 1 ALSO has zero spec files in either app's e2e/visual directory
-    # yet (Phase 2 adds them) — so during Phase 1, a red result from either
-    # "Visual regression baseline" step below is expected, for a harmless
-    # reason (Playwright exits non-zero on "no tests found"), not a finding.
-    # `continue-on-error` already absorbs this; it is flagged here so nobody
-    # reads an early red run as evidence something is broken.
+    # Phase 1 ships exactly ONE spec (apps/web/e2e/visual/smoke.spec.ts) and
+    # it is deliberately not a baseline -- no toHaveScreenshot, no committed
+    # PNG. It exists only to prove the chain below actually works end to
+    # end (seed -> live API -> dev server on 3177 under Linux -> browser ->
+    # login), per god's 2026-10-16 review: a validated run that only proves
+    # "the steps executed" is not validated at all. apps/admin's e2e/visual
+    # is still empty (Phase 2 adds specs there) -- its own step below is
+    # EXPECTED to exit non-zero during Phase 1 for a harmless reason
+    # (Playwright exits non-zero on "no tests found"), absorbed by
+    # continue-on-error same as always; that is not a finding either.
     name: Visual regression baseline (Priority 6)
     runs-on: ubuntu-latest
     permissions:
@@ -437,6 +441,12 @@ jobs:
             if curl -sf http://localhost:9000/minio/health/ready >/dev/null; then echo "minio ready"; break; fi
             sleep 1
           done
+          # Hard gate (god, 2026-10-16): the loop above falls through silently
+          # if MinIO never becomes ready -- same no-exit idiom the Integration
+          # job above already uses, defensible to copy, but a copied idiom
+          # still needs a floor. Fail loudly here rather than let every step
+          # after this one run against a storage backend that never came up.
+          curl -sf http://localhost:9000/minio/health/ready >/dev/null || { echo "MinIO never became ready within 30s" >&2; exit 1; }
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -465,12 +475,33 @@ jobs:
         run: pnpm --filter @bmpl/api build
 
       - name: Start API and wait for real readiness
+        id: start-api
         run: |
-          node apps/api/dist/main.js &
+          node apps/api/dist/main.js > /tmp/api.log 2>&1 &
           for i in $(seq 1 60); do
             if curl -sf http://localhost:4000/api/health >/dev/null; then echo "API ready"; break; fi
             sleep 1
           done
+          # Hard gate (god, 2026-10-16): the loop above falls through
+          # silently if the API never comes up, which would let this step
+          # exit 0 and, because both visual steps below are
+          # continue-on-error, the WHOLE JOB would report green with no API
+          # running at all -- exactly the shape already caught once this
+          # same night in tsc's own incremental cache. continue-on-error must
+          # absorb test redness, never infrastructure redness.
+          curl -sf http://localhost:4000/api/health >/dev/null || {
+            echo "API never became ready within 60s -- see the uploaded log for why" >&2
+            cat /tmp/api.log >&2
+            exit 1
+          }
+
+      - name: Upload API boot log (only when the API never became ready)
+        if: steps.start-api.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-api-log
+          path: /tmp/api.log
+          retention-days: 7
 
       - name: Install Playwright's Chromium (web)
         run: pnpm --filter @bmpl/web exec playwright install --with-deps chromium
