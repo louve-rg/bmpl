@@ -351,15 +351,16 @@ jobs:
     # written, falsifiable criterion that has to be satisfied before this
     # job's own `continue-on-error` comes off).
     #
-    # DRAFT, NOT YET VALIDATED END TO END IN A REAL CI RUN as of the commit
-    # that adds this comment — shown for review before merge per standing
-    # floor rule (never touch ci.yml without authorization; this task is the
-    # authorization for THIS SCOPE, not for skipping review). Known
-    # incompleteness, stated rather than hidden: the exact set of env vars
-    # apps/api's bootstrap requires beyond what's listed below has not been
-    # exhaustively enumerated against a real boot in this environment — a
-    # first validation run (a draft PR, never merged to main until this
-    # comment is removed) is expected to surface any that are missing.
+    # VALIDATED END TO END IN A REAL CI RUN: 38948367691, headSha 981706f,
+    # 2026-10-16 — all five jobs green, this job's own seed/API/Playwright
+    # chain included (seed base role fixtures -> build+start the API ->
+    # readiness gate -> seed UAT logistics against the live API -> Playwright
+    # for both web and admin). Three earlier draft-PR runs went red first, on
+    # three distinct real causes (a step-ordering bug, then a pre-existing
+    # gap in seed-uat-logistics.ts's own email-verification handling, then a
+    # call-site placement bug in the fix for that gap) — none of them a
+    # missing env var. The question this draft existed to answer is
+    # answered: the env block below is complete as written.
     #
     # Phase 1 ships exactly ONE spec (apps/web/e2e/visual/smoke.spec.ts) and
     # it is deliberately not a baseline -- no toHaveScreenshot, no committed
