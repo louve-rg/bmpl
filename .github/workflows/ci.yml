@@ -382,15 +382,20 @@ jobs:
         env:
           POSTGRES_USER: bmpl
           POSTGRES_PASSWORD: bmpl_ci_password
-          # Must be exactly "bmpl" (not e.g. bmpl_visual, which is what this
-          # was originally named) -- discovered by a real CI failure, not
-          # reasoned out in advance: prisma/seed-uat-logistics.ts's own
-          # assertDevelopmentEnvironment() hard-refuses any database name
-          # other than "bmpl" or "bmpl_test" (the latter reserved for the
-          # Integration job). Safe here because this is a throwaway
-          # container on its own isolated runner VM, destroyed at the end of
-          # this job -- it is never the same "bmpl" the Integration job's
-          # bmpl_test guard, or any human's local dev database, refers to.
+          # DELIBERATE, DO NOT "TIDY" THIS TO SOMETHING MORE DESCRIPTIVE LIKE
+          # bmpl_visual (which is what this was originally named, until a real
+          # CI run refused to seed). It must be exactly "bmpl":
+          # prisma/seed-uat-logistics.ts's own assertDevelopmentEnvironment()
+          # hard-refuses any database name other than "bmpl" or "bmpl_test"
+          # (the latter reserved for the Integration job above) -- see that
+          # function for the actual check. This name clears that dev-only
+          # assertion on purpose; it is harmless here because this Postgres
+          # container is a throwaway on its own isolated runner VM for this
+          # one job, destroyed at the end of it -- never the same "bmpl" any
+          # human's local dev database, or the Integration job's bmpl_test,
+          # refers to. If you want this to read less alarmingly, propose an
+          # explicit opt-in flag on the guard itself -- that touches a safety
+          # assertion, so it needs its own review, not a drive-by rename here.
           POSTGRES_DB: bmpl
         ports: ['5432:5432']
         options: >-
