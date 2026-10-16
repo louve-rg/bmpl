@@ -252,7 +252,7 @@ export default function NewShipmentPage() {
               value={parcel.description}
               onChange={(e) => setParcel((p) => ({ ...p, description: e.target.value }))}
               placeholder="One box of documents"
-              className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base"
+              className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base text-slate-900"
             />
           </label>
           <label className="block">
@@ -261,7 +261,7 @@ export default function NewShipmentPage() {
               value={parcel.pieces}
               onChange={(e) => setParcel((p) => ({ ...p, pieces: e.target.value }))}
               inputMode="numeric"
-              className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base"
+              className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base text-slate-900"
             />
           </label>
           <label className="block">
@@ -271,7 +271,7 @@ export default function NewShipmentPage() {
               value={travelDate}
               min={todayKey()}
               onChange={(e) => setTravelDate(e.target.value || todayKey())}
-              className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base"
+              className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base text-slate-900"
             />
           </label>
         </div>

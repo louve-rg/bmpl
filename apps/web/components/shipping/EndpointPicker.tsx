@@ -159,7 +159,7 @@ export function EndpointPicker({
             <select
               value={value.hubId}
               onChange={(e) => set('hubId', e.target.value)}
-              className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base"
+              className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base text-slate-900"
             >
               <option value="">Choose a terminal</option>
               {hubs.map((h) => (
