@@ -480,10 +480,8 @@ jobs:
       - name: Migrate the visual-suite database
         run: pnpm --filter @bmpl/database exec prisma migrate deploy
 
-      - name: Seed role fixtures
-        run: |
-          pnpm --filter @bmpl/database exec tsx prisma/seed.ts
-          pnpm --filter @bmpl/database exec tsx prisma/seed-uat-logistics.ts
+      - name: Seed base role fixtures
+        run: pnpm --filter @bmpl/database exec tsx prisma/seed.ts
 
       - name: Build API
         run: pnpm --filter @bmpl/api build
@@ -516,6 +514,15 @@ jobs:
           name: visual-regression-api-log
           path: /tmp/api.log
           retention-days: 7
+
+      # Must run AFTER the API is live: seed-uat-logistics.ts seeds its
+      # fixtures through real HTTP calls to the running API
+      # (packages/database/prisma/seed-uat-logistics.ts, API_BASE default
+      # http://localhost:4000), not direct DB writes -- confirmed the hard
+      # way on 2026-10-16 (run 38943499250) when this ran before "Start API"
+      # and failed on the script's own correct "API is not reachable" guard.
+      - name: Seed UAT logistics fixtures (needs the live API)
+        run: pnpm --filter @bmpl/database exec tsx prisma/seed-uat-logistics.ts
 
       - name: Install Playwright's Chromium (web)
         run: pnpm --filter @bmpl/web exec playwright install --with-deps chromium
