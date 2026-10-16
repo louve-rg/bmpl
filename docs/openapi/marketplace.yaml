@@ -1156,7 +1156,7 @@ paths:
   /vendor/settlements/{id}:
     get: { tags: [Settlement], summary: "Own settlement detail (gross/fees/net + snapshot)", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
   /driver/earnings:
-    get: { tags: [Settlement], summary: "Driver's own earnings + pending/posted totals", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires APPROVED DELIVERY_DRIVER role" }
+    get: { tags: [Settlement], summary: "Driver's own earnings + pending/posted totals", security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires APPROVED DELIVERY_DRIVER role. Each earning row came from exactly one of a marketplace delivery or a shipment courier leg, never both, never neither: orderDeliveryId+vendorOrderId are set for the former, shipmentReference (the shipment's tracking code, not the leg id) for the latter, with the other pair null. Admin settlement endpoints return the same earning shape but do not yet resolve shipmentReference — it reads null there even for a leg-based row." }
   /driver/earnings/{id}:
     get: { tags: [Settlement], summary: "Own earning detail + snapshot", parameters: [ { name: id, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } } }
   /admin/settlements:
