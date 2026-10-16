@@ -112,6 +112,20 @@ body {
     background-color: var(--bmpl-chip-fill, var(--bmpl-surface-muted));
   }
 
+  /* FIXED on-color surfaces -- identical to apps/web's copy. See
+     glass.css's own comment on the --bmpl-oncolor-light and
+     --bmpl-oncolor-dark token families. */
+  .bmpl-surface-onlight {
+    background-color: var(--bmpl-oncolor-light-bg);
+    border-color: var(--bmpl-oncolor-light-border);
+    color: var(--bmpl-oncolor-light-text);
+  }
+  .bmpl-surface-ondark {
+    background-color: var(--bmpl-oncolor-dark-bg);
+    border-color: var(--bmpl-oncolor-dark-border);
+    color: var(--bmpl-oncolor-dark-text);
+  }
+
   /* Nav row / collapsible group heading -- identical to apps/web's copy. */
   .bmpl-nav-item {
     @apply relative flex min-h-[44px] items-center gap-3 rounded-bmpl-md px-3 py-2 text-sm font-medium transition;

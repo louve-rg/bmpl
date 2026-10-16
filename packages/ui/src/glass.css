@@ -65,6 +65,49 @@
      correct no-op on every light-theme page. */
   --bmpl-backdrop-filter: none;
   --bmpl-backdrop-filter-dense: none;
+
+  /* ---- FIXED on-color pairings (req 6, contrast standard, 2026-10-16) ----
+     For a surface that is deliberately and PERMANENTLY light or dark
+     regardless of which theme scope wraps it (a literal white map-control
+     row sitting inside the glass dashboard; a dark promo card on an
+     otherwise light page). Every other token above is theme-adaptive and
+     flips under [data-theme="glass"] below -- these must NEVER be
+     redefined inside that block, deliberately. That is what makes them
+     fixed: an author reaching for .bmpl-surface-onlight/-ondark gets the
+     same box no matter what it's nested in, which is the one case the
+     adaptive --bmpl-surface/--bmpl-text family structurally cannot cover.
+     DO NOT add a [data-theme='glass'] override for any --bmpl-oncolor-*
+     token -- that would silently reintroduce the exact bug this family
+     exists to close.
+
+     Values computed (sRGB relative luminance, WCAG formula), not eyeballed:
+       #0f172a (text)       on #ffffff (bg)       = 17.85:1
+       #0f172a (text)       on #f8fafc (bg-muted) = 17.06:1
+       #475569 (text-muted) on #ffffff            =  7.58:1
+       #475569 (text-muted) on #f8fafc            =  7.24:1
+     (an earlier draft used #64748b for text-muted -- 4.55:1 on #f8fafc,
+     passing AA by 0.05 of headroom, rejected as too fragile a margin for
+     requirement 4's "muted must stay readable, not just technically
+     compliant".) */
+  --bmpl-oncolor-light-bg: #ffffff;
+  --bmpl-oncolor-light-bg-muted: #f8fafc;
+  --bmpl-oncolor-light-text: #0f172a;
+  --bmpl-oncolor-light-text-muted: #475569;
+  --bmpl-oncolor-light-border: #e2e8f0;
+
+  /* Opaque by construction -- NOT the glass theme's translucent
+     --bmpl-surface/--bmpl-border (rgba with alpha). Those composite
+     correctly only against the dark mural they were designed for; the
+     same rgba(10,20,38,0.56) fill over a light page's white composites to
+     a mid-grey, and white text on that measures 4.21:1 -- a straight
+     fail. A fixed dark box is BY DEFINITION meant for a light page, so it
+     needs its own solid values:
+       #f4f8ff (text)       on #0a1526 (bg) = 18.29:1
+       #cbd5e1 (text-muted) on #0a1526      = 12.33:1 */
+  --bmpl-oncolor-dark-bg: #0a1526;
+  --bmpl-oncolor-dark-text: #f4f8ff;
+  --bmpl-oncolor-dark-text-muted: #cbd5e1;
+  --bmpl-oncolor-dark-border: #64748b;
 }
 
 /* =====================================================================
