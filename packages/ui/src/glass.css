@@ -22,6 +22,11 @@
  * directive is present" when that block lived here instead). The two
  * copies are kept textually identical; what they CONSUME (the values
  * below) is the single source.
+ *
+ * FOREGROUND/BACKGROUND CONTRAST is a permanent owner design-system
+ * standard, not a style preference -- see ../../../docs/design/CONTRAST-STANDARD.md
+ * for the full ten requirements and the current, honest implementation gap.
+ * This file is that standard's requirement-6 home (semantic token pairings).
  */
 
 :root {
