@@ -159,7 +159,11 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     // overflow-x-hidden so a wide table inside a page never makes the whole
     // console scroll sideways on a phone.
-    <div className="min-h-screen overflow-x-hidden md:flex">
+    // data-theme="glass" + .bml-mural: the Liquid Glass redesign's scope
+    // boundary (stage 1 -- tokens only; this shell's own chrome is
+    // restyled in stage 2). /login stays outside this component and
+    // keeps the existing light theme untouched.
+    <div data-theme="glass" className="min-h-screen overflow-x-hidden bml-mural md:flex">
       {/* Desktop sidebar. Hidden below md — on a phone the drawer carries it,
           rather than the full nav stacking above every screen's content. */}
       <aside className="hidden bg-belize-navy p-4 md:flex md:h-screen md:w-64 md:shrink-0 md:flex-col md:gap-5 md:p-5">

@@ -19,7 +19,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
     // min-w-0 on the flex child + overflow-x-hidden here: a single wide table or
     // long address inside a page must not make the whole dashboard scroll
     // sideways on a phone.
-    <div className="min-h-screen overflow-x-hidden bg-slate-50 md:flex">
+    // data-theme="glass" + .bml-mural: the Liquid Glass redesign's scope
+    // boundary (stage 1 -- tokens only; Sidebar/header chrome itself is
+    // restyled in stage 2). Public/marketing pages and /login are outside
+    // this wrapper and keep the existing light theme untouched.
+    <div data-theme="glass" className="min-h-screen overflow-x-hidden bml-mural md:flex">
       <Sidebar me={me} />
       <main className="flex min-w-0 flex-1 flex-col">
         <header

@@ -2,48 +2,99 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  /* Mirrors apps/web BMPL tokens so the admin portal is the same brand. */
-  --bmpl-primary: #1e40af;
-  --bmpl-primary-hover: #1e3a8a;
-  --bmpl-secondary: #0f172a;
-  --bmpl-accent: #0ea5e9;
-  --bmpl-bg: #f1f5f9;
-  --bmpl-surface: #ffffff;
-  --bmpl-text: #0f172a;
-  --bmpl-text-muted: #64748b;
-  --bmpl-border: #e2e8f0;
-  --bmpl-success: #059669;
-  --bmpl-warning: #d97706;
-  --bmpl-error: #dc2626;
-  --bmpl-info: #0284c7;
-}
+/* Design tokens, the shared `.bmpl-*` component classes, the Liquid Glass
+   theme (scoped to `[data-theme="glass"]`), and the reduced-motion rule
+   (admin had none of its own before this) all live in @bmpl/ui now,
+   single-sourced with apps/web instead of two copies that had already
+   drifted (this file was missing the `--bmpl-accent-soft`/`--bmpl-focus`
+   tokens and the whole radius/shadow scale that apps/web's copy had). */
+@import '@bmpl/ui/glass.css';
 
 body {
   @apply bg-slate-100 text-slate-800 antialiased;
 }
 
-.container-admin {
-  @apply mx-auto w-full max-w-6xl px-4 sm:px-6;
-}
-
+/* Consumes the tokens from @bmpl/ui/glass.css (imported above) -- kept as
+   its own `@layer components` block, identical in apps/web's
+   globals.css, because Tailwind's `@layer`/`@apply` requires
+   `@tailwind components` to be present in the SAME file (confirmed: this
+   block doesn't compile when it lives inside an `@import`-ed partial
+   instead). The VALUES are single-sourced; this structure is the
+   smallest change that actually works. */
 @layer components {
   .bmpl-card {
-    @apply rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm;
+    @apply rounded-bmpl-xl border shadow-bmpl-sm;
+    background-color: var(--bmpl-surface);
+    border-color: var(--bmpl-border);
+    color: var(--bmpl-text);
+    -webkit-backdrop-filter: var(--bmpl-backdrop-filter-card, var(--bmpl-backdrop-filter));
+    backdrop-filter: var(--bmpl-backdrop-filter-card, var(--bmpl-backdrop-filter));
   }
   .bmpl-panel {
-    @apply rounded-bmpl-lg border border-slate-200 bg-white;
+    @apply rounded-bmpl-lg border;
+    background-color: var(--bmpl-surface);
+    border-color: var(--bmpl-border);
+    color: var(--bmpl-text);
+    -webkit-backdrop-filter: var(--bmpl-backdrop-filter-card, var(--bmpl-backdrop-filter));
+    backdrop-filter: var(--bmpl-backdrop-filter-card, var(--bmpl-backdrop-filter));
   }
   .bmpl-input {
-    @apply w-full rounded-bmpl-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-belize-navy outline-none transition placeholder:text-slate-400 focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70;
+    @apply w-full rounded-bmpl-md border px-3 py-2.5 text-sm shadow-bmpl-sm outline-none transition disabled:cursor-not-allowed disabled:opacity-70;
+    background-color: var(--bmpl-surface);
+    border-color: var(--bmpl-border);
+    color: var(--bmpl-text);
+  }
+  .bmpl-input::placeholder {
+    color: var(--bmpl-text-muted);
+  }
+  .bmpl-input:focus {
+    border-color: var(--bmpl-focus);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--bmpl-focus) 30%, transparent);
   }
   .bmpl-label {
-    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide;
+    color: var(--bmpl-text-muted);
   }
   .bmpl-eyebrow {
-    @apply text-xs font-semibold uppercase tracking-[0.22em] text-belize-accent;
+    @apply text-xs font-semibold uppercase tracking-[0.22em];
+    color: var(--bmpl-accent, var(--bmpl-focus));
   }
   .bmpl-page-title {
-    @apply text-2xl font-bold tracking-tight text-belize-navy sm:text-3xl;
+    @apply text-2xl font-bold tracking-tight sm:text-3xl;
+    color: var(--bmpl-text);
   }
+
+  /* Glass-only primitives -- inert (no background/blur) outside
+     `[data-theme="glass"]`, since the tokens they read resolve to `none`
+     there. */
+  .glass-chrome {
+    background-color: var(--bmpl-surface-muted);
+    -webkit-backdrop-filter: var(--bmpl-backdrop-filter);
+    backdrop-filter: var(--bmpl-backdrop-filter);
+  }
+  [data-theme='glass'] .glass-chrome {
+    border: 1px solid var(--bmpl-border);
+    box-shadow: var(--bmpl-shadow-md);
+  }
+  /* Dense tabular surfaces (a list/table carrying raw or
+     SATURATED-colour text -- status words, amounts) need more than the
+     ambient chrome fill above; this is that stronger level, read off a
+     SURFACE, never a per-row scrim (see glass.css's own header comment
+     for why that distinction matters). */
+  .bmpl-dense {
+    background-color: var(--bmpl-surface-dense);
+    -webkit-backdrop-filter: var(--bmpl-backdrop-filter-dense, var(--bmpl-backdrop-filter));
+    backdrop-filter: var(--bmpl-backdrop-filter-dense, var(--bmpl-backdrop-filter));
+  }
+  /* A tag/badge OBJECT (a role pill, a count summary) -- legitimately
+     owns its own fill by definition, the same category as a solid
+     badge, never a scrim wrapped around plain text. */
+  .bmpl-chip {
+    @apply rounded-full;
+    background-color: var(--bmpl-chip-fill, var(--bmpl-surface-muted));
+  }
+}
+
+.container-admin {
+  @apply mx-auto w-full max-w-6xl px-4 sm:px-6;
 }
