@@ -468,3 +468,20 @@ export function formatSweepReport(label: string, result: SweepResult): string {
   }
   return lines.join('\n');
 }
+
+/**
+ * One-shot falsifiable check for the `.bmpl-eyebrow` / `--bmpl-accent`
+ * defect (god, 2026-10-21): the sweep's ratio alone is consistent with
+ * "#0ea5e9 text on a near-white background" but does not prove it -- an
+ * actual rgb(14, 165, 233) reading does, and if the foreground comes back
+ * as something else the whole account of this defect is wrong regardless
+ * of the ratio. Reads the FIRST `.bmpl-eyebrow` match only (not every one)
+ * -- this answers one specific prediction, it is not a new detection
+ * mechanism and not a general-purpose instrument like `sweepContrast`.
+ */
+export async function measureFirstEyebrowForeground(page: Page): Promise<string | null> {
+  return page.evaluate(() => {
+    const el = document.querySelector('.bmpl-eyebrow');
+    return el ? getComputedStyle(el).color : null;
+  });
+}
