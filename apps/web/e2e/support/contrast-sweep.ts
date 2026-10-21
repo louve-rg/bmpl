@@ -31,6 +31,27 @@ import { openPixelSampler, contrastRatioOf, type RGB } from './contrast';
  * is new and unproven, unlike the text method, which just reads CSS
  * `color`. Kept apart so an unproven technique cannot contaminate the
  * numbers everyone trusts for text.
+ *
+ * COMPOSITE GRAPHICS GET THEIR OWN NAMED BUCKET, NEVER A SCORED READING —
+ * found live (2026-10-21): admin's daily-sales chart wraps a bar row AND a
+ * separate orders-strip row in ONE `role="img"` element
+ * (apps/admin/app/dashboard/analytics/page.tsx:293), so the icon branch
+ * sampled the whole chart region, not a bar. With little data the fill
+ * occupies a small fraction of that box, the grid lands mostly on
+ * background, both color clusters resolve to the same value, and the
+ * two-color icon-ink method above reports a confident, wrong ratio=1 --
+ * "fg equals bg" read as "this icon has no contrast" instead of "this
+ * region isn't a single fg/bg pair at all." `isCompositeGraphic` below is
+ * a STRUCTURAL test, not a size cutoff deliberately: the distinguishing
+ * property of a composite is that it contains OTHER rendered content with
+ * its own fill (bars, strips), where a real icon is a leaf. A real
+ * <svg>'s path/circle children paint via the `fill`/`stroke` SVG
+ * attributes, not CSS `background-color` or `background-image`, so this
+ * test is sourced in DOM structure rather than a chosen pixel constant —
+ * it would classify the same $22 chart correctly even if it rendered
+ * small. Composite elements are discovered, counted, and reported, but
+ * never sampled or scored PASS/FAIL/AMBIGUOUS — "this graphic cannot be
+ * measured as one color pair" is itself the honest finding.
  */
 
 export const WCAG_NORMAL_TEXT_MIN_RATIO = 4.5;
@@ -84,6 +105,14 @@ export interface SweepIconElement {
   box: { x: number; y: number; width: number; height: number };
 }
 
+export interface SweepCompositeGraphic {
+  kind: 'composite';
+  tag: string;
+  accessibleRole: string | null;
+  accessibleName: string | null;
+  box: { x: number; y: number; width: number; height: number };
+}
+
 export interface SweepReading<E> {
   element: E;
   ratio: number;
@@ -101,7 +130,7 @@ export interface SweepBucket<E> {
 
 export interface SweepResult {
   text: SweepBucket<SweepTextElement> & { excludedDisabledCount: number; measuredCount: number };
-  icon: SweepBucket<SweepIconElement> & { measuredCount: number };
+  icon: SweepBucket<SweepIconElement> & { measuredCount: number; compositeGraphics: SweepCompositeGraphic[] };
   borderOnlyNotMeasured: true;
 }
 
@@ -118,13 +147,28 @@ export interface SweepResult {
  * shrinking the count.
  */
 type DiscoveredText = SweepTextElement & { disabled: boolean };
+type DiscoveredIcon = SweepIconElement & { composite: boolean };
 
-async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; icon: SweepIconElement[] }> {
+async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; icon: DiscoveredIcon[] }> {
   return page.evaluate(() => {
     const NON_TEXT_TAGS = new Set(['SCRIPT', 'STYLE', 'SVG', 'PATH', 'CIRCLE', 'RECT', 'NOSCRIPT']);
 
     function isExempt(el: Element): boolean {
       return !!el.closest('[aria-hidden="true"], [data-contrast-exempt="decorative"]');
+    }
+
+    // Structural composite-graphic test -- see this file's header comment
+    // for why this is a DOM-structure check, not a size cutoff. A real
+    // icon's descendants (svg path/circle/etc) paint via `fill`/`stroke`,
+    // never CSS background -- so this is false for every genuine icon and
+    // true for a wrapper that actually contains other filled content.
+    function hasOwnFillDescendant(el: Element): boolean {
+      for (const child of el.querySelectorAll('*')) {
+        const cs = getComputedStyle(child);
+        if (cs.backgroundImage !== 'none') return true;
+        if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') return true;
+      }
+      return false;
     }
 
     function isDisabled(el: Element): boolean {
@@ -172,6 +216,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       accessibleRole: string | null;
       accessibleName: string | null;
       box: { x: number; y: number; width: number; height: number };
+      composite: boolean;
     }> = [];
 
     for (const el of document.body.querySelectorAll('*')) {
@@ -192,6 +237,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
           accessibleRole: accessibleRoleOf(el),
           accessibleName: accessibleNameOf(el, null),
           box: { x: box.x, y: box.y, width: box.width, height: box.height },
+          composite: hasOwnFillDescendant(el),
         });
         continue;
       }
@@ -275,8 +321,11 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       else textBucket.pass.push(reading);
     }
 
+    const compositeIcons = iconCandidates.filter((ic) => ic.composite);
+    const measurableIcons = iconCandidates.filter((ic) => !ic.composite);
+
     const iconBucket: SweepBucket<SweepIconElement> = { pass: [], fail: [], ambiguous: [] };
-    for (const ic of iconCandidates) {
+    for (const ic of measurableIcons) {
       const clusters = await sampler.sampleClustersOrdered(ic.box);
       if (clusters.length === 0) continue;
       const bg = clusters[0]!.rgb;
@@ -313,18 +362,26 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
           `= ${textAccountedFor}, leaving ${textCandidates.length - textAccountedFor} silently unaccounted for.`,
       );
     }
-    const iconAccountedFor = iconBucket.pass.length + iconBucket.fail.length + iconBucket.ambiguous.length;
+    const iconAccountedFor = iconBucket.pass.length + iconBucket.fail.length + iconBucket.ambiguous.length + compositeIcons.length;
     if (iconAccountedFor !== iconCandidates.length) {
       throw new Error(
         `sweepContrast: icon accounting mismatch -- discovered ${iconCandidates.length} elements but ` +
-          `pass(${iconBucket.pass.length})+fail(${iconBucket.fail.length})+ambiguous(${iconBucket.ambiguous.length}) ` +
+          `pass(${iconBucket.pass.length})+fail(${iconBucket.fail.length})+ambiguous(${iconBucket.ambiguous.length})+compositeNotMeasured(${compositeIcons.length}) ` +
           `= ${iconAccountedFor}, leaving ${iconCandidates.length - iconAccountedFor} silently unaccounted for.`,
       );
     }
 
+    const compositeGraphics: SweepCompositeGraphic[] = compositeIcons.map((ic) => ({
+      kind: 'composite',
+      tag: ic.tag,
+      accessibleRole: ic.accessibleRole,
+      accessibleName: ic.accessibleName,
+      box: ic.box,
+    }));
+
     return {
       text: { ...textBucket, excludedDisabledCount: disabled.length, measuredCount: measurableText.length },
-      icon: { ...iconBucket, measuredCount: iconCandidates.length },
+      icon: { ...iconBucket, measuredCount: measurableIcons.length, compositeGraphics },
       borderOnlyNotMeasured: true,
     };
   } finally {
@@ -350,8 +407,14 @@ export function formatSweepReport(label: string, result: SweepResult): string {
   const lines = [
     `[contrast] ${label}`,
     `  text: measured=${result.text.measuredCount} pass=${result.text.pass.length} fail=${result.text.fail.length} ambiguous=${result.text.ambiguous.length} excludedDisabled=${result.text.excludedDisabledCount}`,
-    `  icon (EXPERIMENTAL METHOD): measured=${result.icon.measuredCount} pass=${result.icon.pass.length} fail=${result.icon.fail.length} ambiguous=${result.icon.ambiguous.length}`,
+    `  icon (EXPERIMENTAL METHOD): measured=${result.icon.measuredCount} pass=${result.icon.pass.length} fail=${result.icon.fail.length} ambiguous=${result.icon.ambiguous.length} compositeNotMeasured=${result.icon.compositeGraphics.length}`,
     `  border-only essential graphics: NOT MEASURED`,
   ];
+  if (result.icon.compositeGraphics.length > 0) {
+    lines.push(`  composite graphics (contains its own filled content, not a single fg/bg pair -- NOT MEASURED, not silently dropped):`);
+    for (const g of result.icon.compositeGraphics) {
+      lines.push(`    - role=${g.accessibleRole ?? '(none)'} name="${g.accessibleName ?? '(none)'}"`);
+    }
+  }
   return lines.join('\n');
 }
