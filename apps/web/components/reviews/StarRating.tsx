@@ -29,8 +29,13 @@ function Star({ fill, className }: { fill: number; className: string }) {
           <rect x="0" y="0" width={`${pct}%`} height="100%" />
         </clipPath>
       </defs>
-      <path d={path} className="fill-slate-200" />
-      <path d={path} className="fill-amber-400" clipPath={`url(#${clipId})`} />
+      {/* slate-500/amber-600, not slate-200/amber-400: an SVG fill is invisible to a
+          text-node contrast sweep, and the lighter shades measured 1.23:1 / 1.67:1
+          against a white card -- failing the 3:1 essential-graphic threshold on every
+          light-theme usage. These two pass on both light cards (4.76:1 / 3.19:1) and
+          dark glass cards (3.84:1 / 5.74:1) without a theme-conditional swap. */}
+      <path d={path} className="fill-slate-500" />
+      <path d={path} className="fill-amber-600" clipPath={`url(#${clipId})`} />
     </svg>
   );
 }
