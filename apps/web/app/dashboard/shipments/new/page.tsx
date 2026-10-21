@@ -186,7 +186,9 @@ export default function NewShipmentPage() {
   const canBook = priced != null && !priced.pricingIncomplete && !booking && affordable;
 
   return (
-    <div className="mx-auto max-w-2xl pb-28">
+    // No manual bottom padding here any more -- StickyActionBar now reserves
+    // its own space (MDF-376); a hand-guessed pb-28 would just double it up.
+    <div className="mx-auto max-w-2xl">
       <PageHeader title="Ship a package" description="Send a parcel anywhere in Belize — by road, air or boat." />
 
       {/* 1. What kind of service. Chosen first because it decides which fields
