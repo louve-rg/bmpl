@@ -119,7 +119,7 @@ export function NotificationBell() {
           <path d="M12 3a6 6 0 0 0-6 6v3l-2 3h16l-2-3V9a6 6 0 0 0-6-6ZM9 19a3 3 0 0 0 6 0" />
         </svg>
         {count > 0 && (
-          <span className="absolute right-0.5 top-0.5 inline-flex min-w-[1.15rem] items-center justify-center rounded-full bg-belize-accent px-1 text-[0.65rem] font-bold leading-4 text-white">
+          <span className="absolute right-0.5 top-0.5 inline-flex min-w-[1.15rem] items-center justify-center rounded-full bg-belize-accent px-1 text-[0.65rem] font-bold leading-4 text-belize-navy">
             {count > 99 ? '99+' : count}
           </span>
         )}

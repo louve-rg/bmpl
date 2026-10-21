@@ -45,7 +45,7 @@ export function CartButton({ className = '' }: { className?: string }) {
         <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
       </svg>
       {count ? (
-        <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-belize-accent px-1 text-[11px] font-bold leading-none text-white">
+        <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-belize-accent px-1 text-[11px] font-bold leading-none text-belize-navy">
           {count > 99 ? '99+' : count}
         </span>
       ) : null}
