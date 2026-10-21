@@ -195,6 +195,74 @@ job), **this is the authoritative number for the ten instrumented routes,
 not a refresh of the full-app 394.** Whoever quotes a before/after figure
 in the completion report should say which of the two they mean.
 
+### Reconciled against Oscar's 355 (2026-10-21, same thread)
+
+The owner independently accepted Oscar's dedup of the original raw sweep:
+422 raw rows -> **355 unique**, keyed on `(route, matchedClass, tag, text)`,
+filtered to ratio `[2.0, 4.5)`. Reproduced exactly from Oscar's own
+`widened-*.json` files (`hive/agents/bmpl-qa-mtmcz0m1/MDF-376-prod-verify/`,
+23 files, 1,894 raw rows before any filter) — 422 in-band, 355 unique under
+all three boundary interpretations tried (`[2,4.5)`, `[2,4.5]`, `(2,4.5)`),
+so the 2.0/4.5 boundary is not the source of any gap.
+
+**My 27 (live, #469 harness) and his 355 (static CSS-class scan of an older
+snapshot) do not disagree about the underlying defects — they disagree in
+scope and in method, and both are explainable:**
+
+1. **Scope: 285 of his 355 (80%) are on 53 routes my ten contrast specs
+   never visit at all.** Not comparable without wider spec coverage —
+   that is new work (req 9), not a discrepancy in either count.
+2. **Dedup granularity goes the other way than you'd expect.** On the 6
+   routes we both cover, his text-exact key produces 70 "unique" rows that
+   collapse to only **14 distinct (route, CSS-class, tag) defect classes**
+   once you group by class instead of by exact text — most of the 70 are
+   the same class rendering different message bodies (notification feed
+   items, hub names). My 27 is already element-level, closer to his
+   14-class figure than to his 70-row figure for the same ground.
+3. **One of his 14 classes is stale.** `/dashboard/logistics/hubs`'s three
+   "Courier rate BZ$X.XX" rows (ratio 2.43, `admin_ops_limited`/
+   `hubs_ops_limited` only) are the five courier-fee nodes #487 fixed —
+   his raw sweep (captured 2026-10-20 23:23, before #487 merged) still
+   contains them; my live run today does not. Confirmed fixed, not a
+   live violation either count should carry.
+4. **Two of his 14 classes are role/app scope gaps on my side, not
+   methodology noise.** `/dashboard/notifications`'s `A.text-belize-blue`
+   "Preferences" link and `/dashboard/settlements`'s `P.text-slate-400`
+   "Default X.00%" rows exist only on a *different role's page* at the
+   same URL path — `web_customer`'s notification preferences and the
+   admin settlement-config view — neither of which any of the four
+   existing MDF-376 regression specs log into. Named, not silently
+   dropped: worth a new spec if the owner wants that page covered, not
+   something to invent coverage for here.
+5. **The remaining 11 of his 14 classes converge with mine within
+   measurement-method tolerance** (his static CSS-declared-color
+   calculation vs my live composited-pixel sample): 3.87 (his) vs
+   3.3-3.9 (mine) on the settlements/store/hubs prose classes, 2.43 vs
+   2.43 on the day-picker and hub courier-rate classes, 2.36 vs 2.36 on
+   the relative-timestamp class, ~2.1 vs 1.34-1.62 on "Mark all read"
+   (the largest single delta — plausibly the glass/backdrop-blur
+   difference #469's live sampler exists to catch and a static
+   class-color calculation cannot).
+6. **One of my 27 has no counterpart in his 355 at all:**
+   `/dashboard/store`'s "Approval:" label (ratio 2.04-2.24). Not stale,
+   not a scope gap I can name — flagged honestly as unreconciled rather
+   than assumed either way. Possibly state-gated (a pending-approval
+   vendor state his sweep's fixture wasn't in); root cause not
+   investigated, same discipline as the rest of this list.
+
+**Conclusion: no rounding either way.** Where the two methods measure the
+same ground, they agree. The headline gap (493/85/27 vs 355) is explained
+by scope (1, mostly) and dedup granularity (2), not by either count being
+wrong. `contrast-known-violations.json` stays `[]` in both apps; nothing
+here is an allowlist entry or a baseline edit.
+
+**Reporting cadence as Oscar's batches land:** this document's own count
+(27 real elements / 493 readings, ten routes) is the one this harness can
+re-derive after each batch with the command above. The full 355 is scoped
+to ~89 routes this harness does not sweep — it moves only when Oscar
+re-sweeps and re-dedupes his own data, not when this harness re-runs. Each
+per-batch report should say which of the two it's reporting against.
+
 | Route | Element | Ratio range | Viewports failing (of 9) |
 | --- | --- | --- | --- |
 | /dashboard/store | "Approval:" | 2.04-2.24 | 8 |
