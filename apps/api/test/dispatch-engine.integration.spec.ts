@@ -10,6 +10,16 @@
  * The engine is driven directly rather than through the 20-second sweeper: a test
  * that sleeps for real timeouts is slow and flaky, and the sweeper's only job is
  * to call these same methods on a timer.
+ *
+ * This file is also the API's Railway deploy-orchestration evidence: #475
+ * (448f646) and #488 (b1d5c0d) each touched ONLY this file, under the identical
+ * apps/api/test/** path, and got different outcomes — 448f646 produced no
+ * Railway deployment object at all, while b1d5c0d's (GitHub deployment
+ * 7219995090) went in_progress and then failed roughly 2h20m later. Same path,
+ * same single file, inconsistent trigger — which rules out a watch-pattern
+ * mismatch (a static pattern cannot match a path once and miss it the next
+ * time on the same commit shape) and points at Railway-side build/orchestration
+ * rather than anything in this repo. See docs/DEPLOYMENT.md §2a.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
