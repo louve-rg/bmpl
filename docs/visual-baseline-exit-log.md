@@ -139,6 +139,87 @@ slice is a byproduct of four narrowly-scoped regression specs, not a
 sweep of the deferred tier; req 9 owns actually finding and clearing the
 rest.
 
+### Current authoritative count, post-merge (2026-10-21, run `39566595024`)
+
+Owner reopened the sweep (god → Jim, MDF-376, same thread) for a defensible
+before/after number. This is that number, measured today against `main` at
+`499af25` itself — the first push-to-main run after #469 merged, not a PR
+run and not last night's pre-merge number quoted from memory.
+
+**Re-run command** (reuses #469's harness exactly; no new instrument):
+
+```
+pnpm --filter @bmpl/web test:contrast
+pnpm --filter @bmpl/admin test:contrast
+```
+
+In CI this is the existing `Contrast check -- requirement 7 (web)`/`(admin)`
+steps inside the "Visual regression baseline (Priority 6)" job — any push to
+`main` or PR into it re-runs both automatically. No local infra needed to
+re-derive the count: pull the job's log and count.
+
+**One-line result format** — every failing reading throws one
+`assertRatchet` line containing the literal string `If this is real, fix
+it`, one per (route, role, viewport) failure, because
+`contrast-known-violations.json` is `[]` in both apps:
+
+```
+gh run view <run-id> --log --job <contrast-job-id> | grep -c "If this is real, fix it"
+```
+
+**Today's result: 493** failing readings (485 text + 8 icon) across the 90
+route×role×viewport combinations the ten existing `e2e/contrast/*.spec.ts`
+files cover (6 web specs + 4 admin specs × 9 `CONTRAST_VIEWPORTS` each).
+Deduplicated by (route, accessible role, accessible name) that is **85
+unique failing elements**, which split cleanly into two very different
+things:
+
+- **58 of the 85 are the Cluster F sampler artifact** already documented in
+  both apps' `contrast.ts` (`clusterAt` samples the topmost painted pixel,
+  not the element's own background) — every main-nav link (ratio ~1.0-1.3)
+  and every `/products` category link (ratio ~2.4/3.75) on `/products` and
+  `/vendors`. Known, not real, deliberately left un-allowlisted; counted
+  here for honesty, not mistaken for debt.
+- **27 are real** — the same four routes' debt already named above, now
+  seen across all 9 viewports instead of only 320px, plus one not
+  previously listed (`/dashboard/store`'s "Approval:" label, ratio
+  2.04-2.24, visible at 8 of 9 widths) and the relative timestamps split
+  into "6m ago"/"7m ago" (both render, depending on exact run time).
+
+**This 27/493 is not the same measurement as last night's 394.** It is
+real, current, and re-derivable — but it is scoped to only the ten routes
+the existing contrast specs already visit, not a sweep of the whole app.
+Last night's 394 claimed a wider scope ("1,792 nodes") that this harness,
+run as-is, does not reach. Until something sweeps every route (req 9's
+job), **this is the authoritative number for the ten instrumented routes,
+not a refresh of the full-app 394.** Whoever quotes a before/after figure
+in the completion report should say which of the two they mean.
+
+| Route | Element | Ratio range | Viewports failing (of 9) |
+| --- | --- | --- | --- |
+| /dashboard/store | "Approval:" | 2.04-2.24 | 8 |
+| /dashboard/store | "Drivers navigate to the pin you drop here..." | 3.86 | 9 |
+| /dashboard/store | "Sunday"/"Monday"/"Tuesday"/"Wednesday"/"Thursday"/"Friday"/"Saturday" | 2.43 | 9 each |
+| /dashboard/settlements | "Pending settlement" | 3.46-3.63 | 5 |
+| /dashboard/settlements | "Calculated, not yet posted to your wallet." | 3.53-3.73 | 8 |
+| /dashboard/settlements | "Posted to wallet" | 3.3-3.77 | 6 |
+| /dashboard/settlements | "Expand a row to see the full calculation for that order." | 3.76-3.8 | 9 |
+| /dashboard/settlements | "Net earnings credited to your wallet." | 3.41-3.8 | 9 |
+| /dashboard/logistics/hubs (OPS_LIMITED) | "Belize City, BELIZE · warehouse · LAND" | 3.41-3.67 | 9 |
+| /dashboard/logistics/hubs (OPS_LIMITED) | "Belmopan, CAYO · warehouse · LAND" | 3.73-3.79 | 9 |
+| /dashboard/notifications (SUPER_ADMIN) | "Mark all read" (button) | 1.34-1.62 | 9 |
+| /dashboard/notifications (SUPER_ADMIN) | "6m ago" / "7m ago" (timestamp) | 2.36 | 5 each |
+| /dashboard/notifications (SUPER_ADMIN) | five application-review toast lines + "An admin permission set was changed..." | 4.37 | 9 each |
+| /dashboard/store/preview (VENDOR) | "Rated 0.0 out of 5 from 0 reviews" (icon) | 1.01-1.3 | 8 |
+| /products | "Category" (filter label) | 2.56 | 5 |
+
+Not root-caused here, same as last night's slice — counted and located
+only. Regression cover: the four MDF-376 specs (`store`, `settlements`,
+`notifications`, `logistics-hubs`) re-run on every push/PR automatically as
+part of this same job; a fix landing for any named element above will show
+up as that element dropping out of the next run's "If this is real" count
+without anyone needing to re-derive the baseline by hand.
+
 ## Review-before-update workflow (the same document records this because the
 same failure shape applies — the easy path must be the safe one)
 
