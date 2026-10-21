@@ -51,6 +51,94 @@ over-specified-loser-assertion shape was already fixed once in a sibling
 file (`717aa58`, 2026-10-12, `apps/api/test/dispatch.integration.spec.ts`,
 measured 4-of-9 runs landing on the "wrong" status code before its fix).
 
+## Requirement 7 contrast check — a second, narrower exit criterion
+
+The `Contrast check -- requirement 7 (web)`/`(admin)` steps and the
+`Enforce contrast check result` step that blocks on them (same CI job,
+`.github/workflows/ci.yml`) got their own `continue-on-error: true` on
+2026-10-21, separately from the job-level rule above and for a different
+reason: this is a different instrument (detects WRONGNESS against a real
+WCAG ratio, not CHANGE from a prior screenshot) and it was built to block
+from its first run, not to earn trust in a green over time like the pixel
+baselines.
+
+**What happened:** a widened sweep the same night (2026-10-20/21) scanned
+1,792 nodes and found 544 failing under 4.5:1, split into 147 near-
+invisible (<2.0:1) and 394 sub-AA (2.0-4.5:1). The 147 tier was fixed that
+night; **the 394 tier was deliberately deferred as its own accessibility
+pass (req 9), not forgotten and not out of scope — just not tonight's
+work.** The first live run of the four MDF-376 regression specs (below)
+against `contrast-known-violations.json` still empty surfaced exactly that
+deferred tier, on real production routes, for the first time. Every one
+of the 30 nodes found is in the 2.3-4.5:1 band — the deferred tier's own
+range, not the <2.0:1 band already fixed, and not the sampler-artifact
+shape documented separately in `apps/web/e2e/support/contrast.ts`'s
+`clusterAt` comment (the two Cluster F elements, ratios 1.17 and 3.75,
+stay un-allowlisted too — nothing here suppresses those either).
+
+**Nothing is allowlisted, suppressed, or threshold-adjusted to reach this.**
+`contrast-known-violations.json` stays empty. Every real violation —
+the 394-tier debt below, the two Cluster F artifacts, anything else this
+check finds — is still measured and still reported, as a failure, on every
+single run. The only thing `continue-on-error` defers is whether a
+first-ever check blocks the merge queue on debt it just discovered the
+same night it was deliberately deferred.
+
+### The rule
+
+This step's `continue-on-error` comes off when:
+
+1. **The 394-node sub-AA tier (2.0-4.5:1) reaches zero** against a live,
+   full sweep — each node fixed, or individually confirmed not a violation
+   and documented as such here. Allowlisting a node to make the count read
+   zero does not satisfy this; the count is only honest if every
+   undischarged node still shows up as a reported failure until it is
+   actually resolved.
+2. Whoever removes it cites the exact sweep run that reaches zero, the
+   same way row 4 of the job-level rule above requires exact run IDs rather
+   than "it's been a while."
+
+### First documented slice of the 394 (2026-10-21)
+
+Found by the first live run of `apps/web/e2e/contrast/store.spec.ts`,
+`apps/web/e2e/contrast/settlements.spec.ts`,
+`apps/admin/e2e/contrast/notifications.spec.ts` and
+`apps/admin/e2e/contrast/logistics-hubs.spec.ts` — run `39562144657`, head
+`2165da2`. Each spec's own originally-targeted belize-navy defect (store's
+"Store: CLOSED", settlements' figures, notifications' "Unread only",
+logistics-hubs' five courier-fee nodes) is confirmed fixed by #482/#483/
+#487 and is **not** in this list — these 30 are the other elements the
+same four routes surfaced once the check had something real to run
+against. All measured at 320px only; the other 8 viewports in
+`CONTRAST_VIEWPORTS` were not individually inspected tonight, per the
+owner's reactive-coverage-only directive — root cause was not investigated
+on any of these, only the ratio and the element.
+
+| Route | Element | Ratio | Count |
+| --- | --- | --- | --- |
+| /dashboard/store | "Drivers navigate to the pin you drop here. Without one they only get the written address, and the delivery distance we e…" | 3.86 | 1 |
+| /dashboard/store | "Sunday" / "Monday" / "Tuesday" / "Wednesday" / "Thursday" / "Friday" / "Saturday" (business-hours day picker) | 2.43 | 7 |
+| /dashboard/settlements | "Pending settlement" | 3.46 | 1 |
+| /dashboard/settlements | "Calculated, not yet posted to your wallet." | 3.59 | 1 |
+| /dashboard/settlements | "Posted to wallet" | 3.77 | 1 |
+| /dashboard/settlements | "Expand a row to see the full calculation for that order." | 3.77 | 1 |
+| /dashboard/settlements | "Net earnings credited to your wallet." | 3.8 | 1 |
+| /dashboard/logistics/hubs (OPS_LIMITED) | "Belize City, BELIZE · warehouse · LAND" | 3.6 | 1 |
+| /dashboard/logistics/hubs (OPS_LIMITED) | "Belmopan, CAYO · warehouse · LAND" | 3.79 | 1 |
+| /dashboard/notifications (SUPER_ADMIN) | "Mark all read" (button) | 1.5 | 1 |
+| /dashboard/notifications (SUPER_ADMIN) | "7m ago" (timestamp, repeated per row) | 2.36 | 7 |
+| /dashboard/notifications (SUPER_ADMIN) | "A passenger provider application was submitted and needs review." | 4.37 | 1 |
+| /dashboard/notifications (SUPER_ADMIN) | "A passenger driver application was submitted and needs review." | 4.37 | 1 |
+| /dashboard/notifications (SUPER_ADMIN) | "\"UAT Walkthrough Store\" submitted their storefront for review." | 4.37 | 1 |
+| /dashboard/notifications (SUPER_ADMIN) | "A vendor application was submitted and needs review." | 4.37 | 1 |
+| /dashboard/notifications (SUPER_ADMIN) | "A delivery driver application was submitted and needs review." | 4.37 | 1 |
+| /dashboard/notifications (SUPER_ADMIN) | "An admin permission set was changed. Check the audit log for the before/after and who made the change." | 4.37 | 2 |
+
+30 nodes total (8 + 5 + 2 + 15). 364 of the 394 remain unlocated — this
+slice is a byproduct of four narrowly-scoped regression specs, not a
+sweep of the deferred tier; req 9 owns actually finding and clearing the
+rest.
+
 ## Review-before-update workflow (the same document records this because the
 same failure shape applies — the easy path must be the safe one)
 
