@@ -87,6 +87,18 @@ export function StickyActionBar({
     };
 
     sync();
+
+    // MDF-376: ResizeObserver is absent in some environments (jsdom in this
+    // app's own unit tests; conceivably a locked-down browser) -- this bar
+    // sits on /dashboard/shipments/new, a route that takes payments, so it
+    // must degrade to the one-time static measurement above rather than
+    // throw at mount.
+    if (typeof ResizeObserver === 'undefined') {
+      return () => {
+        root.style.scrollPaddingBottom = previousScrollPadding;
+      };
+    }
+
     const ro = new ResizeObserver(sync);
     ro.observe(el);
     return () => {
