@@ -103,14 +103,26 @@
      rendering it does not have.
 
      Values computed (sRGB relative luminance, WCAG formula), not eyeballed:
-       #475569 (light)                    on #ffffff            = 7.58:1
-       #475569 (light)                    on #f8fafc            = 7.24:1
-       rgba(244,248,255,0.82) composited  on rgba(10,20,38,0.56) = 11.76:1
-       rgba(244,248,255,0.82) composited  on rgb(10,21,38)       = 11.70:1
+       #475569 (light) on #ffffff                                  = 7.58:1
+       #475569 (light) on #f8fafc                                  = 7.24:1
+       rgba(244,248,255,0.82) on rgb(10,21,38) (the opaque mural,
+         painted flat -- no layer beneath it to name)               = 11.70:1
+       rgba(244,248,255,0.82) on rgba(10,20,38,0.56) -- THIS ONE IS
+         NOT A COMPLETE INPUT ON ITS OWN: a translucent background is
+         not a color until its own underlayer is named, since what
+         the text actually composites against is the CARD-over-
+         whatever's-beneath-it, not the card's declared rgba alone.
+         Composited over the #0a1526 mural (the only underlayer this
+         card is ever actually painted on, in production)            = 11.74:1
+         (composited over #0f172a instead, for comparison only --
+         this card is never painted on that                         = 11.64:1;
+         over black, same caveat                                    = 12.38:1)
      (light values match --bmpl-oncolor-light-text-muted exactly, since
      it's the same color; glass values match --bmpl-text-muted's own,
      since it's the same rgba -- both as expected, not re-derived from a
-     different color.) */
+     different color. The 11.74 figure is reproducible from exactly the
+     three numbers stated: 0.82 over 0.56 over the two named opaque
+     colors, sRGB-composited channel by channel before taking luminance.) */
   --bmpl-text-muted-strong: #475569; /* slate-600 */
   --bmpl-border: #e2e8f0; /* slate-200 hairline */
 
