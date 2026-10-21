@@ -306,7 +306,7 @@ export default function HubsPage() {
                     control is withheld. */}
                 {!canManage && (
                   <p className="shrink-0 text-sm text-slate-600">
-                    Courier rate <span className="font-semibold text-belize-navy">BZ${(h.courierFeeMinor / 100).toFixed(2)}</span>
+                    Courier rate <span className="font-semibold text-[color:var(--bmpl-text)]">BZ${(h.courierFeeMinor / 100).toFixed(2)}</span>
                   </p>
                 )}
                 {/* Visible to a reader too — GET .../hours needs only

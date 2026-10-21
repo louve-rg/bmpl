@@ -227,7 +227,7 @@ export default function NotificationsPage() {
             ))}
           </select>
 
-          <label className="flex cursor-pointer select-none items-center gap-2 text-sm font-medium text-belize-navy">
+          <label className="flex cursor-pointer select-none items-center gap-2 text-sm font-medium text-[color:var(--bmpl-text)]">
             <input
               type="checkbox"
               checked={unreadOnly}
