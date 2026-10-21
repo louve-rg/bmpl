@@ -1,0 +1,264 @@
+import type { Page } from '@playwright/test';
+import { openPixelSampler, contrastRatioOf, type RGB } from './contrast';
+
+/**
+ * Requirement 7 (`hive/agents/god/CONTRAST-STANDARD.md`) — page-wide
+ * contrast sweep for apps/admin. Identical to apps/web/e2e/support/
+ * contrast-sweep.ts; see that file's header for the full reasoning (why the
+ * existing pixel sampler over a DOM walker, the three PASS/FAIL/AMBIGUOUS
+ * buckets, why border-only essential graphics are named as NOT MEASURED
+ * rather than silently dropped, why icon findings are experimental and
+ * reported separately from text). Duplicated rather than shared for the
+ * same reason as every other file in this directory — no shared package
+ * exists between the two apps' e2e trees today.
+ */
+
+export const WCAG_NORMAL_TEXT_MIN_RATIO = 4.5;
+export const WCAG_LARGE_TEXT_MIN_RATIO = 3;
+export const WCAG_ICON_MIN_RATIO = 3;
+
+/**
+ * Ambiguity cutoff for `dominantShare`. Calibrated on apps/web's own
+ * dashboard (see that app's contrast-sweep.ts for the three real readings
+ * this number is grounded in — 0.78 solid vs 0.17/0.22 mural/gradient).
+ * Reused here rather than recalibrated separately: both apps share the
+ * exact same `packages/ui/src/glass.css` token/mural definitions and the
+ * same sampler grid shape, so the same background-paint categories (solid
+ * raised fill vs mural/gradient vs glass edge) apply to admin's own glass
+ * scope (`AdminShell.tsx`) without needing an independent measurement.
+ */
+export const AMBIGUOUS_DOMINANT_SHARE_CUTOFF = 0.5;
+
+// WCAG's own "large text" definition (>=24px regular, or >=18.66px bold) is
+// applied as literal numbers inside discoverElements' page.evaluate() below
+// — a page.evaluate callback runs in the browser and cannot close over a
+// Node-side const without passing it through the function's own argument
+// object, so a module-level constant here would be unused, not reused.
+
+export interface SweepTextElement {
+  kind: 'text';
+  tag: string;
+  accessibleRole: string | null;
+  accessibleName: string | null;
+  textSnippet: string;
+  isLargeText: boolean;
+  box: { x: number; y: number; width: number; height: number };
+}
+
+export interface SweepIconElement {
+  kind: 'icon';
+  tag: string;
+  accessibleRole: string | null;
+  accessibleName: string | null;
+  box: { x: number; y: number; width: number; height: number };
+}
+
+export interface SweepReading<E> {
+  element: E;
+  ratio: number;
+  dominantShare: number;
+  foreground: RGB;
+  dominantBackground: RGB;
+  requiredRatio: number;
+}
+
+export interface SweepBucket<E> {
+  pass: SweepReading<E>[];
+  fail: SweepReading<E>[];
+  ambiguous: SweepReading<E>[];
+}
+
+export interface SweepResult {
+  text: SweepBucket<SweepTextElement> & { excludedDisabledCount: number; measuredCount: number };
+  icon: SweepBucket<SweepIconElement> & { measuredCount: number };
+  borderOnlyNotMeasured: true;
+}
+
+type DiscoveredText = SweepTextElement & { disabled: boolean };
+
+async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; icon: SweepIconElement[] }> {
+  return page.evaluate(() => {
+    const NON_TEXT_TAGS = new Set(['SCRIPT', 'STYLE', 'SVG', 'PATH', 'CIRCLE', 'RECT', 'NOSCRIPT']);
+
+    function isExempt(el: Element): boolean {
+      return !!el.closest('[aria-hidden="true"], [data-contrast-exempt="decorative"]');
+    }
+
+    function isDisabled(el: Element): boolean {
+      const control = el.closest('button, input, select, textarea, [role="button"], [aria-disabled]');
+      if (!control) return false;
+      if ((control as HTMLButtonElement).disabled) return true;
+      return control.getAttribute('aria-disabled') === 'true';
+    }
+
+    function accessibleRoleOf(el: Element): string | null {
+      const explicit = el.getAttribute('role');
+      if (explicit) return explicit;
+      const tag = el.tagName.toLowerCase();
+      if (/^h[1-6]$/.test(tag)) return 'heading';
+      if (tag === 'a' && el.hasAttribute('href')) return 'link';
+      if (tag === 'button') return 'button';
+      return null;
+    }
+
+    function accessibleNameOf(el: Element, fallbackText: string | null): string | null {
+      const label = el.getAttribute('aria-label');
+      if (label) return label;
+      const labelledBy = el.getAttribute('aria-labelledby');
+      if (labelledBy) {
+        const target = document.getElementById(labelledBy);
+        if (target?.textContent) return target.textContent.trim();
+      }
+      return fallbackText;
+    }
+
+    const textOut: Array<{
+      kind: 'text';
+      tag: string;
+      accessibleRole: string | null;
+      accessibleName: string | null;
+      textSnippet: string;
+      isLargeText: boolean;
+      box: { x: number; y: number; width: number; height: number };
+      disabled: boolean;
+    }> = [];
+    const iconOut: Array<{
+      kind: 'icon';
+      tag: string;
+      accessibleRole: string | null;
+      accessibleName: string | null;
+      box: { x: number; y: number; width: number; height: number };
+    }> = [];
+
+    for (const el of document.body.querySelectorAll('*')) {
+      if (isExempt(el)) continue;
+
+      if ((el.tagName === 'SVG' || el.getAttribute('role') === 'img') && !el.closest('svg svg')) {
+        if (el.tagName !== 'SVG' && el.closest('svg')) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        const box = el.getBoundingClientRect();
+        if (box.width < 2 || box.height < 2) continue;
+        iconOut.push({
+          kind: 'icon',
+          tag: el.tagName,
+          accessibleRole: accessibleRoleOf(el),
+          accessibleName: accessibleNameOf(el, null),
+          box: { x: box.x, y: box.y, width: box.width, height: box.height },
+        });
+        continue;
+      }
+
+      if (el.children.length !== 0) continue;
+      const text = (el.textContent || '').trim();
+      if (!text) continue;
+      if (NON_TEXT_TAGS.has(el.tagName)) continue;
+      if (el.classList.contains('sr-only')) continue;
+
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
+
+      const box = el.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) continue;
+
+      const fontSizePx = parseFloat(cs.fontSize);
+      const fontWeight = parseInt(cs.fontWeight, 10) || 400;
+      const isLargeText = fontSizePx >= 24 || (fontSizePx >= 18.66 && fontWeight >= 700);
+
+      textOut.push({
+        kind: 'text',
+        tag: el.tagName,
+        accessibleRole: accessibleRoleOf(el),
+        accessibleName: accessibleNameOf(el, text.slice(0, 120)),
+        textSnippet: text.slice(0, 120),
+        isLargeText,
+        box: { x: box.x, y: box.y, width: box.width, height: box.height },
+        disabled: isDisabled(el),
+      });
+    }
+
+    return { text: textOut, icon: iconOut };
+  });
+}
+
+export async function sweepContrast(page: Page, ambiguousShareCutoff: number = AMBIGUOUS_DOMINANT_SHARE_CUTOFF): Promise<SweepResult> {
+  const { text: textCandidates, icon: iconCandidates } = await discoverElements(page);
+
+  const disabled = textCandidates.filter((t) => t.disabled);
+  const measurableText = textCandidates.filter((t) => !t.disabled);
+
+  const sampler = await openPixelSampler(page);
+  try {
+    const textBucket: SweepBucket<SweepTextElement> = { pass: [], fail: [], ambiguous: [] };
+    for (const t of measurableText) {
+      const fgColor = await page.evaluate(
+        ({ x, y, width, height }) => {
+          const el = document.elementFromPoint(x + width / 2, y + height / 2);
+          return el ? getComputedStyle(el).color : null;
+        },
+        t.box,
+      );
+      if (!fgColor) continue;
+      const fg = parseRgbLocal(fgColor);
+      if (!fg) continue;
+
+      const { rgb: bg, share } = await sampler.sampleDominant(t.box);
+      const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
+      const requiredRatio = t.isLargeText ? WCAG_LARGE_TEXT_MIN_RATIO : WCAG_NORMAL_TEXT_MIN_RATIO;
+      const element: SweepTextElement = {
+        kind: 'text',
+        tag: t.tag,
+        accessibleRole: t.accessibleRole,
+        accessibleName: t.accessibleName,
+        textSnippet: t.textSnippet,
+        isLargeText: t.isLargeText,
+        box: t.box,
+      };
+      const reading: SweepReading<SweepTextElement> = { element, ratio, dominantShare: share, foreground: fg, dominantBackground: bg, requiredRatio };
+      if (share < ambiguousShareCutoff) textBucket.ambiguous.push(reading);
+      else if (ratio < requiredRatio) textBucket.fail.push(reading);
+      else textBucket.pass.push(reading);
+    }
+
+    const iconBucket: SweepBucket<SweepIconElement> = { pass: [], fail: [], ambiguous: [] };
+    for (const ic of iconCandidates) {
+      const clusters = await sampler.sampleClustersOrdered(ic.box);
+      if (clusters.length === 0) continue;
+      const bg = clusters[0]!.rgb;
+      const share = clusters[0]!.share;
+      const fg = clusters[1]?.rgb ?? bg;
+      const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
+      const element: SweepIconElement = { kind: 'icon', tag: ic.tag, accessibleRole: ic.accessibleRole, accessibleName: ic.accessibleName, box: ic.box };
+      const reading: SweepReading<SweepIconElement> = { element, ratio, dominantShare: share, foreground: fg, dominantBackground: bg, requiredRatio: WCAG_ICON_MIN_RATIO };
+      if (share < ambiguousShareCutoff) iconBucket.ambiguous.push(reading);
+      else if (ratio < WCAG_ICON_MIN_RATIO) iconBucket.fail.push(reading);
+      else iconBucket.pass.push(reading);
+    }
+
+    return {
+      text: { ...textBucket, excludedDisabledCount: disabled.length, measuredCount: measurableText.length },
+      icon: { ...iconBucket, measuredCount: iconCandidates.length },
+      borderOnlyNotMeasured: true,
+    };
+  } finally {
+    await sampler.close();
+  }
+}
+
+function parseRgbLocal(css: string): RGB | null {
+  const m = css.match(/rgba?\(([^)]+)\)/);
+  if (!m || m[1] === undefined) return null;
+  const [r, g, b] = m[1].split(',').map((n) => parseFloat(n));
+  if (r === undefined || g === undefined || b === undefined) return null;
+  return { r, g, b };
+}
+
+export function formatSweepReport(label: string, result: SweepResult): string {
+  const lines = [
+    `[contrast] ${label}`,
+    `  text: measured=${result.text.measuredCount} pass=${result.text.pass.length} fail=${result.text.fail.length} ambiguous=${result.text.ambiguous.length} excludedDisabled=${result.text.excludedDisabledCount}`,
+    `  icon (EXPERIMENTAL METHOD): measured=${result.icon.measuredCount} pass=${result.icon.pass.length} fail=${result.icon.fail.length} ambiguous=${result.icon.ambiguous.length}`,
+    `  border-only essential graphics: NOT MEASURED`,
+  ];
+  return lines.join('\n');
+}

@@ -1,0 +1,10 @@
+[
+  {
+    "route": "/dashboard/analytics",
+    "viewport": 1440,
+    "accessibleName": "Analytics",
+    "reason": "Sidebar/breadcrumb nav item reads near-black text (rgb 15,23,42) against a near-black glass background (rgb 40,50,54), ratio 1.36 (needs 4.5:1) -- dark-on-dark, not previously named in CONTRAST-STANDARD.md's hand-checked list; found by the first real contrast-sweep run against this page (2026-10-16). The badge CONTRAST-STANDARD.md names ('By revenue', 1.85) did not appear in this run's FAIL bucket -- it is conditionally rendered only when ranked vendor data exists, and the seeded SUPER_ADMIN account's local dev DB state did not trigger it this run. Not claiming that badge is fixed; it is simply unverified by this entry.",
+    "dateAdded": "2026-10-16",
+    "ticket": "req-9-contrast-remediation"
+  }
+]
