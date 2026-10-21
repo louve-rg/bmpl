@@ -2,7 +2,7 @@ import { test } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tryLogin, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD } from '../support/auth';
-import { settleForSnapshot } from '../support/visual';
+import { settleForSnapshot, VISUAL_VIEWPORTS } from '../support/visual';
 import { sweepContrast, formatSweepReport } from '../support/contrast-sweep';
 import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
 
@@ -19,9 +19,14 @@ import { assertRatchet, type KnownViolationEntry } from '../support/contrast-rat
  * before the local shared API went down mid-build. A real violation at
  * those widths not yet on the allowlist will correctly fail this test the
  * first time it runs in CI; that is the ratchet working as intended.
+ *
+ * ALL SIX pixel-baseline viewports (2026-10-21) -- widened from the
+ * original three (320/375/1440), reusing VISUAL_VIEWPORTS directly rather
+ * than a second list. See apps/web's own copy of this file for the full
+ * reasoning.
  */
 
-const VIEWPORTS = [320, 375, 1440];
+const VIEWPORTS = Object.values(VISUAL_VIEWPORTS).map((v) => v.width);
 const ROUTE = '/dashboard/analytics';
 const KNOWN_VIOLATIONS: KnownViolationEntry[] = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'contrast-known-violations.json'), 'utf8'),

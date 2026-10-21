@@ -2,7 +2,7 @@ import { test } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { loginAsRole } from '../support/auth';
-import { settleForSnapshot } from '../support/visual';
+import { settleForSnapshot, VISUAL_VIEWPORTS } from '../support/visual';
 import { sweepContrast, formatSweepReport } from '../support/contrast-sweep';
 import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
 
@@ -15,10 +15,16 @@ import { assertRatchet, type KnownViolationEntry } from '../support/contrast-rat
  * for the full design: why the existing pixel sampler over a DOM walker,
  * the three PASS/FAIL/AMBIGUOUS buckets, the ratchet allowlist.
  *
- * THREE VIEWPORTS ONLY (320/375/1440, god's ruling) -- not the six-width
- * pixel-baseline matrix. 320 specifically because at the narrow edge text
- * can reflow onto a DIFFERENT ancestor background, which is exactly what
- * this check measures.
+ * ALL SIX pixel-baseline viewports (2026-10-21) -- widened from the
+ * original three (320/375/1440). Reuses VISUAL_VIEWPORTS directly rather
+ * than a second, independently-justified list (CLAUDE.md S12: a second way
+ * to do something that already works is a defect) -- these are the same
+ * six god ruled on for the visual-regression suite (see visual.ts's own
+ * header for why exactly these six). Cheap to add: no new dev-server
+ * lifecycle, only more per-viewport test runs against the one already
+ * running. 320 remains the one most likely to show a reflow onto a
+ * different ancestor background, which is exactly what this check
+ * measures, but it is no longer the only width checked.
  *
  * `measuredCount > 0` is asserted as the FIRST check, before any ratio --
  * a run that silently measures nothing must fail loud, never pass by
@@ -37,7 +43,7 @@ import { assertRatchet, type KnownViolationEntry } from '../support/contrast-rat
  * already there for 1440px.
  */
 
-const VIEWPORTS = [320, 375, 1440];
+const VIEWPORTS = Object.values(VISUAL_VIEWPORTS).map((v) => v.width);
 const ROUTE = '/dashboard/analytics';
 const KNOWN_VIOLATIONS: KnownViolationEntry[] = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'contrast-known-violations.json'), 'utf8'),
