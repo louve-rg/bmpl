@@ -12,6 +12,7 @@
     "test:e2e": "playwright test",
     "test:visual": "playwright test --config=playwright.visual.config.ts",
     "test:visual:update": "playwright test --config=playwright.visual.config.ts --update-snapshots",
+    "test:contrast": "playwright test --config=playwright.contrast.config.ts",
     "clean": "rimraf .next .turbo"
   },
   "dependencies": {
