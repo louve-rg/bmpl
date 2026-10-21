@@ -238,7 +238,17 @@ export function PageHeader({
 
 const TONES = {
   neutral: 'bg-slate-100 text-slate-600',
-  brand: 'bg-belize-blue/10 text-belize-blue',
+  // `brand` was the one tone in this set built on an ALPHA background
+  // (bg-belize-blue/10) rather than a solid pastel like every sibling here.
+  // A solid tint composites to the same colour regardless of what's behind
+  // it; a 10%-alpha tint composites toward whatever IS behind it -- near-
+  // white on a light page (where this shipped and read fine), near-black
+  // under the glass dashboard, where the badge measured 1.54-1.85:1
+  // (owner-reported, admin "By revenue"). bg-blue-100/text-blue-800 is the
+  // same solid-pastel recipe every other tone already uses, and blue-800 is
+  // literally --bmpl-primary's own hex -- same brand colour, just no longer
+  // see-through.
+  brand: 'bg-blue-100 text-blue-800',
   success: 'bg-emerald-100 text-emerald-700',
   warning: 'bg-amber-100 text-amber-700',
   error: 'bg-red-100 text-red-700',
