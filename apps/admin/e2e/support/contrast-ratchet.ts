@@ -63,7 +63,7 @@ export interface KnownViolationEntry {
 const REGRESSION_MARGIN = 0.1;
 
 export interface RatchetCheckResult {
-  newViolations: Array<{ element: SweepTextElement | SweepIconElement; ratio: number; requiredRatio: number; suggestedEntry: KnownViolationEntry; lowConfidence: boolean }>;
+  newViolations: Array<{ element: SweepTextElement | SweepIconElement; ratio: number; requiredRatio: number; suggestedEntry: KnownViolationEntry }>;
   staleEntries: KnownViolationEntry[];
   regressions: Array<{ entry: KnownViolationEntry; previousRatio: number; currentRatio: number }>;
 }
@@ -94,19 +94,41 @@ function roleMatchesEntry(entry: KnownViolationEntry, accessibleRole: string | n
  *    entry's own recorded `measuredRatio` -- a regression on already-
  *    accepted debt, which "still covered, still failing" alone would hide.
  *
- * AMBIGUOUS READINGS ARE NOT SILENTLY SKIPPED (god, 2026-10-21): the
- * original three-bucket design never scores an ambiguous reading
- * PASS/FAIL to avoid a false clean -- but that also meant an ambiguous
- * reading whose computed ratio is clearly below the required threshold
- * (low confidence in exactly WHICH background pixel is dominant, not low
- * confidence that the ratio is bad) was reported in its own count and then
- * never checked against the allowlist at all -- neither a violation nor
- * covered debt, just invisible to this function. Fixed by feeding any
- * ambiguous reading whose ratio already fails the threshold through the
- * same pipeline as a confirmed FAIL, flagged `lowConfidence: true` so the
- * message says to verify by eye (same caveat `assertSufficientContrast`
- * already uses for a single low-share reading) rather than claiming
- * certainty it doesn't have.
+ * AMBIGUOUS READINGS NEVER FAIL THE BUILD (god, 2026-10-21, reversing an
+ * earlier version of this comment from the same date): an earlier revision
+ * fed any ambiguous reading whose ratio already failed the threshold
+ * through the same pipeline as a confirmed FAIL, reasoning that "ambiguous"
+ * meant "low confidence, but probably still bad." That reasoning was
+ * wrong. contrast-sweep.ts's own header already defines the ambiguous
+ * bucket correctly: low `dominantShare` means the element sits on a
+ * composite surface -- a gradient, image, or glass/blur -- where no single
+ * background colour can be resolved at all, not "probably a violation
+ * measured with low confidence." Once routed into newViolations, that
+ * distinction was lost on `assertRatchet`, which throws the words "NEW
+ * contrast violation(s)" over a reading that only means "I could not
+ * measure this" -- the exact category error being policed everywhere else
+ * on this effort. Empirical support: of 4 ambiguous readings independently
+ * hand-verified against the live rendered pixels this run (Dwight,
+ * 2026-10-21), all 4 were artifacts of the glass/mural surface, none were
+ * real violations -- a 100% false-positive rate on the only sample
+ * measured so far. Ambiguous readings are now treated exactly like
+ * `compositeGraphics` in contrast-sweep.ts: reported, named (in
+ * `formatSweepReport`), counted in the accounting invariant exactly as
+ * before -- and never scored into a build failure or added to the
+ * allowlist (allowlisting would misrecord "could not measure" as "accepted
+ * debt", the same lie in the other direction). The FAIL bucket -- high
+ * dominantShare, a resolvable solid background -- is unaffected and still
+ * fails the build; this is where the instrument is trustworthy.
+ * KNOWN CONSEQUENCE, stated plainly rather than hidden: this removes false
+ * failures, it does not add true detection. There is currently no working
+ * automated check for contrast on a glass/translucent surface -- most of
+ * this platform's own chrome. Real glass-surface defects the owner found by
+ * eye (CONTRAST-STANDARD.md: StorefrontView sidebar, ReviewList,
+ * SaveJobButton) would be measured as ambiguous by this sweep and, after
+ * this change, would not fail the build either. The eventual fix is a
+ * different method -- sampling actual rendered pixels behind the text from
+ * a screenshot rather than walking computed styles -- scoped as its own
+ * card, not bundled into this change.
  */
 export function checkRatchet(result: SweepResult, scopedEntries: KnownViolationEntry[], context: { route: string; viewport: number }): RatchetCheckResult {
   const entryStillFails = new Map<KnownViolationEntry, boolean>();
@@ -118,14 +140,7 @@ export function checkRatchet(result: SweepResult, scopedEntries: KnownViolationE
   const regressions: RatchetCheckResult['regressions'] = [];
   const regressedEntries = new Set<KnownViolationEntry>();
 
-  function belowThreshold<E>(readings: Array<SweepReading<E>>): Array<SweepReading<E>> {
-    return readings.filter((r) => r.ratio < r.requiredRatio);
-  }
-
-  function processFailBucket(
-    failReadings: Array<SweepReading<SweepTextElement> | SweepReading<SweepIconElement>>,
-    lowConfidence: boolean,
-  ) {
+  function processFailBucket(failReadings: Array<SweepReading<SweepTextElement> | SweepReading<SweepIconElement>>) {
     for (const reading of failReadings) {
       let covered = false;
       for (const entry of scopedEntries) {
@@ -144,7 +159,6 @@ export function checkRatchet(result: SweepResult, scopedEntries: KnownViolationE
           element: reading.element,
           ratio: reading.ratio,
           requiredRatio: reading.requiredRatio,
-          lowConfidence,
           suggestedEntry: {
             route: context.route,
             viewport: context.viewport,
@@ -160,10 +174,10 @@ export function checkRatchet(result: SweepResult, scopedEntries: KnownViolationE
     }
   }
 
-  processFailBucket(result.text.fail, false);
-  processFailBucket(result.icon.fail, false);
-  processFailBucket(belowThreshold(result.text.ambiguous), true);
-  processFailBucket(belowThreshold(result.icon.ambiguous), true);
+  processFailBucket(result.text.fail);
+  processFailBucket(result.icon.fail);
+  // Ambiguous readings deliberately do NOT feed this function at all any
+  // more -- see this file's own header comment, dated 2026-10-21.
 
   const staleEntries = scopedEntries.filter((e) => e.keyType !== 'css-fallback' && !entryStillFails.get(e));
   // css-fallback entries can't be auto-verified by this matcher (no stable
@@ -187,11 +201,8 @@ export function assertRatchet(result: SweepResult, scopedEntries: KnownViolation
   if (newViolations.length > 0) {
     lines.push(`${newViolations.length} NEW contrast violation(s) not on the known-violations allowlist (${context.route} @ ${context.viewport}px):`);
     for (const v of newViolations) {
-      const confidenceNote = v.lowConfidence
-        ? ' LOW-CONFIDENCE READ (ambiguous dominantShare) -- verify by eye before trusting this ratio, but it is NOT silently passed either.'
-        : '';
       lines.push(
-        `  - role=${v.suggestedEntry.accessibleRole ?? '(none)'} name="${v.suggestedEntry.accessibleName ?? '(none)'}" ratio=${v.ratio} (needs ${v.requiredRatio}).${confidenceNote} ` +
+        `  - role=${v.suggestedEntry.accessibleRole ?? '(none)'} name="${v.suggestedEntry.accessibleName ?? '(none)'}" ratio=${v.ratio} (needs ${v.requiredRatio}). ` +
           `If this is real, fix it. If it's accepted debt, add this entry to contrast-known-violations.json: ${JSON.stringify(v.suggestedEntry)}`,
       );
     }

@@ -431,5 +431,40 @@ export function formatSweepReport(label: string, result: SweepResult): string {
       lines.push(`    - role=${g.accessibleRole ?? '(none)'} name="${g.accessibleName ?? '(none)'}"`);
     }
   }
+  // NAMED, same treatment as compositeGraphics above, and for the same
+  // reason (god, 2026-10-21): low dominantShare means "sits on a
+  // composite/glass surface, cannot resolve a single background colour" --
+  // this file's own earlier header comment already said so. The ratchet
+  // (contrast-ratchet.ts) deliberately never scores these into a build
+  // failure any more -- 4 of 4 independently hand-verified ambiguous
+  // readings this run turned out to be artifacts of the glass surface, not
+  // real violations (Dwight, 2026-10-21).
+  // EVERY ambiguous reading is printed, regardless of which side of its own
+  // threshold the ratio falls on (god, 2026-10-21) -- an un-allowlisted
+  // ambiguous reading used to be promoted to a build failure ONLY when its
+  // ratio already failed (contrast-ratchet.ts's belowThreshold), so an
+  // ambiguous reading whose ratio happened to pass was invisible
+  // everywhere: not a violation, not text.pass (bucketed ambiguous), not in
+  // recordPassNames (reads text.pass only). That is the literal mechanism
+  // behind an element going from "discovered and flagged at every width" to
+  // "appears nowhere" on nothing more than a colour change that pushed its
+  // ratio across the threshold while dominantShare never moved -- see this
+  // app's analytics.spec.ts PageHeader-description investigation. The
+  // PASS/FAIL side is stated explicitly per reading, not left for a reader
+  // to infer from two numbers.
+  if (result.text.ambiguous.length > 0) {
+    lines.push(`  ambiguous text (low dominantShare -- composite/glass surface, cannot resolve a single background colour -- NOT MEASURED, does NOT fail the build, not silently dropped):`);
+    for (const r of result.text.ambiguous) {
+      const side = r.ratio >= r.requiredRatio ? 'PASS' : 'FAIL';
+      lines.push(`    - role=${r.element.accessibleRole ?? '(none)'} name="${r.element.accessibleName ?? '(none)'}" ratio=${r.ratio} (needs ${r.requiredRatio}) dominantShare=${r.dominantShare} -- ambiguous, ratio would ${side}`);
+    }
+  }
+  if (result.icon.ambiguous.length > 0) {
+    lines.push(`  ambiguous icon (EXPERIMENTAL METHOD, same NOT-failing treatment as ambiguous text above):`);
+    for (const r of result.icon.ambiguous) {
+      const side = r.ratio >= r.requiredRatio ? 'PASS' : 'FAIL';
+      lines.push(`    - role=${r.element.accessibleRole ?? '(none)'} name="${r.element.accessibleName ?? '(none)'}" ratio=${r.ratio} (needs ${r.requiredRatio}) dominantShare=${r.dominantShare} -- ambiguous, ratio would ${side}`);
+    }
+  }
   return lines.join('\n');
 }
