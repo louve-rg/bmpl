@@ -2,7 +2,7 @@ import { test } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
-import { sweepContrast, formatSweepReport, measureFirstEyebrowForeground, measureBackgroundColorsByText } from '../support/contrast-sweep';
+import { sweepContrast, formatSweepReport, measureFirstEyebrowForeground, measureBackgroundColorsByText, measureBoxSizeByText } from '../support/contrast-sweep';
 import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
 
 /**
@@ -39,6 +39,22 @@ import { assertRatchet, type KnownViolationEntry } from '../support/contrast-rat
  * band, consistent with the alpha-fill-under-glass family #473 was supposed
  * to have removed everywhere. Printing each element's OWN getComputedStyle
  * background settles both without guessing from the ratio a second time.
+ *
+ * THIRD EXCEPTION, box size (god, 2026-10-21): both background prints came
+ * back `rgba(0, 0, 0, 0)` -- the correct, uninformative CSS answer for an
+ * anchor that never declares a background. That retired the background
+ * question but opened a sharper one: `discoverElements` (contrast-sweep.ts)
+ * already skips any text leaf whose rendered box is under 2px in either
+ * dimension, which a closed `<details>` descendant should always be -- so
+ * these two elements should never have reached the FAIL bucket with a real
+ * ratio at all, yet they did. Logging `getBoundingClientRect()` width/height
+ * for the same two elements (same leaf-selection rule, same node) decides
+ * which half of that contradiction is true: zero -> the existing guard is
+ * being bypassed somewhere in discovery; non-zero -> the element really was
+ * rendered, and the question moves to what pixel the sampler read there.
+ * Do not generalise either answer into the sweep's documentation yet -- god
+ * has already withdrawn three mechanisms on this cluster, this print exists
+ * to stop a fourth guess, not supply one.
  */
 
 const VIEWPORTS = CONTRAST_VIEWPORTS;
@@ -56,6 +72,8 @@ let contributedCount = 0;
 let eyebrowForegroundReported = false;
 let navLinkBackgroundReported = false;
 let categoryLinkBackgroundReported = false;
+let navLinkBoxSizeReported = false;
+let categoryLinkBoxSizeReported = false;
 
 function recordPassNames(result: { text: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> }; icon: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> } }): void {
   contributedCount += 1;
@@ -111,6 +129,29 @@ test.describe('contrast: public products listing', () => {
         if (bg.length > 0) {
           console.log(`[contrast] web ${ROUTE} @ 375px -- "Camping & Hiking" category link measured background colour: ${bg.join(', ')}`);
           categoryLinkBackgroundReported = true;
+        }
+      }
+
+      // Third sanctioned exception (god, 2026-10-21) -- see this file's own
+      // header comment, "THIRD EXCEPTION, box size": decides whether the nav
+      // link's rendered box is really zero (discovery's own box.width<2
+      // guard should have excluded it) or genuinely non-zero (it was
+      // actually rendered).
+      if (viewport === 1440 && !navLinkBoxSizeReported) {
+        const sizes = await measureBoxSizeByText(page, 'Become a Marketplace Vendor');
+        if (sizes.length > 0) {
+          console.log(`[contrast] web ${ROUTE} @ 1440px -- "Become a Marketplace Vendor" nav link measured box size: ${sizes.map((s) => `${s.width}x${s.height}`).join(', ')}`);
+          navLinkBoxSizeReported = true;
+        }
+      }
+
+      // Third sanctioned exception (god, 2026-10-21) -- same question, the
+      // category link.
+      if (viewport === 375 && !categoryLinkBoxSizeReported) {
+        const sizes = await measureBoxSizeByText(page, 'Camping & Hiking');
+        if (sizes.length > 0) {
+          console.log(`[contrast] web ${ROUTE} @ 375px -- "Camping & Hiking" category link measured box size: ${sizes.map((s) => `${s.width}x${s.height}`).join(', ')}`);
+          categoryLinkBoxSizeReported = true;
         }
       }
 

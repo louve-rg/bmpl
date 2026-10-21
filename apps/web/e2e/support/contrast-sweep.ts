@@ -525,3 +525,30 @@ export async function measureBackgroundColorsByText(page: Page, text: string): P
     return matches.map((el) => getComputedStyle(el).backgroundColor);
   }, text);
 }
+
+/**
+ * Third and narrowest exception (god, 2026-10-21): `discoverElements` below
+ * already skips any text leaf whose `getBoundingClientRect()` is under 2px
+ * in either dimension (see its own `box.width < 2 || box.height < 2` guard)
+ * -- a descendant of a `display:none` ancestor (e.g. inside a closed
+ * `<details>`) gets an all-zero rect regardless of its own declared
+ * `display`, so that guard should already have kept these two elements out
+ * of the sweep entirely. They were reported in the FAIL bucket with real
+ * ratios anyway. This answers which half of that contradiction is true:
+ * zero box -> the existing guard is somehow being bypassed (a discovery
+ * bug); non-zero box -> the element really was rendered, and the open
+ * question moves to what pixel `clusterAt` sampled there, not whether the
+ * element existed. Same leaf-selection rule as `discoverElements` and the
+ * two colour prints above, so this measures the identical node.
+ */
+export async function measureBoxSizeByText(page: Page, text: string): Promise<Array<{ width: number; height: number }>> {
+  return page.evaluate((target) => {
+    const matches = Array.from(document.querySelectorAll('*')).filter(
+      (el) => el.children.length === 0 && el.textContent?.trim() === target,
+    );
+    return matches.map((el) => {
+      const box = el.getBoundingClientRect();
+      return { width: box.width, height: box.height };
+    });
+  }, text);
+}
