@@ -193,7 +193,7 @@ export default function HubsPage() {
           this only stops drawing buttons that could never work. */}
       {canManage && (
       <Card className="p-4">
-        <h2 className="text-sm font-semibold text-slate-900">Add a terminal</h2>
+        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Add a terminal</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Code" htmlFor="hub-code" hint="Short handle, e.g. SPA. Used by operators and by the planner.">
             <Input id="hub-code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="SPA" />
@@ -266,8 +266,8 @@ export default function HubsPage() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-sm font-semibold text-slate-900">{h.code}</span>
-                    <span className="break-words text-sm text-slate-700">{h.name}</span>
+                    <span className="font-mono text-sm font-semibold text-[color:var(--bmpl-text)]">{h.code}</span>
+                    <span className="break-words text-sm text-[color:var(--bmpl-text)]">{h.name}</span>
                     <Badge tone={h.isActive ? 'success' : 'neutral'}>{h.isActive ? 'Active' : 'Inactive'}</Badge>
                     {h.isTest && <Badge tone="neutral">Simulation</Badge>}
                   </div>
