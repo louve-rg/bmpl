@@ -5,7 +5,8 @@
     "accessibleName": "$0.00",
     "reason": "Vendor 'Net revenue' KPI value hardcodes text-belize-blue; correct on a light surface, invisible-adjacent on the glass theme's near-navy card fill. Named in hive/agents/god/CONTRAST-STANDARD.md as 'vendor Net revenue KPI -- 1.89' (measured there on an account with non-zero revenue; this entry's own ratio, 2.02, is the same defect measured on the seeded UAT vendor fixture, which has $0.00 revenue -- same component, different exact pixel). Req 9 (platform remediation) owns the fix; this entry is accepted debt until then.",
     "dateAdded": "2026-10-16",
-    "ticket": "req-9-contrast-remediation"
+    "ticket": "req-9-contrast-remediation",
+    "measuredRatio": 2.02
   },
   {
     "route": "/dashboard/analytics",
@@ -13,6 +14,7 @@
     "accessibleName": "No sales in this period.",
     "reason": "Empty-state message under the vendor analytics chart reads at 1.77:1 (needs 4.5:1) against the glass card fill -- not previously named in CONTRAST-STANDARD.md's hand-checked list; found by the first real contrast-sweep run against this page (2026-10-16). A real, separate, currently-true violation, not a guess.",
     "dateAdded": "2026-10-16",
-    "ticket": "req-9-contrast-remediation"
+    "ticket": "req-9-contrast-remediation",
+    "measuredRatio": 1.77
   }
 ]

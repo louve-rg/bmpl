@@ -3,8 +3,18 @@
     "route": "/dashboard/analytics",
     "viewport": 1440,
     "accessibleName": "Analytics",
-    "reason": "Sidebar/breadcrumb nav item reads near-black text (rgb 15,23,42) against a near-black glass background (rgb 40,50,54), ratio 1.36 (needs 4.5:1) -- dark-on-dark, not previously named in CONTRAST-STANDARD.md's hand-checked list; found by the first real contrast-sweep run against this page (2026-10-16). The badge CONTRAST-STANDARD.md names ('By revenue', 1.85) did not appear in this run's FAIL bucket -- it is conditionally rendered only when ranked vendor data exists, and the seeded SUPER_ADMIN account's local dev DB state did not trigger it this run. Not claiming that badge is fixed; it is simply unverified by this entry.",
+    "reason": "Sidebar/breadcrumb nav item reads near-black text (rgb 15,23,42) against a near-black glass background (rgb 40,50,54), ratio 1.36 (needs 4.5:1) -- dark-on-dark, not previously named in CONTRAST-STANDARD.md's hand-checked list; found by the first real contrast-sweep run against this page (2026-10-16). CORRECTION (2026-10-21, god caught this): an earlier version of this entry's own reason claimed the 'By revenue' badge below is conditionally rendered on ranked-vendor-data existing -- that is WRONG, read directly from apps/admin/app/dashboard/analytics/page.tsx: the <Badge> sits outside the rows.length===0 ternary in both TopProductsTable and TopVendorsTable, so it always renders. The real reason my 2026-10-16 sweep run did not flag it is most likely that it landed in the AMBIGUOUS bucket (a rounded-full pill's interior grid samples are more likely to catch border/padding edge variance than a plain text leaf), which at the time was never checked against this allowlist at all -- fixed in contrast-ratchet.ts the same day (ambiguous-but-below-threshold readings now flow through the same pipeline as a confirmed FAIL). Not independently re-verified against a live sweep since (local API down) -- see the sibling entry below, sourced from Dwight's hand tool instead.",
     "dateAdded": "2026-10-16",
-    "ticket": "req-9-contrast-remediation"
+    "ticket": "req-9-contrast-remediation",
+    "measuredRatio": 1.36
+  },
+  {
+    "route": "/dashboard/analytics",
+    "viewport": 1440,
+    "accessibleName": "By revenue",
+    "reason": "The badge CONTRAST-STANDARD.md names (hardcoded text-belize-blue on the glass dashboard), appearing twice on this page (TopProductsTable and TopVendorsTable). Re-measured by Dwight 2026-10-21 at 1.54-1.85, unchanged by PR #468 (requirement 6's token infrastructure is additive only, zero call sites touched -- confirmed by reading that commit, not assumed). Recording the upper bound as measuredRatio since that is the figure both CONTRAST-STANDARD.md and today's re-measurement agree is current. This entry is sourced from Dwight's own tool, not this sweep -- my own 2026-10-16 run did not independently confirm it (see the sibling entry's correction above for why). Req 9 (platform remediation) owns the fix; this is a call-site fix, assigned to Oscar.",
+    "dateAdded": "2026-10-21",
+    "ticket": "req-9-contrast-remediation",
+    "measuredRatio": 1.85
   }
 ]
