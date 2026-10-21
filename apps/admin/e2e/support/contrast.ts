@@ -92,6 +92,20 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
       }),
   );
 
+  /**
+   * KNOWN LIMITATION -- see the web copy of this file (apps/web/e2e/support/
+   * contrast.ts) for the full writeup (god + Dwight + Oscar, 2026-10-21,
+   * requirement 7): `clusterAt` pixel-samples a composited screenshot at an
+   * element's computed box coordinates, so it reports the TOPMOST PAINTED
+   * PIXEL there, which is not always that element's own background. An
+   * element can have a real, non-zero box while something else is painted
+   * over it, or while its own surface is not painted at all and the page
+   * shows through. Confirmed narrow, not systemic: the same method caught a
+   * genuine defect the same night (#480, measured to the thousandth against
+   * a hand computation) and confirmed a merged fix live (#479). Keep in
+   * sync by hand if the web copy's writeup changes, same as the rest of
+   * this file.
+   */
   async function clusterAt(box: { x: number; y: number; width: number; height: number }): Promise<Array<{ rgb: RGB; count: number; total: number }>> {
     const grid = await sampler.evaluate(({ rect }) => {
       const canvas = document.getElementById('cv') as HTMLCanvasElement;

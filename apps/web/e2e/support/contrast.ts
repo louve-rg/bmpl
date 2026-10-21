@@ -117,6 +117,57 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
       }),
   );
 
+  /**
+   * KNOWN LIMITATION (god + Dwight + Oscar, 2026-10-21, requirement 7):
+   * `clusterAt` pixel-samples a composited screenshot at an element's
+   * computed box coordinates. It therefore reports the TOPMOST PAINTED
+   * PIXEL at those coordinates, which is NOT always that element's own
+   * background. An element can be laid out with a real, non-zero box while
+   * something else is painted over it, or while its own surface is not
+   * painted at all and the page shows through.
+   *
+   * Two worked examples from one live run (products.spec.ts, route
+   * `/products`, run 39552489306 @ `0c56037`), both still red:
+   *   - `role=link name="Become a Marketplace Vendor"` @1440px: rendered
+   *     box 208x56 (real, non-zero), ratio 1.17 against its own
+   *     `text-blue-100`. The foreground's luminance back-solves to a
+   *     background around L=0.957 -- indistinguishable from the page's own
+   *     `bg-slate-50` canvas (L=0.9536, which computes to 1.1661), not the
+   *     element's actual ancestor (`bg-belize-navy`, which computes to
+   *     ~7.85:1 against the same foreground).
+   *   - `role=link name="Camping & Hiking"` @375px: TWO leaf matches, one
+   *     325x40 (real) and one 0x0 (correctly excluded by the box.width<2/
+   *     height<2 guard in contrast-sweep.ts's `discoverElements` -- that
+   *     guard is working correctly here, it simply does not govern the
+   *     other match). The real one reads ratio 3.75 against its own
+   *     `text-slate-600`; the foreground's luminance back-solves to a
+   *     background around L=0.4696 (~#b6b6b6), which matches neither the
+   *     element's own declared surface nor anything else in its cascade.
+   *
+   * Five independent instruments agree this is a sampler artifact, not a
+   * real defect, for both elements above: (1) both boxes are real and
+   * non-zero, so discovery is not being bypassed; (2) both back-solved
+   * backgrounds fail to match the sampled element's own declared surface;
+   * (3) a live CDP `CSS.getMatchedStylesForNode` dump on the category
+   * link's ancestor returned `rgb(255, 255, 255)`, the correct resting
+   * colour; (4) screenshots of both dropdown panels while genuinely
+   * OPENED show solid navy with crisp, legible white text; (5) an
+   * independent hand computation from source gives ~14:1 for the nav
+   * link's real contrast. WHY the sampler reads a different pixel than the
+   * element's own surface in either specific case -- a scrim, an overlay,
+   * z-order, paint timing -- is NOT established; do not read this note as
+   * confirming one.
+   *
+   * This is a narrow limitation, not a reason to distrust the sweep: the
+   * same dense-grid method caught a genuine, previously-unnoticed defect
+   * the same night (#480, `text-belize-light` on the header's real 80%-
+   * alpha-navy composite, measured 3.767:1 against a hand computation of
+   * 3.767:1 to the thousandth), and separately confirmed a merged fix live
+   * (#479's `--bmpl-accent` replacement reading exactly as predicted at
+   * every width). The tool is right far more often than it is wrong; this
+   * note names where it is wrong and why, so a reviewer who hits it again
+   * does not have to re-derive any of the above.
+   */
   async function clusterAt(box: { x: number; y: number; width: number; height: number }): Promise<Array<{ rgb: RGB; count: number; total: number }>> {
     const grid = await sampler.evaluate(({ rect }) => {
       const canvas = document.getElementById('cv') as HTMLCanvasElement;
