@@ -39,7 +39,6 @@ export default function AdminWalletPage() {
         breadcrumbs={adminCrumbs('Wallet')}
         eyebrow="Finance"
         title="Wallet & Escrow"
-        descriptionClassName="text-[color:var(--bmpl-text-muted)]"
         description="Double-entry ledger. The only writes available here are a labelled test credit and releasing holds that were never authorized — no balance can be set."
       />
 
