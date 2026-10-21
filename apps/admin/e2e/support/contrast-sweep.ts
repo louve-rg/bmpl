@@ -240,6 +240,32 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       else iconBucket.pass.push(reading);
     }
 
+    // Hard accounting invariant, not a warning -- found live (2026-10-21):
+    // a silent drop (the elementFromPoint bug fixed above) counted an
+    // element in measuredCount while scoring it in NO bucket, and up to 30%
+    // of a run's sample went missing with no error, in output already
+    // quoted as a complete result. Every discovered element must land in
+    // exactly one of: scored (pass/fail/ambiguous) or excluded-disabled. A
+    // sweep that cannot account for its own sample must refuse to report,
+    // because this guard exists precisely to catch causes neither of us has
+    // thought of yet, not just the one bug just fixed.
+    const textAccountedFor = textBucket.pass.length + textBucket.fail.length + textBucket.ambiguous.length + disabled.length;
+    if (textAccountedFor !== textCandidates.length) {
+      throw new Error(
+        `sweepContrast: text accounting mismatch -- discovered ${textCandidates.length} elements but ` +
+          `pass(${textBucket.pass.length})+fail(${textBucket.fail.length})+ambiguous(${textBucket.ambiguous.length})+excludedDisabled(${disabled.length}) ` +
+          `= ${textAccountedFor}, leaving ${textCandidates.length - textAccountedFor} silently unaccounted for.`,
+      );
+    }
+    const iconAccountedFor = iconBucket.pass.length + iconBucket.fail.length + iconBucket.ambiguous.length;
+    if (iconAccountedFor !== iconCandidates.length) {
+      throw new Error(
+        `sweepContrast: icon accounting mismatch -- discovered ${iconCandidates.length} elements but ` +
+          `pass(${iconBucket.pass.length})+fail(${iconBucket.fail.length})+ambiguous(${iconBucket.ambiguous.length}) ` +
+          `= ${iconAccountedFor}, leaving ${iconCandidates.length - iconAccountedFor} silently unaccounted for.`,
+      );
+    }
+
     return {
       text: { ...textBucket, excludedDisabledCount: disabled.length, measuredCount: measurableText.length },
       icon: { ...iconBucket, measuredCount: iconCandidates.length },
