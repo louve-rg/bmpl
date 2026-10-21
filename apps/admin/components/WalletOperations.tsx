@@ -94,7 +94,7 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
   return (
     <Card className="p-4">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-900">Administrative test credit</h3>
+        <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Administrative test credit</h3>
         <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-800">
           Test credit
         </span>
@@ -163,7 +163,7 @@ function StaleHoldCard({ onChanged }: { onChanged?: () => void }) {
 
   return (
     <Card className="p-4">
-      <h3 className="text-sm font-semibold text-slate-900">Release stale wallet holds</h3>
+      <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Release stale wallet holds</h3>
       <p className="mt-1 text-sm text-slate-500">
         A hold placed at checkout that was never authorized reserves money the customer cannot spend and cannot get
         back. This gives those reservations back and cancels the orders behind them. It runs hourly on its own; this is
