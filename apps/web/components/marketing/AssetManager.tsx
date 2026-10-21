@@ -90,7 +90,7 @@ export function AssetManager({
               accept="image/png,image/jpeg,image/webp"
               disabled={busy || atMax}
               onChange={(e) => upload(e.target.files)}
-              className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue disabled:opacity-60"
+              className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-blue-100 file:px-3 file:py-1.5 file:text-belize-blue disabled:opacity-60"
             />
             {atMax && <p className="mt-1 text-xs text-amber-600">Maximum number of assets reached.</p>}
           </div>

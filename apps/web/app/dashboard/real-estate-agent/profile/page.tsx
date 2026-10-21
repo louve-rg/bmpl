@@ -121,7 +121,7 @@ function PhotoManager({ profile, onChanged }: { profile: AgentProfile; onChanged
           accept="image/png,image/jpeg,image/webp"
           disabled={busy}
           onChange={(e) => upload(e.target.files?.[0] ?? null)}
-          className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue"
+          className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-blue-100 file:px-3 file:py-1.5 file:text-belize-blue"
         />
       </div>
     </Card>
