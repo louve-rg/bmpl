@@ -43,6 +43,34 @@ export const VISUAL_VIEWPORTS = {
 } as const;
 
 /**
+ * CONTRAST_VIEWPORTS -- a DIFFERENT, nine-width set, deliberately not the
+ * same six above. Two legitimate sets exist for two different questions,
+ * found live (2026-10-21) only after a CI-gating contrast check was
+ * widened against a wrong assumption that "the owner's widths" and "the
+ * breakpoint widths" were the same list:
+ *
+ * - VISUAL_VIEWPORTS (above) answers "does the layout break at a Tailwind
+ *   breakpoint" -- six widths, god's ruling 2026-10-16 Phase 2, this file.
+ * - CONTRAST_VIEWPORTS answers "is this readable at a real device width" --
+ *   the owner's required verification widths, recorded only in
+ *   hive/agents/bmpl-qa-mtmcz0m1/gate-4-2026-10-16/EDWARD-SIX-DEFECTS.md and
+ *   that agent's own memory ("all 8 REQUIRED viewports"), nowhere in this
+ *   repo until now. 390/430/834 are real device widths (iPhone/iPad), not
+ *   breakpoints -- 640 is a breakpoint with no corresponding device, which
+ *   is why the two sets differ instead of one containing the other.
+ *
+ * The union of both (320/375/390/430/640/768/834/1024/1440, nine) is what
+ * the contrast sweep actually uses, so every element gets both questions
+ * answered in one pass rather than running the sweep twice.
+ *
+ * PIXEL BASELINES STAY AT THE SIX above -- adding 390/430/834 there means
+ * generating new baseline images, which the owner ruled must never be
+ * blindly approved. That is separate, reviewed work, not a side effect of
+ * widening the contrast check.
+ */
+export const CONTRAST_VIEWPORTS = [320, 375, 390, 430, 640, 768, 834, 1024, 1440] as const;
+
+/**
  * A single fixed instant, used by every visual spec that renders a relative
  * time ("2 minutes ago") or today's date. Deliberately a real, memorable,
  * documented value rather than `new Date(0)` — a baseline reviewer should be

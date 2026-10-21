@@ -22,6 +22,16 @@ export const VISUAL_VIEWPORTS = {
   desktop: { width: 1440, height: 900 },
 } as const;
 
+// CONTRAST_VIEWPORTS -- a different, nine-width set, NOT the same as the
+// six above. See apps/web/e2e/support/visual.ts for the full rationale:
+// VISUAL_VIEWPORTS answers "does the layout break at a Tailwind
+// breakpoint"; this answers "is this readable at a real device width" --
+// the owner's required verification widths, recorded only in
+// hive/agents/bmpl-qa-mtmcz0m1/gate-4-2026-10-16/EDWARD-SIX-DEFECTS.md and
+// that agent's memory until now, nowhere in this repo. Kept identical to
+// web's copy by hand, same convention as the rest of this file.
+export const CONTRAST_VIEWPORTS = [320, 375, 390, 430, 640, 768, 834, 1024, 1440] as const;
+
 export const FROZEN_NOW_ISO = '2026-01-15T12:00:00.000Z';
 
 export async function freezeClock(page: Page, isoTime: string = FROZEN_NOW_ISO): Promise<void> {
