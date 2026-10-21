@@ -201,8 +201,18 @@ export function StickyActionBar({
   children: ReactNode;
 }) {
   return (
+    // Fully opaque, no backdrop-blur -- this bar's own call sites rely on it
+    // being a LITERAL opaque surface regardless of theme (see e.g.
+    // dashboard/driver/shipping/[id]/page.tsx's comment on this component).
+    // It previously painted at /95 with backdrop-blur: on a /dashboard glass
+    // route there is no opaque ancestor between this bar and .bml-mural
+    // (#0a1526), so the 5% gap let the dark mural bleed through -- confirmed
+    // real, not hypothetical, by computed style: text-red-600 on the
+    // resulting rgb(242,242,242)-ish composite measured 4.31:1, below 4.5.
+    // --bmpl-oncolor-light-bg is documented opaque-by-construction; using it
+    // at less than full opacity was the bug.
     <div
-      className={`${sticky ? 'sticky' : 'fixed inset-x-0'} isolate z-30 bottom-0 border-t border-[color:var(--bmpl-oncolor-light-border)] bg-[color:var(--bmpl-oncolor-light-bg)]/95 px-3 pt-3 pb-[max(0.75rem,var(--bmpl-safe-bottom,0px))] backdrop-blur ${className}`}
+      className={`${sticky ? 'sticky' : 'fixed inset-x-0'} isolate z-30 bottom-0 border-t border-[color:var(--bmpl-oncolor-light-border)] bg-[color:var(--bmpl-oncolor-light-bg)] px-3 pt-3 pb-[max(0.75rem,var(--bmpl-safe-bottom,0px))] ${className}`}
       style={{ '--bmpl-safe-bottom': 'env(safe-area-inset-bottom)' } as CSSProperties}
     >
       {children}

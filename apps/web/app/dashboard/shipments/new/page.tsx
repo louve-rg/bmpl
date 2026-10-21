@@ -421,7 +421,7 @@ export default function NewShipmentPage() {
              the stacking-context floor and the iPhone safe-area padding --
              see components/ui.tsx for why both are the bar's job, not a
              one-off class here. */}
-      <StickyActionBar className="sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:pt-0 sm:pb-0 sm:backdrop-blur-none">
+      <StickyActionBar className="sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:pt-0 sm:pb-0">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           {quote?.available && (
             <span className="shrink-0 text-lg font-bold tabular-nums text-belize-navy sm:hidden">
