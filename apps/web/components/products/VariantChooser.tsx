@@ -94,7 +94,7 @@ export function VariantLineup({
                     className={`h-full w-full object-cover ${outOfStock ? 'opacity-60' : ''}`}
                   />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">
+                  <div className="flex h-full w-full items-center justify-center text-[10px] text-[color:var(--bmpl-text-muted-strong)]">
                     No image
                   </div>
                 )}

@@ -58,7 +58,7 @@ export function DeliveryStepper({
             </div>
             <span
               className={`pb-3 text-sm ${
-                current ? 'font-semibold text-belize-navy' : done ? 'text-slate-600' : 'text-slate-400'
+                current ? 'font-semibold text-belize-navy' : done ? 'text-slate-600' : 'text-[color:var(--bmpl-text-muted-strong)]'
               }`}
             >
               {step.label}
@@ -84,7 +84,7 @@ export function DeliveryEventLog({ timeline }: { timeline: DeliveryTimelineEvent
               <span className="font-medium text-slate-700">{t.toStatus.replace(/_/g, ' ')}</span>
               {t.actorRole ? <span> · {t.actorRole.toLowerCase()}</span> : null}
               <span> · {new Date(t.createdAt).toLocaleString()}</span>
-              {t.note ? <p className="text-slate-400">{t.note}</p> : null}
+              {t.note ? <p className="text-[color:var(--bmpl-text-muted-strong)]">{t.note}</p> : null}
             </li>
           ))}
       </ul>
@@ -117,7 +117,7 @@ export function DriverCard({ driver, vehicle }: { driver: DeliveryDriver | null;
               <span className="ml-2 font-normal text-slate-500">★ {driver.ratingAverage.toFixed(1)}</span>
             )}
             {driver.completedDeliveries != null && (
-              <span className="ml-2 font-normal text-slate-400">· {driver.completedDeliveries} deliveries</span>
+              <span className="ml-2 font-normal text-[color:var(--bmpl-text-muted-strong)]">· {driver.completedDeliveries} deliveries</span>
             )}
           </p>
         )}
@@ -301,7 +301,7 @@ export function DeliveryTracker({ deliveryId }: { deliveryId: string }) {
             >
               Contact support
             </a>
-            <span className="text-xs text-slate-400">for help with this delivery</span>
+            <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">for help with this delivery</span>
           </div>
         </div>
       )}

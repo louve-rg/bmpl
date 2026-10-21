@@ -283,12 +283,12 @@ function ExpandedDetail({ earning: e }: { earning: Earning }) {
             {detail.snapshot.driverFlatMinor != null && (
               <Row label="Flat component">{money(detail.snapshot.driverFlatMinor, e.currency)}</Row>
             )}
-            <p className="pt-2 text-xs text-slate-400">
+            <p className="pt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">
               Driver-earning rates are configurable platform fee rates set by BML.
             </p>
           </dl>
         ) : (
-          <p className="text-sm text-slate-400">No rate snapshot available for this earning.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No rate snapshot available for this earning.</p>
         )}
       </div>
     </div>

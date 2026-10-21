@@ -280,7 +280,7 @@ export default function NotificationsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="mb-1 flex flex-wrap items-center gap-2">
                       <CategoryChip category={n.category} />
-                      <span className="ml-auto shrink-0 text-xs text-slate-400">{relativeTime(n.createdAt)}</span>
+                      <span className="ml-auto shrink-0 text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(n.createdAt)}</span>
                     </div>
                     <p className={`text-sm ${n.read ? 'font-medium text-belize-navy' : 'font-semibold text-belize-navy'}`}>{n.title}</p>
                     {n.body && <p className="mt-0.5 text-sm text-slate-500">{n.body}</p>}

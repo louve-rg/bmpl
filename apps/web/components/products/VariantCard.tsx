@@ -89,7 +89,7 @@ export function VariantCard({
             }}
             role="switch"
             aria-checked={variant.isActive}
-            className={`inline-flex items-center gap-1.5 text-xs font-semibold ${variant.isActive ? 'text-emerald-600' : 'text-slate-400'}`}
+            className={`inline-flex items-center gap-1.5 text-xs font-semibold ${variant.isActive ? 'text-emerald-600' : 'text-[color:var(--bmpl-text-muted-strong)]'}`}
           >
             <span className={`relative h-4 w-7 rounded-full transition ${variant.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`}>
               <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition ${variant.isActive ? 'left-3.5' : 'left-0.5'}`} />
@@ -214,7 +214,7 @@ function FieldBlock({
         {status && <SaveState state={status} />}
       </div>
       {children}
-      {hint && !error && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
+      {hint && !error && <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">{hint}</p>}
       {error && <p className="mt-1 text-xs font-medium text-red-600">{error}</p>}
     </div>
   );

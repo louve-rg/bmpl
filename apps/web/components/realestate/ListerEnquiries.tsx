@@ -200,7 +200,7 @@ export function EnquiryThread({
           <Card className="space-y-2 p-5">
             <h2 className="text-base font-bold text-belize-navy">Message</h2>
             <p className="whitespace-pre-line text-sm text-slate-600">{enquiry.message}</p>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">
               {enquiry.enquirer.email}
               {enquiry.contactPhone ? ` · ${enquiry.contactPhone}` : ''}
             </p>
@@ -216,7 +216,7 @@ export function EnquiryThread({
                 <Button type="submit" size="sm" disabled={busy}>
                   {busy ? 'Sending…' : 'Send reply'}
                 </Button>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">
                   Replies post to the shared conversation — continue it in{' '}
                   <Link href="/dashboard/messages" className="font-medium text-belize-blue hover:underline">
                     messages

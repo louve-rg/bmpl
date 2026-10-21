@@ -90,7 +90,7 @@ export default function EnquiryDetailPage() {
             <p className="text-sm text-slate-600">Reference: {enquiry.listing.reference}</p>
             {enquiry.respondedAt && <p className="text-sm text-slate-600">Responded: {fmtDateTime(enquiry.respondedAt)}</p>}
             {enquiry.closedAt && <p className="text-sm text-slate-600">Closed: {fmtDateTime(enquiry.closedAt)}</p>}
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">
               Replies from the lister arrive in your{' '}
               <Link href="/dashboard/messages" className="font-medium text-belize-blue hover:underline">
                 messages

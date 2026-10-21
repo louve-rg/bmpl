@@ -142,7 +142,7 @@ function WalletDashboard() {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[12px] font-semibold text-belize-navy">{t.label}</p>
-                <p className="truncate text-[10px] text-slate-400">{t.sub}</p>
+                <p className="truncate text-[10px] text-slate-600">{t.sub}</p>
               </div>
               <span className={`shrink-0 text-[12px] font-bold ${t.positive ? 'text-emerald-600' : 'text-slate-700'}`}>{t.amount}</span>
             </div>

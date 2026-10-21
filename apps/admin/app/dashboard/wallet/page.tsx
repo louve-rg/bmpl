@@ -90,7 +90,7 @@ export default function AdminWalletPage() {
                 <tbody>
                   {txns.map((t) => (
                     <tr key={t.id} className="border-t border-slate-100 hover:bg-slate-50">
-                      <td className="px-4 py-3"><p className="font-medium text-belize-navy">{t.type.replace(/_/g, ' ')}</p><p className="text-xs text-slate-400">{t.reference}</p></td>
+                      <td className="px-4 py-3"><p className="font-medium text-belize-navy">{t.type.replace(/_/g, ' ')}</p><p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{t.reference}</p></td>
                       <td className="px-4 py-3 text-slate-600">
                         {t.entries.map((e, i) => (
                           <span key={i} className="mr-2 inline-block">{e.direction === 'DEBIT' ? '−' : '+'}{money(e.amountMinor)} {e.isCustomer ? 'customer' : e.accountType.replace(/_/g, ' ')}</span>
@@ -98,7 +98,7 @@ export default function AdminWalletPage() {
                       </td>
                       <td className="px-4 py-3"><StatusBadge status={t.status} /></td>
                       <td className="px-4 py-3"><StatusBadge status={t.balanced ? 'BALANCED' : 'UNBALANCED'} /></td>
-                      <td className="px-4 py-3 text-xs text-slate-400">{new Date(t.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-xs text-[color:var(--bmpl-text-muted-strong)]">{new Date(t.createdAt).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -179,7 +179,7 @@ function DriverDetailView({ driver: d, onChanged, canModerate }: { driver: Drive
         </InfoCard>
 
         <InfoCard title="Service areas" className="md:col-span-2">
-          {d.serviceAreas.length === 0 && <p className="text-sm text-slate-400">None</p>}
+          {d.serviceAreas.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">None</p>}
           <div className="flex flex-wrap gap-2">
             {d.serviceAreas.map((s) => (
               <Badge key={s.district} tone={s.isActive ? 'brand' : 'neutral'}>
@@ -195,7 +195,7 @@ function DriverDetailView({ driver: d, onChanged, canModerate }: { driver: Drive
         Vehicles ({d.vehicles.length})
       </h2>
       {d.vehicles.length === 0 ? (
-        <p className="text-sm text-slate-400">No vehicles on file.</p>
+        <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No vehicles on file.</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {d.vehicles.map((v) => (
@@ -205,7 +205,7 @@ function DriverDetailView({ driver: d, onChanged, canModerate }: { driver: Drive
       )}
 
       <InfoCard title="Recent activity" className="mt-6">
-        {d.recentActivity.length === 0 && <p className="text-sm text-slate-400">No recent activity.</p>}
+        {d.recentActivity.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No recent activity.</p>}
         <ol className="space-y-2">
           {d.recentActivity.map((a, i) => (
             <li key={i} className="text-sm text-slate-600">

@@ -150,7 +150,7 @@ export function StorefrontView({ store }: { store: Storefront }) {
                 {store.featuredProducts.map((p) => (
                   <div key={p.id} className="relative">
                     <Link href={`/products/${p.slug}`} className="group block rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md">
-                      <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
+                      <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-600">
                         {p.primaryImageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
@@ -163,7 +163,7 @@ export function StorefrontView({ store }: { store: Storefront }) {
                         {p.salePriceMinor != null ? (
                           <>
                             <span className="text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
-                            <span className="text-xs font-normal text-slate-400 line-through">{money(p.priceMinor)}</span>
+                            <span className="text-xs font-normal text-slate-600 line-through">{money(p.priceMinor)}</span>
                           </>
                         ) : (
                           money(p.priceMinor)

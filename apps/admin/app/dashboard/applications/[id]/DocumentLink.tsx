@@ -26,7 +26,7 @@ export function DocumentLink({ documentId, label }: { documentId: string; label:
       disabled={busy}
       className="flex items-center gap-2 rounded-bmpl-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-belize-blue transition hover:border-belize-light hover:bg-belize-blue/5 disabled:opacity-60"
     >
-      📎 {label} {busy && <span className="text-xs text-slate-400">opening…</span>}
+      📎 {label} {busy && <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">opening…</span>}
     </button>
   );
 }

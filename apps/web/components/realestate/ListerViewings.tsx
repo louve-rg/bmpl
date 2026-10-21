@@ -182,7 +182,7 @@ function TransitionForm({
           Cancel
         </Button>
       </div>
-      <p className="text-[11px] text-slate-400">Requested for {fmtDateTime(viewing.createdAt)}</p>
+      <p className="text-[11px] text-[color:var(--bmpl-text-muted-strong)]">Requested for {fmtDateTime(viewing.createdAt)}</p>
     </form>
   );
 }

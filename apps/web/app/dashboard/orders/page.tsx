@@ -60,12 +60,12 @@ export default function VendorOrdersPage() {
                 <tr key={o.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-3">
                     <Link href={`/dashboard/orders/${o.id}`} className="font-medium text-belize-blue hover:underline">{o.orderNumber}</Link>
-                    <div className="text-xs text-slate-400">{new Date(o.createdAt).toLocaleDateString()}</div>
+                    <div className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{new Date(o.createdAt).toLocaleDateString()}</div>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{o.customerName}</td>
                   <td className="px-4 py-3"><DeliveryBadge method={o.deliveryMethod} /></td>
                   <td className="px-4 py-3 text-slate-600">{o.deliveryFeeMinor != null ? money(o.deliveryFeeMinor) : '—'}</td>
-                  <td className="px-4 py-3">{o.deliveryStatus ? <StatusBadge status={o.deliveryStatus} /> : <span className="text-slate-400">—</span>}</td>
+                  <td className="px-4 py-3">{o.deliveryStatus ? <StatusBadge status={o.deliveryStatus} /> : <span className="text-[color:var(--bmpl-text-muted-strong)]">—</span>}</td>
                   <td className="px-4 py-3 text-slate-600">{o.itemCount}</td>
                   <td className="px-4 py-3 font-semibold text-belize-navy">{money(o.subtotalMinor)}</td>
                   <td className="px-4 py-3"><OrderStatusBadge status={o.status} /></td>

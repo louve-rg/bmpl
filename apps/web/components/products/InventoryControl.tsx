@@ -108,14 +108,14 @@ export function InventoryControl({
     <div>
       <div className="mb-1 flex items-center justify-between">
         <span className="bmpl-label mb-0">Inventory</span>
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">
           On hand: <span className="font-semibold text-belize-navy">{unlimited ? '∞' : current}</span>
           {!unlimited && reserved > 0 && <span className="ml-2">Reserved: {reserved}</span>}
         </span>
       </div>
 
       {unlimited ? (
-        <p className="text-xs text-slate-400">Unlimited stock — quantity tracking is off.</p>
+        <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">Unlimited stock — quantity tracking is off.</p>
       ) : hasLocations ? (
         <p className="text-xs text-slate-500">This product tracks stock per location — adjust it there.</p>
       ) : (
@@ -223,8 +223,8 @@ export function InventoryControl({
       {!unlimited && locOpen && (
         <div className="mt-2 space-y-2">
           {locErr && <p className="text-xs font-medium text-red-600">{locErr}</p>}
-          {locs === null && !locErr && <p className="text-xs text-slate-400">Loading locations…</p>}
-          {locs && locs.length <= 1 && <p className="text-xs text-slate-400">Only one location — nothing to split.</p>}
+          {locs === null && !locErr && <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">Loading locations…</p>}
+          {locs && locs.length <= 1 && <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">Only one location — nothing to split.</p>}
           {locs &&
             locs.length > 1 &&
             locs.map((loc) => (
@@ -283,7 +283,7 @@ function LocationRow({
           {loc.label}
           {loc.isPrimary && <Badge tone="neutral">Primary</Badge>}
         </span>
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">
           On hand: <span className="font-semibold text-belize-navy">{loc.quantity}</span>
           {loc.reserved > 0 && <span className="ml-2">Reserved: {loc.reserved}</span>}
         </span>

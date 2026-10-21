@@ -74,7 +74,7 @@ export default function NotificationPreferencesPage() {
       ) : (
         <Card className="overflow-hidden p-0">
           {/* header row */}
-          <div className="hidden grid-cols-[1fr_auto_auto_auto] items-center gap-4 border-b border-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 sm:grid">
+          <div className="hidden grid-cols-[1fr_auto_auto_auto] items-center gap-4 border-b border-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)] sm:grid">
             <span>Category</span>
             <ChannelHead>In-app</ChannelHead>
             <ChannelHead>Email</ChannelHead>

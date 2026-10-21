@@ -237,13 +237,13 @@ function DetailView({ detail: d, id, onChanged, perms }: { detail: DeliveryDetai
               </Row>
             </>
           ) : (
-            <p className="text-sm text-slate-400">No payment record.</p>
+            <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No payment record.</p>
           )}
         </InfoCard>
 
         <InfoCard title="Items">
           {d.items.length === 0 ? (
-            <p className="text-sm text-slate-400">No items.</p>
+            <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No items.</p>
           ) : (
             <ul className="space-y-1">
               {d.items.map((it, i) => (
@@ -267,7 +267,7 @@ function DetailView({ detail: d, id, onChanged, perms }: { detail: DeliveryDetai
             <Row label="Completed deliveries">{d.driver.completedDeliveries ?? 0}</Row>
           </>
         ) : (
-          <p className="text-sm text-slate-400">No driver assigned.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No driver assigned.</p>
         )}
         {d.currentDriverEligibility && !d.currentDriverEligibility.eligible && (
           <Alert tone="warning" title="Driver not currently eligible" className="mt-3">
@@ -302,13 +302,13 @@ function DetailView({ detail: d, id, onChanged, perms }: { detail: DeliveryDetai
             </div>
           </>
         ) : (
-          <p className="text-sm text-slate-400">No proof of delivery on file.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No proof of delivery on file.</p>
         )}
       </InfoCard>
 
       <InfoCard title="Timeline" className="mt-6">
         {d.timeline.length === 0 ? (
-          <p className="text-sm text-slate-400">No timeline events.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No timeline events.</p>
         ) : (
           <ol className="space-y-3">
             {d.timeline.map((t, i) => (
@@ -324,7 +324,7 @@ function DetailView({ detail: d, id, onChanged, perms }: { detail: DeliveryDetai
                   )}
                 </p>
                 {t.note && <p className="text-xs text-slate-600">{t.note}</p>}
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">
                   {t.actorRole ? `${t.actorRole} · ` : ''}
                   {new Date(t.createdAt).toLocaleString()}
                 </p>
@@ -336,7 +336,7 @@ function DetailView({ detail: d, id, onChanged, perms }: { detail: DeliveryDetai
 
       <InfoCard title="Assignment history" className="mt-6">
         {d.assignmentHistory.length === 0 ? (
-          <p className="text-sm text-slate-400">No assignment history.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No assignment history.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -661,7 +661,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
       <div className="w-full max-w-md rounded-bmpl-xl border border-slate-200 bg-white p-5 shadow-bmpl-lg">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-belize-navy">{title}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+          <button onClick={onClose} className="text-[color:var(--bmpl-text-muted-strong)] hover:text-slate-600" aria-label="Close">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" className="h-5 w-5">
               <path d="M6 6l12 12M18 6L6 18" />
             </svg>

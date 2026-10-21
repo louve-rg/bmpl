@@ -192,7 +192,7 @@ export function HubHoursEditor({ hubId, canManage }: { hubId: string; canManage:
               <div className="text-xs font-semibold text-slate-700">{label}</div>
               {!d ? (
                 <>
-                  <p className="mt-1 text-[11px] text-slate-400">Unconfigured</p>
+                  <p className="mt-1 text-[11px] text-[color:var(--bmpl-text-muted-strong)]">Unconfigured</p>
                   {canManage && (
                     <Button variant="outline" size="sm" className="mt-1 w-full text-xs" onClick={() => addDay(dayOfWeek)}>
                       Add hours
@@ -238,7 +238,7 @@ export function HubHoursEditor({ hubId, canManage }: { hubId: string; canManage:
         that date only.
       </p>
       {exceptions.length === 0 ? (
-        <p className="mt-2 text-xs text-slate-400">No exceptions configured.</p>
+        <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">No exceptions configured.</p>
       ) : (
         <ul className="mt-2 space-y-1">
           {exceptions.map((e) => (

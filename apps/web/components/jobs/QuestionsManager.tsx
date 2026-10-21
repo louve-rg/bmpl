@@ -76,7 +76,7 @@ export function QuestionsManager({ jobId, initial }: { jobId: string; initial: J
       {error && <Alert tone="error">{error}</Alert>}
 
       <div className="space-y-2">
-        {questions.length === 0 && <p className="text-sm text-slate-400">No screening questions yet.</p>}
+        {questions.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No screening questions yet.</p>}
         {questions.map((q) => (
           <div key={q.id} className="flex items-start justify-between gap-3 rounded-bmpl-md border border-slate-200 p-3">
             <div>

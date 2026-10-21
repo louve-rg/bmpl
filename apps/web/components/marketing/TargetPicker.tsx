@@ -77,7 +77,7 @@ export function TargetPicker({
   return (
     <div className="space-y-3">
       {value.length === 0 && (
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">
           No targets yet. Add at least one before submitting for review.
         </p>
       )}
@@ -126,7 +126,7 @@ export function TargetPicker({
       >
         + Add target
       </Button>
-      <p className="text-xs text-slate-400">Up to {MAX_PROMOTION_TARGETS} targets. Ownership is verified server-side.</p>
+      <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">Up to {MAX_PROMOTION_TARGETS} targets. Ownership is verified server-side.</p>
     </div>
   );
 }

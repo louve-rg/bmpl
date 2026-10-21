@@ -55,7 +55,7 @@ function FloatCard({ className, tone, icon, title, sub }: { className: string; t
       </span>
       <div>
         <p className="text-[11px] font-semibold text-belize-navy">{title}</p>
-        <p className="text-[10px] text-slate-400">{sub}</p>
+        <p className="text-[10px] text-slate-600">{sub}</p>
       </div>
     </div>
   );
@@ -114,7 +114,7 @@ function PhoneMock() {
         </div>
         {/* greeting */}
         <div className="px-5 pt-3">
-          <p className="text-[11px] text-slate-400">Good morning,</p>
+          <p className="text-[11px] text-slate-600">Good morning,</p>
           <p className="text-lg font-bold text-belize-navy">John 👋</p>
         </div>
         {/* quick actions */}
@@ -140,7 +140,7 @@ function PhoneMock() {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[10px] font-semibold text-belize-navy">Order #BML-7821</p>
-                <p className="text-[8px] text-slate-400">Today · 9:41 AM</p>
+                <p className="text-[8px] text-slate-600">Today · 9:41 AM</p>
               </div>
               <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[8px] font-semibold text-emerald-700">Delivered</span>
             </div>
@@ -150,7 +150,7 @@ function PhoneMock() {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[10px] font-semibold text-belize-navy">Wallet top-up</p>
-                <p className="text-[8px] text-slate-400">Yesterday</p>
+                <p className="text-[8px] text-slate-600">Yesterday</p>
               </div>
               <span className="text-[10px] font-bold text-emerald-600">+BZ$500</span>
             </div>

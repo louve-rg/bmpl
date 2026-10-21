@@ -116,7 +116,7 @@ export default function DispatchPage() {
         <h2 className="text-sm font-semibold text-slate-900">Assignment mode</h2>
         {modeErr && <Alert tone="warning" className="mt-2">{modeErr}</Alert>}
         {autoDispatch == null ? (
-          <p className="mt-1 text-sm text-slate-400">Loading…</p>
+          <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted-strong)]">Loading…</p>
         ) : (
           <>
             <div className="mt-3 flex flex-wrap gap-2">

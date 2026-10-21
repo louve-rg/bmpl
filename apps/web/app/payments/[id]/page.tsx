@@ -59,11 +59,11 @@ export default function PaymentDetailPage() {
         {state === 'loading' && (
           <div className="mt-8 flex flex-col items-center gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-14 text-center">
             <Spinner />
-            <p className="text-sm text-slate-400">Loading…</p>
+            <p className="text-sm text-slate-600">Loading…</p>
           </div>
         )}
         {state === 'notfound' && (
-          <div className="mt-8 rounded-bmpl-xl border border-slate-200 bg-white p-10 text-center text-slate-400">Payment not found.</div>
+          <div className="mt-8 rounded-bmpl-xl border border-slate-200 bg-white p-10 text-center text-slate-600">Payment not found.</div>
         )}
         {state === 'error' && <Alert tone="error" title="We couldn’t load this payment." className="mt-8" />}
 
@@ -122,7 +122,7 @@ export default function PaymentDetailPage() {
               <Card className="p-4">
                 <h2 className="bmpl-label">Wallet hold</h2>
                 {p.holds.length === 0 ? (
-                  <p className="mt-2 text-sm text-slate-400">No hold.</p>
+                  <p className="mt-2 text-sm text-slate-600">No hold.</p>
                 ) : (
                   p.holds.map((h) => (
                     <div key={h.id} className="mt-2 flex items-center justify-between text-sm">
@@ -131,7 +131,7 @@ export default function PaymentDetailPage() {
                     </div>
                   ))
                 )}
-                <p className="mt-2 text-xs text-slate-400">A hold reserves your intent to pay. It does not move money.</p>
+                <p className="mt-2 text-xs text-slate-600">A hold reserves your intent to pay. It does not move money.</p>
               </Card>
             </div>
 
@@ -143,7 +143,7 @@ export default function PaymentDetailPage() {
                     <span className="text-slate-600">
                       {e.type === 'STATE_CHANGED' ? `Status: ${e.fromStatus} → ${e.toStatus}` : e.type.replace(/_/g, ' ').toLowerCase()}
                     </span>
-                    <span className="text-xs text-slate-400">{new Date(e.createdAt).toLocaleString()}</span>
+                    <span className="text-xs text-slate-600">{new Date(e.createdAt).toLocaleString()}</span>
                   </li>
                 ))}
               </ul>

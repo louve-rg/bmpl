@@ -83,7 +83,7 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
         </InfoCard>
 
         <InfoCard title="Locations">
-          {v.locations.length === 0 && <p className="text-sm text-slate-400">None</p>}
+          {v.locations.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">None</p>}
           {v.locations.map((l) => (
             <p key={l.id} className="text-sm text-slate-600">
               <span className="font-medium">{l.label}</span>
@@ -93,7 +93,7 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
         </InfoCard>
 
         <InfoCard title="Opening hours">
-          {v.openingHours.length === 0 && <p className="text-sm text-slate-400">Not set</p>}
+          {v.openingHours.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">Not set</p>}
           {v.openingHours.map((h) => (
             <p key={h.dayOfWeek} className="text-sm text-slate-600">
               {DAYS[h.dayOfWeek]}: {h.isClosed ? 'Closed' : `${h.openTime}–${h.closeTime}`}
@@ -109,7 +109,7 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
               <li>Vacation mode: {String((v.settings as Record<string, unknown>).vacationMode)}</li>
             </ul>
           ) : (
-            <p className="text-sm text-slate-400">Defaults</p>
+            <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">Defaults</p>
           )}
         </InfoCard>
       </div>

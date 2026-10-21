@@ -323,7 +323,7 @@ function ImagesSection({ store, onDone, onError }: SectionProps) {
         <ImagePicker label="Logo" url={p.logoUrl} onPick={(file) => upload('logo', file)} />
         <ImagePicker label="Banner" url={p.bannerUrl} onPick={(file) => upload('banner', file)} wide />
       </div>
-      <p className="mt-3 text-xs text-slate-400">JPEG, PNG, or WebP up to 8&nbsp;MB.</p>
+      <p className="mt-3 text-xs text-[color:var(--bmpl-text-muted-strong)]">JPEG, PNG, or WebP up to 8&nbsp;MB.</p>
     </Card>
   );
 }
@@ -470,7 +470,7 @@ function LocationsSection({ store, onDone, onError }: SectionProps) {
             </button>
           </li>
         ))}
-        {locations.length === 0 && <li className="text-sm text-slate-400">No locations yet.</li>}
+        {locations.length === 0 && <li className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No locations yet.</li>}
       </ul>
       <form
         className="grid gap-3 md:grid-cols-2"
@@ -578,7 +578,7 @@ function HoursSection({ store, onDone, onError }: SectionProps) {
                   onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, openTime: e.target.value } : x)))}
                   className="bmpl-input w-auto px-2 py-1"
                 />
-                <span className="text-slate-400">–</span>
+                <span className="text-[color:var(--bmpl-text-muted-strong)]">–</span>
                 <input
                   type="time"
                   value={r.closeTime}

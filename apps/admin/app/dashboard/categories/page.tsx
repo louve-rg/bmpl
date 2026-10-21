@@ -285,7 +285,7 @@ export default function CategoriesPage() {
                         {cat.name}
                       </span>
                       {cat.childCount > 0 && (
-                        <span className="ml-2 text-xs text-slate-400">({cat.childCount})</span>
+                        <span className="ml-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">({cat.childCount})</span>
                       )}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-500">{cat.slug}</td>

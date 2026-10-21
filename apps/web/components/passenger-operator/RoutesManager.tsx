@@ -184,7 +184,7 @@ function StopsFields({ stops, onChange }: { stops: StopDraft[]; onChange: (s: St
     <div className="space-y-2">
       {stops.map((s, i) => (
         <div key={i} className="flex flex-wrap items-end gap-2">
-          <span className="pb-2 text-xs text-slate-400">{i + 1}.</span>
+          <span className="pb-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">{i + 1}.</span>
           <Select
             aria-label={`Stop ${i + 1} district`}
             className="w-36"

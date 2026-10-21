@@ -40,7 +40,7 @@ export default function PaymentsPage() {
         {state === 'loading' && (
           <div className="mt-8 flex flex-col items-center gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-14 text-center">
             <Spinner />
-            <p className="text-sm text-slate-400">Loading…</p>
+            <p className="text-sm text-slate-600">Loading…</p>
           </div>
         )}
         {state === 'error' && <Alert tone="error" title="We couldn’t load your payments." className="mt-8" />}

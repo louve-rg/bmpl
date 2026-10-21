@@ -363,7 +363,7 @@ function ConfigTile({ label, value, sub }: { label: string; value: string; sub?:
     <div className="rounded-bmpl-lg border border-slate-200 bg-slate-50 p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-bold text-belize-navy">{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-slate-400">{sub}</p>}
+      {sub && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">{sub}</p>}
     </div>
   );
 }
@@ -634,7 +634,7 @@ function AdminSettlementDetailView({ id }: { id: string }) {
       <div className="rounded-bmpl-lg border border-slate-200 bg-white p-4">
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Driver earnings</h3>
         {detail.driverEarnings.length === 0 ? (
-          <p className="text-sm text-slate-400">No driver earnings for this settlement.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No driver earnings for this settlement.</p>
         ) : (
           <ul className="space-y-2">
             {detail.driverEarnings.map((e) => (
@@ -671,7 +671,7 @@ function AdminSettlementDetailView({ id }: { id: string }) {
             )}
           </dl>
         ) : (
-          <p className="text-sm text-slate-400">No snapshot recorded.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No snapshot recorded.</p>
         )}
       </div>
     </div>

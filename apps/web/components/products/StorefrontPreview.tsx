@@ -132,7 +132,7 @@ export function StorefrontPreview({
   }
 
   if (images.filter((i) => i.url).length === 0 && !hasVariants) {
-    return <p className="text-sm text-slate-400">Add images to preview the storefront gallery.</p>;
+    return <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">Add images to preview the storefront gallery.</p>;
   }
 
   // Same shared display model as the live product page: name → option values → family.
@@ -187,7 +187,7 @@ export function StorefrontPreview({
         </div>
       )}
 
-      <p className="mt-3 text-xs text-slate-400">
+      <p className="mt-3 text-xs text-[color:var(--bmpl-text-muted-strong)]">
         Preview only — this mirrors what buyers see. Out-of-stock variants are hidden.
       </p>
     </div>

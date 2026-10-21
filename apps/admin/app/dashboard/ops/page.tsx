@@ -392,7 +392,7 @@ function SettingsSection({ initial }: { initial: PlatformSetting }) {
             <Button size="sm" onClick={submit} disabled={busy || readOnly || !dirty}>
               {busy ? 'Saving…' : 'Save'}
             </Button>
-            {!readOnly && !dirty && !saved && <span className="text-xs text-slate-400">No changes to save.</span>}
+            {!readOnly && !dirty && !saved && <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">No changes to save.</span>}
           </div>
         </fieldset>
       </Card>

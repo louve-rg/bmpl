@@ -66,7 +66,7 @@ export function PlacementPicker({
                   onChange={(e) => setCategory(placement, e.target.value)}
                   className="text-xs"
                 />
-                <p className="mt-1 text-xs text-slate-400">
+                <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
                   Scope this placement to a single category by its ID.
                 </p>
               </div>

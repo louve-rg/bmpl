@@ -73,7 +73,7 @@ export default function AdminPaymentsPage() {
                       {p.resourceType === 'SHIPMENT' ? 'Shipment' : 'Order'} {p.resourceRef ?? '—'}
                     </p>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{p.customer}<div className="text-xs text-slate-400">{p.customerEmail}</div></td>
+                  <td className="px-4 py-3 text-slate-600">{p.customer}<div className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{p.customerEmail}</div></td>
                   <td className="px-4 py-3 text-slate-600">{p.methodType === 'WALLET' ? 'Wallet' : p.methodType}</td>
                   <td className="px-4 py-3 font-semibold text-belize-navy">{money(p.amountMinor)}</td>
                   <td className="px-4 py-3 text-slate-600">{p.holds[0]?.status ?? '—'}</td>

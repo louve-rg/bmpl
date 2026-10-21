@@ -18,11 +18,11 @@ export function VariantBuilder({ view, productId, reload, onError }: Props) {
   return (
     <section className="rounded-bmpl-md border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
       <h3 className="bmpl-label mb-1">Create variants</h3>
-      <p className="mb-3 text-xs text-slate-400">
+      <p className="mb-3 text-xs text-[color:var(--bmpl-text-muted-strong)]">
         Combine existing option values into variants. To add a new value (e.g. a new colour), use the Options section above.
       </p>
       <GenerateAll productId={productId} reload={reload} onError={onError} />
-      <div className="my-3 flex items-center gap-3 text-xs text-slate-400">
+      <div className="my-3 flex items-center gap-3 text-xs text-[color:var(--bmpl-text-muted-strong)]">
         <span className="h-px flex-1 bg-slate-200" />
         or add one manually
         <span className="h-px flex-1 bg-slate-200" />

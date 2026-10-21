@@ -48,7 +48,7 @@ export function ScheduleManager({
       {error && <Alert tone="error">{error}</Alert>}
 
       {campaign.schedules.length === 0 ? (
-        <p className="text-sm text-slate-400">No schedules yet.</p>
+        <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No schedules yet.</p>
       ) : (
         <ul className="space-y-2">
           {campaign.schedules.map((s) => (

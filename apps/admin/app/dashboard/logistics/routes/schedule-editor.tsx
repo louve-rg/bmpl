@@ -177,7 +177,7 @@ export function RouteScheduleEditor({ routeId, canManage }: { routeId: string; c
       <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Date-specific exceptions</h3>
       <p className="mt-1 text-xs text-slate-500">A known future closure, a carrier-observed holiday, a one-off reduced run — overrides the weekly pattern for that date only.</p>
       {exceptions.length === 0 ? (
-        <p className="mt-2 text-xs text-slate-400">No exceptions configured.</p>
+        <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">No exceptions configured.</p>
       ) : (
         <ul className="mt-2 space-y-1">
           {exceptions.map((e) => (

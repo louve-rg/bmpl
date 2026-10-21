@@ -114,7 +114,7 @@ export function AssetManager({
       )}
 
       {assets.length === 0 ? (
-        <p className="text-sm text-slate-400">No assets yet.</p>
+        <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No assets yet.</p>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {assets.map((a) => (

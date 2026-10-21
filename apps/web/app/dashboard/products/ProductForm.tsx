@@ -170,7 +170,7 @@ export function ProductForm({ initial }: { initial?: ProductValues }) {
           {isEdit ? 'Save changes' : 'Next'}
         </Button>
         {!isEdit && (
-          <p className="text-xs text-slate-400">You'll add options, variants, images, and inventory next.</p>
+          <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">You'll add options, variants, images, and inventory next.</p>
         )}
       </div>
     </form>

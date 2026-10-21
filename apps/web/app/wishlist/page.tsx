@@ -155,7 +155,7 @@ export default function WishlistPage() {
         {state === 'loading' && (
           <div className="mt-8 flex flex-col items-center gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-14 text-center">
             <Spinner />
-            <p className="text-sm text-slate-400">Loading your Wishlist…</p>
+            <p className="text-sm text-slate-600">Loading your Wishlist…</p>
           </div>
         )}
 
@@ -286,7 +286,7 @@ function WishlistCard({
   if (m.unavailable) {
     return (
       <div className="flex flex-col rounded-bmpl-lg border border-slate-200 bg-white p-4 opacity-70 shadow-bmpl-sm">
-        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
+        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-600">
           {m.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={m.imageUrl} alt={m.title} className="h-full w-full object-cover grayscale" />
@@ -296,7 +296,7 @@ function WishlistCard({
         </div>
         <p className="mt-3 font-semibold text-belize-navy">{m.title}</p>
         {m.secondary.length > 0 && <p className="text-xs text-slate-500">{secondaryLine(m.secondary)}</p>}
-        {m.family && <p className="text-xs text-slate-400">{m.family}</p>}
+        {m.family && <p className="text-xs text-slate-600">{m.family}</p>}
         <Badge tone="neutral" className="mt-1.5 self-start">Unavailable</Badge>
         <button
           type="button"
@@ -315,7 +315,7 @@ function WishlistCard({
   return (
     <div className="flex flex-col rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:border-belize-light/60 hover:shadow-bmpl-md">
       <Link href={`/products/${p.slug}`} className="group block">
-        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
+        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-600">
           {m.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={m.imageUrl} alt={m.title} className="h-full w-full object-cover" />
@@ -327,21 +327,21 @@ function WishlistCard({
         <p className="mt-3 font-semibold text-belize-navy group-hover:text-belize-blue">{m.title}</p>
       </Link>
       {m.secondary.length > 0 && <p className="text-xs text-slate-500">{secondaryLine(m.secondary)}</p>}
-      {m.family && <p className="text-xs text-slate-400">{m.family}</p>}
+      {m.family && <p className="text-xs text-slate-600">{m.family}</p>}
 
-      <p className="mt-0.5 text-xs text-slate-400">
+      <p className="mt-0.5 text-xs text-slate-600">
         <Link href={`/store/${p.vendor.slug}`} className="hover:text-belize-blue hover:underline">
           {p.vendor.businessName}
         </Link>
       </p>
 
-      {item.variant?.sku && <p className="mt-0.5 text-xs text-slate-400">SKU: {item.variant.sku}</p>}
+      {item.variant?.sku && <p className="mt-0.5 text-xs text-slate-600">SKU: {item.variant.sku}</p>}
 
       <p className="mt-1.5 text-sm">
         {m.salePriceMinor != null ? (
           <>
             <span className="font-bold text-belize-blue">{money(m.salePriceMinor)}</span>{' '}
-            <span className="text-slate-400 line-through">{money(m.priceMinor)}</span>
+            <span className="text-slate-600 line-through">{money(m.priceMinor)}</span>
           </>
         ) : (
           <span className="font-bold text-belize-navy">{money(m.priceMinor)}</span>
@@ -386,7 +386,7 @@ function MiniCard({ item }: { item: ViewedItem }) {
       href={`/products/${p.slug}`}
       className="group w-40 shrink-0 snap-start rounded-bmpl-lg border border-slate-200 bg-white p-3 shadow-bmpl-sm transition hover:border-belize-light/60 hover:shadow-bmpl-md"
     >
-      <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-md bg-slate-100 text-xs text-slate-400">
+      <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-md bg-slate-100 text-xs text-slate-600">
         {p.primaryImageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full object-cover" />
@@ -399,7 +399,7 @@ function MiniCard({ item }: { item: ViewedItem }) {
         {p.salePriceMinor != null ? (
           <>
             <span className="text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
-            <span className="text-xs font-normal text-slate-400 line-through">{money(p.priceMinor)}</span>
+            <span className="text-xs font-normal text-slate-600 line-through">{money(p.priceMinor)}</span>
           </>
         ) : (
           money(p.priceMinor)

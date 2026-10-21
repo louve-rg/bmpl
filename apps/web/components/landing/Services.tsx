@@ -149,8 +149,8 @@ function MarketplaceCard() {
       <div className="relative mt-6 rounded-2xl border border-white/10 bg-white p-3.5 shadow-2xl sm:p-4" aria-hidden>
         <div className="flex items-center gap-2">
           <div className="flex flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-            <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4 text-slate-400"><circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" /><path d="m14 14 3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-            <span className="text-xs text-slate-400">Search products, stores…</span>
+            <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4 text-slate-600"><circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" /><path d="m14 14 3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+            <span className="text-xs text-slate-600">Search products, stores…</span>
           </div>
           <span className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500">
             <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4"><path d="M5 7h14l-1.2 8.5a2 2 0 0 1-2 1.7H8.2a2 2 0 0 1-2-1.7L5 7Z" stroke="currentColor" strokeWidth="1.6" /><path d="M8.5 7a3.5 3.5 0 1 1 7 0" stroke="currentColor" strokeWidth="1.6" /></svg>
@@ -178,13 +178,13 @@ function MarketplaceCard() {
           {PRODUCTS.map((p) => (
             <div key={p.name} className="rounded-xl border border-slate-100 bg-white p-2 transition duration-300 group-hover:border-slate-200">
               <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-slate-100 to-slate-200/70">
-                <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7 text-slate-400 transition-transform duration-500 group-hover:scale-110" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{p.glyph}</svg>
-                <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-white/90 text-slate-400 shadow-sm">
+                <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7 text-slate-600 transition-transform duration-500 group-hover:scale-110" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{p.glyph}</svg>
+                <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm">
                   <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3"><path d="M12 20s-6.5-4.3-8.5-8A4 4 0 0 1 12 6.5 4 4 0 0 1 20.5 12c-2 3.7-8.5 8-8.5 8Z" stroke="currentColor" strokeWidth="1.8" /></svg>
                 </span>
               </div>
               <p className="mt-1.5 truncate text-[11px] font-semibold text-belize-navy">{p.name}</p>
-              <p className="truncate text-[9px] text-slate-400">{p.vendor}</p>
+              <p className="truncate text-[9px] text-slate-600">{p.vendor}</p>
               <p className="mt-0.5 text-[11px] font-bold text-belize-blue">{p.price}</p>
             </div>
           ))}
@@ -317,7 +317,7 @@ function BelizeConnectCard() {
               <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${j.tone}`}>{j.init}</span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[12px] font-semibold text-belize-navy">{j.title}</p>
-                <p className="truncate text-[10px] text-slate-400">{j.meta}</p>
+                <p className="truncate text-[10px] text-slate-600">{j.meta}</p>
               </div>
               <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{j.tag}</span>
             </div>
@@ -405,7 +405,7 @@ function MarketingCard() {
         <div className="mt-3 grid grid-cols-3 gap-2">
           {[['Reach', '28.6K', '+9%'], ['Clicks', '3.2K', '+15%'], ['Leads', '620', '+6%']].map(([k, v, d]) => (
             <div key={k} className="rounded-lg bg-slate-50 px-2 py-1.5">
-              <p className="text-[9px] font-medium uppercase tracking-wide text-slate-400">{k}</p>
+              <p className="text-[9px] font-medium uppercase tracking-wide text-slate-600">{k}</p>
               <p className="text-[13px] font-bold text-belize-navy">{v}</p>
               <p className="text-[9px] font-semibold text-emerald-600">{d}</p>
             </div>
@@ -485,7 +485,7 @@ function WalletCard() {
               <div key={label} className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-1.5">
                 <div className="min-w-0">
                   <p className="truncate text-[11px] font-medium text-belize-navy">{label}</p>
-                  <p className="text-[9px] text-slate-400">{date}</p>
+                  <p className="text-[9px] text-slate-600">{date}</p>
                 </div>
                 <span className={`shrink-0 text-[11px] font-bold ${tone}`}>{amt}</span>
               </div>

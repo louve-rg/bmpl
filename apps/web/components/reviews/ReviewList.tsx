@@ -164,7 +164,7 @@ function ReviewRow({ review }: { review: Review }) {
         />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-belize-navy">{review.reviewer.name}</p>
-          <span className="text-xs text-slate-400">{relativeTime(review.createdAt)}</span>
+          <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(review.createdAt)}</span>
         </div>
       </div>
 
@@ -196,7 +196,7 @@ function ReviewRow({ review }: { review: Review }) {
         <div className="mt-3 rounded-bmpl-md border-l-2 border-blue-400 bg-blue-50 p-3">
           <p className="bmpl-eyebrow mb-1">Response from the seller</p>
           <p className="whitespace-pre-wrap text-sm text-slate-600">{review.response.body}</p>
-          <p className="mt-1 text-xs text-slate-400">{relativeTime(review.response.createdAt)}</p>
+          <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(review.response.createdAt)}</p>
         </div>
       )}
 
@@ -222,7 +222,7 @@ function ReviewRow({ review }: { review: Review }) {
           <button
             type="button"
             onClick={() => setReporting((v) => !v)}
-            className="text-xs font-medium text-slate-400 hover:text-slate-600 hover:underline"
+            className="text-xs font-medium text-[color:var(--bmpl-text-muted-strong)] hover:text-slate-600 hover:underline"
           >
             {reporting ? 'Close' : 'Report'}
           </button>

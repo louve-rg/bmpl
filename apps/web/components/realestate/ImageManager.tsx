@@ -97,7 +97,7 @@ export function ImageManager({
       </div>
 
       {images.length === 0 ? (
-        <p className="text-sm text-slate-400">No photos yet.</p>
+        <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No photos yet.</p>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {images.map((img, i) => (

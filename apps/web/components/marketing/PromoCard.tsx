@@ -52,7 +52,7 @@ export function PromoCard({
 
   const body = (
     <>
-      <div className="relative flex aspect-[16/10] items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
+      <div className="relative flex aspect-[16/10] items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-600">
         {asset?.url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={asset.url} alt={asset.altText ?? card.title} className="h-full w-full max-w-full object-cover" />
@@ -66,7 +66,7 @@ export function PromoCard({
       <p className="mt-3 line-clamp-2 font-semibold text-belize-navy group-hover:text-belize-blue">{card.title}</p>
       {card.subtitle && <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{card.subtitle}</p>}
       {target?.label && target.targetType !== 'PRODUCT' && target.targetType !== 'PROPERTY' && (
-        <p className="mt-1 text-xs text-slate-400">{target.label}</p>
+        <p className="mt-1 text-xs text-slate-600">{target.label}</p>
       )}
       {price && <p className="mt-1.5 text-sm font-bold text-belize-navy">{price}</p>}
     </>

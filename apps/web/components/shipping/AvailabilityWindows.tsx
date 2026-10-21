@@ -71,7 +71,7 @@ function RoleEditor({ label, rows, onChange }: { label: string; rows: Row[]; onC
               onChange={(e) => onChange(rows.map((x, j) => (j === i ? { ...x, startTime: e.target.value } : x)))}
               className="bmpl-input min-h-[44px] w-auto px-2 py-1"
             />
-            <span className="text-slate-400">–</span>
+            <span className="text-[color:var(--bmpl-text-muted-strong)]">–</span>
             <input
               type="time"
               aria-label={`${label} end time`}

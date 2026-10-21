@@ -106,7 +106,7 @@ export default function CartPage() {
         {state === 'loading' && (
           <div className="mt-8 flex flex-col items-center gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-14 text-center">
             <Spinner />
-            <p className="text-sm text-slate-400">Loading your cart…</p>
+            <p className="text-sm text-slate-600">Loading your cart…</p>
           </div>
         )}
 
@@ -195,7 +195,7 @@ export default function CartPage() {
                     </dd>
                   </div>
                 </dl>
-                <p className="mt-3 text-xs text-slate-400">Taxes, delivery, and fees are calculated at checkout.</p>
+                <p className="mt-3 text-xs text-slate-600">Taxes, delivery, and fees are calculated at checkout.</p>
                 {cart.hasUnavailableItems ? (
                   <Button disabled title="Resolve the unavailable items before checking out." className="mt-4 w-full">
                     Resolve items to checkout
@@ -255,11 +255,11 @@ function CartRow({
           {disp.primary || item.title}
         </Link>
         {disp.secondary.length > 0 && <p className="text-xs text-slate-500">{secondaryLine(disp.secondary)}</p>}
-        {disp.family && <p className="text-xs text-slate-400">{disp.family}</p>}
+        {disp.family && <p className="text-xs text-slate-600">{disp.family}</p>}
         <p className="mt-1 text-sm">
           <span className="font-semibold text-belize-navy">{money(item.unitPriceMinor)}</span>
           {item.priceChanged && (
-            <span className="ml-2 text-xs text-slate-400 line-through">{money(item.unitPriceMinorSnapshot)}</span>
+            <span className="ml-2 text-xs text-slate-600 line-through">{money(item.unitPriceMinorSnapshot)}</span>
           )}
           {item.priceChanged && <span className="ml-1 text-xs font-medium text-belize-blue">price updated</span>}
         </p>

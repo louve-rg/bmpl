@@ -99,7 +99,7 @@ function AssetManager({ agency, onChanged }: { agency: AgencyProfile; onChanged:
               // eslint-disable-next-line @next/next/no-img-element
               <img src={agency.logoUrl} alt="Logo" className="h-14 w-14 rounded-bmpl-md object-cover" />
             ) : (
-              <span className="flex h-14 w-14 items-center justify-center rounded-bmpl-md bg-slate-100 text-xs text-slate-400">None</span>
+              <span className="flex h-14 w-14 items-center justify-center rounded-bmpl-md bg-slate-100 text-xs text-slate-600">None</span>
             )}
             <input
               type="file"
@@ -117,7 +117,7 @@ function AssetManager({ agency, onChanged }: { agency: AgencyProfile; onChanged:
               // eslint-disable-next-line @next/next/no-img-element
               <img src={agency.bannerUrl} alt="Banner" className="h-14 w-24 rounded-bmpl-md object-cover" />
             ) : (
-              <span className="flex h-14 w-24 items-center justify-center rounded-bmpl-md bg-slate-100 text-xs text-slate-400">None</span>
+              <span className="flex h-14 w-24 items-center justify-center rounded-bmpl-md bg-slate-100 text-xs text-slate-600">None</span>
             )}
             <input
               type="file"

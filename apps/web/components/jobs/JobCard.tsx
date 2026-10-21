@@ -57,7 +57,7 @@ export function JobCard({ job, showSave = true }: { job: JobCardType; showSave?:
         {salary ? (
           <p className="text-sm font-semibold text-belize-navy">{salary}</p>
         ) : (
-          <span className="text-xs text-slate-400">Salary not disclosed</span>
+          <span className="text-xs text-[color:var(--bmpl-oncolor-light-text-muted)]">Salary not disclosed</span>
         )}
         {deadline && (
           <Badge tone={deadline.closed ? 'neutral' : deadline.soon ? 'warning' : 'info'}>

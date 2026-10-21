@@ -136,7 +136,7 @@ export function ProductEditorManager({ productId }: { productId: string }) {
       <Card className="space-y-4 p-5 sm:p-6">
         <div className="flex items-center justify-between">
           <h2 className="bmpl-eyebrow">Variants</h2>
-          {view.variants.length > 0 && <span className="text-xs text-slate-400">{view.variants.length} variant{view.variants.length === 1 ? '' : 's'}</span>}
+          {view.variants.length > 0 && <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{view.variants.length} variant{view.variants.length === 1 ? '' : 's'}</span>}
         </div>
 
         {view.options.length === 0 ? (
@@ -208,7 +208,7 @@ export function ProductEditorManager({ productId }: { productId: string }) {
       <Card className="space-y-4 p-5 sm:p-6">
         <div>
           <h2 className="bmpl-eyebrow">Brand image</h2>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
             Shown on marketplace listing cards. Not shown in the product detail gallery. Use “Set as Brand Image” on any image below to choose one.
           </p>
         </div>
@@ -219,7 +219,7 @@ export function ProductEditorManager({ productId }: { productId: string }) {
       <Card className="space-y-4 p-5 sm:p-6">
         <div>
           <h2 className="bmpl-eyebrow">General images (not assigned)</h2>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
             Images stored here are not assigned to a variant and are not shown on the storefront. Use the
             assignment dropdown to attach an image to a specific variant when ready.
           </p>

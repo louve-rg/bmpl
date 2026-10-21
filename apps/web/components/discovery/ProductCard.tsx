@@ -41,7 +41,7 @@ export function ProductCard({ product: p, className = '' }: { product: ProductCa
         href={`/products/${p.slug}`}
         className="group flex h-full flex-col rounded-bmpl-lg border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md"
       >
-        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-400">
+        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-bmpl-lg bg-slate-100 text-sm text-slate-600">
           {p.primaryImageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={p.primaryImageUrl} alt={p.title} className="h-full w-full max-w-full object-cover" />
@@ -50,7 +50,7 @@ export function ProductCard({ product: p, className = '' }: { product: ProductCa
           )}
         </div>
         <p className="mt-3 break-words font-semibold text-belize-navy group-hover:text-belize-blue">{p.title}</p>
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-slate-600">
           {p.vendor.businessName}
           {p.category?.name ? ` · ${p.category.name}` : ''}
         </p>
@@ -61,7 +61,7 @@ export function ProductCard({ product: p, className = '' }: { product: ProductCa
           {p.salePriceMinor != null ? (
             <>
               <span className="font-bold text-belize-blue">{money(p.salePriceMinor)}</span>{' '}
-              <span className="text-slate-400 line-through">{money(p.priceMinor)}</span>
+              <span className="text-slate-600 line-through">{money(p.priceMinor)}</span>
             </>
           ) : (
             <span className="font-bold text-belize-navy">{money(p.priceMinor)}</span>

@@ -279,15 +279,15 @@ export function ProductView({ product }: { product: ProductDetail }) {
           {compareAt != null ? (
             <>
               <span className="font-bold text-belize-blue">{money(effectivePrice)}</span>{' '}
-              <span className="text-lg text-slate-400 line-through">{money(compareAt)}</span>
+              <span className="text-lg text-slate-600 line-through">{money(compareAt)}</span>
             </>
           ) : (
             <span className="font-bold text-belize-navy">{money(effectivePrice)}</span>
           )}
-          <span className="ml-2 text-sm text-slate-400">{product.currency}</span>
+          <span className="ml-2 text-sm text-slate-600">{product.currency}</span>
         </p>
 
-        {selectedVariant?.sku && <p className="mt-1 text-xs text-slate-400">SKU: {selectedVariant.sku}</p>}
+        {selectedVariant?.sku && <p className="mt-1 text-xs text-slate-600">SKU: {selectedVariant.sku}</p>}
 
         <p className="mt-2">
           <StockBadge state={state} avail={avail} />
@@ -420,13 +420,13 @@ export function ProductView({ product }: { product: ProductDetail }) {
             <dl className="mt-6 grid grid-cols-2 gap-2 text-sm text-slate-600">
               {weight && (
                 <div>
-                  <dt className="text-slate-400">Weight</dt>
+                  <dt className="text-slate-600">Weight</dt>
                   <dd>{weight}</dd>
                 </div>
               )}
               {dimensions && (
                 <div>
-                  <dt className="text-slate-400">Dimensions</dt>
+                  <dt className="text-slate-600">Dimensions</dt>
                   <dd>{dimensions}</dd>
                 </div>
               )}
