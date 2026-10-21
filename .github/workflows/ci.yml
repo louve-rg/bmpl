@@ -650,7 +650,7 @@ jobs:
       # found -- contrast-known-violations.json stays empty, on purpose, see
       # that file's own header. Only whether a first-ever check blocks the
       # queue on debt it just discovered is deferred, not the debt itself.
-      - name: Enforce contrast check result (requirement 7 blocks; the pixel baselines above do not)
+      - name: Enforce contrast check result (requirement 7 -- informational until the exit criterion in docs/visual-baseline-exit-log.md is met)
         continue-on-error: true
         if: steps.contrast-web.outcome == 'failure' || steps.contrast-admin.outcome == 'failure'
         run: |
