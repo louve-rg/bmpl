@@ -361,38 +361,51 @@ function BarChart({ series }: { series: SalesPoint[] }) {
 
 /* ---------------------------------------------------------- top products */
 
+/**
+ * Batch 2, first target (god/Jim, 2026-10-21): this `<section>` had NO card
+ * wrapper at all -- its heading row (and the "By revenue" badge) sat
+ * directly on the page's bare .bml-mural, the same bug shape as every
+ * other card-shaped surface on this platform, just missing the card
+ * itself rather than mis-colouring it. "The material carries the
+ * contrast, not the text" (glass.css's own settled principle) means the
+ * fix is the surface this section should have had from the start, same as
+ * the KPI cards and the revenue chart elsewhere on this exact page --
+ * not a second colour patch on top of the Badge fix already shipped.
+ */
 function TopProductsTable({ rows }: { rows: TopProduct[] }) {
   return (
-    <section aria-label="Top products">
-      <div className="mb-3 flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Top products</h2>
-        <Badge tone="brand">By revenue</Badge>
-      </div>
-      {rows.length === 0 ? (
-        <EmptyState title="No product sales yet" description="Best-selling products will appear here." />
-      ) : (
-        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Product</th>
-                <th className="px-4 py-3 text-right">Units sold</th>
-                <th className="px-4 py-3 text-right">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.productId} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium text-belize-navy">{r.title}</td>
-                  <td className="px-4 py-3 text-right text-slate-600">{int(r.unitsSold)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-belize-navy">{money(r.revenueMinor)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <Card className="p-4 sm:p-5">
+      <section aria-label="Top products">
+        <div className="mb-3 flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Top products</h2>
+          <Badge tone="brand">By revenue</Badge>
         </div>
-      )}
-    </section>
+        {rows.length === 0 ? (
+          <EmptyState title="No product sales yet" description="Best-selling products will appear here." />
+        ) : (
+          <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Product</th>
+                  <th className="px-4 py-3 text-right">Units sold</th>
+                  <th className="px-4 py-3 text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.productId} className="border-t border-slate-100 hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-belize-navy">{r.title}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{int(r.unitsSold)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-belize-navy">{money(r.revenueMinor)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </Card>
   );
 }
 
@@ -400,35 +413,37 @@ function TopProductsTable({ rows }: { rows: TopProduct[] }) {
 
 function TopVendorsTable({ rows }: { rows: TopVendor[] }) {
   return (
-    <section aria-label="Top vendors">
-      <div className="mb-3 flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Top vendors</h2>
-        <Badge tone="brand">By revenue</Badge>
-      </div>
-      {rows.length === 0 ? (
-        <EmptyState title="No vendor sales yet" description="Best-performing vendors will appear here." />
-      ) : (
-        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Vendor</th>
-                <th className="px-4 py-3 text-right">Orders</th>
-                <th className="px-4 py-3 text-right">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.vendorProfileId} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium text-belize-navy">{r.businessName}</td>
-                  <td className="px-4 py-3 text-right text-slate-600">{int(r.orders)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-belize-navy">{money(r.revenueMinor)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <Card className="p-4 sm:p-5">
+      <section aria-label="Top vendors">
+        <div className="mb-3 flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Top vendors</h2>
+          <Badge tone="brand">By revenue</Badge>
         </div>
-      )}
-    </section>
+        {rows.length === 0 ? (
+          <EmptyState title="No vendor sales yet" description="Best-performing vendors will appear here." />
+        ) : (
+          <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Vendor</th>
+                  <th className="px-4 py-3 text-right">Orders</th>
+                  <th className="px-4 py-3 text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.vendorProfileId} className="border-t border-slate-100 hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-belize-navy">{r.businessName}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{int(r.orders)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-belize-navy">{money(r.revenueMinor)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </Card>
   );
 }
