@@ -188,7 +188,7 @@ function ReviewRow({ review }: { review: Review }) {
       )}
 
       {review.response && (
-        <div className="mt-3 rounded-bmpl-md border-l-2 border-belize-blue/40 bg-belize-blue/5 p-3">
+        <div className="mt-3 rounded-bmpl-md border-l-2 border-blue-400 bg-blue-50 p-3">
           <p className="bmpl-eyebrow mb-1">Response from the seller</p>
           <p className="whitespace-pre-wrap text-sm text-slate-600">{review.response.body}</p>
           <p className="mt-1 text-xs text-slate-400">{relativeTime(review.response.createdAt)}</p>
@@ -203,7 +203,7 @@ function ReviewRow({ review }: { review: Review }) {
           aria-pressed={voted}
           className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition disabled:opacity-60 ${
             voted
-              ? 'border-belize-blue bg-belize-blue/10 text-belize-blue'
+              ? 'border-belize-blue bg-blue-100 text-belize-blue'
               : 'border-slate-300 text-slate-600 hover:border-belize-blue hover:text-belize-blue'
           }`}
         >
@@ -292,7 +292,7 @@ export function ReviewList({
                 }}
                 className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
                   active
-                    ? 'border-belize-blue bg-belize-blue/10 text-belize-blue'
+                    ? 'border-belize-blue bg-blue-100 text-belize-blue'
                     : 'border-slate-300 text-slate-600 hover:border-belize-blue'
                 }`}
               >

@@ -139,7 +139,7 @@ export function ServiceTypeField({
 
             <dl className="mt-4 space-y-4">
               {ORDER.map((s) => (
-                <div key={s} className={s === value ? 'rounded-bmpl-md bg-belize-blue/5 p-3' : 'px-3'}>
+                <div key={s} className={s === value ? 'rounded-bmpl-md bg-blue-50 p-3' : 'px-3'}>
                   <dt className="text-sm font-semibold text-belize-navy">
                     {SHIPPING_SERVICE_LABELS[s]}
                     {s === value && <span className="ml-2 text-xs font-normal text-belize-blue">selected</span>}

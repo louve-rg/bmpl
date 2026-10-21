@@ -270,7 +270,7 @@ export default function NotificationsPage() {
                     }
                   }}
                   className={`group flex cursor-pointer items-start gap-3 border-b border-slate-100 px-4 py-4 transition last:border-b-0 hover:bg-slate-50 ${
-                    n.read ? '' : 'bg-belize-blue/5'
+                    n.read ? '' : 'bg-blue-50'
                   }`}
                 >
                   <span

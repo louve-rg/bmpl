@@ -184,7 +184,7 @@ export function ShipmentJourney({ shipment }: { shipment: ShipmentView }) {
           only while it is still on its way — after that it is just a stale
           number somebody might read out to the wrong person. */}
       {doorCode && (
-        <div className="rounded-bmpl-xl border border-belize-blue/30 bg-belize-blue/5 p-4">
+        <div className="rounded-bmpl-xl border border-blue-300 bg-blue-50 p-4">
           <p className="text-sm font-medium text-slate-900">Your delivery code</p>
           <p className="mt-1 font-mono text-3xl font-bold tracking-[0.3em] text-belize-blue">{doorCode}</p>
           <p className="mt-2 text-xs text-slate-600">

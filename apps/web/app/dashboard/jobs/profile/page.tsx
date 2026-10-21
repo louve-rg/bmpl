@@ -327,7 +327,7 @@ function CheckChip({ label, checked, onChange }: { label: string; checked: boole
   return (
     <label
       className={`cursor-pointer rounded-full border px-3 py-1 text-xs font-medium transition ${
-        checked ? 'border-belize-blue bg-belize-blue/10 text-belize-blue' : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:border-belize-light/60'
+        checked ? 'border-belize-blue bg-blue-100 text-belize-blue' : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:border-belize-light/60'
       }`}
     >
       <input type="checkbox" checked={checked} onChange={onChange} className="sr-only" />
@@ -788,7 +788,7 @@ function ResumeManager({ profile, onChanged }: { profile: SeekerProfile; onChang
               type="file"
               accept={RESUME_MIME_TYPES.join(',')}
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-2 file:text-belize-blue"
+              className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-blue-100 file:px-3 file:py-2 file:text-belize-blue"
             />
           </div>
           <AddError error={error} />

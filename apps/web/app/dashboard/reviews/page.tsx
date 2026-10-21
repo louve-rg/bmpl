@@ -330,7 +330,7 @@ function MyReviewRow({ review, onUpdated }: { review: Review; onUpdated: (r: Rev
           {review.title && <p className="mt-3 font-semibold text-belize-navy">{review.title}</p>}
           <p className="mt-1.5 whitespace-pre-wrap text-sm text-slate-600">{review.body}</p>
           {review.response && (
-            <div className="mt-3 rounded-bmpl-md border-l-2 border-belize-blue/40 bg-belize-blue/5 p-3">
+            <div className="mt-3 rounded-bmpl-md border-l-2 border-blue-400 bg-blue-50 p-3">
               <p className="bmpl-eyebrow mb-1">Response from the seller</p>
               <p className="whitespace-pre-wrap text-sm text-slate-600">{review.response.body}</p>
             </div>

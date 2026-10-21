@@ -61,7 +61,7 @@ export default async function ApplicationsQueue({
                 href={f.href}
                 className={`rounded-bmpl-md border px-3 py-1.5 font-medium transition ${
                   f.active
-                    ? 'border-belize-blue bg-belize-blue/5 text-belize-blue'
+                    ? 'border-belize-blue bg-blue-50 text-belize-blue'
                     : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400'
                 }`}
               >

@@ -164,7 +164,7 @@ export function Badge({ tone = 'neutral', className = '', children }: { tone?: T
 
 const ALERT_STYLES: Record<Tone, string> = {
   neutral: 'border-slate-200 bg-slate-50 text-slate-700',
-  brand: 'border-belize-light/50 bg-belize-blue/5 text-belize-navy',
+  brand: 'border-blue-200 bg-blue-50 text-blue-800',
   success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
   warning: 'border-amber-200 bg-amber-50 text-amber-800',
   error: 'border-red-200 bg-red-50 text-red-700',

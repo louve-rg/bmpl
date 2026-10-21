@@ -507,7 +507,7 @@ function ListingsTab({ queue, canModerate }: { queue: boolean; canModerate: bool
                       onClick={() => setSelectedId(p.id)}
                       aria-current={active ? 'true' : undefined}
                       className={`flex w-full flex-col gap-1.5 px-4 py-3.5 text-left transition ${
-                        active ? 'bg-belize-blue/5' : 'hover:bg-slate-50'
+                        active ? 'bg-blue-50' : 'hover:bg-slate-50'
                       }`}
                     >
                       <div className="flex items-start gap-2">
@@ -1286,7 +1286,7 @@ function OwnersTab({ canModerate }: { canModerate: boolean }) {
                       onClick={() => setSelectedId(o.id)}
                       aria-current={active ? 'true' : undefined}
                       className={`flex w-full flex-col gap-1.5 px-4 py-3.5 text-left transition ${
-                        active ? 'bg-belize-blue/5' : 'hover:bg-slate-50'
+                        active ? 'bg-blue-50' : 'hover:bg-slate-50'
                       }`}
                     >
                       <div className="flex items-start gap-2">
@@ -1421,7 +1421,7 @@ function AgentsTab({ canModerate }: { canModerate: boolean }) {
                       onClick={() => setSelectedId(a.id)}
                       aria-current={active ? 'true' : undefined}
                       className={`flex w-full flex-col gap-1.5 px-4 py-3.5 text-left transition ${
-                        active ? 'bg-belize-blue/5' : 'hover:bg-slate-50'
+                        active ? 'bg-blue-50' : 'hover:bg-slate-50'
                       }`}
                     >
                       <div className="flex items-start gap-2">

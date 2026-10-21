@@ -90,7 +90,7 @@ export function AvailabilityCard({
                   onClick={() => setAvailability(o.value)}
                   className={`rounded-bmpl-md border px-3 py-2 text-left transition ${
                     active
-                      ? 'border-belize-blue bg-belize-blue/5 ring-1 ring-belize-blue'
+                      ? 'border-belize-blue bg-blue-50 ring-1 ring-belize-blue'
                       : 'border-slate-200 hover:border-belize-blue/50'
                   } ${disabled && !active ? 'cursor-not-allowed opacity-50' : ''}`}
                 >

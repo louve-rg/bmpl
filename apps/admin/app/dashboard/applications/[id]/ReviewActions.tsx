@@ -98,7 +98,7 @@ function ActionTab({
         active
           ? danger
             ? 'border-red-500 bg-red-50 text-red-700'
-            : 'border-belize-blue bg-belize-blue/5 text-belize-blue'
+            : 'border-belize-blue bg-blue-50 text-belize-blue'
           : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400'
       }`}
     >
