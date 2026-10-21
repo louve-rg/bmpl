@@ -219,12 +219,37 @@ scope and in method, and both are explainable:**
    the same class rendering different message bodies (notification feed
    items, hub names). My 27 is already element-level, closer to his
    14-class figure than to his 70-row figure for the same ground.
-3. **One of his 14 classes is stale.** `/dashboard/logistics/hubs`'s three
-   "Courier rate BZ$X.XX" rows (ratio 2.43, `admin_ops_limited`/
-   `hubs_ops_limited` only) are the five courier-fee nodes #487 fixed —
-   his raw sweep (captured 2026-10-20 23:23, before #487 merged) still
-   contains them; my live run today does not. Confirmed fixed, not a
-   live violation either count should carry.
+3. **CORRECTION (2026-10-21 — the original version of this point was
+   wrong):** `/dashboard/logistics/hubs`'s "Courier rate BZ$X.XX" rows
+   (ratio 2.43, `admin_ops_limited`/`hubs_ops_limited` only) were **not**
+   fixed at `499af25`. Verified directly against source
+   (`hubs/page.tsx:307-311`): the dollar-figure span next to the label is
+   `--bmpl-text` (fixed earlier tonight), but the "Courier rate" LABEL
+   itself is a separate `<p>`, still `text-slate-600`, unchanged at
+   `499af25`. It was fixed afterward, in a later batch — after this entry
+   was first written, not before. The original claim ("my live run does
+   not have them, confirmed fixed") stated a possibility as a fact: my
+   live run not finding them is evidence my run didn't see them, not
+   evidence they were already gone, and that gap is exactly where the bug
+   in my reasoning lived.
+   One part of the explanation offered for *why* my run missed it does not
+   hold up on inspection, and is left here rather than silently fixed,
+   because getting this fully right matters more than getting it
+   tidy: `logistics-hubs.spec.ts`'s own source already logs in as
+   `OPS_LIMITED` directly (not a different role), and `canManage` is
+   derived from `logistics.manage` permission, which that role should
+   lack — so the `!canManage` paragraph should render for this run on its
+   face. It did not just fail or read ambiguous; it was never discovered
+   at all (zero mentions anywhere in the run's log, not even as a passing
+   element). Most likely explanation not yet confirmed: the gated
+   alternative content for `canManage=true` (lines 289-304) is an
+   `<Input defaultValue=...>`, not a text leaf — if the seeded
+   `OPS_LIMITED` UAT fixture's permission set does not actually match its
+   name, `canManage` could read true for this run and the sweep would
+   never see a text node to measure at all, which matches the observed
+   total silence better than a wrong-role explanation does. Not
+   re-investigated further here — this is a seed-fixture question, not a
+   contrast-sweep one.
 4. **Two of his 14 classes are role/app scope gaps on my side, not
    methodology noise.** `/dashboard/notifications`'s `A.text-belize-blue`
    "Preferences" link and `/dashboard/settlements`'s `P.text-slate-400`
@@ -250,11 +275,30 @@ scope and in method, and both are explainable:**
    vendor state his sweep's fixture wasn't in); root cause not
    investigated, same discipline as the rest of this list.
 
+**The generalizable finding (worth more than the three nodes in point 3
+above): the two sweeps have opposite blind spots, and each one's clean
+result can mean "fixed" or can mean "never reached the gate" — the
+instrument cannot tell you which.** My live sweep missed the hubs
+courier-rate label because a gated render path kept it from ever being
+discovered, not because it was absent. Oscar's static sweep separately
+missed `/dashboard/store`'s "Approval:" label (point 6) because its
+fixture never reached the data state that renders it. A role gate defeats
+a live probe that logs in as the wrong account, or — per the unresolved
+half of point 3 — as the right account with the wrong seeded permissions.
+A data-state gate defeats a static sweep that never produces that state.
+**Absence from either sweep is not evidence of absence; it is evidence of
+where that sweep did not look.** A route or route+role reporting zero
+findings is a claim about what was measured, never a claim about what
+exists — true of the 355, true of my 27/493, and true of the contrast
+gate itself once anyone starts treating a green run as proof nothing is
+wrong rather than proof nothing *measured* was wrong.
+
 **Conclusion: no rounding either way.** Where the two methods measure the
 same ground, they agree. The headline gap (493/85/27 vs 355) is explained
-by scope (1, mostly) and dedup granularity (2), not by either count being
-wrong. `contrast-known-violations.json` stays `[]` in both apps; nothing
-here is an allowlist entry or a baseline edit.
+by scope (1, mostly), dedup granularity (2), and — per the point above —
+by each method's own blind spots, not by either count being simply wrong.
+`contrast-known-violations.json` stays `[]` in both apps; nothing here is
+an allowlist entry or a baseline edit.
 
 **Reporting cadence as Oscar's batches land:** this document's own count
 (27 real elements / 493 readings, ten routes) is the one this harness can
