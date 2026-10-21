@@ -245,7 +245,15 @@ describe('CheckoutPage mounts its real next/dynamic-wrapped AddressField (BMPL-3
     });
     await flush();
 
-    expect(findByText(container!, 'legend', 'Delivery address & contact')).toBeTruthy();
+    // FormCard (components/ui.tsx) renders AddressField's heading as a visible
+    // <p> plus an `aria-label` on the <fieldset> itself, never a native
+    // <legend> -- a <legend>'s own UA rendering straddles the fieldset's top
+    // border by design, which is what made "Collect from" visibly overlap its
+    // card border on /dashboard/shipments/new (owner-reported defect,
+    // 2026-10-20). The accessible name still exists; it just comes from
+    // `aria-label` now, so the group is asserted directly rather than by tag.
+    expect(findByText(container!, 'p', 'Delivery address & contact')).toBeTruthy();
+    expect(container!.querySelector('fieldset[aria-label="Delivery address & contact"]')).toBeTruthy();
 
     await waitForNoPulse(container!);
 

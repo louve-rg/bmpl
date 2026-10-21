@@ -7,7 +7,7 @@ import { api, type ApiError } from '../../../../../lib/api';
 import { tripMapPoints } from '../../../../../lib/trip-map';
 import { uploadFile } from '../../../../../lib/uploads';
 import { isExceptionBlocked, pickupPhotoSection, reportIssueState } from '../../../../../lib/driver-shipping-job';
-import { Alert, Badge, Button, Card, Label, PageHeader, Spinner, StatusBadge } from '../../../../../components/ui';
+import { Alert, Badge, Button, Card, Label, PageHeader, Spinner, StatusBadge, StickyActionBar } from '../../../../../components/ui';
 import { DriverBreadcrumb } from '../../../../../components/driver/DriverBreadcrumb';
 import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRouteMap';
 
@@ -478,14 +478,14 @@ export default function DriverShippingJobPage() {
             </Alert>
           )}
 
-          {/* One primary action, full width, thumb-height. This bar is its own
-              literal bg-white/95 regardless of theme (a sticky footer must stay
-              legible over whatever scrolls under it, light or dark mural alike),
-              so its bare buttons need the SAME explicit-dark-value treatment as
-              Edward's white-box controls -- --bmpl-text would resolve to near-
-              white under glass and vanish on this white bar exactly like it did
-              there. */}
-          <div className="sticky bottom-0 mt-4 space-y-2 bg-white/95 py-3 backdrop-blur">
+          {/* One primary action, full width, thumb-height. StickyActionBar is
+              its own literal opaque surface regardless of theme (a sticky
+              footer must stay legible over whatever scrolls under it, light
+              or dark mural alike), so its bare buttons need the SAME
+              explicit-dark-value treatment as Edward's white-box controls --
+              --bmpl-text would resolve to near-white under glass and vanish
+              on this bar exactly like it did there. */}
+          <StickyActionBar sticky className="mt-4 space-y-2">
             {reportState !== 'reported' && action && (
               <Button onClick={run} disabled={busy} className="min-h-[48px] w-full text-base">
                 {busy ? 'Working…' : (job.nextActionLabel ?? 'Continue')}
@@ -517,7 +517,7 @@ export default function DriverShippingJobPage() {
                 Back to my deliveries
               </Link>
             )}
-          </div>
+          </StickyActionBar>
         </>
       )}
     </div>

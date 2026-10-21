@@ -13,7 +13,7 @@ import {
   type SavedAddress,
 } from '../../lib/address';
 import { api, type ApiError } from '../../lib/api';
-import { Alert, Spinner } from '../ui';
+import { Alert, FormCard, Spinner } from '../ui';
 
 // The map is client-only and heavy. It must not be in the first paint of a form
 // most people fill in from the top down.
@@ -221,8 +221,7 @@ export function AddressField({
     (savedRow.latitude !== coords.latitude || savedRow.longitude !== coords.longitude);
 
   return (
-    <fieldset className="min-w-0 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5" disabled={disabled}>
-      <legend className="px-1 text-sm font-semibold text-belize-navy">{heading}</legend>
+    <FormCard legend={heading} disabled={disabled}>
       {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
 
       {/* ---------------------------------------------------- contact */}
@@ -554,7 +553,7 @@ export function AddressField({
         </div>
       )}
 
-    </fieldset>
+    </FormCard>
   );
 }
 

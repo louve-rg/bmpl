@@ -580,8 +580,8 @@ function LocationPickerBody({
       ref={containerRef}
       className={
         inModal
-          ? 'relative min-h-0 flex-1 bg-slate-100'
-          : '-mx-2.5 mt-3 h-64 overflow-hidden border-y border-slate-200 bg-slate-100 sm:mx-0 sm:rounded-bmpl-md sm:border'
+          ? 'relative isolate min-h-0 flex-1 bg-slate-100'
+          : '-mx-2.5 isolate mt-3 h-64 overflow-hidden border-y border-slate-200 bg-slate-100 sm:mx-0 sm:rounded-bmpl-md sm:border'
       }
       // Embedded: pan-y disables the browser's own native pinch-zoom and
       // horizontal pan on this element. Observed in Chromium with hasTouch
@@ -589,6 +589,15 @@ function LocationPickerBody({
       // did not stop a one-finger swipe here from panning the map instead
       // of the page. In the modal there is no page underneath to protect,
       // so the map owning every gesture is intentional, not a gap.
+      //
+      // `isolate` (both branches) scopes Leaflet's own internal z-index
+      // stacking (its marker/popup/tooltip panes go up to 700) to this box
+      // alone, so it can never paint over a page's fixed/sticky chrome
+      // elsewhere -- the root cause of the map overlapping the booking
+      // page's "Pay & book shipment" footer. A page-specific z-index on the
+      // footer would have papered over this one instance; a map embedded on
+      // any future page would still carry the same bug until a human
+      // noticed it on a screenshot again.
       style={{ touchAction: inModal ? 'none' : 'pan-y' }}
       role="application"
       aria-label="Map for choosing your delivery location. Use the current-location button, or tap the map to place the pin."
@@ -617,8 +626,23 @@ function LocationPickerBody({
   }
 
   return (
-    <section aria-labelledby={headingId} className="overflow-hidden rounded-bmpl-md border border-slate-200 p-2.5 sm:p-4">
-      <h3 id={headingId} className="bmpl-label">
+    <section
+      aria-labelledby={headingId}
+      className="bmpl-surface-onlight overflow-hidden rounded-bmpl-md border p-2.5 sm:p-4"
+    >
+      {/*
+        `.bmpl-label` alone reaches for --bmpl-text-muted, which is
+        THEME-ADAPTIVE: under the glass dashboard it resolves to a light,
+        near-white value, correct for a glass surface and invisible here,
+        because this section is a FIXED light box (map controls, never the
+        dark mural -- see `.bmpl-surface-onlight` on the <section> above).
+        Overriding the colour explicitly to the matching FIXED token is the
+        same pattern Edward's map-control buttons below already use for
+        this exact component -- this heading was simply missed by that
+        pass, because it had no colour class at all to find by grep ("Check
+        the location on the map", ratio ~1.07 under glass).
+      */}
+      <h3 id={headingId} className="bmpl-label text-[color:var(--bmpl-oncolor-light-text-muted)]">
         {heading ?? 'Delivery location'}
       </h3>
       <p className="mt-0.5 text-xs text-slate-500">

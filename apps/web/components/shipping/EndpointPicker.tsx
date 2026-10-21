@@ -1,6 +1,7 @@
 'use client';
 
 import { AddressField, emptyAddress, type AddressMethod, type AddressValue } from '../address/AddressField';
+import { FormCard } from '../ui';
 import type { ShippingHub } from '../../lib/shipping';
 
 export interface EndpointValue {
@@ -113,8 +114,7 @@ export function EndpointPicker({
   return (
     <div className="space-y-3">
       {allowDoor && allowHub && (
-        <fieldset className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
-          <legend className="px-1 text-sm font-semibold text-belize-navy">{label}</legend>
+        <FormCard legend={label}>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {(
               [
@@ -138,7 +138,7 @@ export function EndpointPicker({
               </button>
             ))}
           </div>
-        </fieldset>
+        </FormCard>
       )}
 
       {showDoor ? (
@@ -149,9 +149,7 @@ export function EndpointPicker({
           onChange={(a) => onChange(fromAddress(value, a))}
         />
       ) : (
-        <fieldset className="min-w-0 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
-          <legend className="px-1 text-sm font-semibold text-belize-navy">{label}</legend>
-
+        <FormCard legend={label}>
           <label className="mt-3 block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
               Terminal<span className="ml-0.5 text-rose-500">*</span>
@@ -213,7 +211,7 @@ export function EndpointPicker({
               className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base"
             />
           </label>
-        </fieldset>
+        </FormCard>
       )}
     </div>
   );
