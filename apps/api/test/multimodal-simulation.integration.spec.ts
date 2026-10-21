@@ -383,4 +383,47 @@ describe('a multimodal parcel, paid once and carried by two drivers', () => {
     const net = all.reduce((s, e) => s + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
     expect(net).toBe(0n);
   });
+
+  /**
+   * MDF-223: the sequential test above never reaches settleShipment's
+   * transaction a second time - the pre-check (payment.status === 'SETTLED')
+   * already short-circuits it. Two REAL concurrent callers can both pass
+   * that pre-check before either commits, and the loser then hits the
+   * ledger's own unique reference (`shipment:${id}:settle`) as a P2002 -
+   * settleShipment had no catch for it (unlike its sibling
+   * settleVendorOrder), so the loser threw instead of settling idempotently.
+   */
+  it('settles exactly once under genuinely concurrent callers, the loser never throws', async () => {
+    const driver = await makeTestDriver('BELIZE');
+    const booked = await post(customer, 'shipping', { ...crossWater(), payWithWallet: true });
+    const shipmentId = booked.body.id;
+    for (const leg of await legsOf(shipmentId)) {
+      await ctx.prisma.shipmentLeg.update({
+        where: { id: leg.id },
+        data: {
+          status: 'COMPLETED',
+          completedAt: new Date(),
+          assignedDriverProfileId: leg.kind === 'LINE_HAUL' ? null : driver.driverProfileId,
+        },
+      });
+    }
+    await ctx.prisma.shipment.update({ where: { id: shipmentId }, data: { status: 'DELIVERED' } });
+
+    const { SettlementService } = await import('../src/settlement/settlement.service');
+    const settlement = ctx.app.get(SettlementService);
+    const results = await Promise.all([
+      settlement.settleShipment(shipmentId, null),
+      settlement.settleShipment(shipmentId, null),
+      settlement.settleShipment(shipmentId, null),
+    ]);
+    expect(results.every((r) => r.settled)).toBe(true);
+
+    const releases = await ctx.prisma.walletTransaction.count({ where: { type: 'ESCROW_RELEASE' } });
+    expect(releases).toBe(1);
+    const earnings = await ctx.prisma.driverEarning.findMany({ where: { shipmentLeg: { shipmentId } } });
+    expect(earnings).toHaveLength(2); // never doubled
+    const all = await ctx.prisma.walletLedgerEntry.findMany();
+    const net = all.reduce((s, e) => s + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
+    expect(net).toBe(0n);
+  });
 });

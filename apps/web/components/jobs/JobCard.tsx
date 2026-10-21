@@ -30,14 +30,14 @@ export function JobCard({ job, showSave = true }: { job: JobCardType; showSave?:
   const salary = formatSalary(job.salary);
   const deadline = deadlineInfo(job.applicationDeadline);
   return (
-    <div className="group relative rounded-bmpl-lg border border-slate-200 bg-white p-5 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md">
+    <div className="group relative min-w-0 rounded-bmpl-lg border border-slate-200 bg-white p-5 shadow-bmpl-sm transition hover:-translate-y-0.5 hover:border-belize-light/60 hover:shadow-bmpl-md">
       {showSave && (
         <div className="absolute right-3 top-3">
           <SaveJobButton jobId={job.id} slug={job.slug} size="sm" />
         </div>
       )}
       <Link href={`/jobs/${job.slug}`} className="block pr-8">
-        <h3 className="font-bold text-belize-navy group-hover:text-belize-blue">{job.title}</h3>
+        <h3 className="break-words font-bold text-belize-navy group-hover:text-belize-blue">{job.title}</h3>
         <p className="mt-0.5 text-sm text-slate-600">{job.company.name}</p>
       </Link>
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">

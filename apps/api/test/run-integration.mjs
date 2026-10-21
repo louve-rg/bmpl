@@ -72,6 +72,26 @@
  *    explicitly before this script; repeating it here would only be a
  *    slower no-op every time.
  *
+ * 5. THE PER-WORKTREE DATABASE IS NOT A PER-AGENT DATABASE (MDF-214). Guard 3
+ *    derives the isolated database name from the worktree PATH alone — it
+ *    stops two WORKTREES from colliding, but does nothing when two AGENTS
+ *    run from the same worktree: they share the one "isolated" database and
+ *    truncate each other's tables mid-run, exactly as if guard 3 did not
+ *    exist. This happened on this floor (two agents, one worktree, one
+ *    database, overlapping runs) before anyone had asked it to.
+ *
+ *    The fix is a REFUSAL, not a rename. A per-agent database name would
+ *    give the two agents two DIFFERENT databases and hide that they were
+ *    ever pointed at the same one — the next flake would carry no signal
+ *    that a collision happened at all. Instead, the isolated database
+ *    itself carries a one-row ownership marker (AGENT_ID + when claimed).
+ *    The first run against a database claims it; every later run from the
+ *    SAME agent proceeds unchanged; a run from a DIFFERENT agent refuses,
+ *    by name, with who holds it and since when — a conversation, not a
+ *    guess. AGENT_ID is this floor's agent identity; a run with no
+ *    AGENT_ID (a human developer, or CI, which never reaches this code at
+ *    all) skips the check entirely and behaves exactly as before.
+ *
  * Env switches:
  *   BMPL_SKIP_WORKSPACE_BUILD=1  skip the install check AND the dependency
  *                                build (you manage both yourself and accept
@@ -79,6 +99,9 @@
  *   BMPL_DRY_RUN=1               print what would run, run nothing
  *   BMPL_SHARED_TEST_DB=1        keep the shared bmpl_test (you are
  *                                coordinating serial runs yourself)
+ *   BMPL_TEST_DB_FORCE_CLAIM=1   reassign a database already claimed by a
+ *                                different AGENT_ID to this one (guard 5) —
+ *                                only after confirming the handoff is real
  */
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -212,6 +235,91 @@ function resolveIsolatedTestUrl() {
   return { url: parsed.toString(), dbName: isolated, adminUrl: (() => { const u = new URL(url); u.pathname = '/postgres'; return u.toString(); })() };
 }
 
+/**
+ * Guard 5's decision (exported for the unit spec — no real database is
+ * touched here). Pure: given who owns the database row (or none) and
+ * whether a forced reassignment was requested, decide what to do. The I/O
+ * (reading/writing that row) lives in ensureDatabaseOwnership below.
+ *
+ * owner: { agentId, agentName, claimedAt } | null — null means unclaimed
+ * (fresh table, e.g. a database just created by ensureDatabaseExists).
+ */
+export function decideDatabaseOwnership({ agentId, owner, forceClaim }) {
+  if (!agentId) return { action: 'skip' };
+  if (!owner) return { action: 'claim' };
+  if (owner.agentId === agentId) return { action: 'proceed' };
+  if (forceClaim) return { action: 'reassign', previousOwner: owner };
+  return { action: 'refuse', owner };
+}
+
+/**
+ * Guard 5's I/O (MDF-214): read/write the one-row ownership marker inside
+ * the isolated database ITSELF (never the admin "postgres" database, and
+ * never a migration — this table is wrapper-owned, not schema the app or
+ * Prisma migrate knows about), in its own "_bmpl_meta" schema rather than
+ * "public" — the suite's resetDb() helper (test/helpers.ts) truncates every
+ * table in "public" between test groups, which would silently wipe this
+ * marker on the very next run and make every claim look like a fresh one.
+ * See decideDatabaseOwnership for the branch logic this drives.
+ */
+async function ensureDatabaseOwnership(target) {
+  const agentId = process.env.AGENT_ID;
+  const requireDb = createRequire(join(repoRoot, 'packages', 'database', 'package.json'));
+  const { PrismaClient } = requireDb('@prisma/client');
+  const client = new PrismaClient({ datasources: { db: { url: target.url } } });
+  try {
+    if (!agentId) return; // no identity to check against — unchanged behaviour.
+
+    // A DEDICATED SCHEMA, not a table in "public" (BMPL-214 follow-up found
+    // during manual verification): the suite's own resetDb() helper
+    // truncates every table in the public schema between test groups, which
+    // would wipe this marker on the very next run and make every claim look
+    // like a fresh one. "_bmpl_meta" is wrapper-owned and nothing the suite
+    // or Prisma migrate ever touches.
+    await client.$executeRawUnsafe('CREATE SCHEMA IF NOT EXISTS "_bmpl_meta"');
+    await client.$executeRawUnsafe(
+      `CREATE TABLE IF NOT EXISTS "_bmpl_meta"."run_integration_owner" (
+         id boolean PRIMARY KEY DEFAULT true CHECK (id),
+         agent_id text NOT NULL,
+         agent_name text,
+         claimed_at timestamptz NOT NULL DEFAULT now()
+       )`,
+    );
+    const rows = await client.$queryRawUnsafe(
+      `SELECT agent_id AS "agentId", agent_name AS "agentName", claimed_at AS "claimedAt" FROM "_bmpl_meta"."run_integration_owner" LIMIT 1`,
+    );
+    const owner = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    const decision = decideDatabaseOwnership({
+      agentId,
+      owner,
+      forceClaim: process.env.BMPL_TEST_DB_FORCE_CLAIM === '1',
+    });
+
+    const agentName = process.env.AGENT_NAME ?? null;
+    if (decision.action === 'claim') {
+      await client.$executeRaw`INSERT INTO "_bmpl_meta"."run_integration_owner" (id, agent_id, agent_name) VALUES (true, ${agentId}, ${agentName})`;
+      console.log(`[run-integration] claimed database "${target.dbName}" for agent "${agentId}" (first claim).`);
+    } else if (decision.action === 'reassign') {
+      await client.$executeRaw`UPDATE "_bmpl_meta"."run_integration_owner" SET agent_id = ${agentId}, agent_name = ${agentName}, claimed_at = now() WHERE id = true`;
+      console.log(
+        `[run-integration] BMPL_TEST_DB_FORCE_CLAIM=1 — reassigned database "${target.dbName}" from agent "${decision.previousOwner.agentId}" ` +
+          `(claimed ${decision.previousOwner.claimedAt.toISOString()}) to "${agentId}". Only do this after confirming the handoff with whoever owned it.`,
+      );
+    } else if (decision.action === 'refuse') {
+      console.error(
+        `[run-integration] refusing to run: database "${target.dbName}" was claimed by agent "${decision.owner.agentId}" at ` +
+          `${decision.owner.claimedAt.toISOString()}, not "${agentId}" (MDF-214). Two agents sharing one worktree share this database and ` +
+          "truncate each other's tables mid-run — that is not a flake, it is a collision. If this reassignment is real (the worktree changed " +
+          'hands), confirm with the previous owner or Michael first, then re-run with BMPL_TEST_DB_FORCE_CLAIM=1.',
+      );
+      process.exit(1);
+    }
+    // decision.action === 'proceed': same agent as last time — nothing to do.
+  } finally {
+    await client.$disconnect();
+  }
+}
+
 /** CREATE DATABASE if missing, via the Prisma client the repo already ships. */
 async function ensureDatabaseExists(target) {
   const requireDb = createRequire(join(repoRoot, 'packages', 'database', 'package.json'));
@@ -256,6 +364,7 @@ async function main() {
     console.log(`[run-integration] dry run. install check: ${skipBuild ? 'SKIPPED' : '`pnpm install --frozen-lockfile` — refuses if node_modules and the lockfile disagree'}`);
     console.log(`[run-integration] dry run. build step: ${skipBuild ? 'SKIPPED (' + (process.env.CI ? 'CI builds packages explicitly' : 'BMPL_SKIP_WORKSPACE_BUILD') + ')' : 'turbo run build --filter=./packages/* — primary; if turbo itself cannot run, falls back to `pnpm -r --filter=./packages/* run build` (BMPL-133); refuses if both fail'}`);
     console.log(`[run-integration] test database: ${isolation ? `"${isolation.dbName}" (isolated, created on first use)` : 'TEST_DATABASE_URL as configured (CI, custom, or BMPL_SHARED_TEST_DB)'}`);
+    console.log(`[run-integration] database ownership check (MDF-214): ${isolation ? (process.env.AGENT_ID ? `enforced for AGENT_ID "${process.env.AGENT_ID}" — refuses if a different agent claimed "${isolation.dbName}" first` : 'SKIPPED (no AGENT_ID in this environment)') : 'not applicable (no isolated database)'}`);
     console.log(`[run-integration] would exec: node ${vitestArgv.join(' ')}`);
     process.exit(0);
   }
@@ -304,6 +413,7 @@ async function main() {
 
   if (isolation) {
     await ensureDatabaseExists(isolation);
+    await ensureDatabaseOwnership(isolation);
   }
 
   const res = spawnSync(process.execPath, vitestArgv, {

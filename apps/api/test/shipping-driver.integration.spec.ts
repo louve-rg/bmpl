@@ -145,6 +145,22 @@ async function pinOf(legId: string) {
   return leg.handoffPin!;
 }
 
+/**
+ * Deterministic replacement for a substring scan: walks the whole payload and
+ * reports true only if some field's EXACT value equals `needle` — never a
+ * coincidental substring (a phone number or timestamp can contain the same
+ * four digits as a PIN by chance; this does not flag that). A PASS on the
+ * caller's assertion means the value is genuinely absent; a FAIL means it is
+ * genuinely present somewhere in the tree.
+ */
+function containsExactValue(node: unknown, needle: string): boolean {
+  if (node == null) return false;
+  if (typeof node === 'string') return node === needle;
+  if (Array.isArray(node)) return node.some((n) => containsExactValue(n, needle));
+  if (typeof node === 'object') return Object.values(node as Record<string, unknown>).some((v) => containsExactValue(v, needle));
+  return false;
+}
+
 /** Operator drives a line-haul leg from its terminal to the next one. */
 async function flyLineHaul(legId: string) {
   expect((await post(admin, `admin/logistics/legs/${legId}/depart`, {})).status).toBe(201);
@@ -520,7 +536,17 @@ describe('what the driver is shown', () => {
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
     const job = await get(driver.cookies, `driver/shipping-jobs/${first.id}`);
-    expect(JSON.stringify(job.body)).not.toContain(await pinOf(first.id));
+    // The old version of this test substring-scanned the serialised payload
+    // for the raw PIN digits, which is not deterministic: a fixture phone
+    // number or a timestamp can contain the same four digits as the PIN by
+    // pure chance (observed in CI — a sender phone ending "...3333" collided
+    // with a randomly generated PIN of "3333"), failing a payload that never
+    // actually leaked anything. The field-and-exact-value checks below give
+    // the property a pass that actually means absent and a fail that actually
+    // means present, regardless of what else is in the payload.
+    expect(job.body).not.toHaveProperty('handoffPin');
+    expect(typeof job.body.pinAttemptsRemaining).toBe('number');
+    expect(containsExactValue(job.body, await pinOf(first.id))).toBe(false);
   });
 });
 
@@ -1290,5 +1316,120 @@ describe('courier and vehicle identification (BMPL-180)', () => {
     // on the generic shipment test to notice if it ever regressed.
     expect(r.status).toBe(404);
     expect(r.body).not.toHaveProperty('legs');
+  });
+});
+
+/**
+ * MDF-96 (Edward requirement 10, Option 2) — a courier reports a failed
+ * delivery attempt themselves, through the SAME exception gate staff already
+ * use (`ShipmentService.flagException`), reached a second way rather than
+ * duplicated. The gate's own behaviour (notify, recompute, resolve, return,
+ * reroute) is proven elsewhere and deliberately untouched here — this suite
+ * pins only what is new: who may call it, and from which courier status.
+ */
+describe('a courier reports a failed delivery attempt (MDF-96)', () => {
+  it('flags the leg exception, and the audit trail correctly names the DRIVER as the actor — not staff, not the system', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, {
+      reason: 'Arrived at the terminal counter and nobody could take the parcel.',
+    });
+    expect(r.status).toBe(201);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(after.status).toBe('EXCEPTION');
+    expect(after.exceptionReason).toBe('Arrived at the terminal counter and nobody could take the parcel.');
+    expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).status).toBe('EXCEPTION');
+
+    // The SAME audit action a staff-flagged exception uses — no new
+    // AuditAction value, no migration — but the actor is unmistakably the
+    // courier, not staff and not the system.
+    const entries = await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_EXCEPTION' } });
+    const entry = entries.find((e) => (e.newValue as { legId?: string }).legId === first.id);
+    expect(entry).toBeTruthy();
+    expect(entry!.actorId).toBe(driver.userId);
+  });
+
+  it('refuses a driver who has not yet picked up the parcel — there is no attempt to report', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Nobody was at the pickup address.' });
+    expect(r.status).toBe(400);
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).status).not.toBe('EXCEPTION');
+  });
+
+  it("refuses a driver reporting an issue on another driver's leg — 404, not 403, the same shape every other ownership miss gets here", async () => {
+    const mine = await makeDriver();
+    const other = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const holder = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId;
+    const holdingDriver = holder === mine.driverProfileId ? mine : other;
+    const intruder = holder === mine.driverProfileId ? other : mine;
+    await post(holdingDriver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    await post(holdingDriver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+
+    const r = await post(intruder.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Not my leg.' });
+    expect(r.status).toBe(404);
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).status).not.toBe('EXCEPTION');
+  });
+
+  it('refuses a second report once the leg is already in exception — the same guard a double staff-flag already hits', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'First report.' })).status).toBe(201);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Second report.' });
+    expect(r.status).toBe(400);
+  });
+
+  it('does not let a signed-out visitor report an issue on a courier leg', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    expect(
+      (await request(ctx.server).post(`/api/driver/shipping-jobs/${first.id}/report-issue`).send({ reason: 'x' })).status,
+    ).toBe(401);
+  });
+
+  // MDF-232, settling the open question: report-issue and the staff route
+  // (`admin/logistics/legs/:id/exception`) both write the SAME ShipmentLeg.status
+  // column through the SAME ShipmentService.flagException() — there is exactly one
+  // EXCEPTION writer, not two, so the forward-transition guard (#401,
+  // `assertNotException` + the conditional `status: { not: 'EXCEPTION' }` write in
+  // `simpleTransition`) cannot distinguish who flagged it and was never going to
+  // have a courier-flagged-only gap. This is the one path #401's own test suite
+  // never actually drove: every existing "blocks every forward courier transition"
+  // test flags via the admin route, none flag via report-issue. Proving it here,
+  // rather than reasoning about it, is the whole point of the question.
+  it("a courier's own self-reported issue blocks their next transition exactly as a staff flag does — the identical gap, closed the identical way", async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Flat tire, pulled over.' })).status).toBe(201);
+    const flagged = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(flagged.status).toBe('EXCEPTION');
+    expect(flagged.courierStatus).toBe('PICKUP_CONFIRMED'); // untouched, same as a staff flag
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/in-transit`);
+    expect(r.status).toBe(409);
+    expect(r.body.message).toMatch(/exception/i);
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(after.courierStatus).toBe('PICKUP_CONFIRMED');
+    expect(after.inTransitAt).toBeNull();
   });
 });

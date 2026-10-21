@@ -174,7 +174,7 @@ export class OrdersService {
         const product = await tx.product.findUnique({
           where: { id: item.productId },
           include: {
-            vendorProfile: { select: { id: true, approvalStatus: true } },
+            vendorProfile: { select: { id: true, approvalStatus: true, storeStatus: true } },
             variants: { where: { isActive: true }, select: { id: true } },
           },
         });
@@ -182,6 +182,13 @@ export class OrdersService {
         if (product.status !== 'PUBLISHED') throw new ConflictException(`"${product.title}" is no longer available.`);
         if (product.vendorProfile.approvalStatus !== 'APPROVED') {
           throw new ConflictException(`The store for "${product.title}" is not currently active.`);
+        }
+        // MDF-216: CLOSED means temporarily not accepting NEW orders - it does
+        // not revoke approval and must not touch any already-placed order
+        // (fulfillment/pickup paths never read storeStatus). Checked here,
+        // the one place every checkout line passes through.
+        if (product.vendorProfile.storeStatus === 'CLOSED') {
+          throw new ConflictException(`The store for "${product.title}" is currently closed and not accepting new orders.`);
         }
 
         let variant: { id: string; sku: string | null; priceMinor: bigint | null; salePriceMinor: bigint | null } | null = null;

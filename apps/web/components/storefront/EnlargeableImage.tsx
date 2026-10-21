@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useBodyScrollLock } from '../../lib/use-body-scroll-lock';
 import { useDialogFocusTrap } from '../../lib/use-dialog-focus-trap';
 
 /**
@@ -30,6 +31,7 @@ export function EnlargeableImage({
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useDialogFocusTrap({ open, containerRef, initialFocusRef: closeRef });
+  useBodyScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
@@ -37,12 +39,7 @@ export function EnlargeableImage({
       if (e.key === 'Escape') setOpen(false);
     };
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
   return (

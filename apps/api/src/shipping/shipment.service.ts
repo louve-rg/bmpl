@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   belizeCalendarDateKey,
   belizeMidday,
@@ -13,6 +13,7 @@ import {
   planRoute,
   resolveScheduleStatus,
   userInitials,
+  customerFacingExceptionReason,
   LEG_KIND_LABELS,
   SHIPMENT_STATUS_LABELS,
   SHIPPING_SERVICE_DESCRIPTIONS,
@@ -1665,8 +1666,18 @@ export class ShipmentService {
     await this.verifyHandoffPin(legId, input.pin, actor);
 
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
-      await tx.shipmentLeg.update({
-        where: { id: leg.id },
+      // Conditional write, NOT an unconditional update by id. `leg.status` is
+      // a read taken moments earlier in this same transaction (transition()'s
+      // own findUnique) — a concurrent flagException() on this exact leg can
+      // commit in between that read and this write, since both start from
+      // the same IN_PROGRESS leg and neither's write previously re-asserted
+      // it. Before this guard, both unconditional writes could each commit,
+      // leaving a leg with status=EXCEPTION but completedAt AND exceptionAt
+      // both set (MDF-223). Re-asserting the status this call actually read,
+      // inside the write, closes it — same pattern as
+      // DriverJobService.confirmPickup / DispatchService.cancel.
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, status: leg.status },
         data: {
           status: 'COMPLETED',
           completedAt: new Date(),
@@ -1676,6 +1687,9 @@ export class ShipmentService {
           handoffReceivedByName: input.receivedByName,
         },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException('This leg changed state before the handoff could be recorded — reload and try again.');
+      }
 
       // Who holds it now depends on where this leg ended, not on who was carrying.
       const toHolder: CustodyHolder = leg.destinationHubId ? 'HUB' : 'RECIPIENT';
@@ -1769,11 +1783,18 @@ export class ShipmentService {
       select: { id: true, shipmentId: true, status: true, handoffPin: true, handoffPinAttempts: true, assignedDriverProfileId: true },
     });
     if (!leg) throw new NotFoundException('Leg not found.');
-    if (leg.status !== 'IN_PROGRESS') {
-      throw new BadRequestException('That leg has not started, so there is nothing to hand over.');
-    }
+    // Checked BEFORE the status guard, not after: MDF-96's lockout now moves
+    // leg.status to EXCEPTION on the attempt that exhausts the counter (see
+    // below), so a leg caught by THIS check is no longer IN_PROGRESS by the
+    // time anyone tries again. Ordering it first keeps the specific, correct
+    // "locked, an administrator must verify" answer for every later attempt
+    // — before AND after this branch existed — rather than letting the
+    // generic "has not started" message mask it.
     if (leg.handoffPinAttempts >= MAX_PIN_ATTEMPTS) {
       throw new ForbiddenException('Too many incorrect codes. An administrator has to confirm this handoff.');
+    }
+    if (leg.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('That leg has not started, so there is nothing to hand over.');
     }
 
     const isAssignedCourier =
@@ -1790,6 +1811,23 @@ export class ShipmentService {
         newValue: { legId: leg.id, shipmentId: leg.shipmentId, wrongCourier: !isAssignedCourier },
       });
       const left = MAX_PIN_ATTEMPTS - leg.handoffPinAttempts - 1;
+      if (left <= 0) {
+        // MDF-96 parity fix: marketplace delivery already auto-notifies admins
+        // the instant ITS OWN PIN counter locks (driver-jobs.service.ts,
+        // ADMIN_FAILED_DELIVERY) — shipping's identical five-attempt cap had
+        // no second half at all, so a locked-out leg was invisible unless
+        // someone went looking. Reuses flagException exactly as a staff-flagged
+        // exception would (same transition, same notifyAdmins/notifyUsers), with
+        // the actor attributed to the SYSTEM (userId: null) since no person
+        // caused this — leg.status is still guaranteed IN_PROGRESS here (the
+        // guard above already refused anything else), so flagException's own
+        // isLegActionable check cannot have moved out from under this call.
+        await this.flagException(
+          leg.id,
+          { reason: `The handoff code was entered incorrectly ${MAX_PIN_ATTEMPTS} times and is now locked. Staff must verify this handoff manually.` },
+          { userId: null, label: 'System — handoff code locked' },
+        );
+      }
       throw new BadRequestException(
         left > 0
           ? `That code is not right. ${left} ${left === 1 ? 'try' : 'tries'} left.`
@@ -1824,12 +1862,21 @@ export class ShipmentService {
    * actually lands at one once that leg's own arrive/handoff writes the next
    * custody row). `flagException` already is the hold primitive.
    */
-  async flagException(legId: string, input: LegExceptionInput, actor: { userId: string; label?: string }) {
+  async flagException(legId: string, input: LegExceptionInput, actor: { userId: string | null; label?: string }) {
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
-      await tx.shipmentLeg.update({
-        where: { id: leg.id },
+      // Conditional write, NOT an unconditional update by id — same race and
+      // same fix as completeLeg() above (MDF-223): re-assert the status this
+      // call actually read (whatever it was — flagException is legal from
+      // several non-terminal statuses, not just IN_PROGRESS), inside the
+      // write, so a concurrent completeLeg() on the same leg cannot silently
+      // lose or be lost.
+      const claimed = await tx.shipmentLeg.updateMany({
+        where: { id: leg.id, status: leg.status },
         data: { status: 'EXCEPTION', exceptionAt: new Date(), exceptionReason: input.reason },
       });
+      if (claimed.count === 0) {
+        throw new ConflictException('This leg changed state before the exception could be recorded — reload and try again.');
+      }
       await tx.shipment.update({ where: { id: shipment.id }, data: { exceptionAt: new Date(), exceptionReason: input.reason } });
       await this.notifications.notifyAdmins(
         'logistics.read',
@@ -1927,6 +1974,18 @@ export class ShipmentService {
 
       let restored: LegStatus;
       let releasedDriverProfileId: string | null = null;
+      // MDF-2: a leg EXCEPTION-ed by the handoff PIN locking out
+      // (`verifyHandoffPin`, handoffPinAttempts reaching MAX_PIN_ATTEMPTS) is
+      // not actually un-stuck by RESUME alone — that guard reads the attempt
+      // counter, not status, and would refuse the very next try with the
+      // same "too many incorrect codes" error forever. Clearing the counter
+      // here, only when it is actually maxed, restores exactly the budget a
+      // never-flagged leg has. The PIN itself is untouched (no reason to
+      // believe it is wrong — handoffPin is the thing the physical recipient
+      // was told; the attempts were the problem), and every other exception
+      // cause (a flat tyre, a diverted flight, a self-reported failed
+      // delivery) leaves the counter exactly as RESUME always has.
+      const pinWasLocked = leg.handoffPinAttempts >= MAX_PIN_ATTEMPTS;
 
       if (input.resolution === 'RESUME') {
         restored = leg.startedAt ? 'IN_PROGRESS' : 'READY';
@@ -1934,7 +1993,12 @@ export class ShipmentService {
         // at the same exception, and exactly one resolution may land.
         const claimed = await tx.shipmentLeg.updateMany({
           where: { id: leg.id, status: 'EXCEPTION' },
-          data: { status: restored, exceptionAt: null, exceptionReason: null },
+          data: {
+            status: restored,
+            exceptionAt: null,
+            exceptionReason: null,
+            ...(pinWasLocked ? { handoffPinAttempts: 0 } : {}),
+          },
         });
         if (claimed.count === 0) throw new BadRequestException('This exception was already resolved by someone else.');
       } else {
@@ -1949,6 +2013,16 @@ export class ShipmentService {
         // by clearing columns — custody is append-only and real. What should
         // happen to a parcel stranded mid-carry is an owner decision that does
         // not exist yet; until it does, this fails closed.
+        //
+        // MDF-2: this guard is also the only reason RESUME alone is a
+        // sufficient fix for a PIN-locked leg — pickedUpAt is set before
+        // handoffPinAttempts can ever increment (see verifyHandoffPin's own
+        // call chain), so a PIN-locked leg can never reach RELEASE_DRIVER's
+        // counter-clearing code below today. If this guard is ever relaxed to
+        // allow releasing a mid-carry parcel, the RELEASE_DRIVER branch must
+        // also reset handoffPinAttempts when it is maxed, exactly as RESUME
+        // does above — otherwise the next driver inherits a dead PIN and the
+        // trap this fix closed reopens through this branch instead.
         if (leg.startedAt != null || leg.pickedUpAt != null) {
           throw new BadRequestException(
             'This driver has already collected the parcel, so they cannot be released here. Resume the leg, or cancel the shipment through support.',
@@ -2009,6 +2083,7 @@ export class ShipmentService {
             resolution: input.resolution,
             restoredStatus: restored,
             releasedDriverProfileId,
+            pinAttemptsReset: input.resolution === 'RESUME' && pinWasLocked,
           },
         },
         tx,
@@ -2759,7 +2834,12 @@ export class ShipmentService {
    */
   private async transition(
     legId: string,
-    actor: { userId: string; label?: string },
+    // Nullable: MDF-96's PIN-lockout auto-trigger attributes the exception to
+    // the SYSTEM, not a person (actorId: null, per apps/api/CLAUDE.md §7's own
+    // rule for a system-initiated action) — audit.record() already accepts
+    // null, so this only widens what the HELPER allows, not what a real actor
+    // may pass.
+    actor: { userId: string | null; label?: string },
     work: (
       tx: Prisma.TransactionClient,
       leg: Prisma.ShipmentLegGetPayload<Record<string, never>>,
@@ -3350,9 +3430,20 @@ export class ShipmentService {
       },
     });
 
+    // Edward requirement 12 (owner priority): a window is one of the
+    // configured signals `estimateShipmentEta` anchors LAST_MILE/DIRECT to
+    // (projectLastMile/projectDirect, packages/shared/src/shipment-eta.ts),
+    // so replacing it can genuinely move the baseline the same way a
+    // carrier's own `scheduleLeg` commitment or a real `transition()` can —
+    // this was the gap: those two were `noticeEtaChange`'s only callers,
+    // and this write reached neither, so a window change silently moved the
+    // real ETA while the customer went on believing the old one.
+    const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
+    const payload = await this.serialize(fresh, { audience: 'CUSTOMER' });
+    await this.noticeEtaChange(fresh, payload.eta);
+
     if (isSender) {
-      const fresh = await this.prisma.shipment.findUniqueOrThrow({ where: { id }, include: SHIPMENT_INCLUDE });
-      return this.serialize(fresh, { audience: 'CUSTOMER' });
+      return payload;
     }
 
     // The recipient's own ack: exactly what is now stored for THEIR role,
@@ -3474,7 +3565,10 @@ export class ShipmentService {
         // is EXCEPTION/UNKNOWN — never a guess standing in for a real gap.
         eta: etaBySequence.get(l.sequence) ?? null,
         handoffReceivedByName: l.handoffReceivedByName,
-        exceptionReason: l.exceptionReason,
+        // MDF-243 (owner ruling): staff alone see the operator's own typed
+        // words. Everyone else gets the one approved sentence — see
+        // `customerFacingExceptionReason`'s own doc for why there is only one.
+        exceptionReason: opts.audience === 'STAFF' ? l.exceptionReason : customerFacingExceptionReason(l.exceptionReason),
         // The customer's own door code, and nothing else.
         handoffPin: this.pinFor(l, opts.audience, endsAtHub),
         // Per-leg, never pooled: a pickup photo belongs to the leg it was taken
@@ -3513,7 +3607,8 @@ export class ShipmentService {
       deliveredAt: s.deliveredAt,
       cancelledAt: s.cancelledAt,
       cancellationReason: s.cancellationReason,
-      exceptionReason: s.exceptionReason,
+      // MDF-243: same gate, shipment-level. See the leg-level comment above.
+      exceptionReason: opts.audience === 'STAFF' ? s.exceptionReason : customerFacingExceptionReason(s.exceptionReason),
       origin: {
         name: s.originName,
         phone: s.originPhone,

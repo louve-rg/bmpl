@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { useBodyScrollLock } from './use-body-scroll-lock';
 
 /** Everything that can hold focus inside a menu panel. */
 export const MENU_FOCUSABLE =
@@ -33,16 +34,9 @@ export function useModalMenu({
   panelRef: React.RefObject<HTMLElement | null>;
   triggerRef: React.RefObject<HTMLElement | null>;
 }): void {
-  // Lock background scroll while open. The previous overflow is restored rather
-  // than hard-set to '', so a page that legitimately sets its own is unharmed.
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, [open]);
+  // Lock background scroll while open. Shared, reference-counted ownership
+  // of document.body.style.overflow (MDF-126) — see use-body-scroll-lock.ts.
+  useBodyScrollLock(open);
 
   // A press outside the panel closes it. The trigger is outside the panel too, so
   // it is excluded: otherwise tapping the trigger closes the menu and the same

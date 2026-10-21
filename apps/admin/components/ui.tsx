@@ -108,7 +108,7 @@ export function PageHeader({
     <div className="mb-6">
       {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs items={breadcrumbs} className="mb-3" />}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+        <div className="min-w-0">
           {eyebrow && <p className="bmpl-eyebrow">{eyebrow}</p>}
           <h1 className="bmpl-page-title mt-1">{title}</h1>
           {description && <p className="mt-1.5 text-sm text-slate-500">{description}</p>}
@@ -150,8 +150,8 @@ const ALERT_STYLES: Record<Tone, string> = {
 export function Alert({ tone = 'info', title, children, className = '' }: { tone?: Tone; title?: string; children?: ReactNode; className?: string }) {
   return (
     <div role="alert" className={`rounded-bmpl-lg border px-4 py-3 text-sm ${ALERT_STYLES[tone]} ${className}`}>
-      {title && <p className="font-semibold">{title}</p>}
-      {children && <div className={title ? 'mt-0.5' : ''}>{children}</div>}
+      {title && <p className="break-words font-semibold">{title}</p>}
+      {children && <div className={`break-words ${title ? 'mt-0.5' : ''}`}>{children}</div>}
     </div>
   );
 }

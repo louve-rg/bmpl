@@ -2,9 +2,11 @@ import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
   declineJobSchema,
+  legExceptionSchema,
   legHandoffSchema,
   legPickupPhotoSchema,
   type DeclineJobInput,
+  type LegExceptionInput,
   type LegHandoffInput,
   type LegPickupPhotoInput,
 } from '@bmpl/validation';
@@ -83,5 +85,11 @@ export class DriverShippingController {
   @Post(':id/pickup-photo/confirm')
   confirmPickupPhoto(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string, @Body(ZodBody(legPickupPhotoSchema)) b: LegPickupPhotoInput) {
     return this.jobs.confirmPickupPhoto(this.actor(u, req), id, b);
+  }
+
+  /** The courier reports something wrong (MDF-96) — the same exception gate staff use, reused rather than duplicated. */
+  @Post(':id/report-issue')
+  reportIssue(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string, @Body(ZodBody(legExceptionSchema)) b: LegExceptionInput) {
+    return this.jobs.reportIssue(this.actor(u, req), id, b);
   }
 }

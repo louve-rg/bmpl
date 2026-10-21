@@ -101,9 +101,9 @@ export default function AdminOrderDetailPage() {
       <Breadcrumbs items={adminCrumbs(['Orders', '/dashboard/orders'], order.orderNumber)} className="mb-3" />
       <Link href="/dashboard/orders" className="text-sm font-medium text-belize-blue hover:underline">← Orders</Link>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h1 className="bmpl-page-title">{order.orderNumber}</h1>
-          <p className="mt-1 text-sm text-slate-500">{order.customer.name} · {order.customer.email} · {new Date(order.placedAt).toLocaleString()}</p>
+          <p className="mt-1 min-w-0 break-words text-sm text-slate-500">{order.customer.name} · {order.customer.email} · {new Date(order.placedAt).toLocaleString()}</p>
         </div>
         <StatusBadge status={order.status} />
       </div>
@@ -111,7 +111,7 @@ export default function AdminOrderDetailPage() {
       {order.deliveryAddress && (
         <Card className="mt-4 p-4 text-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Delivery address</p>
-          <p className="mt-1 text-slate-700">
+          <p className="mt-1 break-words text-slate-700">
             {order.deliveryAddress.fullName} — {addressLines(order.deliveryAddress).join(', ')}
           </p>
           <p className="mt-1 text-slate-500">{order.deliveryAddress.phone}</p>
@@ -122,15 +122,15 @@ export default function AdminOrderDetailPage() {
         {order.vendorOrders.map((vo) => (
           <Card key={vo.id} className="overflow-hidden p-0">
             <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
-              <span className="font-semibold text-belize-navy">{vo.vendor.businessName}</span>
-              <span className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+              <span className="min-w-0 break-words font-semibold text-belize-navy">{vo.vendor.businessName}</span>
+              <span className="flex shrink-0 flex-wrap items-center gap-1.5 text-xs text-slate-500">
                 {vo.orderNumber}
                 <Badge tone={vo.deliveryMethod === 'DELIVERY' ? 'info' : 'neutral'}>{vo.deliveryMethod === 'DELIVERY' ? 'Delivery' : 'Pickup'}</Badge>
                 <StatusBadge status={vo.status} />
               </span>
             </header>
             {vo.originLocation && (
-              <p className="border-b border-slate-100 px-4 py-1.5 text-xs text-slate-500">
+              <p className="break-words border-b border-slate-100 px-4 py-1.5 text-xs text-slate-500">
                 Fulfilled from <span className="font-medium text-slate-700">{vo.originLocation.label}</span>
               </p>
             )}
@@ -160,10 +160,10 @@ export default function AdminOrderDetailPage() {
                   )}
                   <StatusBadge status={vo.delivery.status} />
                 </div>
-                {vo.delivery.instructions && <p className="text-slate-500">Instructions: {vo.delivery.instructions}</p>}
+                {vo.delivery.instructions && <p className="break-words text-slate-500">Instructions: {vo.delivery.instructions}</p>}
               </div>
             )}
-            {vo.customerNotes && <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Notes: {vo.customerNotes}</p>}
+            {vo.customerNotes && <p className="break-words border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Notes: {vo.customerNotes}</p>}
           </Card>
         ))}
       </div>
