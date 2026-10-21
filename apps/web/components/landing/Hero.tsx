@@ -57,14 +57,27 @@ export function Hero() {
       aria-labelledby="hero-heading"
       className="relative isolate flex min-h-[620px] items-center overflow-hidden bg-[#04122b] sm:min-h-[700px] lg:min-h-[760px]"
     >
-      {/* Supplied background — the large logo is already part of this image. */}
+      {/* Supplied background — the large logo is already part of this image.
+          The seal sits right-of-centre in the source photo (~58-83% across
+          its 1822px width), not at the image's own horizontal centre, so a
+          flat object-center crop clips its right edge whenever the cover-fit
+          scale narrows the visible window enough to reach it. Measured
+          against the photo's real pixels: at the `sm` min-h (700px,
+          640-1023px wide) the crop window is narrow enough to cut into the
+          seal at object-center, but at `lg`'s min-h (760px, >=1024px) the
+          window is wide enough to include it even centred, and below `sm`
+          (min-h 620px) the window is narrow enough that the seal was never
+          more than a faint sliver either way -- that's why only the sm-only
+          range clips. 80% keeps the whole seal in view across the full
+          640-1023px band (verified with margin at both ends), reverting to
+          centre at `lg` since centre is already correct there. */}
       <Image
         src="/images/hero-port.jpg"
         alt=""
         fill
         priority
         sizes="100vw"
-        className="object-cover object-center"
+        className="object-cover object-center sm:object-[80%_center] lg:object-center"
       />
       {/* Navy gradient (left → right) for headline legibility on desktop. */}
       <div className="absolute inset-0" style={{ backgroundImage: HERO_OVERLAY }} aria-hidden />
