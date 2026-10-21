@@ -51,18 +51,36 @@ const WEB_ROOT = path.resolve(__dirname, '..', '..');
 /**
  * The PID actually bound to `port`, read from the OS rather than from
  * whatever process object we spawned — `next dev`'s own child is not
- * necessarily the process holding the socket. Windows-only (`netstat`),
- * matching this repo's development platform; the POSIX branch is a best
- * effort, not exercised or verified here.
+ * necessarily the process holding the socket. Windows-only (`netstat`) was
+ * the only path ever run before CI started exercising this file for real.
+ *
+ * CONFIRMED FAILING ON ubuntu-latest (2026-10-21, run 39528351760): all four
+ * dev-server lifecycles this job now starts (web/admin visual, web/admin
+ * contrast) left an orphaned `next-server` process that GitHub Actions'
+ * own job-level cleanup had to kill — stopDevServer's kill attempts never
+ * found the right PID for ANY of the four, including the two pre-existing
+ * visual-suite servers this branch never touched. The lsof-based lookup was
+ * never verified on Linux (its own prior comment said so) and this is that
+ * gap surfacing, not something the port-split fix introduced.
+ *
+ * Tries `ss` first (iproute2 -- part of the base ubuntu-latest image, unlike
+ * lsof which is an optional package) and falls back to `lsof` rather than
+ * replacing it outright, since the real cause of lsof returning nothing
+ * here hasn't been isolated (no Linux box available to reproduce from this
+ * worktree) -- exactly Oscar's own stated principle in #471: report rather
+ * than guess at a fix for a mechanism not actually located. If `ss` also
+ * comes back empty, logs which commands were tried so the NEXT run gives
+ * more to go on instead of the same silent null.
  */
 function findPidOnPort(port: number): string | null {
   if (process.platform !== 'win32') {
-    try {
-      const out = execFileSync('bash', ['-c', `lsof -ti:${port} | head -n1`], { encoding: 'utf8' }).trim();
-      return out || null;
-    } catch {
-      return null;
-    }
+    const viaSs = findPidOnPortPosixSs(port);
+    if (viaSs) return viaSs;
+    const viaLsof = findPidOnPortPosixLsof(port);
+    if (viaLsof) return viaLsof;
+    // eslint-disable-next-line no-console
+    console.error(`findPidOnPort(${port}): both ss and lsof returned nothing -- cannot confirm or free this port by PID lookup.`);
+    return null;
   }
   try {
     const out = execFileSync('netstat', ['-ano'], { encoding: 'utf8' });
@@ -70,6 +88,25 @@ function findPidOnPort(port: number): string | null {
     if (!line) return null;
     const cols = line.trim().split(/\s+/);
     return cols[cols.length - 1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function findPidOnPortPosixSs(port: number): string | null {
+  try {
+    const out = execFileSync('bash', ['-c', `ss -ltnp 'sport = :${port}' 2>/dev/null`], { encoding: 'utf8' });
+    const match = out.match(/pid=(\d+)/);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function findPidOnPortPosixLsof(port: number): string | null {
+  try {
+    const out = execFileSync('bash', ['-c', `lsof -ti:${port} | head -n1`], { encoding: 'utf8' }).trim();
+    return out || null;
   } catch {
     return null;
   }

@@ -39,14 +39,26 @@ export const CONTRAST_BASE_URL = `http://localhost:${CONTRAST_PORT}`;
 
 const ADMIN_ROOT = path.resolve(__dirname, '..', '..');
 
+/**
+ * CONFIRMED FAILING ON ubuntu-latest (2026-10-21, run 39528351760) -- see
+ * apps/web's own copy of this file for the full finding: all four
+ * dev-server lifecycles this job now starts left an orphaned `next-server`
+ * process, including the two pre-existing visual-suite servers this branch
+ * never touched. Tries `ss` (iproute2, part of the base image) before
+ * `lsof` (an optional package, never confirmed present here) rather than
+ * replacing lsof outright -- the real cause hasn't been isolated from this
+ * Windows worktree, so this reports rather than guesses, same principle as
+ * Oscar's #471.
+ */
 function findPidOnPort(port: number): string | null {
   if (process.platform !== 'win32') {
-    try {
-      const out = execFileSync('bash', ['-c', `lsof -ti:${port} | head -n1`], { encoding: 'utf8' }).trim();
-      return out || null;
-    } catch {
-      return null;
-    }
+    const viaSs = findPidOnPortPosixSs(port);
+    if (viaSs) return viaSs;
+    const viaLsof = findPidOnPortPosixLsof(port);
+    if (viaLsof) return viaLsof;
+    // eslint-disable-next-line no-console
+    console.error(`findPidOnPort(${port}): both ss and lsof returned nothing -- cannot confirm or free this port by PID lookup.`);
+    return null;
   }
   try {
     const out = execFileSync('netstat', ['-ano'], { encoding: 'utf8' });
@@ -54,6 +66,25 @@ function findPidOnPort(port: number): string | null {
     if (!line) return null;
     const cols = line.trim().split(/\s+/);
     return cols[cols.length - 1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function findPidOnPortPosixSs(port: number): string | null {
+  try {
+    const out = execFileSync('bash', ['-c', `ss -ltnp 'sport = :${port}' 2>/dev/null`], { encoding: 'utf8' });
+    const match = out.match(/pid=(\d+)/);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function findPidOnPortPosixLsof(port: number): string | null {
+  try {
+    const out = execFileSync('bash', ['-c', `lsof -ti:${port} | head -n1`], { encoding: 'utf8' }).trim();
+    return out || null;
   } catch {
     return null;
   }
