@@ -118,6 +118,19 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
   );
 
   /**
+   * RESOLVED (god, 2026-10-21, same requirement-7 thread) for both worked
+   * examples below: root-caused to a closed native `<details>` preserving
+   * its content's layout box while painting nothing -- see
+   * `isInsideClosedDetails` in contrast-sweep.ts's `discoverElements`,
+   * which now excludes that content at discovery time, the same tier as
+   * the existing zero-geometry guard. This comment's forensic record below
+   * is kept because the underlying LIMITATION of `clusterAt` itself is
+   * still real -- it still reports the topmost painted pixel, not
+   * necessarily an element's own background -- the fix above only removes
+   * the one DISCOVERABLE class of false-positive this specific limitation
+   * was producing (real-but-unpainted boxes). A different cause could
+   * still produce the same symptom and would not be caught by this guard.
+   *
    * KNOWN LIMITATION (god + Dwight + Oscar, 2026-10-21, requirement 7):
    * `clusterAt` pixel-samples a composited screenshot at an element's
    * computed box coordinates. It therefore reports the TOPMOST PAINTED

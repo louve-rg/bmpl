@@ -148,6 +148,24 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       return fallbackText;
     }
 
+    // Cluster F root cause -- see apps/web/e2e/support/contrast-sweep.ts's
+    // identical copy of this comment for the full mechanism (found on web's
+    // Header.tsx/CategoryNav.tsx; admin has no Cluster F instance today, but
+    // the same closed-<details> pattern would produce the same artifact
+    // anywhere it's used, so both apps' sweeps carry the same guard rather
+    // than drifting into two different measurements again).
+    function isInsideClosedDetails(el: Element): boolean {
+      let node: Element | null = el.parentElement;
+      while (node) {
+        if (node.tagName === 'DETAILS' && !node.hasAttribute('open')) {
+          const summary = node.querySelector(':scope > summary');
+          if (!summary || !summary.contains(el)) return true;
+        }
+        node = node.parentElement;
+      }
+      return false;
+    }
+
     const textOut: Array<{
       kind: 'text';
       tag: string;
@@ -177,6 +195,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         if (cs.display === 'none' || cs.visibility === 'hidden') continue;
         const box = el.getBoundingClientRect();
         if (box.width < 2 || box.height < 2) continue;
+        if (isInsideClosedDetails(el)) continue; // real box, nothing painted -- see isInsideClosedDetails' own comment
         iconOut.push({
           kind: 'icon',
           tag: el.tagName,
@@ -199,6 +218,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
 
       const box = el.getBoundingClientRect();
       if (box.width < 2 || box.height < 2) continue;
+      if (isInsideClosedDetails(el)) continue; // real box, nothing painted -- see isInsideClosedDetails' own comment
 
       const fontSizePx = parseFloat(cs.fontSize);
       const fontWeight = parseInt(cs.fontWeight, 10) || 400;
