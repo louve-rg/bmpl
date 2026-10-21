@@ -92,7 +92,7 @@ export function AvatarUploader({ me, onChange }: { me: MeView; onChange: (me: Me
 
         <div className="min-w-[16rem] flex-1 space-y-3">
           <div>
-            <h2 className="font-semibold text-belize-navy">Profile picture</h2>
+            <h2 className="font-semibold text-[color:var(--bmpl-text)]">Profile picture</h2>
             {/* Providers are held to a verification standard, so they get the
                 rules. Customers are not, so telling them about a face check
                 would describe a gate that does not exist for them. */}

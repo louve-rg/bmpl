@@ -70,7 +70,7 @@ function ServiceCard({ service: s }: { service: PassengerService }) {
   return (
     <UiCard className="p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <b className="text-sm text-belize-navy">{s.name}</b>
+        <b className="text-sm text-[color:var(--bmpl-text)]">{s.name}</b>
         {s.operator && <span className="text-xs text-slate-500">{s.operator}</span>}
       </div>
       <p className="mt-1 text-sm text-slate-600">

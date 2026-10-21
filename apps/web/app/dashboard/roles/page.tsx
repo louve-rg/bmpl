@@ -175,7 +175,7 @@ function RoleCard({
   return (
     <Card className="p-5">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="font-bold text-belize-navy">{role.label}</h3>
+        <h3 className="font-bold text-[color:var(--bmpl-text)]">{role.label}</h3>
         {role.status && <StatusBadge status={role.status} className="shrink-0" />}
       </div>
       <p className="mt-2 text-sm text-slate-600">{role.description}</p>
