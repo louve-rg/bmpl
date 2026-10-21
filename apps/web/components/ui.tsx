@@ -161,54 +161,13 @@ export function FormCard({
 }
 
 /**
- * The fixed action bar pinned to the bottom of a long form on a phone (e.g.
- * "Pay & book shipment") -- its own literal opaque surface regardless of
- * theme, same reasoning as `FormCard` above, for the same reason: it must
- * stay legible over whatever scrolls under it.
- *
- * `z-30` and `isolate` are the stacking-context half of the fix, not the
- * padding: a Leaflet map embedded earlier on the same page paints its own
- * panes (markers, popups, controls) at z-index up to 700, and a `position:
- * fixed`/`sticky` element with no z-index of its own does not automatically
- * out-rank that. `isolate` here is defence in depth -- the map's own
- * container is where that containment actually belongs (see
- * LocationPicker's `mapBox`) -- but a shared action bar is also exactly the
- * kind of element a future page might stack a map underneath without
- * knowing to think about it, so it carries its own floor too.
- *
- * `env(safe-area-inset-bottom)` keeps the button clear of an iPhone's home
- * indicator -- `max()` so it never loses the bar's own minimum padding on a
- * device that reports no inset at all (desktop browsers, older phones). Set
- * through a CSS variable and consumed by a `pb-[...]` utility rather than an
- * inline `style`, specifically so a caller's own `sm:pb-0` (e.g. collapsing
- * to a plain static footer on desktop, as the booking page does) can still
- * win at that breakpoint -- an inline style always beats a class, which
- * would otherwise leave desktop stuck with a phantom bottom gap no `sm:`
- * override could remove.
+ * Moved to its own file (StickyActionBar.tsx) because the MDF-376 space-
+ * reservation fix needs hooks (useRef/useEffect/useState), and this file
+ * carries no 'use client' directive -- adding one here would force every
+ * other export in ui.tsx into the client bundle too. Re-exported so every
+ * existing `import { ..., StickyActionBar } from '.../ui'` keeps working.
  */
-export function StickyActionBar({
-  sticky = false,
-  className = '',
-  children,
-}: {
-  /** `sticky` for a bar inside a normal scrolling page (no viewport-fixed
-   * behaviour needed); the default `fixed` pins it to the viewport even
-   * while the rest of the page scrolls underneath -- the right choice for
-   * a long one-page form where the price and the button must stay reachable
-   * without scrolling back down. */
-  sticky?: boolean;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      className={`${sticky ? 'sticky' : 'fixed inset-x-0'} isolate z-30 bottom-0 border-t border-[color:var(--bmpl-oncolor-light-border)] bg-[color:var(--bmpl-oncolor-light-bg)]/95 px-3 pt-3 pb-[max(0.75rem,var(--bmpl-safe-bottom,0px))] backdrop-blur ${className}`}
-      style={{ '--bmpl-safe-bottom': 'env(safe-area-inset-bottom)' } as CSSProperties}
-    >
-      {children}
-    </div>
-  );
-}
+export { StickyActionBar } from './StickyActionBar';
 
 /** Consistent page title block for authenticated screens. */
 export function PageHeader({

@@ -42,7 +42,12 @@ function AggregateHeader({ aggregate }: { aggregate: RatingAggregate }) {
             <div key={r} className="flex items-center gap-2 text-xs text-slate-500">
               <span className="w-8 shrink-0 tabular-nums">{r} ★</span>
               <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100" aria-hidden>
-                <span className="block h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} />
+                {/* amber-600 (the StarRating fix) measures 2.91:1 against this
+                    bg-slate-100 track -- still under 3:1. amber-700 clears it
+                    at 4.58:1; this bar is always on a literal bg-white header
+                    (AggregateHeader, above), never a glass card, so one color
+                    is enough here, same reasoning as the star fix. */}
+                <span className="block h-full rounded-full bg-amber-700" style={{ width: `${pct}%` }} />
               </span>
               <span className="w-8 shrink-0 text-right tabular-nums">{n}</span>
             </div>

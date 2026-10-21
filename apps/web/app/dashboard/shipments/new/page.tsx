@@ -186,7 +186,9 @@ export default function NewShipmentPage() {
   const canBook = priced != null && !priced.pricingIncomplete && !booking && affordable;
 
   return (
-    <div className="mx-auto max-w-2xl pb-28">
+    // No manual bottom padding here any more -- StickyActionBar now reserves
+    // its own space (MDF-376); a hand-guessed pb-28 would just double it up.
+    <div className="mx-auto max-w-2xl">
       <PageHeader title="Ship a package" description="Send a parcel anywhere in Belize — by road, air or boat." />
 
       {/* 1. What kind of service. Chosen first because it decides which fields
@@ -421,7 +423,7 @@ export default function NewShipmentPage() {
              the stacking-context floor and the iPhone safe-area padding --
              see components/ui.tsx for why both are the bar's job, not a
              one-off class here. */}
-      <StickyActionBar className="sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:pt-0 sm:pb-0 sm:backdrop-blur-none">
+      <StickyActionBar className="sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:pt-0 sm:pb-0">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           {quote?.available && (
             <span className="shrink-0 text-lg font-bold tabular-nums text-belize-navy sm:hidden">
