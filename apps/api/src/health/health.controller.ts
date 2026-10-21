@@ -36,7 +36,23 @@ export class HealthController {
    *  still serving", which a commit SHA alone cannot show when a deploy is skipped.
    *  See docs/DEPLOYMENT.md §2a — Railway only rebuilds on a watch-path match.
    *  M10: checkout/orders. M11.1: startup maintenance releases the verification
-   *  account's reservations + wallet holds on boot (idempotent). */
+   *  account's reservations + wallet holds on boot (idempotent).
+   *
+   *  This path IS Railway's `healthcheckPath` (railway.json: `healthcheckTimeout: 100`),
+   *  the gate a newly built container must clear before cutover; `restartPolicyType:
+   *  ON_FAILURE` / `restartPolicyMaxRetries: 3` govern that NEW container only, not
+   *  the one already serving. docs/DEPLOYMENT.md:386-387 documents, for the
+   *  pre-deploy migration hook one stage earlier in the same release sequence, that
+   *  "a failed migration halts the deploy — the previous version keeps serving." NO
+   *  equivalent sentence exists in this repo for a healthcheck-stage failure
+   *  specifically. It is consistent with the same pipeline and with Railway's general
+   *  published behaviour, and deployment `7219995090` (b1d5c0d, failed in_progress
+   *  after ~2h20m without `f2d2c99` ever stopping serving) is observed evidence for
+   *  it — but that failure never reached this endpoint at all (it stayed
+   *  `in_progress`, never progressing to a healthcheck attempt), so it does not
+   *  close the gap either. Treat "a failed healthcheck here leaves the previous
+   *  container serving" as consistent with the design, not as an established,
+   *  repo-documented fact, until something closes this gap on purpose. */
   @Public()
   @Get()
   live() {
