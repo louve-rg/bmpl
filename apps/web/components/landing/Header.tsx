@@ -103,7 +103,17 @@ export function Header() {
   return (
     <>
       <AnnouncementBanner />
-      <header className="sticky top-0 z-50 bg-belize-navy/95 backdrop-blur supports-[backdrop-filter]:bg-belize-navy/80">
+      {/* The blurred branch used to drop to 80% navy specifically to let more of
+          the page glass through -- but this header has no opaque backing of its
+          own, so BrandLockup's subtitle (text-belize-light, designed for solid
+          navy) composites directly against whatever scrolls underneath. Worst
+          case (near-white content behind, e.g. this page's own slate-50 body):
+          80% measured 3.77:1 on real production, below 4.5:1. 90% keeps the
+          frosted-glass look (blur still does the visual separation) while
+          computing >=5.3:1 against white in the worst case -- same fix shape
+          as the dashboard's alpha-fill-under-glass defects, applied to this
+          header's own chrome instead of a card. */}
+      <header className="sticky top-0 z-50 bg-belize-navy/95 backdrop-blur supports-[backdrop-filter]:bg-belize-navy/90">
       {/* The desktop nav switches in at `lg`, not `md`. At exactly 768px the
           brand, five nav links and four account controls measured 978px against
           a 768px viewport — a tablet in portrait scrolled sideways on every
