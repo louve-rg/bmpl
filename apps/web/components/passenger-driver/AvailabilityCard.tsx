@@ -94,8 +94,8 @@ export function AvailabilityCard({
                       : 'border-slate-200 hover:border-belize-blue/50'
                   } ${disabled && !active ? 'cursor-not-allowed opacity-50' : ''}`}
                 >
-                  <span className="block text-sm font-semibold text-belize-navy">{o.label}</span>
-                  <span className="mt-0.5 block text-xs text-slate-500">{o.hint}</span>
+                  <span className={`block text-sm font-semibold ${active ? 'text-belize-navy' : 'text-[color:var(--bmpl-text)]'}`}>{o.label}</span>
+                  <span className={`mt-0.5 block text-xs ${active ? 'text-slate-600' : 'text-[color:var(--bmpl-text-muted)]'}`}>{o.hint}</span>
                 </button>
               );
             })}

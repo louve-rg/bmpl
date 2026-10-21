@@ -394,7 +394,7 @@ function ModerationTab({ canModerate }: { canModerate: boolean }) {
                         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-belize-navy">{j.title}</span>
                         <StatusBadge status={j.status} />
                       </div>
-                      <div className="truncate text-xs text-slate-500">{j.company}</div>
+                      <div className="truncate text-xs text-[color:var(--bmpl-oncolor-light-text-muted)]">{j.company}</div>
                       <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
                         <span>{employmentLabel(j.employmentType)}</span>
                         <span aria-hidden>·</span>

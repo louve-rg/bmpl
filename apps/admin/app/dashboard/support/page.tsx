@@ -200,7 +200,7 @@ export default function SupportPage() {
                           <span className="min-w-0 flex-1 truncate text-sm font-semibold text-belize-navy">{it.subject}</span>
                           <StatusBadge status={it.status} />
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <div className="flex items-center gap-2 text-xs text-[color:var(--bmpl-oncolor-light-text-muted)]">
                           <span className="min-w-0 truncate">
                             {it.requester ? `${it.requester.name} · ${it.requester.email}` : 'Unknown requester'}
                           </span>
@@ -492,7 +492,7 @@ function MessageRow({ message }: { message: SupportMessage }) {
   if (message.type === 'SYSTEM') {
     return (
       <div className="flex justify-center">
-        <p className="rounded-full bg-slate-100 px-3 py-1 text-center text-xs text-slate-500">
+        <p className="rounded-full bg-slate-100 px-3 py-1 text-center text-xs text-[color:var(--bmpl-oncolor-light-text-muted)]">
           {message.deleted ? 'Message removed' : message.body}
         </p>
       </div>
