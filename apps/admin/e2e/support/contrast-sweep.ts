@@ -16,6 +16,13 @@ import { openPixelSampler, contrastRatioOf, type RGB } from './contrast';
  * wrapping a bar row AND an orders-strip row as one element) get their own
  * named bucket, never a scored reading -- see apps/web's own copy of this
  * file for the full reasoning and the structural (not size-based) test.
+ *
+ * KNOWN GAP, shared with apps/web: `hasOwnFillDescendant` only detects a
+ * CSS-painted composite, not an SVG-painted one (apps/web's
+ * StarRating.tsx is the known instance -- five SVG stars painted via
+ * fill/clipPath, no CSS background anywhere). Not live on any route this
+ * app sweeps today. Must be widened before route expansion reaches any
+ * page that renders a star rating or similar SVG composite.
  */
 
 export const WCAG_NORMAL_TEXT_MIN_RATIO = 4.5;

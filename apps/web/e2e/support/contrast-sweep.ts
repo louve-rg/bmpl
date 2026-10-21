@@ -52,6 +52,21 @@ import { openPixelSampler, contrastRatioOf, type RGB } from './contrast';
  * small. Composite elements are discovered, counted, and reported, but
  * never sampled or scored PASS/FAIL/AMBIGUOUS — "this graphic cannot be
  * measured as one color pair" is itself the honest finding.
+ *
+ * KNOWN GAP IN THIS TEST, found live (2026-10-21) before it caused a wrong
+ * reading anywhere: `hasOwnFillDescendant` only detects a CSS-PAINTED
+ * composite (a descendant with its own `background-color`/`background-
+ * image`), not an SVG-PAINTED one. `components/reviews/StarRating.tsx`
+ * is exactly that case the principle above covers but this test does not
+ * — a `role="img"` span wrapping five `<Star>` SVGs, each painted via
+ * `fill`/`clipPath` with no CSS background anywhere, so the whole span
+ * would be sampled as one leaf icon, the same aggregate-over-a-container
+ * error this bucket exists to catch, through the one door this test
+ * doesn't cover. Not live today — StarRating is never rendered on either
+ * currently-swept route — but it becomes live the moment route expansion
+ * reaches reviews, products, or storefront, and the composite test must
+ * be widened to cover SVG composites BEFORE any of those routes is added,
+ * not discovered after by a silent wrong ratio.
  */
 
 export const WCAG_NORMAL_TEXT_MIN_RATIO = 4.5;
