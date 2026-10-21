@@ -38,12 +38,20 @@
    everything inside it. IT DOES NOT, AND CANNOT, un-match a selector
    written as `[data-theme='glass'] <something>` -- that selector matches
    on the ANCESTOR still carrying data-theme="glass", which is still true
-   regardless of what a descendant sets. Any such rule (there are four in
-   this file as of this comment: .bml-mural, .bmpl-header-wash, the
-   reduced-motion `*`, and :focus-visible below) will keep firing inside a
-   [data-theme='light'] subtree, and if the custom properties IT reads are
-   declared only inside the glass block -- not here -- that subtree gets
-   glass-only values with no light equivalent. This is the exact shape of
+   regardless of what a descendant sets. Any such rule will keep firing
+   inside a [data-theme='light'] subtree, and if the custom properties IT
+   reads are declared only inside the glass block -- not here -- that
+   subtree gets glass-only values with no light equivalent. There are ten
+   such rules platform-wide: four here (.bml-mural, .bmpl-header-wash, the
+   reduced-motion `*`, and :focus-visible below) and six more split across
+   apps/web/app/globals.css and apps/admin/app/globals.css
+   (.glass-chrome, .bmpl-nav-item[aria-current='page'], .bmpl-nav-heading
+   -- three each, textually identical between the two files). Checked all
+   ten as of this comment: the other nine read --bmpl-border,
+   --bmpl-shadow-md and --bmpl-surface-muted, each already declared in
+   both blocks, so only the focus-ring pair below was missing its light
+   counterpart. A new `[data-theme='glass'] X` rule, in any of these
+   files, needs the same check before it ships. This is the exact shape of
    the --bmpl-accent/.bmpl-eyebrow defect found earlier tonight (a token
    defined once under glass, never given a light counterpart, consumed
    unconditionally) in the opposite direction: there it was glass missing
