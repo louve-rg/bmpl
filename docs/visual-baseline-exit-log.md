@@ -232,35 +232,37 @@ scope and in method, and both are explainable:**
    live run not finding them is evidence my run didn't see them, not
    evidence they were already gone, and that gap is exactly where the bug
    in my reasoning lived.
-   **Unexplained, with three candidates now ruled out** — left open rather
-   than closed with a guess, because getting this right matters more than
-   getting it tidy. Why the "Courier rate" label was never discovered at
-   all (zero mentions anywhere in the run's log — not failing, not
-   ambiguous, not passing) is not settled, but three plausible mechanisms
-   each turned out wrong on inspection:
-   - *Wrong role.* `logistics-hubs.spec.ts`'s own source already logs in
-     as `OPS_LIMITED` directly — ruled out.
-   - *Seed-fixture permission drift* (my own hypothesis: `canManage` reads
-     `true` for this fixture, routing to the `<Input>` branch instead of
-     the text leaf). Ruled out by reading the seed directly:
-     `packages/database/prisma/seed-uat-logistics.ts:219` sets
-     `OPS_LIMITED_PERMISSIONS = ['logistics.read', 'logistics.operate']` —
-     no `logistics.manage` — so `canManage` should read `false` as named.
-   - *Empty hub list* (the map at `hubs.map((h) => (...))` around line 264
-     never iterating, so neither branch renders for any hub). Ruled out by
-     the same run's own log: both `main @ 499af25` (run `39566595024`) and
-     `chore/contrast-sweep-mdf376` (PR #490, run `39653113575`) show this
-     spec failing — not skipping — with two real hub rows measured each
-     time (`Belize City, BELIZE · warehouse · LAND`, `Belmopan, CAYO ·
-     warehouse · LAND`). The list is populated; the label specifically is
-     what's missing from the output.
-   Best-fit remaining explanation, **not yet confirmed**: a true negative.
-   The live pixel sampler measures the real composited background behind
-   the label, which may not be the nominal card color the static sweep
-   assumed; if that live background gives ratio >= 4.5, the label simply
-   passes and is correctly absent from a failures list — not a discovery
-   miss at all. Not investigated further, per the scope this correction
-   was given.
+   **The node is real, at approximately 2.4:1, and absent from the live
+   sweep — an instrument gap, not a pass.** Ran, not skipped: both
+   `main @ 499af25` (run `39566595024`) and `chore/contrast-sweep-mdf376`
+   (PR #490, run `39653113575`) show this spec failing, not skipping, with
+   real `assertRatchet` violation text at every viewport. Hub list
+   populated, not empty: both runs measure two real hub rows
+   (`Belize City, BELIZE · warehouse · LAND`, `Belmopan, CAYO · warehouse ·
+   LAND`) — if `hubs` were `[]` there would be nothing to report at all.
+   Card confirmed dark glass, not light: `AdminShell.tsx:161` sets
+   `data-theme="glass"` on the whole admin console, and the arithmetic for
+   `text-slate-500`/`text-slate-600` against that glass card's actual
+   composited background (`rgba(10,20,38,0.56)` over the `#0a1526` mural)
+   reproduces the two *other* violations reported on this same card to one
+   decimal place (`text-slate-500` -> ~3.6/~3.79, matching the
+   `3.6`-`3.79` measured above for the hub description text) — and the
+   same arithmetic for `text-slate-600` lands at ~2.4, matching Oscar's
+   2.43 for this exact label. Label confirmed rendering, not gated off:
+   `hubs/page.tsx:94`, `setCanManage((me.adminPermissions ?? []).includes(
+   'logistics.manage'))` — `OPS_LIMITED` does not hold that permission, so
+   `canManage` is `false` and the `!canManage` paragraph (the one
+   containing "Courier rate") is the one that renders.
+   So: Oscar's 2.43 was correct, and my live sweep under-reported this
+   node — **the 27-real figure is a floor, not a total.** Mechanism for
+   the miss is unconfirmed; one candidate, named as a candidate only and
+   not investigated further: the paragraph is mixed content, `Courier
+   rate <span>BZ$...</span>`, and the span is already `--bmpl-text` and
+   passing — a sampler that resolves one color per element could be
+   attributing the parent to its (passing) child's color instead of its
+   own. If that is the mechanism it would not be unique to this node:
+   `Label <span>value</span>` is a common shape in this codebase, which is
+   why it is recorded even unconfirmed.
 4. **Two of his 14 classes are role/app scope gaps on my side, not
    methodology noise.** `/dashboard/notifications`'s `A.text-belize-blue`
    "Preferences" link and `/dashboard/settlements`'s `P.text-slate-400`
@@ -293,23 +295,27 @@ instrument cannot tell you which.** My live sweep missed the hubs
 courier-rate label because a gated render path kept it from ever being
 discovered, not because it was absent. Oscar's static sweep separately
 missed `/dashboard/store`'s "Approval:" label (point 6) because its
-fixture never reached the data state that renders it. A role gate defeats
-a live probe that logs in as the wrong account, or — per the unresolved
-half of point 3 — as the right account with the wrong seeded permissions.
-A data-state gate defeats a static sweep that never produces that state.
-**Absence from either sweep is not evidence of absence; it is evidence of
-where that sweep did not look.** A route or route+role reporting zero
-findings is a claim about what was measured, never a claim about what
+fixture never reached the data state that renders it. A role gate defeats a live probe that logs in as the wrong account. A
+data-state gate defeats a static sweep that never produces that state. And
+per point 3, a live probe can also under-report a node that is real,
+rendering, on the correct account, for a reason that is neither of those —
+an element-level sampler meeting a sub-element reality (mixed content,
+`Label <span>value</span>`, candidate only, unconfirmed). **Absence from
+either sweep is not evidence of absence; it is evidence of where that
+sweep did not look, or of how it looked.** A route or route+role reporting
+zero findings is a claim about what was measured, never a claim about what
 exists — true of the 355, true of my 27/493, and true of the contrast
 gate itself once anyone starts treating a green run as proof nothing is
 wrong rather than proof nothing *measured* was wrong.
 
-**Conclusion: no rounding either way.** Where the two methods measure the
-same ground, they agree. The headline gap (493/85/27 vs 355) is explained
-by scope (1, mostly), dedup granularity (2), and — per the point above —
-by each method's own blind spots, not by either count being simply wrong.
-`contrast-known-violations.json` stays `[]` in both apps; nothing here is
-an allowlist entry or a baseline edit.
+**Conclusion: no rounding either way, and my own count is a floor, not a
+total.** Where the two methods measure the same ground, they mostly agree,
+and where they don't, point 3 shows my live sweep is the one that
+under-counts, not Oscar's that over-counts. The headline gap (493/85/27 vs
+355) is explained by scope (1, mostly), dedup granularity (2), and — per
+the point above — by each method's own blind spots, not by either count
+being simply wrong. `contrast-known-violations.json` stays `[]` in both
+apps; nothing here is an allowlist entry or a baseline edit.
 
 **Reporting cadence as Oscar's batches land:** this document's own count
 (27 real elements / 493 readings, ten routes) is the one this harness can
@@ -381,6 +387,13 @@ elements otherwise match the 27 named in the table above one-for-one.
 No allowlist entry, no threshold or baseline edit, anywhere — this is the
 harness measuring fewer elements because fewer are discovered as
 non-painted, not because any entry was suppressed.
+
+**27 is a floor, not a total.** The hubs "Courier rate" label (point 3,
+above) is a confirmed real ~2.4:1 violation that this harness does not
+discover at all — an instrument gap, not a defect that was fixed or that
+never existed. The true count of real debt on these ten routes is at least
+27 (26 after the clock-drift relabel above); it is not known to be exactly
+that, because this harness can miss a node the way it missed this one.
 
 ## Review-before-update workflow (the same document records this because the
 same failure shape applies — the easy path must be the safe one)
