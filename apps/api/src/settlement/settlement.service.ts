@@ -490,7 +490,10 @@ export class SettlementService {
   async driverEarningDetail(userId: string, id: string) {
     const p = await this.prisma.driverProfile.findUnique({ where: { userId }, select: { id: true } });
     if (!p) throw new ForbiddenException('No driver profile.');
-    const r = await this.prisma.driverEarning.findUnique({ where: { id } });
+    const r = await this.prisma.driverEarning.findUnique({
+      where: { id },
+      include: { shipmentLeg: { select: { shipment: { select: { reference: true } } } } },
+    });
     if (!r || r.driverProfileId !== p.id) throw new NotFoundException('Earning not found.');
     return { ...this.shapeEarning(r), snapshot: r.snapshot };
   }
@@ -519,7 +522,14 @@ export class SettlementService {
   }
 
   async adminDriverEarnings() {
-    const rows = await this.prisma.driverEarning.findMany({ orderBy: { createdAt: 'desc' }, take: 300, include: { driverProfile: { select: { displayName: true } } } });
+    const rows = await this.prisma.driverEarning.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+      include: {
+        driverProfile: { select: { displayName: true } },
+        shipmentLeg: { select: { shipment: { select: { reference: true } } } },
+      },
+    });
     return rows.map((r) => ({ ...this.shapeEarning(r), driver: r.driverProfile.displayName }));
   }
 
