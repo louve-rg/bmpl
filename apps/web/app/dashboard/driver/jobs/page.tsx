@@ -197,7 +197,7 @@ export default function DriverJobsPage() {
                 {count > 0 && (
                   <span
                     className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-[18px] ${
-                      active ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
+                      active ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-600'
                     }`}
                   >
                     {count > 99 ? '99+' : count}

@@ -344,7 +344,7 @@ function Toggle({
     <button
       onClick={onClick}
       className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
-        on ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+        on ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
       }`}
     >
       {on ? labelOn : labelOff}
