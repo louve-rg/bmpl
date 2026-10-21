@@ -22,10 +22,10 @@ import { BASE_URL } from './e2e/support/server';
 export default defineConfig({
   testDir: './e2e',
   // e2e/visual belongs to playwright.visual.config.ts (Priority 6, owner
-  // directive 2026-10-16) -- excluded here so the two suites never silently
-  // double-enumerate the same spec under two different configs as Phase 2
-  // adds files there.
-  testIgnore: ['**/visual/**'],
+  // directive 2026-10-16) and e2e/contrast to playwright.contrast.config.ts
+  // (requirement 7) -- both excluded here so no suite silently
+  // double-enumerates another's spec files under this config too.
+  testIgnore: ['**/visual/**', '**/contrast/**'],
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,

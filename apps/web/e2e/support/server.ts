@@ -26,9 +26,23 @@ import path from 'node:path';
  * PORT is deliberately NOT 3000 (the project's normal `pnpm dev` port), so
  * this harness can never collide with, or be fooled by, a developer's own
  * running dev server.
+ *
+ * CONTRAST_PORT exists because the contrast suite (playwright.contrast.config.ts)
+ * now runs as its own step, in the same CI job, after the visual suite --
+ * found live (2026-10-21, PR #469's first real run): the visual step's
+ * server teardown relies on `findPidOnPort`/`killPid` below, whose POSIX
+ * branch had never actually been exercised against a second same-job
+ * consumer of PORT before that run, and it left the port still bound when
+ * the contrast step tried to start its own server on it (EADDRINUSE). A
+ * distinct port for the contrast suite removes the need for that teardown
+ * to succeed within this job at all, rather than trusting it for the first
+ * time under a new consumer; see docs/design/CONTRAST-STANDARD.md and the
+ * approach doc this PR implements for the rest of that requirement.
  */
 export const PORT = 3177;
 export const BASE_URL = `http://localhost:${PORT}`;
+export const CONTRAST_PORT = 3179;
+export const CONTRAST_BASE_URL = `http://localhost:${CONTRAST_PORT}`;
 export const FIXTURE_PATH = '/e2e-test-fixtures/dialogs';
 export const FIXTURE_READY_MARKER = 'data-e2e-fixture-ready';
 
@@ -37,18 +51,36 @@ const WEB_ROOT = path.resolve(__dirname, '..', '..');
 /**
  * The PID actually bound to `port`, read from the OS rather than from
  * whatever process object we spawned — `next dev`'s own child is not
- * necessarily the process holding the socket. Windows-only (`netstat`),
- * matching this repo's development platform; the POSIX branch is a best
- * effort, not exercised or verified here.
+ * necessarily the process holding the socket. Windows-only (`netstat`) was
+ * the only path ever run before CI started exercising this file for real.
+ *
+ * CONFIRMED FAILING ON ubuntu-latest (2026-10-21, run 39528351760): all four
+ * dev-server lifecycles this job now starts (web/admin visual, web/admin
+ * contrast) left an orphaned `next-server` process that GitHub Actions'
+ * own job-level cleanup had to kill — stopDevServer's kill attempts never
+ * found the right PID for ANY of the four, including the two pre-existing
+ * visual-suite servers this branch never touched. The lsof-based lookup was
+ * never verified on Linux (its own prior comment said so) and this is that
+ * gap surfacing, not something the port-split fix introduced.
+ *
+ * Tries `ss` first (iproute2 -- part of the base ubuntu-latest image, unlike
+ * lsof which is an optional package) and falls back to `lsof` rather than
+ * replacing it outright, since the real cause of lsof returning nothing
+ * here hasn't been isolated (no Linux box available to reproduce from this
+ * worktree) -- exactly Oscar's own stated principle in #471: report rather
+ * than guess at a fix for a mechanism not actually located. If `ss` also
+ * comes back empty, logs which commands were tried so the NEXT run gives
+ * more to go on instead of the same silent null.
  */
 function findPidOnPort(port: number): string | null {
   if (process.platform !== 'win32') {
-    try {
-      const out = execFileSync('bash', ['-c', `lsof -ti:${port} | head -n1`], { encoding: 'utf8' }).trim();
-      return out || null;
-    } catch {
-      return null;
-    }
+    const viaSs = findPidOnPortPosixSs(port);
+    if (viaSs) return viaSs;
+    const viaLsof = findPidOnPortPosixLsof(port);
+    if (viaLsof) return viaLsof;
+    // eslint-disable-next-line no-console
+    console.error(`findPidOnPort(${port}): both ss and lsof returned nothing -- cannot confirm or free this port by PID lookup.`);
+    return null;
   }
   try {
     const out = execFileSync('netstat', ['-ano'], { encoding: 'utf8' });
@@ -56,6 +88,25 @@ function findPidOnPort(port: number): string | null {
     if (!line) return null;
     const cols = line.trim().split(/\s+/);
     return cols[cols.length - 1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function findPidOnPortPosixSs(port: number): string | null {
+  try {
+    const out = execFileSync('bash', ['-c', `ss -ltnp 'sport = :${port}' 2>/dev/null`], { encoding: 'utf8' });
+    const match = out.match(/pid=(\d+)/);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function findPidOnPortPosixLsof(port: number): string | null {
+  try {
+    const out = execFileSync('bash', ['-c', `lsof -ti:${port} | head -n1`], { encoding: 'utf8' }).trim();
+    return out || null;
   } catch {
     return null;
   }
@@ -86,8 +137,8 @@ export function ensurePortFree(port: number): void {
   }
 }
 
-export function startDevServer(): ChildProcess {
-  return spawn('pnpm', ['exec', 'next', 'dev', '-p', String(PORT)], {
+export function startDevServer(port: number = PORT): ChildProcess {
+  return spawn('pnpm', ['exec', 'next', 'dev', '-p', String(port)], {
     cwd: WEB_ROOT,
     shell: true,
     stdio: 'pipe',
@@ -111,11 +162,11 @@ async function fetchOk(url: string): Promise<Response | null> {
  * the two-part check that would have caught bmpl-web's stale-server incident
  * (root 200, chunks 404).
  */
-export async function waitForRealReadiness(timeoutMs = 90_000): Promise<void> {
+export async function waitForRealReadiness(timeoutMs = 90_000, baseUrl: string = BASE_URL): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastReason = 'no response yet';
   while (Date.now() < deadline) {
-    const pageRes = await fetchOk(`${BASE_URL}${FIXTURE_PATH}`);
+    const pageRes = await fetchOk(`${baseUrl}${FIXTURE_PATH}`);
     if (pageRes) {
       const html = await pageRes.text();
       if (!html.includes(FIXTURE_READY_MARKER)) {
@@ -125,7 +176,7 @@ export async function waitForRealReadiness(timeoutMs = 90_000): Promise<void> {
         if (!chunkMatch) {
           lastReason = 'fixture marker present but no static JS chunk reference found in the HTML';
         } else {
-          const chunkRes = await fetchOk(`${BASE_URL}${chunkMatch[0]}`);
+          const chunkRes = await fetchOk(`${baseUrl}${chunkMatch[0]}`);
           const contentType = chunkRes?.headers.get('content-type') ?? '';
           if (chunkRes && contentType.includes('javascript')) {
             return; // Real page, real asset. Genuinely ready.
@@ -145,20 +196,20 @@ export async function waitForRealReadiness(timeoutMs = 90_000): Promise<void> {
  * looked. Confirms the port is free afterward rather than assuming the kill
  * worked.
  */
-export function stopDevServer(spawned: ChildProcess): void {
+export function stopDevServer(spawned: ChildProcess, port: number = PORT): void {
   try {
     spawned.kill();
   } catch {
     // best effort; the OS-level lookup below is what actually matters
   }
   for (let attempt = 0; attempt < 5; attempt++) {
-    const pid = findPidOnPort(PORT);
+    const pid = findPidOnPort(port);
     if (!pid) return;
     killPid(pid);
   }
-  const stillThere = findPidOnPort(PORT);
+  const stillThere = findPidOnPort(port);
   if (stillThere) {
     // eslint-disable-next-line no-console
-    console.error(`e2e teardown: PID ${stillThere} is still bound to port ${PORT} after repeated kill attempts.`);
+    console.error(`e2e teardown: PID ${stillThere} is still bound to port ${port} after repeated kill attempts.`);
   }
 }

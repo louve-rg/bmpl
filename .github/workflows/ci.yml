@@ -372,6 +372,25 @@ jobs:
     # EXPECTED to exit non-zero during Phase 1 for a harmless reason
     # (Playwright exits non-zero on "no tests found"), absorbed by
     # continue-on-error same as always; that is not a finding either.
+    #
+    # THIS JOB ALSO RUNS THE REQUIREMENT-7 CONTRAST CHECK (owner's
+    # foreground/background contrast standard, docs/design/CONTRAST-STANDARD.md,
+    # 2026-10-20 directive making it the highest-priority new check on the
+    # floor). Same live API/seeded-database infrastructure, reused rather
+    # than duplicated -- see the "Contrast check" steps near the end of this
+    # job, and
+    # hive/agents/jim-mv09alb5/priority7-contrast-ci-approach-2026-10-16.md
+    # for the full design. The contrast check is a different instrument from
+    # the pixel-baseline steps above (detects WRONGNESS against a real WCAG
+    # ratio, not CHANGE from a prior screenshot) and was DESIGNED to block on
+    # a real new violation from its first run. It ships `continue-on-error`
+    # instead (god, 2026-10-21) because its first real run, against live
+    # never-audited production pages with an intentionally empty allowlist,
+    # surfaced a 394-node sub-AA (2.0-4.5:1) tier this floor had already
+    # deliberately deferred the same night -- see docs/visual-baseline-exit-
+    # log.md for the named exit criterion and the first documented slice of
+    # that tier. Nothing is suppressed or allowlisted to reach this; every
+    # violation is still measured and reported on every run.
     name: Visual regression baseline (Priority 6)
     runs-on: ubuntu-latest
     permissions:
@@ -437,6 +456,11 @@ jobs:
       SEED_SUPER_ADMIN_PASSWORD: VisualCiFixtureOnly!000
       UAT_SEED_PASSWORD: VisualCiFixtureOnly!000
       SEED_DEMO_PASSWORD: VisualCiFixtureOnly!000
+      # apps/admin/e2e/support/auth.ts's ADMIN/OPS_LIMITED fixtures read this
+      # exact name, not UAT_SEED_PASSWORD -- same throwaway literal, the
+      # var seed-uat-logistics.ts actually used to create those accounts
+      # (god, 2026-10-21: a variable-name mismatch, not a missing credential).
+      UAT_OPS_PASSWORD: VisualCiFixtureOnly!000
     steps:
       - uses: actions/checkout@v4
 
@@ -525,6 +549,15 @@ jobs:
       - name: Seed UAT logistics fixtures (needs the live API)
         run: pnpm --filter @bmpl/database exec tsx prisma/seed-uat-logistics.ts
 
+      # Same API-client-not-DB-seed shape as seed-uat-logistics.ts above, and
+      # the same reason it must run after "Start API" -- this is what
+      # produces the VENDOR/JOB_SEEKER/PASSENGER_DRIVER/PASSENGER_PROVIDER
+      # fixtures the new contrast checks below log in as (requirement 7,
+      # hive/agents/god/CONTRAST-STANDARD.md). Previously only ever run
+      # locally; this is its first unattended CI run.
+      - name: Seed UAT role fixtures (needs the live API)
+        run: pnpm --filter @bmpl/database exec tsx prisma/seed-uat-roles.ts
+
       - name: Install Playwright's Chromium (web)
         run: pnpm --filter @bmpl/web exec playwright install --with-deps chromium
 
@@ -556,6 +589,73 @@ jobs:
           name: visual-diff-report-admin
           path: apps/admin/playwright-report
           retention-days: 7
+
+      # Requirement 7 (hive/agents/god/CONTRAST-STANDARD.md, now
+      # docs/design/CONTRAST-STANDARD.md) -- a DIFFERENT instrument from the
+      # two pixel-baseline steps above. A pixel baseline detects CHANGE and
+      # would bless an already-broken render as its own baseline; this
+      # check detects WRONGNESS against a real WCAG ratio with no prior
+      # state needed. Each `run` step below still gets continue-on-error,
+      # same as the MinIO/API readiness checks earlier in this same job, so
+      # that a failure in the web check cannot silently SKIP the admin check
+      # (a plain step with no `if` is skipped once a prior step has failed).
+      # The gate after both steps reports the actual pass/fail (and, until
+      # docs/visual-baseline-exit-log.md's named exit criterion is met, is
+      # itself continue-on-error -- see that step's own comment for why).
+      # It only reports violations NOT already named in each app's
+      # contrast-known-violations.json (the ratchet allowlist,
+      # apps/{web,admin}/e2e/support/contrast-ratchet.ts) -- empty on
+      # purpose tonight (god, 2026-10-21): the 2026-10-21 run found real
+      # debt, not sampler noise, so none of it was allowlisted. See
+      # hive/agents/jim-mv09alb5/priority7-contrast-ci-approach-2026-10-16.md
+      # for the full design.
+      - name: Contrast check -- requirement 7 (web)
+        id: contrast-web
+        continue-on-error: true
+        run: pnpm --filter @bmpl/web test:contrast
+
+      - name: Upload contrast report (web, only when it failed)
+        if: steps.contrast-web.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: contrast-report-web
+          path: apps/web/playwright-report
+          retention-days: 7
+
+      - name: Contrast check -- requirement 7 (admin)
+        id: contrast-admin
+        continue-on-error: true
+        run: pnpm --filter @bmpl/admin test:contrast
+
+      - name: Upload contrast report (admin, only when it failed)
+        if: steps.contrast-admin.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: contrast-report-admin
+          path: apps/admin/playwright-report
+          retention-days: 7
+
+      # NOW continue-on-error too (god, 2026-10-21), matching every other
+      # step in this job -- see docs/visual-baseline-exit-log.md's own exit
+      # criterion for exactly when this comes back off. Reason: turning this
+      # check on for the first time against real, never-audited production
+      # pages surfaced the 394-node sub-AA tier (2.0-4.5:1) this floor
+      # deliberately deferred the same night it fixed the worse 147-node
+      # (<2.0:1) tier -- not new debt, not a false positive, the thing req 9
+      # was always going to find once it looked. Blocking the merge queue on
+      # debt that was knowingly deferred, the moment the instrument that can
+      # see it first runs, is not what "blocking" in this step's own name
+      # was for. Nothing here is suppressed: every real violation is still
+      # measured and still reported on every run, un-allowlisted, exactly as
+      # found -- contrast-known-violations.json stays empty, on purpose, see
+      # that file's own header. Only whether a first-ever check blocks the
+      # queue on debt it just discovered is deferred, not the debt itself.
+      - name: Enforce contrast check result (requirement 7 -- informational until the exit criterion in docs/visual-baseline-exit-log.md is met)
+        continue-on-error: true
+        if: steps.contrast-web.outcome == 'failure' || steps.contrast-admin.outcome == 'failure'
+        run: |
+          echo "One or both contrast checks failed -- see contrast-report-web/contrast-report-admin artifacts." >&2
+          exit 1
 
   repo-drift-checks:
     name: Repo drift checks (docs, notification & permission catalogs)
