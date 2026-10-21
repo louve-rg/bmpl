@@ -146,7 +146,7 @@ export default function RoutesPage() {
           that could never work. */}
       {canManage && (
       <Card className="p-4">
-        <h2 className="text-sm font-semibold text-slate-900">Add a route</h2>
+        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Add a route</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Mode" htmlFor="route-mode">
             <Select id="route-mode" value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value, originHubId: '', destinationHubId: '' })}>
@@ -208,7 +208,7 @@ export default function RoutesPage() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="break-words text-sm font-semibold text-slate-900">
+                    <span className="break-words text-sm font-semibold text-[color:var(--bmpl-text)]">
                       {r.originHub.name} → {r.destinationHub.name}
                     </span>
                     <Badge tone="info">{r.mode}</Badge>

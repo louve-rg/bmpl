@@ -222,7 +222,7 @@ export default function LogisticsOpsPage() {
                   </p>
                 )}
               </div>
-              <p className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{money(s.totalMinor)}</p>
+              <p className="shrink-0 text-sm font-semibold tabular-nums text-[color:var(--bmpl-text)]">{money(s.totalMinor)}</p>
             </div>
 
             {/* The legs inline: an operator scanning the board should not have to

@@ -113,7 +113,7 @@ export default function DispatchPage() {
           is only ever ONE assignment engine underneath — automatic lets it choose
           the driver, manual leaves the choice to an operator on the delivery. */}
       <Card className="mb-4 p-4">
-        <h2 className="text-sm font-semibold text-slate-900">Assignment mode</h2>
+        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Assignment mode</h2>
         {modeErr && <Alert tone="warning" className="mt-2">{modeErr}</Alert>}
         {autoDispatch == null ? (
           <p className="mt-1 text-sm text-slate-400">Loading…</p>

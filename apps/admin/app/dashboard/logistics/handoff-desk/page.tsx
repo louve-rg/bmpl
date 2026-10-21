@@ -214,7 +214,7 @@ export default function HandoffDeskPage() {
                         <Badge tone={r.arrived ? 'success' : 'info'}>{r.arrived ? 'Arrived' : 'On its way'}</Badge>
                         <Badge tone="neutral">{r.kind.replace(/_/g, ' ').toLowerCase()}</Badge>
                       </div>
-                      <p className="mt-1 break-words text-sm text-slate-700">{r.parcel}</p>
+                      <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text-secondary)]">{r.parcel}</p>
                       <p className="mt-0.5 break-words text-sm text-slate-600">From {r.from} · brought by {r.broughtBy}</p>
                       {r.forRecipient && (
                         <p className="mt-0.5 text-xs text-slate-500">For {r.forRecipient}</p>
@@ -234,7 +234,7 @@ export default function HandoffDeskPage() {
                       {pins[r.legId] ? (
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                           <span className="text-slate-600">Handoff code</span>
-                          <span className="font-mono text-base font-bold tracking-widest text-slate-900">
+                          <span className="font-mono text-base font-bold tracking-widest text-[color:var(--bmpl-text)]">
                             {pins[r.legId]?.handoffPin ?? '—'}
                           </span>
                           {pins[r.legId]?.handoffVerificationStatus && (

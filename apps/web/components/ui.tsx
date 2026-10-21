@@ -329,7 +329,7 @@ export function Breadcrumbs({
                 </span>
               )}
               {!last && (
-                <span aria-hidden="true" className="text-slate-300">
+                <span aria-hidden="true" className="text-[color:var(--bmpl-text-muted)]">
                   /
                 </span>
               )}

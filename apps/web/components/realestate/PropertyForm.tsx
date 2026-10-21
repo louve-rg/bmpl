@@ -230,7 +230,7 @@ export function PropertyForm({
             </Field>
           )}
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-700">
+        <label className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-secondary)]">
           <input
             type="checkbox"
             checked={v.negotiable}

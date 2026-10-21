@@ -83,6 +83,18 @@
   --bmpl-overlay-fill-solid: #ffffff;
 
   --bmpl-text: #0f172a; /* slate-900/navy */
+  /* One step down from --bmpl-text: checkbox/field labels and secondary
+     captions (e.g. a read conversation's subject line, a certification
+     name) that are meant to read as normal body text, not de-emphasised
+     the way --bmpl-text-muted's timestamps/placeholders are. Light value
+     is slate-700 unchanged (#334155 on #ffffff = 10.35:1, on #f8fafc =
+     9.90:1) -- these call sites already passed AA; only the dark-glass
+     side was broken (1.78:1, no variant at all). Reusing --bmpl-text-muted
+     or inventing a lighter shade would have changed what a light-theme
+     user already sees for no reason -- see this same rule applied to
+     --bmpl-text-muted-strong, a sibling token from a separate branch off
+     this same commit for text-slate-600 (not yet merged here). */
+  --bmpl-text-secondary: #334155; /* slate-700 */
   --bmpl-text-muted: #64748b; /* slate-500 */
   --bmpl-border: #e2e8f0; /* slate-200 hairline */
 
@@ -244,6 +256,12 @@
      A menu is the one element nobody is meant to see through. */
   --bmpl-overlay-fill-solid: #101f38;
   --bmpl-text: #f4f8ff;
+  /* Same rgba as --bmpl-text-muted here -- the light-theme gap between
+     slate-700 and slate-500 collapses under glass the same way the
+     slate-600/slate-500 gap does for --bmpl-text-muted-strong: composited
+     over the mural (#0a1526) this reads ~11.74:1, comfortably above the
+     4.5:1 floor regardless of which light-theme tier it stands in for. */
+  --bmpl-text-secondary: rgba(244, 248, 255, 0.82);
   --bmpl-text-muted: rgba(244, 248, 255, 0.82);
   --bmpl-text-faint: rgba(244, 248, 255, 0.64);
   --bmpl-border: rgba(255, 255, 255, 0.32);

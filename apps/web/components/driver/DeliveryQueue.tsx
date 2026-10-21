@@ -318,7 +318,7 @@ function QueueHandle({
   if (!item.canReorder) {
     return (
       <span
-        className="flex h-11 w-6 shrink-0 items-center justify-center text-xs font-bold text-slate-300"
+        className="flex h-11 w-6 shrink-0 items-center justify-center text-xs font-bold text-[color:var(--bmpl-text-faint)]"
         title={item.reorderBlockedReason ?? undefined}
         aria-hidden
       >
@@ -344,7 +344,7 @@ function QueueHandle({
       {/* Grip: the drag affordance, and the position indicator. cursor-grab and
           touch-none keep a drag from also scrolling the page on a phone. */}
       <span
-        className="flex cursor-grab touch-none flex-col items-center gap-0.5 py-0.5 text-slate-300 active:cursor-grabbing"
+        className="flex cursor-grab touch-none flex-col items-center gap-0.5 py-0.5 text-[color:var(--bmpl-text-faint)] active:cursor-grabbing"
         title="Drag to reorder"
         aria-hidden
       >

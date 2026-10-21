@@ -147,7 +147,7 @@ export function ProfileForm({ profile, onDone }: { profile: PassengerDriverProfi
           <Textarea id="pdApplicantNotes" rows={3} value={f.applicantNotes} onChange={(e) => setF({ ...f, applicantNotes: e.target.value })} />
         </Field>
 
-        <label className="flex items-start gap-2 text-sm text-slate-700">
+        <label className="flex items-start gap-2 text-sm text-[color:var(--bmpl-text-secondary)]">
           <input
             type="checkbox"
             className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-belize-blue focus:ring-2 focus:ring-belize-accent/30"

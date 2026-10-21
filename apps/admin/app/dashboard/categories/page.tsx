@@ -281,7 +281,7 @@ export default function CategoriesPage() {
                   <tr key={cat.id} className="border-t border-slate-100 hover:bg-slate-50">
                     <td className="px-4 py-3">
                       <span style={{ paddingLeft: `${depth * 18}px` }} className="font-medium text-belize-navy">
-                        {depth > 0 && <span className="text-slate-300">└ </span>}
+                        {depth > 0 && <span className="text-[color:var(--bmpl-oncolor-light-text-muted)]">└ </span>}
                         {cat.name}
                       </span>
                       {cat.childCount > 0 && (
