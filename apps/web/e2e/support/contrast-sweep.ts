@@ -214,6 +214,41 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       return fallbackText;
     }
 
+    // Cluster F root cause, found live (god, 2026-10-21, same session as the
+    // `clusterAt` KNOWN LIMITATION in contrast.ts): a closed native
+    // `<details>` preserves its non-summary content's LAYOUT BOX (a
+    // content-visibility-style skip-paint, not `display: none`) --
+    // getBoundingClientRect() on a link inside Header.tsx's desktop
+    // dropdown panel or CategoryNav.tsx's mobile disclosure returns a real,
+    // non-zero box while the `<details>` is closed and nothing is actually
+    // painted there. The sampler then reads whatever full-page-screenshot
+    // pixel IS there (the page behind it) and reports that as the
+    // element's background -- a real box with no real paint, not a
+    // measurement of the element at all. This is EXACT, not probabilistic:
+    // a `<details>` element's `open` attribute is a boolean DOM fact, so
+    // there is no "maybe" case a fail-closed default would need to guard --
+    // either an ancestor is a closed `<details>` and this element is not
+    // inside its always-rendered `<summary>`, or it isn't, with nothing in
+    // between. Explains both Cluster F instances with one mechanism: the
+    // main-nav links are Header.tsx's desktop `<details>` group panels
+    // (closed by default); the category links are CategoryNav.tsx's mobile
+    // `<details>` disclosure (also closed by default) -- the SAME
+    // CategoryLinks() markup rendered a second time in the desktop
+    // `<aside>`, which is excluded correctly already by the box.width<2
+    // guard below whenever Tailwind's `hidden`/`md:block` makes IT the
+    // zero-box copy instead.
+    function isInsideClosedDetails(el: Element): boolean {
+      let node: Element | null = el.parentElement;
+      while (node) {
+        if (node.tagName === 'DETAILS' && !node.hasAttribute('open')) {
+          const summary = node.querySelector(':scope > summary');
+          if (!summary || !summary.contains(el)) return true;
+        }
+        node = node.parentElement;
+      }
+      return false;
+    }
+
     const textOut: Array<{
       kind: 'text';
       tag: string;
@@ -246,6 +281,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         if (cs.display === 'none' || cs.visibility === 'hidden') continue;
         const box = el.getBoundingClientRect();
         if (box.width < 2 || box.height < 2) continue;
+        if (isInsideClosedDetails(el)) continue; // real box, nothing painted -- see isInsideClosedDetails' own comment
         iconOut.push({
           kind: 'icon',
           tag: el.tagName,
@@ -268,6 +304,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
 
       const box = el.getBoundingClientRect();
       if (box.width < 2 || box.height < 2) continue; // a genuinely invisible render is a different defect class (zeroWidthTextFindings), not this check's job
+      if (isInsideClosedDetails(el)) continue; // real box, nothing painted -- see isInsideClosedDetails' own comment
 
       const fontSizePx = parseFloat(cs.fontSize);
       const fontWeight = parseInt(cs.fontWeight, 10) || 400;

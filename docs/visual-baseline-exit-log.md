@@ -139,6 +139,249 @@ slice is a byproduct of four narrowly-scoped regression specs, not a
 sweep of the deferred tier; req 9 owns actually finding and clearing the
 rest.
 
+### Current authoritative count, post-merge (2026-10-21, run `39566595024`)
+
+Owner reopened the sweep (god → Jim, MDF-376, same thread) for a defensible
+before/after number. This is that number, measured today against `main` at
+`499af25` itself — the first push-to-main run after #469 merged, not a PR
+run and not last night's pre-merge number quoted from memory.
+
+**Re-run command** (reuses #469's harness exactly; no new instrument):
+
+```
+pnpm --filter @bmpl/web test:contrast
+pnpm --filter @bmpl/admin test:contrast
+```
+
+In CI this is the existing `Contrast check -- requirement 7 (web)`/`(admin)`
+steps inside the "Visual regression baseline (Priority 6)" job — any push to
+`main` or PR into it re-runs both automatically. No local infra needed to
+re-derive the count: pull the job's log and count.
+
+**One-line result format** — every failing reading throws one
+`assertRatchet` line containing the literal string `If this is real, fix
+it`, one per (route, role, viewport) failure, because
+`contrast-known-violations.json` is `[]` in both apps:
+
+```
+gh run view <run-id> --log --job <contrast-job-id> | grep -c "If this is real, fix it"
+```
+
+**Today's result: 493** failing readings (485 text + 8 icon) across the 90
+route×role×viewport combinations the ten existing `e2e/contrast/*.spec.ts`
+files cover (6 web specs + 4 admin specs × 9 `CONTRAST_VIEWPORTS` each).
+Deduplicated by (route, accessible role, accessible name) that is **85
+unique failing elements**, which split cleanly into two very different
+things:
+
+- **58 of the 85 are the Cluster F sampler artifact** already documented in
+  both apps' `contrast.ts` (`clusterAt` samples the topmost painted pixel,
+  not the element's own background) — every main-nav link (ratio ~1.0-1.3)
+  and every `/products` category link (ratio ~2.4/3.75) on `/products` and
+  `/vendors`. Known, not real, deliberately left un-allowlisted; counted
+  here for honesty, not mistaken for debt.
+- **27 are real** — the same four routes' debt already named above, now
+  seen across all 9 viewports instead of only 320px, plus one not
+  previously listed (`/dashboard/store`'s "Approval:" label, ratio
+  2.04-2.24, visible at 8 of 9 widths) and the relative timestamps split
+  into "6m ago"/"7m ago" (both render, depending on exact run time).
+
+**This 27/493 is not the same measurement as last night's 394.** It is
+real, current, and re-derivable — but it is scoped to only the ten routes
+the existing contrast specs already visit, not a sweep of the whole app.
+Last night's 394 claimed a wider scope ("1,792 nodes") that this harness,
+run as-is, does not reach. Until something sweeps every route (req 9's
+job), **this is the authoritative number for the ten instrumented routes,
+not a refresh of the full-app 394.** Whoever quotes a before/after figure
+in the completion report should say which of the two they mean.
+
+### Reconciled against Oscar's 355 (2026-10-21, same thread)
+
+The owner independently accepted Oscar's dedup of the original raw sweep:
+422 raw rows -> **355 unique**, keyed on `(route, matchedClass, tag, text)`,
+filtered to ratio `[2.0, 4.5)`. Reproduced exactly from Oscar's own
+`widened-*.json` files (`hive/agents/bmpl-qa-mtmcz0m1/MDF-376-prod-verify/`,
+23 files, 1,894 raw rows before any filter) — 422 in-band, 355 unique under
+all three boundary interpretations tried (`[2,4.5)`, `[2,4.5]`, `(2,4.5)`),
+so the 2.0/4.5 boundary is not the source of any gap.
+
+**My 27 (live, #469 harness) and his 355 (static CSS-class scan of an older
+snapshot) do not disagree about the underlying defects — they disagree in
+scope and in method, and both are explainable:**
+
+1. **Scope: 285 of his 355 (80%) are on 53 routes my ten contrast specs
+   never visit at all.** Not comparable without wider spec coverage —
+   that is new work (req 9), not a discrepancy in either count.
+2. **Dedup granularity goes the other way than you'd expect.** On the 6
+   routes we both cover, his text-exact key produces 70 "unique" rows that
+   collapse to only **14 distinct (route, CSS-class, tag) defect classes**
+   once you group by class instead of by exact text — most of the 70 are
+   the same class rendering different message bodies (notification feed
+   items, hub names). My 27 is already element-level, closer to his
+   14-class figure than to his 70-row figure for the same ground.
+3. **CORRECTION (2026-10-21 — the original version of this point was
+   wrong):** `/dashboard/logistics/hubs`'s "Courier rate BZ$X.XX" rows
+   (ratio 2.43, `admin_ops_limited`/`hubs_ops_limited` only) were **not**
+   fixed at `499af25`. Verified directly against source
+   (`hubs/page.tsx:307-311`): the dollar-figure span next to the label is
+   `--bmpl-text` (fixed earlier tonight), but the "Courier rate" LABEL
+   itself is a separate `<p>`, still `text-slate-600`, unchanged at
+   `499af25`. It was fixed afterward, in a later batch — after this entry
+   was first written, not before. The original claim ("my live run does
+   not have them, confirmed fixed") stated a possibility as a fact: my
+   live run not finding them is evidence my run didn't see them, not
+   evidence they were already gone, and that gap is exactly where the bug
+   in my reasoning lived.
+   **Unexplained, with three candidates now ruled out** — left open rather
+   than closed with a guess, because getting this right matters more than
+   getting it tidy. Why the "Courier rate" label was never discovered at
+   all (zero mentions anywhere in the run's log — not failing, not
+   ambiguous, not passing) is not settled, but three plausible mechanisms
+   each turned out wrong on inspection:
+   - *Wrong role.* `logistics-hubs.spec.ts`'s own source already logs in
+     as `OPS_LIMITED` directly — ruled out.
+   - *Seed-fixture permission drift* (my own hypothesis: `canManage` reads
+     `true` for this fixture, routing to the `<Input>` branch instead of
+     the text leaf). Ruled out by reading the seed directly:
+     `packages/database/prisma/seed-uat-logistics.ts:219` sets
+     `OPS_LIMITED_PERMISSIONS = ['logistics.read', 'logistics.operate']` —
+     no `logistics.manage` — so `canManage` should read `false` as named.
+   - *Empty hub list* (the map at `hubs.map((h) => (...))` around line 264
+     never iterating, so neither branch renders for any hub). Ruled out by
+     the same run's own log: both `main @ 499af25` (run `39566595024`) and
+     `chore/contrast-sweep-mdf376` (PR #490, run `39653113575`) show this
+     spec failing — not skipping — with two real hub rows measured each
+     time (`Belize City, BELIZE · warehouse · LAND`, `Belmopan, CAYO ·
+     warehouse · LAND`). The list is populated; the label specifically is
+     what's missing from the output.
+   Best-fit remaining explanation, **not yet confirmed**: a true negative.
+   The live pixel sampler measures the real composited background behind
+   the label, which may not be the nominal card color the static sweep
+   assumed; if that live background gives ratio >= 4.5, the label simply
+   passes and is correctly absent from a failures list — not a discovery
+   miss at all. Not investigated further, per the scope this correction
+   was given.
+4. **Two of his 14 classes are role/app scope gaps on my side, not
+   methodology noise.** `/dashboard/notifications`'s `A.text-belize-blue`
+   "Preferences" link and `/dashboard/settlements`'s `P.text-slate-400`
+   "Default X.00%" rows exist only on a *different role's page* at the
+   same URL path — `web_customer`'s notification preferences and the
+   admin settlement-config view — neither of which any of the four
+   existing MDF-376 regression specs log into. Named, not silently
+   dropped: worth a new spec if the owner wants that page covered, not
+   something to invent coverage for here.
+5. **The remaining 11 of his 14 classes converge with mine within
+   measurement-method tolerance** (his static CSS-declared-color
+   calculation vs my live composited-pixel sample): 3.87 (his) vs
+   3.3-3.9 (mine) on the settlements/store/hubs prose classes, 2.43 vs
+   2.43 on the day-picker and hub courier-rate classes, 2.36 vs 2.36 on
+   the relative-timestamp class, ~2.1 vs 1.34-1.62 on "Mark all read"
+   (the largest single delta — plausibly the glass/backdrop-blur
+   difference #469's live sampler exists to catch and a static
+   class-color calculation cannot).
+6. **One of my 27 has no counterpart in his 355 at all:**
+   `/dashboard/store`'s "Approval:" label (ratio 2.04-2.24). Not stale,
+   not a scope gap I can name — flagged honestly as unreconciled rather
+   than assumed either way. Possibly state-gated (a pending-approval
+   vendor state his sweep's fixture wasn't in); root cause not
+   investigated, same discipline as the rest of this list.
+
+**The generalizable finding (worth more than the three nodes in point 3
+above): the two sweeps have opposite blind spots, and each one's clean
+result can mean "fixed" or can mean "never reached the gate" — the
+instrument cannot tell you which.** My live sweep missed the hubs
+courier-rate label because a gated render path kept it from ever being
+discovered, not because it was absent. Oscar's static sweep separately
+missed `/dashboard/store`'s "Approval:" label (point 6) because its
+fixture never reached the data state that renders it. A role gate defeats
+a live probe that logs in as the wrong account, or — per the unresolved
+half of point 3 — as the right account with the wrong seeded permissions.
+A data-state gate defeats a static sweep that never produces that state.
+**Absence from either sweep is not evidence of absence; it is evidence of
+where that sweep did not look.** A route or route+role reporting zero
+findings is a claim about what was measured, never a claim about what
+exists — true of the 355, true of my 27/493, and true of the contrast
+gate itself once anyone starts treating a green run as proof nothing is
+wrong rather than proof nothing *measured* was wrong.
+
+**Conclusion: no rounding either way.** Where the two methods measure the
+same ground, they agree. The headline gap (493/85/27 vs 355) is explained
+by scope (1, mostly), dedup granularity (2), and — per the point above —
+by each method's own blind spots, not by either count being simply wrong.
+`contrast-known-violations.json` stays `[]` in both apps; nothing here is
+an allowlist entry or a baseline edit.
+
+**Reporting cadence as Oscar's batches land:** this document's own count
+(27 real elements / 493 readings, ten routes) is the one this harness can
+re-derive after each batch with the command above. The full 355 is scoped
+to ~89 routes this harness does not sweep — it moves only when Oscar
+re-sweeps and re-dedupes his own data, not when this harness re-runs. Each
+per-batch report should say which of the two it's reporting against.
+
+| Route | Element | Ratio range | Viewports failing (of 9) |
+| --- | --- | --- | --- |
+| /dashboard/store | "Approval:" | 2.04-2.24 | 8 |
+| /dashboard/store | "Drivers navigate to the pin you drop here..." | 3.86 | 9 |
+| /dashboard/store | "Sunday"/"Monday"/"Tuesday"/"Wednesday"/"Thursday"/"Friday"/"Saturday" | 2.43 | 9 each |
+| /dashboard/settlements | "Pending settlement" | 3.46-3.63 | 5 |
+| /dashboard/settlements | "Calculated, not yet posted to your wallet." | 3.53-3.73 | 8 |
+| /dashboard/settlements | "Posted to wallet" | 3.3-3.77 | 6 |
+| /dashboard/settlements | "Expand a row to see the full calculation for that order." | 3.76-3.8 | 9 |
+| /dashboard/settlements | "Net earnings credited to your wallet." | 3.41-3.8 | 9 |
+| /dashboard/logistics/hubs (OPS_LIMITED) | "Belize City, BELIZE · warehouse · LAND" | 3.41-3.67 | 9 |
+| /dashboard/logistics/hubs (OPS_LIMITED) | "Belmopan, CAYO · warehouse · LAND" | 3.73-3.79 | 9 |
+| /dashboard/notifications (SUPER_ADMIN) | "Mark all read" (button) | 1.34-1.62 | 9 |
+| /dashboard/notifications (SUPER_ADMIN) | "6m ago" / "7m ago" (timestamp) | 2.36 | 5 each |
+| /dashboard/notifications (SUPER_ADMIN) | five application-review toast lines + "An admin permission set was changed..." | 4.37 | 9 each |
+| /dashboard/store/preview (VENDOR) | "Rated 0.0 out of 5 from 0 reviews" (icon) | 1.01-1.3 | 8 |
+| /products | "Category" (filter label) | 2.56 | 5 |
+
+Not root-caused here, same as last night's slice — counted and located
+only. Regression cover: the four MDF-376 specs (`store`, `settlements`,
+`notifications`, `logistics-hubs`) re-run on every push/PR automatically as
+part of this same job; a fix landing for any named element above will show
+up as that element dropping out of the next run's "If this is real" count
+without anyone needing to re-derive the baseline by hand.
+
+**Cluster F guard, verified by CI (2026-10-21, PR #490, run `39653113575`,
+head sha matches commit `39101d6` on `chore/contrast-sweep-mdf376`):** this
+is the first CI run to include `isInsideClosedDetails` (commit `6525883`).
+Before (run `39566595024`, pre-guard, `main @ 499af25`): 493 failing
+readings / 85 unique `(route, role, name)` elements. After: 283 failing
+readings / 26 unique elements.
+
+The guard removed **exactly 58** unique elements — all `link`-role, all on
+`/products` (45) or `/vendors` (13), the full Cluster F set: the desktop nav
+dropdown's category links (Header.tsx) and the mobile category disclosure's
+links (CategoryNav.tsx), both closed `<details>` at sweep time. Named in
+full: Accessories, Automotive, Baby Gear, Become a Marketplace Vendor,
+Beverages, Cameras, Camping & Hiking, Car Care, Cosmetics, Cycling, Drive
+Ride or Deliver, Fashion & Apparel, Find Work, Fitness, Food & Grocery,
+Fresh Produce, Furniture, Garden & Outdoor, Health & Beauty, Home & Garden,
+Home Decor, Kids' Clothing, Kitchen & Dining, Marketplace, Men's Clothing,
+Orders, Pantry Staples, Parts & Accessories, Passenger Service, Personal
+Care, Post Jobs, Rent, Sale, Shipping & Delivery, Shoes, Skincare, Snacks,
+Sports & Outdoors, Supplements, Toys & Games, Toys Kids & Baby, Upload
+Resume & Skills, Vendors, View Cart, Women's Clothing (on `/products`); and
+Become a Marketplace Vendor, Drive Ride or Deliver, Find Work, Marketplace,
+Orders, Passenger Service, Post Jobs, Rent, Sale, Shipping & Delivery,
+Upload Resume & Skills, Vendors, View Cart (on `/vendors`, same shared nav,
+separate route).
+
+A separate, unrelated 3-element churn landed in the same diff: two
+`/dashboard/notifications` relative timestamps present in the baseline
+("6m ago", "7m ago") are absent here, and one not in the baseline ("5m ago")
+appears instead — the underlying defect (ratio 2.36, role `(none)`) is
+unchanged; only the elapsed wall-clock time between notification creation
+and test run shifted the label between the two runs. Not a fix, not
+attributable to the guard. Net real tier: 27 -> 26 (27 - 2 relabeled +
+1 relabeled), same defects, one relabeled by clock drift — the 26 remaining
+elements otherwise match the 27 named in the table above one-for-one.
+
+No allowlist entry, no threshold or baseline edit, anywhere — this is the
+harness measuring fewer elements because fewer are discovered as
+non-painted, not because any entry was suppressed.
+
 ## Review-before-update workflow (the same document records this because the
 same failure shape applies — the easy path must be the safe one)
 
