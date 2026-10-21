@@ -351,7 +351,7 @@ function CollectionCard({
     <Card className="space-y-3 p-5 sm:p-6">
       <div>
         <h2 className="text-base font-bold text-[color:var(--bmpl-text)]">{title}</h2>
-        {description && <p className="text-xs text-slate-500">{description}</p>}
+        {description && <p className="text-xs text-[color:var(--bmpl-text-muted)]">{description}</p>}
       </div>
       {children}
     </Card>
@@ -494,17 +494,17 @@ function ExperienceCollection({ profile, onChanged }: { profile: SeekerProfile; 
             ))}
           </Select>
           <div />
-          <label className="text-xs text-slate-500">
+          <label className="text-xs text-[color:var(--bmpl-text-muted)]">
             Start
             <Input type="date" value={f.startDate} onChange={(e) => setF({ ...f, startDate: e.target.value })} />
           </label>
-          <label className="text-xs text-slate-500">
+          <label className="text-xs text-[color:var(--bmpl-text-muted)]">
             End
             <Input type="date" value={f.endDate} disabled={f.current} onChange={(e) => setF({ ...f, endDate: e.target.value })} />
           </label>
         </div>
         <Input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Description (optional)" />
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+        <label className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
           <input type="checkbox" checked={f.current} onChange={(e) => setF({ ...f, current: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-belize-accent" />
           I currently work here
         </label>
@@ -578,7 +578,7 @@ function EducationCollection({ profile, onChanged }: { profile: SeekerProfile; o
           <Input inputMode="numeric" value={f.startYear} onChange={(e) => setF({ ...f, startYear: e.target.value })} placeholder="Start year" />
           <Input inputMode="numeric" value={f.endYear} disabled={f.current} onChange={(e) => setF({ ...f, endYear: e.target.value })} placeholder="End year" />
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+        <label className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
           <input type="checkbox" checked={f.current} onChange={(e) => setF({ ...f, current: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-belize-accent" />
           Currently studying
         </label>

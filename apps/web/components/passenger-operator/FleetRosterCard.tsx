@@ -85,7 +85,7 @@ export function FleetRosterCard({ providerProfileId }: { providerProfileId: stri
       )}
 
       {roster.length === 0 && (
-        <p className="mt-3 text-sm text-slate-600">
+        <p className="mt-3 text-sm text-[color:var(--bmpl-text-muted-strong)]">
           No drivers in your fleet yet. A driver joins only by answering your invitation, or by your approving their
           request — never by either side alone.
         </p>
@@ -156,7 +156,7 @@ export function FleetRosterCard({ providerProfileId }: { providerProfileId: stri
 
       <InviteDriver onDone={reload} />
 
-      <p className="mt-4 text-xs text-slate-500">
+      <p className="mt-4 text-xs text-[color:var(--bmpl-text-muted)]">
         Your operator ID: <code className="rounded bg-slate-100 px-1 py-0.5">{providerProfileId}</code> — share it with a
         driver who wants to request to join.
       </p>

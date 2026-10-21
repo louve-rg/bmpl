@@ -97,7 +97,7 @@ export default function ProfilePage() {
         </form>
       </Card>
 
-      <Card className="mt-4 p-4 text-sm text-slate-600">
+      <Card className="mt-4 p-4 text-sm text-[color:var(--bmpl-text-muted-strong)]">
         <span className="font-medium text-[color:var(--bmpl-text)]">Email:</span> {me.email}{' '}
         {me.emailVerified ? (
           <Badge tone="success" className="ml-1 align-middle">

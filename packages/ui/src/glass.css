@@ -84,6 +84,34 @@
 
   --bmpl-text: #0f172a; /* slate-900/navy */
   --bmpl-text-muted: #64748b; /* slate-500 */
+  /* A second, DARKER muted tier (slate-600, not slate-500) -- exists
+     because --bmpl-text-muted's light value (#64748b) is this file's own
+     REJECTED draft for the role (see the Round 6 note a few lines down:
+     "4.55:1 on #f8fafc, passing AA by 0.05 of headroom -- rejected as too
+     fragile a margin"). A component that already uses slate-600 and also
+     renders outside the glass-scoped dashboard must not be quietly pulled
+     down to the value this file already turned back once (MDF-376,
+     2026-10-21). Light value is --bmpl-oncolor-light-text-muted's number,
+     not a new one -- reusing an already-accepted value under an adaptive
+     name.
+
+     NOT STRONGER UNDER GLASS: this token and --bmpl-text-muted resolve to
+     the IDENTICAL rgba(244,248,255,0.82) there -- "strong" describes the
+     light-theme difference only (#475569 vs #64748b). The two muted tiers
+     have no reason to read as different shades once white-on-navy, and
+     the name must never be read as promising a darker/bolder glass
+     rendering it does not have.
+
+     Values computed (sRGB relative luminance, WCAG formula), not eyeballed:
+       #475569 (light)                    on #ffffff            = 7.58:1
+       #475569 (light)                    on #f8fafc            = 7.24:1
+       rgba(244,248,255,0.82) composited  on rgba(10,20,38,0.56) = 11.76:1
+       rgba(244,248,255,0.82) composited  on rgb(10,21,38)       = 11.70:1
+     (light values match --bmpl-oncolor-light-text-muted exactly, since
+     it's the same color; glass values match --bmpl-text-muted's own,
+     since it's the same rgba -- both as expected, not re-derived from a
+     different color.) */
+  --bmpl-text-muted-strong: #475569; /* slate-600 */
   --bmpl-border: #e2e8f0; /* slate-200 hairline */
 
   --bmpl-success: #059669; /* emerald-600 */
@@ -245,6 +273,7 @@
   --bmpl-overlay-fill-solid: #101f38;
   --bmpl-text: #f4f8ff;
   --bmpl-text-muted: rgba(244, 248, 255, 0.82);
+  --bmpl-text-muted-strong: rgba(244, 248, 255, 0.82); /* same value as --bmpl-text-muted -- see the :root block's comment */
   --bmpl-text-faint: rgba(244, 248, 255, 0.64);
   --bmpl-border: rgba(255, 255, 255, 0.32);
   --bmpl-border-soft: rgba(255, 255, 255, 0.16);

@@ -327,7 +327,7 @@ export function EmployerJobForm({ initial }: { initial?: EmployerJobDetail }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Input value={skillName} onChange={(e) => setSkillName(e.target.value)} placeholder="Add a skill" className="max-w-xs" />
-          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+          <label className="flex items-center gap-1.5 text-sm text-[color:var(--bmpl-text-muted-strong)]">
             <input type="checkbox" checked={skillRequired} onChange={(e) => setSkillRequired(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-belize-accent" />
             Required
           </label>

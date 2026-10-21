@@ -146,7 +146,7 @@ function EligibleItem({ ctx, onPosted }: { ctx: EligibleContext; onPosted: () =>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="font-semibold text-[color:var(--bmpl-text)]">{ctx.label}</p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-[color:var(--bmpl-text-muted)]">
             Order {ctx.orderNumber} · {PROFILE_LABELS[ctx.subjectType]}
           </p>
         </div>

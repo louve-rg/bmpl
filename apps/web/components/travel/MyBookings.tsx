@@ -103,10 +103,10 @@ function BookingRow({ booking: b, onChanged }: { booking: RiderBooking; onChange
             </div>
             {journey && <p className="mt-1 text-sm text-slate-600">{journey}</p>}
             {b.scheduledDepartureAt && (
-              <p className="mt-1 text-sm text-slate-500">Departs {new Date(b.scheduledDepartureAt).toLocaleString()}</p>
+              <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">Departs {new Date(b.scheduledDepartureAt).toLocaleString()}</p>
             )}
             {view.detail && <p className="mt-1 text-xs text-slate-600">{view.detail}</p>}
-            {b.cancellationReason && <p className="mt-1 text-xs text-slate-500">Cancelled: {b.cancellationReason}</p>}
+            {b.cancellationReason && <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">Cancelled: {b.cancellationReason}</p>}
           </div>
           {view.cancellable && !cancelOpen && (
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setCancelOpen(true)}>

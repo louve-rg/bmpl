@@ -72,7 +72,7 @@ export default function AgentAssignmentsPage() {
             <Card key={a.id} className="flex flex-wrap items-center justify-between gap-3 p-5">
               <div>
                 <p className="font-semibold text-[color:var(--bmpl-text)]">{a.listing.title}</p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-[color:var(--bmpl-text-muted)]">
                   {a.listing.reference} · {propertyStatusLabel(a.listing.status)} · invited {fmtDate(a.assignedAt)}
                 </p>
               </div>

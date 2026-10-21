@@ -26,7 +26,7 @@ export default function PassengerServicesPage() {
           <li aria-hidden className="text-slate-300">
             /
           </li>
-          <li aria-current="page" className="min-w-0 truncate font-medium text-slate-600">
+          <li aria-current="page" className="min-w-0 truncate font-medium text-[color:var(--bmpl-text)]">
             Services
           </li>
         </ol>

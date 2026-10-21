@@ -140,7 +140,7 @@ export default function DispatchPage() {
                 </button>
               ))}
             </div>
-            <p className="mt-2 text-sm text-slate-500">
+            <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted)]">
               {autoDispatch
                 ? 'The dispatch engine offers each ready delivery to the best eligible driver, one at a time.'
                 : 'Deliveries stay unassigned until an operator picks a driver from the eligible list.'}

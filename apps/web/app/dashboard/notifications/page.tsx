@@ -203,7 +203,7 @@ export default function NotificationsPage() {
                       <p className={`text-sm ${item.read ? 'font-medium text-slate-700' : 'font-semibold text-[color:var(--bmpl-text)]'}`}>
                         {item.title}
                       </p>
-                      {item.body && <p className="mt-0.5 text-sm text-slate-500">{item.body}</p>}
+                      {item.body && <p className="mt-0.5 text-sm text-[color:var(--bmpl-text-muted)]">{item.body}</p>}
                     </button>
                     <div className="flex shrink-0 items-center gap-1">
                       {!item.read && (

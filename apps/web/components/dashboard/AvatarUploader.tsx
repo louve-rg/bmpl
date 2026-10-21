@@ -96,7 +96,7 @@ export function AvatarUploader({ me, onChange }: { me: MeView; onChange: (me: Me
             {/* Providers are held to a verification standard, so they get the
                 rules. Customers are not, so telling them about a face check
                 would describe a gate that does not exist for them. */}
-            <p className="mt-0.5 text-sm text-slate-500">
+            <p className="mt-0.5 text-sm text-[color:var(--bmpl-text-muted)]">
               {me.avatarRequired
                 ? 'A clear, well-lit photo of your face — just you, looking at the camera. Customers use it to check who has arrived, so logos, products, pets and group photos are not accepted.'
                 : 'Add a photo so people recognise you. It appears on your orders, messages and reviews, and goes live straight away.'}

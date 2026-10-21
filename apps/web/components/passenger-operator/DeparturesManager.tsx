@@ -90,7 +90,7 @@ export function DeparturesManager() {
         </Button>
       )}
       {activeRoutes.length === 0 && !addingOpen && (
-        <p className="text-xs text-slate-500">A departure belongs to a route — declare an active route first.</p>
+        <p className="text-xs text-[color:var(--bmpl-text-muted)]">A departure belongs to a route — declare an active route first.</p>
       )}
     </div>
   );
