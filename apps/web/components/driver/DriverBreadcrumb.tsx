@@ -14,7 +14,7 @@ export function DriverBreadcrumb({ current }: { current: string }) {
     <nav aria-label="Breadcrumb" className="text-sm">
       <ol className="flex flex-wrap items-center gap-1.5 text-[color:var(--bmpl-text-muted)]">
         <li>
-          <Link href="/dashboard/driver" className="font-medium text-belize-blue transition hover:text-belize-deep hover:underline">
+          <Link href="/dashboard/driver" className="font-medium text-[color:var(--bmpl-link)] transition hover:text-belize-deep hover:underline">
             Driver Dashboard
           </Link>
         </li>

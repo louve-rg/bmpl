@@ -74,6 +74,29 @@
      on #ffffff. */
   --bmpl-accent: #0369a1; /* belize-accent -- WCAG AA on near-white only, see above */
   --bmpl-accent-soft: #60a5fa; /* belize-light */
+  /* Plain navigation links/action buttons that hardcode text-belize-blue
+     directly (not --bmpl-primary) -- MDF-376, 2026-10-21. #1e40af is not
+     redefined under [data-theme='glass'] anywhere in this file (no rule
+     below touches --bmpl-primary), so a component consuming the raw
+     Tailwind utility class gets no dark-glass counterpart at all. Light
+     value here is --bmpl-primary's own number, unchanged -- not a new
+     color, and zero visual difference from the Tailwind class it replaces.
+     Glass value reuses #7dd3fc, the same hue already chosen for
+     --bmpl-focus and --bmpl-accent's glass counterpart below -- not a
+     fourth blue invented for this one role.
+
+     Values computed (sRGB relative luminance, WCAG formula), not eyeballed:
+       #1e40af (light) on #ffffff                           = 8.72:1
+       #1e40af (light) on #f8fafc                            = 8.34:1
+       #7dd3fc (glass) on rgb(10,21,38) (opaque mural)        = 10.97:1
+       #7dd3fc (glass) on rgba(10,20,38,0.56), composited
+         over the #0a1526 mural (the only thing this card is
+         ever actually painted on in production)              = 11.01:1
+     (both glass figures composite the card's own alpha over its real
+     underlayer before measuring against it -- the lesson from this same
+     file's --bmpl-text-muted-strong entry above, applied here so it is
+     not re-learned on the next translucent pairing.) */
+  --bmpl-link: #1e40af;
 
   --bmpl-bg: #f8fafc; /* slate-50 page background */
   --bmpl-surface: #ffffff; /* elevated cards */
@@ -287,6 +310,7 @@
   --bmpl-text-muted: rgba(244, 248, 255, 0.82);
   --bmpl-text-muted-strong: rgba(244, 248, 255, 0.82); /* same value as --bmpl-text-muted -- see the :root block's comment */
   --bmpl-text-faint: rgba(244, 248, 255, 0.64);
+  --bmpl-link: #7dd3fc; /* same hue as --bmpl-focus/--bmpl-accent below -- see the :root block's comment */
   --bmpl-border: rgba(255, 255, 255, 0.32);
   --bmpl-border-soft: rgba(255, 255, 255, 0.16);
   --bmpl-focus: #7dd3fc;

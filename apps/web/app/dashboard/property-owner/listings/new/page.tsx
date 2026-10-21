@@ -17,7 +17,7 @@ export default function NewListingPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <Link href="/dashboard/property-owner/listings" className="text-sm font-medium text-belize-blue hover:underline">
+      <Link href="/dashboard/property-owner/listings" className="text-sm font-medium text-[color:var(--bmpl-link)] hover:underline">
         ← Listings
       </Link>
       <div className="mt-2">

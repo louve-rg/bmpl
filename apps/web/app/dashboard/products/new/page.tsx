@@ -7,7 +7,7 @@ import { PageHeader } from '../../../../components/ui';
 export default function NewProductPage() {
   return (
     <div className="mx-auto max-w-2xl">
-      <Link href="/dashboard/products" className="text-sm font-medium text-belize-blue hover:underline">
+      <Link href="/dashboard/products" className="text-sm font-medium text-[color:var(--bmpl-link)] hover:underline">
         ← My Products
       </Link>
       <div className="mt-2">

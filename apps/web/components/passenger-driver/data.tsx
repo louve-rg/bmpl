@@ -107,7 +107,7 @@ export function PassengerDriverBreadcrumb({ current }: { current: string }) {
         <li>
           <Link
             href="/dashboard/passenger-driver"
-            className="font-medium text-belize-blue transition hover:text-belize-deep hover:underline"
+            className="font-medium text-[color:var(--bmpl-link)] transition hover:text-belize-deep hover:underline"
           >
             Passenger Dashboard
           </Link>

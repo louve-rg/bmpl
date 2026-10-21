@@ -210,7 +210,7 @@ export default function NotificationsPage() {
                         <button
                           type="button"
                           onClick={() => markRead(item)}
-                          className="rounded-full px-2 py-1 text-xs font-semibold text-belize-blue transition hover:bg-belize-blue/5"
+                          className="rounded-full px-2 py-1 text-xs font-semibold text-[color:var(--bmpl-link)] transition hover:bg-belize-blue/5"
                         >
                           Mark read
                         </button>
@@ -244,7 +244,7 @@ export default function NotificationsPage() {
 
       <p className="text-center text-xs text-slate-400">
         Manage which updates you receive in{' '}
-        <Link href="/dashboard/notifications/preferences" className="font-semibold text-belize-blue hover:text-belize-deep">
+        <Link href="/dashboard/notifications/preferences" className="font-semibold text-[color:var(--bmpl-link)] hover:text-belize-deep">
           Preferences
         </Link>
         .

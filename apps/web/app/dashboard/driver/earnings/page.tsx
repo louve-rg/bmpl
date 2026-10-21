@@ -214,7 +214,7 @@ function RowGroup({ earning: e, open, onToggle }: { earning: Earning; open: bool
         </td>
         <td className="px-4 py-3 text-xs text-[color:var(--bmpl-text-faint)]">{fmtDate(e.postedAt ?? e.calculatedAt)}</td>
         <td className="px-4 py-3 text-right">
-          <button type="button" onClick={onToggle} aria-expanded={open} className="font-semibold text-belize-blue hover:underline">
+          <button type="button" onClick={onToggle} aria-expanded={open} className="font-semibold text-[color:var(--bmpl-link)] hover:underline">
             {open ? 'Hide' : 'Details'}
           </button>
         </td>

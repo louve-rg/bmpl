@@ -113,7 +113,7 @@ export function OperatorBreadcrumb({ current }: { current: string }) {
         <li>
           <Link
             href="/dashboard/passenger-operator"
-            className="font-medium text-belize-blue transition hover:text-belize-deep hover:underline"
+            className="font-medium text-[color:var(--bmpl-link)] transition hover:text-belize-deep hover:underline"
           >
             Operator Dashboard
           </Link>
