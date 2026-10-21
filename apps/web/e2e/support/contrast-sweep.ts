@@ -505,3 +505,23 @@ export async function measureForegroundColorsByText(page: Page, text: string): P
     return matches.map((el) => getComputedStyle(el).color);
   }, text);
 }
+
+/**
+ * Same method, pointed at the element's OWN declared background rather than
+ * its foreground (god, 2026-10-21, the ONE sanctioned exception to "no new
+ * instrument work" tonight -- two selectors, existing machinery). Settles
+ * finding #1 (desktop header nav links reading ratio ~1.05-1.22): back-
+ * solving the measured ratio against `text-blue-100` (#dbeafe) implies the
+ * sampler resolved a background at or indistinguishable from pure white, not
+ * `bg-belize-navy/95` -- which means the LINK ITSELF may be painting a
+ * background over the header's navy locally. This reads that directly,
+ * rather than inferring it from the ratio a second time.
+ */
+export async function measureBackgroundColorsByText(page: Page, text: string): Promise<string[]> {
+  return page.evaluate((target) => {
+    const matches = Array.from(document.querySelectorAll('*')).filter(
+      (el) => el.children.length === 0 && el.textContent?.trim() === target,
+    );
+    return matches.map((el) => getComputedStyle(el).backgroundColor);
+  }, text);
+}

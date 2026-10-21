@@ -2,7 +2,7 @@ import { test } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
-import { sweepContrast, formatSweepReport, measureFirstEyebrowForeground } from '../support/contrast-sweep';
+import { sweepContrast, formatSweepReport, measureFirstEyebrowForeground, measureBackgroundColorsByText } from '../support/contrast-sweep';
 import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
 
 /**
@@ -25,6 +25,20 @@ import { assertRatchet, type KnownViolationEntry } from '../support/contrast-rat
  * somewhere among 101 call sites is a risk neither of them can rule out by
  * reading source alone. Do not allowlist an eyebrow failure found here; that
  * is exactly the finding this run exists to produce.
+ *
+ * TWO SANCTIONED BACKGROUND-COLOUR PRINTS (god, 2026-10-21, the ONE exception
+ * to the "no new instrument work" line tonight -- existing machinery, two
+ * selectors, nothing new built): a prior run on this route found desktop
+ * header nav links (e.g. "Become a Marketplace Vendor") reading ratio
+ * ~1.05-1.22 against `text-blue-100` -- back-solving that ratio implies the
+ * sampler resolved a background indistinguishable from pure white, not the
+ * header's declared `bg-belize-navy/95`. The same run found mobile category
+ * links (e.g. "Camping & Hiking") reading 3.75/2.36 only inside the `.bmpl-
+ * card`-wrapped mobile disclosure, not the identical desktop markup -- back-
+ * solving BOTH text colours independently implies one background luminance
+ * band, consistent with the alpha-fill-under-glass family #473 was supposed
+ * to have removed everywhere. Printing each element's OWN getComputedStyle
+ * background settles both without guessing from the ratio a second time.
  */
 
 const VIEWPORTS = CONTRAST_VIEWPORTS;
@@ -40,6 +54,8 @@ const KNOWN_VIOLATIONS: KnownViolationEntry[] = JSON.parse(
 const discoveredPassNames = new Set<string>();
 let contributedCount = 0;
 let eyebrowForegroundReported = false;
+let navLinkBackgroundReported = false;
+let categoryLinkBackgroundReported = false;
 
 function recordPassNames(result: { text: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> }; icon: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> } }): void {
   contributedCount += 1;
@@ -75,6 +91,26 @@ test.describe('contrast: public products listing', () => {
         if (eyebrowColor !== null) {
           console.log(`[contrast] web ${ROUTE} -- first .bmpl-eyebrow measured foreground colour: ${eyebrowColor}`);
           eyebrowForegroundReported = true;
+        }
+      }
+
+      // Sanctioned exception, finding #1 (god, 2026-10-21) -- one desktop nav
+      // link's own declared background, at the width he asked for.
+      if (viewport === 1440 && !navLinkBackgroundReported) {
+        const bg = await measureBackgroundColorsByText(page, 'Become a Marketplace Vendor');
+        if (bg.length > 0) {
+          console.log(`[contrast] web ${ROUTE} @ 1440px -- "Become a Marketplace Vendor" nav link measured background colour: ${bg.join(', ')}`);
+          navLinkBackgroundReported = true;
+        }
+      }
+
+      // Sanctioned exception, finding #2 (god, 2026-10-21) -- one mobile
+      // category link's own declared background, at the width he asked for.
+      if (viewport === 375 && !categoryLinkBackgroundReported) {
+        const bg = await measureBackgroundColorsByText(page, 'Camping & Hiking');
+        if (bg.length > 0) {
+          console.log(`[contrast] web ${ROUTE} @ 375px -- "Camping & Hiking" category link measured background colour: ${bg.join(', ')}`);
+          categoryLinkBackgroundReported = true;
         }
       }
 
