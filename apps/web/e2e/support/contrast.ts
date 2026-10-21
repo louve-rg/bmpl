@@ -81,7 +81,20 @@ export interface PixelSampler {
 }
 
 export async function openPixelSampler(page: Page): Promise<PixelSampler> {
-  const fullPageBuffer = await page.screenshot();
+  // { fullPage: true } is load-bearing, not decoration -- found live
+  // (2026-10-21, PR #469's first real run): a bare page.screenshot() only
+  // captures the current viewport, but every box this sampler is handed
+  // comes from getBoundingClientRect(), which is ALWAYS relative to the top
+  // of the full document when scrollY is 0 (true here -- discovery runs
+  // right after page.goto with no manual scroll). Without fullPage, any
+  // element below the first screenful decoded against a short, viewport-only
+  // image, and clusterAt's own clamping (Math.min(canvas.height - 1, ...))
+  // silently read the image's BOTTOM EDGE instead of that element's real
+  // background -- a wrong answer, not a thrown error. Combined with the
+  // elementFromPoint fix in contrast-sweep.ts (same root cause, the
+  // foreground half), this is why "By revenue" went completely unmeasured
+  // rather than merely ambiguous on admin's first live run.
+  const fullPageBuffer = await page.screenshot({ fullPage: true });
   const sampler = await page.context().newPage();
   await sampler.setContent('<img id="shot" /><canvas id="cv"></canvas>');
   await sampler.evaluate((base64) => {

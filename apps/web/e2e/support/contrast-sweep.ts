@@ -72,6 +72,8 @@ export interface SweepTextElement {
   textSnippet: string;
   isLargeText: boolean;
   box: { x: number; y: number; width: number; height: number };
+  /** Raw CSS color, read during discovery -- see discoverElements' own comment for why this replaced an elementFromPoint lookup. */
+  color: string;
 }
 
 export interface SweepIconElement {
@@ -162,6 +164,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       isLargeText: boolean;
       box: { x: number; y: number; width: number; height: number };
       disabled: boolean;
+      color: string;
     }> = [];
     const iconOut: Array<{
       kind: 'icon';
@@ -218,6 +221,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         isLargeText,
         box: { x: box.x, y: box.y, width: box.width, height: box.height },
         disabled: isDisabled(el),
+        color: cs.color,
       });
     }
 
@@ -241,15 +245,15 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
   try {
     const textBucket: SweepBucket<SweepTextElement> = { pass: [], fail: [], ambiguous: [] };
     for (const t of measurableText) {
-      const fgColor = await page.evaluate(
-        ({ x, y, width, height }) => {
-          const el = document.elementFromPoint(x + width / 2, y + height / 2);
-          return el ? getComputedStyle(el).color : null;
-        },
-        t.box,
-      );
-      if (!fgColor) continue;
-      const fg = parseRgbLocal(fgColor);
+      // Foreground color is read during discovery (t.color), not via a
+      // document.elementFromPoint lookup here -- found live (2026-10-21, PR
+      // #469): elementFromPoint only resolves points inside the CURRENTLY
+      // RENDERED viewport. Any element below the first screenful returned
+      // null, which this loop used to silently `continue` past -- counted in
+      // measuredCount, never scored in any bucket, no error. That is how
+      // "By revenue" (and 7 other elements the same run) vanished without a
+      // trace instead of landing in fail or ambiguous.
+      const fg = parseRgbLocal(t.color);
       if (!fg) continue;
 
       const { rgb: bg, share } = await sampler.sampleDominant(t.box);
@@ -263,6 +267,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
         textSnippet: t.textSnippet,
         isLargeText: t.isLargeText,
         box: t.box,
+        color: t.color,
       };
       const reading: SweepReading<SweepTextElement> = { element, ratio, dominantShare: share, foreground: fg, dominantBackground: bg, requiredRatio };
       if (share < ambiguousShareCutoff) textBucket.ambiguous.push(reading);

@@ -64,7 +64,12 @@ export interface PixelSampler {
 }
 
 export async function openPixelSampler(page: Page): Promise<PixelSampler> {
-  const fullPageBuffer = await page.screenshot();
+  // { fullPage: true } is load-bearing, not decoration -- see apps/web's own
+  // copy of this file for the full reasoning (found live, 2026-10-21, PR
+  // #469: a below-the-fold element decoded against a viewport-only
+  // screenshot silently reads the image's bottom edge instead of its real
+  // background -- exactly why "By revenue" went completely unmeasured).
+  const fullPageBuffer = await page.screenshot({ fullPage: true });
   const sampler = await page.context().newPage();
   await sampler.setContent('<img id="shot" /><canvas id="cv"></canvas>');
   await sampler.evaluate((base64) => {
