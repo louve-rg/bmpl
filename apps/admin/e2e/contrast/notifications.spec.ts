@@ -12,11 +12,17 @@ import { assertRatchet, type KnownViolationEntry } from '../support/contrast-rat
  * `belize-navy`, a static Tailwind colour with no glass variant, used as a
  * foreground on glass. This route's instance is the "Unread only" checkbox
  * label (measured 1.02:1 by computed style), reproducing for BOTH admin
- * roles -- a component-level defect, not role-gated, so ADMIN (the default
- * fixture) is enough to cover it. Fixed by Oscar's `fix/glass-navy-text-
- * admin` batch, off `e953569`, not yet merged -- EXPECT THIS TO FAIL IN CI
- * RIGHT NOW, the same deliberate-regression pattern as the web specs. Do
- * not allowlist it.
+ * roles -- a component-level defect, not role-gated. Logs in as SUPER_ADMIN,
+ * not the ADMIN/OPS_FULL fixture: `apps/admin/e2e/support/auth.ts`'s ADMIN
+ * fixture reads `UAT_OPS_PASSWORD`, which CI has never set since 9b69fa8
+ * ("no UAT_OPS_PASSWORD set here on purpose") -- a deliberate local-only
+ * decision, not a bug. ADMIN would silently skip in CI, not fail, giving
+ * false confidence that this spec was proving anything. SUPER_ADMIN reads
+ * `SEED_SUPER_ADMIN_PASSWORD`, which the visual-regression job does set
+ * (confirmed live by analytics.spec.ts passing under it in the same job),
+ * and the bug is not role-gated, so it is an equally valid fixture here.
+ * Fixed by Oscar's `fix/glass-navy-text-admin` batch (merged as #483,
+ * `ebea002`) -- this should now go GREEN in CI.
  */
 
 const VIEWPORTS = CONTRAST_VIEWPORTS;
@@ -52,8 +58,8 @@ test.describe('contrast: admin notifications', () => {
 
   for (const viewport of VIEWPORTS) {
     test(`${ROUTE} has no un-allowlisted contrast violations at ${viewport}px`, async ({ page }) => {
-      const loggedIn = await loginAsRole(page, 'ADMIN');
-      test.skip(!loggedIn, 'Needs SEED_SUPER_ADMIN_PASSWORD / UAT_OPS_PASSWORD and a live API -- set by the visual-regression CI job, or locally per apps/admin/e2e/support/auth.ts.');
+      const loggedIn = await loginAsRole(page, 'SUPER_ADMIN');
+      test.skip(!loggedIn, 'Needs SEED_SUPER_ADMIN_PASSWORD and a live API -- set by the visual-regression CI job, or locally per apps/admin/e2e/support/auth.ts.');
 
       await page.setViewportSize({ width: viewport, height: 900 });
       await page.goto(ROUTE);
@@ -61,7 +67,7 @@ test.describe('contrast: admin notifications', () => {
       await page.waitForTimeout(500);
 
       const result = await sweepContrast(page);
-      console.log(formatSweepReport(`admin ${ROUTE} ADMIN @ ${viewport}px`, result));
+      console.log(formatSweepReport(`admin ${ROUTE} SUPER_ADMIN @ ${viewport}px`, result));
       recordPassNames(result);
 
       if (result.text.measuredCount === 0) {
