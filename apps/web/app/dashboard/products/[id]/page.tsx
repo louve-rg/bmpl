@@ -103,7 +103,7 @@ export default function EditProductPage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <Link href="/dashboard/products" className="text-sm font-medium text-belize-blue hover:underline">← My Products</Link>
+      <Link href="/dashboard/products" className="text-sm font-medium text-[color:var(--bmpl-link)] hover:underline">← My Products</Link>
       <div className="mb-6 mt-2 flex items-center justify-between gap-3">
         <h1 className="bmpl-page-title">Edit product</h1>
         <Badge tone={STATUS_TONE[status] ?? 'neutral'}>{status.replace('_', ' ')}</Badge>

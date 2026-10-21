@@ -36,7 +36,7 @@ export default async function DashboardHome() {
               role label below it read as near-invisible dark-on-dark once
               the card could be a dark glass surface. Inherit instead. */}
           <h2 className="text-lg font-bold">Your roles</h2>
-          <Link href="/dashboard/roles" className="-my-3 inline-flex min-h-[44px] items-center text-sm font-semibold text-belize-blue hover:underline">
+          <Link href="/dashboard/roles" className="-my-3 inline-flex min-h-[44px] items-center text-sm font-semibold text-[color:var(--bmpl-link)] hover:underline">
             Manage roles →
           </Link>
         </div>

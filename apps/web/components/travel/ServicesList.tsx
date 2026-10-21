@@ -94,13 +94,13 @@ function ServiceCard({ service: s }: { service: PassengerService }) {
         {s.stops.length > 0 && (
           <button
             type="button"
-            className="text-sm font-semibold text-belize-blue hover:underline"
+            className="text-sm font-semibold text-[color:var(--bmpl-link)] hover:underline"
             onClick={() => setStopsOpen((v) => !v)}
           >
             {stopsOpen ? 'Hide stops' : `Stops (${s.stops.length})`}
           </button>
         )}
-        <Link href="/dashboard/passenger" className="text-sm font-semibold text-belize-blue hover:underline">
+        <Link href="/dashboard/passenger" className="text-sm font-semibold text-[color:var(--bmpl-link)] hover:underline">
           See upcoming departures
         </Link>
       </div>

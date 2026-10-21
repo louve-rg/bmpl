@@ -83,7 +83,7 @@ export default function AgentAssignmentsPage() {
                 {a.status === 'ACCEPTED' && (
                   <Link
                     href={`/dashboard/real-estate-agent/listings/${a.listing.id}`}
-                    className="text-xs font-semibold text-belize-blue hover:underline"
+                    className="text-xs font-semibold text-[color:var(--bmpl-link)] hover:underline"
                   >
                     Manage
                   </Link>

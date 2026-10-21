@@ -81,7 +81,7 @@ export default function EditJobPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <Link href="/dashboard/employer/jobs" className="text-sm font-medium text-belize-blue hover:underline">
+      <Link href="/dashboard/employer/jobs" className="text-sm font-medium text-[color:var(--bmpl-link)] hover:underline">
         ← Job Listings
       </Link>
       <PageHeader

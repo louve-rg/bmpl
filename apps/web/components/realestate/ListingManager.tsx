@@ -113,7 +113,7 @@ export function ListingManager({
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <Link href={listPath} className="text-sm font-medium text-belize-blue hover:underline">
+      <Link href={listPath} className="text-sm font-medium text-[color:var(--bmpl-link)] hover:underline">
         ← Listings
       </Link>
       <PageHeader

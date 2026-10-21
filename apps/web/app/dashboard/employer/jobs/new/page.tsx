@@ -7,7 +7,7 @@ import { PageHeader } from '../../../../../components/ui';
 export default function NewJobPage() {
   return (
     <div className="mx-auto max-w-3xl">
-      <Link href="/dashboard/employer/jobs" className="text-sm font-medium text-belize-blue hover:underline">
+      <Link href="/dashboard/employer/jobs" className="text-sm font-medium text-[color:var(--bmpl-link)] hover:underline">
         ← Job Listings
       </Link>
       <div className="mt-2">

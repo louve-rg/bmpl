@@ -47,7 +47,7 @@ export default function DepartureDetailPage() {
           <li>
             <Link
               href="/dashboard/passenger"
-              className="font-medium text-belize-blue transition hover:text-belize-deep hover:underline"
+              className="font-medium text-[color:var(--bmpl-link)] transition hover:text-belize-deep hover:underline"
             >
               Passenger Service
             </Link>
