@@ -50,17 +50,22 @@ const KNOWN_VIOLATIONS: KnownViolationEntry[] = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'contrast-known-violations.json'), 'utf8'),
 );
 
-// Discovered-and-passed names, deduped across every viewport in this file --
-// see this file's own describe block afterAll for why (god, 2026-10-21): the
-// per-viewport fail/ambiguous lines already answer "found, and it failed" for
-// an element; nothing anywhere answered "found, and it passed" vs "never
-// found at all" for the SAME element, at any viewport. Printing one line per
-// element per viewport (9 widths x up to 60 elements) would bury the lines
-// that actually matter under hundreds of rows, so this accumulates role+name
-// across all nine widths' test() runs and prints ONE sorted-unique list after
-// the last one -- safe only because playwright.config.ts pins this suite to
-// workers:1/fullyParallel:false, so every viewport's test() runs in the same
-// process and this module-level Set is never split across workers.
+// Discovered-and-passed names, across widths that reached recordPassNames
+// within ONE worker lifetime. The per-viewport fail/ambiguous lines already
+// answer "found, and it failed" for an element; nothing anywhere answered
+// "found, and it passed" vs "never found at all" for the SAME element, at
+// any viewport -- that's what this accumulates (deduped role+name) and
+// prints via afterAll instead of one line per element per viewport (9 widths
+// x up to 60 elements would bury the lines that actually matter under
+// hundreds of rows).
+// workers:1/fullyParallel:false (playwright.contrast.config.ts, not the base
+// playwright.config.ts -- confirmed by reading the actual config
+// `test:contrast` runs, after an earlier verification read the wrong file)
+// rules out PARALLEL splitting, but NOT this: Playwright restarts its worker
+// process after a failed test, which reloads this module fresh -- so on a
+// run where every test fails, this accumulator never spans more than one
+// viewport (god, 2026-10-21). The contributed=N/widths header below says so
+// honestly instead of claiming "across all widths" when it wasn't.
 const discoveredPassNames = new Set<string>();
 // Widths that actually reached recordPassNames (sweepContrast returned, no
 // throw) -- a skipped test (no seeded fixture, no live API) or a width whose

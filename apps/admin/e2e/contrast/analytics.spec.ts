@@ -33,11 +33,16 @@ const KNOWN_VIOLATIONS: KnownViolationEntry[] = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'contrast-known-violations.json'), 'utf8'),
 );
 
-// Discovered-and-passed names, deduped across every viewport in this file --
-// see apps/web's identical copy of this comment for the full reasoning (god,
-// 2026-10-21). Safe only because playwright.config.ts pins this suite to
-// workers:1/fullyParallel:false, so every viewport's test() runs in the same
-// process and this module-level Set is never split across workers.
+// Discovered-and-passed names, across widths that reached recordPassNames
+// within ONE worker lifetime -- see apps/web's identical copy of this
+// comment. workers:1/fullyParallel:false (playwright.contrast.config.ts, not
+// the base playwright.config.ts -- confirmed by reading the actual config
+// `test:contrast` runs, after an earlier verification read the wrong file)
+// rules out PARALLEL splitting, but NOT this: Playwright restarts its worker
+// process after a failed test, which reloads this module fresh -- so on a
+// run where every test fails, this accumulator never spans more than one
+// viewport (god, 2026-10-21). The contributed=N/widths header below says so
+// honestly instead of claiming "across all widths" when it wasn't.
 const discoveredPassNames = new Set<string>();
 // See apps/web's identical copy of this comment: counts widths that actually
 // reached recordPassNames, so absence from the pass list below can be read
@@ -77,6 +82,41 @@ test.describe('contrast: admin analytics', () => {
       await page.goto(ROUTE);
       await settleForSnapshot(page);
       await page.waitForTimeout(500);
+
+      // TEMPORARY DIAGNOSTIC, TO BE REMOVED once the mechanism is found --
+      // PageHeader's eyebrow/title/description (ui.tsx:122-129) are
+      // under-discovered by the sweep at most of the nine widths, while
+      // EmptyState's own description text on the SAME page, SAME run, is
+      // discovered and passing every time (god, 2026-10-21) -- so this is
+      // not a page-wide or worker-cold-load timing issue, it is specific to
+      // PageHeader. Logs the real box + computed style for PageHeader's
+      // three text children and their shared min-w-0 parent at the exact
+      // moment sweepContrast is about to sample them, independent of and
+      // without touching contrast-sweep.ts's own discovery/scoring code.
+      const pageHeaderDiag = await page.evaluate(() => {
+        const texts = ['Insights', 'Platform analytics', 'Marketplace performance'];
+        const found: Array<{ text: string; tag: string; box: DOMRect | null; display: string; visibility: string; opacity: string; parentBox: DOMRect | null }> = [];
+        for (const needle of texts) {
+          const el = [...document.querySelectorAll('p, h1')].find((e) => (e.textContent || '').trim().startsWith(needle));
+          if (!el) {
+            found.push({ text: needle, tag: '(not found in DOM at all)', box: null, display: '', visibility: '', opacity: '', parentBox: null });
+            continue;
+          }
+          const cs = getComputedStyle(el);
+          const parent = el.parentElement;
+          found.push({
+            text: needle,
+            tag: el.tagName,
+            box: el.getBoundingClientRect(),
+            display: cs.display,
+            visibility: cs.visibility,
+            opacity: cs.opacity,
+            parentBox: parent ? parent.getBoundingClientRect() : null,
+          });
+        }
+        return found;
+      });
+      console.log(`[diag] admin PageHeader @ ${viewport}px: ${JSON.stringify(pageHeaderDiag)}`);
 
       const result = await sweepContrast(page);
       console.log(formatSweepReport(`admin ${ROUTE} SUPER_ADMIN @ ${viewport}px`, result));
