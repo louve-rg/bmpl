@@ -123,6 +123,24 @@ body {
     background-color: var(--bmpl-chip-fill, var(--bmpl-surface-muted));
   }
 
+  /* FIXED on-color surfaces (req 6, contrast standard) -- for a box that
+     must stay light or dark regardless of theme scope. See glass.css's
+     own comment on the --bmpl-oncolor-light and --bmpl-oncolor-dark
+     token families for why these are opaque, fixed values rather than
+     the adaptive --bmpl-surface family.
+     Use .bmpl-surface-onlight instead of hand-picking bg-white + a
+     text-* utility; use .bmpl-surface-ondark for the reverse. */
+  .bmpl-surface-onlight {
+    background-color: var(--bmpl-oncolor-light-bg);
+    border-color: var(--bmpl-oncolor-light-border);
+    color: var(--bmpl-oncolor-light-text);
+  }
+  .bmpl-surface-ondark {
+    background-color: var(--bmpl-oncolor-dark-bg);
+    border-color: var(--bmpl-oncolor-dark-border);
+    color: var(--bmpl-oncolor-dark-text);
+  }
+
   /* Nav row / collapsible group heading -- shared by the dashboard
      sidebar, the mobile drawer and (structurally, if admin ever wants
      collapsible groups) the admin console. Outside the glass scope
