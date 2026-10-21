@@ -140,7 +140,7 @@ function TotalCard({ label, value, tone, hint }: { label: string; value: string;
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
         <Badge tone={tone}>{tone === 'success' ? 'Posted' : 'Pending'}</Badge>
       </div>
-      <p className="mt-1.5 text-3xl font-bold text-belize-navy">{value}</p>
+      <p className="mt-1.5 text-3xl font-bold text-[color:var(--bmpl-text)]">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </Card>
   );
