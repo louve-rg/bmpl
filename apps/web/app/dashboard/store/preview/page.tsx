@@ -44,9 +44,17 @@ export default async function StorePreviewPage() {
       </div>
 
       {live && (
-        <p className="mt-3 text-sm text-slate-500">
+        <p className="mt-3 text-sm text-[color:var(--bmpl-text-muted)]">
           Live at{' '}
-          <Link href={`/store/${data.slug}`} className="text-belize-blue hover:underline">
+          {/* No card ancestor -- a sibling of the data-theme="light" frame
+              above, not a descendant, so that fix cannot reach it. Same
+              defect shape as Breadcrumbs' link branch (both apps'
+              components/ui.tsx): a hardcoded belize-blue sitting directly
+              on the mural. Same fix. */}
+          <Link
+            href={`/store/${data.slug}`}
+            className="font-semibold text-[color:var(--bmpl-text-muted)] underline transition hover:text-[color:var(--bmpl-text)]"
+          >
             /store/{data.slug}
           </Link>
         </p>
