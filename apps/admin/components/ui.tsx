@@ -72,13 +72,13 @@ export function Breadcrumbs({ items, className = '' }: { items: Crumb[]; classNa
               {item.href && !last ? (
                 <Link
                   href={item.href}
-                  className="min-w-0 break-words font-medium text-belize-blue hover:underline"
+                  className="min-w-0 break-words font-medium text-[color:var(--bmpl-text-muted)] transition hover:text-[color:var(--bmpl-text)] hover:underline"
                 >
                   {item.label}
                 </Link>
               ) : (
                 <span
-                  className={`min-w-0 break-words ${last ? 'font-medium text-belize-navy' : ''}`}
+                  className={`min-w-0 break-words ${last ? 'font-medium text-[color:var(--bmpl-text)]' : ''}`}
                   aria-current={last ? 'page' : undefined}
                 >
                   {item.label}
