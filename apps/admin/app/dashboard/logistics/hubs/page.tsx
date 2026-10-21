@@ -271,11 +271,11 @@ export default function HubsPage() {
                     <Badge tone={h.isActive ? 'success' : 'neutral'}>{h.isActive ? 'Active' : 'Inactive'}</Badge>
                     {h.isTest && <Badge tone="neutral">Simulation</Badge>}
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
                     {h.city}, {h.district.replace(/_/g, ' ')} · {h.type.replace(/_/g, ' ').toLowerCase()} · {h.modes.join(', ')}
                   </p>
                   {(h.addressLine1 || h.contactPhone || h.contactName) && editingId !== h.id && (
-                    <p className="mt-1 text-xs text-slate-500">
+                    <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
                       {[h.addressLine1, h.addressLine2, h.contactName, h.contactPhone].filter(Boolean).join(' · ')}
                     </p>
                   )}
@@ -305,7 +305,7 @@ export default function HubsPage() {
                 {/* The fee is a fact the report still states; only the
                     control is withheld. */}
                 {!canManage && (
-                  <p className="shrink-0 text-sm text-slate-600">
+                  <p className="shrink-0 text-sm text-[color:var(--bmpl-text-muted-strong)]">
                     Courier rate <span className="font-semibold text-[color:var(--bmpl-text)]">BZ${(h.courierFeeMinor / 100).toFixed(2)}</span>
                   </p>
                 )}

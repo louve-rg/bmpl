@@ -245,7 +245,7 @@ export default function CourierLanesPage() {
             </Field>
           </div>
           <div className="sm:col-span-2 lg:col-span-4">
-            <label className="flex min-h-[44px] items-center gap-2 text-sm text-slate-600">
+            <label className="flex min-h-[44px] items-center gap-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
               <input
                 type="checkbox"
                 checked={form.isTest}
@@ -288,11 +288,11 @@ export default function CourierLanesPage() {
                     <Badge tone={l.isActive ? 'success' : 'neutral'}>{l.isActive ? 'Open' : 'Closed'}</Badge>
                     {l.isTest && <Badge tone="neutral">Simulation</Badge>}
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
                     {money(l.priceMinor)}
                     {l.durationMinutes > 0 ? ` · about ${l.durationMinutes} min` : ''} · both directions
                   </p>
-                  {l.note && <p className="mt-1 break-words text-xs text-slate-500">{l.note}</p>}
+                  {l.note && <p className="mt-1 break-words text-xs text-[color:var(--bmpl-text-muted)]">{l.note}</p>}
                   {l.priceMinor === 0 && (
                     // Flagged, like an unpriced terminal: the lane exists but
                     // nothing can be sold down it yet.

@@ -214,7 +214,7 @@ export default function RoutesPage() {
                     <Badge tone="info">{r.mode}</Badge>
                     <Badge tone={r.isActive ? 'success' : 'neutral'}>{r.isActive ? 'Running' : 'Suspended'}</Badge>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
                     {r.carrierName ?? 'Carrier not named'} · {duration(r.durationMinutes)} · ${(r.priceMinor / 100).toFixed(2)}
                     {r.scheduleNote ? ` · ${r.scheduleNote}` : ''}
                   </p>

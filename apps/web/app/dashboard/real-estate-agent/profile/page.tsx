@@ -74,7 +74,7 @@ export default function AgentProfilePage() {
       />
       {profile && (
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-sm text-slate-500">Approval status:</span>
+          <span className="text-sm text-[color:var(--bmpl-text-muted)]">Approval status:</span>
           <StatusBadge status={profile.approvalStatus} />
           <ButtonLink href={`/properties/agents/${profile.slug}`} size="sm" variant="ghost">
             View public page
@@ -214,7 +214,7 @@ function ProfileForm({ profile, onSaved }: { profile: AgentProfile | null; onSav
           <Label>Service districts</Label>
           <div className="mt-1 flex flex-wrap gap-2">
             {DISTRICTS.map((d) => (
-              <label key={d} className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600">
+              <label key={d} className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-sm text-[color:var(--bmpl-text-muted-strong)]">
                 <input
                   type="checkbox"
                   checked={serviceDistricts.includes(d)}
@@ -231,7 +231,7 @@ function ProfileForm({ profile, onSaved }: { profile: AgentProfile | null; onSav
           <Label>Specialties</Label>
           <div className="mt-1 flex flex-wrap gap-2">
             {AGENT_SPECIALTIES.map((s) => (
-              <label key={s} className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600">
+              <label key={s} className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-sm text-[color:var(--bmpl-text-muted-strong)]">
                 <input
                   type="checkbox"
                   checked={specialties.includes(s)}

@@ -273,7 +273,7 @@ function SettingsSection({ initial }: { initial: PlatformSetting }) {
     <section aria-label="Announcement and maintenance" className="space-y-4">
       <div>
         <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Announcement &amp; maintenance banner</h2>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
           Display-only notice shown to users across the marketplace. This is informational — it does not disable the
           platform or block any functionality.
         </p>
@@ -304,7 +304,7 @@ function SettingsSection({ initial }: { initial: PlatformSetting }) {
               />
               <span>
                 <span className="text-sm font-semibold text-[color:var(--bmpl-text)]">Show announcement banner</span>
-                <span className="mt-0.5 block text-xs text-slate-500">Display a message at the top of the marketplace.</span>
+                <span className="mt-0.5 block text-xs text-[color:var(--bmpl-text-muted)]">Display a message at the top of the marketplace.</span>
               </span>
             </label>
 
@@ -366,7 +366,7 @@ function SettingsSection({ initial }: { initial: PlatformSetting }) {
               />
               <span>
                 <span className="text-sm font-semibold text-[color:var(--bmpl-text)]">Show maintenance notice</span>
-                <span className="mt-0.5 block text-xs text-slate-500">A distinct informational strip about planned maintenance.</span>
+                <span className="mt-0.5 block text-xs text-[color:var(--bmpl-text-muted)]">A distinct informational strip about planned maintenance.</span>
               </span>
             </label>
 

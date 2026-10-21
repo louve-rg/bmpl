@@ -134,7 +134,7 @@ function Toggle({
 }) {
   return (
     <label className="flex items-center gap-2 sm:w-14 sm:justify-center">
-      <span className="text-xs text-slate-500 sm:hidden">{label}</span>
+      <span className="text-xs text-[color:var(--bmpl-text-muted)] sm:hidden">{label}</span>
       <button
         type="button"
         role="switch"

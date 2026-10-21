@@ -71,14 +71,14 @@ function ServiceCard({ service: s }: { service: PassengerService }) {
     <UiCard className="p-4">
       <div className="flex flex-wrap items-center gap-2">
         <b className="text-sm text-[color:var(--bmpl-text)]">{s.name}</b>
-        {s.operator && <span className="text-xs text-slate-500">{s.operator}</span>}
+        {s.operator && <span className="text-xs text-[color:var(--bmpl-text-muted)]">{s.operator}</span>}
       </div>
-      <p className="mt-1 text-sm text-slate-600">
+      <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted-strong)]">
         {s.originCity} → {s.destinationCity}
         {s.durationMinutes != null ? ` · ~${s.durationMinutes} min` : ''}
       </p>
-      {s.scheduleNote && <p className="mt-0.5 text-xs text-slate-500">{s.scheduleNote}</p>}
-      {s.description && <p className="mt-1 text-sm text-slate-600">{s.description}</p>}
+      {s.scheduleNote && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted)]">{s.scheduleNote}</p>}
+      {s.description && <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted-strong)]">{s.description}</p>}
 
       {s.fareConfigured && s.baseFareMinor != null ? (
         <p className="mt-1 text-sm text-slate-700">Fare {formatBzd(s.baseFareMinor)}</p>

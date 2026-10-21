@@ -118,7 +118,7 @@ export function FleetCard({ driverProfileId }: { driverProfileId: string }) {
           )}
         </div>
       ) : (
-        <p className="mt-3 text-sm text-slate-600">
+        <p className="mt-3 text-sm text-[color:var(--bmpl-text-muted-strong)]">
           Independent — you are not part of a fleet.
         </p>
       )}
@@ -163,7 +163,7 @@ export function FleetCard({ driverProfileId }: { driverProfileId: string }) {
 
       {!active && <RequestToJoin onDone={reload} />}
 
-      <p className="mt-4 text-xs text-slate-500">
+      <p className="mt-4 text-xs text-[color:var(--bmpl-text-muted)]">
         Your driver ID: <code className="rounded bg-slate-100 px-1 py-0.5">{driverProfileId}</code> — share it with an
         operator who wants to invite you.
       </p>

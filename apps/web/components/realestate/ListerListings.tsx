@@ -67,7 +67,7 @@ export function ListerListings({
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filter:</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">Filter:</span>
         <FilterChip label="All" active={status === ''} onClick={() => setStatus('')} />
         {PROPERTY_STATUSES.map((s) => (
           <FilterChip key={s} label={PROPERTY_STATUS_LABELS[s]} active={status === s} onClick={() => setStatus(s)} />

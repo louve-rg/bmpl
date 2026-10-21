@@ -147,7 +147,7 @@ export function ProductForm({ initial }: { initial?: ProductValues }) {
         <Field label="Tags (comma-separated)"><Input value={v.tags} onChange={(e) => set('tags', e.target.value)} placeholder="audio, wireless" /></Field>
 
         <details className="rounded-bmpl-md border border-slate-200 p-3">
-          <summary className="cursor-pointer text-sm font-medium text-slate-600">SEO metadata</summary>
+          <summary className="cursor-pointer text-sm font-medium text-[color:var(--bmpl-text-muted-strong)]">SEO metadata</summary>
           <div className="mt-3 space-y-3">
             <Field label="Meta title"><Input value={v.metaTitle} onChange={(e) => set('metaTitle', e.target.value)} /></Field>
             <Field label="Meta description"><Textarea rows={2} value={v.metaDescription} onChange={(e) => set('metaDescription', e.target.value)} /></Field>

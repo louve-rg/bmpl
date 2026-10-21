@@ -99,7 +99,7 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
           Test credit
         </span>
       </div>
-      <p className="mt-1 text-sm text-slate-500">
+      <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
         Posts simulation money through the ordinary ledger so a real person can exercise checkout without a real payment
         rail. It is marked as test money whoever receives it, and it cannot be withdrawn as cash.
       </p>
@@ -164,7 +164,7 @@ function StaleHoldCard({ onChanged }: { onChanged?: () => void }) {
   return (
     <Card className="p-4">
       <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Release stale wallet holds</h3>
-      <p className="mt-1 text-sm text-slate-500">
+      <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
         A hold placed at checkout that was never authorized reserves money the customer cannot spend and cannot get
         back. This gives those reservations back and cancels the orders behind them. It runs hourly on its own; this is
         for when it needs to happen now.
@@ -195,7 +195,7 @@ const input =
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) {
   return (
     <div>
-      <label htmlFor={htmlFor} className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+      <label htmlFor={htmlFor} className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">
         {label}
       </label>
       <div className="mt-1">{children}</div>

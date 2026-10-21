@@ -178,8 +178,8 @@ function RoleCard({
         <h3 className="font-bold text-[color:var(--bmpl-text)]">{role.label}</h3>
         {role.status && <StatusBadge status={role.status} className="shrink-0" />}
       </div>
-      <p className="mt-2 text-sm text-slate-600">{role.description}</p>
-      {needsDocs && <p className="mt-3 text-xs text-slate-500">Documents required: {role.requiredDocuments.join(', ')}</p>}
+      <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">{role.description}</p>
+      {needsDocs && <p className="mt-3 text-xs text-[color:var(--bmpl-text-muted)]">Documents required: {role.requiredDocuments.join(', ')}</p>}
 
       <div className="mt-4">
         {!role.canApply ? (

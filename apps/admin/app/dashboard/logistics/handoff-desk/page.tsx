@@ -180,7 +180,7 @@ export default function HandoffDeskPage() {
           )}
 
           {hubs && hubs.length > 0 && !hubId && (
-            <p className="mt-6 text-sm text-slate-500">Choose a terminal to see what it is expecting.</p>
+            <p className="mt-6 text-sm text-[color:var(--bmpl-text-muted)]">Choose a terminal to see what it is expecting.</p>
           )}
 
           {loading && (

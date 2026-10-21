@@ -246,7 +246,7 @@ export function PropertyForm({
 
       <Card className="space-y-4 p-5 sm:p-6">
         <h2 className="bmpl-eyebrow">Location</h2>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-[color:var(--bmpl-text-muted)]">
           The exact address is never shown publicly. Choose how much of the location to reveal.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">

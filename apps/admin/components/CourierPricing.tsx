@@ -59,7 +59,7 @@ export function CourierPricing({
   return (
     <Card className="p-4">
       <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Local courier pricing</h3>
-      <p className="mt-1 text-sm text-slate-500">
+      <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
         One courier, door to door, within a single town — the journey with no terminal in it.
       </p>
 
@@ -68,20 +68,20 @@ export function CourierPricing({
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div>
-          <label htmlFor="cp-prod" className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <label htmlFor="cp-prod" className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">
             Production rate (BZ$)
           </label>
           <input id="cp-prod" value={production} onChange={(e) => setProduction(e.target.value)} inputMode="decimal" className={input} />
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
             Charged to every real customer, nationwide. {toMinor(production) === 0 && 'Currently unset — local journeys are quoted as "price not configured".'}
           </p>
         </div>
         <div>
-          <label htmlFor="cp-sim" className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <label htmlFor="cp-sim" className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">
             Simulation rate (BZ$)
           </label>
           <input id="cp-sim" value={simulation} onChange={(e) => setSimulation(e.target.value)} inputMode="decimal" className={input} />
-          <p className="mt-1 text-xs text-slate-500">Applies to designated test accounts only. Never charged to a real customer.</p>
+          <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">Applies to designated test accounts only. Never charged to a real customer.</p>
         </div>
       </div>
 

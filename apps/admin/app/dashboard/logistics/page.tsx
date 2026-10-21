@@ -156,7 +156,7 @@ export default function LogisticsOpsPage() {
               ))}
             </Select>
           </Field>
-          <label className="flex min-h-[40px] items-center gap-2 text-sm text-slate-600">
+          <label className="flex min-h-[40px] items-center gap-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
             <input type="checkbox" checked={includeTest} onChange={(e) => setIncludeTest(e.target.checked)} />
             {/* Off by default so the board reflects real work. */}
             Include simulation shipments

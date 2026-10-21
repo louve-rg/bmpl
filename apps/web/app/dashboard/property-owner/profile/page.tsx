@@ -74,7 +74,7 @@ export default function OwnerProfilePage() {
       />
       {profile && (
         <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-500">Approval status:</span>
+          <span className="text-sm text-[color:var(--bmpl-text-muted)]">Approval status:</span>
           <StatusBadge status={profile.approvalStatus} />
         </div>
       )}

@@ -424,7 +424,7 @@ function LocationsSection({ store, onDone, onError }: SectionProps) {
   const [busy, setBusy] = useState(false);
   return (
     <Card title="Pickup locations">
-      <p className="mb-3 text-sm text-slate-500">
+      <p className="mb-3 text-sm text-[color:var(--bmpl-text-muted)]">
         Drivers navigate to the pin you drop here. Without one they only get the written address, and the delivery
         distance we estimate is a district-level guess.
       </p>
@@ -560,8 +560,8 @@ function HoursSection({ store, onDone, onError }: SectionProps) {
       <div className="space-y-2">
         {rows.map((r, i) => (
           <div key={r.dayOfWeek} className="flex flex-wrap items-center gap-3 rounded-bmpl-md border border-slate-100 px-3 py-2 text-sm">
-            <span className="w-24 font-medium text-slate-600">{DAYS[r.dayOfWeek]}</span>
-            <label className="flex items-center gap-1.5 text-slate-500">
+            <span className="w-24 font-medium text-[color:var(--bmpl-text-muted-strong)]">{DAYS[r.dayOfWeek]}</span>
+            <label className="flex items-center gap-1.5 text-[color:var(--bmpl-text-muted)]">
               <input
                 type="checkbox"
                 className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-2 focus:ring-belize-accent/30"
