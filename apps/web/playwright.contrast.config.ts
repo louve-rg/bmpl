@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { BASE_URL } from './e2e/support/server';
+import { CONTRAST_BASE_URL } from './e2e/support/server';
 
 /**
  * Requirement 7 contrast check (`hive/agents/god/CONTRAST-STANDARD.md`,
@@ -20,6 +20,13 @@ import { BASE_URL } from './e2e/support/server';
  * second services block. Locally, needs a running dev server + live API +
  * seeded dev database, same prerequisites as the other authenticated
  * local-only specs in this tree.
+ *
+ * Its own dev server, on its own CONTRAST_PORT, via its own global-setup --
+ * not the visual suite's PORT/global-setup.ts. Found live (2026-10-21, PR
+ * #469) that sharing PORT across two same-job steps depended on the visual
+ * suite's teardown freeing it first, which failed on its first real exercise
+ * on a CI runner (EADDRINUSE). See e2e/support/server.ts's CONTRAST_PORT
+ * comment and e2e/support/global-setup.contrast.ts.
  */
 export default defineConfig({
   testDir: './e2e/contrast',
@@ -29,9 +36,9 @@ export default defineConfig({
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: BASE_URL,
+    baseURL: CONTRAST_BASE_URL,
     trace: 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
-  globalSetup: require.resolve('./e2e/support/global-setup.ts'),
+  globalSetup: require.resolve('./e2e/support/global-setup.contrast.ts'),
 });

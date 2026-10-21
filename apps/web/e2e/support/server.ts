@@ -26,9 +26,23 @@ import path from 'node:path';
  * PORT is deliberately NOT 3000 (the project's normal `pnpm dev` port), so
  * this harness can never collide with, or be fooled by, a developer's own
  * running dev server.
+ *
+ * CONTRAST_PORT exists because the contrast suite (playwright.contrast.config.ts)
+ * now runs as its own step, in the same CI job, after the visual suite --
+ * found live (2026-10-21, PR #469's first real run): the visual step's
+ * server teardown relies on `findPidOnPort`/`killPid` below, whose POSIX
+ * branch had never actually been exercised against a second same-job
+ * consumer of PORT before that run, and it left the port still bound when
+ * the contrast step tried to start its own server on it (EADDRINUSE). A
+ * distinct port for the contrast suite removes the need for that teardown
+ * to succeed within this job at all, rather than trusting it for the first
+ * time under a new consumer; see docs/design/CONTRAST-STANDARD.md and the
+ * approach doc this PR implements for the rest of that requirement.
  */
 export const PORT = 3177;
 export const BASE_URL = `http://localhost:${PORT}`;
+export const CONTRAST_PORT = 3179;
+export const CONTRAST_BASE_URL = `http://localhost:${CONTRAST_PORT}`;
 export const FIXTURE_PATH = '/e2e-test-fixtures/dialogs';
 export const FIXTURE_READY_MARKER = 'data-e2e-fixture-ready';
 
@@ -86,8 +100,8 @@ export function ensurePortFree(port: number): void {
   }
 }
 
-export function startDevServer(): ChildProcess {
-  return spawn('pnpm', ['exec', 'next', 'dev', '-p', String(PORT)], {
+export function startDevServer(port: number = PORT): ChildProcess {
+  return spawn('pnpm', ['exec', 'next', 'dev', '-p', String(port)], {
     cwd: WEB_ROOT,
     shell: true,
     stdio: 'pipe',
@@ -111,11 +125,11 @@ async function fetchOk(url: string): Promise<Response | null> {
  * the two-part check that would have caught bmpl-web's stale-server incident
  * (root 200, chunks 404).
  */
-export async function waitForRealReadiness(timeoutMs = 90_000): Promise<void> {
+export async function waitForRealReadiness(timeoutMs = 90_000, baseUrl: string = BASE_URL): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastReason = 'no response yet';
   while (Date.now() < deadline) {
-    const pageRes = await fetchOk(`${BASE_URL}${FIXTURE_PATH}`);
+    const pageRes = await fetchOk(`${baseUrl}${FIXTURE_PATH}`);
     if (pageRes) {
       const html = await pageRes.text();
       if (!html.includes(FIXTURE_READY_MARKER)) {
@@ -125,7 +139,7 @@ export async function waitForRealReadiness(timeoutMs = 90_000): Promise<void> {
         if (!chunkMatch) {
           lastReason = 'fixture marker present but no static JS chunk reference found in the HTML';
         } else {
-          const chunkRes = await fetchOk(`${BASE_URL}${chunkMatch[0]}`);
+          const chunkRes = await fetchOk(`${baseUrl}${chunkMatch[0]}`);
           const contentType = chunkRes?.headers.get('content-type') ?? '';
           if (chunkRes && contentType.includes('javascript')) {
             return; // Real page, real asset. Genuinely ready.
@@ -145,20 +159,20 @@ export async function waitForRealReadiness(timeoutMs = 90_000): Promise<void> {
  * looked. Confirms the port is free afterward rather than assuming the kill
  * worked.
  */
-export function stopDevServer(spawned: ChildProcess): void {
+export function stopDevServer(spawned: ChildProcess, port: number = PORT): void {
   try {
     spawned.kill();
   } catch {
     // best effort; the OS-level lookup below is what actually matters
   }
   for (let attempt = 0; attempt < 5; attempt++) {
-    const pid = findPidOnPort(PORT);
+    const pid = findPidOnPort(port);
     if (!pid) return;
     killPid(pid);
   }
-  const stillThere = findPidOnPort(PORT);
+  const stillThere = findPidOnPort(port);
   if (stillThere) {
     // eslint-disable-next-line no-console
-    console.error(`e2e teardown: PID ${stillThere} is still bound to port ${PORT} after repeated kill attempts.`);
+    console.error(`e2e teardown: PID ${stillThere} is still bound to port ${port} after repeated kill attempts.`);
   }
 }

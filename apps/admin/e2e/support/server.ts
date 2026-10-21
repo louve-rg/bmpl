@@ -23,9 +23,19 @@ import path from 'node:path';
  * PORT is deliberately NOT 3001 (this app's normal `pnpm dev` port) and NOT
  * 3177 (apps/web's e2e port), so this harness can never collide with, or be
  * fooled by, anyone's own running dev server.
+ *
+ * CONTRAST_PORT exists for the same reason apps/web's own server.ts records
+ * one: the contrast suite now runs as its own CI step, in the same job,
+ * after the visual suite, and the port-teardown's POSIX path (below) was
+ * found live (2026-10-21, PR #469) to leave PORT still bound when a second
+ * same-job consumer tried to reuse it. A distinct port removes the
+ * dependency on that teardown succeeding within this job, rather than
+ * trusting it for the first time.
  */
 export const PORT = 3178;
 export const BASE_URL = `http://localhost:${PORT}`;
+export const CONTRAST_PORT = 3180;
+export const CONTRAST_BASE_URL = `http://localhost:${CONTRAST_PORT}`;
 
 const ADMIN_ROOT = path.resolve(__dirname, '..', '..');
 
@@ -74,8 +84,8 @@ export function ensurePortFree(port: number): void {
   }
 }
 
-export function startDevServer(): ChildProcess {
-  return spawn('pnpm', ['exec', 'next', 'dev', '-p', String(PORT)], {
+export function startDevServer(port: number = PORT): ChildProcess {
+  return spawn('pnpm', ['exec', 'next', 'dev', '-p', String(port)], {
     cwd: ADMIN_ROOT,
     shell: true,
     stdio: 'pipe',
@@ -97,11 +107,11 @@ async function fetchOk(url: string): Promise<Response | null> {
  * /login page rendered its email field AND that a real static JS chunk the
  * page itself references also loads as JavaScript.
  */
-export async function waitForRealReadiness(timeoutMs = 90_000): Promise<void> {
+export async function waitForRealReadiness(timeoutMs = 90_000, baseUrl: string = BASE_URL): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastReason = 'no response yet';
   while (Date.now() < deadline) {
-    const pageRes = await fetchOk(`${BASE_URL}/login`);
+    const pageRes = await fetchOk(`${baseUrl}/login`);
     if (pageRes) {
       const html = await pageRes.text();
       if (!html.includes('login-email')) {
@@ -111,7 +121,7 @@ export async function waitForRealReadiness(timeoutMs = 90_000): Promise<void> {
         if (!chunkMatch) {
           lastReason = 'login form present but no static JS chunk reference found in the HTML';
         } else {
-          const chunkRes = await fetchOk(`${BASE_URL}${chunkMatch[0]}`);
+          const chunkRes = await fetchOk(`${baseUrl}${chunkMatch[0]}`);
           const contentType = chunkRes?.headers.get('content-type') ?? '';
           if (chunkRes && contentType.includes('javascript')) {
             return; // Real page, real asset. Genuinely ready.
@@ -131,20 +141,20 @@ export async function waitForRealReadiness(timeoutMs = 90_000): Promise<void> {
  * looked. Confirms the port is free afterward rather than assuming the kill
  * worked.
  */
-export function stopDevServer(spawned: ChildProcess): void {
+export function stopDevServer(spawned: ChildProcess, port: number = PORT): void {
   try {
     spawned.kill();
   } catch {
     // best effort; the OS-level lookup below is what actually matters
   }
   for (let attempt = 0; attempt < 5; attempt++) {
-    const pid = findPidOnPort(PORT);
+    const pid = findPidOnPort(port);
     if (!pid) return;
     killPid(pid);
   }
-  const stillThere = findPidOnPort(PORT);
+  const stillThere = findPidOnPort(port);
   if (stillThere) {
     // eslint-disable-next-line no-console
-    console.error(`e2e teardown: PID ${stillThere} is still bound to port ${PORT} after repeated kill attempts.`);
+    console.error(`e2e teardown: PID ${stillThere} is still bound to port ${port} after repeated kill attempts.`);
   }
 }
