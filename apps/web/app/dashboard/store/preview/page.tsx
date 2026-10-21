@@ -31,7 +31,15 @@ export default async function StorePreviewPage() {
         </Link>
       </Alert>
 
-      <div className="overflow-hidden rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
+      {/* data-theme="light" -- this frame deliberately simulates the PUBLIC
+          /store/[slug] page, which never sits under the dashboard's glass
+          scope. Without this, StorefrontView's token-driven elements (e.g.
+          the sidebar .bmpl-card) would still inherit this route's glass
+          ancestor despite the literal bg-white below, and render with dark
+          glass surface/text tokens composited against white -- wrong by
+          construction, not merely by appearance. See packages/ui/src/glass.css's
+          [data-theme='light'] comment for the mechanism. */}
+      <div data-theme="light" className="overflow-hidden rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
         <StorefrontView store={data} />
       </div>
 

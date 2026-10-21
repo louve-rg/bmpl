@@ -29,7 +29,29 @@
  * This file is that standard's requirement-6 home (semantic token pairings).
  */
 
-:root {
+/* [data-theme='light'] shares every declaration below with :root -- it is
+   how a subtree can explicitly OPT BACK OUT of an ancestor's
+   [data-theme='glass'], e.g. a deliberately light preview frame sitting
+   inside the glass dashboard shell (apps/web/app/dashboard/store/preview).
+   A nearer custom-property declaration overrides what a descendant
+   inherits, so this correctly resets --bmpl-surface/--bmpl-text/etc for
+   everything inside it. IT DOES NOT, AND CANNOT, un-match a selector
+   written as `[data-theme='glass'] <something>` -- that selector matches
+   on the ANCESTOR still carrying data-theme="glass", which is still true
+   regardless of what a descendant sets. Any such rule (there are four in
+   this file as of this comment: .bml-mural, .bmpl-header-wash, the
+   reduced-motion `*`, and :focus-visible below) will keep firing inside a
+   [data-theme='light'] subtree, and if the custom properties IT reads are
+   declared only inside the glass block -- not here -- that subtree gets
+   glass-only values with no light equivalent. This is the exact shape of
+   the --bmpl-accent/.bmpl-eyebrow defect found earlier tonight (a token
+   defined once under glass, never given a light counterpart, consumed
+   unconditionally) in the opposite direction: there it was glass missing
+   a light-side override, here it would be light missing a glass-side
+   token's counterpart. Before adding a `[data-theme='glass'] X` rule,
+   check whether X's custom properties have a declaration here too. */
+:root,
+[data-theme='light'] {
   --font-sans: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 
   /* ---- BMPL light-theme tokens (source of truth: production landing page) ---- */
@@ -55,6 +77,22 @@
   --bmpl-error: #dc2626; /* red-600 */
   --bmpl-info: #0284c7; /* sky-600 */
   --bmpl-focus: #0ea5e9; /* focus ring */
+
+  /* Light-theme counterparts of the glass-only focus-ring tokens below
+     (--bmpl-focus-ring-core/-halo) -- without these, a [data-theme='light']
+     subtree nested inside a glass ancestor would inherit the GLASS values,
+     since [data-theme='glass'] :focus-visible still matches on that
+     ancestor (see the comment at this block's own selector). Core reuses
+     --bmpl-primary rather than --bmpl-focus/belize-accent (#0ea5e9), which
+     measures ~2.8:1 on white -- below the 3:1 floor this exists to clear.
+     Computed, not eyeballed: #1e40af on #ffffff = 8.72:1. Halo is
+     transparent -- its whole job under glass is darkening the area behind
+     a light outline so it reads against a bright patch of mural; a flat
+     opaque light surface has no such patch, and the outline alone already
+     clears 3:1, so the halo is inert here the same way --bmpl-backdrop-filter
+     is inert outside glass. */
+  --bmpl-focus-ring-core: var(--bmpl-primary);
+  --bmpl-focus-ring-halo: transparent;
 
   --bmpl-radius-sm: 8px;
   --bmpl-radius-md: 12px;
