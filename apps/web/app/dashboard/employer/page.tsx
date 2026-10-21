@@ -163,7 +163,7 @@ function ImageManager({ profile, onChanged }: { profile: EmployerProfile; onChan
               accept="image/png,image/jpeg,image/webp"
               disabled={busy === 'logo'}
               onChange={(e) => upload('logo', e.target.files?.[0] ?? null)}
-              className="block w-full text-xs text-[color:var(--bmpl-text-muted)] file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue"
+              className="block w-full text-xs text-[color:var(--bmpl-text-muted)] file:mr-3 file:rounded-md file:border-0 file:bg-blue-100 file:px-3 file:py-1.5 file:text-belize-blue"
             />
           </div>
         </div>
@@ -181,7 +181,7 @@ function ImageManager({ profile, onChanged }: { profile: EmployerProfile; onChan
               accept="image/png,image/jpeg,image/webp"
               disabled={busy === 'banner'}
               onChange={(e) => upload('banner', e.target.files?.[0] ?? null)}
-              className="block w-full text-xs text-[color:var(--bmpl-text-muted)] file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue"
+              className="block w-full text-xs text-[color:var(--bmpl-text-muted)] file:mr-3 file:rounded-md file:border-0 file:bg-blue-100 file:px-3 file:py-1.5 file:text-belize-blue"
             />
           </div>
         </div>

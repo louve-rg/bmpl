@@ -336,7 +336,7 @@ function BarChart({ series }: { series: SalesPoint[] }) {
                   onMouseLeave={() => setHover((h) => (h === i ? null : h))}
                 >
                   <div
-                    className={`w-full rounded-t-[2px] transition-colors ${active ? 'bg-belize-navy' : 'bg-belize-blue/30'}`}
+                    className={`w-full rounded-t-[2px] transition-colors ${active ? 'bg-belize-navy' : 'bg-belize-blue'}`}
                     style={{ height: `${pct}%`, minHeight: p.orders > 0 ? 2 : 0 }}
                   />
                 </div>

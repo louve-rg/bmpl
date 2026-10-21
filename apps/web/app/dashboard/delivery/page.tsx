@@ -437,7 +437,7 @@ function ZoneEditForm({
   }
 
   return (
-    <form className="space-y-3 rounded-bmpl-md border border-belize-blue/30 bg-belize-blue/5 p-3" onSubmit={submit}>
+    <form className="space-y-3 rounded-bmpl-md border border-blue-300 bg-blue-50 p-3" onSubmit={submit}>
       <div className="grid gap-3 md:grid-cols-2">
         <Field label="Zone name" htmlFor={`edit-name-${zone.id}`}>
           <Input id={`edit-name-${zone.id}`} value={name} onChange={(e) => setName(e.target.value)} />

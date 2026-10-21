@@ -119,7 +119,7 @@ export function FleetRosterCard({ providerProfileId }: { providerProfileId: stri
       ))}
 
       {requests.map((r) => (
-        <div key={r.id} className="mt-3 rounded-bmpl-md border border-belize-blue/30 bg-belize-blue/5 p-3">
+        <div key={r.id} className="mt-3 rounded-bmpl-md border border-blue-300 bg-blue-50 p-3">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm text-belize-navy">
               <b>{r.driver.displayName}</b> asked to join your fleet.

@@ -93,7 +93,7 @@ export function ServiceAreasSection({ serviceAreas, onDone }: { serviceAreas: Se
                 key={d}
                 htmlFor={id}
                 className={`flex min-h-[44px] cursor-pointer items-center gap-2.5 rounded-bmpl-md border px-3 text-sm transition ${
-                  checked ? 'border-belize-blue/40 bg-belize-blue/5 text-belize-navy' : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:bg-belize-blue/5'
+                  checked ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:bg-belize-blue/5'
                 }`}
               >
                 <input
@@ -274,7 +274,7 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
                   key={city}
                   htmlFor={id}
                   className={`flex min-w-0 min-h-[44px] cursor-pointer items-center gap-2.5 break-words rounded-bmpl-md border px-3 text-sm transition ${
-                    checked ? 'border-belize-blue/40 bg-belize-blue/5 text-belize-navy' : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:bg-belize-blue/5'
+                    checked ? 'border-blue-400 bg-blue-50 text-blue-800' : 'border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text-muted)] hover:bg-belize-blue/5'
                   }`}
                 >
                   <input

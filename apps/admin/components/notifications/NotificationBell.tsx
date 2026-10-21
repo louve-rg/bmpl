@@ -164,7 +164,7 @@ export function NotificationBell() {
                           void markRead(n);
                         }
                       }}
-                      className={`group flex cursor-pointer items-start gap-2 border-b border-slate-50 px-4 py-3 transition hover:bg-slate-50 ${n.read ? '' : 'bg-belize-blue/5'}`}
+                      className={`group flex cursor-pointer items-start gap-2 border-b border-slate-50 px-4 py-3 transition hover:bg-slate-50 ${n.read ? '' : 'bg-blue-50'}`}
                     >
                       {!n.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-belize-accent" aria-label="Unread" />}
                       <div className={`min-w-0 flex-1 ${n.read ? 'pl-4' : ''}`}>

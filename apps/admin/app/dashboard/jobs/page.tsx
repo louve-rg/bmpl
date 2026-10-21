@@ -387,7 +387,7 @@ function ModerationTab({ canModerate }: { canModerate: boolean }) {
                       onClick={() => setSelectedId(j.id)}
                       aria-current={active ? 'true' : undefined}
                       className={`flex w-full flex-col gap-1.5 px-4 py-3.5 text-left transition ${
-                        active ? 'bg-belize-blue/5' : 'hover:bg-slate-50'
+                        active ? 'bg-blue-50' : 'hover:bg-slate-50'
                       }`}
                     >
                       <div className="flex items-start gap-2">
@@ -1060,7 +1060,7 @@ function EmployersTab({ canModerate }: { canModerate: boolean }) {
                       onClick={() => setSelectedId(e.id)}
                       aria-current={active ? 'true' : undefined}
                       className={`flex w-full flex-col gap-1.5 px-4 py-3.5 text-left transition ${
-                        active ? 'bg-belize-blue/5' : 'hover:bg-slate-50'
+                        active ? 'bg-blue-50' : 'hover:bg-slate-50'
                       }`}
                     >
                       <div className="flex items-start gap-2">

@@ -109,7 +109,7 @@ function PrimaryAction({ href, title, description, icon }: { href: string; title
       href={href}
       className="bmpl-card flex min-h-[44px] items-start gap-3 p-4 transition hover:border-belize-blue/40 hover:shadow-bmpl-md"
     >
-      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-bmpl-md bg-belize-blue/10 text-belize-blue">
+      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-bmpl-md bg-blue-100 text-belize-blue">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden>
           <path d={icon} />
         </svg>

@@ -202,7 +202,7 @@ function RoleCard({
                   type="file"
                   accept="application/pdf,image/jpeg,image/png,image/webp"
                   onChange={(e) => setFiles((s) => ({ ...s, [d]: e.target.files?.[0] ?? null }))}
-                  className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue"
+                  className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-blue-100 file:px-3 file:py-1.5 file:text-belize-blue"
                 />
               </div>
             ))}
@@ -260,7 +260,7 @@ function ApplicationCard({ app, onDone }: { app: RoleApplication; onDone: (m: { 
         <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
           <p className="text-xs font-medium text-slate-600">Respond with the requested information:</p>
           <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Your response to the reviewer" rows={2} />
-          <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-belize-blue/10 file:px-3 file:py-1.5 file:text-belize-blue" />
+          <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-blue-100 file:px-3 file:py-1.5 file:text-belize-blue" />
           {err && <p className="text-xs font-medium text-red-600" role="alert">{err}</p>}
           <Button size="sm" disabled={busy || !note.trim()} onClick={resubmit}>{busy ? 'Submitting…' : 'Submit response'}</Button>
         </div>

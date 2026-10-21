@@ -193,7 +193,7 @@ export default function SupportPage() {
                         onClick={() => setSelectedId(it.id)}
                         aria-current={active ? 'true' : undefined}
                         className={`flex w-full flex-col gap-1.5 px-4 py-3.5 text-left transition ${
-                          active ? 'bg-belize-blue/5' : 'hover:bg-slate-50'
+                          active ? 'bg-blue-50' : 'hover:bg-slate-50'
                         }`}
                       >
                         <div className="flex items-start gap-2">
@@ -508,7 +508,7 @@ function MessageRow({ message }: { message: SupportMessage }) {
           isNote
             ? 'border-amber-300 bg-amber-50'
             : message.isMine
-              ? 'border-belize-blue/30 bg-belize-blue/5'
+              ? 'border-blue-300 bg-blue-50'
               : 'border-slate-200 bg-white'
         }`}
       >

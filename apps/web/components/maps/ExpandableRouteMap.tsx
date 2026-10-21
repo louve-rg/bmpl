@@ -140,7 +140,7 @@ function RouteLegend({
             onClick={() => onSelect(i)}
             aria-pressed={selected === i}
             className={`flex min-h-[40px] w-full items-center gap-2 rounded-bmpl-md px-2 text-left text-xs transition ${
-              selected === i ? 'bg-belize-blue/10 text-belize-navy' : 'text-slate-500 hover:bg-slate-50'
+              selected === i ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'
             }`}
           >
             <span

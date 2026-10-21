@@ -129,7 +129,7 @@ export function EndpointPicker({
                 aria-pressed={value.mode === opt.key}
                 className={`min-h-[56px] rounded-bmpl-md border px-3 py-2 text-left transition ${
                   value.mode === opt.key
-                    ? 'border-belize-blue bg-belize-blue/5 ring-1 ring-belize-blue'
+                    ? 'border-belize-blue bg-blue-50 ring-1 ring-belize-blue'
                     : 'border-slate-300 hover:border-slate-400'
                 }`}
               >

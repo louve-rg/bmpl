@@ -273,7 +273,7 @@ function VehicleForm({
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-bmpl-md border border-belize-blue/30 bg-belize-blue/5 p-3">
+    <form onSubmit={submit} className="space-y-3 rounded-bmpl-md border border-blue-300 bg-blue-50 p-3">
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Type" htmlFor={`type-${idBase}`}>
           <Select id={`type-${idBase}`} value={f.type} onChange={(e) => setF({ ...f, type: e.target.value as Vehicle['type'] })}>

@@ -157,10 +157,19 @@ body {
   }
   .bmpl-nav-item[aria-current='page'] {
     color: var(--bmpl-text);
-    background-color: color-mix(in srgb, var(--bmpl-primary) 10%, transparent);
+    /* Solid, not color-mix(..., transparent) -- the same alpha-fill-over-
+       transparent construction as the Badge/Alert brand tones, just written
+       in raw CSS instead of a Tailwind /NN utility. Construction fixed; the
+       rendered ratio was not measured. */
+    background-color: #eff6ff;
   }
   [data-theme='glass'] .bmpl-nav-item[aria-current='page'] {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.55), rgba(14, 165, 233, 0.4));
+    /* Same fix, glass branch: the gradient's rgba() stops were translucent,
+       compositing toward whatever mural pixels sit behind this nav item --
+       made opaque so the surface is a fixed, known colour instead of one
+       that depends on where the item lands. Construction fixed; the
+       rendered ratio was not measured. */
+    background: linear-gradient(135deg, rgb(59, 130, 246), rgb(14, 165, 233));
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
   }
   .bmpl-nav-heading {

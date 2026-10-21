@@ -230,7 +230,7 @@ export function DeliveryQueue({ onChanged }: { onChanged?: () => void }) {
                 if (item.canReorder) dropOn(item.id);
               }}
               className={`rounded-bmpl-md border p-3 transition ${
-                dragId === item.id ? 'border-belize-blue bg-belize-blue/5 opacity-60' : 'border-slate-200 bg-white'
+                dragId === item.id ? 'border-belize-blue bg-blue-50 opacity-60' : 'border-slate-200 bg-white'
               }`}
             >
               <div className="flex items-start gap-2.5">
