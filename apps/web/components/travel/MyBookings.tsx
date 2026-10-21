@@ -94,7 +94,7 @@ function BookingRow({ booking: b, onChanged }: { booking: RiderBooking; onChange
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <b className="text-sm text-belize-navy">{b.routeName ?? 'Departure'}</b>
+              <b className="text-sm text-[color:var(--bmpl-text)]">{b.routeName ?? 'Departure'}</b>
               <Badge tone={view.tone}>{view.label}</Badge>
               <Badge tone="neutral">{b.reference}</Badge>
               <Badge tone="neutral">

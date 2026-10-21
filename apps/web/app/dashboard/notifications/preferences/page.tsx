@@ -87,7 +87,7 @@ export default function NotificationPreferencesPage() {
                 key={p.category}
                 className="grid grid-cols-2 items-center gap-4 px-4 py-3 sm:grid-cols-[1fr_auto_auto_auto]"
               >
-                <span className="col-span-2 text-sm font-semibold text-belize-navy sm:col-span-1">
+                <span className="col-span-2 text-sm font-semibold text-[color:var(--bmpl-text)] sm:col-span-1">
                   {NOTIFICATION_CATEGORY_LABELS[p.category] ?? p.category}
                 </span>
                 <Toggle

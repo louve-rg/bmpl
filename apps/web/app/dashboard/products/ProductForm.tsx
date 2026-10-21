@@ -154,7 +154,7 @@ export function ProductForm({ initial }: { initial?: ProductValues }) {
           </div>
         </details>
 
-        <label className="flex items-center gap-2 text-sm text-slate-700">
+        <label className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-secondary)]">
           <input
             type="checkbox"
             className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-2 focus:ring-belize-accent/30"

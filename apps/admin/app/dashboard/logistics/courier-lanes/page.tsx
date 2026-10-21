@@ -168,7 +168,7 @@ export default function CourierLanesPage() {
 
       {canManage && (
       <Card className="p-4">
-        <h2 className="text-sm font-semibold text-slate-900">Add a lane</h2>
+        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Add a lane</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="From district" htmlFor="lane-from-district">
             <Select
@@ -282,7 +282,7 @@ export default function CourierLanesPage() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="break-words text-sm font-semibold text-slate-900">
+                    <span className="break-words text-sm font-semibold text-[color:var(--bmpl-text)]">
                       {where(l.originDistrict, l.originCity)} ↔ {where(l.destinationDistrict, l.destinationCity)}
                     </span>
                     <Badge tone={l.isActive ? 'success' : 'neutral'}>{l.isActive ? 'Open' : 'Closed'}</Badge>

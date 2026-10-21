@@ -182,7 +182,10 @@ export function Alert({ tone = 'info', title, children, className = '' }: { tone
 
 export function EmptyState({ icon, title, description, action }: { icon?: ReactNode; title: string; description?: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-bmpl-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
+    <div
+      data-theme="light"
+      className="flex flex-col items-center justify-center rounded-bmpl-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center"
+    >
       {icon && <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-bmpl-lg bg-slate-100 text-slate-400">{icon}</div>}
       <p className="text-base font-semibold text-belize-navy">{title}</p>
       {description && <p className="mt-1 max-w-sm text-sm text-slate-500">{description}</p>}

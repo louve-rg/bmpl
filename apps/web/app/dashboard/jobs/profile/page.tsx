@@ -296,7 +296,7 @@ function ScalarForm({ profile, onSaved }: { profile: SeekerProfile; onSaved: () 
               ))}
             </Select>
           </Field>
-          <label className="flex items-center gap-2 pt-7 text-sm text-slate-700">
+          <label className="flex items-center gap-2 pt-7 text-sm text-[color:var(--bmpl-text-secondary)]">
             <input
               type="checkbox"
               checked={v.salaryExpectPublic}
@@ -601,8 +601,8 @@ function CertificationsCollection({ profile, onChanged }: { profile: SeekerProfi
       <div className="space-y-2">
         {profile.certifications.map((x) => (
           <div key={x.id} className="flex items-center justify-between gap-3 rounded-bmpl-md border border-slate-200 p-3">
-            <p className="text-sm text-slate-700">
-              <span className="font-semibold text-belize-navy">{x.name}</span>
+            <p className="text-sm text-[color:var(--bmpl-text-secondary)]">
+              <span className="font-semibold text-[color:var(--bmpl-text)]">{x.name}</span>
               {[x.issuer, x.issuedYear].filter(Boolean).length > 0 && (
                 <span className="text-xs text-slate-500"> · {[x.issuer, x.issuedYear].filter(Boolean).join(', ')}</span>
               )}
