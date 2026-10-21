@@ -100,19 +100,19 @@ export function Breadcrumbs({ items, className = '' }: { items: Crumb[]; classNa
 export function PageHeader({
   title,
   description,
-  descriptionClassName = 'text-slate-500',
+  descriptionClassName = 'text-[color:var(--bmpl-text-muted)]',
   eyebrow,
   actions,
   breadcrumbs,
 }: {
   title: string;
   description?: string;
-  /** Override for the description's text color only -- wallet and settlements pass the
-   *  --bmpl-text-muted token because their header sits over the mural's amber glow
-   *  (packages/ui/src/glass.css .bml-mural, background-attachment: fixed, top-left
-   *  radial), which pushed the default text-slate-500 below legible contrast there
-   *  specifically. Every other page's header reads dim-but-legible on plain mural, so
-   *  the default is unchanged -- this is a per-page opt-in, not a component-wide fix. */
+  /** Override for the description's text color only -- the default is now the
+   *  adaptive --bmpl-text-muted token itself (wallet and settlements used to
+   *  override to this exact value because the fixed text-slate-500 default
+   *  read illegibly over the mural's position-varying gradient
+   *  (packages/ui/src/glass.css .bml-mural, background-attachment: fixed) --
+   *  now every page gets that behaviour by default, so the override is gone). */
   descriptionClassName?: string;
   eyebrow?: string;
   actions?: ReactNode;

@@ -156,7 +156,6 @@ export default function AdminSettlementsPage() {
         eyebrow="Finance"
         title="Settlements & Escrow"
         description="Reconciliation, internal balances, settlement history and platform fee configuration. Money is read-only — no manual balance or ledger edits."
-        descriptionClassName="text-[color:var(--bmpl-text-muted)]"
       />
 
       <ReconciliationSection />
