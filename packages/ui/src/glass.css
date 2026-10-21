@@ -66,7 +66,13 @@
   --bmpl-primary: #1e40af; /* belize-blue */
   --bmpl-primary-hover: #1e3a8a; /* belize-deep */
   --bmpl-secondary: #0f172a; /* belize-navy */
-  --bmpl-accent: #0ea5e9; /* belize-accent */
+  /* #0ea5e9 (belize-accent) measured 2.7717:1 on white -- below 4.5:1 for
+     .bmpl-eyebrow's normal-weight text (its only consumer, both apps'
+     globals.css). #0369a1 (sky-700) is the same hue family as this token's
+     glass counterpart (#7dd3fc) and as --bmpl-focus, not --bmpl-primary's
+     navy, which would make eyebrows read as plain links. Computed 5.9334:1
+     on #ffffff. */
+  --bmpl-accent: #0369a1; /* belize-accent -- WCAG AA on near-white only, see above */
   --bmpl-accent-soft: #60a5fa; /* belize-light */
 
   --bmpl-bg: #f8fafc; /* slate-50 page background */
