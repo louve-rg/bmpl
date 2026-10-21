@@ -58,7 +58,7 @@ export function CourierPricing({
 
   return (
     <Card className="p-4">
-      <h3 className="text-sm font-semibold text-slate-900">Local courier pricing</h3>
+      <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Local courier pricing</h3>
       <p className="mt-1 text-sm text-slate-500">
         One courier, door to door, within a single town — the journey with no terminal in it.
       </p>
