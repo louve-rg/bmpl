@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { loginAsRole } from '../support/auth';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
-import { sweepContrast, formatSweepReport } from '../support/contrast-sweep';
+import { sweepContrast, formatSweepReport, measureForegroundColorsByText } from '../support/contrast-sweep';
 import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
 
 /**
@@ -33,6 +33,16 @@ import { assertRatchet, type KnownViolationEntry } from '../support/contrast-rat
  * prediction is wrong and the "fail bucket is trustworthy, ambiguous bucket
  * is glass-blind" story from the ratchet change needs revisiting -- report
  * the dominantShare either way, don't just report pass/fail.
+ *
+ * AFTER #477: the post-fix sweep reports TWO readings sharing the accessible
+ * name "uat-vendor@bzemarketplace.com" at very different ratios (one outright
+ * pass, one ambiguous-would-pass at 17.24) -- a discriminating test, not a
+ * guess (god, 2026-10-21): print getComputedStyle(el).color for every leaf
+ * element with that exact text. The hardcoded `text-slate-600` line (the
+ * actual MDF-357 defect element, StorefrontView.tsx:184) should read
+ * rgb(71, 85, 105); anything else at that position means the account of which
+ * node is the defect element is wrong and needs revisiting before this test
+ * is trusted as a clean before/after proof.
  */
 
 const VIEWPORTS = CONTRAST_VIEWPORTS;
@@ -47,6 +57,7 @@ const KNOWN_VIOLATIONS: KnownViolationEntry[] = JSON.parse(
 // only, not that).
 const discoveredPassNames = new Set<string>();
 let contributedCount = 0;
+let emailColorsReported = false;
 
 function recordPassNames(result: { text: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> }; icon: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> } }): void {
   contributedCount += 1;
@@ -75,6 +86,16 @@ test.describe('contrast: vendor store preview', () => {
       await page.goto(ROUTE);
       await settleForSnapshot(page);
       await page.waitForTimeout(500);
+
+      // One-shot, fires at most once per run -- see this file's own header
+      // comment, "AFTER #477", for what this discriminates.
+      if (!emailColorsReported) {
+        const colors = await measureForegroundColorsByText(page, 'uat-vendor@bzemarketplace.com');
+        if (colors.length > 0) {
+          console.log(`[contrast] web ${ROUTE} -- "uat-vendor@bzemarketplace.com" measured foreground colour(s): ${colors.join(', ')}`);
+          emailColorsReported = true;
+        }
+      }
 
       const result = await sweepContrast(page);
       console.log(formatSweepReport(`web ${ROUTE} VENDOR @ ${viewport}px`, result));

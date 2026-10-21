@@ -485,3 +485,23 @@ export async function measureFirstEyebrowForeground(page: Page): Promise<string 
     return el ? getComputedStyle(el).color : null;
   });
 }
+
+/**
+ * Same one-shot method, pointed at a different question (god, 2026-10-21):
+ * MDF-357's store-preview sweep reports TWO readings sharing the accessible
+ * name "uat-vendor@bzemarketplace.com" (one outright pass, one ambiguous-
+ * would-pass) at very different ratios -- which one is the hardcoded
+ * `text-slate-600` line (the actual MDF-357 defect element, predicted
+ * rgb(71, 85, 105)) and which is some other, token-driven instance of the
+ * same text is not knowable from the ratio alone. Finds every LEAF element
+ * (no children) whose trimmed text content exactly matches `text` and
+ * returns each one's computed foreground colour, in DOM order.
+ */
+export async function measureForegroundColorsByText(page: Page, text: string): Promise<string[]> {
+  return page.evaluate((target) => {
+    const matches = Array.from(document.querySelectorAll('*')).filter(
+      (el) => el.children.length === 0 && el.textContent?.trim() === target,
+    );
+    return matches.map((el) => getComputedStyle(el).color);
+  }, text);
+}
