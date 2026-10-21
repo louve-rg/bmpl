@@ -14,7 +14,7 @@ import {
 import { formatTransitTime, shippingApi, shippingMoney, type ShipmentQuote, type ShippingHub } from '../../../../lib/shipping';
 import { EndpointPicker, emptyEndpoint, type EndpointValue } from '../../../../components/shipping/EndpointPicker';
 import { ServiceTypeField } from '../../../../components/shipping/ServiceTypeField';
-import { Alert, Button, PageHeader, Spinner } from '../../../../components/ui';
+import { Alert, Button, FormCard, PageHeader, Spinner, StickyActionBar } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
 import { bzd, walletApi, type WalletSummary } from '../../../../lib/wallet';
 
@@ -191,7 +191,7 @@ export default function NewShipmentPage() {
 
       {/* 1. What kind of service. Chosen first because it decides which fields
              the rest of the form even shows. */}
-      <div className="mt-6 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
+      <div className="bmpl-surface-onlight mt-6 rounded-bmpl-xl border p-4 shadow-bmpl-sm sm:p-5">
         <ServiceTypeField value={service} onChange={setService} />
       </div>
 
@@ -216,8 +216,7 @@ export default function NewShipmentPage() {
         />
       </div>
 
-      <fieldset className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
-        <legend className="px-1 text-sm font-semibold text-belize-navy">How should it travel?</legend>
+      <FormCard legend="How should it travel?" className="mt-4">
         <div className="mt-2 flex flex-wrap gap-2">
           {(['ANY', ...modes] as Mode[]).map((m) => (
             <button
@@ -275,18 +274,18 @@ export default function NewShipmentPage() {
             />
           </label>
         </div>
-      </fieldset>
+      </FormCard>
 
       {/* 2. The quote. One price, and the journey that produced it. */}
       <div className="mt-4">
         {!ready && (
-          <p className="rounded-bmpl-xl border border-dashed border-[color:var(--bmpl-border)] p-4 text-sm text-[color:var(--bmpl-text-muted)]">
+          <p className="bmpl-surface-onlight rounded-bmpl-xl border border-dashed p-4 text-sm text-[color:var(--bmpl-oncolor-light-text-muted)]">
             Tell us the town at each end and we will price the whole journey.
           </p>
         )}
 
         {ready && quoting && !quote && (
-          <div className="flex items-center gap-2 rounded-bmpl-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+          <div className="bmpl-surface-onlight flex items-center gap-2 rounded-bmpl-xl border p-4 text-sm text-[color:var(--bmpl-oncolor-light-text-muted)]">
             <Spinner className="h-4 w-4" /> Working out your route…
           </div>
         )}
@@ -329,7 +328,7 @@ export default function NewShipmentPage() {
         )}
 
         {quote?.available && (
-          <div className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
+          <div className="bmpl-surface-onlight rounded-bmpl-xl border p-4 shadow-bmpl-sm sm:p-5">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <div>
                 <p className="text-xs uppercase tracking-wide text-slate-500">{quote.serviceLabel}</p>
@@ -368,7 +367,7 @@ export default function NewShipmentPage() {
       {/* 3. Review and pay. The customer should know money is about to move, how
              much, and what they will have left — before they commit. */}
       {quote?.available && !quote.pricingIncomplete && (
-        <div className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
+        <div className="bmpl-surface-onlight mt-4 rounded-bmpl-xl border p-4 shadow-bmpl-sm sm:p-5">
           <h2 className="text-sm font-semibold text-belize-navy">Review and pay</h2>
 
           <dl className="mt-3 space-y-1.5 text-sm">
@@ -418,8 +417,11 @@ export default function NewShipmentPage() {
       )}
 
       {/* 3. Book. Pinned so the price and the button are reachable with a thumb
-             without scrolling back down a long form. */}
-      <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 p-3 backdrop-blur sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:p-0">
+             without scrolling back down a long form. StickyActionBar carries
+             the stacking-context floor and the iPhone safe-area padding --
+             see components/ui.tsx for why both are the bar's job, not a
+             one-off class here. */}
+      <StickyActionBar className="sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:pt-0 sm:pb-0 sm:backdrop-blur-none">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           {quote?.available && (
             <span className="shrink-0 text-lg font-bold tabular-nums text-belize-navy sm:hidden">
@@ -436,7 +438,7 @@ export default function NewShipmentPage() {
                 : 'Pay & book shipment'}
           </Button>
         </div>
-      </div>
+      </StickyActionBar>
     </div>
   );
 }

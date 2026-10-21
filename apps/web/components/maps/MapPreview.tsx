@@ -175,7 +175,14 @@ export function MapPreview({
   return (
     <div
       ref={containerRef}
-      className={`w-full overflow-hidden ${bordered ? 'rounded-bmpl-lg border border-slate-200' : ''} ${heightClassName} ${className}`}
+      className={`isolate w-full overflow-hidden ${bordered ? 'rounded-bmpl-lg border border-slate-200' : ''} ${heightClassName} ${className}`}
+      // `isolate`: same fix and same reason as LocationPicker's map
+      // container (see its own comment) -- Leaflet's internal panes paint
+      // up to z-index 700, and without a stacking context of its own here
+      // that can escape onto any fixed/sticky chrome on a page this
+      // preview is embedded in (e.g. the driver shipping-job page's sticky
+      // action bar sits lower in the same page as this map).
+      //
       // Embedded: pan-y disables the browser's own native pinch-zoom and
       // horizontal pan on this element, matching LocationPicker's identical
       // container style. Observed in Chromium with hasTouch at 375px: by

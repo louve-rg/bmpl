@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, CSSProperties, ReactNode } from 'react';
 
 const base =
   'inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-belize-accent disabled:opacity-60 disabled:pointer-events-none';
@@ -123,6 +123,93 @@ export function Card({ className = '', title, children, ...props }: ComponentPro
   );
 }
 
+/**
+ * A form-grouping card: the FIXED on-light shell forms, maps and other dense
+ * content need regardless of theme (see @bmpl/ui/glass.css's
+ * --bmpl-oncolor-light-* -- req 6, contrast standard). Deliberately NOT
+ * `.bmpl-card` -- that pairing is theme-ADAPTIVE and goes translucent/dark
+ * under the glass dashboard, which is wrong here: the owner has ruled that
+ * form fields, maps and other dense content stay an opaque, literal light
+ * box in every theme, never glass.
+ *
+ * Renders a real `<fieldset>` so assistive tech still gets a named group
+ * (`aria-label`), but the VISIBLE heading is an ordinary `<p>` inside the
+ * padding -- never a native `<legend>`. A `<legend>`'s own UA rendering
+ * straddles the fieldset's top border by design (how a browser draws any
+ * fieldset/legend pair, not a bug in this codebase) -- which is exactly why
+ * every card built that way visibly overlapped its own border. The `<p>` is
+ * `aria-hidden` so the group name isn't announced twice.
+ */
+export function FormCard({
+  legend,
+  className = '',
+  children,
+  ...props
+}: ComponentProps<'fieldset'> & { legend: string }) {
+  return (
+    <fieldset
+      aria-label={legend}
+      className={`bmpl-surface-onlight min-w-0 rounded-bmpl-xl border p-4 shadow-bmpl-sm sm:p-5 ${className}`}
+      {...props}
+    >
+      <p className="mb-2 px-1 text-sm font-semibold" aria-hidden="true">
+        {legend}
+      </p>
+      {children}
+    </fieldset>
+  );
+}
+
+/**
+ * The fixed action bar pinned to the bottom of a long form on a phone (e.g.
+ * "Pay & book shipment") -- its own literal opaque surface regardless of
+ * theme, same reasoning as `FormCard` above, for the same reason: it must
+ * stay legible over whatever scrolls under it.
+ *
+ * `z-30` and `isolate` are the stacking-context half of the fix, not the
+ * padding: a Leaflet map embedded earlier on the same page paints its own
+ * panes (markers, popups, controls) at z-index up to 700, and a `position:
+ * fixed`/`sticky` element with no z-index of its own does not automatically
+ * out-rank that. `isolate` here is defence in depth -- the map's own
+ * container is where that containment actually belongs (see
+ * LocationPicker's `mapBox`) -- but a shared action bar is also exactly the
+ * kind of element a future page might stack a map underneath without
+ * knowing to think about it, so it carries its own floor too.
+ *
+ * `env(safe-area-inset-bottom)` keeps the button clear of an iPhone's home
+ * indicator -- `max()` so it never loses the bar's own minimum padding on a
+ * device that reports no inset at all (desktop browsers, older phones). Set
+ * through a CSS variable and consumed by a `pb-[...]` utility rather than an
+ * inline `style`, specifically so a caller's own `sm:pb-0` (e.g. collapsing
+ * to a plain static footer on desktop, as the booking page does) can still
+ * win at that breakpoint -- an inline style always beats a class, which
+ * would otherwise leave desktop stuck with a phantom bottom gap no `sm:`
+ * override could remove.
+ */
+export function StickyActionBar({
+  sticky = false,
+  className = '',
+  children,
+}: {
+  /** `sticky` for a bar inside a normal scrolling page (no viewport-fixed
+   * behaviour needed); the default `fixed` pins it to the viewport even
+   * while the rest of the page scrolls underneath -- the right choice for
+   * a long one-page form where the price and the button must stay reachable
+   * without scrolling back down. */
+  sticky?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`${sticky ? 'sticky' : 'fixed inset-x-0'} isolate z-30 bottom-0 border-t border-[color:var(--bmpl-oncolor-light-border)] bg-[color:var(--bmpl-oncolor-light-bg)]/95 px-3 pt-3 pb-[max(0.75rem,var(--bmpl-safe-bottom,0px))] backdrop-blur ${className}`}
+      style={{ '--bmpl-safe-bottom': 'env(safe-area-inset-bottom)' } as CSSProperties}
+    >
+      {children}
+    </div>
+  );
+}
+
 /** Consistent page title block for authenticated screens. */
 export function PageHeader({
   title,
@@ -151,7 +238,17 @@ export function PageHeader({
 
 const TONES = {
   neutral: 'bg-slate-100 text-slate-600',
-  brand: 'bg-belize-blue/10 text-belize-blue',
+  // `brand` was the one tone in this set built on an ALPHA background
+  // (bg-belize-blue/10) rather than a solid pastel like every sibling here.
+  // A solid tint composites to the same colour regardless of what's behind
+  // it; a 10%-alpha tint composites toward whatever IS behind it -- near-
+  // white on a light page (where this shipped and read fine), near-black
+  // under the glass dashboard, where the badge measured 1.54-1.85:1
+  // (owner-reported, admin "By revenue"). bg-blue-100/text-blue-800 is the
+  // same solid-pastel recipe every other tone already uses, and blue-800 is
+  // literally --bmpl-primary's own hex -- same brand colour, just no longer
+  // see-through.
+  brand: 'bg-blue-100 text-blue-800',
   success: 'bg-emerald-100 text-emerald-700',
   warning: 'bg-amber-100 text-amber-700',
   error: 'bg-red-100 text-red-700',

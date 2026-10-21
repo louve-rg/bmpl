@@ -219,8 +219,18 @@ function DistrictCities({ district, initial, onDone }: { district: string; initi
   }
 
   return (
-    <fieldset className="min-w-0 rounded-bmpl-md border border-slate-200 p-3">
-      <legend className="bmpl-label px-1 text-sm">{districtLabel(district)}</legend>
+    // No native <legend>: its own UA rendering straddles/clips against this
+    // fieldset's own border+radius (confirmed on production,
+    // /dashboard/shipments/new, same primitive -- see FormCard in
+    // components/ui.tsx for the full mechanism and the fix used there). The
+    // accessible group name moves to `aria-label`; the visible heading is
+    // an ordinary <p>, same classes as before -- this one is left adaptive
+    // (no .bmpl-surface-onlight) because it already inherits its parent
+    // Card's correct theme-aware colour, which was never broken.
+    <fieldset aria-label={districtLabel(district)} className="min-w-0 rounded-bmpl-md border border-slate-200 p-3">
+      <p className="bmpl-label px-1 text-sm" aria-hidden="true">
+        {districtLabel(district)}
+      </p>
       {msg && (
         <Alert tone="success" className="mb-3">
           {msg}

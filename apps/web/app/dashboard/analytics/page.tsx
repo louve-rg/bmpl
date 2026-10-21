@@ -152,7 +152,7 @@ function KpiGrid({ o }: { o: Overview }) {
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
       <KpiCard label="Gross sales" value={money(o.grossSalesMinor)} hint="From paid orders" />
-      <KpiCard label="Net revenue" value={money(o.netRevenueMinor)} hint="After commission" accent />
+      <KpiCard label="Net revenue" value={money(o.netRevenueMinor)} hint="After commission" />
       <KpiCard label="Commission paid" value={money(o.commissionPaidMinor)} hint="Platform fees" />
       <KpiCard label="Paid orders" value={intFmt(o.paidOrders)} hint="Orders you were paid for" />
       <KpiCard label="Units sold" value={intFmt(o.unitsSold)} hint="Items across paid orders" />
@@ -163,11 +163,22 @@ function KpiGrid({ o }: { o: Overview }) {
   );
 }
 
-function KpiCard({ label, value, hint, accent }: { label: string; value: string; hint: string; accent?: boolean }) {
+/**
+ * `accent` used to render `text-belize-blue` for the one KPI the caller
+ * wants to emphasize (Net revenue) -- a FIXED colour on Card's own
+ * THEME-ADAPTIVE surface, measured 2.02:1 under the glass dashboard (owner
+ * acceptance criterion names financial figures explicitly). Dropped in
+ * favour of the already-shipped precedent in
+ * components/marketing/AnalyticsPanel.tsx, which emphasizes a stat purely
+ * with size/weight and leaves colour to --bmpl-text -- no two KPIs on this
+ * grid need a different hue, and this is the pairing that was already
+ * correct everywhere else on this exact page.
+ */
+function KpiCard({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
     <Card className="p-4 sm:p-5">
       <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">{label}</p>
-      <p className={`mt-1.5 text-2xl font-bold sm:text-3xl ${accent ? 'text-belize-blue' : 'text-[color:var(--bmpl-text)]'}`}>{value}</p>
+      <p className="mt-1.5 text-2xl font-bold text-[color:var(--bmpl-text)] sm:text-3xl">{value}</p>
       <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">{hint}</p>
     </Card>
   );
@@ -245,7 +256,13 @@ function BarChart({ series }: { series: SalesPoint[] }) {
 
   if (series.length === 0 || max === 0) {
     return (
-      <div className="flex h-48 items-center justify-center rounded-bmpl-lg border border-dashed border-slate-200 bg-slate-50/60 text-sm text-slate-500">
+      // bg-slate-50/60 was the same alpha-background defect as the Badge
+      // brand tone above: a translucent light fill composites toward
+      // whatever's behind it, reading fine on a light page and measuring
+      // 1.77:1 under the glass dashboard. A fixed light box has a token to
+      // reach for now (req 6, contrast standard) -- use it instead of a
+      // see-through one.
+      <div className="bmpl-surface-onlight flex h-48 items-center justify-center rounded-bmpl-lg border border-dashed text-sm text-[color:var(--bmpl-oncolor-light-text-muted)]">
         No sales in this period.
       </div>
     );
