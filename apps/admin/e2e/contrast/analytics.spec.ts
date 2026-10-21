@@ -33,7 +33,40 @@ const KNOWN_VIOLATIONS: KnownViolationEntry[] = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'contrast-known-violations.json'), 'utf8'),
 );
 
+// Discovered-and-passed names, deduped across every viewport in this file --
+// see apps/web's identical copy of this comment for the full reasoning (god,
+// 2026-10-21). Safe only because playwright.config.ts pins this suite to
+// workers:1/fullyParallel:false, so every viewport's test() runs in the same
+// process and this module-level Set is never split across workers.
+const discoveredPassNames = new Set<string>();
+// See apps/web's identical copy of this comment: counts widths that actually
+// reached recordPassNames, so absence from the pass list below can be read
+// as NOT DISCOVERED only when contributed equals the total -- otherwise it's
+// unknown for whichever widths skipped or threw (god, 2026-10-21).
+let contributedCount = 0;
+
+function recordPassNames(result: { text: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> }; icon: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> } }): void {
+  contributedCount += 1;
+  for (const reading of [...result.text.pass, ...result.icon.pass]) {
+    discoveredPassNames.add(`role=${reading.element.accessibleRole ?? '(none)'} name="${reading.element.accessibleName ?? '(none)'}"`);
+  }
+}
+
 test.describe('contrast: admin analytics', () => {
+  test.afterAll(() => {
+    // UNCONDITIONAL, and WORDING FIX not a mechanism fix -- see apps/web's
+    // identical copy of this block for the full reasoning (god, 2026-10-21):
+    // Playwright restarts its worker after a failed test, resetting this
+    // module, so "across all widths" was false whenever contributed < total.
+    const scope = contributedCount >= VIEWPORTS.length ? 'across all widths' : `across the ${contributedCount} width(s) this worker ran before restarting (NOT all ${VIEWPORTS.length} -- see this block's own comment)`;
+    console.log(`[contrast] admin ${ROUTE} -- pass-bucket elements discovered ${scope}, contributed=${contributedCount}/${VIEWPORTS.length} (deduped by role+name; absence below is only "not discovered" when contributed equals the total):`);
+    if (discoveredPassNames.size === 0) {
+      console.log('  (none -- either nothing passed at any contributing width, or every test above was skipped/threw)');
+    } else {
+      for (const name of [...discoveredPassNames].sort()) console.log(`  - ${name}`);
+    }
+  });
+
   for (const viewport of VIEWPORTS) {
     test(`${ROUTE} has no un-allowlisted contrast violations at ${viewport}px`, async ({ page }) => {
       test.skip(!SUPER_ADMIN_PASSWORD, 'Needs SEED_SUPER_ADMIN_PASSWORD -- set by the visual-regression CI job, or locally per apps/admin/e2e/support/auth.ts.');
@@ -47,6 +80,7 @@ test.describe('contrast: admin analytics', () => {
 
       const result = await sweepContrast(page);
       console.log(formatSweepReport(`admin ${ROUTE} SUPER_ADMIN @ ${viewport}px`, result));
+      recordPassNames(result);
 
       if (result.text.measuredCount === 0) {
         throw new Error(`contrast sweep measured ZERO text elements on ${ROUTE} at ${viewport}px -- this is a false clean, not a pass. Investigate before trusting this run.`);

@@ -50,7 +50,63 @@ const KNOWN_VIOLATIONS: KnownViolationEntry[] = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'contrast-known-violations.json'), 'utf8'),
 );
 
+// Discovered-and-passed names, deduped across every viewport in this file --
+// see this file's own describe block afterAll for why (god, 2026-10-21): the
+// per-viewport fail/ambiguous lines already answer "found, and it failed" for
+// an element; nothing anywhere answered "found, and it passed" vs "never
+// found at all" for the SAME element, at any viewport. Printing one line per
+// element per viewport (9 widths x up to 60 elements) would bury the lines
+// that actually matter under hundreds of rows, so this accumulates role+name
+// across all nine widths' test() runs and prints ONE sorted-unique list after
+// the last one -- safe only because playwright.config.ts pins this suite to
+// workers:1/fullyParallel:false, so every viewport's test() runs in the same
+// process and this module-level Set is never split across workers.
+const discoveredPassNames = new Set<string>();
+// Widths that actually reached recordPassNames (sweepContrast returned, no
+// throw) -- a skipped test (no seeded fixture, no live API) or a width whose
+// sweepContrast call throws before returning never increments this, and never
+// contributes a name either. Without this counter, absence from the pass list
+// is ambiguous between "checked and not found" and "never checked" -- exactly
+// the gap this whole print exists to close, just one level up (god,
+// 2026-10-21): "$0.00 is absent from the pass list" only means NOT DISCOVERED
+// if contributed === VIEWPORTS.length; otherwise it means unknown for
+// whichever widths didn't contribute.
+let contributedCount = 0;
+
+function recordPassNames(result: { text: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> }; icon: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> } }): void {
+  contributedCount += 1;
+  for (const reading of [...result.text.pass, ...result.icon.pass]) {
+    discoveredPassNames.add(`role=${reading.element.accessibleRole ?? '(none)'} name="${reading.element.accessibleName ?? '(none)'}"`);
+  }
+}
+
 test.describe('contrast: vendor analytics', () => {
+  test.afterAll(() => {
+    // UNCONDITIONAL -- not gated on any failure existing. A fully-green run
+    // is exactly the run where "discovered and passed" vs "never discovered"
+    // matters most, because green plus silence is the ambiguous case this
+    // print exists to close.
+    //
+    // WORDING FIX, NOT A MECHANISM FIX (god, 2026-10-21): Playwright restarts
+    // its worker process after a failed test, which reloads this module and
+    // resets discoveredPassNames/contributedCount -- so on a run where every
+    // test fails, this fires once per test, each time having only seen ONE
+    // viewport, not accumulated across all nine. The header below used to
+    // unconditionally say "across all widths", which is false whenever
+    // contributed < VIEWPORTS.length -- exactly the failure mode this print
+    // exists to prevent, just one level up. Fixed to say what actually
+    // happened; true aggregation across worker restarts (afterAll writes to
+    // a file, a custom reporter unions them) is deliberately NOT done here --
+    // that is new measurement machinery, and this run is mid-measurement.
+    const scope = contributedCount >= VIEWPORTS.length ? 'across all widths' : `across the ${contributedCount} width(s) this worker ran before restarting (NOT all ${VIEWPORTS.length} -- see this block's own comment)`;
+    console.log(`[contrast] web ${ROUTE} -- pass-bucket elements discovered ${scope}, contributed=${contributedCount}/${VIEWPORTS.length} (deduped by role+name; absence below is only "not discovered" when contributed equals the total):`);
+    if (discoveredPassNames.size === 0) {
+      console.log('  (none -- either nothing passed at any contributing width, or every test above was skipped/threw)');
+    } else {
+      for (const name of [...discoveredPassNames].sort()) console.log(`  - ${name}`);
+    }
+  });
+
   for (const viewport of VIEWPORTS) {
     test(`${ROUTE} has no un-allowlisted contrast violations at ${viewport}px`, async ({ page }) => {
       const loggedIn = await loginAsRole(page, 'VENDOR');
@@ -63,6 +119,7 @@ test.describe('contrast: vendor analytics', () => {
 
       const result = await sweepContrast(page);
       console.log(formatSweepReport(`web ${ROUTE} VENDOR @ ${viewport}px`, result));
+      recordPassNames(result);
 
       if (result.text.measuredCount === 0) {
         throw new Error(`contrast sweep measured ZERO text elements on ${ROUTE} at ${viewport}px -- this is a false clean, not a pass. Investigate before trusting this run.`);
