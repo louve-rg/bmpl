@@ -232,24 +232,35 @@ scope and in method, and both are explainable:**
    live run not finding them is evidence my run didn't see them, not
    evidence they were already gone, and that gap is exactly where the bug
    in my reasoning lived.
-   One part of the explanation offered for *why* my run missed it does not
-   hold up on inspection, and is left here rather than silently fixed,
-   because getting this fully right matters more than getting it
-   tidy: `logistics-hubs.spec.ts`'s own source already logs in as
-   `OPS_LIMITED` directly (not a different role), and `canManage` is
-   derived from `logistics.manage` permission, which that role should
-   lack — so the `!canManage` paragraph should render for this run on its
-   face. It did not just fail or read ambiguous; it was never discovered
-   at all (zero mentions anywhere in the run's log, not even as a passing
-   element). Most likely explanation not yet confirmed: the gated
-   alternative content for `canManage=true` (lines 289-304) is an
-   `<Input defaultValue=...>`, not a text leaf — if the seeded
-   `OPS_LIMITED` UAT fixture's permission set does not actually match its
-   name, `canManage` could read true for this run and the sweep would
-   never see a text node to measure at all, which matches the observed
-   total silence better than a wrong-role explanation does. Not
-   re-investigated further here — this is a seed-fixture question, not a
-   contrast-sweep one.
+   **Unexplained, with three candidates now ruled out** — left open rather
+   than closed with a guess, because getting this right matters more than
+   getting it tidy. Why the "Courier rate" label was never discovered at
+   all (zero mentions anywhere in the run's log — not failing, not
+   ambiguous, not passing) is not settled, but three plausible mechanisms
+   each turned out wrong on inspection:
+   - *Wrong role.* `logistics-hubs.spec.ts`'s own source already logs in
+     as `OPS_LIMITED` directly — ruled out.
+   - *Seed-fixture permission drift* (my own hypothesis: `canManage` reads
+     `true` for this fixture, routing to the `<Input>` branch instead of
+     the text leaf). Ruled out by reading the seed directly:
+     `packages/database/prisma/seed-uat-logistics.ts:219` sets
+     `OPS_LIMITED_PERMISSIONS = ['logistics.read', 'logistics.operate']` —
+     no `logistics.manage` — so `canManage` should read `false` as named.
+   - *Empty hub list* (the map at `hubs.map((h) => (...))` around line 264
+     never iterating, so neither branch renders for any hub). Ruled out by
+     the same run's own log: both `main @ 499af25` (run `39566595024`) and
+     `chore/contrast-sweep-mdf376` (PR #490, run `39653113575`) show this
+     spec failing — not skipping — with two real hub rows measured each
+     time (`Belize City, BELIZE · warehouse · LAND`, `Belmopan, CAYO ·
+     warehouse · LAND`). The list is populated; the label specifically is
+     what's missing from the output.
+   Best-fit remaining explanation, **not yet confirmed**: a true negative.
+   The live pixel sampler measures the real composited background behind
+   the label, which may not be the nominal card color the static sweep
+   assumed; if that live background gives ratio >= 4.5, the label simply
+   passes and is correctly absent from a failures list — not a discovery
+   miss at all. Not investigated further, per the scope this correction
+   was given.
 4. **Two of his 14 classes are role/app scope gaps on my side, not
    methodology noise.** `/dashboard/notifications`'s `A.text-belize-blue`
    "Preferences" link and `/dashboard/settlements`'s `P.text-slate-400`
@@ -331,6 +342,45 @@ only. Regression cover: the four MDF-376 specs (`store`, `settlements`,
 part of this same job; a fix landing for any named element above will show
 up as that element dropping out of the next run's "If this is real" count
 without anyone needing to re-derive the baseline by hand.
+
+**Cluster F guard, verified by CI (2026-10-21, PR #490, run `39653113575`,
+head sha matches commit `39101d6` on `chore/contrast-sweep-mdf376`):** this
+is the first CI run to include `isInsideClosedDetails` (commit `6525883`).
+Before (run `39566595024`, pre-guard, `main @ 499af25`): 493 failing
+readings / 85 unique `(route, role, name)` elements. After: 283 failing
+readings / 26 unique elements.
+
+The guard removed **exactly 58** unique elements — all `link`-role, all on
+`/products` (45) or `/vendors` (13), the full Cluster F set: the desktop nav
+dropdown's category links (Header.tsx) and the mobile category disclosure's
+links (CategoryNav.tsx), both closed `<details>` at sweep time. Named in
+full: Accessories, Automotive, Baby Gear, Become a Marketplace Vendor,
+Beverages, Cameras, Camping & Hiking, Car Care, Cosmetics, Cycling, Drive
+Ride or Deliver, Fashion & Apparel, Find Work, Fitness, Food & Grocery,
+Fresh Produce, Furniture, Garden & Outdoor, Health & Beauty, Home & Garden,
+Home Decor, Kids' Clothing, Kitchen & Dining, Marketplace, Men's Clothing,
+Orders, Pantry Staples, Parts & Accessories, Passenger Service, Personal
+Care, Post Jobs, Rent, Sale, Shipping & Delivery, Shoes, Skincare, Snacks,
+Sports & Outdoors, Supplements, Toys & Games, Toys Kids & Baby, Upload
+Resume & Skills, Vendors, View Cart, Women's Clothing (on `/products`); and
+Become a Marketplace Vendor, Drive Ride or Deliver, Find Work, Marketplace,
+Orders, Passenger Service, Post Jobs, Rent, Sale, Shipping & Delivery,
+Upload Resume & Skills, Vendors, View Cart (on `/vendors`, same shared nav,
+separate route).
+
+A separate, unrelated 3-element churn landed in the same diff: two
+`/dashboard/notifications` relative timestamps present in the baseline
+("6m ago", "7m ago") are absent here, and one not in the baseline ("5m ago")
+appears instead — the underlying defect (ratio 2.36, role `(none)`) is
+unchanged; only the elapsed wall-clock time between notification creation
+and test run shifted the label between the two runs. Not a fix, not
+attributable to the guard. Net real tier: 27 -> 26 (27 - 2 relabeled +
+1 relabeled), same defects, one relabeled by clock drift — the 26 remaining
+elements otherwise match the 27 named in the table above one-for-one.
+
+No allowlist entry, no threshold or baseline edit, anywhere — this is the
+harness measuring fewer elements because fewer are discovered as
+non-painted, not because any entry was suppressed.
 
 ## Review-before-update workflow (the same document records this because the
 same failure shape applies — the easy path must be the safe one)
