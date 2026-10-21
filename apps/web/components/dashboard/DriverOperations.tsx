@@ -172,7 +172,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
     <Card className="p-3">
       <p className="bmpl-label">{label}</p>
       {/* tabular-nums so figures don't jitter as they refresh. */}
-      <p className="mt-1 text-lg font-bold tabular-nums text-belize-navy">{value}</p>
+      <p className="mt-1 text-lg font-bold tabular-nums text-[color:var(--bmpl-text)]">{value}</p>
       {hint && <p className="mt-0.5 text-xs text-slate-400">{hint}</p>}
     </Card>
   );

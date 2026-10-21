@@ -195,7 +195,7 @@ function StatusBar({ store, onDone, onError }: SectionProps) {
           <StatusBadge status={status} />
           <span className="text-slate-300">·</span>
           <span>
-            Store: <b className="text-belize-navy">{storeStatus}</b>
+            Store: <b className="text-[color:var(--bmpl-text)]">{storeStatus}</b>
           </span>
           {store.profile!.rejectionReason && status === 'REJECTED' && (
             <span className="min-w-0 break-words text-red-600">Reason: {store.profile!.rejectionReason}</span>

@@ -116,7 +116,7 @@ export default function VendorSettlementsPage() {
 
           <Card className="p-0 overflow-hidden">
             <div className="border-b border-slate-100 px-5 py-4">
-              <h2 className="text-sm font-semibold text-belize-navy">Settlement history</h2>
+              <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Settlement history</h2>
               <p className="text-xs text-slate-500">Expand a row to see the full calculation for that order.</p>
             </div>
             {data.settlements.length === 0 ? (
@@ -140,7 +140,7 @@ function TotalCard({ label, value, tone, hint }: { label: string; value: string;
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
         <Badge tone={tone}>{tone === 'success' ? 'Posted' : 'Pending'}</Badge>
       </div>
-      <p className="mt-1.5 text-3xl font-bold text-belize-navy">{value}</p>
+      <p className="mt-1.5 text-3xl font-bold text-[color:var(--bmpl-text)]">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </Card>
   );

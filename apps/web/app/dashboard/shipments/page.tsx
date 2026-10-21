@@ -104,7 +104,7 @@ export default function ShipmentsPage() {
         if (rows_.length === 0) return null;
         return (
           <section key={group.key} className="mt-6">
-            <h2 className="text-sm font-semibold text-belize-navy">
+            <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">
               {group.title} <span className="font-normal text-slate-400">({rows_.length})</span>
             </h2>
             {group.hint && <p className="mt-0.5 text-xs text-slate-500">{group.hint}</p>}

@@ -200,7 +200,7 @@ export default function NotificationsPage() {
                         <Badge tone="neutral">{NOTIFICATION_CATEGORY_LABELS[item.category] ?? item.category}</Badge>
                         <span className="text-xs text-slate-400">{relativeTime(item.createdAt)}</span>
                       </div>
-                      <p className={`text-sm ${item.read ? 'font-medium text-slate-700' : 'font-semibold text-belize-navy'}`}>
+                      <p className={`text-sm ${item.read ? 'font-medium text-slate-700' : 'font-semibold text-[color:var(--bmpl-text)]'}`}>
                         {item.title}
                       </p>
                       {item.body && <p className="mt-0.5 text-sm text-slate-500">{item.body}</p>}

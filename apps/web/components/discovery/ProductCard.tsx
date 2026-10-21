@@ -102,7 +102,7 @@ export function ProductRow({
       <div className="mb-4 flex items-end justify-between gap-3">
         <div>
           {eyebrow && <p className="bmpl-eyebrow">{eyebrow}</p>}
-          <h2 className="text-xl font-bold tracking-tight text-belize-navy sm:text-2xl">{title}</h2>
+          <h2 className="text-xl font-bold tracking-tight text-[color:var(--bmpl-text)] sm:text-2xl">{title}</h2>
         </div>
         {action && <div className="shrink-0">{action}</div>}
       </div>

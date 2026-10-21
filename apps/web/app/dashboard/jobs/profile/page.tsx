@@ -350,7 +350,7 @@ function CollectionCard({
   return (
     <Card className="space-y-3 p-5 sm:p-6">
       <div>
-        <h2 className="text-base font-bold text-belize-navy">{title}</h2>
+        <h2 className="text-base font-bold text-[color:var(--bmpl-text)]">{title}</h2>
         {description && <p className="text-xs text-slate-500">{description}</p>}
       </div>
       {children}
