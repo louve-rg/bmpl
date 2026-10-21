@@ -83,41 +83,6 @@ test.describe('contrast: admin analytics', () => {
       await settleForSnapshot(page);
       await page.waitForTimeout(500);
 
-      // TEMPORARY DIAGNOSTIC, TO BE REMOVED once the mechanism is found --
-      // PageHeader's eyebrow/title/description (ui.tsx:122-129) are
-      // under-discovered by the sweep at most of the nine widths, while
-      // EmptyState's own description text on the SAME page, SAME run, is
-      // discovered and passing every time (god, 2026-10-21) -- so this is
-      // not a page-wide or worker-cold-load timing issue, it is specific to
-      // PageHeader. Logs the real box + computed style for PageHeader's
-      // three text children and their shared min-w-0 parent at the exact
-      // moment sweepContrast is about to sample them, independent of and
-      // without touching contrast-sweep.ts's own discovery/scoring code.
-      const pageHeaderDiag = await page.evaluate(() => {
-        const texts = ['Insights', 'Platform analytics', 'Marketplace performance'];
-        const found: Array<{ text: string; tag: string; box: DOMRect | null; display: string; visibility: string; opacity: string; parentBox: DOMRect | null }> = [];
-        for (const needle of texts) {
-          const el = [...document.querySelectorAll('p, h1')].find((e) => (e.textContent || '').trim().startsWith(needle));
-          if (!el) {
-            found.push({ text: needle, tag: '(not found in DOM at all)', box: null, display: '', visibility: '', opacity: '', parentBox: null });
-            continue;
-          }
-          const cs = getComputedStyle(el);
-          const parent = el.parentElement;
-          found.push({
-            text: needle,
-            tag: el.tagName,
-            box: el.getBoundingClientRect(),
-            display: cs.display,
-            visibility: cs.visibility,
-            opacity: cs.opacity,
-            parentBox: parent ? parent.getBoundingClientRect() : null,
-          });
-        }
-        return found;
-      });
-      console.log(`[diag] admin PageHeader @ ${viewport}px: ${JSON.stringify(pageHeaderDiag)}`);
-
       const result = await sweepContrast(page);
       console.log(formatSweepReport(`admin ${ROUTE} SUPER_ADMIN @ ${viewport}px`, result));
       recordPassNames(result);
