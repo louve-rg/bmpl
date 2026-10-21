@@ -785,8 +785,19 @@ describe('driver claim fallback (MDF-18)', () => {
 
     const responses = await Promise.all(racers.map((r) => post(r.cookies, `driver/jobs/${deliveryId}/claim`)));
     const wins = responses.filter((r) => r.status === 201);
-    expect(wins).toHaveLength(1);
-    expect(responses.filter((r) => r.status === 409)).toHaveLength(racers.length - 1);
+    const conflicts = responses.filter((r) => r.status === 409);
+    // Richer failure message only — the two assertions below are unchanged
+    // in what they require (exactly one 201, exactly racers.length-1 409s).
+    // This exists because a bare length mismatch here has twice given no
+    // way to tell a 500 from a 400 from a 404 on whichever response wasn't
+    // a clean win or a clean conflict — the individual statuses are never
+    // otherwise printed, so each occurrence destroyed its own evidence.
+    const unexpected = responses.filter((r) => r.status !== 201 && r.status !== 409);
+    const detail =
+      `status distribution: ${JSON.stringify(responses.map((r) => r.status))}` +
+      (unexpected.length > 0 ? `; unexpected response(s): ${JSON.stringify(unexpected.map((r) => ({ status: r.status, body: r.body })))}` : '');
+    expect(wins, detail).toHaveLength(1);
+    expect(conflicts, detail).toHaveLength(racers.length - 1);
 
     const d = await deliveryOf(deliveryId);
     expect(d.status).toBe('ASSIGNED');
