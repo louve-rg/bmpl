@@ -450,6 +450,11 @@ jobs:
       SEED_SUPER_ADMIN_PASSWORD: VisualCiFixtureOnly!000
       UAT_SEED_PASSWORD: VisualCiFixtureOnly!000
       SEED_DEMO_PASSWORD: VisualCiFixtureOnly!000
+      # apps/admin/e2e/support/auth.ts's ADMIN/OPS_LIMITED fixtures read this
+      # exact name, not UAT_SEED_PASSWORD -- same throwaway literal, the
+      # var seed-uat-logistics.ts actually used to create those accounts
+      # (god, 2026-10-21: a variable-name mismatch, not a missing credential).
+      UAT_OPS_PASSWORD: VisualCiFixtureOnly!000
     steps:
       - uses: actions/checkout@v4
 
