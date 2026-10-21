@@ -231,7 +231,7 @@ export function EmployerJobForm({ initial }: { initial?: EmployerJobDetail }) {
             <Input inputMode="numeric" value={v.openings} onChange={(e) => set('openings', e.target.value)} placeholder="1" />
           </Field>
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-700">
+        <label className="flex items-center gap-2 text-sm text-[color:var(--bmpl-text-secondary)]">
           <input
             type="checkbox"
             checked={v.remoteEligible}

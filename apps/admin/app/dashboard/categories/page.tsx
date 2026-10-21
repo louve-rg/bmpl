@@ -281,7 +281,7 @@ export default function CategoriesPage() {
                   <tr key={cat.id} className="border-t border-slate-100 hover:bg-slate-50">
                     <td className="px-4 py-3">
                       <span style={{ paddingLeft: `${depth * 18}px` }} className="font-medium text-belize-navy">
-                        {depth > 0 && <span className="text-slate-300">└ </span>}
+                        {depth > 0 && <span className="text-[color:var(--bmpl-oncolor-light-text-muted)]">└ </span>}
                         {cat.name}
                       </span>
                       {cat.childCount > 0 && (
@@ -344,7 +344,7 @@ function Toggle({
     <button
       onClick={onClick}
       className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
-        on ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+        on ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
       }`}
     >
       {on ? labelOn : labelOff}

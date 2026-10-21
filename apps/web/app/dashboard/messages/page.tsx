@@ -267,7 +267,7 @@ function ConversationList({
               <div className="flex items-start justify-between gap-2">
                 <p
                   className={`min-w-0 flex-1 truncate text-sm ${
-                    c.unreadCount > 0 ? 'font-semibold text-belize-navy' : 'font-medium text-slate-700'
+                    c.unreadCount > 0 ? 'font-semibold text-[color:var(--bmpl-text)]' : 'font-medium text-[color:var(--bmpl-text-secondary)]'
                   }`}
                 >
                   {c.subject || c.contextLabel}

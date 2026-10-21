@@ -283,7 +283,7 @@ export default function NotificationsPage() {
                       <span className="ml-auto shrink-0 text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(n.createdAt)}</span>
                     </div>
                     <p className={`text-sm ${n.read ? 'font-medium text-belize-navy' : 'font-semibold text-belize-navy'}`}>{n.title}</p>
-                    {n.body && <p className="mt-0.5 text-sm text-slate-500">{n.body}</p>}
+                    {n.body && <p className="mt-0.5 text-sm text-[color:var(--bmpl-oncolor-light-text-muted)]">{n.body}</p>}
                   </div>
                   <button
                     type="button"
