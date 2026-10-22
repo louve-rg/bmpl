@@ -573,7 +573,7 @@ function AttachmentChip({ attachment }: { attachment: SupportAttachment }) {
         title={`Scan status: ${attachment.scanStatus}`}
       >
         {content}
-        <span className="text-amber-600">· scanning</span>
+        <span className="text-amber-800">· scanning</span>
       </span>
     );
   }

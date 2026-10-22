@@ -271,7 +271,7 @@ function CartRow({
           </p>
         )}
         {item.issues.includes('INSUFFICIENT_STOCK') && item.available != null && (
-          <p className="mt-1 text-xs font-semibold text-amber-600">
+          <p className="mt-1 text-xs font-semibold text-amber-800">
             Only {item.available} available — reduce the quantity.
           </p>
         )}

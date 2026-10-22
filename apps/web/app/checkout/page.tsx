@@ -325,7 +325,7 @@ export default function CheckoutPage() {
                           })()}
                         </>
                       ) : (
-                        <p className="mt-2 text-xs font-semibold text-amber-600">
+                        <p className="mt-2 text-xs font-semibold text-amber-800">
                           {q.reason === 'PICKUP_ONLY'
                             ? 'This store does not offer delivery — choose Pickup.'
                             : q.reason === 'BELOW_MINIMUM'

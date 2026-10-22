@@ -217,7 +217,7 @@ function ReviewRow({ review }: { review: Review }) {
           </svg>
           Helpful ({helpfulCount})
         </button>
-        {authHint && <span className="text-xs text-amber-600">{authHint}</span>}
+        {authHint && <span className="text-xs text-amber-800">{authHint}</span>}
         {!review.isMine && (
           <button
             type="button"
