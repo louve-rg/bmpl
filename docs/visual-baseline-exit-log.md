@@ -531,6 +531,34 @@ the corrected gate actually run against each of those 154 files' live
 pages, which this count does not do and was not asked to do. Nothing here
 was fixed; per instruction, this is a count, not a remediation.
 
+**Three separate claims, stated as three, not rounded into one (2026-10-22):**
+
+1. **The zero-flip result holds for the ten covered routes, where every
+   failing node has an opaque foreground.** Nothing broader was measured
+   on those ten.
+2. **The 574/154 count is the upper bound on what the broken gate could
+   have hidden elsewhere** — it is a population count, not a defect count.
+3. **Of that population, the 542-usage glass-token majority was
+   separately measured as passing.** Dwight's bounded re-run found 42
+   alpha-carrying foreground readings across 8849 historical readings, all
+   compositing to 7.52–11.77:1 — because `--bmpl-surface`
+   (`rgba(10,20,38,0.56)`) shares `--bmpl-bg`'s (`#0a1526`) rgb, so a glass
+   card composites to the mural color regardless of which of the four
+   alpha tokens sits on it, and even the lowest-alpha one clears AA there.
+   That leaves the 32-occurrence hardcoded `text-COLOR/NN` set (above) as
+   the actionable remainder, not the full 574 — those classes carry
+   arbitrary colors at arbitrary opacities on arbitrary backgrounds, with
+   no structural reason to land safely the way the tokens do, and god's
+   own enumeration of all 32 against the gradient backgrounds they
+   actually sit on (`bg-gradient-to-r from-belize-navy to-belize-blue`)
+   found 7 nodes with a probable fail at the belize-blue end of that
+   gradient (`text-white/60`, `text-blue-100/50`, `text-blue-100/60`,
+   `text-blue-100/70`, `text-blue-200/60`), not previously visible under
+   either the old gate (alpha discarded) or a single-point sampler (reads
+   whichever end of the gradient it happens to land on). Oscar is
+   measuring those 7 with the gradient-ramp technique from #499 before
+   anyone calls them real; not fixed here, per instruction.
+
 No allowlist entry, no threshold or baseline edit; `continue-on-error`
 untouched; both apps' `contrast-known-violations.json` stay `[]`.
 
