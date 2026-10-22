@@ -67,6 +67,39 @@ const SELF_REPORTED_CERTIFICATIONS =
 const toMinor = (v: string) => (v.trim() === '' ? null : Math.round(Number(v) * 100));
 const toDollars = (m: number | null) => (m == null ? '' : (m / 100).toString());
 
+// A brand-new job seeker has no profile row yet -- GET /job-seeker/profile
+// returns null, not an error (job-seeker.service.ts's getOwn()). Every
+// scalar default below matches the Prisma column default exactly
+// (schema.prisma: employmentStatus OPEN_TO_WORK, salaryExpectPublic false,
+// visibility PRIVATE), so saving this form unedited creates the same row
+// the API would have created on its own. PUT /job-seeker/profile upserts
+// (job-seeker.service.ts's upsertProfile), so the first save both creates
+// the profile and grants the JOB_SEEKER role.
+const DEFAULT_PROFILE: SeekerProfile = {
+  preferredName: '',
+  legalName: null,
+  headline: null,
+  summary: null,
+  district: null,
+  contactEmail: null,
+  contactPhone: null,
+  employmentStatus: 'OPEN_TO_WORK',
+  preferredTypes: [],
+  preferredDistricts: [],
+  remotePreference: null,
+  availabilityDate: null,
+  salaryExpectMinor: null,
+  salaryPeriod: null,
+  salaryExpectPublic: false,
+  visibility: 'PRIVATE',
+  skills: [],
+  education: [],
+  experience: [],
+  certifications: [],
+  languages: [],
+  resumes: [],
+};
+
 export default function JobSeekerProfilePage() {
   const [profile, setProfile] = useState<SeekerProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -100,17 +133,27 @@ export default function JobSeekerProfilePage() {
         </div>
       ) : error ? (
         <Alert tone="error">{error}</Alert>
-      ) : profile ? (
+      ) : (
         <>
-          <ScalarForm profile={profile} onSaved={load} />
-          <ResumeManager profile={profile} onChanged={load} />
-          <SkillsCollection profile={profile} onChanged={load} />
-          <ExperienceCollection profile={profile} onChanged={load} />
-          <EducationCollection profile={profile} onChanged={load} />
-          <CertificationsCollection profile={profile} onChanged={load} />
-          <LanguagesCollection profile={profile} onChanged={load} />
+          {!profile && (
+            <Alert tone="info">
+              You haven&rsquo;t created a job-seeker profile yet. Fill in the basics below and save to create one
+              &mdash; you can add skills, experience and a résumé afterward.
+            </Alert>
+          )}
+          <ScalarForm profile={profile ?? DEFAULT_PROFILE} onSaved={load} />
+          {profile && (
+            <>
+              <ResumeManager profile={profile} onChanged={load} />
+              <SkillsCollection profile={profile} onChanged={load} />
+              <ExperienceCollection profile={profile} onChanged={load} />
+              <EducationCollection profile={profile} onChanged={load} />
+              <CertificationsCollection profile={profile} onChanged={load} />
+              <LanguagesCollection profile={profile} onChanged={load} />
+            </>
+          )}
         </>
-      ) : null}
+      )}
     </div>
   );
 }
