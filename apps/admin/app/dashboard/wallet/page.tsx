@@ -76,7 +76,12 @@ export default function AdminWalletPage() {
           {txns.length === 0 ? (
             <EmptyState title="No transactions yet" description="Ledger transactions will appear here as they are posted." />
           ) : (
-            <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
+            // data-theme="light" resets the adaptive-token scope for this subtree:
+            // the wrapper paints an opaque bg-white, so the muted reference/
+            // timestamp cells inside it (which read --bmpl-text-muted-strong)
+            // must resolve the on-light value, not the glass-ambient near-white
+            // one the surrounding dashboard shell would otherwise hand them.
+            <div data-theme="light" className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <tr>
