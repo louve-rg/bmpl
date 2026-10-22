@@ -19,6 +19,7 @@ export interface RGB {
 
 export interface ContrastReading {
   ratio: number;
+  /** The foreground actually used for `ratio` — alpha-composited over `dominantBackground` when the declared color was translucent, so it always matches what `ratio` was computed from. */
   foreground: RGB;
   dominantBackground: RGB;
   dominantShare: number;
@@ -26,12 +27,26 @@ export interface ContrastReading {
 
 export const WCAG_AA_NORMAL_TEXT_MIN_RATIO = 4.5;
 
-function parseRgb(css: string): RGB | null {
+function parseRgb(css: string): { rgb: RGB; alpha: number } | null {
   const m = css.match(/rgba?\(([^)]+)\)/);
   if (!m || m[1] === undefined) return null;
-  const [r, g, b] = m[1].split(',').map((n) => parseFloat(n));
+  const [r, g, b, a] = m[1].split(',').map((n) => parseFloat(n));
   if (r === undefined || g === undefined || b === undefined) return null;
-  return { r, g, b };
+  return { rgb: { r, g, b }, alpha: a === undefined ? 1 : a };
+}
+
+/**
+ * Alpha-composites a translucent foreground over the real sampled
+ * background pixel it is painted on — see the web copy of this file for
+ * the full reasoning (the bug this fixes, and why it went unnoticed).
+ */
+export function compositeOver(fg: RGB, alpha: number, bg: RGB): RGB {
+  if (alpha >= 1) return fg;
+  return {
+    r: alpha * fg.r + (1 - alpha) * bg.r,
+    g: alpha * fg.g + (1 - alpha) * bg.g,
+    b: alpha * fg.b + (1 - alpha) * bg.b,
+  };
 }
 
 function relativeLuminance({ r, g, b }: RGB): number {
@@ -165,17 +180,18 @@ export async function sampleContrast(locator: Locator): Promise<ContrastReading>
   }
 
   const fgColor = await locator.evaluate((el) => getComputedStyle(el).color);
-  const fg = parseRgb(fgColor);
-  if (!fg) {
+  const fgParsed = parseRgb(fgColor);
+  if (!fgParsed) {
     throw new Error(`sampleContrast: could not parse foreground color "${fgColor}".`);
   }
 
   const sampler = await openPixelSampler(page);
   try {
     const { rgb: dominant, share } = await sampler.sampleDominant(box);
+    const effectiveFg = compositeOver(fgParsed.rgb, fgParsed.alpha, dominant);
     return {
-      ratio: Math.round(contrastRatioOf(fg, dominant) * 100) / 100,
-      foreground: fg,
+      ratio: Math.round(contrastRatioOf(effectiveFg, dominant) * 100) / 100,
+      foreground: effectiveFg,
       dominantBackground: dominant,
       dominantShare: share,
     };
