@@ -5,6 +5,7 @@ import { loginAsRole } from '../support/auth';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
 import { sweepContrast, formatSweepReport, measureForegroundColorsByText } from '../support/contrast-sweep';
 import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
+import { sampleContrast } from '../support/contrast';
 
 /**
  * Requirement 7's second swept route (`hive/agents/god/CONTRAST-STANDARD.md`,
@@ -58,6 +59,7 @@ const KNOWN_VIOLATIONS: KnownViolationEntry[] = JSON.parse(
 const discoveredPassNames = new Set<string>();
 let contributedCount = 0;
 let emailColorsReported = false;
+let ratingCountRatioReported = false;
 
 function recordPassNames(result: { text: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> }; icon: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> } }): void {
   contributedCount += 1;
@@ -94,6 +96,23 @@ test.describe('contrast: vendor store preview', () => {
         if (colors.length > 0) {
           console.log(`[contrast] web ${ROUTE} -- "uat-vendor@bzemarketplace.com" measured foreground colour(s): ${colors.join(', ')}`);
           emailColorsReported = true;
+        }
+      }
+
+      // One-shot, fires at most once per run (MDF-376): directly re-samples
+      // the real text node behind StarRating.tsx's `role="img"` count span
+      // via the already-existing single-locator `sampleContrast`, as an
+      // independent cross-check of the fixed sweep's own PASS-bucket
+      // discovery for this exact node now that `isExemptForText`
+      // (contrast-sweep.ts) routes it through the text path.
+      if (!ratingCountRatioReported) {
+        const noReviewsLocator = page.getByText('No reviews yet', { exact: true });
+        if ((await noReviewsLocator.count()) > 0) {
+          const reading = await sampleContrast(noReviewsLocator.first());
+          console.log(
+            `[contrast] web ${ROUTE} -- one-shot sampleContrast on name="No reviews yet" leaf (StarRating.tsx:73-75's count span) @ ${viewport}px: ratio=${reading.ratio} dominantShare=${reading.dominantShare} fg=rgb(${reading.foreground.r},${reading.foreground.g},${reading.foreground.b}) bg=rgb(${reading.dominantBackground.r},${reading.dominantBackground.g},${reading.dominantBackground.b})`,
+          );
+          ratingCountRatioReported = true;
         }
       }
 

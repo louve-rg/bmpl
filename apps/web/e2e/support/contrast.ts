@@ -109,7 +109,11 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
   // captures the current viewport, but every box this sampler is handed
   // comes from getBoundingClientRect(), which is ALWAYS relative to the top
   // of the full document when scrollY is 0 (true here -- discovery runs
-  // right after page.goto with no manual scroll). Without fullPage, any
+  // right after page.goto with no manual scroll). That scrollY=0 assumption
+  // was documented but not ENFORCED -- a 2026-10-22 live bug (MDF-376) found
+  // a wrong-but-confident reading the moment a caller scrolled before
+  // sampling. See the scrollOffset capture right below: it makes a scrolled
+  // box correct instead of merely asserting it never happens. Without fullPage, any
   // element below the first screenful decoded against a short, viewport-only
   // image, and clusterAt's own clamping (Math.min(canvas.height - 1, ...))
   // silently read the image's BOTTOM EDGE instead of that element's real
@@ -118,6 +122,26 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
   // foreground half), this is why "By revenue" went completely unmeasured
   // rather than merely ambiguous on admin's first live run.
   const fullPageBuffer = await page.screenshot({ fullPage: true });
+  // Found live (frontend owner/god, 2026-10-22, MDF-376): `{ fullPage: true }`
+  // captures the FULL DOCUMENT regardless of current scroll position (CDP
+  // renders beyond the viewport without physically scrolling), so pixel
+  // (0,0) in the decoded image is always the document's top-left -- but
+  // every box this sampler is handed comes from `getBoundingClientRect()`
+  // or Playwright's `boundingBox()`, which are VIEWPORT-relative at
+  // whatever scroll position was current when they were read. The two
+  // coordinate systems agree only when scrollY/scrollX are 0 at that
+  // moment -- true for every CALLER IN THIS REPO TODAY (discoverElements
+  // below never scrolls; confirmed by grep, zero `scroll` occurrences in
+  // either app's contrast-sweep.ts or contrast spec files) but not
+  // guaranteed for a future caller, and `sampleContrast`'s own single-
+  // locator convenience wrapper calls `locator.boundingBox()`, which can
+  // trigger an auto-scroll-into-view as a side effect. Capturing the
+  // scroll offset here, right alongside the screenshot it describes, and
+  // adding it to every sampled box below converts a viewport-relative box
+  // into the screenshot's own document-absolute space -- correct whether
+  // or not the page is scrolled, and a true no-op (offset 0,0) for every
+  // existing caller, which never scrolls.
+  const scrollOffset = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
   const sampler = await page.context().newPage();
   await sampler.setContent('<img id="shot" /><canvas id="cv"></canvas>');
   await sampler.evaluate((base64) => {
@@ -205,7 +229,7 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
    * does not have to re-derive any of the above.
    */
   async function clusterAt(box: { x: number; y: number; width: number; height: number }): Promise<Array<{ rgb: RGB; count: number; total: number }>> {
-    const grid = await sampler.evaluate(({ rect }) => {
+    const grid = await sampler.evaluate(({ rect, offset }) => {
       const canvas = document.getElementById('cv') as HTMLCanvasElement;
       const ctx = canvas.getContext('2d')!;
       const pts: { r: number; g: number; b: number }[] = [];
@@ -214,16 +238,18 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
       // inside each edge to avoid border-radius artifacts.
       const fxs = [0.15, 0.3, 0.45, 0.6, 0.75, 0.9];
       const fys = [0.2, 0.5, 0.8];
+      // `offset` converts `rect` (viewport-relative) into this screenshot's
+      // document-absolute space -- see openPixelSampler's own comment.
       for (const fx of fxs) {
         for (const fy of fys) {
-          const x = Math.max(0, Math.min(canvas.width - 1, Math.round(rect.x + fx * rect.width)));
-          const y = Math.max(0, Math.min(canvas.height - 1, Math.round(rect.y + fy * rect.height)));
+          const x = Math.max(0, Math.min(canvas.width - 1, Math.round(rect.x + offset.x + fx * rect.width)));
+          const y = Math.max(0, Math.min(canvas.height - 1, Math.round(rect.y + offset.y + fy * rect.height)));
           const data = ctx.getImageData(x, y, 1, 1).data;
           pts.push({ r: data[0] ?? 0, g: data[1] ?? 0, b: data[2] ?? 0 });
         }
       }
       return pts;
-    }, { rect: box });
+    }, { rect: box, offset: scrollOffset });
 
     const counts = new Map<string, { count: number; rgb: RGB }>();
     for (const p of grid) {
