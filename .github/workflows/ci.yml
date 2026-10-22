@@ -653,6 +653,27 @@ jobs:
         if: always()
         run: node scripts/summarize-contrast-ndjson.mjs apps/web/contrast-results.ndjson apps/admin/contrast-results.ndjson >> "$GITHUB_STEP_SUMMARY"
 
+      # `if: always()`, upload-only, asserts nothing. The step summary above
+      # is the convenient view but is NOT retrievable through any API once
+      # the job ends -- not the Checks API, not `gh run view`, only the web
+      # UI renders it -- which defeats half the reporter's purpose: a number
+      # that can only be read live, while watching, is not an audit trail
+      # (god, 2026-10-22, MDF-376). The NDJSON files are small and already
+      # written by both contrast steps before either can throw, so this is
+      # the durable, addressable copy of the exact same data the summary
+      # above was built from -- every reading, every field (including
+      # `foreground`/`dominantBackground`/`dominantShare`), not just FAIL.
+      - name: Upload contrast NDJSON (requirement 7 -- durable copy of every reading, for a read after the job has ended)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contrast-results-ndjson
+          path: |
+            apps/web/contrast-results.ndjson
+            apps/admin/contrast-results.ndjson
+          retention-days: 30
+          if-no-files-found: warn
+
       # NOW continue-on-error too (god, 2026-10-21), matching every other
       # step in this job -- see docs/visual-baseline-exit-log.md's own exit
       # criterion for exactly when this comes back off. Reason: turning this
