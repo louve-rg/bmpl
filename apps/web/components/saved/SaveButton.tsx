@@ -154,8 +154,8 @@ export function SaveButton({
       title={label}
       className={`inline-flex items-center justify-center rounded-full ${BTN_PAD[size]} transition disabled:opacity-60 ${
         saved
-          ? 'text-belize-accent hover:text-belize-accent'
-          : 'text-slate-400 hover:text-belize-accent'
+          ? 'text-belize-blue hover:text-belize-blue'
+          : 'text-slate-600 hover:text-belize-blue'
       } ${className}`}
     >
       <svg
