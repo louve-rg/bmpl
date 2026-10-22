@@ -114,7 +114,14 @@ export function NotificationBell({ roleCodes = [] }: { roleCodes?: readonly stri
   const badge = badgeCount(count);
 
   return (
-    <div ref={rootRef} className="relative">
+    // md:relative pairs with dashboard/layout.tsx's "relative md:static" on the
+    // ml-auto group: below md this wrapper is NOT the dropdown's positioned
+    // ancestor on purpose, so `absolute right-0` below resolves against that
+    // flush-right group instead -- the avatar link occupies ~48px to this
+    // button's right inside that group, and anchoring to the button itself
+    // pushed the panel's left edge off the left of the screen at every phone
+    // width (measured on production: x=-29 at 320/375/390, x=-15 at 430).
+    <div ref={rootRef} className="md:relative">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

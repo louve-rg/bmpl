@@ -36,7 +36,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <Link href="/" className="min-w-0 rounded-bmpl-md bg-belize-navy px-2 py-1.5 md:hidden">
             <BrandLockup allowTruncate />
           </Link>
-          <div className="ml-auto flex shrink-0 items-center gap-1 md:gap-3">
+          {/* relative md:static: below md the bell's own dropdown panel (absolute
+              right-0) needs ITS positioned ancestor to be this flush-right group,
+              not the bell's own wrapper -- the avatar link sitting to the bell's
+              right inside this same group is what pushes the panel's left edge
+              past the viewport's left edge otherwise (NotificationBell.tsx's
+              "md:relative" pairs with this). At md+ this group goes back to
+              static and the bell's own wrapper resumes being the anchor, exactly
+              today's unchanged desktop placement. */}
+          <div className="relative ml-auto flex shrink-0 items-center gap-1 md:static md:gap-3">
             {/* Approved roles only: a pending driver application should not make
                 delivery notifications open the driver job screen. */}
             <NotificationBell
