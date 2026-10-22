@@ -395,6 +395,173 @@ never existed. The true count of real debt on these ten routes is at least
 27 (26 after the clock-drift relabel above); it is not known to be exactly
 that, because this harness can miss a node the way it missed this one.
 
+### Foreground-alpha bug — a defect in the gate itself (2026-10-21/22, #503)
+
+Oscar found it measuring a real node; god confirmed it reached CI.
+`parseRgb` (`contrast.ts`) and `parseRgbLocal` (`contrast-sweep.ts`), all
+four copies across both apps, discarded a foreground color string's alpha
+channel — a translucent foreground like `text-white/80` was scored as if
+fully opaque. The error runs in only one direction: compositing is a convex
+combination, so the composited foreground can never cross past the
+background, which means discarding alpha can only overstate a ratio, never
+understate it — a gate that can silently PASS a real FAIL.
+
+Fixed in `fix/contrast-foreground-alpha` (branched fresh off `main @
+2e87093`, `chore/contrast-sweep-mdf376` being dead — see below). All four
+parsers now return `{rgb, alpha}`; one exported `compositeOver(fg, alpha,
+bg)` in `contrast.ts` is imported by both `contrast-sweep.ts` copies rather
+than reimplemented, so the sweep and the gate share one formula.
+`foreground` fields now report the post-composite color actually used for
+the ratio, so a failure's reported ratio is reproducible by hand from the
+two colors it prints — not true before this fix.
+
+**Before/after, same commit pinned on both sides, auditable:** before =
+run `39707392238` on `main @ 2e87093` (broken gate, the exact commit the
+fix branched from). After = run `39708563032` on PR #503 (`51288a0`, the
+fix, same commit plus only this change). Both: 84 failing readings on the
+ten existing regression routes.
+
+- **Raw flip count (nodes the corrected gate newly fails that the broken
+  gate passed): 0.** Diffed every `(route, role, name, viewport)` ratio
+  individually, not just the unique-element count — 22 keys appear as
+  failing in both runs, and every one of the 22 has the byte-identical
+  ratio in both (e.g. `/dashboard/store/preview` icon "Rated 0.0 out of 5
+  from 0 reviews" stays at the same ratios at every viewport). 0 nodes
+  changed ratio while keeping the same verdict, on these ten routes.
+- **Any PASS this effort relied on invalidated? None, measured, not
+  assumed.** The only non-identical unique-element-count change (4 unique
+  before -> 5 after) is the same clock-drift artifact documented earlier in
+  this file: `/dashboard/notifications`'s relative timestamp reads "6m ago"
+  in the before run and "5m ago" in the after run, same underlying node,
+  same ratio (`1.02` in both, exactly) — wall-clock drift between
+  notification creation and test run, nothing to do with alpha.
+- **Translucent text on these ten routes: none detected.** The "ratio
+  changed but verdict same" count god asked for (a proxy for how much
+  translucent text exists) is 0 here too, for the same reason as the flip
+  count — every failing node on these routes has an opaque foreground.
+  This bounds what these ten routes can tell us about the bug's reach, not
+  the app overall — see the coverage gap below.
+- **Calibration, checked analytically against the fix's own formulas**
+  (`relativeLuminance`/`contrastRatioOf`/`compositeOver`, run standalone,
+  not from a live page): `--bmpl-oncolor-light-text-muted` (`#475569`) on
+  `#ffffff` computes to `7.5777`, matching the cited `7.579` to within
+  rounding — opaque nodes are unaffected, as the no-op-at-alpha-1 branch
+  guarantees by construction. `text-white/70` on `rgb(52,83,183)`
+  (`bg-belize-blue`) computes to `4.26` (fails 4.5) under the corrected
+  formula, against `6.85` under the broken one (alpha discarded) — matching
+  the broken gate's own cited `6.85:1` misreading exactly. `text-white/80`
+  on the same background computes to `5.03`, matching the cited post-#501
+  target exactly.
+- **Coverage gap, stated rather than guessed:** the message-bubble node
+  itself (`#501`'s subject) is not on any of the ten routes these
+  regression specs cover — confirmed by searching this run's full log;
+  every "message" match is a sidebar nav link's accessible name
+  ("Messages"), not the chat bubble. This harness cannot report that
+  node's live verdict; the calibration above is this fix's formula checked
+  against the cited numbers in isolation, not a live measurement of that
+  specific element.
+
+### Coverage gap, as a number (2026-10-22) — how narrow, and how much translucent text exists at all
+
+The zero-flip result above only says the ten covered routes have no
+translucent-foreground defect. It says nothing about the rest of the app.
+Static count from source, no browser, at `main @ 1a6f826`:
+
+**Route coverage: 10 of 152.** The ten contrast regression spec files
+cover 9 distinct URL paths (`/dashboard/analytics` is tested once per app —
+two separate `page.tsx` files, same path string) out of 152 `page.tsx`
+route files total (112 in `apps/web/app`, 40 in `apps/admin/app`). About
+6.6% of routes by file count.
+
+**Translucent-foreground classes app-wide: 574 occurrences across 154
+files.** Two kinds, counted separately because they're exposed differently:
+
+- **Tailwind opacity-modifier classes** (`text-white/NN`, `text-blue-1NN/
+  NN`, `text-sky-7NN/NN` — `text-COLOR/OPACITY`; zero `text-black/NN`
+  found): **32 occurrences across 15 files.** These are unconditionally
+  translucent wherever they render — the opacity is hardcoded in the class
+  name itself. By file:
+  `apps/web/components/landing/Wallet.tsx` (5),
+  `apps/web/components/landing/WhyChooseUs.tsx` (5),
+  `apps/web/components/landing/Services.tsx` (4),
+  `apps/web/components/auth/AuthShell.tsx` (3),
+  `apps/web/components/landing/Footer.tsx` (3),
+  `apps/admin/components/AnnouncementBanner.tsx` (2),
+  `apps/web/components/landing/MobilePromo.tsx` (2),
+  `apps/admin/app/dashboard/analytics/page.tsx` (1),
+  `apps/admin/components/ui.tsx` (1),
+  `apps/web/app/dashboard/messages/page.tsx` (1) — **this is the #501
+  message-bubble node** (`text-white/80` at line 561),
+  `apps/web/components/account/AccountSummary.tsx` (1),
+  `apps/web/components/driver/AvailabilityControl.tsx` (1),
+  `apps/web/components/landing/Hero.tsx` (1),
+  `apps/web/components/landing/Providers.tsx` (1),
+  `apps/web/components/ui.tsx` (1).
+- **Alpha-carrying glass design tokens**, used as `text-[color:var(--TOKEN)]`:
+  **542 occurrences across 145 files.** Of the 8 `--bmpl-*` text-color
+  tokens used this way anywhere in the codebase, exactly 4 are redefined
+  under `[data-theme='glass']` (`packages/ui/src/glass.css:296-331`) as
+  `rgba(244, 248, 255, 0.82)` or `0.64` — translucent — while they're
+  opaque hex everywhere else (`:root`/`[data-theme='light']`); the other 4
+  (`--bmpl-text`, `--bmpl-link`, `--bmpl-warning`,
+  `--bmpl-oncolor-light-text-muted`) stay opaque even under glass scope, by
+  design, and are not counted here. The 4 that do carry alpha in glass
+  scope: `--bmpl-text-muted-strong` (257 occurrences / 94 files),
+  `--bmpl-text-muted` (237 / 77), `--bmpl-text-faint` (39 / 19),
+  `--bmpl-text-secondary` (9 / 8) — these are conditionally translucent,
+  not unconditionally, but the condition is the common case, not a rare
+  one: `data-theme="glass"` is set once at the top of `apps/admin`'s entire
+  shell (`AdminShell.tsx:161`) and once at the top of `apps/web`'s entire
+  `/dashboard/*` tree (`dashboard/layout.tsx:26`), so most uses of these 4
+  tokens render translucent by default, not by exception.
+- Zero inline `text-[color:rgba(...)]` literals found anywhere.
+- 6 files use both kinds (`apps/admin/app/dashboard/analytics/page.tsx`,
+  `apps/admin/components/ui.tsx`, `apps/web/app/dashboard/messages/page.tsx`,
+  `apps/web/components/account/AccountSummary.tsx`,
+  `apps/web/components/driver/AvailabilityControl.tsx`,
+  `apps/web/components/ui.tsx`) — 15 + 145 − 6 = 154 distinct files total.
+
+**What this does and doesn't say.** It converts "coverage is narrow" from
+an admission into a number: 6.6% of routes, against a translucent-text
+surface of 574 occurrences in 154 files, nearly all of it under the glass
+scope that is the default rendering context for both apps' authenticated
+areas. It is an upper bound on how much the broken gate could ever have
+hidden, not a measurement of how much it actually got wrong — that needs
+the corrected gate actually run against each of those 154 files' live
+pages, which this count does not do and was not asked to do. Nothing here
+was fixed; per instruction, this is a count, not a remediation.
+
+**Three separate claims, stated as three, not rounded into one (2026-10-22):**
+
+1. **The zero-flip result holds for the ten covered routes, where every
+   failing node has an opaque foreground.** Nothing broader was measured
+   on those ten.
+2. **The 574/154 count is the upper bound on what the broken gate could
+   have hidden elsewhere** — it is a population count, not a defect count.
+3. **Of that population, the 542-usage glass-token majority was
+   separately measured as passing.** Dwight's bounded re-run found 42
+   alpha-carrying foreground readings across 8849 historical readings, all
+   compositing to 7.52–11.77:1 — because `--bmpl-surface`
+   (`rgba(10,20,38,0.56)`) shares `--bmpl-bg`'s (`#0a1526`) rgb, so a glass
+   card composites to the mural color regardless of which of the four
+   alpha tokens sits on it, and even the lowest-alpha one clears AA there.
+   That leaves the 32-occurrence hardcoded `text-COLOR/NN` set (above) as
+   the actionable remainder, not the full 574 — those classes carry
+   arbitrary colors at arbitrary opacities on arbitrary backgrounds, with
+   no structural reason to land safely the way the tokens do, and god's
+   own enumeration of all 32 against the gradient backgrounds they
+   actually sit on (`bg-gradient-to-r from-belize-navy to-belize-blue`)
+   found 7 nodes with a probable fail at the belize-blue end of that
+   gradient (`text-white/60`, `text-blue-100/50`, `text-blue-100/60`,
+   `text-blue-100/70`, `text-blue-200/60`), not previously visible under
+   either the old gate (alpha discarded) or a single-point sampler (reads
+   whichever end of the gradient it happens to land on). Oscar is
+   measuring those 7 with the gradient-ramp technique from #499 before
+   anyone calls them real; not fixed here, per instruction.
+
+No allowlist entry, no threshold or baseline edit; `continue-on-error`
+untouched; both apps' `contrast-known-violations.json` stay `[]`.
+
 ## Review-before-update workflow (the same document records this because the
 same failure shape applies — the easy path must be the safe one)
 
