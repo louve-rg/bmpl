@@ -708,7 +708,13 @@ function AssignTripModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Assign driver and vehicle">
-      <div className="w-full max-w-md rounded-bmpl-xl border border-slate-200 bg-white p-5 shadow-bmpl-lg">
+      {/* data-theme="light": this panel's own background is a literal, always-
+          opaque bg-white, but AdminShell's ambient [data-theme="glass"] scope
+          makes the close icon (var(--bmpl-text-muted-strong)) AND the Cancel
+          button's outline variant (var(--bmpl-text)/var(--bmpl-border)) both
+          resolve glass values on this white sheet -- same mechanism and fix
+          as dispatch/[id]'s own Modal (#520), two nodes not one. */}
+      <div data-theme="light" className="w-full max-w-md rounded-bmpl-xl border border-slate-200 bg-white p-5 shadow-bmpl-lg">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-belize-navy">Assign {trip.reference}</h2>
           <button onClick={onClose} className="text-[color:var(--bmpl-text-muted-strong)] hover:text-slate-600" aria-label="Close">

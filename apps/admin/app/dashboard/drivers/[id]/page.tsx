@@ -317,7 +317,12 @@ function VehicleCard({ vehicle: v, onChanged, canModerate }: { vehicle: Vehicle;
 
 function InfoCard({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className={`rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm ${className}`}>
+    // data-theme="light": this card's own background is a literal, always-
+    // opaque bg-white, but AdminShell's ambient [data-theme="glass"] scope
+    // makes every var(--bmpl-text-muted-strong) inside it (the three empty-
+    // state lines below) resolve to the glass value, ~1.05:1 on this white
+    // sheet. Same mechanism and fix as dispatch/[id]'s InfoCard (#520).
+    <section data-theme="light" className={`rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm ${className}`}>
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
       {children}
     </section>
