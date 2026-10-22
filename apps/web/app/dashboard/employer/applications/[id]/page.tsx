@@ -293,7 +293,13 @@ function NotesEditor({ app, onChanged }: { app: EmployerApplicationDetail; onCha
       <div className="space-y-2">
         {app.employerNotes.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No notes yet.</p>}
         {app.employerNotes.map((n, i) => (
-          <div key={i} className="rounded-bmpl-md border border-slate-200 bg-slate-50 p-3">
+          // data-theme="light" resets the adaptive-token scope for this note
+          // box. The Card it sits inside is itself adaptive (correct under
+          // glass), but this box repaints its own opaque bg-slate-50 -- the
+          // Card's adaptiveness doesn't survive a child repainting its own
+          // background. The timestamp below (--bmpl-text-muted-strong) was
+          // resolving the glass value against this light surface -- 1.05:1.
+          <div key={i} data-theme="light" className="rounded-bmpl-md border border-slate-200 bg-slate-50 p-3">
             <p className="text-sm text-slate-700">{n.note}</p>
             <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">{fmtDateTime(n.at)}</p>
           </div>

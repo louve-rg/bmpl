@@ -214,7 +214,14 @@ export default function CategoriesPage() {
       ) : rows.length === 0 ? (
         <EmptyState title="No categories yet" description="Add your first category using the form above." />
       ) : (
-        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
+        // data-theme="light" resets the adaptive-token scope for this card.
+        // It's a literal bg-white surface inside AdminShell's data-theme="glass"
+        // root with nothing resetting the scope locally, so the child-count
+        // caption below (--bmpl-text-muted-strong) was resolving the glass
+        // value against an opaque white table -- 1.05:1. The fixed indent
+        // marker on the row above (--bmpl-oncolor-light-text-muted) was
+        // already correct either way -- glass.css never overrides that family.
+        <div data-theme="light" className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>

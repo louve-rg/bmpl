@@ -227,7 +227,12 @@ export function ShipmentJourney({ shipment }: { shipment: ShipmentView }) {
       </div>
 
       {shipment.custody.length > 0 && (
-        <details className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
+        // data-theme="light" resets the adaptive-token scope for this
+        // details panel. It's a literal bg-white root with nothing resetting
+        // the scope locally, so the custody timestamp below
+        // (--bmpl-text-muted-strong, line 244) was resolving the glass value
+        // against this opaque light panel -- 1.05:1.
+        <details data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
           {/* Collapsed by default: most people want the headline, and the ones
               who want the full chain really want it. */}
           {/* min-h-11: measured at 20px in the mobile pass, which is half a

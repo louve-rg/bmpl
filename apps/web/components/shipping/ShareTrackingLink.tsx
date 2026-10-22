@@ -48,7 +48,11 @@ export function ShareTrackingLink({ token, reference }: { token: string; referen
   }
 
   return (
-    <div className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
+    // data-theme="light" resets the adaptive-token scope for this card. It's
+    // a literal bg-white root with nothing resetting the scope locally, so
+    // the "Copy link" button below (--bmpl-text-muted, line 81) was
+    // resolving the glass value against this opaque light card -- 1.05:1.
+    <div data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
       <h2 className="text-sm font-semibold text-slate-900">Share tracking with the recipient</h2>
       <p className="mt-1 text-sm text-slate-600">
         Send this link to whoever is receiving the parcel. It shows the delivery status only — no account needed, and none
