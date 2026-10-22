@@ -137,6 +137,7 @@ export function NotificationBell({ roleCodes = [] }: { roleCodes?: readonly stri
         <div
           role="dialog"
           aria-label="Notifications"
+          data-theme="light"
           className="absolute right-0 z-50 mt-2 w-[calc(100vw-2rem)] max-w-sm overflow-hidden rounded-bmpl-lg border border-slate-200 bg-white shadow-bmpl-md"
         >
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
