@@ -50,8 +50,20 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
  *      bar instead of landing a field's bottom few px behind it.
  * `sticky` mode (the driver job screen) needs neither: a sticky element
  * already reserves its own space in flow, confirmed by rendering (not just
- * reading the keyword) -- measured 115px+ of clearance at every width
- * tested, no fix needed there.
+ * reading the keyword) -- measured 115px+ of clearance AGAINST THE BAR, AT
+ * FULL VIEWPORT HEIGHT, at every width tested. That measurement says
+ * nothing about an on-screen keyboard shrinking the viewport afterward --
+ * a separate check (MDF-376, 2026-10-22) covers exactly that gap:
+ * reachable-by-scroll after a keyboard shrink is CONFIRMED (real scroll
+ * room -- maxScrollY 421-491px -- and `scrollIntoViewIfNeeded()` lands the
+ * driver handoff-code input mid-viewport, y 208-243, inside shrunk heights
+ * of 471-541 at 375/390/430). Auto-reveal the moment the keyboard opens is
+ * NOT confirmed and is platform-dependent: Chromium can only represent
+ * Android's layout-viewport-resize model here, and iOS Safari's
+ * visual-viewport-only model is a separate, unverifiable-by-this-suite
+ * gap. Reachable-but-not-automatic is friction, not a broken page --
+ * deliberately not "fixed" here; do not add an auto-scroll for sticky mode
+ * on the strength of this comment alone.
  *
  * KEYBOARD-SHRINK FOLLOW-UP (MDF-376): `scroll-padding-bottom` above only
  * shapes a FUTURE scroll -- it cannot retroactively fix a scroll position
