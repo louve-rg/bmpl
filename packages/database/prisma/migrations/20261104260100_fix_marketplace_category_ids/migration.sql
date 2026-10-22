@@ -1,0 +1,34 @@
+-- Fix: the M26.2 marketplace-category baseline seed
+-- (20260920120000_seed_marketplace_categories) wrote deterministic slug-style
+-- primary keys ("cat_electronics", "cat_phones-tablets", ...) instead of
+-- letting Prisma's `Category.id String @id @default(cuid())` generate real
+-- ids. Its own `ON CONFLICT ("slug") DO NOTHING` meant the bad ids landed
+-- only where "categories" was empty when that migration first ran -- local
+-- dev and UAT. Production already held real-cuid category rows keyed by the
+-- same slugs, so every one of its inserts was a no-op and the slug ids never
+-- landed there (confirmed by reading production directly:
+-- GET /api/marketplace/categories returns 36 rows, zero non-cuid ids;
+-- MDF-420). A FRESH environment seeded from scratch today would still pick
+-- up the bad ids from that migration -- this one runs immediately after it
+-- in sequence and corrects them before `prisma migrate deploy` ever returns.
+--
+-- The already-applied seed migration is never edited in place (that would be
+-- checksum drift on an applied migration, strictly worse than the bug it
+-- would fix) -- this is a new, idempotent, forward-only correction instead.
+--
+-- Scope: only rows whose id does NOT already match the lowercase-alphanumeric
+-- shape every cuid/cuid2 id in this codebase has -- the same shape
+-- packages/validation's `cuidRef = z.string().cuid2().or(z.string().cuid())`
+-- checks at every API boundary that references a category. This is a no-op
+-- everywhere that shape already holds, including production and any
+-- database this has already run against cleanly.
+--
+-- categories.parentId, products.categoryId and promotion_placements.categoryId
+-- are all declared `ON UPDATE CASCADE` (20260728022523_add_categories,
+-- 20260728034942_add_products, 20260901120000_m26_marketing), so rewriting
+-- the primary key here propagates to every dependent row automatically --
+-- no separate UPDATE is needed for any of the three. slug, name and every
+-- other column are left untouched; nothing public-facing keys off this id.
+UPDATE "categories"
+SET "id" = 'cat2' || substr(md5(gen_random_uuid()::text || "id"), 1, 20)
+WHERE "id" !~ '^[0-9a-z]+$';
