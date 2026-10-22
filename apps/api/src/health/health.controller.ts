@@ -53,6 +53,9 @@ export class HealthController {
    *  close the gap either. Treat "a failed healthcheck here leaves the previous
    *  container serving" as consistent with the design, not as an established,
    *  repo-documented fact, until something closes this gap on purpose. */
+  // MDF-376 deploy probe: comment-only, matches railway.json's `apps/api/**`
+  // watchPatterns entry so it alone can trigger a deployment. No behavior
+  // change — nothing below this line is touched.
   @Public()
   @Get()
   live() {
