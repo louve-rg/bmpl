@@ -44,7 +44,7 @@ export function WalletSection() {
 
         {/* Copy */}
         <div className="order-1 min-w-0 lg:order-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-belize-accent">Platform Wallet</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-belize-blue">Platform Wallet</p>
           <h2 className="mt-3 text-3xl font-bold leading-[1.1] tracking-tight text-belize-navy sm:text-4xl">
             One secure wallet.
             <br /> Every transaction.

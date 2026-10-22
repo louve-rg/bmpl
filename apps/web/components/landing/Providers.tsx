@@ -25,7 +25,7 @@ export function Providers() {
       <div className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-belize-accent">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-belize-blue">
             For Businesses &amp; Providers
           </p>
           <h2 className="mt-3 text-3xl font-bold leading-[1.12] tracking-tight text-belize-navy sm:text-4xl lg:text-[2.75rem]">
