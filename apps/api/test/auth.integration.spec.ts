@@ -40,6 +40,14 @@ describe('registration', () => {
     expect(customer?.status).toBe('APPROVED');
   });
 
+  it('reports the real verification-email outcome - register has no enumeration constraint to protect (MDF-24)', async () => {
+    const res = await request(ctx.server)
+      .post('/api/auth/register')
+      .send({ email: 'auth_reg_sent@example.bz', password: 'CustomerPass123', firstName: 'R', lastName: 'S', acceptedTerms: true });
+    expect(res.status).toBe(201);
+    expect(res.body.verificationEmailSent).toBe(true); // console provider in tests always "sends"
+  });
+
   it('rejects duplicate email registration', async () => {
     const res = await request(ctx.server)
       .post('/api/auth/register')
@@ -223,6 +231,23 @@ describe('login, refresh rotation, reuse rejection, logout', () => {
 });
 
 describe('password reset', () => {
+  it('answers identically for an unknown and a real address, and creates no token for the unknown one (MDF-24)', async () => {
+    const email = 'forgot_shape_known@example.bz';
+    await request(ctx.server)
+      .post('/api/auth/register')
+      .send({ email, password: 'CustomerPass123', firstName: 'F', lastName: 'K', acceptedTerms: true });
+
+    const tokensBefore = await ctx.prisma.passwordResetToken.count();
+    const unknown = await request(ctx.server).post('/api/auth/forgot-password').send({ email: 'forgot_shape_nobody@example.bz' });
+    expect(await ctx.prisma.passwordResetToken.count()).toBe(tokensBefore); // nothing created
+
+    const known = await request(ctx.server).post('/api/auth/forgot-password').send({ email });
+    expect(await ctx.prisma.passwordResetToken.count()).toBe(tokensBefore + 1); // one token quietly issued
+
+    expect(unknown.status).toBe(known.status);
+    expect(unknown.body).toEqual(known.body);
+  });
+
   it('resets the password; old password fails, new password works', async () => {
     const email = 'reset@example.bz';
     const oldPassword = 'OldPass12345';

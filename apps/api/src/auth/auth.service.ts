@@ -17,10 +17,18 @@ import { ENV } from '../config/config.module';
 import type { Env } from '../config/env';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EmailService } from '../email/email.service';
+import { RedisService } from '../redis/redis.service';
 import { SessionService, type IssuedSession } from './session.service';
 
 const EMAIL_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1h
+
+// RFC 2606 reserved TLD - guaranteed never to route to a real mailbox,
+// whichever EMAIL_PROVIDER is live. Used only to pay the real send path's
+// cost on a nonexistent account (see dummyEmailSendCost below); never a
+// recipient a person could actually own.
+const TIMING_GUARD_RECIPIENT = 'timing-guard@example.invalid';
 
 interface RequestMeta {
   client: string;
@@ -35,15 +43,54 @@ export class AuthService {
     private readonly sessions: SessionService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly email: EmailService,
+    private readonly redis: RedisService,
     @Inject(ENV) private readonly env: Env,
   ) {}
+
+  /**
+   * Pays the real path's cost for a request against a nonexistent account,
+   * so wall-clock time cannot distinguish "no such account" from "account
+   * exists" (MDF-24). Same pattern as login()'s dummy verifyPassword call
+   * against a fixed hash, extended to cover the email round trip too - the
+   * dominant cost once EMAIL_PROVIDER is a real network provider.
+   */
+  private async dummyEmailSendCost(): Promise<void> {
+    hashToken(generateToken());
+    await this.email.send({ to: TIMING_GUARD_RECIPIENT, subject: 'noop', body: 'noop' });
+  }
+
+  /**
+   * Per-ADDRESS (not per-IP) ceiling on password-reset/verification-resend
+   * requests for one email, shared by both real and nonexistent addresses so
+   * the limiter itself cannot be used to distinguish them (MDF-24 §4): an
+   * attacker already knows how many times they've queried any given
+   * address, real or not, so a uniform count->short-circuit shape leaks
+   * nothing new. Checked and incremented BEFORE any account lookup.
+   */
+  private async underAddressNoticeLimit(route: string, email: string): Promise<boolean> {
+    // Same test-environment gate as BmplThrottlerGuard (throttler.guard.ts) -
+    // skipped by default so the deterministic suite isn't rate-limited by
+    // Redis state left over between runs; a dedicated spec opts in exactly
+    // as the existing per-IP throttle spec does.
+    if (
+      process.env.NODE_ENV === 'test' &&
+      !(process.env.THROTTLE_TEST_ENABLED === 'true' || process.env.THROTTLE_TEST_ENABLED === '1')
+    ) {
+      return true;
+    }
+    const key = `email-notice-limit:${route}:${email}`;
+    const count = await this.redis.client.incr(key);
+    if (count === 1) await this.redis.client.expire(key, this.env.THROTTLE_TTL_SECONDS);
+    return count <= this.env.EMAIL_NOTICE_ADDRESS_LIMIT;
+  }
 
   /**
    * Register a new account. Every new user is created ACTIVE with an APPROVED
    * CUSTOMER role and a BZD wallet account, atomically. An email-verification
    * token is issued (verification gates business features, not basic login).
    */
-  async register(input: RegisterInput, meta: RequestMeta): Promise<IssuedSession> {
+  async register(input: RegisterInput, meta: RequestMeta): Promise<IssuedSession & { verificationEmailSent: boolean }> {
     const existing = await this.prisma.user.findUnique({ where: { email: input.email } });
     if (existing) {
       // Do not disclose which emails are registered.
@@ -91,15 +138,19 @@ export class AuthService {
 
     const link = `${this.env.NEXT_PUBLIC_SITE_URL}/verify-email?token=${emailToken}`;
     const tpl = templates.emailVerification(link);
-    await this.notifications.sendEmail(
+    // register() has no enumeration constraint - this is the caller's own
+    // address, just typed in - so the real outcome is reported honestly
+    // (MDF-24), unlike the two anonymous routes below.
+    const verificationEmailSent = await this.notifications.sendEmail(
       { userId: user.id, type: 'ACCOUNT', title: tpl.title, body: tpl.body },
       user.email,
     );
 
-    return this.sessions.create(
+    const issued = await this.sessions.create(
       { id: user.id, activeRoleCode: 'CUSTOMER' },
       meta,
     );
+    return { ...issued, verificationEmailSent };
   }
 
   async login(
@@ -164,8 +215,17 @@ export class AuthService {
   }
 
   async resendVerification(email: string): Promise<void> {
+    // Checked BEFORE the lookup and shared across real/nonexistent addresses
+    // alike — see underAddressNoticeLimit's own comment (MDF-24 §4).
+    if (!(await this.underAddressNoticeLimit('resend-verification', email))) return;
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user || user.emailVerifiedAt) return; // silent — no enumeration
+    if (!user) {
+      // Pay the real path's cost so wall-clock time doesn't disclose that
+      // this address has no account (MDF-24).
+      await this.dummyEmailSendCost();
+      return;
+    }
+    if (user.emailVerifiedAt) return; // silent — no enumeration, no send needed either way
     const token = generateToken();
     await this.prisma.emailVerificationToken.create({
       data: {
@@ -184,8 +244,16 @@ export class AuthService {
 
   /** Always returns success to prevent account enumeration. */
   async forgotPassword(email: string): Promise<void> {
+    // Checked BEFORE the lookup and shared across real/nonexistent addresses
+    // alike — see underAddressNoticeLimit's own comment (MDF-24 §4).
+    if (!(await this.underAddressNoticeLimit('forgot-password', email))) return;
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) return;
+    if (!user) {
+      // Pay the real path's cost so wall-clock time doesn't disclose that
+      // this address has no account (MDF-24).
+      await this.dummyEmailSendCost();
+      return;
+    }
     const token = generateToken();
     await this.prisma.passwordResetToken.create({
       data: {
