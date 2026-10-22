@@ -68,7 +68,7 @@ export function Services() {
       <div className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-belize-accent">Our Platform</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-belize-blue">Our Platform</p>
           <h2 id="platform-heading" className="mt-3 text-3xl font-bold leading-[1.1] tracking-tight text-belize-navy sm:text-4xl lg:text-[2.75rem]">
             Everything Belize needs,
             <br className="hidden sm:block" /> in one platform.

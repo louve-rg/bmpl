@@ -70,7 +70,11 @@ export function SectionHeading({
   return (
     <div className="mx-auto max-w-2xl text-center">
       {eyebrow && (
-        <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-belize-accent">
+        <p
+          className={`mb-2 text-sm font-semibold uppercase tracking-wide ${
+            dark ? 'text-belize-accent' : 'text-belize-blue'
+          }`}
+        >
           {eyebrow}
         </p>
       )}

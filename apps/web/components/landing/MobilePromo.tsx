@@ -67,7 +67,7 @@ export function MobilePromo() {
       <div className="mx-auto grid w-full max-w-[1200px] items-center gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:gap-8 lg:px-8">
         {/* Copy */}
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-belize-accent">Mobile App</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-belize-blue">Mobile App</p>
           <h2 className="mt-3 text-3xl font-bold leading-[1.1] tracking-tight text-belize-navy sm:text-4xl">
             Belize Marketplace,
             <br /> in your pocket.
