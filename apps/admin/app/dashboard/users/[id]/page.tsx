@@ -113,7 +113,7 @@ export default async function UserDetailPage({ params }: { params: { id: string 
           </Link>
         </div>
         {u.adminPermissions.length === 0 ? (
-          <p className="text-sm text-slate-400">No administrative permissions.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No administrative permissions.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {u.adminPermissions.map((p) => (

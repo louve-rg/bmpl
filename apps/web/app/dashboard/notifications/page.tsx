@@ -198,7 +198,7 @@ export default function NotificationsPage() {
                     <button type="button" onClick={() => openNotification(item)} className="min-w-0 flex-1 text-left">
                       <div className="mb-1 flex flex-wrap items-center gap-2">
                         <Badge tone="neutral">{NOTIFICATION_CATEGORY_LABELS[item.category] ?? item.category}</Badge>
-                        <span className="text-xs text-slate-400">{relativeTime(item.createdAt)}</span>
+                        <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(item.createdAt)}</span>
                       </div>
                       <p className={`text-sm ${item.read ? 'font-medium text-slate-700' : 'font-semibold text-[color:var(--bmpl-text)]'}`}>
                         {item.title}
@@ -219,7 +219,7 @@ export default function NotificationsPage() {
                         type="button"
                         onClick={() => dismiss(item)}
                         aria-label="Dismiss notification"
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[color:var(--bmpl-text-muted-strong)] transition hover:bg-slate-100 hover:text-slate-600"
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4" aria-hidden>
                           <path d="M6 6l12 12M18 6L6 18" />
@@ -242,7 +242,7 @@ export default function NotificationsPage() {
         </>
       )}
 
-      <p className="text-center text-xs text-slate-400">
+      <p className="text-center text-xs text-[color:var(--bmpl-text-muted-strong)]">
         Manage which updates you receive in{' '}
         <Link href="/dashboard/notifications/preferences" className="font-semibold text-[color:var(--bmpl-link)] hover:text-belize-deep">
           Preferences

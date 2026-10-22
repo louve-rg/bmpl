@@ -345,7 +345,7 @@ export function AddressField({
                       type="button"
                       onClick={updateSavedAddress}
                       disabled={editingAddress}
-                      className="text-sm font-semibold text-belize-blue hover:underline disabled:cursor-not-allowed disabled:text-slate-400"
+                      className="text-sm font-semibold text-belize-blue hover:underline disabled:cursor-not-allowed disabled:text-[color:var(--bmpl-text-muted-strong)]"
                     >
                       {editingAddress ? 'Saving…' : 'Save changes to this address'}
                     </button>
@@ -353,7 +353,7 @@ export function AddressField({
                       type="button"
                       onClick={removeSavedAddress}
                       disabled={editingAddress}
-                      className="text-sm font-semibold text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-slate-400"
+                      className="text-sm font-semibold text-red-600 hover:underline disabled:cursor-not-allowed disabled:text-[color:var(--bmpl-text-muted-strong)]"
                     >
                       Remove from saved addresses
                     </button>
@@ -512,7 +512,7 @@ export function AddressField({
             </p>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <span aria-hidden="true" className="text-lg leading-none text-slate-400">☆</span>
+              <span aria-hidden="true" className="text-lg leading-none text-[color:var(--bmpl-text-muted-strong)]">☆</span>
               <input
                 value={labelDraft}
                 onChange={(e) => setLabelDraft(e.target.value)}
@@ -525,7 +525,7 @@ export function AddressField({
                 type="button"
                 onClick={saveToAddressBook}
                 disabled={savingAddress || !labelDraft.trim() || addressGap(value, { contact }) != null}
-                className="text-sm font-semibold text-belize-blue hover:underline disabled:cursor-not-allowed disabled:text-slate-400"
+                className="text-sm font-semibold text-belize-blue hover:underline disabled:cursor-not-allowed disabled:text-[color:var(--bmpl-text-muted-strong)]"
               >
                 {savingAddress ? 'Saving…' : 'Save to my addresses'}
               </button>
@@ -578,7 +578,7 @@ function Labelled({
       <label htmlFor={id} className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
         {label}
         {required && <span className="text-red-600"> *</span>}
-        {optional && <span className="font-normal normal-case text-slate-400"> (optional)</span>}
+        {optional && <span className="font-normal normal-case text-[color:var(--bmpl-text-muted-strong)]"> (optional)</span>}
       </label>
       <div className="mt-1">{children}</div>
     </div>

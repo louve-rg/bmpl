@@ -183,7 +183,7 @@ function RoleCard({
 
       <div className="mt-4">
         {!role.canApply ? (
-          <span className="text-sm text-slate-400">{role.status === 'APPROVED' ? 'Active' : 'In progress'}</span>
+          <span className="text-sm text-[color:var(--bmpl-text-muted-strong)]">{role.status === 'APPROVED' ? 'Active' : 'In progress'}</span>
         ) : verifyEmailFirst(role, emailVerified) ? (
           // The reason in place of the action (the fare-gate pattern): a live
           // Apply control here leads to a certain refusal at submit. The
@@ -247,7 +247,7 @@ function ApplicationCard({ app, onDone }: { app: RoleApplication; onDone: (m: { 
         <span className="font-semibold text-belize-navy">{app.roleCode.replace(/_/g, ' ')} application</span>
         <StatusBadge status={app.status} />
       </div>
-      <p className="mt-1 text-xs text-slate-400">
+      <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
         Submitted {new Date(app.createdAt).toLocaleDateString()} · {app.documents.length} document{app.documents.length === 1 ? '' : 's'}
       </p>
       {latestReview?.note && (

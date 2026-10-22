@@ -288,12 +288,12 @@ function ExpandedDetail({ settlement: s }: { settlement: Settlement }) {
             {detail.snapshot.config.driverDeliveryFeeBps != null && (
               <BreakdownRow label="Driver delivery share">{(detail.snapshot.config.driverDeliveryFeeBps / 100).toFixed(2)}%</BreakdownRow>
             )}
-            <p className="pt-2 text-xs text-slate-400">
+            <p className="pt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">
               Commission and driver-share rates are configurable platform fee rates set by BML.
             </p>
           </dl>
         ) : (
-          <p className="text-sm text-slate-400">No rate snapshot available for this settlement.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No rate snapshot available for this settlement.</p>
         )}
       </div>
     </div>

@@ -114,7 +114,7 @@ function PhotoManager({ profile, onChanged }: { profile: AgentProfile; onChanged
           // eslint-disable-next-line @next/next/no-img-element
           <img src={profile.photoUrl} alt="Photo" className="h-16 w-16 rounded-full object-cover" />
         ) : (
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-xs text-slate-400">None</span>
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-xs text-slate-600">None</span>
         )}
         <input
           type="file"

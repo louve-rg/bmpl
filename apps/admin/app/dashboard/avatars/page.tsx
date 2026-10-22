@@ -154,7 +154,7 @@ function QueueCard({
             </Badge>
           ))}
         </div>
-        <p className="text-xs text-slate-400">Submitted {relativeTime(item.submittedAt)}</p>
+        <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">Submitted {relativeTime(item.submittedAt)}</p>
 
         <div className="mt-auto space-y-2 pt-1">
           <Select
@@ -170,7 +170,7 @@ function QueueCard({
           </Select>
           {/* The exact wording the user receives — reviewers should see what they
               are actually sending before they send it. */}
-          <p className="text-[11px] leading-snug text-slate-400">{AVATAR_REJECTION_MESSAGES[reason]}</p>
+          <p className="text-[11px] leading-snug text-[color:var(--bmpl-text-muted-strong)]">{AVATAR_REJECTION_MESSAGES[reason]}</p>
           <div className="flex gap-2">
             <Button
               type="button"

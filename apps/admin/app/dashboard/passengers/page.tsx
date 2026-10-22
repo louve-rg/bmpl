@@ -711,7 +711,7 @@ function AssignTripModal({
       <div className="w-full max-w-md rounded-bmpl-xl border border-slate-200 bg-white p-5 shadow-bmpl-lg">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-belize-navy">Assign {trip.reference}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+          <button onClick={onClose} className="text-[color:var(--bmpl-text-muted-strong)] hover:text-slate-600" aria-label="Close">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" className="h-5 w-5">
               <path d="M6 6l12 12M18 6L6 18" />
             </svg>

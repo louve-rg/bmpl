@@ -114,7 +114,7 @@ export function AvailabilityControl({
                   }`}
                 >
                   <span className="block text-sm font-semibold">{o.label}</span>
-                  <span className={`block text-xs ${active ? 'text-white/80' : 'text-slate-400'}`}>{o.hint}</span>
+                  <span className={`block text-xs ${active ? 'text-white/80' : 'text-[color:var(--bmpl-oncolor-light-text-muted)]'}`}>{o.hint}</span>
                 </button>
               );
             })}

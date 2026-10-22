@@ -99,7 +99,7 @@ export function PropertyCard({ property, showSave = true }: { property: Property
           )}
         </div>
         {(property.agency || property.agent) && (
-          <p className="mt-3 truncate border-t border-slate-100 pt-2 text-xs text-slate-400">
+          <p className="mt-3 truncate border-t border-slate-100 pt-2 text-xs text-[color:var(--bmpl-oncolor-light-text-muted)]">
             {property.agency?.name ?? property.agent?.displayName}
           </p>
         )}

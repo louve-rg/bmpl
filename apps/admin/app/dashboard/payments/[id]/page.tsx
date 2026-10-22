@@ -74,14 +74,14 @@ export default function AdminPaymentDetailPage() {
         </Card>
         <Card className="p-4 text-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Wallet holds</p>
-          {p.holds.length === 0 ? <p className="mt-1 text-slate-400">None</p> : p.holds.map((h) => (
-            <p key={h.id} className="mt-1 text-slate-600">{money(h.amountMinor)} — <span className={h.status === 'HELD' ? 'text-amber-600' : 'text-slate-400'}>{h.status}</span></p>
+          {p.holds.length === 0 ? <p className="mt-1 text-[color:var(--bmpl-text-muted-strong)]">None</p> : p.holds.map((h) => (
+            <p key={h.id} className="mt-1 text-slate-600">{money(h.amountMinor)} — <span className={h.status === 'HELD' ? 'text-amber-600' : 'text-[color:var(--bmpl-text-muted-strong)]'}>{h.status}</span></p>
           ))}
         </Card>
         <Card className="p-4 text-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ledger references</p>
-          {p.ledgerReferences.length === 0 ? <p className="mt-1 text-slate-400">None</p> : p.ledgerReferences.map((l) => (
-            <p key={l.id} className="mt-1 text-slate-600">{l.direction} {money(l.amountMinor)} — <span className="text-slate-400">{l.status}</span>{l.walletTransactionId ? ` · tx ${l.walletTransactionId}` : ''}</p>
+          {p.ledgerReferences.length === 0 ? <p className="mt-1 text-[color:var(--bmpl-text-muted-strong)]">None</p> : p.ledgerReferences.map((l) => (
+            <p key={l.id} className="mt-1 text-slate-600">{l.direction} {money(l.amountMinor)} — <span className="text-[color:var(--bmpl-text-muted-strong)]">{l.status}</span>{l.walletTransactionId ? ` · tx ${l.walletTransactionId}` : ''}</p>
           ))}
         </Card>
       </div>
@@ -101,7 +101,7 @@ export default function AdminPaymentDetailPage() {
             {p.events.map((e, i) => (
               <li key={i} className="flex justify-between px-4 py-2.5">
                 <span className="text-slate-600">{e.type === 'STATE_CHANGED' ? `${e.fromStatus} → ${e.toStatus}` : e.type.replace(/_/g, ' ').toLowerCase()}</span>
-                <span className="text-xs text-slate-400">{new Date(e.createdAt).toLocaleString()}</span>
+                <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{new Date(e.createdAt).toLocaleString()}</span>
               </li>
             ))}
           </ul>

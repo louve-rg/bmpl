@@ -22,7 +22,7 @@ export function StopsList({ stops }: { stops: RouteStop[] }) {
     <ol className="space-y-1.5">
       {stops.map((s) => (
         <li key={`${s.sequence}-${s.city}-${s.name ?? ''}`} className="flex items-baseline gap-2 text-sm">
-          <span className="w-6 shrink-0 text-right font-mono text-xs text-slate-400">{s.sequence}.</span>
+          <span className="w-6 shrink-0 text-right font-mono text-xs text-[color:var(--bmpl-text-muted-strong)]">{s.sequence}.</span>
           <span className="min-w-0">
             <span className="font-medium text-belize-navy">{stopLabel(s)}</span>
             <span className="text-slate-500">

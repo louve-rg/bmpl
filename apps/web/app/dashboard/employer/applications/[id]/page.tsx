@@ -136,7 +136,7 @@ export default function EmployerApplicantPage() {
       <Card className="space-y-3 p-5">
         <h2 className="text-base font-bold text-belize-navy">Status history</h2>
         <ol className="space-y-3">
-          {app.timeline.length === 0 && <p className="text-sm text-slate-400">No updates yet.</p>}
+          {app.timeline.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No updates yet.</p>}
           {app.timeline.map((t, i) => (
             <li key={i} className="flex gap-3">
               <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-belize-blue" aria-hidden />
@@ -155,7 +155,7 @@ export default function EmployerApplicantPage() {
 
 function ResumeButton({ id, hasResume }: { id: string; hasResume: boolean }) {
   const [busy, setBusy] = useState(false);
-  if (!hasResume) return <span className="text-xs text-slate-400">No résumé submitted</span>;
+  if (!hasResume) return <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">No résumé submitted</span>;
   return (
     <Button
       size="sm"
@@ -291,11 +291,11 @@ function NotesEditor({ app, onChanged }: { app: EmployerApplicationDetail; onCha
       </div>
       {error && <Alert tone="error">{error}</Alert>}
       <div className="space-y-2">
-        {app.employerNotes.length === 0 && <p className="text-sm text-slate-400">No notes yet.</p>}
+        {app.employerNotes.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No notes yet.</p>}
         {app.employerNotes.map((n, i) => (
           <div key={i} className="rounded-bmpl-md border border-slate-200 bg-slate-50 p-3">
             <p className="text-sm text-slate-700">{n.note}</p>
-            <p className="mt-1 text-xs text-slate-400">{fmtDateTime(n.at)}</p>
+            <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">{fmtDateTime(n.at)}</p>
           </div>
         ))}
       </div>

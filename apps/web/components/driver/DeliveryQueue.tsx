@@ -277,7 +277,7 @@ export function DeliveryQueue({ onChanged }: { onChanged?: () => void }) {
                   </p>
 
                   {item.reorderBlockedReason && (
-                    <p className="mt-1 text-[11px] text-slate-400">{item.reorderBlockedReason}</p>
+                    <p className="mt-1 text-[11px] text-[color:var(--bmpl-text-muted-strong)]">{item.reorderBlockedReason}</p>
                   )}
                 </div>
 
@@ -334,7 +334,7 @@ function QueueHandle({
         disabled={busy || index <= 0}
         onClick={() => onMove(index, -1)}
         aria-label={`Move ${item.kind === 'MARKETPLACE' ? `order ${item.orderNumber}` : `shipment ${item.reference}`} earlier in your queue`}
-        className="flex h-11 w-11 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-belize-navy disabled:opacity-30 disabled:hover:bg-transparent"
+        className="flex h-11 w-11 items-center justify-center rounded text-[color:var(--bmpl-text-muted-strong)] transition hover:bg-slate-100 hover:text-belize-navy disabled:opacity-30 disabled:hover:bg-transparent"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>
           <path d="M6 15l6-6 6 6" />
@@ -364,7 +364,7 @@ function QueueHandle({
         disabled={busy || index < 0 || index >= total - 1}
         onClick={() => onMove(index, 1)}
         aria-label={`Move ${item.kind === 'MARKETPLACE' ? `order ${item.orderNumber}` : `shipment ${item.reference}`} later in your queue`}
-        className="flex h-11 w-11 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-belize-navy disabled:opacity-30 disabled:hover:bg-transparent"
+        className="flex h-11 w-11 items-center justify-center rounded text-[color:var(--bmpl-text-muted-strong)] transition hover:bg-slate-100 hover:text-belize-navy disabled:opacity-30 disabled:hover:bg-transparent"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>
           <path d="M6 9l6 6 6-6" />

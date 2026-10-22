@@ -137,7 +137,7 @@ export default function ApplicationDetailPage() {
                   </div>
                 </li>
               ))}
-              {app.timeline.length === 0 && <p className="text-sm text-slate-400">No updates yet.</p>}
+              {app.timeline.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No updates yet.</p>}
             </ol>
           </Card>
 

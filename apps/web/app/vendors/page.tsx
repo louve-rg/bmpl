@@ -76,7 +76,7 @@ export default async function VendorsDirectoryPage({ searchParams }: { searchPar
                             ? `Rated ${v.ratingAverage.toFixed(1)} out of 5 from ${v.ratingCount} review${v.ratingCount === 1 ? '' : 's'}`
                             : 'No reviews yet'
                         }
-                        className="block text-xs text-slate-400"
+                        className="block text-xs text-slate-600"
                       >
                         <span aria-hidden>
                           {'★'.repeat(Math.round(v.ratingAverage))}

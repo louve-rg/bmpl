@@ -54,7 +54,7 @@ export function BrandImageSlot({ productId, image, onMutate, onError }: Props) {
     return (
       <div className="rounded-bmpl-md border-2 border-dashed border-slate-300 px-4 py-5 text-center">
         <p className="text-sm font-medium text-slate-500">No brand image set</p>
-        <p className="mx-auto mt-1 max-w-md text-xs text-slate-400">
+        <p className="mx-auto mt-1 max-w-md text-xs text-[color:var(--bmpl-text-muted-strong)]">
           {HELPER} Use “Set as Brand Image” on any image below to choose one.
         </p>
       </div>
@@ -75,7 +75,7 @@ export function BrandImageSlot({ productId, image, onMutate, onError }: Props) {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={image.url} alt={image.altText ?? ''} className="h-full w-full object-cover" />
           ) : (
-            <span className="flex h-full items-center justify-center text-[10px] text-slate-400">no preview</span>
+            <span className="flex h-full items-center justify-center text-[10px] text-[color:var(--bmpl-text-muted-strong)]">no preview</span>
           )}
           <span className="absolute inset-0 hidden items-center justify-center bg-belize-navy/55 text-[11px] font-semibold text-white group-hover:flex">
             {replacing ? 'Replacing…' : 'Replace'}

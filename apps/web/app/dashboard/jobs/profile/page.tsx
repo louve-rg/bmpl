@@ -408,7 +408,7 @@ function SkillsCollection({ profile, onChanged }: { profile: SeekerProfile; onCh
   return (
     <CollectionCard title="Skills" description={SELF_REPORTED}>
       <div className="flex flex-wrap gap-2">
-        {profile.skills.length === 0 && <p className="text-sm text-slate-400">No skills added yet.</p>}
+        {profile.skills.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No skills added yet.</p>}
         {profile.skills.map((s) => (
           <span key={s.id} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
             {s.name}
@@ -652,7 +652,7 @@ function LanguagesCollection({ profile, onChanged }: { profile: SeekerProfile; o
   return (
     <CollectionCard title="Languages">
       <div className="flex flex-wrap gap-2">
-        {profile.languages.length === 0 && <p className="text-sm text-slate-400">No languages added yet.</p>}
+        {profile.languages.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No languages added yet.</p>}
         {profile.languages.map((x) => (
           <span key={x.id} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
             {x.name}
@@ -738,7 +738,7 @@ function ResumeManager({ profile, onChanged }: { profile: SeekerProfile; onChang
   return (
     <CollectionCard title="Résumés" description={`PDF or DOCX, up to ${MAX_RESUMES_PER_SEEKER}. Your primary résumé is offered by default when applying.`}>
       <div className="space-y-2">
-        {profile.resumes.length === 0 && <p className="text-sm text-slate-400">No résumés uploaded yet.</p>}
+        {profile.resumes.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No résumés uploaded yet.</p>}
         {profile.resumes.map((r) => (
           <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-bmpl-md border border-slate-200 p-3">
             <div>

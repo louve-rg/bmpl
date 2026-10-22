@@ -105,7 +105,7 @@ export default function ShipmentsPage() {
         return (
           <section key={group.key} className="mt-6">
             <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">
-              {group.title} <span className="font-normal text-slate-400">({rows_.length})</span>
+              {group.title} <span className="font-normal text-[color:var(--bmpl-text-muted-strong)]">({rows_.length})</span>
             </h2>
             {group.hint && <p className="mt-0.5 text-xs text-slate-500">{group.hint}</p>}
             <ul className="mt-2 space-y-3">
@@ -135,7 +135,7 @@ export default function ShipmentsPage() {
                       <span className="text-sm font-medium tabular-nums text-slate-900">
                         {shippingMoney(s.quotedTotalMinor)}
                       </span>
-                      {s.bookedAt && <span className="text-xs text-slate-400">Booked {formatDate(s.bookedAt)}</span>}
+                      {s.bookedAt && <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">Booked {formatDate(s.bookedAt)}</span>}
                     </div>
                   </Link>
                 </li>

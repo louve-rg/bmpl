@@ -137,7 +137,7 @@ export default function UsersPage() {
               ))}
               {result && result.items.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">
+                  <td colSpan={4} className="px-4 py-6 text-center text-sm text-[color:var(--bmpl-text-muted-strong)]">
                     No users found.
                   </td>
                 </tr>

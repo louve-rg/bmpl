@@ -77,7 +77,7 @@ export function DocumentManager({
       {error && <Alert tone="error">{error}</Alert>}
 
       <div className="space-y-2">
-        {docs.length === 0 && <p className="text-sm text-slate-400">No documents uploaded.</p>}
+        {docs.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No documents uploaded.</p>}
         {docs.map((d) => (
           <div key={d.id} className="flex flex-wrap items-center justify-between gap-2 rounded-bmpl-md border border-slate-200 p-3">
             <div>

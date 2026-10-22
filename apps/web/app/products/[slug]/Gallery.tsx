@@ -31,7 +31,7 @@ export function Gallery({ images }: { images: GalleryImage[] }) {
 
   if (usable.length === 0) {
     return (
-      <div className="flex aspect-square items-center justify-center rounded-bmpl-lg border border-slate-200 bg-slate-100 text-sm text-slate-400">
+      <div className="flex aspect-square items-center justify-center rounded-bmpl-lg border border-slate-200 bg-slate-100 text-sm text-slate-600">
         No image yet
       </div>
     );

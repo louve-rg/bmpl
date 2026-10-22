@@ -395,7 +395,7 @@ function ModerationTab({ canModerate }: { canModerate: boolean }) {
                         <StatusBadge status={j.status} />
                       </div>
                       <div className="truncate text-xs text-[color:var(--bmpl-oncolor-light-text-muted)]">{j.company}</div>
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">
                         <span>{employmentLabel(j.employmentType)}</span>
                         <span aria-hidden>·</span>
                         <span>
@@ -556,7 +556,7 @@ function JobDetailPanel({ id, onModerated, canModerate }: { id: string; onModera
           {districtLabel(detail.district) && <Badge tone="neutral">{districtLabel(detail.district)}</Badge>}
           {detail.remoteEligible && <Badge tone="success">Remote eligible</Badge>}
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
           {salary && <span className="font-medium text-belize-navy">{salary}</span>}
           {detail.city && <span>{detail.city}</span>}
           {detail.openings != null && <span>{num(detail.openings)} opening(s)</span>}
@@ -585,7 +585,7 @@ function JobDetailPanel({ id, onModerated, canModerate }: { id: string; onModera
 
         {detail.skills.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Skills</p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Skills</p>
             <div className="flex flex-wrap gap-1.5">
               {detail.skills.map((s) => (
                 <Badge key={s.name} tone={s.required ? 'brand' : 'neutral'}>
@@ -599,7 +599,7 @@ function JobDetailPanel({ id, onModerated, canModerate }: { id: string; onModera
 
         {detail.benefits.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Benefits</p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Benefits</p>
             <div className="flex flex-wrap gap-1.5">
               {detail.benefits.map((b) => (
                 <Badge key={b} tone="success">
@@ -612,12 +612,12 @@ function JobDetailPanel({ id, onModerated, canModerate }: { id: string; onModera
 
         {detail.questions.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Screening questions</p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Screening questions</p>
             <ul className="space-y-1.5">
               {detail.questions.map((q) => (
                 <li key={q.id} className="rounded-bmpl-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-belize-navy">
                   <span>{q.prompt}</span>
-                  <span className="ml-2 text-xs text-slate-400">
+                  <span className="ml-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">
                     {q.type.replace(/_/g, ' ').toLowerCase()}
                     {q.required ? ' · required' : ''}
                   </span>
@@ -627,7 +627,7 @@ function JobDetailPanel({ id, onModerated, canModerate }: { id: string; onModera
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
           {detail.applicationMethod && <span>Apply via: {detail.applicationMethod.replace(/_/g, ' ').toLowerCase()}</span>}
           {detail.externalUrl && (
             <a href={detail.externalUrl} target="_blank" rel="noopener noreferrer" className="text-belize-blue underline">
@@ -648,7 +648,7 @@ function JobDetailPanel({ id, onModerated, canModerate }: { id: string; onModera
       {canModerate && (
       <div className="border-t border-slate-100 p-4">
         {actions.length === 0 ? (
-          <p className="text-sm text-slate-400">No moderation actions available for this status.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No moderation actions available for this status.</p>
         ) : pending ? (
           <div className="space-y-2">
             <Field
@@ -724,7 +724,7 @@ function ExpandableText({ label, text }: { label: string; text: string }) {
   const shown = expanded || !long ? text : `${text.slice(0, 320)}…`;
   return (
     <div>
-      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">{label}</p>
       <p className="whitespace-pre-wrap break-words text-sm text-belize-navy">{shown}</p>
       {long && (
         <button type="button" onClick={() => setExpanded((v) => !v)} className="mt-1 text-xs font-semibold text-belize-blue underline">
@@ -863,7 +863,7 @@ function ReportCard({
           <Badge tone="error">{report.reason.replace(/_/g, ' ')}</Badge>
           <StatusBadge status={report.status} />
         </div>
-        <span className="shrink-0 text-xs text-slate-400">{relativeTime(report.createdAt)}</span>
+        <span className="shrink-0 text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(report.createdAt)}</span>
       </div>
 
       {report.note && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">{report.note}</p>}
@@ -873,7 +873,7 @@ function ReportCard({
           <span className="text-sm font-semibold text-belize-navy">{report.job.title}</span>
           <StatusBadge status={report.job.status} />
         </div>
-        <p className="text-xs text-slate-400">Listing #{report.job.id}</p>
+        <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">Listing #{report.job.id}</p>
       </div>
 
       {error && (
@@ -1067,7 +1067,7 @@ function EmployersTab({ canModerate }: { canModerate: boolean }) {
                         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-belize-navy">{e.companyName}</span>
                         <StatusBadge status={e.approvalStatus} />
                       </div>
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">
                         {e.industry && <span>{e.industry}</span>}
                         {districtLabel(e.district) && <span>{districtLabel(e.district)}</span>}
                         <span aria-hidden>·</span>
@@ -1178,7 +1178,7 @@ function EmployerDetailPanel({ id, onChanged, canModerate }: { id: string; onCha
           <h2 className="text-base font-semibold text-belize-navy">{detail.companyName}</h2>
           <StatusBadge status={detail.approvalStatus} />
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
           {detail.industry && <span>{detail.industry}</span>}
           {districtLabel(detail.district) && <span>{districtLabel(detail.district)}</span>}
           {detail.contactEmail && <span>{detail.contactEmail}</span>}
@@ -1195,11 +1195,11 @@ function EmployerDetailPanel({ id, onChanged, canModerate }: { id: string; onCha
         {detail.description && <ExpandableText label="About" text={detail.description} />}
 
         <div>
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">
             Listings by status ({num(detail.jobCount)} total)
           </p>
           {detail.jobsByStatus.length === 0 ? (
-            <p className="text-sm text-slate-400">No job listings yet.</p>
+            <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No job listings yet.</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {detail.jobsByStatus.map((s) => (
@@ -1531,7 +1531,7 @@ function CategoryRow({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-belize-navy">{category.name}</span>
             <Badge tone={category.isVisible ? 'success' : 'neutral'}>{category.isVisible ? 'Visible' : 'Hidden'}</Badge>
-            <span className="text-xs text-slate-400">Order {category.sortOrder}</span>
+            <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">Order {category.sortOrder}</span>
           </div>
           {canManage && (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -1617,9 +1617,9 @@ function AnalyticsTab() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {kpis.map((k) => (
           <div key={k.label} className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{k.label}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">{k.label}</p>
             <p className="mt-1 text-2xl font-semibold text-belize-navy">{k.value}</p>
-            {k.hint && <p className="mt-0.5 text-xs text-slate-400">{k.hint}</p>}
+            {k.hint && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">{k.hint}</p>}
           </div>
         ))}
       </div>
@@ -1644,7 +1644,7 @@ function MiniTable({ title, rows }: { title: string; rows: Array<{ label: string
     <div className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
       <p className="mb-3 text-sm font-semibold text-belize-navy">{title}</p>
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-400">No data yet.</p>
+        <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No data yet.</p>
       ) : (
         <ul className="space-y-2">
           {rows.map((r) => (

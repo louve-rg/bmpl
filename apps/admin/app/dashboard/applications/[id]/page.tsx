@@ -77,7 +77,7 @@ export default async function ApplicationDetailPage({ params }: { params: { id: 
 
       <Card className="mb-5 p-5">
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Applicant message</h2>
-        <p className="text-sm text-slate-700">{app.message || <em className="text-slate-400">No message provided.</em>}</p>
+        <p className="text-sm text-slate-700">{app.message || <em className="text-[color:var(--bmpl-text-muted-strong)]">No message provided.</em>}</p>
         <p className="mt-3 text-xs text-slate-500">
           District: {app.user.district ?? '—'} · Submitted {new Date(app.submittedAt).toLocaleString()}
         </p>
@@ -86,7 +86,7 @@ export default async function ApplicationDetailPage({ params }: { params: { id: 
       <Card className="mb-5 p-5">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Documents</h2>
         {app.documents.length === 0 ? (
-          <p className="text-sm text-slate-400">No documents uploaded.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No documents uploaded.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {app.documents.map((doc) => (
@@ -121,7 +121,7 @@ export default async function ApplicationDetailPage({ params }: { params: { id: 
                 )}
               </p>
               {r.note && <p className="text-sm text-slate-600">{r.note}</p>}
-              <p className="text-xs text-slate-400">{new Date(r.createdAt).toLocaleString()}</p>
+              <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{new Date(r.createdAt).toLocaleString()}</p>
             </li>
           ))}
         </ol>

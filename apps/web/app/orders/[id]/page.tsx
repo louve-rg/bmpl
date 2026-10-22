@@ -91,11 +91,11 @@ export default function OrderDetailPage() {
         {state === 'loading' && (
           <div className="mt-8 flex flex-col items-center gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-14 text-center">
             <Spinner />
-            <p className="text-sm text-slate-400">Loading…</p>
+            <p className="text-sm text-slate-600">Loading…</p>
           </div>
         )}
         {state === 'notfound' && (
-          <div className="mt-8 rounded-bmpl-xl border border-slate-200 bg-white p-10 text-center text-slate-400">Order not found.</div>
+          <div className="mt-8 rounded-bmpl-xl border border-slate-200 bg-white p-10 text-center text-slate-600">Order not found.</div>
         )}
         {state === 'error' && <Alert tone="error" title="We couldn’t load this order." className="mt-8" />}
 
@@ -152,7 +152,7 @@ export default function OrderDetailPage() {
             <Card className="mt-4 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="bmpl-label">Payment</p>
-                {payment ? <PaymentStatusBadge status={payment.status} /> : <span className="text-xs text-slate-400">—</span>}
+                {payment ? <PaymentStatusBadge status={payment.status} /> : <span className="text-xs text-slate-600">—</span>}
               </div>
               {payment && (
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-600">
@@ -189,7 +189,7 @@ export default function OrderDetailPage() {
                           between placing the order and the pickup code appearing. */}
                       <OrderStatusBadge status={vo.status} />
                     </div>
-                    <span className="text-xs text-slate-400">{vo.orderNumber}</span>
+                    <span className="text-xs text-slate-600">{vo.orderNumber}</span>
                   </header>
                   <ul className="divide-y divide-slate-100">
                     {vo.items.map((it, i) => (

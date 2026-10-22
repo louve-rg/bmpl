@@ -118,7 +118,7 @@ export function LegAssignModal({
           <h2 className="text-base font-semibold text-belize-navy">
             {mode === 'assign' ? 'Assign driver' : 'Reassign driver'}
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+          <button onClick={onClose} className="text-[color:var(--bmpl-text-muted-strong)] hover:text-slate-600" aria-label="Close">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" className="h-5 w-5">
               <path d="M6 6l12 12M18 6L6 18" />
             </svg>

@@ -20,7 +20,7 @@ export function OptionsManager({ view, productId, reload, onError }: Props) {
       <div className="mb-1 flex items-center justify-between gap-2">
         <h3 className="bmpl-label mb-0">Options</h3>
       </div>
-      <p className="mb-3 text-xs text-slate-400">
+      <p className="mb-3 text-xs text-[color:var(--bmpl-text-muted-strong)]">
         Manage the values buyers choose from. Adding a value here makes it available in the variant builder below.
       </p>
 
@@ -35,7 +35,7 @@ export function OptionsManager({ view, productId, reload, onError }: Props) {
       )}
 
       {locked ? (
-        <p className="mt-3 text-xs text-slate-400">
+        <p className="mt-3 text-xs text-[color:var(--bmpl-text-muted-strong)]">
           Options are fixed once variants exist — edit values instead. Delete all variants to change the option set.
         </p>
       ) : (
@@ -225,7 +225,7 @@ function ValueChip({
           setMode('edit');
         }}
         aria-label={`Rename ${value.value}`}
-        className="rounded px-1 text-slate-400 hover:text-belize-blue"
+        className="rounded px-1 text-[color:var(--bmpl-text-muted-strong)] hover:text-belize-blue"
       >
         Edit
       </button>
@@ -233,7 +233,7 @@ function ValueChip({
         type="button"
         onClick={() => setMode('confirm')}
         aria-label={`Remove ${value.value}`}
-        className="rounded px-1 text-slate-400 hover:text-red-600"
+        className="rounded px-1 text-[color:var(--bmpl-text-muted-strong)] hover:text-red-600"
       >
         ×
       </button>

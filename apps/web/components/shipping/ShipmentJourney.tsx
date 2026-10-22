@@ -241,7 +241,7 @@ export function ShipmentJourney({ shipment }: { shipment: ShipmentView }) {
               <li key={c.id} className="flex flex-wrap gap-x-2">
                 <span className="font-medium text-slate-800">{c.actorLabel ?? c.toHolder.toLowerCase()}</span>
                 <span>{c.note}</span>
-                <time dateTime={c.occurredAt} className="text-slate-400">
+                <time dateTime={c.occurredAt} className="text-[color:var(--bmpl-text-muted-strong)]">
                   {new Date(c.occurredAt).toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' })}
                 </time>
               </li>

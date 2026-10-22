@@ -407,7 +407,7 @@ function ChipEditor({
     <Card className="space-y-4 p-5 sm:p-6">
       <h2 className="bmpl-eyebrow">{title}</h2>
       <div className="flex flex-wrap gap-2">
-        {items.length === 0 && <p className="text-sm text-slate-400">None added.</p>}
+        {items.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">None added.</p>}
         {items.map((x, i) => (
           <span key={`${x}-${i}`} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
             {x}

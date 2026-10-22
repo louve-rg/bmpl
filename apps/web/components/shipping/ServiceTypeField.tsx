@@ -74,7 +74,7 @@ export function ServiceTypeField({
           onClick={() => setOpen(true)}
           aria-label="What do these service types mean?"
           aria-haspopup="dialog"
-          className="flex h-11 w-11 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-belize-blue"
+          className="flex h-11 w-11 items-center justify-center rounded-full text-[color:var(--bmpl-text-muted-strong)] transition hover:bg-slate-100 hover:text-belize-blue"
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
             <circle cx="12" cy="12" r="9" />
@@ -123,7 +123,7 @@ export function ServiceTypeField({
                   setOpen(false);
                   triggerRef.current?.focus();
                 }}
-                className="-mr-2 -mt-1 flex h-11 w-11 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100"
+                className="-mr-2 -mt-1 flex h-11 w-11 items-center justify-center rounded-full text-[color:var(--bmpl-text-muted-strong)] hover:bg-slate-100"
                 aria-label="Close"
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>

@@ -74,7 +74,7 @@ export default async function AuditPage({
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500">
                     {row.reason ?? ''}
-                    {row.ipAddress && <span className="ml-1 text-slate-400">· {row.ipAddress}</span>}
+                    {row.ipAddress && <span className="ml-1 text-[color:var(--bmpl-text-muted-strong)]">· {row.ipAddress}</span>}
                   </td>
                 </tr>
               ))}

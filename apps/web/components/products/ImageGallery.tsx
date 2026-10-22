@@ -67,7 +67,7 @@ export function ImageGallery({ productId, variantId, images, variantChoices, mov
       {images.length === 0 ? (
         <label className="flex cursor-pointer flex-col items-center justify-center rounded-bmpl-md border-2 border-dashed border-slate-300 px-4 py-6 text-center transition hover:border-belize-accent">
           <span className="text-sm font-medium text-slate-500">{busy ? 'Uploading…' : 'Add images'}</span>
-          <span className="mt-0.5 text-xs text-slate-400">JPEG, PNG or WebP. Tap an image later to replace it.</span>
+          <span className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">JPEG, PNG or WebP. Tap an image later to replace it.</span>
           <input
             ref={fileRef}
             type="file"
@@ -172,7 +172,7 @@ function ImageCard({
             // eslint-disable-next-line @next/next/no-img-element
             <img src={img.url} alt={img.altText ?? ''} className="h-full w-full object-cover" />
           ) : (
-            <span className="flex h-full items-center justify-center text-[10px] text-slate-400">no preview</span>
+            <span className="flex h-full items-center justify-center text-[10px] text-[color:var(--bmpl-text-muted-strong)]">no preview</span>
           )}
           <span className="absolute inset-0 hidden items-center justify-center bg-belize-navy/55 text-[10px] font-semibold text-white group-hover:flex">
             {replacing ? 'Replacing…' : 'Replace'}

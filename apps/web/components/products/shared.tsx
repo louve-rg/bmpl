@@ -26,9 +26,9 @@ export function fieldError(e: ApiError, ...paths: string[]): string {
 
 /* Compact control classes that match the design-system inputs at a smaller scale. */
 export const smallInput =
-  'rounded-bmpl-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-belize-navy outline-none transition placeholder:text-slate-400 focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70';
+  'rounded-bmpl-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-belize-navy outline-none transition placeholder:text-slate-600 focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70';
 export const tinyInput =
-  'rounded-bmpl-sm border border-slate-200 bg-white px-2 py-1 text-xs text-belize-navy outline-none transition placeholder:text-slate-400 focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30';
+  'rounded-bmpl-sm border border-slate-200 bg-white px-2 py-1 text-xs text-belize-navy outline-none transition placeholder:text-slate-600 focus:border-belize-accent focus:ring-2 focus:ring-belize-accent/30';
 
 /**
  * Inline, two-step confirmation affordance (no window.confirm). The trigger
@@ -98,7 +98,7 @@ export function ConfirmAction({
 
 /** Tiny "Saving… / Saved" indicator used next to per-field save actions. */
 export function SaveState({ state }: { state: 'idle' | 'saving' | 'saved' | 'error' }) {
-  if (state === 'saving') return <span className="text-xs text-slate-400">Saving…</span>;
+  if (state === 'saving') return <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">Saving…</span>;
   if (state === 'saved') return <span className="text-xs text-emerald-600">Saved</span>;
   return null;
 }

@@ -619,7 +619,7 @@ function LocationPickerBody({
           {messages}
         </div>
         {mapBox}
-        {!ready && <p className="shrink-0 px-3 py-2 text-xs text-slate-400">Loading map…</p>}
+        {!ready && <p className="shrink-0 px-3 py-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">Loading map…</p>}
         <div className="shrink-0 border-t border-slate-200 px-3 py-2">{status}</div>
       </div>
     );
@@ -655,12 +655,12 @@ function LocationPickerBody({
 
       {mapBox}
 
-      {!ready && <p className="mt-2 text-xs text-slate-400">Loading map…</p>}
+      {!ready && <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">Loading map…</p>}
 
       {status}
       {value && (
         <details className="mt-1">
-          <summary className="flex min-h-11 cursor-pointer items-center text-xs text-slate-400">Coordinates</summary>
+          <summary className="flex min-h-11 cursor-pointer items-center text-xs text-[color:var(--bmpl-text-muted-strong)]">Coordinates</summary>
           <p className="mt-1 font-mono text-xs text-slate-500">
             {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)}
           </p>

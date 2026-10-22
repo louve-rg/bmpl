@@ -123,7 +123,7 @@ export default function VendorsPage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">
+                  <td colSpan={5} className="px-4 py-6 text-center text-sm text-[color:var(--bmpl-text-muted-strong)]">
                     {EMPTY_STATE_LABEL[status]}
                   </td>
                 </tr>

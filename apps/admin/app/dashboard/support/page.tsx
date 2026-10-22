@@ -205,7 +205,7 @@ export default function SupportPage() {
                             {it.requester ? `${it.requester.name} · ${it.requester.email}` : 'Unknown requester'}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                        <div className="flex items-center gap-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">
                           <span>{it.messageCount} {it.messageCount === 1 ? 'message' : 'messages'}</span>
                           <span aria-hidden>·</span>
                           <span>{relativeTime(it.lastMessageAt ?? it.createdAt)}</span>
@@ -363,10 +363,10 @@ function ConversationDetail({ id, onChanged }: { id: string; onChanged: () => vo
             <h2 className="text-base font-semibold text-belize-navy">{detail.subject}</h2>
             <StatusBadge status={detail.status} />
           </div>
-          {detail.contextLabel && <p className="mt-1 text-xs font-medium text-slate-400">{detail.contextLabel}</p>}
+          {detail.contextLabel && <p className="mt-1 text-xs font-medium text-[color:var(--bmpl-text-muted-strong)]">{detail.contextLabel}</p>}
           <p className="mt-1 text-sm text-slate-500">
             {requester ? requester.name : 'Requester'}
-            {detail.viewerRole && <span className="ml-2 text-xs text-slate-400">· You: {detail.viewerRole.replace(/_/g, ' ')}</span>}
+            {detail.viewerRole && <span className="ml-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">· You: {detail.viewerRole.replace(/_/g, ' ')}</span>}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -411,7 +411,7 @@ function ConversationDetail({ id, onChanged }: { id: string; onChanged: () => vo
       {/* Thread */}
       <div ref={threadRef} className="flex-1 space-y-4 overflow-y-auto p-4">
         {detail.messages.length === 0 ? (
-          <p className="py-8 text-center text-sm text-slate-400">No messages yet.</p>
+          <p className="py-8 text-center text-sm text-[color:var(--bmpl-text-muted-strong)]">No messages yet.</p>
         ) : (
           detail.messages.map((m) => <MessageRow key={m.id} message={m} />)
         )}
@@ -515,10 +515,10 @@ function MessageRow({ message }: { message: SupportMessage }) {
         <div className="mb-1 flex flex-wrap items-center gap-2">
           {isNote && <Badge tone="warning">Internal note — staff only</Badge>}
           <span className="text-xs font-semibold text-belize-navy">{message.senderName ?? 'Unknown'}</span>
-          <span className="text-xs text-slate-400">{relativeTime(message.createdAt)}</span>
+          <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(message.createdAt)}</span>
         </div>
         {message.deleted ? (
-          <p className="text-sm italic text-slate-400">This message was removed.</p>
+          <p className="text-sm italic text-[color:var(--bmpl-text-muted-strong)]">This message was removed.</p>
         ) : (
           // Plain text only — rendered as React text, never as HTML.
           <p className={`whitespace-pre-wrap break-words text-sm ${isNote ? 'text-amber-900' : 'text-belize-navy'}`}>
@@ -558,11 +558,11 @@ function AttachmentChip({ attachment }: { attachment: SupportAttachment }) {
 
   const content = (
     <>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-slate-400" aria-hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-[color:var(--bmpl-text-muted-strong)]" aria-hidden>
         <path d="M14 3v5h5M8 3h6l5 5v11a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
       </svg>
       <span className="max-w-[10rem] truncate">{attachment.fileName}</span>
-      <span className="text-slate-400">{formatBytes(attachment.fileSizeBytes)}</span>
+      <span className="text-[color:var(--bmpl-text-muted-strong)]">{formatBytes(attachment.fileSizeBytes)}</span>
     </>
   );
 

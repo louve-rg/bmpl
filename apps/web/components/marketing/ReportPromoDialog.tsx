@@ -38,14 +38,14 @@ export function ReportPromoDialog({ promotionId }: { promotionId: string }) {
     }
   }
 
-  if (done) return <p className="text-[11px] text-slate-400">Thanks — this ad was reported for review.</p>;
+  if (done) return <p className="text-[11px] text-[color:var(--bmpl-text-muted-strong)]">Thanks — this ad was reported for review.</p>;
 
   if (!open) {
     return (
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-[11px] font-medium text-slate-400 hover:text-red-600 hover:underline"
+        className="text-[11px] font-medium text-[color:var(--bmpl-text-muted-strong)] hover:text-red-600 hover:underline"
       >
         Report ad
       </button>

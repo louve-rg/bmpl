@@ -106,7 +106,7 @@ export function ListerListings({
                     <Link href={`${detailBase}/${l.id}`} className="font-medium text-belize-navy hover:text-belize-blue">
                       {l.title}
                     </Link>
-                    <p className="text-xs text-slate-400">{l.reference}</p>
+                    <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{l.reference}</p>
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {formatPrice(l.priceMinor, { purpose: l.purpose, rentalPeriod: l.rentalPeriod })}

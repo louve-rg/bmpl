@@ -508,7 +508,7 @@ function PromotionsTab({ queue }: { queue: boolean }) {
                           </>
                         )}
                       </div>
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">
                         <span>Priority {num(p.priority)}</span>
                         {p.isActive && <Badge tone="success">Live</Badge>}
                         {p.reportCount > 0 && (
@@ -734,7 +734,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
           <Badge tone="neutral">Priority {num(detail.priority)}</Badge>
           {detail.campaign && <Badge tone="info">Campaign: {detail.campaign.name}</Badge>}
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
           {window && <span>{window}</span>}
           <span>TZ {detail.timezone}</span>
           {detail.publishedAt && <span>Published {relativeTime(detail.publishedAt)}</span>}
@@ -756,7 +756,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
 
         {detail.targets.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Targets</p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Targets</p>
             <div className="flex flex-wrap gap-1.5">
               {detail.targets.map((t, i) => (
                 <Badge key={`${t.targetType}-${t.id ?? i}`} tone="neutral">
@@ -771,7 +771,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
 
         {detail.placements.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Placements</p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Placements</p>
             <div className="flex flex-wrap gap-1.5">
               {detail.placements.map((pl) => (
                 <Badge key={pl.id} tone="info">
@@ -785,7 +785,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
 
         {detail.assets.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Assets ({num(detail.assets.length)})</p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Assets ({num(detail.assets.length)})</p>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
               {detail.assets.map((a) =>
                 a.url ? (
@@ -797,7 +797,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
                     className="aspect-square w-full rounded-bmpl-md border border-slate-200 object-cover"
                   />
                 ) : (
-                  <div key={a.id} className="flex aspect-square w-full flex-col items-center justify-center rounded-bmpl-md border border-slate-200 bg-slate-50 p-2 text-center text-xs text-slate-400">
+                  <div key={a.id} className="flex aspect-square w-full flex-col items-center justify-center rounded-bmpl-md border border-slate-200 bg-slate-50 p-2 text-center text-xs text-slate-600">
                     <span className="font-semibold">{PROMOTION_ASSET_KIND_LABELS[a.kind] ?? a.kind}</span>
                     {a.videoUrl && <span className="mt-1 break-all">video</span>}
                   </div>
@@ -811,7 +811,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
       {/* Priority / feature control */}
       {canManagePriority && (
       <div className="border-t border-slate-100 p-4">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Priority &amp; feature</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Priority &amp; feature</p>
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-32">
             <Field label="Priority (0–1000)" htmlFor={`priority-${id}`}>
@@ -857,7 +857,7 @@ function PromotionDetailPanel({ id, onUpdated }: { id: string; onUpdated: (p: Pr
       {canModerate && (
       <div className="border-t border-slate-100 p-4">
         {actions.length === 0 ? (
-          <p className="text-sm text-slate-400">No moderation actions available for this status.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No moderation actions available for this status.</p>
         ) : pending ? (
           <div className="space-y-2">
             <Field
@@ -933,7 +933,7 @@ function ExpandableText({ label, text }: { label: string; text: string }) {
   const shown = expanded || !long ? text : `${text.slice(0, 320)}…`;
   return (
     <div>
-      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">{label}</p>
       <p className="whitespace-pre-wrap break-words text-sm text-belize-navy">{shown}</p>
       {long && (
         <button type="button" onClick={() => setExpanded((v) => !v)} className="mt-1 text-xs font-semibold text-belize-blue underline">
@@ -1071,12 +1071,12 @@ function CampaignCard({ campaign, onChanged }: { campaign: CampaignListItem; onC
           <StatusBadge status={campaign.status} />
           <Badge tone="brand">{campaignTypeLabel(campaign.type)}</Badge>
         </div>
-        <span className="shrink-0 text-xs text-slate-400">Updated {relativeTime(campaign.updatedAt)}</span>
+        <span className="shrink-0 text-xs text-[color:var(--bmpl-text-muted-strong)]">Updated {relativeTime(campaign.updatedAt)}</span>
       </div>
 
       {campaign.description && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-600">{campaign.description}</p>}
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
         <span>{num(campaign.promotionCount)} promotions</span>
         <span>{num(campaign.couponCount)} coupons</span>
         <span>{num(campaign.scheduleCount)} schedules</span>
@@ -1130,7 +1130,7 @@ function CampaignCard({ campaign, onChanged }: { campaign: CampaignListItem; onC
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Transition to:</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Transition to:</span>
               {transitions.map((t) => (
                 <Button
                   key={t}
@@ -1392,7 +1392,7 @@ function CouponRow({
         </div>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
         {coupon.minSpendMinor != null && <span>Min spend {moneyMinor(coupon.minSpendMinor)}</span>}
         {coupon.maxDiscountMinor != null && <span>Max discount {moneyMinor(coupon.maxDiscountMinor)}</span>}
         {coupon.maxUses != null && <span>Max uses {num(coupon.maxUses)}</span>}
@@ -1766,7 +1766,7 @@ function PlacementsTab() {
                     <h3 className="text-sm font-semibold text-belize-navy">{placementLabel(slot)}</h3>
                     {rendersNowhereYet(slot) && <Badge tone="warning">Not shown anywhere yet</Badge>}
                   </div>
-                  <span className="text-xs text-slate-400">
+                  <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">
                     {num(slotRows.length)} {slotRows.length === 1 ? 'assignment' : 'assignments'}
                   </span>
                 </div>
@@ -2039,7 +2039,7 @@ function PlacementRow({
             <Badge tone="brand">{promotionTypeLabel(row.promotion.type)}</Badge>
             {row.isActive ? <Badge tone="success">Active</Badge> : <Badge tone="neutral">Paused</Badge>}
           </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
             <span>Position {num(row.position)}</span>
             <span>{DEVICE_LABELS[row.device]}</span>
             {window && <span>{window}</span>}
@@ -2265,10 +2265,10 @@ function HomepageTab() {
               <div key={placement} className="rounded-bmpl-xl border border-slate-200 bg-white">
                 <div className="border-b border-slate-200 p-4">
                   <h3 className="text-sm font-semibold text-belize-navy">{placementLabel(placement)}</h3>
-                  <p className="text-xs text-slate-400">{num(items.length)} promotions</p>
+                  <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{num(items.length)} promotions</p>
                 </div>
                 {items.length === 0 ? (
-                  <p className="p-4 text-sm text-slate-400">Nothing placed here.</p>
+                  <p className="p-4 text-sm text-[color:var(--bmpl-text-muted-strong)]">Nothing placed here.</p>
                 ) : (
                   <ul className="divide-y divide-slate-100">
                     {items
@@ -2285,7 +2285,7 @@ function HomepageTab() {
                                 <StatusBadge status={it.status} />
                                 {d.isActive && <Badge tone="success">Live</Badge>}
                               </div>
-                              <p className="text-xs text-slate-400">{promotionTypeLabel(it.type)}</p>
+                              <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{promotionTypeLabel(it.type)}</p>
                             </div>
                             <div className="w-28">
                               <Field label="Priority" htmlFor={`hp-${it.promotionId}`}>
@@ -2318,7 +2318,7 @@ function HomepageTab() {
                                 className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-belize-blue disabled:opacity-50"
                               />
                               Featured
-                              {!canServe && <span className="text-xs text-slate-400">(approve first)</span>}
+                              {!canServe && <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">(approve first)</span>}
                             </label>
                           </li>
                         );
@@ -2461,7 +2461,7 @@ function ReportCard({
           <Badge tone="error">{PROMOTION_REPORT_REASON_LABELS[report.reason] ?? report.reason}</Badge>
           <StatusBadge status={report.status} />
         </div>
-        <span className="shrink-0 text-xs text-slate-400">{relativeTime(report.createdAt)}</span>
+        <span className="shrink-0 text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(report.createdAt)}</span>
       </div>
 
       {report.note && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">{report.note}</p>}
@@ -2471,7 +2471,7 @@ function ReportCard({
           <span className="text-sm font-semibold text-belize-navy">{report.promotion.title}</span>
           <StatusBadge status={report.promotion.status} />
         </div>
-        <p className="text-xs text-slate-400">{promotionTypeLabel(report.promotion.type)}</p>
+        <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{promotionTypeLabel(report.promotion.type)}</p>
       </div>
 
       {error && (
@@ -2606,9 +2606,9 @@ function AnalyticsTab() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         {kpis.map((k) => (
           <div key={k.label} className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{k.label}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">{k.label}</p>
             <p className="mt-1 text-2xl font-semibold text-belize-navy">{k.value}</p>
-            {k.hint && <p className="mt-0.5 text-xs text-slate-400">{k.hint}</p>}
+            {k.hint && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">{k.hint}</p>}
           </div>
         ))}
       </div>
@@ -2621,12 +2621,12 @@ function AnalyticsTab() {
       <div className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
         <p className="mb-3 text-sm font-semibold text-belize-navy">Top promotions (by views)</p>
         {data.topPromotions.length === 0 ? (
-          <p className="text-sm text-slate-400">No promotion metrics yet.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No promotion metrics yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[36rem] text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">
                   <th className="py-2 pr-3">Promotion</th>
                   <th className="py-2 pr-3">Status</th>
                   <th className="py-2 pr-3 text-right">Views</th>
@@ -2640,7 +2640,7 @@ function AnalyticsTab() {
                   <tr key={p.id} className="border-b border-slate-100">
                     <td className="py-2 pr-3">
                       <span className="font-medium text-belize-navy">{p.title}</span>
-                      <span className="ml-2 text-xs text-slate-400">{promotionTypeLabel(p.type)}</span>
+                      <span className="ml-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">{promotionTypeLabel(p.type)}</span>
                     </td>
                     <td className="py-2 pr-3">
                       <StatusBadge status={p.status} />
@@ -2666,7 +2666,7 @@ function MiniTable({ title, rows }: { title: string; rows: Array<{ label: string
     <div className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
       <p className="mb-3 text-sm font-semibold text-belize-navy">{title}</p>
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-400">No data yet.</p>
+        <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No data yet.</p>
       ) : (
         <ul className="space-y-2">
           {rows.map((r) => (

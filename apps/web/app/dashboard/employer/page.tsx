@@ -156,7 +156,7 @@ function ImageManager({ profile, onChanged }: { profile: EmployerProfile; onChan
               // eslint-disable-next-line @next/next/no-img-element
               <img src={profile.logoUrl} alt="Logo" className="h-14 w-14 rounded-bmpl-md object-cover" />
             ) : (
-              <span className="flex h-14 w-14 items-center justify-center rounded-bmpl-md bg-slate-100 text-xs text-slate-400">None</span>
+              <span className="flex h-14 w-14 items-center justify-center rounded-bmpl-md bg-slate-100 text-xs text-slate-600">None</span>
             )}
             <input
               type="file"
@@ -174,7 +174,7 @@ function ImageManager({ profile, onChanged }: { profile: EmployerProfile; onChan
               // eslint-disable-next-line @next/next/no-img-element
               <img src={profile.bannerUrl} alt="Banner" className="h-14 w-24 rounded-bmpl-md object-cover" />
             ) : (
-              <span className="flex h-14 w-24 items-center justify-center rounded-bmpl-md bg-slate-100 text-xs text-slate-400">None</span>
+              <span className="flex h-14 w-24 items-center justify-center rounded-bmpl-md bg-slate-100 text-xs text-slate-600">None</span>
             )}
             <input
               type="file"

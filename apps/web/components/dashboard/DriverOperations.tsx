@@ -157,7 +157,7 @@ function JobLine({ job }: { job: DriverJobSummary }) {
   return (
     <div className="mt-1.5 min-w-0">
       <p className="truncate font-semibold text-belize-navy">
-        {job.vendor} <span className="font-normal text-slate-400">·</span> {job.orderNumber}
+        {job.vendor} <span className="font-normal text-[color:var(--bmpl-text-muted-strong)]">·</span> {job.orderNumber}
       </p>
       <p className="truncate text-sm text-slate-500">
         {job.destination ?? 'Destination unavailable'}
@@ -173,7 +173,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
       <p className="bmpl-label">{label}</p>
       {/* tabular-nums so figures don't jitter as they refresh. */}
       <p className="mt-1 text-lg font-bold tabular-nums text-[color:var(--bmpl-text)]">{value}</p>
-      {hint && <p className="mt-0.5 text-xs text-slate-400">{hint}</p>}
+      {hint && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">{hint}</p>}
     </Card>
   );
 }

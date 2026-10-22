@@ -107,7 +107,7 @@ export default async function JobDetailPage({ params }: { params: { slug: string
                       </Badge>
                     ))}
                   </div>
-                  <p className="mt-2 text-xs text-slate-400">* required</p>
+                  <p className="mt-2 text-xs text-slate-600">* required</p>
                 </Card>
               )}
 
@@ -139,7 +139,7 @@ export default async function JobDetailPage({ params }: { params: { slug: string
                     <p className="mt-0.5 text-lg font-bold text-belize-navy">{salary}</p>
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-400">Salary not disclosed</p>
+                  <p className="text-sm text-slate-600">Salary not disclosed</p>
                 )}
                 <JobApplyPanel job={job} />
                 <SaveJobButton jobId={job.id} slug={job.slug} withLabel className="w-full justify-center" />

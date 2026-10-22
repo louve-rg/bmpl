@@ -230,7 +230,7 @@ function DriverDetailView({
         Vehicles ({d.vehicles.length})
       </h2>
       {d.vehicles.length === 0 ? (
-        <p className="text-sm text-slate-400">No vehicles on file — nothing to clear yet.</p>
+        <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No vehicles on file — nothing to clear yet.</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {d.vehicles.map((v) => (

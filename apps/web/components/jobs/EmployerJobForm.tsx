@@ -314,7 +314,7 @@ export function EmployerJobForm({ initial }: { initial?: EmployerJobDetail }) {
       <Card className="space-y-4 p-5 sm:p-6">
         <h2 className="bmpl-eyebrow">Skills</h2>
         <div className="flex flex-wrap gap-2">
-          {skills.length === 0 && <p className="text-sm text-slate-400">No skills added.</p>}
+          {skills.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No skills added.</p>}
           {skills.map((s, i) => (
             <span key={`${s.name}-${i}`} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
               {s.name}
@@ -351,7 +351,7 @@ export function EmployerJobForm({ initial }: { initial?: EmployerJobDetail }) {
       <Card className="space-y-4 p-5 sm:p-6">
         <h2 className="bmpl-eyebrow">Benefits</h2>
         <div className="flex flex-wrap gap-2">
-          {benefits.length === 0 && <p className="text-sm text-slate-400">No benefits added.</p>}
+          {benefits.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No benefits added.</p>}
           {benefits.map((b, i) => (
             <span key={`${b}-${i}`} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
               {b}
@@ -414,7 +414,7 @@ export function EmployerJobForm({ initial }: { initial?: EmployerJobDetail }) {
         <Button disabled={busy} size="lg">
           {busy ? 'Saving…' : isEdit ? 'Save changes' : 'Create draft'}
         </Button>
-        {!isEdit && <p className="mt-1.5 text-xs text-slate-400">You'll add screening questions and submit for review next.</p>}
+        {!isEdit && <p className="mt-1.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">You'll add screening questions and submit for review next.</p>}
       </div>
     </form>
   );

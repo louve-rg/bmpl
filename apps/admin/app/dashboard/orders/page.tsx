@@ -72,7 +72,7 @@ export default function AdminOrdersPage() {
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {o.customer}
-                    <div className="text-xs text-slate-400">{o.customerEmail}</div>
+                    <div className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{o.customerEmail}</div>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{o.vendors.join(', ')}</td>
                   <td className="px-4 py-3 text-slate-600">{o.itemCount}</td>

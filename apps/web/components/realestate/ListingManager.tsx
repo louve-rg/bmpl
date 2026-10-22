@@ -212,7 +212,7 @@ export function ListingManager({
       <Card className="space-y-3 p-5">
         <h2 className="bmpl-eyebrow">Status history</h2>
         <ol className="space-y-3">
-          {l.statusHistory.length === 0 && <p className="text-sm text-slate-400">No history yet.</p>}
+          {l.statusHistory.length === 0 && <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No history yet.</p>}
           {l.statusHistory.map((h, i) => (
             <li key={i} className="flex gap-3">
               <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-belize-blue" aria-hidden />

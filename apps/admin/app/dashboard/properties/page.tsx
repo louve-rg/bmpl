@@ -525,7 +525,7 @@ function ListingsTab({ queue, canModerate }: { queue: boolean; canModerate: bool
                           </>
                         )}
                       </div>
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">
                         {price && <span className="font-medium text-belize-navy">{price}</span>}
                         {p.reportCount > 0 && (
                           <Badge tone="error">
@@ -688,7 +688,7 @@ function PropertyDetailPanel({ id, onModerated, canModerate }: { id: string; onM
           {detail.negotiable && <Badge tone="neutral">Negotiable</Badge>}
           {detail.authorityVerified && <Badge tone="success">Authority verified</Badge>}
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
           {price && <span className="font-medium text-belize-navy">{price}</span>}
           {detail.bedrooms != null && <span>{num(detail.bedrooms)} bed</span>}
           {detail.bathrooms != null && <span>{num(detail.bathrooms)} bath</span>}
@@ -700,7 +700,7 @@ function PropertyDetailPanel({ id, onModerated, canModerate }: { id: string; onM
           {detail.condition && <span>{detail.condition.replace(/_/g, ' ').toLowerCase()}</span>}
           <span>Created {relativeTime(detail.createdAt)}</span>
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
           {detail.locality && <span>{detail.locality}</span>}
           {detail.generalAddress && <span>{detail.generalAddress}</span>}
           {detail.exactAddress && <span className="text-belize-navy">{detail.exactAddress}</span>}
@@ -721,7 +721,7 @@ function PropertyDetailPanel({ id, onModerated, canModerate }: { id: string; onM
         <ExpandableText label="Description" text={detail.description} />
 
         <div>
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Listed by</p>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Listed by</p>
           <div className="flex flex-wrap gap-1.5">
             <Badge tone="neutral">
               Owner: {detail.owner.name}
@@ -735,7 +735,7 @@ function PropertyDetailPanel({ id, onModerated, canModerate }: { id: string; onM
 
         {detail.utilities.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Utilities</p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Utilities</p>
             <div className="flex flex-wrap gap-1.5">
               {detail.utilities.map((u) => (
                 <Badge key={u} tone="neutral">
@@ -748,7 +748,7 @@ function PropertyDetailPanel({ id, onModerated, canModerate }: { id: string; onM
 
         {detail.amenities.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">Amenities</p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Amenities</p>
             <div className="flex flex-wrap gap-1.5">
               {detail.amenities.map((a) => (
                 <Badge key={a} tone="success">
@@ -761,7 +761,7 @@ function PropertyDetailPanel({ id, onModerated, canModerate }: { id: string; onM
 
         {detail.images.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">
               Images ({num(detail.images.length)})
             </p>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
@@ -793,7 +793,7 @@ function PropertyDetailPanel({ id, onModerated, canModerate }: { id: string; onM
       {canModerate && (
       <div className="border-t border-slate-100 p-4">
         {actions.length === 0 ? (
-          <p className="text-sm text-slate-400">No moderation actions available for this status.</p>
+          <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No moderation actions available for this status.</p>
         ) : pending ? (
           <div className="space-y-2">
             <Field
@@ -887,7 +887,7 @@ function DocumentsSection({ propertyId }: { propertyId: string }) {
   return (
     <div className="rounded-bmpl-lg border border-slate-200 bg-slate-50 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Ownership documents</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">Ownership documents</p>
         {state === 'idle' && (
           <Button size="sm" variant="outline" onClick={() => void load()}>
             View documents
@@ -896,7 +896,7 @@ function DocumentsSection({ propertyId }: { propertyId: string }) {
       </div>
 
       {state === 'idle' && (
-        <p className="mt-2 text-xs text-slate-400">
+        <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">
           Private ownership documents are restricted to super-admins with <code>property_documents.read</code>.
         </p>
       )}
@@ -924,7 +924,7 @@ function DocumentsSection({ propertyId }: { propertyId: string }) {
       )}
       {state === 'ready' &&
         (docs.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-400">No documents on file for this listing.</p>
+          <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">No documents on file for this listing.</p>
         ) : (
           <ul className="mt-2 space-y-1.5">
             {docs.map((d) => (
@@ -935,13 +935,13 @@ function DocumentsSection({ propertyId }: { propertyId: string }) {
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <Badge tone="neutral">{d.kind.replace(/_/g, ' ').toLowerCase()}</Badge>
                   <span className="truncate text-belize-navy">{d.label ?? 'Document'}</span>
-                  <span className="text-xs text-slate-400">{formatBytes(d.fileSizeBytes)}</span>
+                  <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{formatBytes(d.fileSizeBytes)}</span>
                   <Badge tone={d.scanStatus === 'CLEAN' ? 'success' : d.scanStatus === 'INFECTED' ? 'error' : 'warning'}>
                     {d.scanStatus.replace(/_/g, ' ').toLowerCase()}
                   </Badge>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <span className="text-xs text-slate-400">{relativeTime(d.createdAt)}</span>
+                  <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(d.createdAt)}</span>
                   {d.url && (
                     <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-belize-blue underline">
                       Open
@@ -962,7 +962,7 @@ function ExpandableText({ label, text }: { label: string; text: string }) {
   const shown = expanded || !long ? text : `${text.slice(0, 320)}…`;
   return (
     <div>
-      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">{label}</p>
       <p className="whitespace-pre-wrap break-words text-sm text-belize-navy">{shown}</p>
       {long && (
         <button type="button" onClick={() => setExpanded((v) => !v)} className="mt-1 text-xs font-semibold text-belize-blue underline">
@@ -1101,7 +1101,7 @@ function ReportCard({
           <Badge tone="error">{report.reason.replace(/_/g, ' ')}</Badge>
           <StatusBadge status={report.status} />
         </div>
-        <span className="shrink-0 text-xs text-slate-400">{relativeTime(report.createdAt)}</span>
+        <span className="shrink-0 text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(report.createdAt)}</span>
       </div>
 
       {report.note && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">{report.note}</p>}
@@ -1111,7 +1111,7 @@ function ReportCard({
           <span className="text-sm font-semibold text-belize-navy">{report.listing.title}</span>
           <StatusBadge status={report.listing.status} />
         </div>
-        <p className="text-xs text-slate-400">Ref {report.listing.reference}</p>
+        <p className="text-xs text-[color:var(--bmpl-text-muted-strong)]">Ref {report.listing.reference}</p>
       </div>
 
       {error && (
@@ -1293,7 +1293,7 @@ function OwnersTab({ canModerate }: { canModerate: boolean }) {
                         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-belize-navy">{o.name}</span>
                         <StatusBadge status={o.approvalStatus} />
                       </div>
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">
                         {districtLabel(o.district) && <span>{districtLabel(o.district)}</span>}
                         {o.identityVerified && <Badge tone="success">ID verified</Badge>}
                         <span aria-hidden>·</span>
@@ -1428,7 +1428,7 @@ function AgentsTab({ canModerate }: { canModerate: boolean }) {
                         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-belize-navy">{a.displayName}</span>
                         <StatusBadge status={a.approvalStatus} />
                       </div>
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">
                         {a.agency && <span className="truncate">{a.agency.name}</span>}
                         {!a.isActive && <Badge tone="neutral">Inactive</Badge>}
                         <span aria-hidden>·</span>
@@ -1564,7 +1564,7 @@ function PrincipalDetailPanel<T extends OwnerDetail | AgentDetail>({
           <h2 className="text-base font-semibold text-belize-navy">{displayName}</h2>
           <StatusBadge status={detail.approvalStatus} />
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
           {agent?.agency && <span>{agent.agency.name}</span>}
           {detail.email && <span>{detail.email}</span>}
           {detail.phone && <span>{detail.phone}</span>}
@@ -1587,11 +1587,11 @@ function PrincipalDetailPanel<T extends OwnerDetail | AgentDetail>({
         {agent?.bio && <ExpandableText label="Bio" text={agent.bio} />}
 
         <div>
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">
             Listings by status ({num(detail.listingCount)} total)
           </p>
           {detail.listingsByStatus.length === 0 ? (
-            <p className="text-sm text-slate-400">No listings yet.</p>
+            <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No listings yet.</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {detail.listingsByStatus.map((s) => (
@@ -1750,9 +1750,9 @@ function AnalyticsTab() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {kpis.map((k) => (
           <div key={k.label} className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{k.label}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">{k.label}</p>
             <p className="mt-1 text-2xl font-semibold text-belize-navy">{k.value}</p>
-            {k.hint && <p className="mt-0.5 text-xs text-slate-400">{k.hint}</p>}
+            {k.hint && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">{k.hint}</p>}
           </div>
         ))}
       </div>
@@ -1777,7 +1777,7 @@ function MiniTable({ title, rows }: { title: string; rows: Array<{ label: string
     <div className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
       <p className="mb-3 text-sm font-semibold text-belize-navy">{title}</p>
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-400">No data yet.</p>
+        <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No data yet.</p>
       ) : (
         <ul className="space-y-2">
           {rows.map((r) => (

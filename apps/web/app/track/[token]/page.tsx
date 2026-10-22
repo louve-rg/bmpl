@@ -134,7 +134,7 @@ export default function RecipientTrackingPage() {
               )}
             </div>
 
-            <p className="mt-6 text-center text-xs text-slate-400">
+            <p className="mt-6 text-center text-xs text-slate-600">
               This link shows the status of one parcel. It doesn&rsquo;t need an account.
             </p>
           </div>

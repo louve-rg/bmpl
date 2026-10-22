@@ -98,7 +98,7 @@ export default function AdminProductsPage() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No products in this state.</td></tr>
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-[color:var(--bmpl-text-muted-strong)]">No products in this state.</td></tr>
               )}
             </tbody>
           </table>

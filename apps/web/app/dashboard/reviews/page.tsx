@@ -291,7 +291,7 @@ function MyReviewRow({ review, onUpdated }: { review: Review; onUpdated: (r: Rev
           <StatusBadge status={review.status} />
           {review.verifiedPurchase && <Badge tone="success">Verified purchase</Badge>}
         </div>
-        <span className="text-xs text-slate-400">{relativeTime(review.editedAt ?? review.createdAt)}</span>
+        <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(review.editedAt ?? review.createdAt)}</span>
       </div>
 
       {editing ? (

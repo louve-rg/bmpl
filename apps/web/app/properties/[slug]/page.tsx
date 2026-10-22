@@ -164,7 +164,7 @@ export default async function PropertyDetailPage({ params }: { params: { slug: s
                 <div>
                   <p className="bmpl-eyebrow">Price</p>
                   <p className="mt-0.5 text-xl font-bold text-belize-navy">{price}</p>
-                  <p className="text-xs text-slate-400">Reference {p.reference}</p>
+                  <p className="text-xs text-slate-600">Reference {p.reference}</p>
                 </div>
                 <SaveButton listingId={p.id} slug={p.slug} withLabel className="w-full justify-center" />
                 <div className="border-t border-slate-100 pt-3">

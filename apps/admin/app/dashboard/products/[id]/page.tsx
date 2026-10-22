@@ -105,7 +105,7 @@ export default async function AdminProductDetail({ params }: { params: { id: str
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={img.url} alt={img.altText ?? ''} className="h-full w-full object-cover" />
                 ) : (
-                  <span className="flex h-full items-center justify-center text-[10px] text-slate-400">no preview</span>
+                  <span className="flex h-full items-center justify-center text-[10px] text-[color:var(--bmpl-text-muted-strong)]">no preview</span>
                 )}
                 {img.isPrimary && <span className="absolute left-0 top-0 bg-belize-blue px-1 text-[10px] font-bold text-white">PRIMARY</span>}
               </div>
@@ -124,7 +124,7 @@ export default async function AdminProductDetail({ params }: { params: { id: str
               {r.note ? ` — ${r.note}` : ''}
             </li>
           ))}
-          {p.reviews.length === 0 && <li className="text-sm text-slate-400">No history yet.</li>}
+          {p.reviews.length === 0 && <li className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No history yet.</li>}
         </ol>
       </Card>
     </div>

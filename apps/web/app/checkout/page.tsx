@@ -68,19 +68,19 @@ function CheckoutItem({ it }: { it: CartLine }) {
   return (
     <li className="flex items-start justify-between gap-4 py-3">
       <dl className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1">
-        <dt className="text-xs uppercase tracking-wide text-slate-400">Product</dt>
+        <dt className="text-xs uppercase tracking-wide text-slate-600">Product</dt>
         <dd className="break-words font-medium text-belize-navy">{disp.primary || it.title}</dd>
         {pairs.map((o, i) => (
           <Fragment key={`${o.name}-${i}`}>
-            <dt className="text-xs uppercase tracking-wide text-slate-400">{o.name}</dt>
+            <dt className="text-xs uppercase tracking-wide text-slate-600">{o.name}</dt>
             <dd className="break-words text-slate-700">{o.value}</dd>
           </Fragment>
         ))}
-        <dt className="text-xs uppercase tracking-wide text-slate-400">Cost</dt>
+        <dt className="text-xs uppercase tracking-wide text-slate-600">Cost</dt>
         <dd className="text-slate-700">
-          {money(it.unitPriceMinor)} <span className="text-slate-400">BZD</span>
+          {money(it.unitPriceMinor)} <span className="text-slate-600">BZD</span>
         </dd>
-        <dt className="text-xs uppercase tracking-wide text-slate-400">Quantity</dt>
+        <dt className="text-xs uppercase tracking-wide text-slate-600">Quantity</dt>
         <dd className="text-slate-700">×{it.quantity}</dd>
       </dl>
       <span className="shrink-0 text-right font-semibold text-belize-navy">{money(it.lineSubtotalMinor)}</span>
@@ -236,7 +236,7 @@ export default function CheckoutPage() {
         {state === 'loading' && (
           <div className="mt-8 flex flex-col items-center gap-3 rounded-bmpl-xl border border-slate-200 bg-white p-14 text-center">
             <Spinner />
-            <p className="text-sm text-slate-400">Loading…</p>
+            <p className="text-sm text-slate-600">Loading…</p>
           </div>
         )}
         {state === 'error' && (
@@ -396,7 +396,7 @@ export default function CheckoutPage() {
                     </dd>
                   </div>
                 </dl>
-                <p className="mt-3 text-xs text-slate-400">Taxes and fees are not yet calculated.</p>
+                <p className="mt-3 text-xs text-slate-600">Taxes and fees are not yet calculated.</p>
 
                 {undeliverable.length > 0 && (
                   <Alert tone="warning" className="mt-3">

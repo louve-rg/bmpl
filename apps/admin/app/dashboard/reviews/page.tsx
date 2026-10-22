@@ -316,7 +316,7 @@ function ReviewCard({ review, onModerated, canModerate }: { review: Review; onMo
             </Badge>
           )}
         </div>
-        <span className="shrink-0 text-xs text-slate-400">{relativeTime(review.createdAt)}</span>
+        <span className="shrink-0 text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(review.createdAt)}</span>
       </div>
 
       {review.title && <p className="mt-2 text-sm font-semibold text-belize-navy">{review.title}</p>}
@@ -328,7 +328,7 @@ function ReviewCard({ review, onModerated, canModerate }: { review: Review; onMo
         </button>
       )}
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[color:var(--bmpl-text-muted-strong)]">
         {review.variantName && <span>Variant: {review.variantName}</span>}
         {review.sku && <span>SKU: {review.sku}</span>}
         <span>{review.helpfulCount} found helpful</span>
@@ -358,7 +358,7 @@ function ReviewCard({ review, onModerated, canModerate }: { review: Review; onMo
         <div className="mt-3 rounded-bmpl-lg border border-slate-200 bg-slate-50 p-3">
           <div className="mb-1 flex items-center gap-2">
             <Badge tone="info">Seller response</Badge>
-            <span className="text-xs text-slate-400">{relativeTime(review.response.createdAt)}</span>
+            <span className="text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(review.response.createdAt)}</span>
           </div>
           <p className="whitespace-pre-wrap break-words text-sm text-slate-700">{review.response.body}</p>
         </div>
@@ -567,7 +567,7 @@ function ReportCard({
           <Badge tone="error">{report.reason}</Badge>
           <StatusBadge status={report.status} />
         </div>
-        <span className="shrink-0 text-xs text-slate-400">{relativeTime(report.createdAt)}</span>
+        <span className="shrink-0 text-xs text-[color:var(--bmpl-text-muted-strong)]">{relativeTime(report.createdAt)}</span>
       </div>
 
       {report.note && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">{report.note}</p>}
