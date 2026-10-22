@@ -461,6 +461,76 @@ ten existing regression routes.
   against the cited numbers in isolation, not a live measurement of that
   specific element.
 
+### Coverage gap, as a number (2026-10-22) — how narrow, and how much translucent text exists at all
+
+The zero-flip result above only says the ten covered routes have no
+translucent-foreground defect. It says nothing about the rest of the app.
+Static count from source, no browser, at `main @ 1a6f826`:
+
+**Route coverage: 10 of 152.** The ten contrast regression spec files
+cover 9 distinct URL paths (`/dashboard/analytics` is tested once per app —
+two separate `page.tsx` files, same path string) out of 152 `page.tsx`
+route files total (112 in `apps/web/app`, 40 in `apps/admin/app`). About
+6.6% of routes by file count.
+
+**Translucent-foreground classes app-wide: 574 occurrences across 154
+files.** Two kinds, counted separately because they're exposed differently:
+
+- **Tailwind opacity-modifier classes** (`text-white/NN`, `text-blue-1NN/
+  NN`, `text-sky-7NN/NN` — `text-COLOR/OPACITY`; zero `text-black/NN`
+  found): **32 occurrences across 15 files.** These are unconditionally
+  translucent wherever they render — the opacity is hardcoded in the class
+  name itself. By file:
+  `apps/web/components/landing/Wallet.tsx` (5),
+  `apps/web/components/landing/WhyChooseUs.tsx` (5),
+  `apps/web/components/landing/Services.tsx` (4),
+  `apps/web/components/auth/AuthShell.tsx` (3),
+  `apps/web/components/landing/Footer.tsx` (3),
+  `apps/admin/components/AnnouncementBanner.tsx` (2),
+  `apps/web/components/landing/MobilePromo.tsx` (2),
+  `apps/admin/app/dashboard/analytics/page.tsx` (1),
+  `apps/admin/components/ui.tsx` (1),
+  `apps/web/app/dashboard/messages/page.tsx` (1) — **this is the #501
+  message-bubble node** (`text-white/80` at line 561),
+  `apps/web/components/account/AccountSummary.tsx` (1),
+  `apps/web/components/driver/AvailabilityControl.tsx` (1),
+  `apps/web/components/landing/Hero.tsx` (1),
+  `apps/web/components/landing/Providers.tsx` (1),
+  `apps/web/components/ui.tsx` (1).
+- **Alpha-carrying glass design tokens**, used as `text-[color:var(--TOKEN)]`:
+  **542 occurrences across 145 files.** Of the 8 `--bmpl-*` text-color
+  tokens used this way anywhere in the codebase, exactly 4 are redefined
+  under `[data-theme='glass']` (`packages/ui/src/glass.css:296-331`) as
+  `rgba(244, 248, 255, 0.82)` or `0.64` — translucent — while they're
+  opaque hex everywhere else (`:root`/`[data-theme='light']`); the other 4
+  (`--bmpl-text`, `--bmpl-link`, `--bmpl-warning`,
+  `--bmpl-oncolor-light-text-muted`) stay opaque even under glass scope, by
+  design, and are not counted here. The 4 that do carry alpha in glass
+  scope: `--bmpl-text-muted-strong` (257 occurrences / 94 files),
+  `--bmpl-text-muted` (237 / 77), `--bmpl-text-faint` (39 / 19),
+  `--bmpl-text-secondary` (9 / 8) — these are conditionally translucent,
+  not unconditionally, but the condition is the common case, not a rare
+  one: `data-theme="glass"` is set once at the top of `apps/admin`'s entire
+  shell (`AdminShell.tsx:161`) and once at the top of `apps/web`'s entire
+  `/dashboard/*` tree (`dashboard/layout.tsx:26`), so most uses of these 4
+  tokens render translucent by default, not by exception.
+- Zero inline `text-[color:rgba(...)]` literals found anywhere.
+- 6 files use both kinds (`apps/admin/app/dashboard/analytics/page.tsx`,
+  `apps/admin/components/ui.tsx`, `apps/web/app/dashboard/messages/page.tsx`,
+  `apps/web/components/account/AccountSummary.tsx`,
+  `apps/web/components/driver/AvailabilityControl.tsx`,
+  `apps/web/components/ui.tsx`) — 15 + 145 − 6 = 154 distinct files total.
+
+**What this does and doesn't say.** It converts "coverage is narrow" from
+an admission into a number: 6.6% of routes, against a translucent-text
+surface of 574 occurrences in 154 files, nearly all of it under the glass
+scope that is the default rendering context for both apps' authenticated
+areas. It is an upper bound on how much the broken gate could ever have
+hidden, not a measurement of how much it actually got wrong — that needs
+the corrected gate actually run against each of those 154 files' live
+pages, which this count does not do and was not asked to do. Nothing here
+was fixed; per instruction, this is a count, not a remediation.
+
 No allowlist entry, no threshold or baseline edit; `continue-on-error`
 untouched; both apps' `contrast-known-violations.json` stay `[]`.
 
