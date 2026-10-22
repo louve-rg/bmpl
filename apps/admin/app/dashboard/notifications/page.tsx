@@ -256,7 +256,7 @@ export default function NotificationsPage() {
         />
       ) : (
         <>
-          <ul className="overflow-hidden rounded-bmpl-xl border border-slate-200 bg-white">
+          <ul data-theme="light" className="overflow-hidden rounded-bmpl-xl border border-slate-200 bg-white">
             {items.map((n) => (
               <li key={n.id}>
                 <div
