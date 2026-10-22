@@ -119,6 +119,15 @@ body {
     background-color: var(--bmpl-oncolor-light-bg);
     border-color: var(--bmpl-oncolor-light-border);
     color: var(--bmpl-oncolor-light-text);
+    /* Identical to apps/web's copy -- see that file for the full reasoning
+       (the LocationPicker.tsx leak this fixes, and requirement 8's nesting
+       trap, checked clear for every current usage on 2026-10-22). Admin has
+       no live usage of this class today; kept in sync so the first one
+       doesn't ship without it. */
+    --bmpl-text: #0f172a;
+    --bmpl-text-secondary: #334155;
+    --bmpl-text-muted: #64748b;
+    --bmpl-text-muted-strong: #475569;
   }
   .bmpl-surface-ondark {
     background-color: var(--bmpl-oncolor-dark-bg);

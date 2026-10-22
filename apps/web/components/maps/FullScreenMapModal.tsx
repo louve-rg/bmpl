@@ -64,17 +64,29 @@ export function FullScreenMapModal({
   // viewport, with the confirm button entirely below the fold). Same
   // mechanism MobileNavDrawer.tsx already hit and fixed; same fix here.
   //
-  // data-theme="glass" reapplied on the portaled root: escaping to
-  // document.body also escapes any [data-theme="glass"] ancestor in the DOM,
-  // not just its backdrop-filter containing block, so a caller's children
-  // that read adaptive --bmpl-* tokens (LocationPickerBody does) would
-  // otherwise render against the wrong theme once portaled. See
-  // MobileNavDrawer.tsx:77-84 for the same fix and the screenshot that caught
-  // it the first time.
+  // data-theme="light" reapplied on the portaled root: escaping to
+  // document.body also escapes any [data-theme] ancestor in the DOM, not
+  // just its backdrop-filter containing block, so a caller's children that
+  // read adaptive --bmpl-* tokens (LocationPickerBody's "Loading map..."
+  // fallback does, var(--bmpl-text-muted-strong)) would otherwise render
+  // against whatever theme happened to be ambient before portaling.
+  //
+  // CORRECTION (2026-10-22, found while enumerating .bmpl-surface-onlight
+  // usages for a separate task): this used to say data-theme="glass", by
+  // direct analogy to MobileNavDrawer.tsx:77-84. That analogy doesn't hold
+  // here -- MobileNavDrawer's panel is `.bmpl-overlay`, an ADAPTIVE surface
+  // whose own background genuinely IS the glass colour, so its content
+  // correctly wants glass values. THIS dialog's panel below is a literal,
+  // always-opaque `bg-white` -- never adaptive, portaled or not -- so
+  // anything inside it that reads an adaptive text token always wants the
+  // LIGHT value, the same structural fix as InfoCard/NotificationBell/
+  // ServiceTypeField tonight. "glass" was never correct; it happened to go
+  // unnoticed because the only affected node (the loading fallback) is a
+  // transient state nothing measured directly.
   return createPortal(
     <div
       ref={containerRef}
-      data-theme="glass"
+      data-theme="light"
       role="dialog"
       aria-modal="true"
       aria-label={title}

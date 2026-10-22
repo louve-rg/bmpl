@@ -134,6 +134,31 @@ body {
     background-color: var(--bmpl-oncolor-light-bg);
     border-color: var(--bmpl-oncolor-light-border);
     color: var(--bmpl-oncolor-light-text);
+    /* This box's own background/border/color above are already FIXED --
+       immune to [data-theme]. But a child that reads an ADAPTIVE token
+       directly (--bmpl-text-muted-strong etc, not this class's own `color`)
+       still resolves against whichever [data-theme] ancestor is nearest in
+       the DOM, which this class does not reset -- confirmed live tonight at
+       1.05-1.07:1 on LocationPicker.tsx's embedded map card (glass value on
+       this box's opaque white). Redeclaring the adaptive text tokens here,
+       to the exact values [data-theme='light'] (== :root) already uses,
+       makes every current AND future var(--bmpl-text*) consumer on this
+       surface correct without each caller remembering a data-theme="light"
+       reset. Kept in sync by hand with :root above if those four ever
+       change -- same convention [data-theme='light'] itself already uses.
+
+       THE TRAP (requirement 8): this blindly recolors ANY adaptive surface
+       nested inside (a glass .bmpl-card, another [data-theme] scope) the
+       same way, inverting its own defect instead of fixing one. Enumerated
+       every current .bmpl-surface-onlight/FormCard usage before writing
+       this (2026-10-22, Oscar) -- none nest an adaptive surface, all are
+       flat forms/cards with only static Tailwind text or these four
+       tokens. Re-check this before adding a Card/.bmpl-card/glass subtree
+       inside a .bmpl-surface-onlight box. */
+    --bmpl-text: #0f172a;
+    --bmpl-text-secondary: #334155;
+    --bmpl-text-muted: #64748b;
+    --bmpl-text-muted-strong: #475569;
   }
   .bmpl-surface-ondark {
     background-color: var(--bmpl-oncolor-dark-bg);
