@@ -225,6 +225,14 @@ const USERS = {
   opsLimited: { email: 'uat-ops-limited@bzemarketplace.com', firstName: 'Uat', lastName: 'OpsLimited' },
   customer: { email: 'uat-customer@bzemarketplace.com', firstName: 'Uat', lastName: 'Sender' },
   driver: { email: 'uat-driver@bzemarketplace.com', firstName: 'Uat', lastName: 'Driver' },
+  // MDF-410: a dedicated, self-contained isTest vendor for the admin-dispatch
+  // delivery fixture below — NOT the public uat-walk-store-simulation
+  // storefront (packages/database/prisma/seed.ts), which must stay
+  // isTest:false for /store/[slug] and /products/[slug] to resolve publicly.
+  // Checkout derives Order.isTest from the vendor being bought FROM
+  // (orders.service.ts), so a delivery fixture needs its own isTest:true
+  // vendor, separate from any public-facing one.
+  dispatchVendor: { email: 'uat-dispatch-vendor@bzemarketplace.com', firstName: 'Uat', lastName: 'DispatchVendor' },
 };
 
 const OPS_FULL_PERMISSIONS = ['logistics.read', 'logistics.manage', 'logistics.operate', 'logistics.verify'];
@@ -636,6 +644,196 @@ async function main(): Promise<void> {
       `  ✓ /track fixture booked UNPAID via POST shipping (DOOR_TO_DOOR, local same-city rate): ` +
         `${createdTrack.reference ?? '(no reference returned)'} token=${createdTrack.recipientTrackingToken ?? '(no token returned)'}`,
     );
+  }
+
+  // ---- the dispatch delivery fixture (MDF-410: admin console, /dashboard/dispatch) ----
+  //
+  // The admin dispatch console (OrderDelivery, marketplace-delivery domain)
+  // is deliberately distinct from shipping (root CLAUDE.md §6) — nothing
+  // above this point touches it. Jim's contrast spec for admin dispatch
+  // (#508) found its LIST route measurable but its DETAIL route
+  // (/dashboard/dispatch/[id]) skipping at every width: the seeded
+  // environment has zero OrderDelivery rows, because no seed script —
+  // seed.ts, this file, or seed-uat-roles.ts — has ever placed a real
+  // checkout order. That is the finding: this was never a missing-fixture
+  // bug in an EXISTING fixture, it is a domain with no UAT coverage at all.
+  //
+  // Self-contained in THIS file rather than reusing seed-uat-roles.ts's
+  // uat-vendor@ (also isTest:true, also VENDOR-approved): CI runs this
+  // script BEFORE seed-uat-roles.ts (.github/workflows/ci.yml), so that
+  // account does not exist yet when this would run. A separate, dedicated
+  // vendor avoids a cross-script ordering dependency.
+  console.info('• Dispatch delivery fixture');
+  await ensureUser(superAdmin, USERS.dispatchVendor);
+  const dispatchVendor = new Client('dispatch vendor');
+  await dispatchVendor.login(USERS.dispatchVendor.email, PASSWORD);
+
+  const vendorApps = await dispatchVendor.get<MyApplication[]>('/roles/applications');
+  let vendorApplication = vendorApps.find((a) => a.roleCode === 'VENDOR');
+  if (!vendorApplication) {
+    // Inside the guard on purpose — same reasoning as every other
+    // role-application call site in this file and in seed-uat-roles.ts.
+    await ensureEmailVerified(dispatchVendor, USERS.dispatchVendor.email);
+    const pdf = new TextEncoder().encode(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n' +
+        '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\nxref\n0 4\ntrailer<</Size 4/Root 1 0 R>>\n%%EOF\n',
+    );
+    const idUpload = await dispatchVendor.upload<{ key?: string; storageKey?: string }>(
+      '/roles/applications/VENDOR/documents/upload?filename=uat-dispatch-vendor-id.pdf',
+      pdf,
+      'application/pdf',
+    );
+    const regUpload = await dispatchVendor.upload<{ key?: string; storageKey?: string }>(
+      '/roles/applications/VENDOR/documents/upload?filename=uat-dispatch-vendor-business-registration.pdf',
+      pdf,
+      'application/pdf',
+    );
+    const idKey = idUpload.key ?? idUpload.storageKey;
+    const regKey = regUpload.key ?? regUpload.storageKey;
+    if (!idKey || !regKey) throw new Error(`Document upload returned no key: ${JSON.stringify({ idUpload, regUpload })}`);
+    await dispatchVendor.post('/roles/applications', {
+      roleCode: 'VENDOR',
+      message: 'UAT dispatch delivery fixture seed (MDF-410)',
+      documentKeys: [idKey, regKey],
+    });
+    const refreshed = await dispatchVendor.get<MyApplication[]>('/roles/applications');
+    vendorApplication = refreshed.find((a) => a.roleCode === 'VENDOR');
+    if (!vendorApplication) throw new Error('The dispatch vendor VENDOR application did not appear in /roles/applications.');
+    console.info('  ✓ VENDOR application submitted for the dispatch fixture vendor');
+  } else {
+    console.info('  • dispatch fixture vendor VENDOR application already exists');
+  }
+  if (vendorApplication.status !== 'APPROVED') {
+    await superAdmin.post('/admin/applications/approve', { applicationId: vendorApplication.id, note: 'UAT dispatch fixture seed (MDF-410)' });
+    console.info('  ✓ dispatch fixture vendor VENDOR role approved');
+  }
+
+  type VendorProfileRow = { id: string; businessName: string; approvalStatus: string };
+  type OwnProfileResponse = { profile: VendorProfileRow | null };
+  const DISPATCH_VENDOR_NAME = 'UAT Dispatch Fixture Vendor (simulation)';
+  let dispatchProfile = (await dispatchVendor.get<OwnProfileResponse>('/vendor/profile')).profile;
+  if (!dispatchProfile) {
+    dispatchProfile = (
+      await dispatchVendor.post<OwnProfileResponse>('/vendor/profile', {
+        businessName: DISPATCH_VENDOR_NAME,
+        contactEmail: USERS.dispatchVendor.email,
+        description: 'SYNTHETIC QA TEST DATA — exists solely to give the admin dispatch console (/dashboard/dispatch) a real delivery row to measure, per MDF-410. Never a real storefront.',
+      })
+    ).profile;
+    console.info('  ✓ dispatch fixture storefront profile created');
+  } else {
+    console.info('  • dispatch fixture storefront profile already exists');
+  }
+  if (!dispatchProfile) throw new Error('Dispatch fixture storefront profile is still null after create.');
+  if (dispatchProfile.approvalStatus === 'DRAFT' || dispatchProfile.approvalStatus === 'REJECTED') {
+    await dispatchVendor.post('/vendor/profile/submit');
+    dispatchProfile = (await dispatchVendor.get<OwnProfileResponse>('/vendor/profile')).profile;
+    if (!dispatchProfile) throw new Error('Dispatch fixture storefront profile disappeared after submit.');
+    console.info('  ✓ dispatch fixture storefront submitted for review');
+  }
+  if (dispatchProfile.approvalStatus === 'PENDING') {
+    await superAdmin.post(`/admin/vendors/${dispatchProfile.id}/approve`, { note: 'UAT dispatch fixture seed (MDF-410)' });
+    console.info('  ✓ dispatch fixture storefront approved');
+  } else if (dispatchProfile.approvalStatus !== 'APPROVED') {
+    throw new Error(`Unexpected dispatch fixture storefront approvalStatus "${dispatchProfile.approvalStatus}".`);
+  }
+
+  // Flagged isTest through the approved admin endpoint — idempotent on the
+  // server (vendor.service.ts short-circuits when already set), the same
+  // propagation point orders.service.ts reads at checkout to derive
+  // Order.isTest from "the vendor being bought from".
+  await superAdmin.patch(`/admin/vendors/${dispatchProfile.id}/test-mode`, { isTest: true, reason: 'UAT dispatch fixture seed (MDF-410)' });
+  console.info('  ✓ dispatch fixture storefront flagged isTest (idempotent)');
+
+  // deliveryEnabled + a flat base fee is sufficient for DeliveryPricingService
+  // .quote() to resolve DELIVERY as deliverable with no district zone
+  // configured (apps/api/src/delivery/delivery.pricing.ts) — no delivery zone
+  // or courier lane fabricated to make this exist.
+  await dispatchVendor.patch('/vendor/settings', { deliveryEnabled: true, baseDeliveryFeeMinor: 500 });
+  console.info('  ✓ dispatch fixture vendor settings: deliveryEnabled, BZ$5.00 base fee');
+
+  // A new storefront defaults to CLOSED (vendor.service.ts create()) —
+  // correct for a real vendor who has not opened yet, but checkout refuses
+  // "currently closed" for any store in that state regardless of isTest.
+  // Opened through the same approved PATCH /vendor/profile an owner uses.
+  await dispatchVendor.patch('/vendor/profile', { storeStatus: 'OPEN' });
+  console.info('  ✓ dispatch fixture storefront set to OPEN (idempotent)');
+
+  type CategoryNode = { id: string; slug: string; children: CategoryNode[] };
+  function findCategoryBySlug(nodes: CategoryNode[], slug: string): CategoryNode | null {
+    for (const n of nodes) {
+      if (n.slug === slug) return n;
+      const found = findCategoryBySlug(n.children, slug);
+      if (found) return found;
+    }
+    return null;
+  }
+  const categoryTree = await new Client('preflight').get<CategoryNode[]>('/marketplace/categories');
+  const electronicsCategory = findCategoryBySlug(categoryTree, 'electronics');
+
+  type ProductRow = { id: string; sku: string };
+  let dispatchProductId: string | null = null;
+  if (!electronicsCategory) {
+    console.info('  ⚠ MDF-410: no "electronics" category found — skipping the dispatch fixture product (and the order that depends on it).');
+  } else {
+    const DISPATCH_PRODUCT_SKU = 'UATDISPATCH-1';
+    const existingProducts = await dispatchVendor.get<ProductRow[]>('/vendor/products');
+    const existingProduct = existingProducts.find((p) => p.sku === DISPATCH_PRODUCT_SKU);
+    if (existingProduct) {
+      dispatchProductId = existingProduct.id;
+      console.info('  • dispatch fixture product already exists');
+    } else {
+      const created = await dispatchVendor.post<ProductRow>('/vendor/products', {
+        title: 'UAT Dispatch Fixture Widget (simulation)',
+        sku: DISPATCH_PRODUCT_SKU,
+        categoryId: electronicsCategory.id,
+        priceMinor: 1000,
+        description: 'SYNTHETIC QA TEST DATA — exists solely so a real checkout order can be placed for the admin dispatch fixture (MDF-410). Not for sale.',
+      });
+      dispatchProductId = created.id;
+      console.info('  ✓ dispatch fixture product created via POST vendor/products');
+    }
+  }
+
+  if (dispatchProductId) {
+    // One order per environment, never re-placed: checking for an existing
+    // order against this vendor (by its distinctive businessName) rather
+    // than re-running checkout, which would otherwise create a fresh
+    // OrderDelivery on every seed run.
+    type MyOrderRow = { id: string; vendors: string[] };
+    type OrderDetail = { vendorOrders: Array<{ delivery: { id: string } | null }> };
+    const myOrders = await customer.get<MyOrderRow[]>('/orders');
+    const existingOrder = myOrders.find((o) => o.vendors.includes(DISPATCH_VENDOR_NAME));
+    if (existingOrder) {
+      const detail = await customer.get<OrderDetail>(`/orders/${existingOrder.id}`);
+      const deliveryId = detail.vendorOrders.find((vo) => vo.delivery)?.delivery?.id;
+      console.info(
+        `  • dispatch fixture delivery order already exists: order=${existingOrder.id} delivery=${deliveryId ?? '(not found)'}`,
+      );
+    } else {
+      await customer.post('/cart/items', { productId: dispatchProductId, quantity: 1 });
+      const placed = await customer.post<{ orderNumber?: string } & OrderDetail>('/checkout', {
+        vendors: [{ vendorProfileId: dispatchProfile.id, deliveryMethod: 'DELIVERY' }],
+        deliveryAddress: {
+          fullName: 'Uat Dispatch Recipient',
+          phone: '+501-600-0005',
+          addressLine1: '56 MDF-410 QA Fixture Road',
+          city: 'Belize City',
+          district: 'BELIZE',
+        },
+        // Unpaid, same reasoning as the /track shipment fixture above: this
+        // never has to become settled, real work. isTest:true (derived from
+        // the vendor, never requested) already keeps it off any real
+        // driver's pool regardless — see driver.service.ts's two-way
+        // isTest/isTestDelivery check.
+        payWithWallet: false,
+      });
+      const deliveryId = placed.vendorOrders.find((vo) => vo.delivery)?.delivery?.id;
+      console.info(
+        `  ✓ dispatch fixture delivery order placed UNPAID via POST checkout: ${placed.orderNumber ?? '(no order number returned)'} ` +
+          `delivery=${deliveryId ?? '(not found)'} (reachable from /dashboard/dispatch as an OrderDelivery row)`,
+      );
+    }
   }
 
   console.info('\nUAT walkthrough environment ready.');
