@@ -216,7 +216,7 @@ function UpdatesPanel() {
               <p className="truncate text-[12px] font-semibold text-white">{f.title}</p>
               <p className="truncate text-[10px] text-blue-100/60">{f.sub}</p>
             </div>
-            <span className="shrink-0 text-[10px] text-blue-100/50">{f.time}</span>
+            <span className="shrink-0 text-[10px] text-blue-100/60">{f.time}</span>
           </div>
         ))}
       </div>
