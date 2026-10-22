@@ -58,7 +58,7 @@ export function AvailabilityControl({
 
   return (
     <UiCard
-      className={`p-4 sm:p-6 ${current === 'ONLINE' ? 'border-emerald-300 bg-emerald-50/40' : ''}`}
+      className={`p-4 sm:p-6 ${current === 'ONLINE' ? 'border-emerald-300 bg-emerald-500/10' : ''}`}
       // aria-live: going online/offline is a state change the driver needs
       // confirmed, and on a phone the badge may be the only thing they see.
       aria-live="polite"
