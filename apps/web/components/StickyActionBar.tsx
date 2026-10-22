@@ -52,6 +52,24 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
  * already reserves its own space in flow, confirmed by rendering (not just
  * reading the keyword) -- measured 115px+ of clearance at every width
  * tested, no fix needed there.
+ *
+ * KEYBOARD-SHRINK FOLLOW-UP (MDF-376): `scroll-padding-bottom` above only
+ * shapes a FUTURE scroll -- it cannot retroactively fix a scroll position
+ * the browser already computed against a taller, pre-shrink viewport. An
+ * on-screen keyboard opening AFTER a field is focused (and already scrolled
+ * clear of the bar) shrinks the viewport without re-running that scroll,
+ * so a field that was correctly clear a moment ago can end up with its
+ * bottom edge behind the bar once the keyboard takes its space. Measured
+ * on /dashboard/shipments/new, fixed mode only: the address input's bottom
+ * edge landed 13px past the bar's top edge at 320x329 (320 width, the
+ * viewport height once shrunk) -- clean at 375/390/430, where the same
+ * shrink left the field comfortably clear. Fixed by re-running
+ * `scrollIntoView({ block: 'nearest' })` on whichever element is currently
+ * focused, on every window resize, but ONLY while this bar is actually
+ * fixed (getComputedStyle, same guard `sync` already uses) -- `sticky`
+ * mode is untouched, and `block: 'nearest'` is a no-op wherever the field
+ * already satisfies `scroll-padding-bottom`, which is every width but 320
+ * here, so it cannot move a field that wasn't a problem.
  */
 export function StickyActionBar({
   sticky = false,
@@ -84,9 +102,20 @@ export function StickyActionBar({
       const height = isFixed ? el.offsetHeight : 0;
       setSpacerHeight(height);
       root.style.scrollPaddingBottom = isFixed ? `${height}px` : previousScrollPadding;
+      return isFixed;
     };
 
     sync();
+
+    // See the KEYBOARD-SHRINK FOLLOW-UP comment above the component.
+    const onWindowResize = () => {
+      const isFixed = sync();
+      const active = document.activeElement;
+      if (isFixed && active instanceof HTMLElement && active !== document.body && !el.contains(active)) {
+        active.scrollIntoView({ block: 'nearest' });
+      }
+    };
+    window.addEventListener('resize', onWindowResize);
 
     // MDF-376: ResizeObserver is absent in some environments (jsdom in this
     // app's own unit tests; conceivably a locked-down browser) -- this bar
@@ -95,6 +124,7 @@ export function StickyActionBar({
     // throw at mount.
     if (typeof ResizeObserver === 'undefined') {
       return () => {
+        window.removeEventListener('resize', onWindowResize);
         root.style.scrollPaddingBottom = previousScrollPadding;
       };
     }
@@ -102,6 +132,7 @@ export function StickyActionBar({
     const ro = new ResizeObserver(sync);
     ro.observe(el);
     return () => {
+      window.removeEventListener('resize', onWindowResize);
       ro.disconnect();
       root.style.scrollPaddingBottom = previousScrollPadding;
     };
