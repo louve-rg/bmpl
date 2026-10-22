@@ -137,7 +137,7 @@ export function DashboardNavList({
                     {item.href === '/dashboard/messages' && unread > 0 && (
                       <span
                         aria-label={unreadLabel(unread)}
-                        className="inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full bg-belize-accent px-1.5 text-[10px] font-bold leading-[18px] text-white"
+                        className="inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full bg-belize-accent px-1.5 text-[10px] font-bold leading-[18px] text-belize-navy"
                       >
                         {badgeCount(unread)}
                       </span>

@@ -6,7 +6,7 @@ const base =
 
 const variants = {
   primary: 'bg-belize-blue text-white shadow-bmpl-sm hover:bg-belize-deep',
-  accent: 'bg-belize-accent text-white shadow-bmpl-sm hover:brightness-110',
+  accent: 'bg-belize-accent text-belize-navy shadow-bmpl-sm hover:brightness-110',
   outline: 'border border-[color:var(--bmpl-border)] text-[color:var(--bmpl-text)] hover:border-belize-blue hover:bg-belize-blue/5',
   ghost: 'text-[color:var(--bmpl-link)] hover:bg-belize-blue/5',
   ghostLight: 'text-white/90 hover:text-white',

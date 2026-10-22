@@ -154,7 +154,7 @@ function MarketplaceCard() {
           </div>
           <span className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500">
             <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4"><path d="M5 7h14l-1.2 8.5a2 2 0 0 1-2 1.7H8.2a2 2 0 0 1-2-1.7L5 7Z" stroke="currentColor" strokeWidth="1.6" /><path d="M8.5 7a3.5 3.5 0 1 1 7 0" stroke="currentColor" strokeWidth="1.6" /></svg>
-            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-belize-accent text-[9px] font-bold text-white">3</span>
+            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-belize-accent text-[9px] font-bold text-belize-navy">3</span>
           </span>
         </div>
 
