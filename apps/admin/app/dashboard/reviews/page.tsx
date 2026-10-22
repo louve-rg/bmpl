@@ -303,7 +303,12 @@ function ReviewCard({ review, onModerated, canModerate }: { review: Review; onMo
   }
 
   return (
-    <li className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
+    // data-theme="light" resets the adaptive-token scope for this subtree:
+    // the card paints an opaque bg-white (and the nested bg-slate-50
+    // seller-response box inherits the same reset), so their muted-strong
+    // text must resolve the on-light value, not the glass-ambient
+    // near-white one.
+    <li data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Badge tone="brand">{review.subjectType}</Badge>
@@ -561,7 +566,9 @@ function ReportCard({
   }
 
   return (
-    <li className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
+    // data-theme="light" resets the adaptive-token scope for this subtree,
+    // same reason as the ReviewCard above.
+    <li data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Badge tone="error">{report.reason}</Badge>

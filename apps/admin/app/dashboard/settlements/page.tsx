@@ -360,7 +360,11 @@ function FeeConfigSection({ canManage }: { canManage: boolean }) {
 
 function ConfigTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-bmpl-lg border border-slate-200 bg-slate-50 p-3">
+    // data-theme="light" resets the adaptive-token scope for this subtree:
+    // the tile paints an opaque bg-slate-50, so `sub`'s muted-strong token
+    // must resolve the on-light value rather than the glass-ambient
+    // near-white one the dashboard shell would otherwise hand it.
+    <div data-theme="light" className="rounded-bmpl-lg border border-slate-200 bg-slate-50 p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-bold text-belize-navy">{value}</p>
       {sub && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">{sub}</p>}
@@ -631,7 +635,12 @@ function AdminSettlementDetailView({ id }: { id: string }) {
         )}
       </div>
 
-      <div className="rounded-bmpl-lg border border-slate-200 bg-white p-4">
+      {/* data-theme="light" resets the adaptive-token scope for this subtree:
+          the panel paints an opaque bg-white, so the empty-state copy below
+          (which reads --bmpl-text-muted-strong) must resolve the on-light
+          value, not the glass-ambient near-white one the dashboard shell
+          would otherwise hand it. */}
+      <div data-theme="light" className="rounded-bmpl-lg border border-slate-200 bg-white p-4">
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Driver earnings</h3>
         {detail.driverEarnings.length === 0 ? (
           <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No driver earnings for this settlement.</p>
@@ -653,7 +662,9 @@ function AdminSettlementDetailView({ id }: { id: string }) {
         )}
       </div>
 
-      <div className="rounded-bmpl-lg border border-slate-200 bg-white p-4">
+      {/* data-theme="light" resets the adaptive-token scope for this subtree,
+          same reason as the "Driver earnings" panel above. */}
+      <div data-theme="light" className="rounded-bmpl-lg border border-slate-200 bg-white p-4">
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Rates snapshot</h3>
         {detail.snapshot?.config ? (
           <dl className="space-y-1.5 text-sm">

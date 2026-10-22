@@ -358,7 +358,11 @@ function ModerationTab({ canModerate }: { canModerate: boolean }) {
       )}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
-        <div className="rounded-bmpl-xl border border-slate-200 bg-white">
+        {/* data-theme="light" resets the adaptive-token scope for this
+            subtree: the list paints an opaque bg-white, so each row's muted
+            metadata line (--bmpl-text-muted-strong) must resolve the
+            on-light value, not the glass-ambient near-white one. */}
+        <div data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white">
           {listState === 'loading' ? (
             <div className="flex items-center gap-2 p-4 text-sm text-slate-500">
               <Spinner className="h-4 w-4" /> Loading jobs…
@@ -542,7 +546,12 @@ function JobDetailPanel({ id, onModerated, canModerate }: { id: string; onModera
   const actions = availableActions(detail.status);
 
   return (
-    <div className="rounded-bmpl-xl border border-slate-200 bg-white">
+    // data-theme="light" resets the adaptive-token scope for this subtree:
+    // the panel paints an opaque bg-white, so every muted-strong consumer
+    // inside it (meta line, Skills/Benefits/Screening-questions labels,
+    // ExpandableText's label, the no-actions copy) must resolve the
+    // on-light value, not the glass-ambient near-white one.
+    <div data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-200 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-semibold text-belize-navy">{detail.title}</h2>
@@ -857,7 +866,11 @@ function ReportCard({
   }
 
   return (
-    <li className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
+    // data-theme="light" resets the adaptive-token scope for this subtree:
+    // the card paints an opaque bg-white (and the nested bg-slate-50 job
+    // summary inherits the same reset), so their muted-strong text must
+    // resolve the on-light value, not the glass-ambient near-white one.
+    <li data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Badge tone="error">{report.reason.replace(/_/g, ' ')}</Badge>
@@ -1031,7 +1044,9 @@ function EmployersTab({ canModerate }: { canModerate: boolean }) {
       )}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
-        <div className="rounded-bmpl-xl border border-slate-200 bg-white">
+        {/* data-theme="light" resets the adaptive-token scope for this
+            subtree, same reason as the jobs list above. */}
+        <div data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white">
           {listState === 'loading' ? (
             <div className="flex items-center gap-2 p-4 text-sm text-slate-500">
               <Spinner className="h-4 w-4" /> Loading employers…
@@ -1172,7 +1187,9 @@ function EmployerDetailPanel({ id, onChanged, canModerate }: { id: string; onCha
   const suspended = detail.approvalStatus === 'SUSPENDED';
 
   return (
-    <div className="rounded-bmpl-xl border border-slate-200 bg-white">
+    // data-theme="light" resets the adaptive-token scope for this subtree,
+    // same reason as JobDetailPanel above.
+    <div data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-200 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-semibold text-belize-navy">{detail.companyName}</h2>
@@ -1478,7 +1495,11 @@ function CategoryRow({
   }
 
   return (
-    <li className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
+    // data-theme="light" resets the adaptive-token scope for this subtree:
+    // the row paints an opaque bg-white, so the "Order N" muted-strong
+    // label must resolve the on-light value, not the glass-ambient
+    // near-white one.
+    <li data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
       {editing ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-end gap-3">
@@ -1616,7 +1637,11 @@ function AnalyticsTab() {
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {kpis.map((k) => (
-          <div key={k.label} className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
+          // data-theme="light" resets the adaptive-token scope for this
+          // subtree: each KPI tile paints an opaque bg-white, so its label
+          // and hint (muted-strong) must resolve the on-light value, not
+          // the glass-ambient near-white one.
+          <div key={k.label} data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-[color:var(--bmpl-text-muted-strong)]">{k.label}</p>
             <p className="mt-1 text-2xl font-semibold text-belize-navy">{k.value}</p>
             {k.hint && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">{k.hint}</p>}
@@ -1641,7 +1666,11 @@ function AnalyticsTab() {
 function MiniTable({ title, rows }: { title: string; rows: Array<{ label: string; count: number }> }) {
   const max = rows.reduce((m, r) => Math.max(m, r.count), 0);
   return (
-    <div className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
+    // data-theme="light" resets the adaptive-token scope for this subtree:
+    // the panel paints an opaque bg-white, so the "No data yet." copy
+    // (muted-strong) must resolve the on-light value, not the
+    // glass-ambient near-white one.
+    <div data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
       <p className="mb-3 text-sm font-semibold text-belize-navy">{title}</p>
       {rows.length === 0 ? (
         <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No data yet.</p>
