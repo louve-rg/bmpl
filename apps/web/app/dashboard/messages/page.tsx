@@ -454,7 +454,7 @@ function MessageBubble({ message }: { message: Message }) {
   if (message.type === 'SYSTEM') {
     return (
       <div className="flex justify-center">
-        <div className="max-w-md rounded-full bg-slate-200/70 px-3 py-1 text-center text-xs text-slate-500">
+        <div className="max-w-md rounded-full bg-slate-200/70 px-3 py-1 text-center text-xs text-slate-700">
           {message.deleted ? 'Message removed' : message.body}
           <span className="ml-1.5 text-slate-700">· {relativeTime(message.createdAt)}</span>
         </div>
