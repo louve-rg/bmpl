@@ -11,8 +11,26 @@ interface AnnouncementResponse {
 
 const LEVEL_STYLES: Record<'INFO' | 'WARNING' | 'CRITICAL', string> = {
   INFO: 'bg-belize-blue text-white',
-  WARNING: 'bg-amber-500 text-white',
+  // bg-amber-500 is light, not dark like the other two levels -- white text
+  // on it (the message, and the level pill at :48 which inherits this
+  // colour) measured 2.15:1. slate-900 measures 8.31:1 on amber-500 directly
+  // and 9.60:1 on the pill's own bg-white/20-over-amber-500 ground.
+  WARNING: 'bg-amber-500 text-slate-900',
   CRITICAL: 'bg-red-600 text-white',
+};
+
+// The dismiss icon sits directly on the level's background (no pill wrapper),
+// so it needs the same light/dark split as LEVEL_STYLES above, chosen by
+// measuring each of the three grounds rather than reusing one colour:
+// INFO (belize-blue) and CRITICAL (red-600) are dark -- white/80 measured
+// 6.19:1 and 3.52:1 there; dropping the 20% translucency to plain white
+// raises CRITICAL to 4.83:1 with real headroom over the icon's 3:1 bar
+// without costing INFO anything. WARNING (amber-500) is light -- white
+// measured 1.84:1, the worst ratio found tonight; slate-900 measures 8.31:1.
+const DISMISS_ICON_STYLES: Record<'INFO' | 'WARNING' | 'CRITICAL', string> = {
+  INFO: 'text-white hover:bg-white/20',
+  WARNING: 'text-slate-900 hover:bg-black/10',
+  CRITICAL: 'text-white hover:bg-white/20',
 };
 
 export function AnnouncementBanner() {
@@ -53,7 +71,7 @@ export function AnnouncementBanner() {
             type="button"
             onClick={() => setDismissedAnnouncement(true)}
             aria-label="Dismiss announcement"
-            className="shrink-0 rounded p-0.5 text-white/80 transition hover:bg-white/20 hover:text-white"
+            className={`shrink-0 rounded p-0.5 transition ${DISMISS_ICON_STYLES[data.announcement.level]}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4" aria-hidden>
               <path d="M6 6l12 12M18 6 6 18" />
@@ -73,7 +91,7 @@ export function AnnouncementBanner() {
             type="button"
             onClick={() => setDismissedMaintenance(true)}
             aria-label="Dismiss maintenance notice"
-            className="shrink-0 rounded p-0.5 text-sky-700/70 transition hover:bg-sky-100 hover:text-sky-900"
+            className="shrink-0 rounded p-0.5 text-sky-700 transition hover:bg-sky-100 hover:text-sky-900"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4" aria-hidden>
               <path d="M6 6l12 12M18 6 6 18" />
