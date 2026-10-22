@@ -91,11 +91,11 @@ export function AvailabilityCard({
                   className={`rounded-bmpl-md border px-3 py-2 text-left transition ${
                     active
                       ? 'border-belize-blue bg-blue-50 ring-1 ring-belize-blue'
-                      : 'border-slate-200 hover:border-belize-blue/50'
+                      : 'border-slate-200 bg-white hover:border-belize-blue/50'
                   } ${disabled && !active ? 'cursor-not-allowed opacity-50' : ''}`}
                 >
-                  <span className={`block text-sm font-semibold ${active ? 'text-belize-navy' : 'text-[color:var(--bmpl-text)]'}`}>{o.label}</span>
-                  <span className={`mt-0.5 block text-xs ${active ? 'text-slate-600' : 'text-[color:var(--bmpl-text-muted)]'}`}>{o.hint}</span>
+                  <span className={`block text-sm font-semibold ${active ? 'text-belize-navy' : 'text-slate-600'}`}>{o.label}</span>
+                  <span className={`mt-0.5 block text-xs ${active ? 'text-slate-600' : 'text-[color:var(--bmpl-oncolor-light-text-muted)]'}`}>{o.hint}</span>
                 </button>
               );
             })}
