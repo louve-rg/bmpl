@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { loginAsRole } from '../support/auth';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
-import { sweepContrast, formatSweepReport } from '../support/contrast-sweep';
+import { sweepContrast, formatSweepReport, writeSweepResultRecords } from '../support/contrast-sweep';
 import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
 
 /**
@@ -63,6 +63,7 @@ test.describe('contrast: vendor settlements', () => {
       const result = await sweepContrast(page);
       console.log(formatSweepReport(`web ${ROUTE} VENDOR @ ${viewport}px`, result));
       recordPassNames(result);
+      writeSweepResultRecords(result, { route: ROUTE, viewport });
 
       if (result.text.measuredCount === 0) {
         throw new Error(`contrast sweep measured ZERO text elements on ${ROUTE} at ${viewport}px -- this is a false clean, not a pass. Investigate before trusting this run.`);

@@ -1,4 +1,6 @@
+import * as fs from 'node:fs';
 import { ensurePortFree, startDevServer, stopDevServer, waitForRealReadiness, CONTRAST_PORT, CONTRAST_BASE_URL } from './server';
+import { SWEEP_RESULTS_NDJSON_PATH } from './contrast-sweep';
 
 /**
  * Same lifecycle as global-setup.ts, pinned to CONTRAST_PORT instead of
@@ -13,6 +15,13 @@ import { ensurePortFree, startDevServer, stopDevServer, waitForRealReadiness, CO
  * CONTRAST_PORT comment.
  */
 export default async function globalSetup() {
+  // Truncated exactly once per `playwright test` invocation, here rather
+  // than in contrast-sweep.ts itself (god, 2026-10-22, MDF-376): a worker
+  // restart after a failed test resets that module's state, so a module-
+  // level "have I cleared it yet" flag would either never fire or fire on
+  // every restart. Global setup runs once regardless of worker restarts.
+  fs.rmSync(SWEEP_RESULTS_NDJSON_PATH, { force: true });
+
   ensurePortFree(CONTRAST_PORT);
   const server = startDevServer(CONTRAST_PORT);
 

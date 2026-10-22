@@ -1,4 +1,6 @@
 import type { Page } from '@playwright/test';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { openPixelSampler, contrastRatioOf, compositeOver, type RGB } from './contrast';
 
 /**
@@ -119,6 +121,22 @@ export const AMBIGUOUS_DOMINANT_SHARE_CUTOFF = 0.5;
  */
 export const MIN_ICON_INK_SHARE = 2 / 18;
 
+/**
+ * Maximum fraction of the 18-point grid allowed to have fallen outside the
+ * sampler's own canvas (`contrast.ts`'s `outOfBoundsShare`) before a
+ * reading is forced into AMBIGUOUS regardless of ratio or dominantShare.
+ * Found live (god/frontend owner, 2026-10-22, MDF-376): the dispatch
+ * list's `overflow-x-auto` table clips cells that still return a real,
+ * non-zero `getBoundingClientRect()` -- the sampler was confidently
+ * reporting a ratio against pixels that were never that cell's own
+ * content at all, because the cell is never painted anywhere once clipped
+ * away by a scrolling ancestor. This is the design principle god asked
+ * for stated as code: a sampler that cannot see an element must say so,
+ * not return a number. 0.5 mirrors AMBIGUOUS_DOMINANT_SHARE_CUTOFF's own
+ * "majority" framing rather than a new standard of its own.
+ */
+export const OUT_OF_BOUNDS_SHARE_CUTOFF = 0.5;
+
 export interface SweepTextElement {
   kind: 'text';
   tag: string;
@@ -180,8 +198,8 @@ export interface SweepResult {
  * reports how many it excluded for that reason rather than silently
  * shrinking the count.
  */
-type DiscoveredText = SweepTextElement & { disabled: boolean };
-type DiscoveredIcon = SweepIconElement & { composite: boolean };
+type DiscoveredText = SweepTextElement & { disabled: boolean; fixedPositionAncestor: boolean };
+type DiscoveredIcon = SweepIconElement & { composite: boolean; fixedPositionAncestor: boolean };
 
 async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; icon: DiscoveredIcon[] }> {
   return page.evaluate(() => {
@@ -228,6 +246,20 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         const cs = getComputedStyle(child);
         if (cs.backgroundImage !== 'none') return true;
         if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') return true;
+      }
+      return false;
+    }
+
+    // See contrast.ts's `ensureViewportSampler` comment for the full
+    // reasoning (god, 2026-10-22, MDF-376, FullScreenMapModal): a
+    // `position: fixed` ancestor breaks the fullPage-screenshot sampling
+    // assumption in a way no coordinate offset can fix, so elements under
+    // one are flagged at discovery time and routed to a different sampler.
+    function hasFixedPositionAncestor(el: Element): boolean {
+      let node: Element | null = el;
+      while (node) {
+        if (getComputedStyle(node).position === 'fixed') return true;
+        node = node.parentElement;
       }
       return false;
     }
@@ -305,6 +337,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       box: { x: number; y: number; width: number; height: number };
       disabled: boolean;
       color: string;
+      fixedPositionAncestor: boolean;
     }> = [];
     const iconOut: Array<{
       kind: 'icon';
@@ -313,6 +346,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       accessibleName: string | null;
       box: { x: number; y: number; width: number; height: number };
       composite: boolean;
+      fixedPositionAncestor: boolean;
     }> = [];
 
     for (const el of document.body.querySelectorAll('*')) {
@@ -334,6 +368,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
           accessibleName: accessibleNameOf(el, null),
           box: { x: box.x, y: box.y, width: box.width, height: box.height },
           composite: hasOwnFillDescendant(el),
+          fixedPositionAncestor: hasFixedPositionAncestor(el),
         });
         continue;
       }
@@ -366,6 +401,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         box: { x: box.x, y: box.y, width: box.width, height: box.height },
         disabled: isDisabled(el),
         color: cs.color,
+        fixedPositionAncestor: hasFixedPositionAncestor(el),
       });
     }
 
@@ -400,7 +436,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       const fgParsed = parseRgbLocal(t.color);
       if (!fgParsed) continue;
 
-      const { rgb: bg, share } = await sampler.sampleDominant(t.box);
+      const { rgb: bg, share, outOfBoundsShare } = await sampler.sampleDominant(t.box, { fixedPosition: t.fixedPositionAncestor });
       const fg = compositeOver(fgParsed.rgb, fgParsed.alpha, bg);
       const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
       const requiredRatio = t.isLargeText ? WCAG_LARGE_TEXT_MIN_RATIO : WCAG_NORMAL_TEXT_MIN_RATIO;
@@ -414,8 +450,15 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
         box: t.box,
         color: t.color,
       };
-      const reading: SweepReading<SweepTextElement> = { element, ratio, dominantShare: share, foreground: fg, dominantBackground: bg, requiredRatio };
-      if (share < ambiguousShareCutoff) textBucket.ambiguous.push(reading);
+      // `outOfBoundsShare` too high means the box was clipped away by a
+      // scrolling ancestor (or otherwise never painted where it was
+      // sampled) -- see OUT_OF_BOUNDS_SHARE_CUTOFF's own comment. Reported
+      // share is overridden to make that the printed reason, same
+      // precedent as the icon loop's `reportedShare` below.
+      const boxOutOfBounds = outOfBoundsShare > OUT_OF_BOUNDS_SHARE_CUTOFF;
+      const reportedTextShare = boxOutOfBounds ? 1 - outOfBoundsShare : share;
+      const reading: SweepReading<SweepTextElement> = { element, ratio, dominantShare: reportedTextShare, foreground: fg, dominantBackground: bg, requiredRatio };
+      if (share < ambiguousShareCutoff || boxOutOfBounds) textBucket.ambiguous.push(reading);
       else if (ratio < requiredRatio) textBucket.fail.push(reading);
       else textBucket.pass.push(reading);
     }
@@ -425,7 +468,8 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
 
     const iconBucket: SweepBucket<SweepIconElement> = { pass: [], fail: [], ambiguous: [] };
     for (const ic of measurableIcons) {
-      const clusters = await sampler.sampleClustersOrdered(ic.box);
+      const clusters = await sampler.sampleClustersOrdered(ic.box, { fixedPosition: ic.fixedPositionAncestor });
+      const boxOutOfBounds = clusters.outOfBoundsShare > OUT_OF_BOUNDS_SHARE_CUTOFF;
       if (clusters.length === 0) continue;
       const bg = clusters[0]!.rgb;
       const share = clusters[0]!.share;
@@ -448,10 +492,10 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       // reading is ambiguous rather than contradicting it.
       const inkShare = clusters[1]?.share ?? 0;
       const inkUnreliable = inkShare < MIN_ICON_INK_SHARE;
-      const reportedShare = inkUnreliable && share >= ambiguousShareCutoff ? inkShare : share;
+      const reportedShare = boxOutOfBounds ? 1 - clusters.outOfBoundsShare : inkUnreliable && share >= ambiguousShareCutoff ? inkShare : share;
       const element: SweepIconElement = { kind: 'icon', tag: ic.tag, accessibleRole: ic.accessibleRole, accessibleName: ic.accessibleName, box: ic.box };
       const reading: SweepReading<SweepIconElement> = { element, ratio, dominantShare: reportedShare, foreground: fg, dominantBackground: bg, requiredRatio: WCAG_ICON_MIN_RATIO };
-      if (share < ambiguousShareCutoff || inkUnreliable) iconBucket.ambiguous.push(reading);
+      if (share < ambiguousShareCutoff || inkUnreliable || boxOutOfBounds) iconBucket.ambiguous.push(reading);
       else if (ratio < WCAG_ICON_MIN_RATIO) iconBucket.fail.push(reading);
       else iconBucket.pass.push(reading);
     }
@@ -498,6 +542,78 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
   } finally {
     await sampler.close();
   }
+}
+
+const APP_NAME = 'web';
+
+/**
+ * One NDJSON file per app, truncated once per `playwright test` invocation
+ * by global-setup.contrast.ts (not per-test/per-worker — a worker restart
+ * after a failed test resets this module's state, so clearing here would
+ * either never happen or happen on every restart; global setup runs
+ * exactly once regardless). Resolved from this file's own location, not
+ * `process.cwd()`, because `pnpm --filter @bmpl/web test:contrast` and a
+ * bare `playwright test` run from this directory give that a different
+ * value — this path is always `apps/web/contrast-results.ndjson`.
+ */
+export const SWEEP_RESULTS_NDJSON_PATH = path.resolve(__dirname, '..', '..', 'contrast-results.ndjson');
+
+export interface SweepResultRecord {
+  app: string;
+  route: string;
+  viewport: number;
+  elementKind: 'text' | 'icon';
+  bucket: 'pass' | 'fail' | 'ambiguous';
+  accessibleRole: string | null;
+  accessibleName: string | null;
+  ratio: number;
+  requiredRatio: number;
+  dominantShare: number;
+  foreground: RGB;
+  dominantBackground: RGB;
+}
+
+/**
+ * Persists every reading from one sweep -- PASS and AMBIGUOUS included, not
+ * only FAIL -- as one line of structured JSON each, appended before the
+ * caller runs `assertRatchet`, so a thrown ratchet error can never prevent
+ * the write (god, 2026-10-22, MDF-376: this is the data the enforce-step
+ * summary reads; "giving FAIL rows the same fields the ambiguous rows
+ * already print" closes the exact gap that cost five bad merge
+ * verifications -- the real numbers were only reachable by reconstructing
+ * them from `gh run view --log`). `foreground`/`dominantBackground` were
+ * always computed onto every `SweepReading` -- see that type above -- just
+ * never printed by `formatSweepReport`; this writes what already exists,
+ * it does not compute anything new.
+ */
+export function writeSweepResultRecords(result: SweepResult, context: { route: string; viewport: number }): void {
+  const records: SweepResultRecord[] = [];
+  function pushBucket(elementKind: 'text' | 'icon', bucket: 'pass' | 'fail' | 'ambiguous', readings: Array<SweepReading<SweepTextElement> | SweepReading<SweepIconElement>>) {
+    for (const r of readings) {
+      records.push({
+        app: APP_NAME,
+        route: context.route,
+        viewport: context.viewport,
+        elementKind,
+        bucket,
+        accessibleRole: r.element.accessibleRole,
+        accessibleName: r.element.accessibleName,
+        ratio: r.ratio,
+        requiredRatio: r.requiredRatio,
+        dominantShare: r.dominantShare,
+        foreground: r.foreground,
+        dominantBackground: r.dominantBackground,
+      });
+    }
+  }
+  pushBucket('text', 'pass', result.text.pass);
+  pushBucket('text', 'fail', result.text.fail);
+  pushBucket('text', 'ambiguous', result.text.ambiguous);
+  pushBucket('icon', 'pass', result.icon.pass);
+  pushBucket('icon', 'fail', result.icon.fail);
+  pushBucket('icon', 'ambiguous', result.icon.ambiguous);
+  if (records.length === 0) return;
+  fs.appendFileSync(SWEEP_RESULTS_NDJSON_PATH, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
 }
 
 /**

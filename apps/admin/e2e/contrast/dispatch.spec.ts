@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { loginAsRole } from '../support/auth';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
-import { sweepContrast, formatSweepReport } from '../support/contrast-sweep';
+import { sweepContrast, formatSweepReport, writeSweepResultRecords } from '../support/contrast-sweep';
 import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
 
 /**
@@ -86,6 +86,7 @@ test.describe('contrast: admin dispatch list', () => {
       const result = await sweepContrast(page);
       console.log(formatSweepReport(`admin ${LIST_ROUTE} SUPER_ADMIN @ ${viewport}px`, result));
       recordPassNames(result);
+      writeSweepResultRecords(result, { route: LIST_ROUTE, viewport });
 
       if (result.text.measuredCount === 0) {
         throw new Error(`contrast sweep measured ZERO text elements on ${LIST_ROUTE} at ${viewport}px -- this is a false clean, not a pass. Investigate before trusting this run.`);
@@ -128,6 +129,7 @@ test.describe('contrast: admin dispatch detail', () => {
       const result = await sweepContrast(page);
       console.log(formatSweepReport(`admin ${href} SUPER_ADMIN @ ${viewport}px`, result));
       recordPassNames(result);
+      writeSweepResultRecords(result, { route: DETAIL_ROUTE_LABEL, viewport });
 
       if (result.text.measuredCount === 0) {
         throw new Error(`contrast sweep measured ZERO text elements on ${href} at ${viewport}px -- this is a false clean, not a pass. Investigate before trusting this run.`);

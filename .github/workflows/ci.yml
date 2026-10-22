@@ -635,6 +635,24 @@ jobs:
           path: apps/admin/playwright-report
           retention-days: 7
 
+      # `if: always()`, read-and-print only, no `continue-on-error` (there is
+      # nothing here that can fail in a way worth hiding) and no change to
+      # the enforce step's own `if` condition below. Exists because
+      # `continue-on-error: true` on both contrast-web/contrast-admin steps
+      # means their `conclusion` is always 'success' -- the real pass/fail/
+      # ambiguous counts were only reachable by downloading this job's log
+      # and hand-parsing it, which produced five bad merge verifications in
+      # one night (god, 2026-10-22, MDF-376). Reads the NDJSON both contrast
+      # steps write (one line per reading, before either can throw) and
+      # prints a Markdown table straight into the job summary -- same
+      # fields the ambiguous bucket already logged, now also for FAIL, and
+      # for both buckets in one place instead of reconstructed from `gh run
+      # view --log`. This step asserts nothing; the verdict stays exactly
+      # where it already lives, in the enforce step's `if` below.
+      - name: Contrast result summary (requirement 7 -- informational, reads NDJSON written before the ratchet could throw)
+        if: always()
+        run: node scripts/summarize-contrast-ndjson.mjs apps/web/contrast-results.ndjson apps/admin/contrast-results.ndjson >> "$GITHUB_STEP_SUMMARY"
+
       # NOW continue-on-error too (god, 2026-10-21), matching every other
       # step in this job -- see docs/visual-baseline-exit-log.md's own exit
       # criterion for exactly when this comes back off. Reason: turning this

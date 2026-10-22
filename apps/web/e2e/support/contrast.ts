@@ -35,6 +35,8 @@ export interface ContrastReading {
   dominantBackground: RGB;
   /** 0..1 — the fraction of sampled grid points that matched the dominant color. Low means an ambiguous read (gradient, image, glass edge) — check by eye before trusting the ratio. */
   dominantShare: number;
+  /** 0..1 — the fraction of the grid that fell outside the sampler's own canvas before clamping. High means the box does not correspond to anything actually rendered where it was sampled (e.g. clipped by a scrolling ancestor's overflow) — a different failure from a low `dominantShare`, and the stronger of the two reasons not to trust `ratio`. */
+  outOfBoundsShare: number;
 }
 
 export const WCAG_AA_NORMAL_TEXT_MIN_RATIO = 4.5;
@@ -96,10 +98,22 @@ export function contrastRatioOf(fg: RGB, bg: RGB): number {
  * `sampleContrast` always has — fractional interior grid (6x3), clustered by
  * rounded color — just reusable across many boxes instead of one.
  */
+export interface SampleOptions {
+  /**
+   * True when the element (or an ancestor) is `position: fixed` -- see
+   * `openPixelSampler`'s own comment on `ensureViewportSampler` for why
+   * this needs an entirely different screenshot, not just a coordinate
+   * offset. Defaults to false: a true no-op for every caller that doesn't
+   * know or doesn't care, same convention as the scrollOffset fix above.
+   */
+  fixedPosition?: boolean;
+}
+
 export interface PixelSampler {
-  sampleDominant(box: { x: number; y: number; width: number; height: number }): Promise<{ rgb: RGB; share: number }>;
-  /** Every color cluster found in the grid, sorted most-common first. Used by the icon sweep (contrast-sweep.ts) to take the second-most-common cluster as an icon's own ink, distinct from its background fill. */
-  sampleClustersOrdered(box: { x: number; y: number; width: number; height: number }): Promise<Array<{ rgb: RGB; share: number }>>;
+  /** `outOfBoundsShare` (0..1): the fraction of the 18-point grid that fell outside this sampler's own canvas before clamping -- see `clusterAt`'s own comment. High means the box does not correspond to anything actually rendered here; the caller should refuse to trust the color, not just the share. */
+  sampleDominant(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions): Promise<{ rgb: RGB; share: number; outOfBoundsShare: number }>;
+  /** Every color cluster found in the grid, sorted most-common first, plus `outOfBoundsShare` (see `sampleDominant`) as a property on the returned array. Used by the icon sweep (contrast-sweep.ts) to take the second-most-common cluster as an icon's own ink, distinct from its background fill. */
+  sampleClustersOrdered(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions): Promise<Array<{ rgb: RGB; share: number }> & { outOfBoundsShare: number }>;
   close(): Promise<void>;
 }
 
@@ -142,27 +156,64 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
   // or not the page is scrolled, and a true no-op (offset 0,0) for every
   // existing caller, which never scrolls.
   const scrollOffset = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
-  const sampler = await page.context().newPage();
-  await sampler.setContent('<img id="shot" /><canvas id="cv"></canvas>');
-  await sampler.evaluate((base64) => {
-    const img = document.getElementById('shot') as HTMLImageElement;
-    img.src = `data:image/png;base64,${base64}`;
-  }, fullPageBuffer.toString('base64'));
-  await sampler.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        const img = document.getElementById('shot') as HTMLImageElement;
-        const finish = () => {
-          const canvas = document.getElementById('cv') as HTMLCanvasElement;
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-          canvas.getContext('2d')!.drawImage(img, 0, 0);
-          resolve();
-        };
-        if (img.complete && img.naturalWidth > 0) finish();
-        else img.onload = finish;
-      }),
-  );
+
+  /** Decodes one PNG onto a fresh blank page's `<canvas>`, shared by the eager fullPage setup below and the lazy viewport sampler. */
+  async function createCanvasPage(pngBase64: string): Promise<Page> {
+    const canvasPage = await page.context().newPage();
+    await canvasPage.setContent('<img id="shot" /><canvas id="cv"></canvas>');
+    await canvasPage.evaluate((base64) => {
+      const img = document.getElementById('shot') as HTMLImageElement;
+      img.src = `data:image/png;base64,${base64}`;
+    }, pngBase64);
+    await canvasPage.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const img = document.getElementById('shot') as HTMLImageElement;
+          const finish = () => {
+            const canvas = document.getElementById('cv') as HTMLCanvasElement;
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            canvas.getContext('2d')!.drawImage(img, 0, 0);
+            resolve();
+          };
+          if (img.complete && img.naturalWidth > 0) finish();
+          else img.onload = finish;
+        }),
+    );
+    return canvasPage;
+  }
+
+  const sampler = await createCanvasPage(fullPageBuffer.toString('base64'));
+
+  // Lazy, created only on the first fixed-position request -- most pages
+  // have none, and this is a second screenshot + decode. Found live
+  // (frontend owner/god, 2026-10-22, MDF-376, FullScreenMapModal): a
+  // `position: fixed` element (here, the map modal's own `fixed inset-0`
+  // shell) is sized and positioned relative to the VIEWPORT, but `{
+  // fullPage: true }` makes Chromium render the page as if the viewport
+  // were resized to the full document height for that one capture --
+  // `boundingBox()` still reports the element's real, small-viewport rect,
+  // but in the fullPage image that same fixed element is laid out relative
+  // to a viewport many times taller, so anything positioned within it by
+  // percentage, flex-grow, or distance-from-an-edge (a bottom action bar, a
+  // vertically centered body) ends up at a DIFFERENT pixel row in the
+  // fullPage image than where it is actually drawn on screen. This is not
+  // a coordinate OFFSET like the scrollX/Y fix above -- there is no single
+  // number that converts one into the other, because the two renderings of
+  // the same fixed element are different SIZES. The only correct fix is to
+  // sample a plain, viewport-only screenshot for fixed-position content:
+  // its pixel (0,0) is the real viewport's top-left, exactly what
+  // `boundingBox()`/`getBoundingClientRect()` are already relative to, so
+  // no offset is needed at all -- offset {0,0} below is exact, not a
+  // default.
+  let viewportSamplerPage: Page | null = null;
+  async function ensureViewportSampler(): Promise<Page> {
+    if (!viewportSamplerPage) {
+      const viewportBuffer = await page.screenshot({ fullPage: false });
+      viewportSamplerPage = await createCanvasPage(viewportBuffer.toString('base64'));
+    }
+    return viewportSamplerPage;
+  }
 
   /**
    * RESOLVED (god, 2026-10-21, same requirement-7 thread) for both worked
@@ -228,11 +279,16 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
    * note names where it is wrong and why, so a reviewer who hits it again
    * does not have to re-derive any of the above.
    */
-  async function clusterAt(box: { x: number; y: number; width: number; height: number }): Promise<Array<{ rgb: RGB; count: number; total: number }>> {
-    const grid = await sampler.evaluate(({ rect, offset }) => {
+  async function clusterAt(
+    samplerPage: Page,
+    box: { x: number; y: number; width: number; height: number },
+    offset: { x: number; y: number },
+  ): Promise<{ clusters: Array<{ rgb: RGB; count: number; total: number }>; outOfBoundsShare: number }> {
+    const { pts: grid, outOfBounds } = await samplerPage.evaluate(({ rect, offset }) => {
       const canvas = document.getElementById('cv') as HTMLCanvasElement;
       const ctx = canvas.getContext('2d')!;
       const pts: { r: number; g: number; b: number }[] = [];
+      let outOfBounds = 0;
       // Fractional interior grid (6x3 points), not pixel-additive — keeps
       // point count constant regardless of element size, and stays 2px+
       // inside each edge to avoid border-radius artifacts.
@@ -242,14 +298,32 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
       // document-absolute space -- see openPixelSampler's own comment.
       for (const fx of fxs) {
         for (const fy of fys) {
-          const x = Math.max(0, Math.min(canvas.width - 1, Math.round(rect.x + offset.x + fx * rect.width)));
-          const y = Math.max(0, Math.min(canvas.height - 1, Math.round(rect.y + offset.y + fy * rect.height)));
+          const rawX = rect.x + offset.x + fx * rect.width;
+          const rawY = rect.y + offset.y + fy * rect.height;
+          // Found live (god/frontend owner, 2026-10-22, MDF-376, the
+          // dispatch list table's `overflow-x-auto`): an element clipped
+          // away by a scrolling ANCESTOR's own overflow still returns a
+          // real, non-zero `getBoundingClientRect()` -- the browser
+          // reports where the box WOULD be if unclipped, not whether it
+          // is actually painted anywhere. Content clipped this way is
+          // never rasterized at that position in ANY screenshot, so no
+          // coordinate fix can recover it; the only correct move is to
+          // know the sample landed outside this canvas at all and say so
+          // (see the `OUT_OF_BOUNDS_SHARE_CUTOFF` caller in
+          // contrast-sweep.ts). The existing `Math.max`/`Math.min` clamp
+          // below still runs after this check -- it has to produce SOME
+          // pixel for the clustering math -- but clamping to the nearest
+          // edge is exactly how a clipped box used to read a confident,
+          // wrong color instead of refusing to answer.
+          if (rawX < 0 || rawX >= canvas.width || rawY < 0 || rawY >= canvas.height) outOfBounds += 1;
+          const x = Math.max(0, Math.min(canvas.width - 1, Math.round(rawX)));
+          const y = Math.max(0, Math.min(canvas.height - 1, Math.round(rawY)));
           const data = ctx.getImageData(x, y, 1, 1).data;
           pts.push({ r: data[0] ?? 0, g: data[1] ?? 0, b: data[2] ?? 0 });
         }
       }
-      return pts;
-    }, { rect: box, offset: scrollOffset });
+      return { pts, outOfBounds };
+    }, { rect: box, offset });
 
     const counts = new Map<string, { count: number; rgb: RGB }>();
     for (const p of grid) {
@@ -261,20 +335,35 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
     if (counts.size === 0) {
       throw new Error('clusterAt: no pixels sampled -- the grid should always produce at least one point.');
     }
-    return [...counts.values()].sort((a, b) => b.count - a.count).map((c) => ({ rgb: c.rgb, count: c.count, total: grid.length }));
+    return {
+      clusters: [...counts.values()].sort((a, b) => b.count - a.count).map((c) => ({ rgb: c.rgb, count: c.count, total: grid.length })),
+      outOfBoundsShare: Math.round((outOfBounds / grid.length) * 100) / 100,
+    };
+  }
+
+  async function clustersFor(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions) {
+    if (opts?.fixedPosition) return clusterAt(await ensureViewportSampler(), box, { x: 0, y: 0 });
+    return clusterAt(sampler, box, scrollOffset);
   }
 
   return {
-    async sampleDominant(box) {
-      const clusters = await clusterAt(box);
+    async sampleDominant(box, opts) {
+      const { clusters, outOfBoundsShare } = await clustersFor(box, opts);
       const dominant = clusters[0]!;
-      return { rgb: dominant.rgb, share: Math.round((dominant.count / dominant.total) * 100) / 100 };
+      return { rgb: dominant.rgb, share: Math.round((dominant.count / dominant.total) * 100) / 100, outOfBoundsShare };
     },
-    async sampleClustersOrdered(box) {
-      const clusters = await clusterAt(box);
-      return clusters.map((c) => ({ rgb: c.rgb, share: Math.round((c.count / c.total) * 100) / 100 }));
+    async sampleClustersOrdered(box, opts) {
+      const { clusters, outOfBoundsShare } = await clustersFor(box, opts);
+      const ordered = clusters.map((c) => ({ rgb: c.rgb, share: Math.round((c.count / c.total) * 100) / 100 })) as Array<{ rgb: RGB; share: number }> & {
+        outOfBoundsShare: number;
+      };
+      ordered.outOfBoundsShare = outOfBoundsShare;
+      return ordered;
     },
-    close: () => sampler.close(),
+    close: async () => {
+      await sampler.close();
+      if (viewportSamplerPage) await viewportSamplerPage.close();
+    },
   };
 }
 
@@ -299,15 +388,27 @@ export async function sampleContrast(locator: Locator): Promise<ContrastReading>
     throw new Error(`sampleContrast: could not parse foreground color "${fgColor}".`);
   }
 
+  // See openPixelSampler's `ensureViewportSampler` comment for why a
+  // position:fixed ancestor needs an entirely different screenshot.
+  const fixedPosition = await locator.evaluate((el) => {
+    let node: Element | null = el;
+    while (node) {
+      if (getComputedStyle(node).position === 'fixed') return true;
+      node = node.parentElement;
+    }
+    return false;
+  });
+
   const sampler = await openPixelSampler(page);
   try {
-    const { rgb: dominant, share } = await sampler.sampleDominant(box);
+    const { rgb: dominant, share, outOfBoundsShare } = await sampler.sampleDominant(box, { fixedPosition });
     const effectiveFg = compositeOver(fgParsed.rgb, fgParsed.alpha, dominant);
     return {
       ratio: Math.round(contrastRatioOf(effectiveFg, dominant) * 100) / 100,
       foreground: effectiveFg,
       dominantBackground: dominant,
       dominantShare: share,
+      outOfBoundsShare,
     };
   } finally {
     await sampler.close();
@@ -321,6 +422,12 @@ export async function sampleContrast(locator: Locator): Promise<ContrastReading>
  * without re-running anything.
  */
 export function assertSufficientContrast(reading: ContrastReading, minRatio: number = WCAG_AA_NORMAL_TEXT_MIN_RATIO): void {
+  if (reading.outOfBoundsShare > 0.5) {
+    throw new Error(
+      `sampleContrast: most of the sample grid (${Math.round(reading.outOfBoundsShare * 100)}%) fell outside the screenshot's own canvas — ` +
+        `the box does not correspond to anything actually rendered there (e.g. clipped by a scrolling ancestor's overflow). This is not a low-confidence read, it is no read at all; do not trust this ratio.`,
+    );
+  }
   if (reading.dominantShare < 0.5) {
     throw new Error(
       `sampleContrast: low-confidence background read (dominant fill was only ${Math.round(reading.dominantShare * 100)}% of sampled pixels) — ` +
