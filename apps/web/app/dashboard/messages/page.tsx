@@ -456,7 +456,7 @@ function MessageBubble({ message }: { message: Message }) {
       <div className="flex justify-center">
         <div className="max-w-md rounded-full bg-slate-200/70 px-3 py-1 text-center text-xs text-slate-500">
           {message.deleted ? 'Message removed' : message.body}
-          <span className="ml-1.5 text-slate-400">· {relativeTime(message.createdAt)}</span>
+          <span className="ml-1.5 text-slate-700">· {relativeTime(message.createdAt)}</span>
         </div>
       </div>
     );
@@ -558,7 +558,7 @@ function AttachmentView({ attachment, mine }: { attachment: MessageAttachment; m
         <path d="M13 3v6h6" />
       </svg>
       <span className="min-w-0 flex-1 truncate font-medium">{attachment.fileName}</span>
-      <span className={mine ? 'text-white/70' : 'text-slate-400'}>
+      <span className={mine ? 'text-white/80' : 'text-slate-600'}>
         {pending ? 'scanning' : formatBytes(attachment.fileSizeBytes)}
       </span>
     </a>
