@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useBodyScrollLock } from '../../lib/use-body-scroll-lock';
 import { useDialogFocusTrap } from '../../lib/use-dialog-focus-trap';
 
@@ -53,8 +54,32 @@ export function FullScreenMapModal({
 
   if (!open) return null;
 
-  return (
-    <div ref={containerRef} role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[100] flex flex-col bg-white">
+  // Portaled to document.body, not rendered in place: a caller can embed this
+  // modal anywhere, including inside a `bmpl-card` with its own
+  // `backdrop-filter`. A `backdrop-filter` on an ancestor establishes a new
+  // containing block for a descendant `position: fixed` element, so without
+  // the portal this "fixed, full-viewport" dialog pins to that card's box
+  // instead of the viewport -- confirmed on /dashboard/store's LocationPicker
+  // (measured rect {top:394, bottom:949, height:555} against an 844px
+  // viewport, with the confirm button entirely below the fold). Same
+  // mechanism MobileNavDrawer.tsx already hit and fixed; same fix here.
+  //
+  // data-theme="glass" reapplied on the portaled root: escaping to
+  // document.body also escapes any [data-theme="glass"] ancestor in the DOM,
+  // not just its backdrop-filter containing block, so a caller's children
+  // that read adaptive --bmpl-* tokens (LocationPickerBody does) would
+  // otherwise render against the wrong theme once portaled. See
+  // MobileNavDrawer.tsx:77-84 for the same fix and the screenshot that caught
+  // it the first time.
+  return createPortal(
+    <div
+      ref={containerRef}
+      data-theme="glass"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-[100] flex flex-col bg-white"
+    >
       <div className="flex min-h-[56px] shrink-0 items-center justify-between border-b border-slate-200 px-3">
         <p className="truncate text-sm font-semibold text-belize-navy">{title}</p>
         <button
@@ -83,6 +108,7 @@ export function FullScreenMapModal({
           {confirmLabel}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
