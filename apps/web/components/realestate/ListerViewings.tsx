@@ -150,7 +150,10 @@ function TransitionForm({
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-bmpl-md border border-slate-200 bg-slate-50 p-3">
+    // data-theme="light" resets the adaptive-token scope for this form: it's
+    // a literal, always-opaque bg-slate-50, so the "Requested for" line
+    // must resolve the on-light value, not the glass-ambient one.
+    <form onSubmit={submit} data-theme="light" className="space-y-3 rounded-bmpl-md border border-slate-200 bg-slate-50 p-3">
       {error && <Alert tone="error">{error}</Alert>}
       <Field label="Move to">
         <Select value={status} onChange={(e) => setStatus(e.target.value as ViewingRequestStatus)}>

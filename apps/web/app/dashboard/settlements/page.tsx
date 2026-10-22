@@ -269,7 +269,10 @@ function ExpandedDetail({ settlement: s }: { settlement: Settlement }) {
         )}
       </div>
 
-      <div className="rounded-bmpl-lg border border-slate-200 bg-white p-4">
+      {/* data-theme="light" resets the adaptive-token scope for this card,
+          same reason and copy-pasted shape as driver/earnings/page.tsx's
+          "Rates applied" card. */}
+      <div data-theme="light" className="rounded-bmpl-lg border border-slate-200 bg-white p-4">
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Rates applied</h3>
         {err ? (
           <p className="text-sm text-red-600">{err}</p>
