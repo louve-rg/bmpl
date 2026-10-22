@@ -121,6 +121,22 @@ export const AMBIGUOUS_DOMINANT_SHARE_CUTOFF = 0.5;
  */
 export const MIN_ICON_INK_SHARE = 2 / 18;
 
+/**
+ * Maximum fraction of the 18-point grid allowed to have fallen outside the
+ * sampler's own canvas (`contrast.ts`'s `outOfBoundsShare`) before a
+ * reading is forced into AMBIGUOUS regardless of ratio or dominantShare.
+ * Found live (god/frontend owner, 2026-10-22, MDF-376): the dispatch
+ * list's `overflow-x-auto` table clips cells that still return a real,
+ * non-zero `getBoundingClientRect()` -- the sampler was confidently
+ * reporting a ratio against pixels that were never that cell's own
+ * content at all, because the cell is never painted anywhere once clipped
+ * away by a scrolling ancestor. This is the design principle god asked
+ * for stated as code: a sampler that cannot see an element must say so,
+ * not return a number. 0.5 mirrors AMBIGUOUS_DOMINANT_SHARE_CUTOFF's own
+ * "majority" framing rather than a new standard of its own.
+ */
+export const OUT_OF_BOUNDS_SHARE_CUTOFF = 0.5;
+
 export interface SweepTextElement {
   kind: 'text';
   tag: string;
@@ -420,7 +436,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       const fgParsed = parseRgbLocal(t.color);
       if (!fgParsed) continue;
 
-      const { rgb: bg, share } = await sampler.sampleDominant(t.box, { fixedPosition: t.fixedPositionAncestor });
+      const { rgb: bg, share, outOfBoundsShare } = await sampler.sampleDominant(t.box, { fixedPosition: t.fixedPositionAncestor });
       const fg = compositeOver(fgParsed.rgb, fgParsed.alpha, bg);
       const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
       const requiredRatio = t.isLargeText ? WCAG_LARGE_TEXT_MIN_RATIO : WCAG_NORMAL_TEXT_MIN_RATIO;
@@ -434,8 +450,15 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
         box: t.box,
         color: t.color,
       };
-      const reading: SweepReading<SweepTextElement> = { element, ratio, dominantShare: share, foreground: fg, dominantBackground: bg, requiredRatio };
-      if (share < ambiguousShareCutoff) textBucket.ambiguous.push(reading);
+      // `outOfBoundsShare` too high means the box was clipped away by a
+      // scrolling ancestor (or otherwise never painted where it was
+      // sampled) -- see OUT_OF_BOUNDS_SHARE_CUTOFF's own comment. Reported
+      // share is overridden to make that the printed reason, same
+      // precedent as the icon loop's `reportedShare` below.
+      const boxOutOfBounds = outOfBoundsShare > OUT_OF_BOUNDS_SHARE_CUTOFF;
+      const reportedTextShare = boxOutOfBounds ? 1 - outOfBoundsShare : share;
+      const reading: SweepReading<SweepTextElement> = { element, ratio, dominantShare: reportedTextShare, foreground: fg, dominantBackground: bg, requiredRatio };
+      if (share < ambiguousShareCutoff || boxOutOfBounds) textBucket.ambiguous.push(reading);
       else if (ratio < requiredRatio) textBucket.fail.push(reading);
       else textBucket.pass.push(reading);
     }
@@ -446,6 +469,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
     const iconBucket: SweepBucket<SweepIconElement> = { pass: [], fail: [], ambiguous: [] };
     for (const ic of measurableIcons) {
       const clusters = await sampler.sampleClustersOrdered(ic.box, { fixedPosition: ic.fixedPositionAncestor });
+      const boxOutOfBounds = clusters.outOfBoundsShare > OUT_OF_BOUNDS_SHARE_CUTOFF;
       if (clusters.length === 0) continue;
       const bg = clusters[0]!.rgb;
       const share = clusters[0]!.share;
@@ -468,10 +492,10 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       // reading is ambiguous rather than contradicting it.
       const inkShare = clusters[1]?.share ?? 0;
       const inkUnreliable = inkShare < MIN_ICON_INK_SHARE;
-      const reportedShare = inkUnreliable && share >= ambiguousShareCutoff ? inkShare : share;
+      const reportedShare = boxOutOfBounds ? 1 - clusters.outOfBoundsShare : inkUnreliable && share >= ambiguousShareCutoff ? inkShare : share;
       const element: SweepIconElement = { kind: 'icon', tag: ic.tag, accessibleRole: ic.accessibleRole, accessibleName: ic.accessibleName, box: ic.box };
       const reading: SweepReading<SweepIconElement> = { element, ratio, dominantShare: reportedShare, foreground: fg, dominantBackground: bg, requiredRatio: WCAG_ICON_MIN_RATIO };
-      if (share < ambiguousShareCutoff || inkUnreliable) iconBucket.ambiguous.push(reading);
+      if (share < ambiguousShareCutoff || inkUnreliable || boxOutOfBounds) iconBucket.ambiguous.push(reading);
       else if (ratio < WCAG_ICON_MIN_RATIO) iconBucket.fail.push(reading);
       else iconBucket.pass.push(reading);
     }

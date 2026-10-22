@@ -23,6 +23,8 @@ export interface ContrastReading {
   foreground: RGB;
   dominantBackground: RGB;
   dominantShare: number;
+  /** 0..1 -- see the web copy of this file for the full reasoning. High means the box does not correspond to anything actually rendered where it was sampled. */
+  outOfBoundsShare: number;
 }
 
 export const WCAG_AA_NORMAL_TEXT_MIN_RATIO = 4.5;
@@ -77,9 +79,10 @@ export interface SampleOptions {
 }
 
 export interface PixelSampler {
-  sampleDominant(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions): Promise<{ rgb: RGB; share: number }>;
-  /** Every color cluster found in the grid, sorted most-common first. Used by the icon sweep (contrast-sweep.ts) to take the second-most-common cluster as an icon's own ink, distinct from its background fill. */
-  sampleClustersOrdered(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions): Promise<Array<{ rgb: RGB; share: number }>>;
+  /** `outOfBoundsShare` -- see the web copy of this file for the full reasoning. */
+  sampleDominant(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions): Promise<{ rgb: RGB; share: number; outOfBoundsShare: number }>;
+  /** Every color cluster found in the grid, sorted most-common first, plus `outOfBoundsShare` as a property on the returned array. Used by the icon sweep (contrast-sweep.ts) to take the second-most-common cluster as an icon's own ink, distinct from its background fill. */
+  sampleClustersOrdered(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions): Promise<Array<{ rgb: RGB; share: number }> & { outOfBoundsShare: number }>;
   close(): Promise<void>;
 }
 
@@ -160,22 +163,32 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
     samplerPage: Page,
     box: { x: number; y: number; width: number; height: number },
     offset: { x: number; y: number },
-  ): Promise<Array<{ rgb: RGB; count: number; total: number }>> {
-    const grid = await samplerPage.evaluate(({ rect, offset }) => {
+  ): Promise<{ clusters: Array<{ rgb: RGB; count: number; total: number }>; outOfBoundsShare: number }> {
+    const { pts: grid, outOfBounds } = await samplerPage.evaluate(({ rect, offset }) => {
       const canvas = document.getElementById('cv') as HTMLCanvasElement;
       const ctx = canvas.getContext('2d')!;
       const pts: { r: number; g: number; b: number }[] = [];
+      let outOfBounds = 0;
       const fxs = [0.15, 0.3, 0.45, 0.6, 0.75, 0.9];
       const fys = [0.2, 0.5, 0.8];
       for (const fx of fxs) {
         for (const fy of fys) {
-          const x = Math.max(0, Math.min(canvas.width - 1, Math.round(rect.x + offset.x + fx * rect.width)));
-          const y = Math.max(0, Math.min(canvas.height - 1, Math.round(rect.y + offset.y + fy * rect.height)));
+          const rawX = rect.x + offset.x + fx * rect.width;
+          const rawY = rect.y + offset.y + fy * rect.height;
+          // See the web copy of this file's identical comment for the full
+          // reasoning -- an element clipped away by a scrolling ancestor's
+          // own overflow still returns a real, non-zero
+          // `getBoundingClientRect()`, and that content is never
+          // rasterized anywhere, so this has to be caught here, not fixed
+          // with a coordinate offset.
+          if (rawX < 0 || rawX >= canvas.width || rawY < 0 || rawY >= canvas.height) outOfBounds += 1;
+          const x = Math.max(0, Math.min(canvas.width - 1, Math.round(rawX)));
+          const y = Math.max(0, Math.min(canvas.height - 1, Math.round(rawY)));
           const data = ctx.getImageData(x, y, 1, 1).data;
           pts.push({ r: data[0] ?? 0, g: data[1] ?? 0, b: data[2] ?? 0 });
         }
       }
-      return pts;
+      return { pts, outOfBounds };
     }, { rect: box, offset });
 
     const counts = new Map<string, { count: number; rgb: RGB }>();
@@ -188,7 +201,10 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
     if (counts.size === 0) {
       throw new Error('clusterAt: no pixels sampled -- the grid should always produce at least one point.');
     }
-    return [...counts.values()].sort((a, b) => b.count - a.count).map((c) => ({ rgb: c.rgb, count: c.count, total: grid.length }));
+    return {
+      clusters: [...counts.values()].sort((a, b) => b.count - a.count).map((c) => ({ rgb: c.rgb, count: c.count, total: grid.length })),
+      outOfBoundsShare: Math.round((outOfBounds / grid.length) * 100) / 100,
+    };
   }
 
   async function clustersFor(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions) {
@@ -198,13 +214,17 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
 
   return {
     async sampleDominant(box, opts) {
-      const clusters = await clustersFor(box, opts);
+      const { clusters, outOfBoundsShare } = await clustersFor(box, opts);
       const dominant = clusters[0]!;
-      return { rgb: dominant.rgb, share: Math.round((dominant.count / dominant.total) * 100) / 100 };
+      return { rgb: dominant.rgb, share: Math.round((dominant.count / dominant.total) * 100) / 100, outOfBoundsShare };
     },
     async sampleClustersOrdered(box, opts) {
-      const clusters = await clustersFor(box, opts);
-      return clusters.map((c) => ({ rgb: c.rgb, share: Math.round((c.count / c.total) * 100) / 100 }));
+      const { clusters, outOfBoundsShare } = await clustersFor(box, opts);
+      const ordered = clusters.map((c) => ({ rgb: c.rgb, share: Math.round((c.count / c.total) * 100) / 100 })) as Array<{ rgb: RGB; share: number }> & {
+        outOfBoundsShare: number;
+      };
+      ordered.outOfBoundsShare = outOfBoundsShare;
+      return ordered;
     },
     close: async () => {
       await sampler.close();
@@ -245,13 +265,14 @@ export async function sampleContrast(locator: Locator): Promise<ContrastReading>
 
   const sampler = await openPixelSampler(page);
   try {
-    const { rgb: dominant, share } = await sampler.sampleDominant(box, { fixedPosition });
+    const { rgb: dominant, share, outOfBoundsShare } = await sampler.sampleDominant(box, { fixedPosition });
     const effectiveFg = compositeOver(fgParsed.rgb, fgParsed.alpha, dominant);
     return {
       ratio: Math.round(contrastRatioOf(effectiveFg, dominant) * 100) / 100,
       foreground: effectiveFg,
       dominantBackground: dominant,
       dominantShare: share,
+      outOfBoundsShare,
     };
   } finally {
     await sampler.close();
@@ -259,6 +280,12 @@ export async function sampleContrast(locator: Locator): Promise<ContrastReading>
 }
 
 export function assertSufficientContrast(reading: ContrastReading, minRatio: number = WCAG_AA_NORMAL_TEXT_MIN_RATIO): void {
+  if (reading.outOfBoundsShare > 0.5) {
+    throw new Error(
+      `sampleContrast: most of the sample grid (${Math.round(reading.outOfBoundsShare * 100)}%) fell outside the screenshot's own canvas — ` +
+        `the box does not correspond to anything actually rendered there (e.g. clipped by a scrolling ancestor's overflow). This is not a low-confidence read, it is no read at all; do not trust this ratio.`,
+    );
+  }
   if (reading.dominantShare < 0.5) {
     throw new Error(
       `sampleContrast: low-confidence background read (dominant fill was only ${Math.round(reading.dominantShare * 100)}% of sampled pixels) — ` +

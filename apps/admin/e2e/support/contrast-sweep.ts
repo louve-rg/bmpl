@@ -56,6 +56,14 @@ export const AMBIGUOUS_DOMINANT_SHARE_CUTOFF = 0.5;
  */
 export const MIN_ICON_INK_SHARE = 2 / 18;
 
+/**
+ * Maximum fraction of the grid allowed to have fallen outside the
+ * sampler's own canvas before a reading is forced into AMBIGUOUS -- see
+ * the web copy of this file for the full reasoning (god/frontend owner,
+ * 2026-10-22, MDF-376, the dispatch list's `overflow-x-auto` table).
+ */
+export const OUT_OF_BOUNDS_SHARE_CUTOFF = 0.5;
+
 // WCAG's own "large text" definition (>=24px regular, or >=18.66px bold) is
 // applied as literal numbers inside discoverElements' page.evaluate() below
 // — a page.evaluate callback runs in the browser and cannot close over a
@@ -312,7 +320,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       const fgParsed = parseRgbLocal(t.color);
       if (!fgParsed) continue;
 
-      const { rgb: bg, share } = await sampler.sampleDominant(t.box, { fixedPosition: t.fixedPositionAncestor });
+      const { rgb: bg, share, outOfBoundsShare } = await sampler.sampleDominant(t.box, { fixedPosition: t.fixedPositionAncestor });
       const fg = compositeOver(fgParsed.rgb, fgParsed.alpha, bg);
       const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
       const requiredRatio = t.isLargeText ? WCAG_LARGE_TEXT_MIN_RATIO : WCAG_NORMAL_TEXT_MIN_RATIO;
@@ -326,8 +334,11 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
         box: t.box,
         color: t.color,
       };
-      const reading: SweepReading<SweepTextElement> = { element, ratio, dominantShare: share, foreground: fg, dominantBackground: bg, requiredRatio };
-      if (share < ambiguousShareCutoff) textBucket.ambiguous.push(reading);
+      // See apps/web's identical copy of this block for the full reasoning.
+      const boxOutOfBounds = outOfBoundsShare > OUT_OF_BOUNDS_SHARE_CUTOFF;
+      const reportedTextShare = boxOutOfBounds ? 1 - outOfBoundsShare : share;
+      const reading: SweepReading<SweepTextElement> = { element, ratio, dominantShare: reportedTextShare, foreground: fg, dominantBackground: bg, requiredRatio };
+      if (share < ambiguousShareCutoff || boxOutOfBounds) textBucket.ambiguous.push(reading);
       else if (ratio < requiredRatio) textBucket.fail.push(reading);
       else textBucket.pass.push(reading);
     }
@@ -339,6 +350,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
     for (const ic of measurableIcons) {
       const clusters = await sampler.sampleClustersOrdered(ic.box, { fixedPosition: ic.fixedPositionAncestor });
       if (clusters.length === 0) continue;
+      const boxOutOfBounds = clusters.outOfBoundsShare > OUT_OF_BOUNDS_SHARE_CUTOFF;
       const bg = clusters[0]!.rgb;
       const share = clusters[0]!.share;
       const fg = clusters[1]?.rgb ?? bg;
@@ -346,10 +358,10 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       // See apps/web's identical copy of this block for the full reasoning.
       const inkShare = clusters[1]?.share ?? 0;
       const inkUnreliable = inkShare < MIN_ICON_INK_SHARE;
-      const reportedShare = inkUnreliable && share >= ambiguousShareCutoff ? inkShare : share;
+      const reportedShare = boxOutOfBounds ? 1 - clusters.outOfBoundsShare : inkUnreliable && share >= ambiguousShareCutoff ? inkShare : share;
       const element: SweepIconElement = { kind: 'icon', tag: ic.tag, accessibleRole: ic.accessibleRole, accessibleName: ic.accessibleName, box: ic.box };
       const reading: SweepReading<SweepIconElement> = { element, ratio, dominantShare: reportedShare, foreground: fg, dominantBackground: bg, requiredRatio: WCAG_ICON_MIN_RATIO };
-      if (share < ambiguousShareCutoff || inkUnreliable) iconBucket.ambiguous.push(reading);
+      if (share < ambiguousShareCutoff || inkUnreliable || boxOutOfBounds) iconBucket.ambiguous.push(reading);
       else if (ratio < WCAG_ICON_MIN_RATIO) iconBucket.fail.push(reading);
       else iconBucket.pass.push(reading);
     }
