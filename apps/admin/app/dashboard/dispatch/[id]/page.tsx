@@ -167,7 +167,7 @@ export default function DispatchDetailPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <Link href="/dashboard/dispatch" className="text-sm font-medium text-belize-blue hover:underline">
+      <Link href="/dashboard/dispatch" className="text-sm font-medium text-[color:var(--bmpl-link)] hover:underline">
         ← Dispatch
       </Link>
 
@@ -658,7 +658,7 @@ function PinPanel({ id }: { id: string }) {
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="w-full max-w-md rounded-bmpl-xl border border-slate-200 bg-white p-5 shadow-bmpl-lg">
+      <div data-theme="light" className="w-full max-w-md rounded-bmpl-xl border border-slate-200 bg-white p-5 shadow-bmpl-lg">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-belize-navy">{title}</h2>
           <button onClick={onClose} className="text-[color:var(--bmpl-text-muted-strong)] hover:text-slate-600" aria-label="Close">
@@ -675,7 +675,12 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
 function InfoCard({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className={`rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm ${className}`}>
+    // data-theme="light" resets the adaptive-token scope for this card's
+    // opaque bg-white surface. Without it, every var(--bmpl-*) consumer
+    // inside (the empty-state captions, the timeline timestamp, PinPanel's
+    // outline-variant Reveal button) inherits the dashboard shell's glass
+    // scope and reads near-white-on-white instead -- 1.05-1.07:1.
+    <section data-theme="light" className={`rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm ${className}`}>
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
       {children}
     </section>
