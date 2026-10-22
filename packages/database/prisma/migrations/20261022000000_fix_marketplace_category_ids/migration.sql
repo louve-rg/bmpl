@@ -9,8 +9,13 @@
 -- landed there (confirmed by reading production directly:
 -- GET /api/marketplace/categories returns 36 rows, zero non-cuid ids;
 -- MDF-420). A FRESH environment seeded from scratch today would still pick
--- up the bad ids from that migration -- this one runs immediately after it
--- in sequence and corrects them before `prisma migrate deploy` ever returns.
+-- up the bad ids from that migration -- this one runs AFTER the seed
+-- migration (any later-stamped migration does, by Prisma's lexicographic
+-- folder-name ordering) and corrects them within the same `prisma migrate
+-- deploy` run. It does not need to run immediately after it, or at any
+-- particular position among later migrations: the UPDATE below is
+-- idempotent, so wherever it lands in sequence it is a no-op once the ids
+-- are already fixed.
 --
 -- The already-applied seed migration is never edited in place (that would be
 -- checksum drift on an applied migration, strictly worse than the bug it
