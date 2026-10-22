@@ -96,10 +96,21 @@ export function contrastRatioOf(fg: RGB, bg: RGB): number {
  * `sampleContrast` always has — fractional interior grid (6x3), clustered by
  * rounded color — just reusable across many boxes instead of one.
  */
+export interface SampleOptions {
+  /**
+   * True when the element (or an ancestor) is `position: fixed` -- see
+   * `openPixelSampler`'s own comment on `ensureViewportSampler` for why
+   * this needs an entirely different screenshot, not just a coordinate
+   * offset. Defaults to false: a true no-op for every caller that doesn't
+   * know or doesn't care, same convention as the scrollOffset fix above.
+   */
+  fixedPosition?: boolean;
+}
+
 export interface PixelSampler {
-  sampleDominant(box: { x: number; y: number; width: number; height: number }): Promise<{ rgb: RGB; share: number }>;
+  sampleDominant(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions): Promise<{ rgb: RGB; share: number }>;
   /** Every color cluster found in the grid, sorted most-common first. Used by the icon sweep (contrast-sweep.ts) to take the second-most-common cluster as an icon's own ink, distinct from its background fill. */
-  sampleClustersOrdered(box: { x: number; y: number; width: number; height: number }): Promise<Array<{ rgb: RGB; share: number }>>;
+  sampleClustersOrdered(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions): Promise<Array<{ rgb: RGB; share: number }>>;
   close(): Promise<void>;
 }
 
@@ -142,27 +153,64 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
   // or not the page is scrolled, and a true no-op (offset 0,0) for every
   // existing caller, which never scrolls.
   const scrollOffset = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
-  const sampler = await page.context().newPage();
-  await sampler.setContent('<img id="shot" /><canvas id="cv"></canvas>');
-  await sampler.evaluate((base64) => {
-    const img = document.getElementById('shot') as HTMLImageElement;
-    img.src = `data:image/png;base64,${base64}`;
-  }, fullPageBuffer.toString('base64'));
-  await sampler.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        const img = document.getElementById('shot') as HTMLImageElement;
-        const finish = () => {
-          const canvas = document.getElementById('cv') as HTMLCanvasElement;
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-          canvas.getContext('2d')!.drawImage(img, 0, 0);
-          resolve();
-        };
-        if (img.complete && img.naturalWidth > 0) finish();
-        else img.onload = finish;
-      }),
-  );
+
+  /** Decodes one PNG onto a fresh blank page's `<canvas>`, shared by the eager fullPage setup below and the lazy viewport sampler. */
+  async function createCanvasPage(pngBase64: string): Promise<Page> {
+    const canvasPage = await page.context().newPage();
+    await canvasPage.setContent('<img id="shot" /><canvas id="cv"></canvas>');
+    await canvasPage.evaluate((base64) => {
+      const img = document.getElementById('shot') as HTMLImageElement;
+      img.src = `data:image/png;base64,${base64}`;
+    }, pngBase64);
+    await canvasPage.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const img = document.getElementById('shot') as HTMLImageElement;
+          const finish = () => {
+            const canvas = document.getElementById('cv') as HTMLCanvasElement;
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            canvas.getContext('2d')!.drawImage(img, 0, 0);
+            resolve();
+          };
+          if (img.complete && img.naturalWidth > 0) finish();
+          else img.onload = finish;
+        }),
+    );
+    return canvasPage;
+  }
+
+  const sampler = await createCanvasPage(fullPageBuffer.toString('base64'));
+
+  // Lazy, created only on the first fixed-position request -- most pages
+  // have none, and this is a second screenshot + decode. Found live
+  // (frontend owner/god, 2026-10-22, MDF-376, FullScreenMapModal): a
+  // `position: fixed` element (here, the map modal's own `fixed inset-0`
+  // shell) is sized and positioned relative to the VIEWPORT, but `{
+  // fullPage: true }` makes Chromium render the page as if the viewport
+  // were resized to the full document height for that one capture --
+  // `boundingBox()` still reports the element's real, small-viewport rect,
+  // but in the fullPage image that same fixed element is laid out relative
+  // to a viewport many times taller, so anything positioned within it by
+  // percentage, flex-grow, or distance-from-an-edge (a bottom action bar, a
+  // vertically centered body) ends up at a DIFFERENT pixel row in the
+  // fullPage image than where it is actually drawn on screen. This is not
+  // a coordinate OFFSET like the scrollX/Y fix above -- there is no single
+  // number that converts one into the other, because the two renderings of
+  // the same fixed element are different SIZES. The only correct fix is to
+  // sample a plain, viewport-only screenshot for fixed-position content:
+  // its pixel (0,0) is the real viewport's top-left, exactly what
+  // `boundingBox()`/`getBoundingClientRect()` are already relative to, so
+  // no offset is needed at all -- offset {0,0} below is exact, not a
+  // default.
+  let viewportSamplerPage: Page | null = null;
+  async function ensureViewportSampler(): Promise<Page> {
+    if (!viewportSamplerPage) {
+      const viewportBuffer = await page.screenshot({ fullPage: false });
+      viewportSamplerPage = await createCanvasPage(viewportBuffer.toString('base64'));
+    }
+    return viewportSamplerPage;
+  }
 
   /**
    * RESOLVED (god, 2026-10-21, same requirement-7 thread) for both worked
@@ -228,8 +276,12 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
    * note names where it is wrong and why, so a reviewer who hits it again
    * does not have to re-derive any of the above.
    */
-  async function clusterAt(box: { x: number; y: number; width: number; height: number }): Promise<Array<{ rgb: RGB; count: number; total: number }>> {
-    const grid = await sampler.evaluate(({ rect, offset }) => {
+  async function clusterAt(
+    samplerPage: Page,
+    box: { x: number; y: number; width: number; height: number },
+    offset: { x: number; y: number },
+  ): Promise<Array<{ rgb: RGB; count: number; total: number }>> {
+    const grid = await samplerPage.evaluate(({ rect, offset }) => {
       const canvas = document.getElementById('cv') as HTMLCanvasElement;
       const ctx = canvas.getContext('2d')!;
       const pts: { r: number; g: number; b: number }[] = [];
@@ -249,7 +301,7 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
         }
       }
       return pts;
-    }, { rect: box, offset: scrollOffset });
+    }, { rect: box, offset });
 
     const counts = new Map<string, { count: number; rgb: RGB }>();
     for (const p of grid) {
@@ -264,17 +316,25 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
     return [...counts.values()].sort((a, b) => b.count - a.count).map((c) => ({ rgb: c.rgb, count: c.count, total: grid.length }));
   }
 
+  async function clustersFor(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions) {
+    if (opts?.fixedPosition) return clusterAt(await ensureViewportSampler(), box, { x: 0, y: 0 });
+    return clusterAt(sampler, box, scrollOffset);
+  }
+
   return {
-    async sampleDominant(box) {
-      const clusters = await clusterAt(box);
+    async sampleDominant(box, opts) {
+      const clusters = await clustersFor(box, opts);
       const dominant = clusters[0]!;
       return { rgb: dominant.rgb, share: Math.round((dominant.count / dominant.total) * 100) / 100 };
     },
-    async sampleClustersOrdered(box) {
-      const clusters = await clusterAt(box);
+    async sampleClustersOrdered(box, opts) {
+      const clusters = await clustersFor(box, opts);
       return clusters.map((c) => ({ rgb: c.rgb, share: Math.round((c.count / c.total) * 100) / 100 }));
     },
-    close: () => sampler.close(),
+    close: async () => {
+      await sampler.close();
+      if (viewportSamplerPage) await viewportSamplerPage.close();
+    },
   };
 }
 
@@ -299,9 +359,20 @@ export async function sampleContrast(locator: Locator): Promise<ContrastReading>
     throw new Error(`sampleContrast: could not parse foreground color "${fgColor}".`);
   }
 
+  // See openPixelSampler's `ensureViewportSampler` comment for why a
+  // position:fixed ancestor needs an entirely different screenshot.
+  const fixedPosition = await locator.evaluate((el) => {
+    let node: Element | null = el;
+    while (node) {
+      if (getComputedStyle(node).position === 'fixed') return true;
+      node = node.parentElement;
+    }
+    return false;
+  });
+
   const sampler = await openPixelSampler(page);
   try {
-    const { rgb: dominant, share } = await sampler.sampleDominant(box);
+    const { rgb: dominant, share } = await sampler.sampleDominant(box, { fixedPosition });
     const effectiveFg = compositeOver(fgParsed.rgb, fgParsed.alpha, dominant);
     return {
       ratio: Math.round(contrastRatioOf(effectiveFg, dominant) * 100) / 100,
