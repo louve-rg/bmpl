@@ -50,8 +50,38 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
  *      bar instead of landing a field's bottom few px behind it.
  * `sticky` mode (the driver job screen) needs neither: a sticky element
  * already reserves its own space in flow, confirmed by rendering (not just
- * reading the keyword) -- measured 115px+ of clearance at every width
- * tested, no fix needed there.
+ * reading the keyword) -- measured 115px+ of clearance AGAINST THE BAR, AT
+ * FULL VIEWPORT HEIGHT, at every width tested. That measurement says
+ * nothing about an on-screen keyboard shrinking the viewport afterward --
+ * a separate check (MDF-376, 2026-10-22) covers exactly that gap:
+ * reachable-by-scroll after a keyboard shrink is CONFIRMED (real scroll
+ * room -- maxScrollY 421-491px -- and `scrollIntoViewIfNeeded()` lands the
+ * driver handoff-code input mid-viewport, y 208-243, inside shrunk heights
+ * of 471-541 at 375/390/430). Auto-reveal the moment the keyboard opens is
+ * NOT confirmed and is platform-dependent: Chromium can only represent
+ * Android's layout-viewport-resize model here, and iOS Safari's
+ * visual-viewport-only model is a separate, unverifiable-by-this-suite
+ * gap. Reachable-but-not-automatic is friction, not a broken page --
+ * deliberately not "fixed" here; do not add an auto-scroll for sticky mode
+ * on the strength of this comment alone.
+ *
+ * KEYBOARD-SHRINK FOLLOW-UP (MDF-376): `scroll-padding-bottom` above only
+ * shapes a FUTURE scroll -- it cannot retroactively fix a scroll position
+ * the browser already computed against a taller, pre-shrink viewport. An
+ * on-screen keyboard opening AFTER a field is focused (and already scrolled
+ * clear of the bar) shrinks the viewport without re-running that scroll,
+ * so a field that was correctly clear a moment ago can end up with its
+ * bottom edge behind the bar once the keyboard takes its space. Measured
+ * on /dashboard/shipments/new, fixed mode only: the address input's bottom
+ * edge landed 13px past the bar's top edge at 320x329 (320 width, the
+ * viewport height once shrunk) -- clean at 375/390/430, where the same
+ * shrink left the field comfortably clear. Fixed by re-running
+ * `scrollIntoView({ block: 'nearest' })` on whichever element is currently
+ * focused, on every window resize, but ONLY while this bar is actually
+ * fixed (getComputedStyle, same guard `sync` already uses) -- `sticky`
+ * mode is untouched, and `block: 'nearest'` is a no-op wherever the field
+ * already satisfies `scroll-padding-bottom`, which is every width but 320
+ * here, so it cannot move a field that wasn't a problem.
  */
 export function StickyActionBar({
   sticky = false,
@@ -84,9 +114,20 @@ export function StickyActionBar({
       const height = isFixed ? el.offsetHeight : 0;
       setSpacerHeight(height);
       root.style.scrollPaddingBottom = isFixed ? `${height}px` : previousScrollPadding;
+      return isFixed;
     };
 
     sync();
+
+    // See the KEYBOARD-SHRINK FOLLOW-UP comment above the component.
+    const onWindowResize = () => {
+      const isFixed = sync();
+      const active = document.activeElement;
+      if (isFixed && active instanceof HTMLElement && active !== document.body && !el.contains(active)) {
+        active.scrollIntoView({ block: 'nearest' });
+      }
+    };
+    window.addEventListener('resize', onWindowResize);
 
     // MDF-376: ResizeObserver is absent in some environments (jsdom in this
     // app's own unit tests; conceivably a locked-down browser) -- this bar
@@ -95,6 +136,7 @@ export function StickyActionBar({
     // throw at mount.
     if (typeof ResizeObserver === 'undefined') {
       return () => {
+        window.removeEventListener('resize', onWindowResize);
         root.style.scrollPaddingBottom = previousScrollPadding;
       };
     }
@@ -102,6 +144,7 @@ export function StickyActionBar({
     const ro = new ResizeObserver(sync);
     ro.observe(el);
     return () => {
+      window.removeEventListener('resize', onWindowResize);
       ro.disconnect();
       root.style.scrollPaddingBottom = previousScrollPadding;
     };
