@@ -45,7 +45,7 @@ export function AuthShell({
             </span>
           </div>
         </div>
-        <p className="relative text-xs text-blue-200/60">© 2026 Belize Marketplace &amp; Logistics</p>
+        <p className="relative text-xs text-blue-100/70">© 2026 Belize Marketplace &amp; Logistics</p>
       </div>
 
       {/* Form panel */}
