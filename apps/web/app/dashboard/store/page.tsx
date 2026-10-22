@@ -190,7 +190,7 @@ function StatusBar({ store, onDone, onError }: SectionProps) {
   return (
     <>
       <UiCard className="flex flex-wrap items-center gap-3 p-4">
-        <div className="min-w-0 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+        <div className="min-w-0 flex flex-wrap items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
           <span>Approval:</span>
           <StatusBadge status={status} />
           <span className="text-slate-300">·</span>

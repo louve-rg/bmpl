@@ -39,7 +39,7 @@ export function CategoryNav({
       <details className="group bmpl-card overflow-hidden md:hidden">
         <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 [&::-webkit-details-marker]:hidden">
           <span className="min-w-0">
-            <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Category</span>
+            <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--bmpl-text-muted)]">Category</span>
             <span className="block truncate text-sm font-semibold text-belize-navy">{active?.name ?? 'All categories'}</span>
           </span>
           <svg
