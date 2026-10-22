@@ -41,6 +41,19 @@ export const WCAG_ICON_MIN_RATIO = 3;
  */
 export const AMBIGUOUS_DOMINANT_SHARE_CUTOFF = 0.5;
 
+/**
+ * Minimum share an icon's "ink" cluster must hold before it is trusted as
+ * the icon's real fill rather than a stray sample. See apps/web's identical
+ * copy of this constant for the full reasoning (god/Jim, 2026-10-22,
+ * MDF-376) -- the existing cutoff above keys on the BACKGROUND cluster's
+ * share, not on whether the second cluster is representative, so a
+ * confident-looking background share can hide a single lucky anti-aliased
+ * edge pixel being read as the icon's ink. The grid is a fixed 18 points
+ * (contrast.ts's `clusterAt`), so 2/18 is the smallest guard that rules out
+ * a lone-pixel fluke.
+ */
+export const MIN_ICON_INK_SHARE = 2 / 18;
+
 // WCAG's own "large text" definition (>=24px regular, or >=18.66px bold) is
 // applied as literal numbers inside discoverElements' page.evaluate() below
 // — a page.evaluate callback runs in the browser and cannot close over a
@@ -105,6 +118,24 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
 
     function isExempt(el: Element): boolean {
       return !!el.closest('[aria-hidden="true"], [data-contrast-exempt="decorative"]');
+    }
+
+    // Found live (god/Jim, 2026-10-22, MDF-376) on apps/web's identical copy
+    // of this file -- see that file for the full mechanism. `role="img"`
+    // routes the whole element into the icon pipeline regardless of what it
+    // contains; a wrapper that hides its real, visible text in an
+    // `aria-hidden` child (to avoid announcing it twice to a screen reader)
+    // is deduplicating the ACCESSIBILITY TREE, not marking the content
+    // visually decorative. `isExemptForText` keeps the original exemption
+    // for genuinely decorative aria-hidden content with no role="img"
+    // ancestor, and un-exempts only the deduplication case -- `isExempt`
+    // itself is untouched and still gates icon/svg discovery as before.
+    function isExemptForText(el: Element): boolean {
+      if (el.closest('[data-contrast-exempt="decorative"]')) return true;
+      const hiddenAncestor = el.closest('[aria-hidden="true"]');
+      if (!hiddenAncestor) return false;
+      if (hiddenAncestor.closest('[role="img"]')) return false;
+      return true;
     }
 
     // Structural composite-graphic test -- see apps/web's own copy of this
@@ -187,9 +218,8 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
     }> = [];
 
     for (const el of document.body.querySelectorAll('*')) {
-      if (isExempt(el)) continue;
-
       if ((el.tagName === 'SVG' || el.getAttribute('role') === 'img') && !el.closest('svg svg')) {
+        if (isExempt(el)) continue; // decorative icon exemption -- unchanged, scoped to this branch only now
         if (el.tagName !== 'SVG' && el.closest('svg')) continue;
         const cs = getComputedStyle(el);
         if (cs.display === 'none' || cs.visibility === 'hidden') continue;
@@ -212,6 +242,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       if (!text) continue;
       if (NON_TEXT_TAGS.has(el.tagName)) continue;
       if (el.classList.contains('sr-only')) continue;
+      if (isExemptForText(el)) continue;
 
       const cs = getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
@@ -293,9 +324,13 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       const share = clusters[0]!.share;
       const fg = clusters[1]?.rgb ?? bg;
       const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
+      // See apps/web's identical copy of this block for the full reasoning.
+      const inkShare = clusters[1]?.share ?? 0;
+      const inkUnreliable = inkShare < MIN_ICON_INK_SHARE;
+      const reportedShare = inkUnreliable && share >= ambiguousShareCutoff ? inkShare : share;
       const element: SweepIconElement = { kind: 'icon', tag: ic.tag, accessibleRole: ic.accessibleRole, accessibleName: ic.accessibleName, box: ic.box };
-      const reading: SweepReading<SweepIconElement> = { element, ratio, dominantShare: share, foreground: fg, dominantBackground: bg, requiredRatio: WCAG_ICON_MIN_RATIO };
-      if (share < ambiguousShareCutoff) iconBucket.ambiguous.push(reading);
+      const reading: SweepReading<SweepIconElement> = { element, ratio, dominantShare: reportedShare, foreground: fg, dominantBackground: bg, requiredRatio: WCAG_ICON_MIN_RATIO };
+      if (share < ambiguousShareCutoff || inkUnreliable) iconBucket.ambiguous.push(reading);
       else if (ratio < WCAG_ICON_MIN_RATIO) iconBucket.fail.push(reading);
       else iconBucket.pass.push(reading);
     }

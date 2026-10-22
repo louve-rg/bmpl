@@ -100,6 +100,25 @@ export const WCAG_ICON_MIN_RATIO = 3;
  */
 export const AMBIGUOUS_DOMINANT_SHARE_CUTOFF = 0.5;
 
+/**
+ * Minimum share an icon's "ink" cluster (`clusters[1]`, see `sweepContrast`'s
+ * icon loop) must hold before it is trusted as the icon's real fill colour
+ * rather than a stray sample. Found live (god/Jim, 2026-10-22, MDF-376): the
+ * existing `AMBIGUOUS_DOMINANT_SHARE_CUTOFF` above keys on the BACKGROUND
+ * cluster's share, not on whether the second cluster is representative at
+ * all -- a background share of 0.83 clears that cutoff easily even when
+ * `clusters[1]` is a single lucky anti-aliased edge pixel out of the grid's
+ * 18 points. That is a structural gap in the ambiguous gate itself, found
+ * while investigating (but not confirmed live in) two non-icon false
+ * failures -- it can hide a real violation behind a confident-looking
+ * passing ratio just as easily as it can produce a false one, and the
+ * hiding direction is the one that matters more. The grid is a fixed 18
+ * points (contrast.ts's `clusterAt`), so a single matching point is 1/18 ≈
+ * 0.056 share; requiring at least 2 is the smallest guard that rules out a
+ * lone-pixel fluke being read as a confident ink sample.
+ */
+export const MIN_ICON_INK_SHARE = 2 / 18;
+
 export interface SweepTextElement {
   kind: 'text';
   tag: string;
@@ -170,6 +189,33 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
 
     function isExempt(el: Element): boolean {
       return !!el.closest('[aria-hidden="true"], [data-contrast-exempt="decorative"]');
+    }
+
+    // Found live (god/Jim, 2026-10-22, MDF-376): `role="img"` on a wrapper
+    // routes the WHOLE element into the icon pipeline (below) regardless of
+    // what it actually contains. A common, legitimate a11y pattern nests the
+    // VISIBLE text/glyphs in an `aria-hidden` child so a screen reader hears
+    // only the wrapper's own `aria-label` once, instead of twice -- but that
+    // aria-hidden is deduplicating the ACCESSIBILITY TREE, not marking the
+    // content visually decorative. Two real nodes (StarRating.tsx's count
+    // span, vendors/page.tsx's inline rating label) are exactly this shape,
+    // and both measured ratio=1.00 (self-comparison) because their real,
+    // sighted-user-visible text never reached the text path at all -- it was
+    // exempted by `isExempt` before the loop ever classified it.
+    // `isExemptForText` keeps the ORIGINAL exemption for aria-hidden content
+    // that has no role="img" ancestor (the far more common, genuinely
+    // decorative case -- untouched), and un-exempts ONLY the case where the
+    // aria-hidden ancestor itself sits inside a `role="img"` boundary that
+    // already supplies its own accessible name for assistive tech. This is
+    // intentionally narrower than touching `isExempt` itself, which still
+    // gates icon/svg discovery unchanged (see its one remaining call site
+    // below) -- decorative icon SVGs stay exempt from the icon pipeline too.
+    function isExemptForText(el: Element): boolean {
+      if (el.closest('[data-contrast-exempt="decorative"]')) return true;
+      const hiddenAncestor = el.closest('[aria-hidden="true"]');
+      if (!hiddenAncestor) return false;
+      if (hiddenAncestor.closest('[role="img"]')) return false;
+      return true;
     }
 
     // Structural composite-graphic test -- see this file's header comment
@@ -270,12 +316,11 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
     }> = [];
 
     for (const el of document.body.querySelectorAll('*')) {
-      if (isExempt(el)) continue;
-
       // Icons: svg / [role=img], counted once at the outer element — never
       // descend into an svg's own <path>/<circle> children as separate
       // candidates.
       if ((el.tagName === 'SVG' || el.getAttribute('role') === 'img') && !el.closest('svg svg')) {
+        if (isExempt(el)) continue; // decorative icon exemption -- unchanged, scoped to this branch only now
         if (el.tagName !== 'SVG' && el.closest('svg')) continue; // a [role=img] nested inside an svg we already counted
         const cs = getComputedStyle(el);
         if (cs.display === 'none' || cs.visibility === 'hidden') continue;
@@ -298,6 +343,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       if (!text) continue;
       if (NON_TEXT_TAGS.has(el.tagName)) continue;
       if (el.classList.contains('sr-only')) continue;
+      if (isExemptForText(el)) continue;
 
       const cs = getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
@@ -391,9 +437,21 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       // is itself a real finding, not a measurement gap.
       const fg = clusters[1]?.rgb ?? bg;
       const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
+      // `inkShare` is how much of the 18-point grid actually landed on
+      // `clusters[1]` -- 0 when there was no second cluster at all (the
+      // self-comparison case this file's own comment above already names).
+      // Either way, too low means "ink" was read off noise, not the icon's
+      // real fill -- see MIN_ICON_INK_SHARE's own comment. When that's the
+      // binding reason (background share alone would have cleared the
+      // cutoff), report the ink share as `dominantShare` instead of the
+      // background's, so the printed number actually explains why this
+      // reading is ambiguous rather than contradicting it.
+      const inkShare = clusters[1]?.share ?? 0;
+      const inkUnreliable = inkShare < MIN_ICON_INK_SHARE;
+      const reportedShare = inkUnreliable && share >= ambiguousShareCutoff ? inkShare : share;
       const element: SweepIconElement = { kind: 'icon', tag: ic.tag, accessibleRole: ic.accessibleRole, accessibleName: ic.accessibleName, box: ic.box };
-      const reading: SweepReading<SweepIconElement> = { element, ratio, dominantShare: share, foreground: fg, dominantBackground: bg, requiredRatio: WCAG_ICON_MIN_RATIO };
-      if (share < ambiguousShareCutoff) iconBucket.ambiguous.push(reading);
+      const reading: SweepReading<SweepIconElement> = { element, ratio, dominantShare: reportedShare, foreground: fg, dominantBackground: bg, requiredRatio: WCAG_ICON_MIN_RATIO };
+      if (share < ambiguousShareCutoff || inkUnreliable) iconBucket.ambiguous.push(reading);
       else if (ratio < WCAG_ICON_MIN_RATIO) iconBucket.fail.push(reading);
       else iconBucket.pass.push(reading);
     }
