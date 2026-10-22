@@ -85,6 +85,14 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
   // screenshot silently reads the image's bottom edge instead of its real
   // background -- exactly why "By revenue" went completely unmeasured).
   const fullPageBuffer = await page.screenshot({ fullPage: true });
+  // Scroll-offset capture -- see apps/web's identical copy of this file for
+  // the full reasoning (frontend owner/god, 2026-10-22, MDF-376): fullPage
+  // screenshots are document-absolute regardless of current scroll
+  // position, but every box this sampler is handed is viewport-relative.
+  // Capturing the offset here and adding it to every sampled box converts
+  // one into the other -- correct whether or not the page is scrolled, and
+  // a true no-op for every existing caller, which never scrolls.
+  const scrollOffset = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
   const sampler = await page.context().newPage();
   await sampler.setContent('<img id="shot" /><canvas id="cv"></canvas>');
   await sampler.evaluate((base64) => {
@@ -122,7 +130,7 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
    * this file.
    */
   async function clusterAt(box: { x: number; y: number; width: number; height: number }): Promise<Array<{ rgb: RGB; count: number; total: number }>> {
-    const grid = await sampler.evaluate(({ rect }) => {
+    const grid = await sampler.evaluate(({ rect, offset }) => {
       const canvas = document.getElementById('cv') as HTMLCanvasElement;
       const ctx = canvas.getContext('2d')!;
       const pts: { r: number; g: number; b: number }[] = [];
@@ -130,14 +138,14 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
       const fys = [0.2, 0.5, 0.8];
       for (const fx of fxs) {
         for (const fy of fys) {
-          const x = Math.max(0, Math.min(canvas.width - 1, Math.round(rect.x + fx * rect.width)));
-          const y = Math.max(0, Math.min(canvas.height - 1, Math.round(rect.y + fy * rect.height)));
+          const x = Math.max(0, Math.min(canvas.width - 1, Math.round(rect.x + offset.x + fx * rect.width)));
+          const y = Math.max(0, Math.min(canvas.height - 1, Math.round(rect.y + offset.y + fy * rect.height)));
           const data = ctx.getImageData(x, y, 1, 1).data;
           pts.push({ r: data[0] ?? 0, g: data[1] ?? 0, b: data[2] ?? 0 });
         }
       }
       return pts;
-    }, { rect: box });
+    }, { rect: box, offset: scrollOffset });
 
     const counts = new Map<string, { count: number; rgb: RGB }>();
     for (const p of grid) {
