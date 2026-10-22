@@ -6,9 +6,12 @@
  *
  *   * two simulation terminals (Belize City ⇄ Belmopan), a LAND route between
  *     them, and a priced courier lane;
- *   * a simulation customer with a funded test wallet and one PAID
- *     DOOR_TO_HUB shipment (unpaid shipments correctly refuse assignment,
- *     so payment is load-bearing);
+ *   * a simulation customer with a funded test wallet, one PAID DOOR_TO_HUB
+ *     shipment (unpaid shipments correctly refuse assignment, so payment is
+ *     load-bearing), and a second, UNPAID, local DOOR_TO_DOOR shipment that
+ *     exists solely to give /track/[token] (MDF-410) a reproducible public
+ *     tracking fixture — told apart from the walkthrough shipment by
+ *     `description`, never by status alone;
  *   * a simulation driver on a DIFFERENT user (the self-delivery exclusion
  *     empties the pool otherwise): approved role, ONLINE, in-district, with
  *     an approved vehicle whose documents have future expiry dates;
@@ -26,8 +29,10 @@
  * either call fails, #19 does not work as claimed.
  *
  * Idempotent — safe to run repeatedly. Reuses anything it already created;
- * only the walkthrough shipment is created fresh when no active one exists,
- * so every run leaves exactly one parcel to walk.
+ * the walkthrough shipment and the /track fixture shipment are each created
+ * fresh only when their own distinctly-described one does not already
+ * exist, so every run leaves exactly one parcel to walk plus one durable
+ * /track fixture — never one masquerading as the other.
  *
  * Requires: `pnpm db:seed` run once before (roles + super admin), and the API
  * running locally (`pnpm --filter @bmpl/api dev`).
@@ -195,6 +200,13 @@ const HUB_B = {
   isTest: true,
 };
 const HUB_COURIER_FEE_MINOR = 700; // BZ$7.00 simulation first/last-mile rate
+// The flat rate a local (same-district, same-city) DOOR_TO_DOOR run is priced
+// from — see isLocalDoorToDoor()/courierFees() in shipment.service.ts. This
+// field defaults to 0 on any database that has never set it, which includes a
+// fresh CI database: PlatformSetting is not created by any migration or base
+// seed. #507 found this the hard way (CI: "This journey has not been priced
+// yet") after the equivalent local database had already had this set by hand.
+const LOCAL_COURIER_TEST_FEE_MINOR = 111; // BZ$1.11 simulation local door-to-door rate
 const ROUTE = { mode: 'LAND', carrierName: 'UAT Simulation Carrier', durationMinutes: 90, priceMinor: 1500, isTest: true };
 const LANE = {
   originDistrict: 'BELIZE',
@@ -518,13 +530,29 @@ async function main(): Promise<void> {
   await superAdmin.post('/admin/wallet/test-credit', { userId: customerId, ...CREDIT });
   console.info(`  ✓ BZ$${(CREDIT.amountMinor / 100).toFixed(2)} test credit granted via POST admin/wallet/test-credit`);
 
+  // Two DISTINCT fixtures live on this account, told apart by `description`
+  // rather than by status alone — a lesson from MDF-410: the walkthrough
+  // lookup used to match ANY `AWAITING_PICKUP` shipment, which would have
+  // silently adopted the /track fixture below as "the" walkthrough parcel
+  // (or the reverse, depending on creation order) the moment both existed.
+  // Both lookups are now specific on purpose; a narrow new check beside a
+  // broad old one still collides.
+  const WALKTHROUGH_DESCRIPTION = 'UAT walkthrough parcel';
+  const TRACK_FIXTURE_DESCRIPTION = 'UAT /track fixture parcel (MDF-410, DOOR_TO_DOOR, unpaid)';
+
+  type MineRow = {
+    reference: string;
+    status: string;
+    description: string | null;
+    recipientTrackingToken: string | null;
+  };
+  const mine = await customer.get<MineRow[]>('/shipping');
+
   // One WALKABLE parcel per run: reuse only a shipment still waiting for its
   // first-mile assignment — anything further along has been walked already,
   // so a fresh one is booked through the real quote → create(payWithWallet)
   // flow and each run leaves exactly one parcel ready to assign.
-  type MineRow = { reference: string; status: string };
-  const mine = await customer.get<MineRow[]>('/shipping');
-  const active = mine.find((s) => s.status === 'AWAITING_PICKUP');
+  const active = mine.find((s) => s.status === 'AWAITING_PICKUP' && s.description === WALKTHROUGH_DESCRIPTION);
   if (active) {
     console.info(`  • walkable shipment already waiting: ${active.reference} (${active.status})`);
   } else {
@@ -543,12 +571,71 @@ async function main(): Promise<void> {
         phone: '+501-600-0002',
       },
       pieces: 1,
-      description: 'UAT walkthrough parcel',
+      description: WALKTHROUGH_DESCRIPTION,
       payWithWallet: true,
     };
     await customer.post('/shipping/quote', booking);
     const created = await customer.post<{ reference?: string }>('/shipping', booking);
     console.info(`  ✓ shipment booked and PAID via POST shipping (payWithWallet): ${created.reference ?? '(no reference returned)'}`);
+  }
+
+  // The /track/[token] public-route fixture (MDF-410): a SECOND, permanent
+  // shipment on the same account, created through the same real quote →
+  // create flow, never reused for and never confused with the walkthrough
+  // parcel above. DOOR_TO_DOOR with both ends in the same district AND city
+  // (Belize City/Belize City) hits isLocalDoorToDoor() in
+  // packages/shared/src/route-planner.ts, which prices from
+  // PlatformSetting.localCourierFeeTestMinor — no hub, lane or rate is
+  // invented to make this fixture exist. Left UNPAID (payWithWallet
+  // omitted/false) so it is never dispatched and never becomes work for a
+  // real driver; isTest is derived server-side from this account (flagged
+  // isTest above), never requested.
+  const trackFixture = mine.find((s) => s.description === TRACK_FIXTURE_DESCRIPTION);
+  if (trackFixture) {
+    console.info(
+      `  • /track fixture already exists: ${trackFixture.reference} (${trackFixture.status}) token=${trackFixture.recipientTrackingToken}`,
+    );
+  } else {
+    // Establish the pricing precondition itself, through the same approved
+    // admin flow the BZ$7.00 courier rate above already uses (PATCH, not a
+    // direct Prisma write), rather than assuming some earlier environment
+    // already configured it. Unconditional and idempotent: this is the TEST
+    // rate field specifically, never read by a real (isTest:false) booking,
+    // so setting it carries no risk to real pricing on any environment this
+    // guarded script is allowed to touch.
+    await superAdmin.patch('/admin/ops/settings', { localCourierFeeTestMinor: LOCAL_COURIER_TEST_FEE_MINOR });
+    console.info(
+      `  ✓ local door-to-door TEST rate set to BZ$${(LOCAL_COURIER_TEST_FEE_MINOR / 100).toFixed(2)} via PATCH admin/ops/settings ` +
+        `(precondition for the /track fixture — defaults to 0 on a fresh database, which is what failed in CI)`,
+    );
+    const trackBooking = {
+      service: 'DOOR_TO_DOOR',
+      origin: {
+        name: 'Uat Track Sender',
+        phone: '+501-600-0003',
+        address: '12 MDF-410 QA Fixture Street',
+        city: 'Belize City',
+        district: 'BELIZE',
+      },
+      destination: {
+        name: 'Uat Track Recipient',
+        phone: '+501-600-0004',
+        address: '34 MDF-410 QA Fixture Avenue',
+        city: 'Belize City',
+        district: 'BELIZE',
+      },
+      pieces: 1,
+      description: TRACK_FIXTURE_DESCRIPTION,
+    };
+    await customer.post('/shipping/quote', trackBooking);
+    const createdTrack = await customer.post<{ reference?: string; recipientTrackingToken?: string }>(
+      '/shipping',
+      trackBooking,
+    );
+    console.info(
+      `  ✓ /track fixture booked UNPAID via POST shipping (DOOR_TO_DOOR, local same-city rate): ` +
+        `${createdTrack.reference ?? '(no reference returned)'} token=${createdTrack.recipientTrackingToken ?? '(no token returned)'}`,
+    );
   }
 
   console.info('\nUAT walkthrough environment ready.');
