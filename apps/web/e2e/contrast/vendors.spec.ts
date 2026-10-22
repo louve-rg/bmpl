@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
 import { sweepContrast, formatSweepReport, measureFirstEyebrowForeground } from '../support/contrast-sweep';
 import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
+import { sampleContrast } from '../support/contrast';
 
 /**
  * Requirement 7's second public-marketplace route -- see products.spec.ts in
@@ -29,6 +30,7 @@ const KNOWN_VIOLATIONS: KnownViolationEntry[] = JSON.parse(
 const discoveredPassNames = new Set<string>();
 let contributedCount = 0;
 let eyebrowForegroundReported = false;
+let noReviewsRatioReported = false;
 
 function recordPassNames(result: { text: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> }; icon: { pass: Array<{ element: { accessibleRole: string | null; accessibleName: string | null } }> } }): void {
   contributedCount += 1;
@@ -60,6 +62,24 @@ test.describe('contrast: public vendors directory', () => {
         if (eyebrowColor !== null) {
           console.log(`[contrast] web ${ROUTE} -- first .bmpl-eyebrow measured foreground colour: ${eyebrowColor}`);
           eyebrowForegroundReported = true;
+        }
+      }
+
+      // One-shot, fires at most once per run (MDF-376): directly re-samples
+      // the real text node behind the icon-bucket's "No reviews yet"/"New"
+      // widget via the already-existing single-locator `sampleContrast`, as
+      // an independent cross-check of the fixed sweep's own PASS-bucket
+      // discovery for this exact node (vendors/page.tsx:72-85's inline
+      // aria-hidden <span>text-slate-600</span> whose own text is "New"
+      // when ratingCount is 0 -- see contrast-sweep.ts's `isExemptForText`).
+      if (!noReviewsRatioReported) {
+        const newTextLocator = page.getByText('New', { exact: true });
+        if ((await newTextLocator.count()) > 0) {
+          const reading = await sampleContrast(newTextLocator.first());
+          console.log(
+            `[contrast] web ${ROUTE} -- one-shot sampleContrast on name="New" leaf (the vendors.tsx:72-85 rating-label text) @ ${viewport}px: ratio=${reading.ratio} dominantShare=${reading.dominantShare} fg=rgb(${reading.foreground.r},${reading.foreground.g},${reading.foreground.b}) bg=rgb(${reading.dominantBackground.r},${reading.dominantBackground.g},${reading.dominantBackground.b})`,
+          );
+          noReviewsRatioReported = true;
         }
       }
 
