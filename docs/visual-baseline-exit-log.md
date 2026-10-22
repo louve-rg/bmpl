@@ -562,6 +562,66 @@ was fixed; per instruction, this is a count, not a remediation.
 No allowlist entry, no threshold or baseline edit; `continue-on-error`
 untouched; both apps' `contrast-known-violations.json` stay `[]`.
 
+### A green contrast step and a contrast step that ran are different claims (2026-10-22)
+
+**#507** (run `39711682342`, job `119604241492`): the step "Seed UAT
+logistics fixtures" exited 1 (`400 This journey has not been priced yet`).
+That step deliberately has no `continue-on-error` — `ci.yml`'s own comment
+on the API-readiness check above it says why: without that, a dead
+dependency would let the whole job report green with nothing actually
+running. But every step downstream of the seed step *does* carry
+`continue-on-error`, so the failure cascaded as 11 **skipped** steps, not
+11 failed ones: both Playwright installs, both visual baselines, both
+contrast checks, and the enforcement step. The run produced **zero**
+contrast readings for either app. This particular case stayed visible
+because the seed step's own redness surfaced — but the general risk it
+names is wider: a `continue-on-error` step reports success by definition
+when it skips, not only when it passes, so a dependency failure far
+upstream of the contrast steps can leave a job that looks clean with no
+measurement behind it at all.
+
+**The same shape, one layer down, same night** — see slice 1 below. The
+contrast steps themselves executed in that run (confirmed by reading the
+job's own step list, not assumed from a green checkmark), but the new
+`/dashboard/dispatch/[id]` test skipped itself at all 9 widths, because
+the seeded CI database had zero delivery rows and the spec was built to
+skip rather than invent an id (CLAUDE.md §5). That is the correct
+behavior, not a defect in the spec — but it means the run produced zero
+readings for that route, and zero readings must never be read as zero
+violations, for the same reason the job-level case above can't be read
+that way.
+
+**The rule this generalizes to:** before reading any contrast number as
+the violation count for a route, check whether the contrast steps *and*
+that route's specific test actually executed — not whether the job or
+step concluded without failing. A `continue-on-error` step and a
+`test.skip()` both report cleanly when they skip. Absence is not zero.
+
+### Slice 1: admin dispatch (2026-10-22, PR #508, run `39712415745`)
+
+Additive spec only — `apps/admin/e2e/contrast/dispatch.spec.ts`. The
+shared instrument (`contrast.ts`/`contrast-sweep.ts`/`contrast-ratchet.ts`)
+and both apps' `contrast-known-violations.json` (`[]`) are untouched.
+
+- **`/dashboard/dispatch` (list): 9/9 widths passed. Zero confirmed
+  violations.** One ambiguous reading recurs at 8 of the 9 widths: role
+  `button` name `"Show unassigned deliveries"`, ratio 1 (needs 4.5),
+  `dominantShare` 0.33 — the same bucket (low `dominantShare`, no single
+  resolvable background) as the 4-for-4 false-positive sample Dwight
+  already hand-verified this session. Per `contrast-ratchet.ts`'s own
+  design this does not fail the build and is not scored as a violation.
+  Named here anyway, because "ambiguous" and "passing" are different
+  claims even though both leave the build green the same way "skipped"
+  and "zero violations" are different claims above.
+- **`/dashboard/dispatch/[id]` (detail): 9/9 widths skipped. Zero
+  readings, not zero violations** — the seeded CI environment currently
+  has no delivery rows, so this half of slice 1 produced no coverage in
+  this run, for a data reason, not an instrument or spec defect.
+- Admin's contrast step overall this run: 36 passed, 9 failed, 9 skipped.
+  All 9 failures belong to `notifications.spec.ts` (the pre-existing
+  belize-navy checkbox-label defect) — present before this change,
+  unrelated to it. All 9 skips belong to the new detail test above.
+
 ## Review-before-update workflow (the same document records this because the
 same failure shape applies — the easy path must be the safe one)
 
