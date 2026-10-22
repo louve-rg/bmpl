@@ -103,7 +103,13 @@ function PhoneMock() {
   return (
     <div className="relative w-[248px] shrink-0 rounded-[2.6rem] border-[10px] border-slate-900 bg-slate-900 shadow-[0_40px_80px_-30px_rgba(15,23,42,0.55)] sm:w-[272px] lg:rotate-[3deg]">
       <span className="absolute left-1/2 top-0 z-10 h-5 w-24 -translate-x-1/2 rounded-b-2xl bg-slate-900" aria-hidden />
-      <div className="overflow-hidden rounded-[1.9rem] bg-gradient-to-b from-belize-blue/[0.06] via-white to-white" aria-hidden>
+      {/* bg-white backs the gradient, which is only 6% opaque at its own
+          start -- without it, the "Good morning," greeting composited
+          against the phone frame's bg-slate-900 showing through
+          (measured live: ~1.2-1.75:1). bg-white (background-color) and
+          bg-gradient-to-b (background-image) coexist; the colour stop
+          itself is unaffected, now painted over white instead of slate-900. */}
+      <div className="overflow-hidden rounded-[1.9rem] bg-white bg-gradient-to-b from-belize-blue/[0.06] via-white to-white" aria-hidden>
         {/* status bar */}
         <div className="flex items-center justify-between px-5 pb-1 pt-3 text-[10px] font-semibold text-belize-navy">
           <span>9:41</span>

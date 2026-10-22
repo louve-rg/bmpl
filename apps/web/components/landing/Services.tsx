@@ -443,10 +443,14 @@ function WalletCard() {
           range, matching the layout it already uses correctly below 640. */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
         {/* Balance card */}
-        <div className="relative w-full shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-teal-600 to-emerald-700 p-4 text-white lg:w-56" aria-hidden>
+        <div className="relative w-full shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-teal-700 to-emerald-800 p-4 text-white lg:w-56" aria-hidden>
           <div className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/15 blur-2xl" />
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-white/70">Wallet balance</span>
+            {/* Full-opacity white, not white/70: on this card's own gradient
+                (even darkened one shade below, teal-700/emerald-800), a
+                translucent white label still doesn't clear 4.5:1 at the
+                gradient's lighter end -- measured live. */}
+            <span className="text-[10px] font-medium uppercase tracking-wide text-white">Wallet balance</span>
             <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-white/80"><rect x="3" y="6" width="18" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.6" /><circle cx="16.5" cy="12.5" r="1.2" fill="currentColor" /></svg>
           </div>
           <p className="mt-1 text-2xl font-bold tracking-tight">BZ$1,250.00</p>
@@ -461,7 +465,7 @@ function WalletCard() {
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15 text-white">
                   <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4">{path as ReactNode}</svg>
                 </span>
-                <span className="text-[8.5px] font-medium text-white/80">{label as string}</span>
+                <span className="text-[8.5px] font-medium text-white">{label as string}</span>
               </div>
             ))}
           </div>
