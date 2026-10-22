@@ -113,8 +113,14 @@ export default function ShipmentsPage() {
                 <li key={s.id}>
                   {/* The whole card is the tap target — a 44px-plus row is far
                       easier to hit on a phone than a small "track" link. */}
+                  {/* data-theme="light" resets the adaptive-token scope for this
+                      card: it's a literal, always-opaque bg-white, but the
+                      glass-ambient dashboard scope would otherwise leave the
+                      "Booked {date}" text reading the glass value on this
+                      white background. */}
                   <Link
                     href={`/dashboard/shipments/${encodeURIComponent(s.reference)}`}
+                    data-theme="light"
                     className="block rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm transition hover:border-belize-blue/40 hover:shadow-bmpl-md"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">

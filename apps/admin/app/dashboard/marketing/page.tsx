@@ -1540,7 +1540,13 @@ function CouponForm({
   const isPct = form.discountType === 'PERCENTAGE';
 
   return (
-    <div className="space-y-3 rounded-bmpl-lg border border-slate-200 bg-slate-50 p-4">
+    // data-theme="light" resets the adaptive-token scope for this form: it's
+    // a literal, always-opaque bg-slate-50. The create-mode call site
+    // (CouponsTab's plain div) has no reset of its own, so the "Code" hint
+    // (ui.tsx's Field) reads the glass-ambient value there; the edit-mode
+    // call site (CouponRow's own data-theme="light" <li>) was already fine,
+    // and this reassertion is a harmless no-op on that path.
+    <div data-theme="light" className="space-y-3 rounded-bmpl-lg border border-slate-200 bg-slate-50 p-4">
       <p className="text-sm font-semibold text-belize-navy">{mode === 'create' ? 'New platform coupon' : `Edit ${coupon?.code ?? 'coupon'}`}</p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1879,7 +1885,12 @@ function AssignPlacementForm({
   }
 
   return (
-    <div className="space-y-3 rounded-bmpl-xl border border-slate-200 bg-slate-50 p-4">
+    // data-theme="light" resets the adaptive-token scope for this form: it's
+    // a literal, always-opaque bg-slate-50, reached directly from the
+    // ad-placements tab with no reset anywhere above it -- the "Category ID"
+    // and "Position" field hints (ui.tsx's Field) would otherwise read the
+    // glass-ambient value on every render, not just on one path.
+    <div data-theme="light" className="space-y-3 rounded-bmpl-xl border border-slate-200 bg-slate-50 p-4">
       <p className="text-sm font-semibold text-belize-navy">Assign an approved campaign</p>
 
       {approved.length === 0 ? (

@@ -100,7 +100,17 @@ export function DriverCard({ driver, vehicle }: { driver: DeliveryDriver | null;
       null
     : null;
   return (
-    <div className="flex items-center gap-3 rounded-bmpl-md border border-slate-100 bg-slate-50 px-3 py-2.5 text-sm">
+    // data-theme="light" resets the adaptive-token scope for this card: it's
+    // a literal, always-opaque bg-slate-50. Reached from three hosts --
+    // this file's own DeliveryTracker (apps/web/app/orders/[id], no glass
+    // scope, already light, so this is a no-op reassertion there),
+    // ShipmentJourney (apps/web/app/dashboard/shipments/[reference], glass)
+    // and VendorDeliveryPanel (apps/web/app/dashboard/orders/[id], glass) --
+    // without this, the "N deliveries" text reads the glass-ambient value
+    // on the two glass hosts. "light" is correct on every host, unlike
+    // #516's data-theme="glass" choice for a fixed-white surface, which was
+    // wrong on its own non-glass host and had to be undone in #523.
+    <div data-theme="light" className="flex items-center gap-3 rounded-bmpl-md border border-slate-100 bg-slate-50 px-3 py-2.5 text-sm">
       {driver && (
         <Avatar
           name={driver.displayName}
