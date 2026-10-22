@@ -108,7 +108,11 @@ export function RecipientAvailabilityWindow({ reference }: { reference: string }
   }
 
   return (
-    <div className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
+    // data-theme="light" resets the adaptive-token scope for this card. It's
+    // a literal bg-white root with nothing resetting the scope locally, so
+    // the time-range separator below (--bmpl-text-muted-strong, line 128)
+    // was resolving the glass value against this opaque light card -- 1.05:1.
+    <div data-theme="light" className="rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
       <h2 className="text-sm font-semibold text-slate-900">Your delivery availability</h2>
       <p className="mt-1 text-sm text-slate-600">
         Set the hours you&rsquo;ll be there to receive this parcel. Leave this blank and the driver will attempt delivery at

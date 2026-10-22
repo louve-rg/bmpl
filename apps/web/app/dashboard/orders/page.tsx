@@ -41,7 +41,13 @@ export default function VendorOrdersPage() {
       )}
 
       {rows.length > 0 && (
-        <div className="mt-6 overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
+        // data-theme="light" resets the adaptive-token scope for this card.
+        // It's a literal bg-white surface inside the dashboard layout's
+        // data-theme="glass" root with nothing resetting the scope locally, so
+        // the date caption and the "no delivery status" placeholder below
+        // (--bmpl-text-muted-strong, lines 63/68) were resolving the glass
+        // value against an opaque white table -- 1.05:1.
+        <div data-theme="light" className="mt-6 overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
           <table className="w-full min-w-[40rem] text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>

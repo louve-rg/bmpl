@@ -683,8 +683,14 @@ function Composer({
       {files.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
           {files.map((f) => (
+            // data-theme="light" resets the adaptive-token scope for this
+            // chip. It repaints its own opaque bg-slate-50 (or bg-red-50 in
+            // the error state) regardless of the surrounding glass scope, so
+            // the remove button below (--bmpl-text-muted-strong) was
+            // resolving the glass value against this light surface -- 1.05:1.
             <span
               key={f.id}
+              data-theme="light"
               className={`inline-flex max-w-[14rem] items-center gap-1.5 rounded-bmpl-md border px-2 py-1 text-xs ${
                 f.status === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50 text-slate-600'
               }`}

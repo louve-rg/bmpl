@@ -87,7 +87,12 @@ export function ListerListings({
           action={newHref ? <ButtonLink href={newHref}>+ New listing</ButtonLink> : undefined}
         />
       ) : (
-        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
+        // data-theme="light" resets the adaptive-token scope for this card.
+        // It's a literal bg-white surface inside the dashboard layout's
+        // data-theme="glass" root with nothing resetting the scope locally, so
+        // the reference-number caption below (--bmpl-text-muted-strong) was
+        // resolving the glass value against an opaque white table -- 1.05:1.
+        <div data-theme="light" className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white shadow-bmpl-sm">
           <table className="w-full min-w-[44rem] text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>

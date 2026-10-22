@@ -45,7 +45,12 @@ export default async function AuditPage({
       {items.length === 0 ? (
         <EmptyState title="No audit entries yet" description="Administrative actions across the platform will be recorded here." />
       ) : (
-        <div className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
+        // data-theme="light" resets the adaptive-token scope for this card.
+        // It's a literal bg-white surface inside AdminShell's data-theme="glass"
+        // root with nothing resetting the scope locally, so the IP-address
+        // caption below (--bmpl-text-muted-strong) was resolving the glass
+        // value against an opaque white table -- 1.05:1.
+        <div data-theme="light" className="overflow-x-auto rounded-bmpl-xl border border-slate-200 bg-white">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>

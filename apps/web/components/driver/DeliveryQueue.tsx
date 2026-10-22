@@ -217,6 +217,13 @@ export function DeliveryQueue({ onChanged }: { onChanged?: () => void }) {
         {data.items.map((item) => {
           const reorderIndex = reorderable.findIndex((i) => i.id === item.id);
           return (
+            // data-theme="light" resets the adaptive-token scope for this
+            // queue row. It's a literal bg-white (or bg-blue-50 while being
+            // dragged) surface, both opaque light, with nothing resetting the
+            // scope locally -- the blocked-reorder caption (line 280) and
+            // both QueueHandle up/down buttons it wraps (lines 337, 367) were
+            // resolving the glass --bmpl-text-muted-strong value against this
+            // light row -- 1.05:1.
             <li
               key={item.id}
               draggable={item.canReorder && !busy}
@@ -229,6 +236,7 @@ export function DeliveryQueue({ onChanged }: { onChanged?: () => void }) {
                 e.preventDefault();
                 if (item.canReorder) dropOn(item.id);
               }}
+              data-theme="light"
               className={`rounded-bmpl-md border p-3 transition ${
                 dragId === item.id ? 'border-belize-blue bg-blue-50 opacity-60' : 'border-slate-200 bg-white'
               }`}
