@@ -113,7 +113,11 @@ export function LegAssignModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label={mode === 'assign' ? 'Assign driver' : 'Reassign driver'}>
-      <div className="w-full max-w-md rounded-bmpl-xl border border-slate-200 bg-white p-5 shadow-bmpl-lg">
+      {/* data-theme="light": same mechanism and fix as passengers/page.tsx's
+          identical assign modal and dispatch/[id]'s Modal (#520) -- a literal
+          opaque bg-white panel inside AdminShell's ambient glass scope, two
+          leaking nodes (close icon, Cancel button's outline variant). */}
+      <div data-theme="light" className="w-full max-w-md rounded-bmpl-xl border border-slate-200 bg-white p-5 shadow-bmpl-lg">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-belize-navy">
             {mode === 'assign' ? 'Assign driver' : 'Reassign driver'}

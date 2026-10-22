@@ -131,7 +131,12 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
 
 function InfoCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm">
+    // data-theme="light": same mechanism and fix as dispatch/[id]'s InfoCard
+    // (#520) and drivers/[id]'s InfoCard above -- a literal opaque bg-white
+    // card inside AdminShell's ambient [data-theme="glass"] scope, leaking
+    // glass-value var(--bmpl-text-muted-strong) (~1.05:1) onto its own white
+    // sheet in the three empty-state lines below.
+    <section data-theme="light" className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm">
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
       {children}
     </section>
