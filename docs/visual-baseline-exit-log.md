@@ -395,6 +395,75 @@ never existed. The true count of real debt on these ten routes is at least
 27 (26 after the clock-drift relabel above); it is not known to be exactly
 that, because this harness can miss a node the way it missed this one.
 
+### Foreground-alpha bug — a defect in the gate itself (2026-10-21/22, #503)
+
+Oscar found it measuring a real node; god confirmed it reached CI.
+`parseRgb` (`contrast.ts`) and `parseRgbLocal` (`contrast-sweep.ts`), all
+four copies across both apps, discarded a foreground color string's alpha
+channel — a translucent foreground like `text-white/80` was scored as if
+fully opaque. The error runs in only one direction: compositing is a convex
+combination, so the composited foreground can never cross past the
+background, which means discarding alpha can only overstate a ratio, never
+understate it — a gate that can silently PASS a real FAIL.
+
+Fixed in `fix/contrast-foreground-alpha` (branched fresh off `main @
+2e87093`, `chore/contrast-sweep-mdf376` being dead — see below). All four
+parsers now return `{rgb, alpha}`; one exported `compositeOver(fg, alpha,
+bg)` in `contrast.ts` is imported by both `contrast-sweep.ts` copies rather
+than reimplemented, so the sweep and the gate share one formula.
+`foreground` fields now report the post-composite color actually used for
+the ratio, so a failure's reported ratio is reproducible by hand from the
+two colors it prints — not true before this fix.
+
+**Before/after, same commit pinned on both sides, auditable:** before =
+run `39707392238` on `main @ 2e87093` (broken gate, the exact commit the
+fix branched from). After = run `39708563032` on PR #503 (`51288a0`, the
+fix, same commit plus only this change). Both: 84 failing readings on the
+ten existing regression routes.
+
+- **Raw flip count (nodes the corrected gate newly fails that the broken
+  gate passed): 0.** Diffed every `(route, role, name, viewport)` ratio
+  individually, not just the unique-element count — 22 keys appear as
+  failing in both runs, and every one of the 22 has the byte-identical
+  ratio in both (e.g. `/dashboard/store/preview` icon "Rated 0.0 out of 5
+  from 0 reviews" stays at the same ratios at every viewport). 0 nodes
+  changed ratio while keeping the same verdict, on these ten routes.
+- **Any PASS this effort relied on invalidated? None, measured, not
+  assumed.** The only non-identical unique-element-count change (4 unique
+  before -> 5 after) is the same clock-drift artifact documented earlier in
+  this file: `/dashboard/notifications`'s relative timestamp reads "6m ago"
+  in the before run and "5m ago" in the after run, same underlying node,
+  same ratio (`1.02` in both, exactly) — wall-clock drift between
+  notification creation and test run, nothing to do with alpha.
+- **Translucent text on these ten routes: none detected.** The "ratio
+  changed but verdict same" count god asked for (a proxy for how much
+  translucent text exists) is 0 here too, for the same reason as the flip
+  count — every failing node on these routes has an opaque foreground.
+  This bounds what these ten routes can tell us about the bug's reach, not
+  the app overall — see the coverage gap below.
+- **Calibration, checked analytically against the fix's own formulas**
+  (`relativeLuminance`/`contrastRatioOf`/`compositeOver`, run standalone,
+  not from a live page): `--bmpl-oncolor-light-text-muted` (`#475569`) on
+  `#ffffff` computes to `7.5777`, matching the cited `7.579` to within
+  rounding — opaque nodes are unaffected, as the no-op-at-alpha-1 branch
+  guarantees by construction. `text-white/70` on `rgb(52,83,183)`
+  (`bg-belize-blue`) computes to `4.26` (fails 4.5) under the corrected
+  formula, against `6.85` under the broken one (alpha discarded) — matching
+  the broken gate's own cited `6.85:1` misreading exactly. `text-white/80`
+  on the same background computes to `5.03`, matching the cited post-#501
+  target exactly.
+- **Coverage gap, stated rather than guessed:** the message-bubble node
+  itself (`#501`'s subject) is not on any of the ten routes these
+  regression specs cover — confirmed by searching this run's full log;
+  every "message" match is a sidebar nav link's accessible name
+  ("Messages"), not the chat bubble. This harness cannot report that
+  node's live verdict; the calibration above is this fix's formula checked
+  against the cited numbers in isolation, not a live measurement of that
+  specific element.
+
+No allowlist entry, no threshold or baseline edit; `continue-on-error`
+untouched; both apps' `contrast-known-violations.json` stay `[]`.
+
 ## Review-before-update workflow (the same document records this because the
 same failure shape applies — the easy path must be the safe one)
 
