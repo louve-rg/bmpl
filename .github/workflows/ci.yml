@@ -649,9 +649,15 @@ jobs:
       # for both buckets in one place instead of reconstructed from `gh run
       # view --log`. This step asserts nothing; the verdict stays exactly
       # where it already lives, in the enforce step's `if` below.
+      #
+      # Piped through `tee` rather than `>>` alone (god, 2026-10-22): the step
+      # summary itself is not retrievable through any API once the job ends
+      # (not the Checks API, not artifacts, not `gh run view`) -- only the web
+      # UI renders it. Mirroring the table into this step's own stdout means
+      # `gh run view --job <id> --log` keeps a permanent, API-reachable copy.
       - name: Contrast result summary (requirement 7 -- informational, reads NDJSON written before the ratchet could throw)
         if: always()
-        run: node scripts/summarize-contrast-ndjson.mjs apps/web/contrast-results.ndjson apps/admin/contrast-results.ndjson >> "$GITHUB_STEP_SUMMARY"
+        run: node scripts/summarize-contrast-ndjson.mjs apps/web/contrast-results.ndjson apps/admin/contrast-results.ndjson | tee -a "$GITHUB_STEP_SUMMARY"
 
       # NOW continue-on-error too (god, 2026-10-21), matching every other
       # step in this job -- see docs/visual-baseline-exit-log.md's own exit
