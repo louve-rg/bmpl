@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { openPixelSampler, contrastRatioOf, type RGB } from './contrast';
+import { openPixelSampler, contrastRatioOf, compositeOver, type RGB } from './contrast';
 
 /**
  * Requirement 7 (`hive/agents/god/CONTRAST-STANDARD.md`) — a page-wide
@@ -351,10 +351,11 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       // measuredCount, never scored in any bucket, no error. That is how
       // "By revenue" (and 7 other elements the same run) vanished without a
       // trace instead of landing in fail or ambiguous.
-      const fg = parseRgbLocal(t.color);
-      if (!fg) continue;
+      const fgParsed = parseRgbLocal(t.color);
+      if (!fgParsed) continue;
 
       const { rgb: bg, share } = await sampler.sampleDominant(t.box);
+      const fg = compositeOver(fgParsed.rgb, fgParsed.alpha, bg);
       const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
       const requiredRatio = t.isLargeText ? WCAG_LARGE_TEXT_MIN_RATIO : WCAG_NORMAL_TEXT_MIN_RATIO;
       const element: SweepTextElement = {
@@ -441,12 +442,19 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
   }
 }
 
-function parseRgbLocal(css: string): RGB | null {
+/**
+ * Mirrors `parseRgb` in `./contrast` (not imported — that one is private to
+ * its module). Must carry alpha for the same reason: a declared `color`
+ * like `text-white/80` is translucent, and the caller composites it over
+ * the real sampled background (via `compositeOver`) before computing a
+ * ratio — discarding alpha here silently overstates every such node.
+ */
+function parseRgbLocal(css: string): { rgb: RGB; alpha: number } | null {
   const m = css.match(/rgba?\(([^)]+)\)/);
   if (!m || m[1] === undefined) return null;
-  const [r, g, b] = m[1].split(',').map((n) => parseFloat(n));
+  const [r, g, b, a] = m[1].split(',').map((n) => parseFloat(n));
   if (r === undefined || g === undefined || b === undefined) return null;
-  return { r, g, b };
+  return { rgb: { r, g, b }, alpha: a === undefined ? 1 : a };
 }
 
 /**
