@@ -33,6 +33,18 @@ const DISMISS_ICON_STYLES: Record<'INFO' | 'WARNING' | 'CRITICAL', string> = {
   CRITICAL: 'text-white hover:bg-white/20',
 };
 
+// The level pill's own frosted overlay. bg-white/20 LIGHTENS the banner
+// colour underneath it -- fine for INFO's navy and WARNING's amber, but
+// red-600 is dark enough that lightening it pulls white pill text down to
+// 3.77:1 (below the 4.5:1 text bar; the pill label is text, not an icon).
+// bg-black/20 darkens instead of lightening, which is what CRITICAL's
+// already-dark ground needs: white-on-darkened-red measures 6.86:1.
+const PILL_OVERLAY_STYLES: Record<'INFO' | 'WARNING' | 'CRITICAL', string> = {
+  INFO: 'bg-white/20',
+  WARNING: 'bg-white/20',
+  CRITICAL: 'bg-black/20',
+};
+
 export function AnnouncementBanner() {
   const [data, setData] = useState<AnnouncementResponse | null>(null);
   const [dismissedAnnouncement, setDismissedAnnouncement] = useState(false);
@@ -63,7 +75,9 @@ export function AnnouncementBanner() {
     <div>
       {showAnnouncement && data.announcement && (
         <div className={`flex items-start gap-3 px-4 py-2.5 text-sm font-medium md:px-8 ${LEVEL_STYLES[data.announcement.level]}`} role="status">
-          <span className="mt-px inline-flex shrink-0 items-center rounded-full bg-white/20 px-2 py-0.5 text-xs font-bold uppercase tracking-wide">
+          <span
+            className={`mt-px inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-bold uppercase tracking-wide ${PILL_OVERLAY_STYLES[data.announcement.level]}`}
+          >
             {data.announcement.level}
           </span>
           <span className="flex-1">{data.announcement.message}</span>
