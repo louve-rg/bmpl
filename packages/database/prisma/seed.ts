@@ -8,6 +8,11 @@
  *    so the admin approval queue has something to review out of the box.
  *  * Creates two permanent Belize Connect employer fixtures for apps/web/e2e
  *    (BMPL-228) — see seedEmployerE2eFixtures() below before touching either.
+ *  * Creates permanent fixtures for three PUBLIC detail routes that had no
+ *    seed record anywhere in the repo (MDF-410): a storefront + product
+ *    (/store/[slug], /products/[slug]) and a real-estate agency
+ *    (/properties/agencies/[slug]). See seedMarketplaceFixtures() and
+ *    seedAgencyFixture() below.
  *
  * Run: pnpm db:seed   (after migrate)
  */
@@ -164,6 +169,8 @@ async function seedDemoData() {
   }
 
   await seedEmployerE2eFixtures();
+  await seedMarketplaceFixtures();
+  await seedAgencyFixture();
 }
 
 /**
@@ -257,6 +264,143 @@ async function seedEmployerE2eFixtures() {
   await approveEmployerRole(noProfile.id);
 
   console.info('✓ Seeded Belize Connect e2e fixtures (BMPL-228): 1 with a profile, 1 permanently without');
+}
+
+/**
+ * MDF-410: /products/[slug] and /store/[slug] had NO seed record anywhere in
+ * the repo, so neither could render locally at any viewport, let alone the
+ * owner's required eight widths — a repo fixture gap, not a production one
+ * (production carries its own, unrelated live products).
+ *
+ * isTest MUST be false here, which is the opposite of how a vendor/product is
+ * normally marked as simulation data. products.service.ts's publicDetail()
+ * and vendor.service.ts's publicStorefront() both deliberately exclude
+ * isTest vendors from direct-slug reachability (the whole point of that flag
+ * is that a simulation storefront is NOT publicly reachable even by its exact
+ * slug) — so an isTest fixture here would 404 on exactly the route it exists
+ * to exercise. "Clearly labeled" is carried entirely by name/content instead,
+ * same as the BMPL-228 employer fixture above, which has no isTest boundary
+ * to lean on either.
+ *
+ * Reuses the existing deshawn.vendor@example.bz demo account (seeded by
+ * seedDemoData above) rather than creating a second vendor identity.
+ */
+async function seedMarketplaceFixtures() {
+  const deshawn = await prisma.user.findUnique({ where: { email: 'deshawn.vendor@example.bz' } });
+  if (!deshawn) {
+    console.warn('⚠ MDF-410: deshawn.vendor@example.bz not found — skipping marketplace storefront/product fixture.');
+    return;
+  }
+
+  await prisma.userRole.upsert({
+    where: { userId_roleCode: { userId: deshawn.id, roleCode: 'VENDOR' } },
+    update: { status: 'APPROVED', approvedAt: new Date() },
+    create: { userId: deshawn.id, roleCode: 'VENDOR', status: 'APPROVED', approvedAt: new Date() },
+  });
+
+  const vendor = await prisma.vendorProfile.upsert({
+    where: { slug: 'uat-walk-store-simulation' },
+    update: {},
+    create: {
+      userId: deshawn.id,
+      businessName: 'UAT Walk Store (simulation)',
+      slug: 'uat-walk-store-simulation',
+      contactEmail: 'deshawn.vendor@example.bz',
+      approvalStatus: 'APPROVED',
+      storeStatus: 'CLOSED',
+      isTest: false,
+      submittedAt: new Date(),
+      approvedAt: new Date(),
+    },
+  });
+
+  await prisma.vendorSettings.upsert({
+    where: { vendorProfileId: vendor.id },
+    update: {},
+    create: {
+      vendorProfileId: vendor.id,
+      pickupEnabled: true,
+      deliveryEnabled: true,
+      baseDeliveryFeeMinor: 500n,
+    },
+  });
+
+  await prisma.vendorLocation.upsert({
+    where: { id: 'mdf410-uat-walk-store-hq' },
+    update: {},
+    create: {
+      id: 'mdf410-uat-walk-store-hq',
+      vendorProfileId: vendor.id,
+      label: 'Req1 HQ Warehouse',
+      addressLine1: '123 Main St',
+      city: 'Belize City',
+      district: 'BELIZE',
+      country: 'BZ',
+      isPrimary: false,
+    },
+  });
+
+  const electronics = await prisma.category.findUnique({ where: { slug: 'electronics' } });
+  if (!electronics) {
+    console.warn('⚠ MDF-410: "electronics" category not found — skipping product fixture (store fixture still seeded).');
+  } else {
+    await prisma.product.upsert({
+      where: { slug: 'uat-walk-widget-simulation' },
+      update: {},
+      create: {
+        vendorProfileId: vendor.id,
+        categoryId: electronics.id,
+        title: 'UAT Walk Widget (simulation)',
+        slug: 'uat-walk-widget-simulation',
+        description: 'Simulation product for the BMPL-106 walkthrough.',
+        sku: 'UATWALK-1',
+        status: 'PUBLISHED',
+        priceMinor: 2500n,
+        currency: 'BZD',
+        publishedAt: new Date(),
+      },
+    });
+  }
+
+  console.info(
+    '✓ Seeded marketplace fixtures (MDF-410): /store/uat-walk-store-simulation, /products/uat-walk-widget-simulation',
+  );
+}
+
+/**
+ * MDF-410: /properties/agencies/[slug] had NO seed record anywhere in the
+ * repo either. AgencyProfile carries no isTest column at all (Belize Connect
+ * and real estate share that gap — see seedEmployerE2eFixtures' own comment),
+ * so "clearly labeled" is carried by the `[QA SYNTHETIC]` name prefix and the
+ * description, not by a simulation flag.
+ *
+ * Reuses the existing uat-real-estate-agent@bzemarketplace.com UAT account as
+ * the agency's manager rather than creating a second identity.
+ */
+async function seedAgencyFixture() {
+  const manager = await prisma.user.findUnique({ where: { email: 'uat-real-estate-agent@bzemarketplace.com' } });
+  if (!manager) {
+    console.warn('⚠ MDF-410: uat-real-estate-agent@bzemarketplace.com not found — skipping agency fixture.');
+    return;
+  }
+
+  await prisma.agencyProfile.upsert({
+    where: { slug: 'qa-synthetic-caye-breeze-realty-group' },
+    update: {},
+    create: {
+      managerUserId: manager.id,
+      name: '[QA SYNTHETIC] Caye Breeze Realty Group',
+      slug: 'qa-synthetic-caye-breeze-realty-group',
+      description:
+        'SYNTHETIC QA TEST DATA - not a real agency. Created to exercise the /properties/agencies/[slug] route locally only, per MDF-376/MDF-410.',
+      contactEmail: 'qa-synthetic-agency@example.bz',
+      district: 'BELIZE',
+      city: 'Belize City',
+      approvalStatus: 'APPROVED',
+    },
+  });
+
+  console.info('✓ Seeded real-estate agency fixture (MDF-410): /properties/agencies/qa-synthetic-caye-breeze-realty-group');
 }
 
 /** Baseline Belize Connect job categories (managed reference data). Idempotent
