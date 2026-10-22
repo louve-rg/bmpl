@@ -1,4 +1,6 @@
+import * as fs from 'node:fs';
 import { ensurePortFree, startDevServer, stopDevServer, waitForRealReadiness, CONTRAST_PORT, CONTRAST_BASE_URL } from './server';
+import { SWEEP_RESULTS_NDJSON_PATH } from './contrast-sweep';
 
 /**
  * Same lifecycle as global-setup.ts, pinned to CONTRAST_PORT instead of
@@ -16,6 +18,10 @@ export default async function globalSetup() {
         'ADMIN_PUBLIC_API_URL=http://localhost:4000 pnpm --filter @bmpl/admin test:contrast',
     );
   }
+
+  // See apps/web's own copy of this line for why this lives in global
+  // setup rather than in contrast-sweep.ts (god, 2026-10-22, MDF-376).
+  fs.rmSync(SWEEP_RESULTS_NDJSON_PATH, { force: true });
 
   ensurePortFree(CONTRAST_PORT);
   const server = startDevServer(CONTRAST_PORT);

@@ -1,4 +1,6 @@
 import type { Page } from '@playwright/test';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { openPixelSampler, contrastRatioOf, compositeOver, type RGB } from './contrast';
 
 /**
@@ -109,8 +111,8 @@ export interface SweepResult {
   borderOnlyNotMeasured: true;
 }
 
-type DiscoveredText = SweepTextElement & { disabled: boolean };
-type DiscoveredIcon = SweepIconElement & { composite: boolean };
+type DiscoveredText = SweepTextElement & { disabled: boolean; fixedPositionAncestor: boolean };
+type DiscoveredIcon = SweepIconElement & { composite: boolean; fixedPositionAncestor: boolean };
 
 async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; icon: DiscoveredIcon[] }> {
   return page.evaluate(() => {
@@ -147,6 +149,19 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         const cs = getComputedStyle(child);
         if (cs.backgroundImage !== 'none') return true;
         if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') return true;
+      }
+      return false;
+    }
+
+    // See contrast.ts's `ensureViewportSampler` comment (web's copy has the
+    // full reasoning) -- a `position: fixed` ancestor breaks the fullPage-
+    // screenshot sampling assumption, so elements under one are flagged at
+    // discovery time and routed to a different sampler.
+    function hasFixedPositionAncestor(el: Element): boolean {
+      let node: Element | null = el;
+      while (node) {
+        if (getComputedStyle(node).position === 'fixed') return true;
+        node = node.parentElement;
       }
       return false;
     }
@@ -207,6 +222,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       box: { x: number; y: number; width: number; height: number };
       disabled: boolean;
       color: string;
+      fixedPositionAncestor: boolean;
     }> = [];
     const iconOut: Array<{
       kind: 'icon';
@@ -215,6 +231,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       accessibleName: string | null;
       box: { x: number; y: number; width: number; height: number };
       composite: boolean;
+      fixedPositionAncestor: boolean;
     }> = [];
 
     for (const el of document.body.querySelectorAll('*')) {
@@ -233,6 +250,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
           accessibleName: accessibleNameOf(el, null),
           box: { x: box.x, y: box.y, width: box.width, height: box.height },
           composite: hasOwnFillDescendant(el),
+          fixedPositionAncestor: hasFixedPositionAncestor(el),
         });
         continue;
       }
@@ -265,6 +283,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         box: { x: box.x, y: box.y, width: box.width, height: box.height },
         disabled: isDisabled(el),
         color: cs.color,
+        fixedPositionAncestor: hasFixedPositionAncestor(el),
       });
     }
 
@@ -293,7 +312,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       const fgParsed = parseRgbLocal(t.color);
       if (!fgParsed) continue;
 
-      const { rgb: bg, share } = await sampler.sampleDominant(t.box);
+      const { rgb: bg, share } = await sampler.sampleDominant(t.box, { fixedPosition: t.fixedPositionAncestor });
       const fg = compositeOver(fgParsed.rgb, fgParsed.alpha, bg);
       const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
       const requiredRatio = t.isLargeText ? WCAG_LARGE_TEXT_MIN_RATIO : WCAG_NORMAL_TEXT_MIN_RATIO;
@@ -318,7 +337,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
 
     const iconBucket: SweepBucket<SweepIconElement> = { pass: [], fail: [], ambiguous: [] };
     for (const ic of measurableIcons) {
-      const clusters = await sampler.sampleClustersOrdered(ic.box);
+      const clusters = await sampler.sampleClustersOrdered(ic.box, { fixedPosition: ic.fixedPositionAncestor });
       if (clusters.length === 0) continue;
       const bg = clusters[0]!.rgb;
       const share = clusters[0]!.share;
@@ -377,6 +396,68 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
   } finally {
     await sampler.close();
   }
+}
+
+const APP_NAME = 'admin';
+
+/**
+ * One NDJSON file per app -- see the web copy of this file for the full
+ * reasoning (truncated once per invocation by global-setup.contrast.ts,
+ * not per-test, and why `__dirname`-relative rather than `process.cwd()`-
+ * relative). Always resolves to `apps/admin/contrast-results.ndjson`.
+ */
+export const SWEEP_RESULTS_NDJSON_PATH = path.resolve(__dirname, '..', '..', 'contrast-results.ndjson');
+
+export interface SweepResultRecord {
+  app: string;
+  route: string;
+  viewport: number;
+  elementKind: 'text' | 'icon';
+  bucket: 'pass' | 'fail' | 'ambiguous';
+  accessibleRole: string | null;
+  accessibleName: string | null;
+  ratio: number;
+  requiredRatio: number;
+  dominantShare: number;
+  foreground: RGB;
+  dominantBackground: RGB;
+}
+
+/**
+ * Persists every reading from one sweep as NDJSON before the caller runs
+ * `assertRatchet` -- see the web copy of this file for the full reasoning
+ * (god, 2026-10-22, MDF-376). `foreground`/`dominantBackground` were
+ * always on every `SweepReading`, just never printed; this writes what
+ * already exists.
+ */
+export function writeSweepResultRecords(result: SweepResult, context: { route: string; viewport: number }): void {
+  const records: SweepResultRecord[] = [];
+  function pushBucket(elementKind: 'text' | 'icon', bucket: 'pass' | 'fail' | 'ambiguous', readings: Array<SweepReading<SweepTextElement> | SweepReading<SweepIconElement>>) {
+    for (const r of readings) {
+      records.push({
+        app: APP_NAME,
+        route: context.route,
+        viewport: context.viewport,
+        elementKind,
+        bucket,
+        accessibleRole: r.element.accessibleRole,
+        accessibleName: r.element.accessibleName,
+        ratio: r.ratio,
+        requiredRatio: r.requiredRatio,
+        dominantShare: r.dominantShare,
+        foreground: r.foreground,
+        dominantBackground: r.dominantBackground,
+      });
+    }
+  }
+  pushBucket('text', 'pass', result.text.pass);
+  pushBucket('text', 'fail', result.text.fail);
+  pushBucket('text', 'ambiguous', result.text.ambiguous);
+  pushBucket('icon', 'pass', result.icon.pass);
+  pushBucket('icon', 'fail', result.icon.fail);
+  pushBucket('icon', 'ambiguous', result.icon.ambiguous);
+  if (records.length === 0) return;
+  fs.appendFileSync(SWEEP_RESULTS_NDJSON_PATH, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
 }
 
 /**
