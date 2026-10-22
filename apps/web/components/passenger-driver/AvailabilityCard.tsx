@@ -50,7 +50,7 @@ export function AvailabilityCard({
   const currentLabel = PASSENGER_AVAILABILITY_OPTIONS.find((o) => o.value === current)?.label ?? 'Suspended';
 
   return (
-    <UiCard className={`p-4 sm:p-6 ${current === 'ONLINE' ? 'border-emerald-300 bg-emerald-50/40' : ''}`} aria-live="polite">
+    <UiCard className={`p-4 sm:p-6 ${current === 'ONLINE' ? 'border-emerald-300 bg-emerald-500/10' : ''}`} aria-live="polite">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="bmpl-eyebrow">Availability</h2>
         <Badge tone={tone}>{currentLabel}</Badge>
@@ -63,7 +63,7 @@ export function AvailabilityCard({
       )}
 
       {suspended ? (
-        <p className="mt-3 text-sm text-slate-600">
+        <p className="mt-3 text-sm text-[color:var(--bmpl-text-muted)]">
           Your passenger-driver role is suspended, so availability can&rsquo;t be changed. An administrator has to lift
           the suspension.
         </p>
