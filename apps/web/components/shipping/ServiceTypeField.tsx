@@ -61,7 +61,16 @@ export function ServiceTypeField({
   }, [open]);
 
   return (
-    <div>
+    // data-theme="light" resets the adaptive-token scope for this subtree.
+    // The trigger button and the dialog's close button both read
+    // var(--bmpl-text-muted-strong) directly; without a reset they inherit
+    // whatever [data-theme] ancestor is nearest in the DOM (glass, from the
+    // dashboard shell) while actually rendering on this component's own
+    // fixed-light surfaces (the caller's .bmpl-surface-onlight card, and the
+    // dialog's own bg-white panel) -- 1.05:1. The dialog is a DOM descendant
+    // of this root despite its own `fixed` positioning, so one reset here
+    // covers both nodes.
+    <div data-theme="light">
       <div className="flex items-center gap-1.5">
         <label htmlFor="service-type" className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
           Service type
