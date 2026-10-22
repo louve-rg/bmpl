@@ -359,7 +359,7 @@ export function ProductView({ product }: { product: ProductDetail }) {
           </div>
 
           {state === 'ADD' && maxQty != null && maxQty <= 10 && (
-            <p className="mt-2 text-xs font-medium text-amber-600">
+            <p className="mt-2 text-xs font-medium text-amber-800">
               Only {maxQty} left in stock — the quantity is capped at what's available.
             </p>
           )}
