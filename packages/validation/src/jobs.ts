@@ -51,6 +51,13 @@ export const upsertJobSeekerProfileSchema = z.object({
 });
 export type UpsertJobSeekerProfileInput = z.infer<typeof upsertJobSeekerProfileSchema>;
 
+// The kinds of work a seeker will do: ids of VISIBLE JobCategory rows. Replaces the
+// whole set. Duplicates are collapsed by the service; existence is checked there.
+export const jobSeekerWorkCategoriesSchema = z.object({
+  categoryIds: z.array(z.string().trim().min(1).max(64)).max(30),
+});
+export type JobSeekerWorkCategoriesInput = z.infer<typeof jobSeekerWorkCategoriesSchema>;
+
 export const jobSeekerSkillSchema = z.object({ name: skillName });
 export type JobSeekerSkillInput = z.infer<typeof jobSeekerSkillSchema>;
 

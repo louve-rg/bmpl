@@ -3124,6 +3124,7 @@ model JobCategory {
   updatedAt DateTime @updatedAt
 
   jobs JobListing[]
+  seekerWorkCategories JobSeekerWorkCategory[]
 
   @@index([isVisible])
   @@map("job_categories")
@@ -3161,6 +3162,7 @@ model JobSeekerProfile {
   certifications JobSeekerCertification[]
   languages      JobSeekerLanguage[]
   resumes        JobSeekerResume[]
+  workCategories JobSeekerWorkCategory[]
 
   @@index([visibility])
   @@index([district])
@@ -3256,6 +3258,22 @@ model JobSeekerResume {
 
   @@index([profileId])
   @@map("job_seeker_resumes")
+}
+
+// The kinds of work a job seeker is willing to do, as links to the EXISTING
+// JobCategory taxonomy (never a parallel list). Self-declared: nothing here is
+// verified by BML, and nothing here claims a licence or certification.
+model JobSeekerWorkCategory {
+  id            String           @id @default(cuid())
+  profileId     String
+  profile       JobSeekerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  jobCategoryId String
+  jobCategory   JobCategory      @relation(fields: [jobCategoryId], references: [id], onDelete: Cascade)
+  createdAt     DateTime         @default(now())
+
+  @@unique([profileId, jobCategoryId])
+  @@index([jobCategoryId])
+  @@map("job_seeker_work_categories")
 }
 
 // ---- Employer / Company profile (mirrors VendorProfile; approval via EMPLOYER role) ----
