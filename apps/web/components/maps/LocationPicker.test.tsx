@@ -170,3 +170,35 @@ describe('LocationPicker full-screen picking (Edward REQ 8)', () => {
     expect(onChange).toHaveBeenCalledWith({ latitude: 17.5, longitude: -88.2 });
   });
 });
+
+describe('LocationPicker repositioning an existing pin (MDF-376 section 6: placement AND repositioning)', () => {
+  it('dragging the marker reports the DRAGGED coordinates, not the ones it was seeded with', async () => {
+    mount();
+    const onChange = vi.fn();
+    act(() => {
+      root!.render(<LocationPicker value={{ latitude: 17.4995, longitude: -88.1976 }} onChange={onChange} />);
+    });
+    await flush();
+
+    const leaflet = (await import('leaflet')).default as unknown as { marker: ReturnType<typeof vi.fn> };
+    const markerInstance = leaflet.marker.mock.results.at(-1)!.value as {
+      getLatLng: ReturnType<typeof vi.fn>;
+      on: ReturnType<typeof vi.fn>;
+    };
+    const onDragEnd = markerInstance.on.mock.calls.find((c: unknown[]) => c[0] === 'dragend')?.[1] as
+      | (() => void)
+      | undefined;
+    expect(onDragEnd).toBeTruthy();
+
+    // Leaflet moves the marker itself, THEN fires dragend; the component
+    // reads the new position back out via getLatLng() at that point, not
+    // from whatever it was created with — the mock has to report the
+    // dragged position at call time for this to mean anything.
+    markerInstance.getLatLng.mockReturnValue({ lat: 17.52, lng: -88.21 });
+    onChange.mockClear();
+    act(() => onDragEnd!());
+
+    expect(onChange).toHaveBeenCalledWith({ latitude: 17.52, longitude: -88.21 });
+    expect(onChange).not.toHaveBeenCalledWith({ latitude: 17.4995, longitude: -88.1976 });
+  });
+});
