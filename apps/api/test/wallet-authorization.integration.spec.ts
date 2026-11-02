@@ -183,6 +183,16 @@ describe('insufficient balance → full rollback', () => {
   });
 });
 
+// After the wallet-lock enforcement fix (SHIPPING-E2E), `authorize()` keeps
+// its OWN pre-transaction wallet-status check (payments.service.ts, right
+// before escrowInTx's $transaction). Every `it` below goes through that
+// endpoint, so it exercises that pre-check's early-out, not the enforcement
+// inside `escrowInTx` itself — the sink now refuses a locked/suspended
+// wallet on its own, and these tests would pass exactly as they do today
+// even if that sink-level check were deleted, because authorize()'s own
+// check would still catch it first. Coverage of the sink itself — the part
+// that actually protects orders.checkout() and shipment creation — lives in
+// wallet-lock-enforcement.integration.spec.ts.
 describe('wallet validation failures (each rolls back)', () => {
   async function setup(email: string, business: string, sku: string, fund = 6000) {
     const customer = await registerCustomer(email);

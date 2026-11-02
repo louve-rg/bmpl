@@ -194,6 +194,16 @@ export class PaymentsService {
     }
 
     // ---- Wallet validation ----
+    // Pre-transaction early-out, kept even though escrowInTx below now enforces
+    // the same LOCKED/SUSPENDED/not-ACTIVE and balance checks itself. This is
+    // no longer the enforcement point — it is redundant on purpose: it lets a
+    // missing wallet, a currency mismatch, or a locked/insufficient wallet
+    // fail BEFORE opening a transaction, with failAuthorization's richer
+    // rollback (releases holds, cancels the order, voids the ledger ref) and
+    // its own audit trail. escrowInTx's check is what makes refusal correct
+    // for every caller; this one is what makes it well-shaped for this one.
+    // Do not remove it as "now covered by the sink" and do not read its
+    // presence as proof the sink lacks its own check.
     const wallets = await this.prisma.walletAccount.findMany({ where: { userId: actor.userId, type: 'USER' } });
     const wallet = wallets.find((w) => w.currency === payment.currency);
     const reason = await this.walletRejectReason(wallet, wallets.length, payment.amountMinor);
@@ -253,6 +263,18 @@ export class PaymentsService {
     const wallet = await tx.walletAccount.findFirstOrThrow({ where: { userId: payment.userId, type: 'USER', currency: payment.currency } });
     if (fresh.status === 'AUTHORIZED') return; // concurrent replay
     if (fresh.status !== 'CREATED' && fresh.status !== 'PENDING') throw new ConflictException(`Cannot authorize a ${fresh.status} payment.`);
+
+    // Locking a wallet is documented (WalletService.setUserWalletLock) as
+    // removing its permission to ORIGINATE new movement. This is the one sink
+    // every customer-wallet debit passes through (see the BMPL-375 comment
+    // above), so it is enforced here rather than per caller: `authorize()`'s
+    // own pre-check above is a copy of this same rule, and orders.checkout()
+    // / shipment.create() reached this function directly, with no copy of
+    // their own, which is how a locked wallet could still be charged. Reusing
+    // walletRejectReason's status wording rather than writing a new message
+    // keeps one refusal shape for one condition.
+    const lockReason = this.walletStatusRejectReason(wallet);
+    if (lockReason) throw new ConflictException(lockReason);
 
     const escrow = await this.wallet.ensureSystemAccount('SYSTEM_ESCROW', payment.currency, tx);
 
@@ -320,6 +342,14 @@ export class PaymentsService {
     );
   }
 
+  /** Returns a rejection reason for the wallet's STATUS alone (no balance check), or null. */
+  private walletStatusRejectReason(wallet: { status: string }): string | null {
+    if (wallet.status === 'LOCKED') return 'Wallet is locked.';
+    if (wallet.status === 'SUSPENDED') return 'Wallet is suspended.';
+    if (wallet.status !== 'ACTIVE') return 'Wallet is not active.';
+    return null;
+  }
+
   /** Returns a rejection reason if the wallet fails validation, else null. */
   private async walletRejectReason(
     wallet: { id: string; status: string; currency: Currency } | undefined,
@@ -327,9 +357,8 @@ export class PaymentsService {
     amountMinor: bigint,
   ): Promise<string | null> {
     if (!wallet) return walletCount > 0 ? 'Wallet currency mismatch.' : 'No wallet account found.';
-    if (wallet.status === 'LOCKED') return 'Wallet is locked.';
-    if (wallet.status === 'SUSPENDED') return 'Wallet is suspended.';
-    if (wallet.status !== 'ACTIVE') return 'Wallet is not active.';
+    const statusReason = this.walletStatusRejectReason(wallet);
+    if (statusReason) return statusReason;
     const balance = await this.wallet.balanceMinor(wallet.id);
     if (balance < amountMinor) return 'Insufficient wallet balance.';
     return null;
