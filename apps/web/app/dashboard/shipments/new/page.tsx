@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   belizeCalendarDateKey,
@@ -55,6 +55,28 @@ function quotable(service: ShippingService, origin: EndpointValue, destination: 
 function todayKey(): string {
   return belizeCalendarDateKey(new Date());
 }
+
+/**
+ * Only `request()` in lib/api throws this shape, and only once it has a real
+ * HTTP response to read (`status` is always a number there). A dropped
+ * connection or an aborted request never reaches that point — `fetch` itself
+ * rejects with a plain `TypeError`/`DOMException`, which has no `status`.
+ * That distinction is exactly what decides which message a customer reads
+ * below: a server-told reason, or an honest "we don't know what happened."
+ */
+function isApiError(e: unknown): e is ApiError {
+  return typeof e === 'object' && e !== null && typeof (e as { status?: unknown }).status === 'number';
+}
+
+/**
+ * Shown when the booking request never got a usable response — connection
+ * dropped, timed out, or the browser aborted it. We do not know whether the
+ * server already charged the wallet and booked the shipment, so we never
+ * guess and never resubmit automatically: silence is what makes a customer
+ * retry and risk paying twice, so this says exactly that, in words, instead.
+ */
+const CONNECTION_LOST_MESSAGE =
+  'We lost the connection before we could confirm this booking. Please do not submit again — check My Shipments to see whether it already went through, or contact us if you are not sure.';
 
 /** The request body both quoting and booking use, so they cannot disagree. */
 function toRequest(
@@ -116,6 +138,12 @@ export default function NewShipmentPage() {
   const [quoting, setQuoting] = useState(false);
   const [booking, setBooking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Mirrors `booking`, but read/set synchronously inside book() itself —
+  // the `disabled` attribute only takes effect once React commits the next
+  // render, which is not guaranteed to happen before a second click event
+  // (a fast double-click, or two taps) reaches this same handler. The ref
+  // closes that gap completely instead of relying on render timing.
+  const submitInFlight = useRef(false);
 
   useEffect(() => {
     shippingApi.hubs().then(setHubs).catch(() => setHubs([]));
@@ -167,15 +195,22 @@ export default function NewShipmentPage() {
   }, [refreshQuote]);
 
   async function book() {
+    if (submitInFlight.current) return;
+    submitInFlight.current = true;
     setBooking(true);
     setErr(null);
     try {
       const created = await shippingApi.create({ ...request, payWithWallet: true });
       router.push(`/dashboard/shipments/${encodeURIComponent(created.reference)}`);
     } catch (e) {
-      const api = e as ApiError;
-      setErr(api.errors?.[0]?.message ?? api.message ?? 'We could not book that shipment.');
+      // DO NOT auto-retry and DO NOT try to infer success from the failure
+      // shape here — a server-told error (isApiError) is shown as the
+      // server worded it; anything else (dropped connection, abort, timeout)
+      // gets the honest "we don't know" message, never the raw browser/network
+      // error text, which would read as gibberish rather than guidance.
+      setErr(isApiError(e) ? e.errors?.[0]?.message ?? e.message ?? 'We could not book that shipment.' : CONNECTION_LOST_MESSAGE);
       setBooking(false);
+      submitInFlight.current = false;
     }
   }
 
@@ -432,7 +467,12 @@ export default function NewShipmentPage() {
           )}
           {/* Never "Book" — booking now takes the money, and the button should
               say so before it is pressed. */}
-          <Button onClick={book} disabled={!canBook} className="min-h-[48px] w-full text-base">
+          {/* `canBook` already folds in `!booking`, so this is redundant today --
+              it is here so the button staying disabled through the request
+              cannot silently regress if `canBook`'s own definition ever drops
+              that clause; the ref (submitInFlight, above) is what actually
+              keeps a double-submit safe either way. */}
+          <Button onClick={book} disabled={!canBook || booking} className="min-h-[48px] w-full text-base">
             {booking
               ? 'Paying…'
               : quote?.available
