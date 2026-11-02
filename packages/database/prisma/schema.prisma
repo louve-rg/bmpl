@@ -5279,6 +5279,17 @@ model ShipmentLeg {
   handoffReceivedByName     String?
   handoffPhotoKeys          String[]
 
+  // ---- Pickup verification at the start of this leg (SHIPPING-E2E step 9) ----
+  // Exact mirror of the handoff columns above: the SENDER holds the code, the
+  // collecting driver must produce it. Only enforced/revealed for a leg that
+  // genuinely starts at a door (FIRST_MILE/DIRECT on a service with a first
+  // mile) — see ShipmentService.pickupPinFor. Same access rule as handoff:
+  // never returned to the driver who must submit it, never logged.
+  pickupPin                String?
+  pickupPinAttempts        Int                @default(0)
+  pickupVerifiedAt         DateTime?
+  pickupVerificationStatus VerificationStatus @default(PENDING)
+
   startedAt       DateTime?
   completedAt     DateTime?
   cancelledAt     DateTime?
