@@ -3894,20 +3894,13 @@ export class ShipmentService {
   }
 
   /**
-   * RULING 2 parity fix (SHIPPING-E2E, own commit): ShipmentJourney.tsx's own
-   * comment already states the intent — the code is shown "only while it is
-   * still on its way — after that it is just a stale number somebody might
-   * read out to the wrong person." This implementation only ever checked
-   * leg STATUS, never verification status, so a USED code (VERIFIED by
-   * `completeLeg`, or OVERRIDDEN by an admin) stayed on screen for the rest
-   * of the leg's COMPLETED life. Checking `handoffVerificationStatus` here
-   * honours documented intent; it does not change policy.
+   * The code is withheld once the leg is COMPLETED or CANCELLED. Because
+   * `verifyHandoffPin` is only ever called from `completeLeg`, a verified
+   * handoff pin and a completed leg are the same moment — which is why a
+   * separate verification-status check here would be redundant, not why
+   * one is missing.
    */
-  private pinFor(
-    l: { kind: string; status: string; handoffPin: string | null },
-    audience: 'CUSTOMER' | 'STAFF',
-    endsAtHub: boolean,
-  ): string | null {
+  private pinFor(l: { kind: string; status: string; handoffPin: string | null }, audience: 'CUSTOMER' | 'STAFF', endsAtHub: boolean): string | null {
     if (audience === 'STAFF') return null; // staff reveal it deliberately, not by listing
     // A DIRECT leg is last-mile-equivalent: it ends at the RECIPIENT's door, not
     // a counter, so the recipient is the party who must hold the code. Before
