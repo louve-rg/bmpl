@@ -273,6 +273,12 @@ export class PaymentsService {
     // their own, which is how a locked wallet could still be charged. Reusing
     // walletRejectReason's status wording rather than writing a new message
     // keeps one refusal shape for one condition.
+    //
+    // This is a cheap early-out ONLY, on the pre-lock read above — it saves a
+    // round-trip to ensureSystemAccount for the common case but is NOT the
+    // enforcement point: an admin UPDATE can land between this read and the
+    // row lock below, and this check cannot see it. The re-read under FOR
+    // UPDATE, further down, is what actually enforces the lock.
     const lockReason = this.walletStatusRejectReason(wallet);
     if (lockReason) throw new ConflictException(lockReason);
 
@@ -289,6 +295,16 @@ export class PaymentsService {
     // second one reads a balance the first has already reduced. Per wallet, not
     // globally: two different customers still authorize in parallel.
     await tx.$queryRaw`SELECT id FROM wallet_accounts WHERE id = ${wallet.id} FOR UPDATE`;
+
+    // Status is RE-READ here, under the same row lock, for exactly the reason
+    // the balance is re-read below rather than trusted from the pre-lock
+    // `wallet` variable: an admin's lock is itself an UPDATE on this row, and
+    // it can commit after the early-out above ran but before this point. The
+    // row lock guarantees this read sees it. THIS is the enforcement point —
+    // the earlier check is only a cheap, non-authoritative early-out.
+    const lockedWallet = await tx.walletAccount.findUniqueOrThrow({ where: { id: wallet.id } });
+    const lockReasonUnderLock = this.walletStatusRejectReason(lockedWallet);
+    if (lockReasonUnderLock) throw new ConflictException(lockReasonUnderLock);
 
     const balance = await this.wallet.balanceMinor(wallet.id, tx); // authoritative, in-tx, now serialised
     if (balance < payment.amountMinor) throw new ConflictException('Insufficient wallet balance.');
