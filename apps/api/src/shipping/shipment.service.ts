@@ -895,6 +895,11 @@ export class ShipmentService {
       // end up enforcing (see verifyLegPinOrThrow / pickupPinFor, which
       // decide that from kind + service, not from whether a value exists).
       pickupPin: this.genPin(),
+      // Explicit, not relied-on-as-a-default: every leg created by this
+      // feature always gets a real pickupPin above, so it is never exempt
+      // from ruling 1. Only a row that predates this column (migration-day
+      // grandfather, see the migration's own comment) is ever true.
+      pickupPinGrandfathered: false,
     };
   }
 

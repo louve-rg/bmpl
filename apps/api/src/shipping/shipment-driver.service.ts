@@ -230,6 +230,13 @@ export class ShipmentDriverService {
    * leg's own handoff; a DOOR_TO_HUB service has no driver at a door at
    * all), so `dto.pin` is accepted but ignored there — the exact backward-
    * compatible shape the contract promised Oscar.
+   *
+   * A structurally-enforcing leg that predates this feature entirely
+   * (pickupPinGrandfathered, set true only by the migration's one-time
+   * default-flip for rows that already existed) is a third, narrow case:
+   * exempt from ruling 1, not because the rule softened, but because it has
+   * no pin and never will. It collects exactly as it did before this
+   * shipped, and the exemption is recorded on the pickup audit row.
    */
   async confirmPickup(actor: Actor, legId: string, dto: LegPickupInput) {
     const { leg } = await this.ownedLeg(actor.userId, legId);
@@ -239,8 +246,18 @@ export class ShipmentDriverService {
       throw new BadRequestException('The parcel has not reached this leg yet.');
     }
 
-    const enforcesPickupPin =
+    // Structurally eligible for enforcement by kind + service alone — but a
+    // row that predates this feature (migration-day grandfather, owner
+    // ruling) is exempt even when structurally eligible: it has no pin and
+    // never will, so enforcing against it would lock every shipment already
+    // in flight on the day this ships into EXCEPTION, one by one. A leg
+    // created BY this feature always gets a real pickupPin and is never
+    // grandfathered (ShipmentService.legData()), so this exemption cannot
+    // mask a genuine missing-pin defect going forward — see
+    // pickupPinGrandfathered's own comment in schema.prisma.
+    const structurallyEnforcesPickupPin =
       (leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT') && needsFirstMile(leg.shipment.service);
+    const enforcesPickupPin = structurallyEnforcesPickupPin && !leg.pickupPinGrandfathered;
     if (enforcesPickupPin) {
       // Checked BEFORE the transition, in its own write — same shape and same
       // reasoning as completeHandoff/completeLeg's verifyLegPinOrThrow call: a
@@ -271,7 +288,18 @@ export class ShipmentDriverService {
     // notification), but the audit trail only gets one SHIPMENT_LEG_PICKED_UP
     // row per leg, whichever path wrote it first.
     if (leg.handoffPhotoKeys.length === 0) {
-      await this.audit.record({ action: 'SHIPMENT_LEG_PICKED_UP', actorId: actor.userId, newValue: { legId, reference: leg.shipment.reference } });
+      await this.audit.record({
+        action: 'SHIPMENT_LEG_PICKED_UP',
+        actorId: actor.userId,
+        newValue: {
+          legId,
+          reference: leg.shipment.reference,
+          // Only true when a leg that would otherwise enforce a code was let
+          // through on the migration-day grandfather — the reason the owner
+          // asked to have on record for every leg this ever fires on.
+          pickupPinGrandfathered: structurallyEnforcesPickupPin && leg.pickupPinGrandfathered,
+        },
+      });
     }
     await this.notifyCustomer(
       leg,
@@ -634,14 +662,16 @@ export class ShipmentDriverService {
       queuePosition: leg.driverQueuePosition,
       pinAttemptsRemaining: Math.max(0, DELIVERY_PIN_MAX_ATTEMPTS - leg.handoffPinAttempts),
       // SHIPPING-E2E: true only on a leg that genuinely enforces a pickup
-      // code (kind FIRST_MILE/DIRECT, service needsFirstMile) and has not
-      // already satisfied it — mirrors requiresPickupPin on the marketplace
-      // delivery view (delivery-core.service.ts). The PIN value itself is
-      // never in this payload, same rule as handoffPin.
+      // code (kind FIRST_MILE/DIRECT, service needsFirstMile), has not
+      // already satisfied it, and was not grandfathered in on migration day
+      // — mirrors requiresPickupPin on the marketplace delivery view
+      // (delivery-core.service.ts). The PIN value itself is never in this
+      // payload, same rule as handoffPin.
       requiresPickupPin:
         (kind === 'FIRST_MILE' || kind === 'DIRECT') &&
         needsFirstMile(s.service) &&
-        leg.pickupVerificationStatus === 'PENDING',
+        leg.pickupVerificationStatus === 'PENDING' &&
+        !leg.pickupPinGrandfathered,
       pickupPhotoUrls,
     };
   }

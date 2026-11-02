@@ -5289,6 +5289,15 @@ model ShipmentLeg {
   pickupPinAttempts        Int                @default(0)
   pickupVerifiedAt         DateTime?
   pickupVerificationStatus VerificationStatus @default(PENDING)
+  // Every row that existed the moment this feature's migration applied
+  // predates pickupPin entirely and starts true (migration-day grandfather,
+  // owner ruling) -- see the migration's own comment for why this is a
+  // one-time default-flip, not a backfill. ShipmentService.legData() always
+  // sets this false explicitly for every leg created from this feature
+  // onward, which always gets a real pickupPin, so this column -- not a
+  // null check on pickupPin -- is the single, explicit, testable signal that
+  // an enforcing leg is exempt from ruling 1's fail-closed check.
+  pickupPinGrandfathered Boolean @default(false)
 
   startedAt       DateTime?
   completedAt     DateTime?

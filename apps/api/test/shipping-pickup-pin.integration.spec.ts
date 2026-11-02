@@ -11,7 +11,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
 import { DELIVERY_PIN_MAX_ATTEMPTS } from '@bmpl/shared';
 
@@ -136,6 +136,7 @@ async function assignedAndAccepted(courier: { cookies: string[] }, legId: string
 beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
+  await seedRoles(ctx.prisma);
   const a = await seedSuperAdmin(ctx.prisma);
   admin = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password }));
   dispatch = ctx.app.get(ShipmentDispatchService);
@@ -163,11 +164,14 @@ describe('a leg that enforces a pickup code fails closed; one that does not keep
     expect(DELIVERY_PIN_MAX_ATTEMPTS).toBe(5);
   });
 
-  it('1 · a FIRST_MILE leg on a DOOR_TO_DOOR shipment enforces the code: no pin at all is a rejection, not a silent pass', async () => {
+  it('1 · a FIRST_MILE leg on a DOOR_TO_DOOR shipment enforces the code: no pin at all is a rejection, not a silent pass (a POST-FEATURE leg, not grandfathered)', async () => {
     const sender = await fundedSender();
     const courier = await makeCourier('STANN_CREEK');
     const shipment = await book(sender.cookies);
     const { firstMile } = await journey(shipment.id);
+    // This leg was created by ShipmentService.legData() in this same test run,
+    // so it is never exempt from ruling 1 — the contrasting case to test 8.
+    expect(firstMile.pickupPinGrandfathered).toBe(false);
     await assignedAndAccepted(courier, firstMile.id);
 
     const noBody = await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`);
@@ -279,12 +283,18 @@ describe('a leg that enforces a pickup code fails closed; one that does not keep
     expect(locked.status).toBe('EXCEPTION');
     expect(locked.pickupPinAttempts).toBe(DELIVERY_PIN_MAX_ATTEMPTS);
 
-    // Even the RIGHT code is refused now — locked means locked, not "one more try".
+    // Even the RIGHT code is refused now — locked means locked, not "one more
+    // try": the leg is EXCEPTION, and assertNotException refuses any further
+    // pickup call on that status (409) before the pin is ever re-checked,
+    // same as every other driver action on an excepted leg.
     const stillLocked = await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: real });
-    expect(stillLocked.status).toBe(403);
+    expect(stillLocked.status).toBe(409);
 
     // The staff escape hatch: RESUME clears the counter, same mechanism MDF-2 built for handoff.
-    const resumed = await post(admin, `admin/logistics/legs/${firstMile.id}/resolve-exception`, { resolution: 'RESUME' });
+    const resumed = await post(admin, `admin/logistics/legs/${firstMile.id}/resolve-exception`, {
+      resolution: 'RESUME',
+      note: 'Pickup PIN lockout cleared after confirming with the courier.',
+    });
     expect(resumed.status).toBe(201);
     const after = await legRow(firstMile.id);
     expect(after.status).not.toBe('EXCEPTION');
@@ -313,6 +323,8 @@ describe('a leg that enforces a pickup code fails closed; one that does not keep
     for (const lh of lineHauls) {
       expect((await post(admin, `admin/logistics/legs/${lh.id}/depart`, {})).status).toBe(201);
       expect((await post(admin, `admin/logistics/legs/${lh.id}/arrive`, {})).status).toBe(201);
+      const lhPin = (await legRow(lh.id)).handoffPin!;
+      expect((await post(admin, `admin/logistics/legs/${lh.id}/handoff`, { pin: lhPin, receivedByName: 'Counter staff' })).status).toBe(201);
     }
 
     await dispatch.dispatchLeg(lastMile.id);
@@ -322,5 +334,35 @@ describe('a leg that enforces a pickup code fails closed; one that does not keep
     // terminal, not a sender's door) never enforced one and still does not.
     expect((await post(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/pickup`)).status).toBe(201);
     expect((await legRow(lastMile.id)).status).toBe('IN_PROGRESS');
+  });
+
+  it('8 · MIGRATION DAY (owner ruling): a leg that predates the pickup-pin feature collects with no code at all, and the exemption is recorded on the audit row', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+
+    // Simulate exactly what the migration's own default-flip produces for a
+    // row that already existed: pickupPin stays NULL forever (nothing ever
+    // backfills it) and pickupPinGrandfathered is true. This leg is
+    // structurally identical to test 1's (FIRST_MILE, DOOR_TO_DOOR) — the
+    // grandfather flag is the ONLY difference, proving it is what decides
+    // the outcome, not an incidental consequence of the pin being null.
+    await ctx.prisma.shipmentLeg.update({ where: { id: firstMile.id }, data: { pickupPinGrandfathered: true } });
+
+    await assignedAndAccepted(courier, firstMile.id);
+    const r = await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`);
+    expect(r.status).toBe(201);
+    const after = await legRow(firstMile.id);
+    expect(after.status).toBe('IN_PROGRESS');
+    expect(after.pickedUpAt).not.toBeNull();
+    // Grandfathering means never-enforced — it must NOT backdate to VERIFIED,
+    // which would misrepresent a code that was never checked as one that was.
+    expect(after.pickupVerificationStatus).toBe('PENDING');
+
+    const audit = (await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_PICKED_UP' } })).find(
+      (a) => (a.newValue as { legId?: string }).legId === firstMile.id,
+    );
+    expect((audit!.newValue as { pickupPinGrandfathered?: boolean }).pickupPinGrandfathered).toBe(true);
   });
 });
