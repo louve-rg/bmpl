@@ -182,7 +182,7 @@ const assign = (legId: string, d: { driverProfileId: string; vehicleId: string }
 /** A driver walks a courier leg from offer to handoff. */
 async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
@@ -198,6 +198,14 @@ async function bookedWithFirstMileDone(driver: Awaited<ReturnType<typeof makeDri
   expect((await assign(first.id, driver)).status).toBe(201);
   await driveCourierLeg(driver, first.id);
   return { shipment: s, lineHaul: (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')! };
+}
+
+/** SHIPPING-E2E: a FIRST_MILE/DIRECT leg on a needsFirstMile service now
+ *  enforces the sender's pickup code. Harmless to send on a leg that does
+ *  not enforce one (LAST_MILE, etc.) — it is simply ignored there, same
+ *  contract Oscar builds against. */
+async function pickupPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
 }
 
 beforeAll(async () => {
@@ -577,8 +585,8 @@ describe('the complete chain, sender to recipient, every handoff proven (Edward 
     // a stranger cannot even learn that a job exists there.
     expect((await post(bumped.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(404);
     expect((await post(driver1.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
-    expect((await post(bumped.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(404);
-    expect((await post(driver1.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await post(bumped.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinFor(firstMile.id) })).status).toBe(404);
+    expect((await post(driver1.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinFor(firstMile.id) })).status).toBe(201);
     // (c) Sender -> courier: exactly one NEW custody row, the moment it really happened.
     expect(await custodyCount(s.id)).toBe(2);
 
@@ -670,7 +678,7 @@ describe('the complete chain, sender to recipient, every handoff proven (Edward 
     expect((await post(bumped.cookies, `driver/shipping-jobs/${lastMile.id}/accept`)).status).toBe(404);
     // The newly assigned courier proceeds with no special case.
     expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/accept`)).status).toBe(201);
-    expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/pickup`)).status).toBe(201);
+    expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/pickup`, { pin: await pickupPinFor(lastMile.id) })).status).toBe(201);
     expect(await custodyCount(s.id)).toBe(6); // hub -> courier
     expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/in-transit`)).status).toBe(201);
     expect((await post(driver2.cookies, `driver/shipping-jobs/${lastMile.id}/arriving`)).status).toBe(201);

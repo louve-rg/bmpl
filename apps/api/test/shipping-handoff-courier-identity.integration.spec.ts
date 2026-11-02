@@ -158,6 +158,10 @@ async function legRow(legId: string) {
 async function pinOf(legId: string) {
   return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { handoffPin: true } })).handoffPin!;
 }
+/** SHIPPING-E2E: a DOOR_TO_DOOR FIRST_MILE leg now enforces a pickup code too. */
+async function pickupPinOf(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
+}
 
 /** Auto-dispatch to the single online courier, then bring the leg through
  * accept/pickup/in-transit/arriving — right up to, but not through, handoff. */
@@ -166,7 +170,7 @@ async function driveToInProgress(courier: { cookies: string[] }, legId: string) 
   const leg = await legRow(legId);
   expect(leg.assignedDriverProfileId).not.toBeNull();
   expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+  expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinOf(legId) })).status).toBe(201);
   expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(courier.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
   return legRow(legId);
@@ -366,7 +370,7 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     expect((await legRow(firstMile.id)).assignedDriverProfileId).toBe(courierB.driverProfileId);
 
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
-    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinOf(firstMile.id) })).status).toBe(201);
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
 
@@ -424,7 +428,7 @@ describe('handoff completion checks the courier, not just the code (BMPL-174)', 
     // Courier B carries it all the way to IN_PROGRESS, so the leg has genuinely
     // started (verifyHandoffPin's own status gate opens) by the time A tries.
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
-    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinOf(firstMile.id) })).status).toBe(201);
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
     const pin = await pinOf(firstMile.id);

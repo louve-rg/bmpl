@@ -146,7 +146,7 @@ const resolve = (legId: string, body: object) => post(admin, `admin/logistics/le
 /** A driver walks a courier leg through every transition to the handoff. */
 async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
@@ -161,7 +161,7 @@ async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
  */
 async function driveToPinLockout(driver: { cookies: string[] }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
   for (let i = 0; i < 5; i++) {
@@ -176,6 +176,14 @@ async function bookedWithAssignedFirstMile(driver: { driverProfileId: string; ve
   const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
   expect((await assign(first.id, driver)).status).toBe(201);
   return { shipment: s, legId: first.id };
+}
+
+/** SHIPPING-E2E: a FIRST_MILE/DIRECT leg on a needsFirstMile service now
+ *  enforces the sender's pickup code. Harmless to send on a leg that does
+ *  not enforce one (LAST_MILE, etc.) — it is simply ignored there, same
+ *  contract Oscar builds against. */
+async function pickupPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
 }
 
 beforeAll(async () => {
@@ -250,7 +258,7 @@ describe('resume', () => {
     const driver = await makeDriver();
     const { shipment, legId } = await bookedWithAssignedFirstMile(driver);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
 
     const custodyBefore = await ctx.prisma.custodyEvent.count({ where: { shipmentId: shipment.id } });
     expect((await flag(legId, 'Road flooded outside Placencia.')).status).toBe(201);
@@ -313,7 +321,7 @@ describe('completeLeg racing flagException on the same IN_PROGRESS leg (MDF-223)
     const driver = await makeDriver();
     const { legId } = await bookedWithAssignedFirstMile(driver);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
     const pin = await pinOf(legId);
@@ -393,7 +401,7 @@ describe('resume — handoff PIN locked out (MDF-2)', () => {
     expect(resolveAudit).toBeTruthy();
     expect(resolveAudit!.actorId).not.toBeNull();
     expect(resolveAudit!.reason).toBe('Confirmed with the recipient by phone; PIN is correct, let the driver try again.');
-    expect((resolveAudit!.newValue as { pinAttemptsReset?: boolean }).pinAttemptsReset).toBe(true);
+    expect((resolveAudit!.newValue as { handoffPinAttemptsReset?: boolean }).handoffPinAttemptsReset).toBe(true);
   });
 
   it('leaves the counter alone when the exception was not a PIN lockout', async () => {
@@ -410,7 +418,7 @@ describe('resume — handoff PIN locked out (MDF-2)', () => {
     const audit = (await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_EXCEPTION_RESOLVED' } })).find(
       (a) => (a.newValue as { legId?: string }).legId === legId,
     );
-    expect((audit!.newValue as { pinAttemptsReset?: boolean }).pinAttemptsReset).toBe(false);
+    expect((audit!.newValue as { handoffPinAttemptsReset?: boolean }).handoffPinAttemptsReset).toBe(false);
   });
 
   it('a PIN-locked leg cannot be resumed by an admin who only holds logistics.read', async () => {
@@ -475,7 +483,7 @@ describe('release', () => {
     const driver = await makeDriver();
     const { legId } = await bookedWithAssignedFirstMile(driver);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
     expect((await flag(legId, 'Vehicle crashed en route.')).status).toBe(201);
 
     const r = await resolve(legId, { resolution: 'RELEASE_DRIVER', note: 'Trying to release mid-carry.' });
@@ -572,7 +580,7 @@ describe('an active exception blocks every forward courier transition', () => {
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
     expect((await flag(legId, 'Flagged after acceptance, before pickup.')).status).toBe(201);
 
-    const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`);
+    const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) });
     expect(r.status).toBe(409);
     expect(r.body.message).toMatch(/exception/i);
     const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
@@ -585,7 +593,7 @@ describe('an active exception blocks every forward courier transition', () => {
     const driver = await makeDriver();
     const { legId } = await bookedWithAssignedFirstMile(driver);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
     expect((await flag(legId, 'Flagged mid-carry, before in-transit.')).status).toBe(201);
 
     const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`);
@@ -600,7 +608,7 @@ describe('an active exception blocks every forward courier transition', () => {
     const driver = await makeDriver();
     const { legId } = await bookedWithAssignedFirstMile(driver);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
     expect((await flag(legId, 'Flagged en route, before arriving.')).status).toBe(201);
 
@@ -616,7 +624,7 @@ describe('an active exception blocks every forward courier transition', () => {
     const driver = await makeDriver();
     const { legId } = await bookedWithAssignedFirstMile(driver);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
     expect((await flag(legId, 'Flagged on arrival, before handoff.')).status).toBe(201);
@@ -685,7 +693,7 @@ describe('cancellation with an exception on board', () => {
     const driver = await makeDriver();
     const { shipment, legId } = await bookedWithAssignedFirstMile(driver);
     expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
     expect((await flag(legId, 'Vehicle stuck; parcel on board.')).status).toBe(201);
 
     const r = await post(customer, `shipping/${shipment.id}/cancel`, { reason: 'Taking too long.' });

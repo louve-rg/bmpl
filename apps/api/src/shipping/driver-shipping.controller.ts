@@ -5,9 +5,11 @@ import {
   legExceptionSchema,
   legHandoffSchema,
   legPickupPhotoSchema,
+  legPickupSchema,
   type DeclineJobInput,
   type LegExceptionInput,
   type LegHandoffInput,
+  type LegPickupInput,
   type LegPickupPhotoInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
@@ -51,10 +53,15 @@ export class DriverShippingController {
     return this.jobs.decline(this.actor(u, req), id, b.reason);
   }
 
-  /** The parcel is in the vehicle. Custody moves here. */
+  /**
+   * The parcel is in the vehicle. Custody moves here. Throttled: on an
+   * enforcing leg (FIRST_MILE/DIRECT, service needsFirstMile) this is now
+   * also a code-verification endpoint, same reasoning as /handoff below.
+   */
+  @StrictThrottle()
   @Post(':id/pickup')
-  pickup(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
-    return this.jobs.confirmPickup(this.actor(u, req), id);
+  pickup(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string, @Body(ZodBody(legPickupSchema)) b: LegPickupInput) {
+    return this.jobs.confirmPickup(this.actor(u, req), id, b);
   }
 
   @Post(':id/in-transit')

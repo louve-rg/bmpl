@@ -8,6 +8,7 @@ import {
   isAllowedProductImageMime,
   isLegActionable,
   MAX_PRODUCT_IMAGE_BYTES,
+  needsFirstMile,
   STORAGE_PREFIX,
   TRANSPORT_MODE_LABELS,
   type DeliveryAction,
@@ -15,7 +16,7 @@ import {
   type DriverJobKind,
   type LegView,
 } from '@bmpl/shared';
-import type { LegExceptionInput, LegHandoffInput, LegPickupPhotoInput } from '@bmpl/validation';
+import type { LegExceptionInput, LegHandoffInput, LegPickupInput, LegPickupPhotoInput } from '@bmpl/validation';
 import type { AuditAction, LegStatus, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -219,8 +220,18 @@ export class ShipmentDriverService {
    * the moment custody passes and the shipment's own status advances. Both
    * happen through the shipment layer rather than being written here — the
    * shipment owns its status derivation, and a second writer would drift.
+   *
+   * SHIPPING-E2E step 9: a leg that genuinely starts at a door (FIRST_MILE or
+   * DIRECT, on a service that `needsFirstMile`) now ENFORCES the sender's own
+   * collection code — RULING 1, owner's explicit requirement: a missing,
+   * empty or malformed pin on an enforcing leg is a REJECTION, never a
+   * silent pass-through. Every other leg kind/service combination never
+   * enforced one (LINE_HAUL's custody is already proven by the preceding
+   * leg's own handoff; a DOOR_TO_HUB service has no driver at a door at
+   * all), so `dto.pin` is accepted but ignored there — the exact backward-
+   * compatible shape the contract promised Oscar.
    */
-  async confirmPickup(actor: Actor, legId: string) {
+  async confirmPickup(actor: Actor, legId: string, dto: LegPickupInput) {
     const { leg } = await this.ownedLeg(actor.userId, legId);
     this.assertAction('CONFIRM_PICKUP', leg.courierStatus);
     this.assertNotException(leg);
@@ -228,12 +239,27 @@ export class ShipmentDriverService {
       throw new BadRequestException('The parcel has not reached this leg yet.');
     }
 
+    const enforcesPickupPin =
+      (leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT') && needsFirstMile(leg.shipment.service);
+    if (enforcesPickupPin) {
+      // Checked BEFORE the transition, in its own write — same shape and same
+      // reasoning as completeHandoff/completeLeg's verifyLegPinOrThrow call: a
+      // failed attempt recorded inside the transition's own transaction would
+      // roll back when that transaction throws, and the counter would never
+      // climb.
+      await this.shipments.verifyPickupPin(legId, dto.pin, actor);
+    }
+
     // Conditional, not an update by id: staff may flag the exception in the
     // same window the driver is confirming pickup. The database, not the read
     // above, is the arbiter.
     const claimed = await this.prisma.shipmentLeg.updateMany({
       where: { id: legId, courierStatus: 'DRIVER_ACCEPTED', status: { not: 'EXCEPTION' } },
-      data: { courierStatus: 'PICKUP_CONFIRMED', pickedUpAt: new Date() },
+      data: {
+        courierStatus: 'PICKUP_CONFIRMED',
+        pickedUpAt: new Date(),
+        ...(enforcesPickupPin ? { pickupVerifiedAt: new Date(), pickupVerificationStatus: 'VERIFIED' } : {}),
+      },
     });
     if (claimed.count === 0) {
       throw new ConflictException('This leg has an open exception and must be resolved by staff before it can be picked up.');
@@ -607,6 +633,15 @@ export class ShipmentDriverService {
       completedAt: leg.completedAt,
       queuePosition: leg.driverQueuePosition,
       pinAttemptsRemaining: Math.max(0, DELIVERY_PIN_MAX_ATTEMPTS - leg.handoffPinAttempts),
+      // SHIPPING-E2E: true only on a leg that genuinely enforces a pickup
+      // code (kind FIRST_MILE/DIRECT, service needsFirstMile) and has not
+      // already satisfied it — mirrors requiresPickupPin on the marketplace
+      // delivery view (delivery-core.service.ts). The PIN value itself is
+      // never in this payload, same rule as handoffPin.
+      requiresPickupPin:
+        (kind === 'FIRST_MILE' || kind === 'DIRECT') &&
+        needsFirstMile(s.service) &&
+        leg.pickupVerificationStatus === 'PENDING',
       pickupPhotoUrls,
     };
   }

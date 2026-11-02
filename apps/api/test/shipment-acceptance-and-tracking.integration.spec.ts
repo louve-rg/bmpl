@@ -99,6 +99,14 @@ async function setLocalCourierFee(feeMinor: number) {
   expect(r.status).toBe(200);
 }
 
+/** SHIPPING-E2E: a FIRST_MILE/DIRECT leg on a needsFirstMile service now
+ *  enforces the sender's pickup code. Harmless to send on a leg that does
+ *  not enforce one (LAST_MILE, etc.) — it is simply ignored there, same
+ *  contract Oscar builds against. */
+async function pickupPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
+}
+
 beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
@@ -136,7 +144,7 @@ describe('acceptance is not custody (req 10, rule 2)', () => {
     const leg = await legOf(shipment.id);
     const courier = await makeCourier();
     await courierAccepts(leg.id, courier);
-    expect((await post(courier.cookies, `driver/shipping-jobs/${leg.id}/pickup`)).status).toBe(201);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${leg.id}/pickup`, { pin: await pickupPinFor(leg.id) })).status).toBe(201);
     expect(await custodyTransfers(shipment.id)).toBe(1);
 
     const before = await balanceOf(customer.cookies);

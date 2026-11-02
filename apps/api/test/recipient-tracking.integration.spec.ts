@@ -137,7 +137,7 @@ const assign = (legId: string, d: { driverProfileId: string; vehicleId: string }
 
 async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
@@ -155,6 +155,14 @@ async function flyLineHaul(legId: string) {
 
 /** A syntactically plausible token that matches nothing. */
 const missToken = () => Array.from({ length: 24 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
+
+/** SHIPPING-E2E: a FIRST_MILE/DIRECT leg on a needsFirstMile service now
+ *  enforces the sender's pickup code. Harmless to send on a leg that does
+ *  not enforce one (LAST_MILE, etc.) — it is simply ignored there, same
+ *  contract Oscar builds against. */
+async function pickupPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
+}
 
 beforeAll(async () => {
   ctx = await bootApp();
@@ -269,7 +277,7 @@ describe('the payload is an allowlist — nothing private, however rich the stat
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     expect((await assign(first.id, driver)).status).toBe(201);
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`)).status).toBe(201);
-    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`)).status).toBe(201);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) })).status).toBe(201);
 
     const pin = await pinOf(first.id);
     const r = await publicTrack(s.recipientTrackingToken);

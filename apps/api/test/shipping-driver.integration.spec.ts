@@ -174,7 +174,7 @@ async function flyLineHaul(legId: string) {
 /** A driver takes a courier leg from offer through to a verified handoff. */
 async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
   const r = await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
@@ -182,6 +182,14 @@ async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
   });
   expect(r.status).toBe(201);
   return r.body;
+}
+
+/** SHIPPING-E2E: a FIRST_MILE/DIRECT leg on a needsFirstMile service now
+ *  enforces the sender's pickup code. Harmless to send on a leg that does
+ *  not enforce one (LAST_MILE, etc.) — it is simply ignored there, same
+ *  contract Oscar builds against. */
+async function pickupPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
 }
 
 beforeAll(async () => {
@@ -297,7 +305,7 @@ describe('the invariant: a driver is only sent where the parcel is', () => {
       where: { id: last.id },
       data: { assignedDriverProfileId: driver.driverProfileId, courierStatus: 'DRIVER_ACCEPTED', acceptedAt: new Date() },
     });
-    const r = await post(driver.cookies, `driver/shipping-jobs/${last.id}/pickup`);
+    const r = await post(driver.cookies, `driver/shipping-jobs/${last.id}/pickup`, { pin: await pickupPinFor(last.id) });
     expect(r.status).toBe(400);
     expect(r.body.message).toContain('has not reached this leg yet');
   });
@@ -819,7 +827,7 @@ describe('cancellation releases the driver from the job', () => {
     // And the record no longer resolves for this driver at all: 404, not 400 —
     // once the assignment is cleared the ownership check fails before any
     // state-machine guard is reached.
-    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`)).status).toBe(404);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) })).status).toBe(404);
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/decline`, { reason: 'It was cancelled.' })).status).toBe(404);
   });
 
@@ -1343,7 +1351,7 @@ describe('a courier reports a failed delivery or collection attempt (MDF-96)', (
     const s = await book();
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
-    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
 
     const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, {
       reason: 'Arrived at the terminal counter and nobody could take the parcel.',
@@ -1453,7 +1461,7 @@ describe('a courier reports a failed delivery or collection attempt (MDF-96)', (
     const holdingDriver = holder === mine.driverProfileId ? mine : other;
     const intruder = holder === mine.driverProfileId ? other : mine;
     await post(holdingDriver.cookies, `driver/shipping-jobs/${first.id}/accept`);
-    await post(holdingDriver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    await post(holdingDriver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
 
     const r = await post(intruder.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Not my leg.' });
     expect(r.status).toBe(404);
@@ -1465,7 +1473,7 @@ describe('a courier reports a failed delivery or collection attempt (MDF-96)', (
     const s = await book();
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
-    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'First report.' })).status).toBe(201);
 
     const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Second report.' });
@@ -1497,7 +1505,7 @@ describe('a courier reports a failed delivery or collection attempt (MDF-96)', (
     const s = await book();
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
-    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
 
     expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Flat tire, pulled over.' })).status).toBe(201);
     const flagged = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
