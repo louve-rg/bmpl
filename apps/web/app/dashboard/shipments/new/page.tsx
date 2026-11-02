@@ -467,7 +467,12 @@ export default function NewShipmentPage() {
           )}
           {/* Never "Book" — booking now takes the money, and the button should
               say so before it is pressed. */}
-          <Button onClick={book} disabled={!canBook} className="min-h-[48px] w-full text-base">
+          {/* `canBook` already folds in `!booking`, so this is redundant today --
+              it is here so the button staying disabled through the request
+              cannot silently regress if `canBook`'s own definition ever drops
+              that clause; the ref (submitInFlight, above) is what actually
+              keeps a double-submit safe either way. */}
+          <Button onClick={book} disabled={!canBook || booking} className="min-h-[48px] w-full text-base">
             {booking
               ? 'Paying…'
               : quote?.available
