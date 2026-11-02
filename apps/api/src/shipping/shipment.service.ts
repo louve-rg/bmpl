@@ -54,7 +54,8 @@ import type {
   SetAvailabilityWindowsInput,
   ShipmentQuoteInput,
 } from '@bmpl/validation';
-import type { CustodyHolder, LegStatus, Prisma, ShipmentStatus } from '@bmpl/database';
+import { Prisma } from '@bmpl/database';
+import type { CustodyHolder, LegStatus, ShipmentStatus } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -172,6 +173,10 @@ function normalizePhone(phone: string | null | undefined): string | null {
   const local = digits.length === 10 && digits.startsWith('501') ? digits.slice(3) : digits;
   return local.length === 7 ? local : null;
 }
+
+// Mirrors orders.service.ts's CHECKOUT_SCOPE exactly -- the idempotency_keys
+// table is scope-generic, one row per (userId, scope, key).
+const SHIPPING_SCOPE = 'shipping';
 
 const SHIPMENT_INCLUDE = {
   legs: {
@@ -643,7 +648,54 @@ export class ShipmentService {
    * somebody edited a saved address afterwards, and the driver working leg 3 has
    * to see what was agreed at booking.
    */
-  async create(userId: string, input: CreateShipmentInput, isTest?: boolean) {
+  async create(userId: string, input: CreateShipmentInput, isTest?: boolean, idempotencyKey?: string) {
+    // Idempotency fast path: a completed key replays the original shipment
+    // instead of creating a duplicate booking (safe under distributed
+    // retries) -- mirrors orders.service.ts's checkout() exactly.
+    if (idempotencyKey) {
+      const existing = await this.prisma.idempotencyKey.findUnique({
+        where: { userId_scope_key: { userId, scope: SHIPPING_SCOPE, key: idempotencyKey } },
+      });
+      if (existing?.resultShipmentId) {
+        await this.audit.record({ action: 'IDEMPOTENCY_KEY_REPLAYED', actorId: userId, newValue: { scope: SHIPPING_SCOPE, shipmentId: existing.resultShipmentId } });
+        return this.getOwnById(userId, existing.resultShipmentId);
+      }
+      if (existing) throw new ConflictException('A shipment booking with this idempotency key is already in progress.');
+    }
+
+    try {
+      return await this.runCreate(userId, input, isTest, idempotencyKey);
+    } catch (e) {
+      // Concurrent duplicate: the unique (user, scope, key) lost the race.
+      if (idempotencyKey && e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        const existing = await this.prisma.idempotencyKey.findUnique({
+          where: { userId_scope_key: { userId, scope: SHIPPING_SCOPE, key: idempotencyKey } },
+        });
+        if (existing?.resultShipmentId) return this.getOwnById(userId, existing.resultShipmentId);
+        // Defensive, not dead: under the CURRENT one-transaction shape (the
+        // reservation and the COMPLETED write both happen inside the same
+        // $transaction in runCreate), an external reader can never observe
+        // the reservation committed with the completion still pending --
+        // they commit together, so a genuine concurrent race always finds
+        // `existing.resultShipmentId` already set and takes the replay
+        // branch above instead of reaching this line. This throw exists for
+        // the day that shape changes (the reservation moves to its own
+        // transaction ahead of the main one) and a visible, still-pending
+        // row becomes possible again. Do not delete it as unreachable, and
+        // do not read its presence as proof a real race returns 409 today.
+        throw new ConflictException('A duplicate shipment booking is already in progress.');
+      }
+      throw e;
+    }
+  }
+
+  private async getOwnById(userId: string, shipmentId: string) {
+    const shipment = await this.prisma.shipment.findUnique({ where: { id: shipmentId, customerUserId: userId }, include: SHIPMENT_INCLUDE });
+    if (!shipment) throw new NotFoundException('No shipment with that id.');
+    return this.serialize(shipment, { audience: 'CUSTOMER' });
+  }
+
+  private async runCreate(userId: string, input: CreateShipmentInput, isTest: boolean | undefined, idempotencyKey?: string) {
     // Booking without paying exists only for the paths that predate shipment
     // payments; the customer-facing form always pays. An unpaid shipment is
     // created but never dispatched, so it cannot become work for a driver.
@@ -750,7 +802,16 @@ export class ShipmentService {
     }
 
     const shipment = await this.prisma.$transaction(async (tx) => {
-      // SHIPPING-E2E — the VERY FIRST thing this transaction does to the
+      // Reserve the idempotency key up front — a concurrent duplicate hits the
+      // unique constraint here (-> P2002, handled by the caller) before this
+      // transaction does anything else, including taking the wallet lock
+      // below — a duplicate submission should fail fast, not wait behind a
+      // row lock it was never going to need.
+      const idemRow = idempotencyKey
+        ? await tx.idempotencyKey.create({ data: { userId, scope: SHIPPING_SCOPE, key: idempotencyKey, status: 'IN_PROGRESS' } })
+        : null;
+
+      // SHIPPING-E2E — the first thing this transaction does to the
       // customer's wallet, before any row with a foreign key to it (the
       // WalletHold/LedgerReference createForShipment inserts below) exists.
       // See PaymentsService.lockWalletForOrigination's own comment: this is
@@ -758,6 +819,10 @@ export class ShipmentService {
       // concurrent bookings could hit live in production today, independent
       // of the PaymentMethod race fixed above. escrowInTx's own FOR UPDATE
       // and #540's post-lock enforcement check, further down, are UNCHANGED.
+      // The idempotency-key reservation above runs first (not this), for the
+      // reason given there — it does not touch wallet_accounts or anything
+      // FK'd to it, so reordering it ahead of this lock changes nothing this
+      // fix depends on.
       if (payNow) {
         await this.payments.lockWalletForOrigination(tx, userId, 'BZD');
       }
@@ -829,6 +894,7 @@ export class ShipmentService {
       // shipment exists — the same guarantee marketplace checkout gives. A
       // half-booked parcel with an unpayable price is worse than a refusal,
       // because somebody eventually has to work out what to do with it.
+      let paymentId: string | null = null;
       if (payNow) {
         const payment = await this.payments.createForShipment(
           tx,
@@ -842,6 +908,15 @@ export class ShipmentService {
           { userId },
         );
         await this.payments.escrowInTx(tx, payment.id, { userId });
+        paymentId = payment.id;
+      }
+
+      if (idemRow) {
+        await tx.idempotencyKey.update({
+          where: { id: idemRow.id },
+          data: { status: 'COMPLETED', resultShipmentId: created.id, ...(paymentId ? { resultPaymentId: paymentId } : {}) },
+        });
+        if (paymentId) await tx.payment.update({ where: { id: paymentId }, data: { idempotencyKeyId: idemRow.id } });
       }
 
       const status = this.statusFrom(created.legs, endsAtHub);

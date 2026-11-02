@@ -1,0 +1,20 @@
+-- SHIPPING-E2E: POST /shipping had no idempotency-key protection. A dropped
+-- connection or a resubmitted form could double-book and double-charge a
+-- real customer -- the exact failure marketplace checkout already guards
+-- against with its own optional idempotency-key header
+-- (orders.controller.ts POST checkout), reusing this same IdempotencyKey
+-- table under scope "checkout".
+--
+-- This mirrors that pattern exactly for scope "shipping" rather than
+-- inventing a parallel mechanism: the (userId, scope, key) unique
+-- constraint already on this table is scope-generic and needs no change.
+-- The one thing missing is somewhere to record WHICH shipment a completed
+-- key replays, the same role resultOrderId already plays for checkout.
+--
+-- A new column, not a reuse of resultOrderId: a shipment is never an order,
+-- and keeping the two columns distinct means a bug in either path can
+-- never replay a shipment as an order or an order as a shipment by
+-- accident. Nullable and additive -- every existing row (all scope
+-- "checkout" today) gets NULL here, which is exactly correct: a checkout
+-- key never resolves to a shipment.
+ALTER TABLE "idempotency_keys" ADD COLUMN "resultShipmentId" TEXT;

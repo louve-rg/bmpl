@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Headers, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
   assignShipmentLegSchema,
@@ -267,8 +267,12 @@ export class ShippingController {
 
   @StrictThrottle()
   @Post()
-  create(@CurrentUser() u: AuthContext, @Body(ZodBody(createShipmentSchema)) dto: CreateShipmentInput) {
-    return this.shipments.create(u.userId, dto);
+  create(
+    @CurrentUser() u: AuthContext,
+    @Body(ZodBody(createShipmentSchema)) dto: CreateShipmentInput,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.shipments.create(u.userId, dto, undefined, idempotencyKey?.trim() || undefined);
   }
 
   @Get()
