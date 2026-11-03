@@ -81,6 +81,16 @@ export interface ShipmentLegView {
   exceptionReason: string | null;
   /** Only ever set on the customer's own final delivery leg. */
   handoffPin: string | null;
+  /**
+   * SHIPPING-E2E: the sender's own collection code — the mirror of
+   * `handoffPin` above, for the START of a leg instead of the end. Set only
+   * on the leg that still needs to be collected from the sender, and null
+   * again once that pickup is confirmed, same lifecycle as `handoffPin`.
+   * Optional: web and api deploy independently, and the API work that sends
+   * this field (PR #537) has not merged yet — absence just means "not sent
+   * yet", same as `pickupPhotoUrls` below, never a crash.
+   */
+  pickupPin?: string | null;
   /** Null until a courier is actually assigned to this leg. */
   courier: ShipmentCourier | null;
   courierVehicle: ShipmentCourierVehicle | null;
