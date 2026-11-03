@@ -236,19 +236,48 @@ function resolveIsolatedTestUrl() {
 }
 
 /**
+ * A dead claim previously held forever (MDF-214 follow-up): one left by a
+ * crashed or abandoned run sat for three weeks blocking its worktree for
+ * anyone who didn't know BMPL_TEST_DB_FORCE_CLAIM existed. This threshold
+ * reclaims a claim automatically once it is old enough that it cannot
+ * plausibly still be a live run.
+ *
+ * Picked in hours, not minutes, on purpose: the claim exists to stop two
+ * concurrent runs truncating the same database underneath each other, and
+ * a threshold that is too short turns that correctness guard into a race —
+ * stealing a database FROM a live run is strictly worse than a stale claim
+ * sitting an extra few hours, because the first produces a failure nobody
+ * can reproduce and the second costs one person one force-claim. Observed
+ * integration runs range from 29s (single file) to ~9m20s (the full suite
+ * in CI); 6 hours is roughly 38x the longest run seen, which comfortably
+ * covers a slow box, a paused debugger session, or a run left attached
+ * over a meal — while still reclaiming a genuinely dead claim same-day
+ * rather than letting it sit for weeks.
+ */
+export const STALE_CLAIM_MS = 6 * 60 * 60 * 1000;
+
+/**
  * Guard 5's decision (exported for the unit spec — no real database is
- * touched here). Pure: given who owns the database row (or none) and
- * whether a forced reassignment was requested, decide what to do. The I/O
- * (reading/writing that row) lives in ensureDatabaseOwnership below.
+ * touched here). Pure: given who owns the database row (or none), whether
+ * a forced reassignment was requested, and how old the claim is, decide
+ * what to do. The I/O (reading/writing that row) lives in
+ * ensureDatabaseOwnership below.
  *
  * owner: { agentId, agentName, claimedAt } | null — null means unclaimed
  * (fresh table, e.g. a database just created by ensureDatabaseExists).
+ *
+ * No process-liveness check: the owner row carries no PID, and `agentId`
+ * identifies a hive agent, not an OS process this script could inspect —
+ * there is nothing cheap to check here beyond the claim's age. Time alone
+ * is the whole guard.
  */
-export function decideDatabaseOwnership({ agentId, owner, forceClaim }) {
+export function decideDatabaseOwnership({ agentId, owner, forceClaim, now = new Date() }) {
   if (!agentId) return { action: 'skip' };
   if (!owner) return { action: 'claim' };
   if (owner.agentId === agentId) return { action: 'proceed' };
   if (forceClaim) return { action: 'reassign', previousOwner: owner };
+  const ageMs = now.getTime() - new Date(owner.claimedAt).getTime();
+  if (ageMs >= STALE_CLAIM_MS) return { action: 'reclaim-stale', previousOwner: owner, ageMs };
   return { action: 'refuse', owner };
 }
 
@@ -304,6 +333,12 @@ async function ensureDatabaseOwnership(target) {
       console.log(
         `[run-integration] BMPL_TEST_DB_FORCE_CLAIM=1 — reassigned database "${target.dbName}" from agent "${decision.previousOwner.agentId}" ` +
           `(claimed ${decision.previousOwner.claimedAt.toISOString()}) to "${agentId}". Only do this after confirming the handoff with whoever owned it.`,
+      );
+    } else if (decision.action === 'reclaim-stale') {
+      await client.$executeRaw`UPDATE "_bmpl_meta"."run_integration_owner" SET agent_id = ${agentId}, agent_name = ${agentName}, claimed_at = now() WHERE id = true`;
+      console.log(
+        `[run-integration] stale claim reclaimed: database "${target.dbName}" was claimed by agent "${decision.previousOwner.agentId}" ` +
+          `${(decision.ageMs / 3600000).toFixed(1)}h ago (older than the ${STALE_CLAIM_MS / 3600000}h staleness threshold) — now claimed by "${agentId}".`,
       );
     } else if (decision.action === 'refuse') {
       console.error(

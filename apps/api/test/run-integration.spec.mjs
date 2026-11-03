@@ -13,7 +13,7 @@
  *   shells out to `pnpm` with all-literal arguments.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { enforceWorkspaceBuild, ensureNodeModulesInstalled, decideDatabaseOwnership } from './run-integration.mjs';
+import { enforceWorkspaceBuild, ensureNodeModulesInstalled, decideDatabaseOwnership, STALE_CLAIM_MS } from './run-integration.mjs';
 
 const TURBO_BIN = 'X:/repo/node_modules/turbo/bin/turbo';
 const NODE = 'X:/node/node.exe';
@@ -176,7 +176,12 @@ describe('ensureNodeModulesInstalled', () => {
  * decides what to do once the current owner row (or lack of one) is known.
  */
 describe('decideDatabaseOwnership', () => {
-  const OWNER = { agentId: 'bmpl-jim', agentName: 'Jim', claimedAt: new Date('2026-10-12T02:00:00Z') };
+  // Recent on purpose, not a fixed historical date: these "different agent,
+  // no staleness involved" tests must stay recent relative to whenever the
+  // suite actually runs, or they silently cross the staleness threshold
+  // added below and start asserting the wrong action against real wall-clock
+  // time — exactly the trap a fixed date like the old `2026-10-12` became.
+  const OWNER = { agentId: 'bmpl-jim', agentName: 'Jim', claimedAt: new Date(Date.now() - 60_000) };
 
   it('no AGENT_ID in this environment: skips entirely, unchanged behaviour (a human developer, or CI)', () => {
     expect(decideDatabaseOwnership({ agentId: undefined, owner: OWNER, forceClaim: false })).toEqual({ action: 'skip' });
@@ -209,5 +214,46 @@ describe('decideDatabaseOwnership', () => {
   it('force flag set but owner already matches: still just proceeds (force is for disagreement, not re-stamping)', () => {
     const sameAgentOwner = { agentId: 'bmpl-qa-mtmcz0m1', agentName: 'Dwight', claimedAt: new Date() };
     expect(decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: sameAgentOwner, forceClaim: true })).toEqual({ action: 'proceed' });
+  });
+
+  describe('claim staleness (MDF-214 follow-up)', () => {
+    const NOW = new Date('2026-11-02T23:00:00Z');
+
+    it('owner is a different agent, claim just under the threshold: still refuses — never steal from a run that might be live', () => {
+      const freshEnoughOwner = { ...OWNER, claimedAt: new Date(NOW.getTime() - (STALE_CLAIM_MS - 1000)) };
+      expect(decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: freshEnoughOwner, forceClaim: false, now: NOW })).toEqual({
+        action: 'refuse',
+        owner: freshEnoughOwner,
+      });
+    });
+
+    it('owner is a different agent, claim exactly at the threshold: reclaims as stale', () => {
+      const staleOwner = { ...OWNER, claimedAt: new Date(NOW.getTime() - STALE_CLAIM_MS) };
+      expect(decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: staleOwner, forceClaim: false, now: NOW })).toEqual({
+        action: 'reclaim-stale',
+        previousOwner: staleOwner,
+        ageMs: STALE_CLAIM_MS,
+      });
+    });
+
+    it('owner is a different agent, claim three weeks old (the real one this guard responds to): reclaims as stale', () => {
+      const threeWeeksOld = { ...OWNER, claimedAt: new Date('2026-10-12T02:00:00Z') };
+      const decision = decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: threeWeeksOld, forceClaim: false, now: NOW });
+      expect(decision.action).toBe('reclaim-stale');
+      expect(decision.ageMs).toBeGreaterThan(STALE_CLAIM_MS);
+    });
+
+    it('owner matches this agent even though the claim is ancient: still just proceeds — staleness only matters for a DIFFERENT agent', () => {
+      const ownAncientClaim = { agentId: 'bmpl-qa-mtmcz0m1', agentName: 'Dwight', claimedAt: new Date('2026-10-12T02:00:00Z') };
+      expect(decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: ownAncientClaim, forceClaim: false, now: NOW })).toEqual({ action: 'proceed' });
+    });
+
+    it('stale AND force both true: force still wins and reports as an explicit reassign, not a stale reclaim', () => {
+      const staleOwner = { ...OWNER, claimedAt: new Date(NOW.getTime() - STALE_CLAIM_MS * 2) };
+      expect(decideDatabaseOwnership({ agentId: 'bmpl-qa-mtmcz0m1', owner: staleOwner, forceClaim: true, now: NOW })).toEqual({
+        action: 'reassign',
+        previousOwner: staleOwner,
+      });
+    });
   });
 });
