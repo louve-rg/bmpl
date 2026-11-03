@@ -55,6 +55,54 @@ function findButton(root: ParentNode, matchLabel: string): HTMLButtonElement {
   return btn;
 }
 
+describe('LocationPicker — a GPS fix that arrives after the chunk has already failed', () => {
+  /**
+   * The race QA found: "Use my current location" is tapped WHILE the
+   * Leaflet chunk is still loading — before `loadError` has flipped, so the
+   * button is not yet disabled. The chunk import then fails while the real
+   * device geolocation request is still in flight. `place()` silently
+   * no-ops against the now-dead map (no `L`, no `map`) — before the fix
+   * below, `useCurrentLocation`'s success callback reported "Location
+   * detected" regardless, so the UI claimed success on a coordinate that
+   * never reached `onChange` at all.
+   */
+  it('reports the map as unavailable instead of a false "Location detected" when the fix lands after the chunk fails', async () => {
+    let resolvePosition: ((pos: GeolocationPosition) => void) | null = null;
+    const getCurrentPosition = vi.fn((success: (pos: GeolocationPosition) => void) => {
+      resolvePosition = success;
+    });
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { getCurrentPosition },
+    });
+
+    mount();
+    const onChange = vi.fn();
+    act(() => {
+      root!.render(<LocationPicker value={null} onChange={onChange} />);
+    });
+
+    // No `flush()` yet — the chunk import is still pending, so the button is
+    // not disabled. This is the exact window the race lives in.
+    const current = findButton(container!, 'current location');
+    expect(current.disabled).toBe(false);
+    act(() => current.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+
+    // NOW let the chunk import's rejection land, after the GPS request has
+    // already started.
+    await flush();
+    expect(container!.textContent).toContain('couldn’t load');
+
+    // The device returns a real, successful fix — after the map has died.
+    act(() => resolvePosition!({ coords: { latitude: 17.5, longitude: -88.2, accuracy: 10 } } as GeolocationPosition));
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(container!.textContent).not.toContain('Location detected');
+    expect(container!.textContent).toContain('your location couldn’t be placed on it');
+  });
+});
+
 describe('LocationPicker when the map itself fails to load', () => {
   it('shows a readable explanation instead of "Loading map…" forever', async () => {
     mount();
