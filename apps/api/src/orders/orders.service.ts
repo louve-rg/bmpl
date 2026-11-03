@@ -158,6 +158,19 @@ export class OrdersService {
   private async runCheckout(actor: ActorContext, dto: CheckoutInput, idempotencyKey?: string): Promise<string> {
     const choiceByVendor = new Map(dto.vendors.map((v) => [v.vendorProfileId, v]));
 
+    // SHIPPING-E2E — same fix as `ShipmentService.create`'s `payNow` path, for
+    // the identical pair of races `PaymentsService.createForOrder`'s own
+    // comment flags: a customer's FIRST-EVER wallet-paid checkout could race
+    // two concurrent `paymentMethod.upsert`s into a raw P2002 500, and a
+    // REPEAT customer's concurrent wallet-paid checkouts could deadlock
+    // Postgres at `escrowInTx`'s `FOR UPDATE` — confirmed LIVE on unmodified
+    // `main` by reproducing both with real concurrent HTTP checkouts.
+    // `ensureWalletPaymentMethod` runs before this transaction opens, same as
+    // shipping.
+    if (dto.payWithWallet) {
+      await this.payments.ensureWalletPaymentMethod(actor.userId);
+    }
+
     const orderId = await this.prisma.$transaction(async (tx) => {
       const cart = await tx.cart.findUnique({ where: { userId: actor.userId }, include: { items: { orderBy: { createdAt: 'asc' } } } });
       if (!cart || cart.items.length === 0) throw new BadRequestException('Your cart is empty.');
@@ -541,6 +554,21 @@ export class OrdersService {
       }
 
       // ---- Payment ----
+      // SHIPPING-E2E — take the EXCLUSIVE row lock on the wallet BEFORE
+      // `createForOrder` inserts the WalletHold/LedgerReference that are FK'd
+      // to it. This doesn't need to be the transaction's first statement
+      // (unlike shipping's `create`, checkout does real work — cart,
+      // inventory, order/vendor-order creation — before it ever touches the
+      // wallet): the only requirement is that no row referencing this wallet
+      // exists in THIS transaction before the lock is held, and nothing
+      // earlier in this transaction touches wallet_accounts. See
+      // PaymentsService.lockWalletForOrigination's own comment for the full
+      // mechanism (#540's post-lock enforcement check, inside `escrowInTx`
+      // below, is unaffected — same code, same position, same effect).
+      if (dto.payWithWallet) {
+        await this.payments.lockWalletForOrigination(tx, actor.userId, 'BZD');
+      }
+
       // Without `payWithWallet` this is the original behaviour: a PENDING
       // payment and a SOFT hold, no money moved, settled later.
       const payment = await this.payments.createForOrder(
