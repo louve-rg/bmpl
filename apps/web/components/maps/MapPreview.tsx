@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BELIZE_BOUNDS } from '@bmpl/shared';
 import type { MapPoint } from '../../lib/trip-map';
 import { attachCooperativeMapDrag } from './cooperative-map-drag';
@@ -73,6 +73,12 @@ export function MapPreview({
   // Read inside Leaflet's own event callbacks without re-running the build effect.
   const onSelectRef = useRef(onSelectIndex);
   onSelectRef.current = onSelectIndex;
+  /** Leaflet's chunk failed to load, or threw while building the map (e.g. a
+   *  CDN tile host unreachable, an ad blocker on the OSM request, offline).
+   *  Without this the container just sits there empty forever -- a blank box
+   *  with no indication anything went wrong, and no way to tell "still
+   *  loading" apart from "never going to load". */
+  const [loadError, setLoadError] = useState(false);
 
   // The effect is keyed on the points' CONTENT, not the array identity: a
   // caller that computes `points` inline re-creates the array every render,
@@ -84,63 +90,80 @@ export function MapPreview({
   useEffect(() => {
     if (points.length === 0) return;
     let cancelled = false;
+    setLoadError(false);
 
     (async () => {
-      const L = (await import('leaflet')).default;
+      let L: typeof import('leaflet');
+      try {
+        L = (await import('leaflet')).default;
+      } catch {
+        if (!cancelled) setLoadError(true);
+        return;
+      }
       if (cancelled || !containerRef.current) return;
 
-      const map = L.map(containerRef.current, {
-        // Desktop mouse-wheel zoom only -- off when embedded so an accidental
-        // wheel-over doesn't hijack the page's own scroll, on for a
-        // full-screen host with no page underneath to protect. Observed in
-        // Chromium with `hasTouch` at 375px, unfixed: this option alone
-        // (plus the container's `touchAction` style, below) did not stop a
-        // one-finger swipe on the embedded map from panning the map instead
-        // of scrolling the page. `attachCooperativeMapDrag`
-        // (./cooperative-map-drag.ts), wired up below once the map exists,
-        // is the actual fix for touch; this option by itself only ever
-        // covered the desktop wheel -- same shape as LocationPicker.tsx.
-        scrollWheelZoom,
-        maxBounds: L.latLngBounds(
-          [BELIZE_BOUNDS.minLatitude, BELIZE_BOUNDS.minLongitude],
-          [BELIZE_BOUNDS.maxLatitude, BELIZE_BOUNDS.maxLongitude],
-        ),
-        maxBoundsViscosity: 0.8,
-      });
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors',
-      }).addTo(map);
+      try {
+        const map = L.map(containerRef.current, {
+          // Desktop mouse-wheel zoom only -- off when embedded so an accidental
+          // wheel-over doesn't hijack the page's own scroll, on for a
+          // full-screen host with no page underneath to protect. Observed in
+          // Chromium with `hasTouch` at 375px, unfixed: this option alone
+          // (plus the container's `touchAction` style, below) did not stop a
+          // one-finger swipe on the embedded map from panning the map instead
+          // of scrolling the page. `attachCooperativeMapDrag`
+          // (./cooperative-map-drag.ts), wired up below once the map exists,
+          // is the actual fix for touch; this option by itself only ever
+          // covered the desktop wheel -- same shape as LocationPicker.tsx.
+          scrollWheelZoom,
+          maxBounds: L.latLngBounds(
+            [BELIZE_BOUNDS.minLatitude, BELIZE_BOUNDS.minLongitude],
+            [BELIZE_BOUNDS.maxLatitude, BELIZE_BOUNDS.maxLongitude],
+          ),
+          maxBoundsViscosity: 0.8,
+        });
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; OpenStreetMap contributors',
+        }).addTo(map);
 
-      const markers = points.map((p, i) => {
-        const marker = L.marker([p.latitude, p.longitude], { icon: markerIcon(L, p.letter) })
-          .addTo(map)
-          .bindPopup(p.label);
-        marker.on('click', () => onSelectRef.current?.(i));
-        return marker;
-      });
+        const markers = points.map((p, i) => {
+          const marker = L.marker([p.latitude, p.longitude], { icon: markerIcon(L, p.letter) })
+            .addTo(map)
+            .bindPopup(p.label);
+          marker.on('click', () => onSelectRef.current?.(i));
+          return marker;
+        });
 
-      if (points.length === 1) {
-        const only = points[0]!;
-        map.setView([only.latitude, only.longitude], 15);
-      } else {
-        map.fitBounds(
-          L.latLngBounds(points.map((p) => [p.latitude, p.longitude] as [number, number])),
-          { padding: [30, 30], maxZoom: 15 },
-        );
+        if (points.length === 1) {
+          const only = points[0]!;
+          map.setView([only.latitude, only.longitude], 15);
+        } else {
+          map.fitBounds(
+            L.latLngBounds(points.map((p) => [p.latitude, p.longitude] as [number, number])),
+            { padding: [30, 30], maxZoom: 15 },
+          );
+        }
+        // The container is sized by CSS after mount; without this the tiles
+        // render into a stale box and the map looks half-drawn.
+        setTimeout(() => map.invalidateSize(), 0);
+
+        // Embedded only (scrollWheelZoom off): a full-screen host already owns
+        // every gesture, with no page scroll underneath to protect.
+        if (!scrollWheelZoom) {
+          detachDragRef.current = attachCooperativeMapDrag(map, containerRef.current);
+        }
+
+        mapRef.current = map;
+        markersRef.current = markers;
+      } catch {
+        // Thrown synchronously by Leaflet itself -- e.g. the container was
+        // detached between the await above and this point, or the tile host
+        // is unreachable in a way Leaflet surfaces as a build-time throw
+        // rather than a silently failed tile. Same readable state as an
+        // import failure: nothing left half-built to clean up, since
+        // mapRef/markersRef are only assigned once construction succeeds.
+        if (!cancelled) setLoadError(true);
       }
-      // The container is sized by CSS after mount; without this the tiles
-      // render into a stale box and the map looks half-drawn.
-      setTimeout(() => map.invalidateSize(), 0);
-
-      // Embedded only (scrollWheelZoom off): a full-screen host already owns
-      // every gesture, with no page scroll underneath to protect.
-      if (!scrollWheelZoom) {
-        detachDragRef.current = attachCooperativeMapDrag(map, containerRef.current);
-      }
-
-      mapRef.current = map;
-      markersRef.current = markers;
     })();
 
     return () => {
@@ -191,6 +214,17 @@ export function MapPreview({
       // full-screen host (scrollWheelZoom=true) has no page underneath to
       // protect, so the map owning every gesture there is intentional.
       style={{ touchAction: scrollWheelZoom ? 'none' : 'pan-y' }}
-    />
+    >
+      {/* Leaflet writes its own DOM into this container on success and never
+          sees this text -- it's only ever present while there is nothing
+          else in the box. A blank box with no explanation was the actual
+          defect: "still loading" and "never going to load" looked
+          identical to a reader. */}
+      {loadError && (
+        <div className="flex h-full items-center justify-center p-4 text-center text-sm text-slate-500">
+          The map couldn’t load. The stops are still listed below.
+        </div>
+      )}
+    </div>
   );
 }

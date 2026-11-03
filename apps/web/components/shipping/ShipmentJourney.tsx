@@ -146,6 +146,11 @@ function LegRow({ leg, isLast }: { leg: ShipmentLegView; isLast: boolean }) {
 
 export function ShipmentJourney({ shipment }: { shipment: ShipmentView }) {
   const doorCode = shipment.legs.find((l) => l.handoffPin)?.handoffPin ?? null;
+  // SHIPPING-E2E: the sender's own collection code, shown only while a leg
+  // still needs to be picked up FROM them — never the driver's to read, since
+  // the driver is who the sender is checking against. Same lifecycle as
+  // doorCode above: the API nulls this the moment pickup is confirmed.
+  const pickupCode = shipment.legs.find((l) => l.pickupPin)?.pickupPin ?? null;
   const collectHub = shipment.status === 'AWAITING_COLLECTION'
     ? [...shipment.legs].reverse().find((l) => l.destinationHub)?.destinationHub ?? null
     : null;
@@ -180,6 +185,20 @@ export function ShipmentJourney({ shipment }: { shipment: ShipmentView }) {
         </dl>
       </div>
 
+      {/* The pickup code. Shown only while a leg still needs to be collected
+          FROM the sender — gone the moment pickup is confirmed, same rule as
+          the door code below. The driver never sees this: it exists so the
+          sender can confirm it's the right driver, not the other way round. */}
+      {pickupCode && (
+        <div className="rounded-bmpl-xl border border-blue-300 bg-blue-50 p-4">
+          <p className="text-sm font-medium text-slate-900">Your pickup code</p>
+          <p className="mt-1 font-mono text-3xl font-bold tracking-[0.3em] text-belize-blue">{pickupCode}</p>
+          <p className="mt-2 text-xs text-slate-600">
+            Read this to the driver when they collect the parcel from you.
+          </p>
+        </div>
+      )}
+
       {/* The door code. Shown only on a shipment that ends at an address, and
           only while it is still on its way — after that it is just a stale
           number somebody might read out to the wrong person. */}
@@ -188,7 +207,7 @@ export function ShipmentJourney({ shipment }: { shipment: ShipmentView }) {
           <p className="text-sm font-medium text-slate-900">Your delivery code</p>
           <p className="mt-1 font-mono text-3xl font-bold tracking-[0.3em] text-belize-blue">{doorCode}</p>
           <p className="mt-2 text-xs text-slate-600">
-            Give this to the driver when they hand the parcel over. Nobody else needs it.
+            Share this with whoever will receive the parcel — the driver asks for it when the parcel is handed over.
           </p>
         </div>
       )}
