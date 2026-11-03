@@ -44,19 +44,20 @@ export class PaymentsService {
    * and a PENDING LedgerReference (a planned movement, unposted). Emits payment
    * events + audit rows. Returns the payment.
    *
-   * NOTED, NOT FIXED (SHIPPING-E2E, by direction — this is checkout, already
-   * shipped): this function has the IDENTICAL pair of races the shipping
-   * path (`createForShipment`) had — the `tx.paymentMethod.upsert` first-
-   * ever-booking P2002, and the WalletHold/LedgerReference FK-then-
-   * `escrowInTx`-FOR-UPDATE wallet-row deadlock, confirmed LIVE on `main`
-   * for a repeat customer. `orders.service.ts`'s `runCheckout()` calls this
-   * with no equivalent of `ShipmentService`'s
-   * `PaymentsService.ensureWalletPaymentMethod` /
-   * `PaymentsService.lockWalletForOrigination` calls before its own
-   * transaction opens. Deliberately unchanged here: the one real
-   * compatibility question — whether fixing it changes behaviour an
-   * external consumer already depends on — is the owner's to answer, not
-   * something this repo's code can settle on its own.
+   * FIXED (SHIPPING-E2E, owner-approved): this function had the IDENTICAL
+   * pair of races the shipping path (`createForShipment`) had — the
+   * `tx.paymentMethod.upsert` first-ever-checkout P2002, and the
+   * WalletHold/LedgerReference FK-then-`escrowInTx`-FOR-UPDATE wallet-row
+   * deadlock. Both confirmed LIVE on unmodified `main` by reproducing them
+   * with real concurrent HTTP checkouts (not inferred from the shipping fix)
+   * — tracked, limited-stock products were incidentally shielded from the
+   * deadlock by `InventoryService.reserve`'s own earlier `FOR UPDATE` on the
+   * inventory row serializing concurrent checkouts before any of them could
+   * race on the wallet; an UNLIMITED/untracked product has no such lock and
+   * deadlocked exactly like shipping. `orders.service.ts`'s `runCheckout()`
+   * now calls the same `PaymentsService.ensureWalletPaymentMethod` /
+   * `PaymentsService.lockWalletForOrigination` pair shipping does, gated on
+   * `payWithWallet` the same way.
    */
   async createForOrder(
     tx: Tx,
