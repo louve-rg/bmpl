@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   belizeCalendarDateKey,
@@ -177,6 +177,34 @@ function normalizePhone(phone: string | null | undefined): string | null {
 // Mirrors orders.service.ts's CHECKOUT_SCOPE exactly -- the idempotency_keys
 // table is scope-generic, one row per (userId, scope, key).
 const SHIPPING_SCOPE = 'shipping';
+
+/**
+ * Deterministic key order, recursively — plain JSON.stringify's key order
+ * depends on insertion order, which is not a promise this hash can rely on.
+ * Arrays keep their own order (position is meaningful there); only object
+ * keys are sorted.
+ */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * SHIPPING-E2E: the fingerprint an idempotency key is checked against on
+ * replay. Hashes the PARSED/validated DTO, not the raw request body — a
+ * request that omits an optional field and one that sends its explicit
+ * default must hash identically, since Zod already normalized that
+ * difference away. Hashing the raw body instead would refuse two requests
+ * that mean the same thing and look like a bug in this feature, not a
+ * safeguard.
+ */
+function hashRequest(input: unknown): string {
+  return createHash('sha256').update(stableStringify(input)).digest('hex');
+}
 
 const SHIPMENT_INCLUDE = {
   legs: {
@@ -649,6 +677,13 @@ export class ShipmentService {
    * to see what was agreed at booking.
    */
   async create(userId: string, input: CreateShipmentInput, isTest?: boolean, idempotencyKey?: string) {
+    // Computed once, up front, regardless of whether a key was sent --
+    // SHIPPING-E2E (requestHash): a replayed key with a DIFFERENT body used
+    // to silently return the OLDER shipment, because the key was matched on
+    // (userId, scope, key) identity alone. `IdempotencyKey.requestHash` has
+    // existed since July with zero callers; this is the first one.
+    const requestHash = idempotencyKey ? hashRequest(input) : null;
+
     // Idempotency fast path: a completed key replays the original shipment
     // instead of creating a duplicate booking (safe under distributed
     // retries) -- mirrors orders.service.ts's checkout() exactly.
@@ -657,6 +692,7 @@ export class ShipmentService {
         where: { userId_scope_key: { userId, scope: SHIPPING_SCOPE, key: idempotencyKey } },
       });
       if (existing?.resultShipmentId) {
+        this.assertSameRequest(existing.requestHash, requestHash);
         await this.audit.record({ action: 'IDEMPOTENCY_KEY_REPLAYED', actorId: userId, newValue: { scope: SHIPPING_SCOPE, shipmentId: existing.resultShipmentId } });
         return this.getOwnById(userId, existing.resultShipmentId);
       }
@@ -664,14 +700,17 @@ export class ShipmentService {
     }
 
     try {
-      return await this.runCreate(userId, input, isTest, idempotencyKey);
+      return await this.runCreate(userId, input, isTest, idempotencyKey, requestHash);
     } catch (e) {
       // Concurrent duplicate: the unique (user, scope, key) lost the race.
       if (idempotencyKey && e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         const existing = await this.prisma.idempotencyKey.findUnique({
           where: { userId_scope_key: { userId, scope: SHIPPING_SCOPE, key: idempotencyKey } },
         });
-        if (existing?.resultShipmentId) return this.getOwnById(userId, existing.resultShipmentId);
+        if (existing?.resultShipmentId) {
+          this.assertSameRequest(existing.requestHash, requestHash);
+          return this.getOwnById(userId, existing.resultShipmentId);
+        }
         // Defensive, not dead: under the CURRENT one-transaction shape (the
         // reservation and the COMPLETED write both happen inside the same
         // $transaction in runCreate), an external reader can never observe
@@ -689,13 +728,28 @@ export class ShipmentService {
     }
   }
 
+  /**
+   * SHIPPING-E2E: the ONE place a stored requestHash is compared against an
+   * incoming one, so the two replay sites above (the fast path and the
+   * concurrent-duplicate catch) can never drift into checking it
+   * differently. A null stored hash (a row written before this existed, or
+   * a key sent once but never again) is never treated as a mismatch -- there
+   * is nothing to compare it against, and refusing on absence would turn a
+   * missing fact into a false accusation.
+   */
+  private assertSameRequest(stored: string | null, incoming: string | null): void {
+    if (stored && incoming && stored !== incoming) {
+      throw new ConflictException('This idempotency key was already used with a different request.');
+    }
+  }
+
   private async getOwnById(userId: string, shipmentId: string) {
     const shipment = await this.prisma.shipment.findUnique({ where: { id: shipmentId, customerUserId: userId }, include: SHIPMENT_INCLUDE });
     if (!shipment) throw new NotFoundException('No shipment with that id.');
     return this.serialize(shipment, { audience: 'CUSTOMER' });
   }
 
-  private async runCreate(userId: string, input: CreateShipmentInput, isTest: boolean | undefined, idempotencyKey?: string) {
+  private async runCreate(userId: string, input: CreateShipmentInput, isTest: boolean | undefined, idempotencyKey?: string, requestHash?: string | null) {
     // Booking without paying exists only for the paths that predate shipment
     // payments; the customer-facing form always pays. An unpaid shipment is
     // created but never dispatched, so it cannot become work for a driver.
@@ -808,7 +862,7 @@ export class ShipmentService {
       // below — a duplicate submission should fail fast, not wait behind a
       // row lock it was never going to need.
       const idemRow = idempotencyKey
-        ? await tx.idempotencyKey.create({ data: { userId, scope: SHIPPING_SCOPE, key: idempotencyKey, status: 'IN_PROGRESS' } })
+        ? await tx.idempotencyKey.create({ data: { userId, scope: SHIPPING_SCOPE, key: idempotencyKey, status: 'IN_PROGRESS', requestHash } })
         : null;
 
       // SHIPPING-E2E — the first thing this transaction does to the
