@@ -334,6 +334,36 @@ describe('paying twice', () => {
     const after = await balanceOf(customerId);
     expect(after.availableMinor).toBe(PRICE * 10 - PRICE * 5);
   });
+
+  /**
+   * SHIPPING-E2E — guards the margin the deadlock fix above depends on, not
+   * concurrency itself. `lockWalletForOrigination` holds the wallet row's
+   * EXCLUSIVE lock across the WHOLE booking transaction, so N concurrent
+   * bookings on one wallet now run end to end, one at a time, each still
+   * bound by Prisma's 5000ms default interactive-transaction timeout. A
+   * booking that gets slower multiplies straight into that serialized total
+   * — at ~200ms/booking there is room for ~25 queued bookings before 5000ms;
+   * at 600ms there is room for ~8. 600ms is the threshold that keeps 8
+   * concurrent bookings safe, with ~3x headroom over the measured 196ms on a
+   * quiet path (SHIPPING-E2E PR #547), loose enough not to flake on a loaded
+   * CI runner.
+   *
+   * Deliberately asserts ONE booking's wall-clock time, not a concurrent
+   * total: a concurrent-total assertion measures the test runner's own
+   * contention as much as this code, which is the flakiest possible shape
+   * for a CI timing test — and a flaky timing test gets its threshold raised
+   * until it asserts nothing. If this ever fails, it means a booking step
+   * got slower and ate into the deadlock fix's safety margin — report it,
+   * do not raise the threshold.
+   */
+  it('a single wallet-paid booking stays well under the serialized-booking timeout budget', async () => {
+    await fund(customerId, PRICE * 2);
+    const t0 = Date.now();
+    const r = await post(customer, 'shipping', { ...localParcel(), payWithWallet: true });
+    const elapsedMs = Date.now() - t0;
+    expect(r.status).toBe(201);
+    expect(elapsedMs).toBeLessThan(600);
+  });
 });
 
 describe('a shipment nobody paid for', () => {
