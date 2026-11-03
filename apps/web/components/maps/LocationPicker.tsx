@@ -201,17 +201,24 @@ function LocationPickerBody({
    * genuinely is "somewhere in this circle" and should say so. The moment the
    * customer taps or drags, the pin is a deliberate human choice and continuing
    * to draw a margin of error around it would misrepresent it as still automatic.
+   *
+   * Returns whether it actually placed the pin. `false` means there was no live
+   * map to place it on — the caller MUST check this before reporting success:
+   * `useCurrentLocation` below used to call this, then unconditionally report
+   * "Location detected" regardless of the return, which is how a real GPS fix
+   * obtained after the map's chunk failed to load got silently discarded while
+   * the UI claimed success.
    */
-  const place = useCallback((lat: number, lng: number, opts: { pan?: boolean; zoom?: number; fromGps?: boolean } = {}) => {
+  const place = useCallback((lat: number, lng: number, opts: { pan?: boolean; zoom?: number; fromGps?: boolean } = {}): boolean => {
     const L = leafletRef.current;
     const map = mapRef.current;
-    if (!L || !map) return;
+    if (!L || !map) return false;
 
     if (!isWithinBelize(lat, lng)) {
       // Refused rather than stored. The server rejects it too — this only means
       // the customer finds out now instead of on submit.
       setOutOfBounds(true);
-      return;
+      return true;
     }
     setOutOfBounds(false);
 
@@ -235,6 +242,7 @@ function LocationPickerBody({
     }
     if (opts.pan) map.setView([lat, lng], opts.zoom ?? map.getZoom());
     onChangeRef.current({ latitude: lat, longitude: lng });
+    return true;
   }, [clearAccuracyCircle]);
 
   /** Draw the "your device thinks you're somewhere in here" circle. */
@@ -444,7 +452,19 @@ function LocationPickerBody({
           });
           return;
         }
-        place(latitude, longitude, { pan: true, zoom: PINNED_ZOOM, fromGps: true });
+        const placed = place(latitude, longitude, { pan: true, zoom: PINNED_ZOOM, fromGps: true });
+        if (!placed) {
+          // The map died (chunk load failed, or threw) in the time between this
+          // request starting and the GPS fix coming back. The fix itself is real
+          // and must not be reported as a success we then throw away — say
+          // plainly that the map is unavailable, same wording as `loadError`'s
+          // own alert, rather than a false "Location detected."
+          setGeo({
+            kind: 'error',
+            message: 'The map couldn’t load, so your location couldn’t be placed on it. Reload the page to try again — or continue on the address you’ve given.',
+          });
+          return;
+        }
         if (Number.isFinite(accuracy) && accuracy > 0) drawAccuracyCircle(latitude, longitude, accuracy);
         setGeo({ kind: 'located', accuracyM: Number.isFinite(accuracy) ? Math.round(accuracy) : null });
       },
