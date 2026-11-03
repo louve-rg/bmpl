@@ -218,6 +218,18 @@ describe('the complete journey over two line-haul hops (SHIPPING-E2E-JOURNEY)', 
     /* ------------------------------------------- THE N=2 PROOF, PART TWO */
     // The actual claim this file exists to prove: LAST_MILE must wait for
     // BOTH line-hauls, not just the first one to finish.
+    //
+    // RESIDUAL, checked and not caught by design: isLegActionable's
+    // .every(sequence < target) over every earlier leg is, right now,
+    // equivalent to checking only the immediate predecessor — proven by
+    // mutating it to exactly that and finding this assertion still passes,
+    // because releaseNextLeg only ever promotes legs one at a time in
+    // sequence, so a leg can never become actionable out of order to begin
+    // with. .every() is DEFENSIVE today, not load-bearing. If a future change
+    // ever lets releaseNextLeg skip ahead (e.g. an EXCEPTION/resume path that
+    // fast-forwards a later leg) AT THE SAME TIME .every() is simplified to a
+    // predecessor-only check, this test will not catch it — the induction
+    // this residual relies on would be exactly what broke.
     const tooSoon2 = await assign(lastMile.id, lastCourier);
     expect(tooSoon2.status).toBe(400);
     expect(tooSoon2.body.message).toContain('has not reached this leg');
