@@ -43,6 +43,20 @@ export class PaymentsService {
    * PENDING), a WALLET PaymentMethod, a soft WalletHold (HELD — no money moved),
    * and a PENDING LedgerReference (a planned movement, unposted). Emits payment
    * events + audit rows. Returns the payment.
+   *
+   * NOTED, NOT FIXED (SHIPPING-E2E, by direction — this is checkout, already
+   * shipped): this function has the IDENTICAL pair of races the shipping
+   * path (`createForShipment`) had — the `tx.paymentMethod.upsert` first-
+   * ever-booking P2002, and the WalletHold/LedgerReference FK-then-
+   * `escrowInTx`-FOR-UPDATE wallet-row deadlock, confirmed LIVE on `main`
+   * for a repeat customer. `orders.service.ts`'s `runCheckout()` calls this
+   * with no equivalent of `ShipmentService`'s
+   * `PaymentsService.ensureWalletPaymentMethod` /
+   * `PaymentsService.lockWalletForOrigination` calls before its own
+   * transaction opens. Deliberately unchanged here: the one real
+   * compatibility question — whether fixing it changes behaviour an
+   * external consumer already depends on — is the owner's to answer, not
+   * something this repo's code can settle on its own.
    */
   async createForOrder(
     tx: Tx,
@@ -470,6 +484,96 @@ export class PaymentsService {
       await this.transition(tx, { id: paymentId, status: payment.status }, terminalStatus, actor.userId, { reason });
       await this.audit.record({ action: 'PAYMENT_AUTHORIZATION_FAILED', actorId: actor.userId, newValue: { paymentId, reason } }, tx);
     });
+  }
+
+  /**
+   * Ensure the customer's WALLET `PaymentMethod` row exists — call this
+   * BEFORE opening the caller's own booking transaction, never from inside
+   * it (SHIPPING-E2E: the raw-500 root cause).
+   *
+   * `createForShipment`/`createForOrder` below each do their own
+   * `tx.paymentMethod.upsert(...)` already, but Prisma's `upsert` is not one
+   * atomic statement — it SELECTs, then branches to INSERT or UPDATE. On a
+   * customer's FIRST EVER wallet-paid booking there is no existing row, so
+   * two concurrently-submitted requests both SELECT-find-nothing and both
+   * attempt INSERT; Postgres blocks the second on the unique
+   * `(userId, type)` index until the first commits, then raises
+   * `P2002` on the one that waited. That happened INSIDE the booking
+   * transaction, so the whole transaction (and the shipment it was
+   * creating) rolled back cleanly — no orphan — but the loser got a raw,
+   * unmapped 500: `LedgerErrorFilter` is the only global exception filter
+   * and it catches only `LedgerError`, not a bare Prisma error.
+   *
+   * Simply calling the SAME upsert earlier does not fix this by itself —
+   * two concurrent callers of THIS method would still race each other the
+   * identical way. What fixes it is absorbing that race here, once, outside
+   * any transaction the caller cares about: whichever call loses learns the
+   * row already exists, which is all it ever needed to know, and returns
+   * normally instead of throwing. By the time the caller opens its own
+   * booking transaction the row is committed and visible, so
+   * `createForShipment`/`createForOrder`'s own upsert always takes the
+   * UPDATE branch there — which cannot itself raise P2002 — for every
+   * concurrent request, not just the winner.
+   */
+  async ensureWalletPaymentMethod(userId: string): Promise<void> {
+    try {
+      await this.prisma.paymentMethod.upsert({
+        where: { userId_type: { userId, type: 'WALLET' } },
+        update: {},
+        create: { userId, type: 'WALLET', label: 'Platform wallet', isDefault: true },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return;
+      throw e;
+    }
+  }
+
+  /**
+   * Take the EXCLUSIVE row lock on a customer's USER wallet account as the
+   * VERY FIRST thing done to it inside a booking transaction — before ANY
+   * row carrying a foreign key to it is inserted elsewhere in that SAME
+   * transaction (`createForShipment`/`createForOrder`'s own WalletHold and
+   * LedgerReference, both FK'd to this wallet).
+   *
+   * SHIPPING-E2E — a second, pre-existing raw-500 found verifying the
+   * PaymentMethod-race fix above, confirmed LIVE in production for a REPEAT
+   * customer (one whose PaymentMethod row already exists, so that race
+   * never fires for them at all): Postgres takes an implicit SHARE lock on
+   * a row for every FK-referencing INSERT, held until the transaction ends.
+   * `createForShipment`/`createForOrder` insert a WalletHold and a
+   * LedgerReference against this wallet BEFORE `escrowInTx` ever runs, so
+   * every concurrent booking by the SAME customer picks up that SHARE lock
+   * early. When `escrowInTx`'s own `FOR UPDATE` (further below, UNCHANGED —
+   * see its comment) then tries to upgrade to EXCLUSIVE, each concurrent
+   * transaction is waiting on every OTHER one's still-held SHARE lock to
+   * release — a genuine N-way deadlock (Postgres: "deadlock detected ...
+   * ShareLock on transaction"), not a 2-row lock-ordering bug.
+   *
+   * The fix is not reordering around the upgrade — it is never creating a
+   * SHARE lock in the first place. Call this BEFORE `createForShipment`/
+   * `createForOrder`, so this transaction holds EXCLUSIVE on the wallet row
+   * from its very first touch: every other concurrent transaction targeting
+   * the SAME wallet blocks HERE, on this same early exclusive acquisition,
+   * before it can create any FK-referencing row of its own — there is no
+   * window left for a SHARE lock to be taken by a transaction that does not
+   * already hold (or is not already queued for) the exclusive one. This
+   * incidentally serialises a repeat customer's concurrent bookings end to
+   * end, which on a money path is a feature, not a cost.
+   *
+   * `escrowInTx`'s OWN `FOR UPDATE` and its #540 post-lock status re-read
+   * are left completely in place, untouched, in the same position relative
+   * to each other — this method only adds an EARLIER acquisition of the
+   * same lock, on the same row, by the same transaction. Postgres re-grants
+   * a lock mode a transaction already holds on a row to itself without
+   * blocking, so `escrowInTx`'s later `FOR UPDATE` becomes a same-transaction
+   * no-op once this has already run — it does not weaken or relocate the
+   * #540 enforcement check that follows it; if anything, the wallet's
+   * status cannot change under a lock this transaction already exclusively
+   * holds, from the moment this method returns.
+   */
+  async lockWalletForOrigination(tx: Tx, userId: string, currency: Currency): Promise<void> {
+    const wallet = await this.ensureUserWallet(tx, userId, currency);
+    await tx.$queryRaw`SELECT id FROM wallet_accounts WHERE id = ${wallet.id} FOR UPDATE`;
   }
 
   /**
