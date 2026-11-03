@@ -33,12 +33,20 @@ interface Actor {
 }
 
 /**
- * A driver may report a failed-delivery-shaped issue only once they actually
- * hold the parcel — see `reportIssue`'s own comment for why. Positive
- * allow-list, not "not yet delivered or cancelled": the same discipline
- * apps/api/CLAUDE.md §6 asks for everywhere else in this class.
+ * Every courierStatus a driver may call `reportIssue` from, once they have
+ * genuinely committed to the job (accepted it) — see `reportIssue`'s own
+ * comment for the two shapes this covers. Positive allow-list, not "not yet
+ * delivered or cancelled": the same discipline apps/api/CLAUDE.md §6 asks for
+ * everywhere else in this class. `ASSIGNED` is deliberately absent — a driver
+ * who has only been offered the job, not accepted it, already has `DECLINE`.
+ *
+ * `DRIVER_ACCEPTED` — a FAILED COLLECTION report: the driver accepted but
+ * cannot get the parcel (sender unavailable, parcel not ready, wrong pickup
+ * location, or another obstacle). Before this, `CONFIRM_PICKUP` was the only
+ * driver-reachable edge out of `DRIVER_ACCEPTED`, so a driver stuck at a
+ * locked door had no way to say so (owner's section 4, found by Dwight).
  */
-const REPORTABLE_COURIER_STATUSES: readonly DeliveryStatus[] = ['PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'];
+const REPORTABLE_COURIER_STATUSES: readonly DeliveryStatus[] = ['DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'];
 
 /** A hub end is a public place — always safe to show in full, exact coordinates included. */
 const HUB_SELECT = {
@@ -352,9 +360,23 @@ export class ShipmentDriverService {
 
   /**
    * The courier reports something wrong — MDF-96 (Edward requirement 10),
-   * Option 2. The SAME exception gate staff already use
-   * (`ShipmentService.flagException`), reached a second way rather than
-   * duplicated: no new leg state, no new notification, no new audit action.
+   * Option 2, now covering two shapes. The SAME exception gate staff already
+   * use (`ShipmentService.flagException`), reached a second way rather than
+   * duplicated: no new leg state, no new notification, no new audit action,
+   * and — for the collection case — no new endpoint either.
+   *
+   *  - FAILED COLLECTION (`DRIVER_ACCEPTED`): the driver accepted the job but
+   *    cannot get the parcel — sender unavailable, parcel not ready, wrong
+   *    pickup location, or another obstacle. A report here is an
+   *    ESCALATION, never a terminal action: it moves no money, refunds
+   *    nothing and does not touch the driver's own record. It only opens the
+   *    SAME hold `flagException` already gives staff, who resolve it through
+   *    the existing business rules (reassignment via `resolveException`'s
+   *    `RELEASE_DRIVER` or admin `REASSIGN`, rescheduling, or cancellation) —
+   *    nothing new is invented here.
+   *  - FAILED DELIVERY (`PICKUP_CONFIRMED`/`IN_TRANSIT`/`ARRIVING`):
+   *    "attempted delivery, nobody was there" presupposes an attempt, so this
+   *    stays gated to once the driver actually holds the parcel.
    *
    * `ownedLeg` is the one check every other driver-side write on this leg
    * goes through — holding a driver profile is necessary, but it must also
@@ -362,20 +384,15 @@ export class ShipmentDriverService {
    * else's leg is refused (404, same as every other ownership miss here)
    * before this ever reaches the shared exception primitive.
    *
-   * Only legal once the driver actually has the parcel: "attempted delivery,
-   * nobody was there" presupposes an attempt, and a driver who has not yet
-   * picked up has not attempted anything. Positive allow-list
-   * (`REPORTABLE_COURIER_STATUSES`), same discipline as every other
-   * courierStatus guard in this class — DELIVERED/CANCELLED are terminal and
-   * were never going to be members of it.
+   * Positive allow-list (`REPORTABLE_COURIER_STATUSES`), same discipline as
+   * every other courierStatus guard in this class — DELIVERED/CANCELLED are
+   * terminal and were never going to be members of it.
    */
   async reportIssue(actor: Actor, legId: string, input: LegExceptionInput) {
     const { leg } = await this.ownedLeg(actor.userId, legId);
     const status = leg.courierStatus ?? 'PENDING_ASSIGNMENT';
     if (!REPORTABLE_COURIER_STATUSES.includes(status)) {
-      throw new BadRequestException(
-        `Cannot report a delivery issue while the job is "${DELIVERY_STATUS_LABELS[status]}" — report it once you have the parcel.`,
-      );
+      throw new BadRequestException(`Cannot report an issue while the job is "${DELIVERY_STATUS_LABELS[status]}".`);
     }
     await this.shipments.flagException(legId, input, { userId: actor.userId, label: 'Driver' });
     return this.getJob(actor.userId, legId);

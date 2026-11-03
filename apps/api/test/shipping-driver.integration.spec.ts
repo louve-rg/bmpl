@@ -22,6 +22,7 @@ import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.servi
 let ctx: TestContext;
 let dispatch: ShipmentDispatchService;
 let admin: string[];
+let adminUserId: string;
 let customer: string[];
 let seq = 0;
 const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
@@ -189,6 +190,7 @@ beforeAll(async () => {
   await seedRoles(ctx.prisma);
   const a = await seedSuperAdmin(ctx.prisma);
   admin = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password }));
+  adminUserId = a.id;
   dispatch = ctx.app.get(ShipmentDispatchService);
 });
 
@@ -1321,13 +1323,21 @@ describe('courier and vehicle identification (BMPL-180)', () => {
 
 /**
  * MDF-96 (Edward requirement 10, Option 2) — a courier reports a failed
- * delivery attempt themselves, through the SAME exception gate staff already
- * use (`ShipmentService.flagException`), reached a second way rather than
- * duplicated. The gate's own behaviour (notify, recompute, resolve, return,
- * reroute) is proven elsewhere and deliberately untouched here — this suite
- * pins only what is new: who may call it, and from which courier status.
+ * delivery OR failed collection attempt themselves, through the SAME
+ * exception gate staff already use (`ShipmentService.flagException`),
+ * reached a second way rather than duplicated. The gate's own behaviour
+ * (notify, recompute, resolve, return, reroute) is proven elsewhere and
+ * deliberately untouched here — this suite pins only what is new: who may
+ * call it, and from which courier status.
+ *
+ * FAILED COLLECTION (owner's section 4): before this, `CONFIRM_PICKUP` was
+ * the only driver-reachable edge out of `DRIVER_ACCEPTED`, so a driver who
+ * accepted a job and then found the sender unavailable, the parcel not
+ * ready, or the wrong pickup location had no way to say so — the sender saw
+ * an ordinary pre-pickup wait, and a driver stuck at a locked door was
+ * invisible. `report-issue` now accepts `DRIVER_ACCEPTED` too.
  */
-describe('a courier reports a failed delivery attempt (MDF-96)', () => {
+describe('a courier reports a failed delivery or collection attempt (MDF-96)', () => {
   it('flags the leg exception, and the audit trail correctly names the DRIVER as the actor — not staff, not the system', async () => {
     const driver = await makeDriver();
     const s = await book();
@@ -1354,15 +1364,84 @@ describe('a courier reports a failed delivery attempt (MDF-96)', () => {
     expect(entry!.actorId).toBe(driver.userId);
   });
 
-  it('refuses a driver who has not yet picked up the parcel — there is no attempt to report', async () => {
+  it('refuses a driver who has only been offered the job, not yet accepted it — DECLINE is the right door there, not this one', async () => {
     const driver = await makeDriver();
     const s = await book();
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
-    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    expect(first.courierStatus).toBe('ASSIGNED'); // booking auto-offers; not yet accepted
 
     const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Nobody was at the pickup address.' });
     expect(r.status).toBe(400);
     expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).status).not.toBe('EXCEPTION');
+  });
+
+  it('lets a driver who accepted the job but cannot collect the parcel report it — a FAILED COLLECTION, the owner-approved new door out of DRIVER_ACCEPTED', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).courierStatus).toBe('DRIVER_ACCEPTED');
+    const senderId = (await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).customerUserId!;
+    const walletBefore = await ctx.prisma.walletAccount.findFirstOrThrow({ where: { userId: senderId, type: 'USER' } });
+    const balanceBefore = await ctx.prisma.walletLedgerEntry.aggregate({
+      _sum: { amountMinor: true },
+      where: { accountId: walletBefore.id },
+    });
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, {
+      reason: 'Arrived at the pickup address; nobody answered after repeated attempts.',
+    });
+    expect(r.status).toBe(201);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(after.status).toBe('EXCEPTION');
+    // Escalation only — the driver's own acceptance is never undone and no
+    // terminal action fires on an unverified report.
+    expect(after.courierStatus).toBe('DRIVER_ACCEPTED');
+    expect(after.exceptionReason).toBe('Arrived at the pickup address; nobody answered after repeated attempts.');
+    expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).status).toBe('EXCEPTION');
+
+    // Visible to the responsible administrator...
+    expect(
+      await ctx.prisma.notificationRecipient.count({
+        where: { userId: adminUserId, notification: { event: 'SHIPMENT_EXCEPTION' } },
+      }),
+    ).toBeGreaterThan(0);
+    // ...and the customer receives an appropriate status update.
+    expect(
+      await ctx.prisma.notificationRecipient.count({
+        where: { userId: senderId, notification: { event: 'SHIPMENT_STATUS' } },
+      }),
+    ).toBeGreaterThan(0);
+
+    // No money moved and no driver penalty — a report is an escalation, not
+    // a terminal action.
+    const balanceAfter = await ctx.prisma.walletLedgerEntry.aggregate({
+      _sum: { amountMinor: true },
+      where: { accountId: walletBefore.id },
+    });
+    expect(balanceAfter._sum.amountMinor).toEqual(balanceBefore._sum.amountMinor);
+    const driverRow = await ctx.prisma.driverProfile.findUniqueOrThrow({ where: { id: driver.driverProfileId } });
+    expect(driverRow.isActive).toBe(true);
+    expect(await ctx.prisma.driverEarning.count({ where: { driverProfileId: driver.driverProfileId } })).toBe(0);
+
+    // The audit trail names the DRIVER as the actor, same as a failed-delivery report.
+    const entries = await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_EXCEPTION' } });
+    const entry = entries.find((e) => (e.newValue as { legId?: string }).legId === first.id);
+    expect(entry).toBeTruthy();
+    expect(entry!.actorId).toBe(driver.userId);
+  });
+
+  it('still blocks the next forward transition after a failed-collection report, the same hold a failed-delivery report creates', async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    expect((await post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Sender not answering the door.' })).status).toBe(201);
+
+    const r = await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    expect(r.status).toBe(409);
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('EXCEPTION');
   });
 
   it("refuses a driver reporting an issue on another driver's leg — 404, not 403, the same shape every other ownership miss gets here", async () => {
