@@ -20,12 +20,21 @@ describe('shipping money boundary (STATIC GUARD, source read)', () => {
     }
   });
 
-  it('STATIC GUARD: money leaves shipping only through the payments service, and only these three calls', () => {
+  it('STATIC GUARD: money leaves shipping only through the payments service, and only these five calls', () => {
     const calls = new Set<string>();
     for (const file of SHIPPING_SERVICES) {
       for (const match of sourceOf(file).matchAll(/this\.payments\.(\w+)/g)) calls.add(match[1]!);
     }
-    expect([...calls].sort()).toEqual(['createForShipment', 'escrowInTx', 'releaseForShipment']);
+    expect([...calls].sort()).toEqual([
+      'createForShipment',
+      // moves no money; called OUTSIDE the booking transaction to make the
+      // customer's WALLET PaymentMethod row exist before it can be raced.
+      'ensureWalletPaymentMethod',
+      'escrowInTx',
+      // moves no money; takes a row lock on wallet_accounts, nothing else.
+      'lockWalletForOrigination',
+      'releaseForShipment',
+    ]);
   });
 
   it('STATIC GUARD: shipping imports no payment provider SDK (no new payment rail)', () => {
