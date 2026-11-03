@@ -94,10 +94,18 @@ Payments connect to **VendorOrder**, **wallet ledger** (via `LedgerReference`), 
 
 ## 6. Idempotency (distributed retries)
 `POST /api/checkout` accepts an `Idempotency-Key` header. The key is reserved as
-`IdempotencyKey(userId, 'checkout', key)` inside the checkout transaction (unique
-constraint). A completed key **replays** the original order/payment; a concurrent
-duplicate loses the unique-constraint race (P2002) and is resolved to the same
-result — a duplicate **never** creates a second order or payment (test-verified).
+`IdempotencyKey(userId, 'checkout', key)` **inside the same `$transaction` that
+creates the order/payment and marks the key `COMPLETED`** — so no external
+reader ever observes the key committed while the order/payment is still being
+created; it is either absent, or committed-and-complete. A completed key
+**replays** the original order/payment. A genuine concurrent duplicate loses
+the unique-constraint race (P2002) against a row that is therefore already
+`COMPLETED`, and resolves to that same replay — a duplicate **never** creates
+a second order or payment (test-verified). The service also has a defensive
+`ConflictException` branch ("a duplicate checkout is already in progress")
+for a key row that exists without a result; under this single-transaction
+shape that state cannot arise from real concurrent traffic, so the branch is
+not reachable today.
 
 ## 7. API (read-only foundation)
 Customer: `GET /api/payments`, `/api/payments/for-order/:orderId`,
