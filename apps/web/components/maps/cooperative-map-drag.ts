@@ -22,8 +22,10 @@ import type * as LeafletNS from 'leaflet';
  * toggling `dragging` never touches that path: a two-finger drag keeps
  * working, observed live, whether or not this fix is enabled.
  *
- * Recomputed from the CURRENT touch count on every touchstart/touchmove/
- * touchend/touchcancel, never incremented or decremented, so a lifted finger,
+ * Recomputed from the CURRENT touch count on every touchstart/touchend/
+ * touchcancel (touchmove is never listened to -- touch COUNT cannot change
+ * mid-move, only at start/end/cancel, so it would be a listener with
+ * nothing to recompute), never incremented or decremented, so a lifted finger,
  * a second finger joining mid-gesture, or an interrupted gesture (an incoming
  * call, the OS taking over -- touchcancel) can never leave `dragging` stuck
  * in the wrong state: whatever the event, the rule is the same -- exactly one

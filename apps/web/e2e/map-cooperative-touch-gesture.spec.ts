@@ -13,8 +13,8 @@ import { test, expect, type Page, type Browser, type BrowserContext, type CDPSes
  * not scroll at all -- a longer swipe never advanced `scrollY`.
  *
  * Fix: `attachCooperativeMapDrag` (./../components/maps/cooperative-map-
- * drag.ts), shared by both files. On every touchstart/touchmove/touchend/
- * touchcancel it recomputes from the CURRENT touch count: exactly one
+ * drag.ts), shared by both files. On every touchstart/touchend/touchcancel
+ * it recomputes from the CURRENT touch count: exactly one
  * active touch disables `map.dragging` (so nothing competes with the
  * browser's native pan-y scroll any more), anything else (zero, or two-plus)
  * re-enables it. Two-finger pinch AND two-finger pan both go through the
