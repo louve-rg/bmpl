@@ -728,7 +728,30 @@ export class ShipmentService {
       routeRows.map((r) => [r.id, r.operatedByProviderId && eligibleOperators.has(r.operatedByProviderId) ? r.operatedByProviderId : null]),
     );
 
+    // Outside the booking transaction, deliberately, and only when this
+    // booking will actually pay: a concurrent duplicate submission on a
+    // customer's FIRST EVER wallet-paid booking used to surface a raw,
+    // unmapped 500 here (SHIPPING-E2E) — see
+    // PaymentsService.ensureWalletPaymentMethod's own comment for why
+    // resolving the race BEFORE this transaction opens is what actually
+    // fixes it, not merely moving the same upsert earlier.
+    if (payNow) {
+      await this.payments.ensureWalletPaymentMethod(userId);
+    }
+
     const shipment = await this.prisma.$transaction(async (tx) => {
+      // SHIPPING-E2E — the VERY FIRST thing this transaction does to the
+      // customer's wallet, before any row with a foreign key to it (the
+      // WalletHold/LedgerReference createForShipment inserts below) exists.
+      // See PaymentsService.lockWalletForOrigination's own comment: this is
+      // what actually closes the wallet-row deadlock a repeat customer's
+      // concurrent bookings could hit live in production today, independent
+      // of the PaymentMethod race fixed above. escrowInTx's own FOR UPDATE
+      // and #540's post-lock enforcement check, further down, are UNCHANGED.
+      if (payNow) {
+        await this.payments.lockWalletForOrigination(tx, userId, 'BZD');
+      }
+
       const created = await tx.shipment.create({
         data: {
           reference: await this.uniqueReference(tx),

@@ -260,6 +260,25 @@ describe('paying twice', () => {
     const created = results.filter((r) => r.status === 201);
     expect(created.length).toBeLessThanOrEqual(2);
 
+    // The regression guard for SHIPPING-E2E's two raw-500 fixes. Before
+    // PaymentsService.ensureWalletPaymentMethod existed, this customer's
+    // FIRST EVER wallet-paid booking meant whichever requests lost the
+    // PaymentMethod upsert race inside the booking transaction got an
+    // unmapped 500. Fixing that alone would have swapped it for the SECOND
+    // raw 500 below (the wallet-row deadlock) the instant all four requests
+    // reached escrowInTx's FOR UPDATE together instead of three dying early
+    // — so this one test guards both mechanisms behind the one customer-
+    // visible failure. This test passed with either raw 500 present anyway,
+    // because it only ever checked `created.length`, never what the losers'
+    // own responses actually were. Every non-201 response here must be the
+    // SAME expected conflict a losing request should get on insufficient
+    // funds, never anything else.
+    for (const r of results) {
+      if (r.status === 201) continue;
+      expect(r.status).toBe(409);
+      expect(JSON.stringify(r.body)).toMatch(/insufficient wallet balance/i);
+    }
+
     const after = await balanceOf(customerId);
     expect(after.availableMinor).toBe(PRICE * 2 - created.length * PRICE);
     expect(after.availableMinor).toBeGreaterThanOrEqual(0);
@@ -268,6 +287,52 @@ describe('paying twice', () => {
     const all = await ctx.prisma.walletLedgerEntry.findMany();
     const net = all.reduce((s, e) => s + (e.direction === 'CREDIT' ? e.amountMinor : -e.amountMinor), 0n);
     expect(net).toBe(0n);
+  });
+
+  /**
+   * SHIPPING-E2E — isolates the fix from the insufficient-balance path
+   * above: fund enough for all four, so a loss can ONLY come from the
+   * PaymentMethod-upsert race on this customer's first-ever wallet booking,
+   * never from the wallet ledger check. Before
+   * PaymentsService.ensureWalletPaymentMethod, this reproduced the raw 500
+   * directly — every concurrent request here must now succeed.
+   */
+  it('a concurrent first-ever wallet booking never surfaces the PaymentMethod race as a raw 500', async () => {
+    await fund(customerId, PRICE * 4);
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () => post(customer, 'shipping', { ...localParcel(), payWithWallet: true })),
+    );
+    for (const r of results) expect(r.status).toBe(201);
+
+    expect(await ctx.prisma.payment.count({ where: { userId: customerId } })).toBe(4);
+    expect(await ctx.prisma.paymentMethod.count({ where: { userId: customerId, type: 'WALLET' } })).toBe(1);
+    const after = await balanceOf(customerId);
+    expect(after.availableMinor).toBe(0);
+  });
+
+  /**
+   * SHIPPING-E2E — the SECOND mechanism, isolated on its own: a REPEAT
+   * customer (one ordinary booking first, so the WALLET PaymentMethod row
+   * already exists and the upsert race above never fires at all) whose
+   * concurrent bookings used to deadlock Postgres directly at escrowInTx's
+   * `FOR UPDATE` — confirmed LIVE on unmodified `main`, with zero PaymentMethod
+   * involvement in the failure, before `PaymentsService.lockWalletForOrigination`
+   * existed. This is the MAJORITY-case scenario (every customer after their
+   * first wallet-paid booking), not an edge case.
+   */
+  it("a repeat customer's concurrent bookings never deadlock the wallet row", async () => {
+    await fund(customerId, PRICE * 10);
+    const first = await post(customer, 'shipping', { ...localParcel(), payWithWallet: true });
+    expect(first.status).toBe(201); // establishes the PaymentMethod row -- now a "repeat" customer
+
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () => post(customer, 'shipping', { ...localParcel(), payWithWallet: true })),
+    );
+    for (const r of results) expect(r.status).toBe(201);
+
+    expect(await ctx.prisma.payment.count({ where: { userId: customerId } })).toBe(5); // the first booking + 4 more
+    const after = await balanceOf(customerId);
+    expect(after.availableMinor).toBe(PRICE * 10 - PRICE * 5);
   });
 });
 
