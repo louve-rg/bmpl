@@ -5279,6 +5279,26 @@ model ShipmentLeg {
   handoffReceivedByName     String?
   handoffPhotoKeys          String[]
 
+  // ---- Pickup verification at the start of this leg (SHIPPING-E2E step 9) ----
+  // Exact mirror of the handoff columns above: the SENDER holds the code, the
+  // collecting driver must produce it. Only enforced/revealed for a leg that
+  // genuinely starts at a door (FIRST_MILE/DIRECT on a service with a first
+  // mile) — see ShipmentService.pickupPinFor. Same access rule as handoff:
+  // never returned to the driver who must submit it, never logged.
+  pickupPin                String?
+  pickupPinAttempts        Int                @default(0)
+  pickupVerifiedAt         DateTime?
+  pickupVerificationStatus VerificationStatus @default(PENDING)
+  // Every row that existed the moment this feature's migration applied
+  // predates pickupPin entirely and starts true (migration-day grandfather,
+  // owner ruling) -- see the migration's own comment for why this is a
+  // one-time default-flip, not a backfill. ShipmentService.legData() always
+  // sets this false explicitly for every leg created from this feature
+  // onward, which always gets a real pickupPin, so this column -- not a
+  // null check on pickupPin -- is the single, explicit, testable signal that
+  // an enforcing leg is exempt from ruling 1's fail-closed check.
+  pickupPinGrandfathered Boolean @default(false)
+
   startedAt       DateTime?
   completedAt     DateTime?
   cancelledAt     DateTime?

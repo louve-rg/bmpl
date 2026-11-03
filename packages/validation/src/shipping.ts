@@ -390,6 +390,28 @@ export const legHandoffSchema = z.object({
 });
 export type LegHandoffInput = z.infer<typeof legHandoffSchema>;
 
+/**
+ * Confirming a leg's pickup. Mirrors legHandoffSchema's pin shape exactly —
+ * the SENDER holds this one, the collecting driver must produce it. Only
+ * enforced server-side for a leg that genuinely starts at a door
+ * (ShipmentService.verifyLegPinOrThrow decides that, not this schema); every
+ * other leg kind/service combination accepts and ignores this field.
+ */
+// `pin` is OPTIONAL at the schema level on purpose: a leg where no pickup
+// code was ever enforceable must keep working with no body at all (the
+// driver app's existing call shape everywhere this does not apply). The
+// service layer, which alone knows whether THIS leg enforces one, is what
+// turns a missing/empty/malformed pin into a hard rejection on a leg that
+// does — never a silent pass-through either way.
+export const legPickupSchema = z.object({
+  pin: z
+    .string()
+    .trim()
+    .regex(/^\d{4,8}$/, 'Enter the collection code.')
+    .optional(),
+});
+export type LegPickupInput = z.infer<typeof legPickupSchema>;
+
 /** An operator recording that something went wrong on a leg. */
 export const legExceptionSchema = z.object({
   reason: z.string().trim().min(4, 'Say what happened.').max(500),

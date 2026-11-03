@@ -158,6 +158,12 @@ async function journey(shipmentId: string) {
 async function legRow(legId: string) {
   return ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
 }
+/** SHIPPING-E2E: a DOOR_TO_DOOR FIRST_MILE leg now enforces a pickup code —
+ *  this file's own fixture reads it the same way a real sender would see it
+ *  (the shipment view), never via a shortcut this test alone has access to. */
+async function pickupPinOf(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
+}
 
 beforeAll(async () => {
   ctx = await bootApp();
@@ -208,7 +214,7 @@ describe('starting a leg checks the courier, not just an admin permission (BMPL-
 
     // No side effect on the real courier: they can still pick it up themselves.
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
-    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinOf(firstMile.id) })).status).toBe(201);
     expect((await legRow(firstMile.id)).status).toBe('IN_PROGRESS');
   });
 
@@ -241,7 +247,7 @@ describe('starting a leg checks the courier, not just an admin permission (BMPL-
     // Get the parcel to the terminal legitimately so the LINE_HAUL leg is READY.
     await dispatch.dispatchLeg(firstMile.id);
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
-    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinOf(firstMile.id) })).status).toBe(201);
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
     const pin = (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: firstMile.id }, select: { handoffPin: true } })).handoffPin!;
@@ -293,7 +299,7 @@ describe('starting a leg checks the courier, not just an admin permission (BMPL-
 
     // The newly assigned courier's own pickup succeeds with no special case.
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
-    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinOf(firstMile.id) })).status).toBe(201);
     expect((await legRow(firstMile.id)).status).toBe('IN_PROGRESS');
   });
 
@@ -353,7 +359,7 @@ describe('starting a leg checks the courier, not just an admin permission (BMPL-
 
     // B, who the leg actually belongs to now, is unaffected by A's attempts.
     expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
-    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await post(courierB.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinOf(firstMile.id) })).status).toBe(201);
     expect((await legRow(firstMile.id)).status).toBe('IN_PROGRESS');
   });
 });

@@ -138,7 +138,7 @@ const assign = (legId: string, d: { driverProfileId: string; vehicleId: string }
 
 async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
@@ -173,6 +173,14 @@ async function capture(step: () => Promise<unknown>): Promise<Delivered[]> {
 }
 
 const etaChanges = (all: Delivered[]) => all.filter((n) => n.event === 'SHIPMENT_ETA_CHANGED');
+
+/** SHIPPING-E2E: a FIRST_MILE/DIRECT leg on a needsFirstMile service now
+ *  enforces the sender's pickup code. Harmless to send on a leg that does
+ *  not enforce one (LAST_MILE, etc.) — it is simply ignored there, same
+ *  contract Oscar builds against. */
+async function pickupPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
+}
 
 beforeAll(async () => {
   ctx = await bootApp();

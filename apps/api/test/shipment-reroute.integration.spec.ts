@@ -158,7 +158,7 @@ const flag = (legId: string, reason = 'Recipient not home; no safe place to leav
 
 async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
-  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
   expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, {
@@ -188,7 +188,7 @@ async function walkToLastMileException(reason?: string) {
   const last = (await legs(shipment.id)).find((l) => l.kind === 'LAST_MILE')!;
   expect((await assign(last.id, lastDriver)).status).toBe(201);
   expect((await post(lastDriver.cookies, `driver/shipping-jobs/${last.id}/accept`)).status).toBe(201);
-  expect((await post(lastDriver.cookies, `driver/shipping-jobs/${last.id}/pickup`)).status).toBe(201);
+  expect((await post(lastDriver.cookies, `driver/shipping-jobs/${last.id}/pickup`, { pin: await pickupPinFor(last.id) })).status).toBe(201);
 
   expect((await flag(last.id, reason)).status).toBe(201);
   return { shipment, legId: last.id, driver: lastDriver };
@@ -240,6 +240,14 @@ async function marketplaceExceptionLeg() {
     include: { legs: true },
   });
   return { shipment, legId: shipment.legs[0]!.id };
+}
+
+/** SHIPPING-E2E: a FIRST_MILE/DIRECT leg on a needsFirstMile service now
+ *  enforces the sender's pickup code. Harmless to send on a leg that does
+ *  not enforce one (LAST_MILE, etc.) — it is simply ignored there, same
+ *  contract Oscar builds against. */
+async function pickupPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
 }
 
 beforeAll(async () => {

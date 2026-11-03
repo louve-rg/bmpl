@@ -3,6 +3,8 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import {
   belizeCalendarDateKey,
   belizeMidday,
+  DELIVERY_PIN_LENGTH,
+  DELIVERY_PIN_MAX_ATTEMPTS,
   deriveShipmentStatus,
   estimateShipmentEta,
   isLegActionable,
@@ -44,6 +46,7 @@ import type {
   LegDepartInput,
   LegExceptionInput,
   LegHandoffInput,
+  LegPickupInput,
   LegScheduleInput,
   RerouteInput,
   ResolveLegExceptionInput,
@@ -68,14 +71,21 @@ import type { Env } from '../config/env';
 /** Minor units go out as numbers; see the note in logistics-network.service.ts. */
 const money = (v: bigint) => Number(v);
 
-/** How many failed handoff codes before the leg stops accepting them. */
-const MAX_PIN_ATTEMPTS = 5;
-const PIN_LENGTH = 4;
+/** Constant-time PIN comparison — same shape as pickup.service.ts's and
+ *  driver-jobs.service.ts's own local copies; a PIN check is a security
+ *  boundary each file keeps its own non-short-circuiting comparison for. */
+function timingSafeEqualStr(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
 /**
  * How many failed matching-signal attempts before a shipment's claim link
- * stops accepting them at all — same number, same shape as MAX_PIN_ATTEMPTS,
- * applied to `claimAsRecipient` instead of `verifyHandoffPin`. Per-shipment
+ * stops accepting them at all — same number, same shape as
+ * DELIVERY_PIN_MAX_ATTEMPTS, applied to `claimAsRecipient` instead of
+ * `verifyLegPinOrThrow`. Per-shipment
  * (stored on the shipment itself), not per-account, so the limit cannot be
  * laundered by registering a fresh account for each guess.
  */
@@ -880,11 +890,21 @@ export class ShipmentService {
       priceMinor: BigInt(l.priceMinor),
       description: l.description,
       handoffPin: this.genPin(),
+      // Generated universally, same as handoffPin above — cheap, consistent,
+      // and the leg doesn't need to know at creation time whether it will
+      // end up enforcing (see verifyLegPinOrThrow / pickupPinFor, which
+      // decide that from kind + service, not from whether a value exists).
+      pickupPin: this.genPin(),
+      // Explicit, not relied-on-as-a-default: every leg created by this
+      // feature always gets a real pickupPin above, so it is never exempt
+      // from ruling 1. Only a row that predates this column (migration-day
+      // grandfather, see the migration's own comment) is ever true.
+      pickupPinGrandfathered: false,
     };
   }
 
   private genPin(): string {
-    return String(randomInt(0, 10 ** PIN_LENGTH)).padStart(PIN_LENGTH, '0');
+    return String(randomInt(0, 10 ** DELIVERY_PIN_LENGTH)).padStart(DELIVERY_PIN_LENGTH, '0');
   }
 
   /** Short, unambiguous, and checked for collision rather than assumed unique. */
@@ -1180,7 +1200,7 @@ export class ShipmentService {
    * match increments it and is audited (`SHIPMENT_RECIPIENT_CLAIM_FAILED`),
    * and `MAX_RECIPIENT_CLAIM_ATTEMPTS` failures lock the shipment's claim
    * link for good (an administrator has to intervene), exactly mirroring
-   * `verifyHandoffPin`'s lockout rather than inventing a second shape. The
+   * `verifyLegPinOrThrow`'s lockout rather than inventing a second shape. The
    * counter lives on the SHIPMENT, not the account, so the limit cannot be
    * laundered by registering a fresh account per guess.
    *
@@ -1238,7 +1258,7 @@ export class ShipmentService {
     // comment) — but that same property means anyone merely holding the
     // tracking link can deliberately burn all five attempts and permanently
     // lock out the genuine recipient. A locked-out recipient here and a
-    // locked-out handoff PIN (verifyHandoffPin) are the same unanswered
+    // locked-out handoff PIN (verifyLegPinOrThrow) are the same unanswered
     // question, and it is already in front of the owner as BMPL-13. Do not
     // invent a reset path here — that would decide BMPL-13 by
     // implementation rather than by the owner actually deciding it.
@@ -1457,7 +1477,7 @@ export class ShipmentService {
    * (`shipment-dispatch.service.ts`), so nothing legitimate ever reaches this
    * method with one — this closes the gap rather than changing any real path.
    *
-   * Same owner rule as `verifyHandoffPin` (BMPL-174), applied to the OTHER end
+   * Same owner rule as `verifyLegPinOrThrow` (BMPL-174), applied to the OTHER end
    * of a courier's custody: picking up. There is no code to check here — the
    * sender and the terminal desk do not hold one — but the actor recording the
    * pickup still has to BE the courier the parcel is credited to, or an ops
@@ -1690,7 +1710,7 @@ export class ShipmentService {
     // A failed attempt recorded inside the transaction is rolled back when that
     // transaction throws, so the counter would never climb and the lockout below
     // would be unreachable — the code could be guessed forever.
-    await this.verifyHandoffPin(legId, input.pin, actor);
+    await this.verifyLegPinOrThrow(legId, 'handoff', input.pin, actor);
 
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
       // Conditional write, NOT an unconditional update by id. `leg.status` is
@@ -1803,41 +1823,93 @@ export class ShipmentService {
    * uncounted wrong-courier path would let anyone with the code (right or
    * wrong) probe for who the assigned courier is without ever touching the
    * lockout.
+   *
+   * GENERALIZED (SHIPPING-E2E) to also verify the PICKUP code at the start of
+   * a leg — same shape, same lockout, same shared DELIVERY_PIN_MAX_ATTEMPTS
+   * threshold, one method instead of two, mirroring driver-jobs.service.ts's
+   * own kind-parameterized verifyPinOrThrow for marketplace pickup/delivery.
+   *
+   * Does NOT decide whether a pin is required for this call — that is the
+   * caller's job (completeLeg always requires one; confirmPickup only calls
+   * this at all when the leg actually enforces a pickup code — see
+   * ShipmentDriverService.confirmPickup). This method's only job, given that
+   * a check IS happening, is: is there a pin, does it match, count the
+   * failure, lock out at the shared threshold.
    */
-  private async verifyHandoffPin(legId: string, pin: string, actor: { userId: string }) {
+  private async verifyLegPinOrThrow(
+    legId: string,
+    kind: 'pickup' | 'handoff',
+    pin: string | undefined,
+    actor: { userId: string },
+  ) {
     const leg = await this.prisma.shipmentLeg.findUnique({
       where: { id: legId },
-      select: { id: true, shipmentId: true, status: true, handoffPin: true, handoffPinAttempts: true, assignedDriverProfileId: true },
+      select: {
+        id: true,
+        shipmentId: true,
+        status: true,
+        assignedDriverProfileId: true,
+        pickupPin: true,
+        pickupPinAttempts: true,
+        handoffPin: true,
+        handoffPinAttempts: true,
+      },
     });
     if (!leg) throw new NotFoundException('Leg not found.');
+
+    const label = kind === 'pickup' ? 'collection' : 'handoff';
+    const storedPin = kind === 'pickup' ? leg.pickupPin : leg.handoffPin;
+    const attempts = kind === 'pickup' ? leg.pickupPinAttempts : leg.handoffPinAttempts;
+
     // Checked BEFORE the status guard, not after: MDF-96's lockout now moves
     // leg.status to EXCEPTION on the attempt that exhausts the counter (see
-    // below), so a leg caught by THIS check is no longer IN_PROGRESS by the
-    // time anyone tries again. Ordering it first keeps the specific, correct
-    // "locked, an administrator must verify" answer for every later attempt
-    // — before AND after this branch existed — rather than letting the
-    // generic "has not started" message mask it.
-    if (leg.handoffPinAttempts >= MAX_PIN_ATTEMPTS) {
-      throw new ForbiddenException('Too many incorrect codes. An administrator has to confirm this handoff.');
+    // below), so a leg caught by THIS check is no longer in its expected
+    // status by the time anyone tries again. Ordering it first keeps the
+    // specific, correct "locked, an administrator must verify" answer for
+    // every later attempt, rather than letting a generic status message mask
+    // it.
+    if (attempts >= DELIVERY_PIN_MAX_ATTEMPTS) {
+      throw new ForbiddenException(`Too many incorrect codes. An administrator has to confirm this ${label}.`);
     }
-    if (leg.status !== 'IN_PROGRESS') {
+    if (kind === 'handoff' && leg.status !== 'IN_PROGRESS') {
       throw new BadRequestException('That leg has not started, so there is nothing to hand over.');
+    }
+    // Pickup's equivalent readiness check is deliberately looser than
+    // handoff's exact IN_PROGRESS: ShipmentDriverService.confirmPickup
+    // already ran assertAction/isLegActionable/assertNotException and its
+    // own conditional updateMany before ever reaching this call, so this is
+    // a defensive backstop against the same race window handoff's own check
+    // closes (a concurrent flagException landing between those checks and
+    // this one) — not the primary gate. COMPLETED/CANCELLED are the only
+    // terminal statuses; anything else is a status confirmPickup's own
+    // checks have already made sense of.
+    if (kind === 'pickup' && (leg.status === 'COMPLETED' || leg.status === 'CANCELLED')) {
+      throw new BadRequestException('This leg is already finished, so there is nothing to collect.');
+    }
+    if (!pin) {
+      // Reachable only for 'pickup' — legHandoffSchema requires `pin`, so a
+      // handoff call can never reach this with it undefined.
+      throw new BadRequestException(`Enter the ${label} code.`);
     }
 
     const isAssignedCourier =
       leg.assignedDriverProfileId == null ||
       (await this.prisma.driverProfile.findUnique({ where: { userId: actor.userId }, select: { id: true } }))?.id ===
         leg.assignedDriverProfileId;
-    const codeMatches = !!leg.handoffPin && pin === leg.handoffPin;
+    const codeMatches = !!storedPin && timingSafeEqualStr(pin, storedPin);
 
     if (!isAssignedCourier || !codeMatches) {
-      await this.prisma.shipmentLeg.update({ where: { id: leg.id }, data: { handoffPinAttempts: { increment: 1 } } });
+      const attemptsField = kind === 'pickup' ? 'pickupPinAttempts' : 'handoffPinAttempts';
+      await this.prisma.shipmentLeg.update({ where: { id: leg.id }, data: { [attemptsField]: { increment: 1 } } });
       await this.audit.record({
+        // Reuses the existing handoff action for both kinds rather than
+        // adding a new AuditAction enum value (a second migration this
+        // batch was not scoped for) — `kind` in the payload disambiguates.
         action: 'SHIPMENT_LEG_HANDOFF_PIN_FAILED',
         actorId: actor.userId,
-        newValue: { legId: leg.id, shipmentId: leg.shipmentId, wrongCourier: !isAssignedCourier },
+        newValue: { legId: leg.id, shipmentId: leg.shipmentId, kind, wrongCourier: !isAssignedCourier },
       });
-      const left = MAX_PIN_ATTEMPTS - leg.handoffPinAttempts - 1;
+      const left = DELIVERY_PIN_MAX_ATTEMPTS - attempts - 1;
       if (left <= 0) {
         // MDF-96 parity fix: marketplace delivery already auto-notifies admins
         // the instant ITS OWN PIN counter locks (driver-jobs.service.ts,
@@ -1846,13 +1918,11 @@ export class ShipmentService {
         // someone went looking. Reuses flagException exactly as a staff-flagged
         // exception would (same transition, same notifyAdmins/notifyUsers), with
         // the actor attributed to the SYSTEM (userId: null) since no person
-        // caused this — leg.status is still guaranteed IN_PROGRESS here (the
-        // guard above already refused anything else), so flagException's own
-        // isLegActionable check cannot have moved out from under this call.
+        // caused this.
         await this.flagException(
           leg.id,
-          { reason: `The handoff code was entered incorrectly ${MAX_PIN_ATTEMPTS} times and is now locked. Staff must verify this handoff manually.` },
-          { userId: null, label: 'System — handoff code locked' },
+          { reason: `The ${label} code was entered incorrectly ${DELIVERY_PIN_MAX_ATTEMPTS} times and is now locked. Staff must verify this ${label} manually.` },
+          { userId: null, label: `System — ${label} code locked` },
         );
       }
       throw new BadRequestException(
@@ -1861,6 +1931,11 @@ export class ShipmentService {
           : 'That code is not right, and that was the last try.',
       );
     }
+  }
+
+  /** Public entry for ShipmentDriverService.confirmPickup — same method, see above. */
+  async verifyPickupPin(legId: string, pin: string | undefined, actor: { userId: string }) {
+    return this.verifyLegPinOrThrow(legId, 'pickup', pin, actor);
   }
 
   /**
@@ -2001,18 +2076,20 @@ export class ShipmentService {
 
       let restored: LegStatus;
       let releasedDriverProfileId: string | null = null;
-      // MDF-2: a leg EXCEPTION-ed by the handoff PIN locking out
-      // (`verifyHandoffPin`, handoffPinAttempts reaching MAX_PIN_ATTEMPTS) is
-      // not actually un-stuck by RESUME alone — that guard reads the attempt
-      // counter, not status, and would refuse the very next try with the
-      // same "too many incorrect codes" error forever. Clearing the counter
-      // here, only when it is actually maxed, restores exactly the budget a
-      // never-flagged leg has. The PIN itself is untouched (no reason to
-      // believe it is wrong — handoffPin is the thing the physical recipient
-      // was told; the attempts were the problem), and every other exception
-      // cause (a flat tyre, a diverted flight, a self-reported failed
-      // delivery) leaves the counter exactly as RESUME always has.
-      const pinWasLocked = leg.handoffPinAttempts >= MAX_PIN_ATTEMPTS;
+      // MDF-2: a leg EXCEPTION-ed by a PIN locking out (`verifyLegPinOrThrow`,
+      // either counter reaching DELIVERY_PIN_MAX_ATTEMPTS) is not actually
+      // un-stuck by RESUME alone — that guard reads the attempt counter, not
+      // status, and would refuse the very next try with the same "too many
+      // incorrect codes" error forever. Clearing the counter here, only when
+      // it is actually maxed, restores exactly the budget a never-flagged leg
+      // has. The PIN itself is untouched (no reason to believe it is wrong —
+      // it is the thing the other party was told; the attempts were the
+      // problem), and every other exception cause (a flat tyre, a diverted
+      // flight, a self-reported failed delivery) leaves both counters exactly
+      // as RESUME always has. Handoff and pickup are independent — clearing
+      // one never touches the other.
+      const handoffPinWasLocked = leg.handoffPinAttempts >= DELIVERY_PIN_MAX_ATTEMPTS;
+      const pickupPinWasLocked = leg.pickupPinAttempts >= DELIVERY_PIN_MAX_ATTEMPTS;
 
       if (input.resolution === 'RESUME') {
         restored = leg.startedAt ? 'IN_PROGRESS' : 'READY';
@@ -2024,7 +2101,8 @@ export class ShipmentService {
             status: restored,
             exceptionAt: null,
             exceptionReason: null,
-            ...(pinWasLocked ? { handoffPinAttempts: 0 } : {}),
+            ...(handoffPinWasLocked ? { handoffPinAttempts: 0 } : {}),
+            ...(pickupPinWasLocked ? { pickupPinAttempts: 0 } : {}),
           },
         });
         if (claimed.count === 0) throw new BadRequestException('This exception was already resolved by someone else.');
@@ -2043,7 +2121,7 @@ export class ShipmentService {
         //
         // MDF-2: this guard is also the only reason RESUME alone is a
         // sufficient fix for a PIN-locked leg — pickedUpAt is set before
-        // handoffPinAttempts can ever increment (see verifyHandoffPin's own
+        // handoffPinAttempts can ever increment (see verifyLegPinOrThrow's own
         // call chain), so a PIN-locked leg can never reach RELEASE_DRIVER's
         // counter-clearing code below today. If this guard is ever relaxed to
         // allow releasing a mid-carry parcel, the RELEASE_DRIVER branch must
@@ -2110,7 +2188,8 @@ export class ShipmentService {
             resolution: input.resolution,
             restoredStatus: restored,
             releasedDriverProfileId,
-            pinAttemptsReset: input.resolution === 'RESUME' && pinWasLocked,
+            handoffPinAttemptsReset: input.resolution === 'RESUME' && handoffPinWasLocked,
+            pickupPinAttemptsReset: input.resolution === 'RESUME' && pickupPinWasLocked,
           },
         },
         tx,
@@ -3591,6 +3670,7 @@ export class ShipmentService {
     opts: { audience: 'CUSTOMER' | 'STAFF'; conversationIds?: Map<string, string>; cancellationAuthorship?: Map<string, boolean> },
   ) {
     const endsAtHub = !needsLastMile(s.service);
+    const startsAtHub = !needsFirstMile(s.service);
     const live = s.legs.filter((l) => l.status !== 'CANCELLED');
     const current = live.find((l) => l.status !== 'COMPLETED') ?? null;
     // Callers serving a LIST (listMine) resolve this once across every shipment
@@ -3664,6 +3744,9 @@ export class ShipmentService {
         exceptionReason: opts.audience === 'STAFF' ? l.exceptionReason : customerFacingExceptionReason(l.exceptionReason),
         // The customer's own door code, and nothing else.
         handoffPin: this.pinFor(l, opts.audience, endsAtHub),
+        // The sender's own collection code — exact mirror of handoffPin above,
+        // for the other end of the leg.
+        pickupPin: this.pickupPinFor(l, opts.audience, startsAtHub),
         // Per-leg, never pooled: a pickup photo belongs to the leg it was taken
         // on and must not appear on any sibling leg of the same shipment.
         pickupPhotoUrls: await this.photoUrls(l.handoffPhotoKeys),
@@ -3810,6 +3893,13 @@ export class ShipmentService {
     return { type: v.type, make: v.make, model: v.model, color: v.color, licencePlate: v.licencePlate, photoUrl };
   }
 
+  /**
+   * The code is withheld once the leg is COMPLETED or CANCELLED. Because
+   * `verifyHandoffPin` is only ever called from `completeLeg`, a verified
+   * handoff pin and a completed leg are the same moment — which is why a
+   * separate verification-status check here would be redundant, not why
+   * one is missing.
+   */
   private pinFor(l: { kind: string; status: string; handoffPin: string | null }, audience: 'CUSTOMER' | 'STAFF', endsAtHub: boolean): string | null {
     if (audience === 'STAFF') return null; // staff reveal it deliberately, not by listing
     // A DIRECT leg is last-mile-equivalent: it ends at the RECIPIENT's door, not
@@ -3819,6 +3909,24 @@ export class ShipmentService {
     if (endsAtHub || (l.kind !== 'LAST_MILE' && l.kind !== 'DIRECT')) return null;
     if (l.status === 'COMPLETED' || l.status === 'CANCELLED') return null;
     return l.handoffPin;
+  }
+
+  /**
+   * Exact mirror of `pinFor`, for the code the SENDER holds at the START of
+   * a leg instead of the code the recipient holds at the END of one.
+   * `startsAtHub` is `!needsFirstMile(service)` — the symmetric check to
+   * `pinFor`'s own `endsAtHub` (`!needsLastMile(service)`).
+   */
+  private pickupPinFor(
+    l: { kind: string; status: string; pickupPin: string | null; pickupVerificationStatus: string },
+    audience: 'CUSTOMER' | 'STAFF',
+    startsAtHub: boolean,
+  ): string | null {
+    if (audience === 'STAFF') return null;
+    if (startsAtHub || (l.kind !== 'FIRST_MILE' && l.kind !== 'DIRECT')) return null;
+    if (l.status === 'COMPLETED' || l.status === 'CANCELLED') return null;
+    if (l.pickupVerificationStatus === 'VERIFIED' || l.pickupVerificationStatus === 'OVERRIDDEN') return null;
+    return l.pickupPin;
   }
 
   /** Short-lived signed URLs for stored pickup-photo keys. A dangling/deleted

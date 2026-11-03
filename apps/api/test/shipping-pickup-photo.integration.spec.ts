@@ -176,6 +176,14 @@ async function uploadPickupPhoto(courier: { cookies: string[] }, legId: string) 
   return r.body.key as string;
 }
 
+/** SHIPPING-E2E: a FIRST_MILE/DIRECT leg on a needsFirstMile service now
+ *  enforces the sender's pickup code. Harmless to send on a leg that does
+ *  not enforce one (LAST_MILE, etc.) — it is simply ignored there, same
+ *  contract Oscar builds against. */
+async function pickupPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
+}
+
 beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
@@ -208,7 +216,7 @@ describe('shipment pickup photo (BMPL-178)', () => {
     const courier = await makeCourier('STANN_CREEK');
     const shipment = await book(sender.cookies);
     const firstMile = await assignedFirstMile(shipment.id, courier);
-    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinFor(firstMile.id) })).status).toBe(201);
 
     const driverView = await get(courier.cookies, `driver/shipping-jobs/${firstMile.id}`);
     expect(driverView.status).toBe(200);
@@ -316,7 +324,7 @@ describe('shipment pickup photo (BMPL-178)', () => {
     const courier = await makeCourier('STANN_CREEK');
     const shipment = await book(sender.cookies);
     const firstMile = await assignedFirstMile(shipment.id, courier);
-    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`)).status).toBe(201);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinFor(firstMile.id) })).status).toBe(201);
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/in-transit`)).status).toBe(201);
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/arriving`)).status).toBe(201);
     const pin = (await legRow(firstMile.id)).handoffPin!;
@@ -481,7 +489,7 @@ describe('shipment pickup photo (BMPL-178)', () => {
     // The official pickup transition still fires normally (status, custody,
     // notification) — it just does not ALSO write a second audit row for an
     // event the photo already recorded.
-    const pickup = await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`);
+    const pickup = await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup`, { pin: await pickupPinFor(firstMile.id) });
     expect(pickup.status).toBe(201);
     expect((await legRow(firstMile.id)).courierStatus).toBe('PICKUP_CONFIRMED');
     expect(await pickedUpAudits(firstMile.id)).toHaveLength(1);

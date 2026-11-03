@@ -93,7 +93,13 @@ export const isTerminalDeliveryStatus = (s: DeliveryStatus): boolean => TERMINAL
 
 /** PIN configuration for pickup / delivery verification. */
 export const DELIVERY_PIN_LENGTH = 4;
-/** After this many wrong PIN attempts the code locks; an admin override is required. */
+/**
+ * After this many wrong PIN attempts the code locks; an admin override is
+ * required. Also governs ShipmentLeg's handoff AND pickup PINs
+ * (shipment.service.ts) — one shared lockout threshold, not two names for
+ * the same number. A silent change here is security-relevant; see
+ * shipment.service.ts's test coverage, which pins this value.
+ */
 export const DELIVERY_PIN_MAX_ATTEMPTS = 5;
 
 /** Customer-safe, human-readable status labels (UI convenience). */

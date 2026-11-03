@@ -151,6 +151,14 @@ async function capture(step: () => Promise<unknown>): Promise<Delivered[]> {
 
 const to = (all: Delivered[], userId: string) => all.filter((n) => n.userId === userId);
 
+/** SHIPPING-E2E: a FIRST_MILE/DIRECT leg on a needsFirstMile service now
+ *  enforces the sender's pickup code. Harmless to send on a leg that does
+ *  not enforce one (LAST_MILE, etc.) — it is simply ignored there, same
+ *  contract Oscar builds against. */
+async function pickupPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
+}
+
 beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
@@ -267,7 +275,8 @@ describe('the customer follows one journey', () => {
     const first = legs.find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
 
-    const fired = await capture(() => post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`));
+    const pickupPin = await pickupPinFor(first.id);
+    const fired = await capture(() => post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: pickupPin }));
     const mine = to(fired, customerId);
     // Collection moves custody AND advances the shipment status, so the customer
     // legitimately hears about both — but each exactly once, and both about this
@@ -283,7 +292,7 @@ describe('the customer follows one journey', () => {
     const first = legs.find((l) => l.kind === 'FIRST_MILE')!;
     const fired = await capture(async () => {
       await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
-      await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+      await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
     });
     const mine = to(fired, customerId);
     expect(mine.length).toBeGreaterThan(0);
@@ -305,7 +314,7 @@ describe('the customer follows one journey', () => {
     const rows = await legsOf(s.id);
     const first = rows.find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
-    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/in-transit`);
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/arriving`);
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/handoff`, { pin: await pinOf(first.id), receivedByName: 'Counter' });
@@ -357,7 +366,7 @@ describe('a driver hears only about their own leg', () => {
       data: { assignedDriverProfileId: firstDriver.driverProfileId, courierStatus: 'ASSIGNED', acceptedAt: null },
     });
     await post(firstDriver.cookies, `driver/shipping-jobs/${first.id}/accept`);
-    await post(firstDriver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    await post(firstDriver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
     await post(firstDriver.cookies, `driver/shipping-jobs/${first.id}/in-transit`);
     await post(firstDriver.cookies, `driver/shipping-jobs/${first.id}/arriving`);
     await post(firstDriver.cookies, `driver/shipping-jobs/${first.id}/handoff`, { pin: await pinOf(first.id), receivedByName: 'Counter' });
@@ -400,7 +409,7 @@ describe('operations are told when a human is needed', () => {
     const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
-    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
 
     const fired = await capture(() =>
       post(admin, `admin/logistics/legs/${first.id}/exception`, { reason: 'Parcel damaged in the van.' }),
@@ -425,7 +434,7 @@ describe('operations are told when a human is needed', () => {
     const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
-    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
 
     const fired = await capture(() =>
       post(driver.cookies, `driver/shipping-jobs/${first.id}/report-issue`, { reason: 'Nobody at the terminal could take the parcel.' }),
@@ -450,7 +459,7 @@ describe('operations are told when a human is needed', () => {
     const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
-    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`);
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/pickup`, { pin: await pickupPinFor(first.id) });
     // DELIVER (the handoff route's own courierStatus guard) is only legal
     // from ARRIVING — the leg must walk all the way there before a PIN
     // attempt of any kind is even reachable.
