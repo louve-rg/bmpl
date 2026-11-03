@@ -162,6 +162,13 @@ function LocationPickerBody({
   onChangeRef.current = onChange;
 
   const [ready, setReady] = useState(false);
+  /** Leaflet's chunk failed to load, or threw while building the map (CDN
+   *  tile host unreachable, an ad blocker on the OSM request, offline). The
+   *  box used to just sit on "Loading map…" forever with no way to tell
+   *  that apart from an ordinary slow load — this is the defined, readable
+   *  state the map-failing-to-load path needs. The pin stays optional
+   *  either way: the customer can still submit on the typed address. */
+  const [loadError, setLoadError] = useState(false);
   const [geo, setGeo] = useState<GeoState>({ kind: 'idle' });
   const [outOfBounds, setOutOfBounds] = useState(false);
   /**
@@ -253,65 +260,81 @@ function LocationPickerBody({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const L = (await import('leaflet')).default;
-      if (cancelled || !containerRef.current || mapRef.current) return;
-      leafletRef.current = L;
-
-      // The default marker icon resolves image URLs relative to the CSS, which
-      // breaks under Next's asset hashing. An inline SVG avoids the whole
-      // problem and needs no static files.
-      const icon = L.divIcon({
-        className: '',
-        html:
-          '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 24 24" fill="#0ea5e9" stroke="#ffffff" stroke-width="1.6">' +
-          '<path d="M12 22s7-6.2 7-12A7 7 0 0 0 5 10c0 5.8 7 12 7 12Z"/><circle cx="12" cy="10" r="2.6" fill="#ffffff" stroke="none"/></svg>',
-        iconSize: [34, 34],
-        iconAnchor: [17, 32],
-      });
-
-      const start = value ?? DEFAULT_CENTRE;
-      const map = L.map(containerRef.current, {
-        center: [start.latitude, start.longitude],
-        zoom: value ? PINNED_ZOOM : DEFAULT_ZOOM,
-        // Desktop mouse-wheel zoom only -- off when embedded so an accidental
-        // wheel-over doesn't hijack the page's own scroll, on for the
-        // full-screen modal with no page underneath to protect. Observed in
-        // Chromium with `hasTouch` at 375px, unfixed: this option alone (plus
-        // the container's `touchAction: 'pan-y'`, below) did not stop a
-        // one-finger swipe on the embedded map from panning the map instead
-        // of scrolling the page -- a longer swipe never advanced `scrollY`
-        // at all. `attachCooperativeMapDrag` (./cooperative-map-drag.ts),
-        // wired up below once the map exists, is the actual fix for touch;
-        // this option by itself only ever covered the desktop wheel.
-        scrollWheelZoom: inModal,
-        // Keep the customer inside the country they are ordering in.
-        maxBounds: L.latLngBounds(
-          [BELIZE_BOUNDS.minLatitude, BELIZE_BOUNDS.minLongitude],
-          [BELIZE_BOUNDS.maxLatitude, BELIZE_BOUNDS.maxLongitude],
-        ),
-        maxBoundsViscosity: 0.8,
-      });
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors',
-      }).addTo(map);
-
-      // Tapping the map is the manual placement path — no GPS required.
-      map.on('click', (e: LeafletNS.LeafletMouseEvent) => place(e.latlng.lat, e.latlng.lng));
-
-      // Embedded only: the modal owns every gesture already (no page scroll
-      // underneath to protect), so this is deliberately skipped there.
-      if (!inModal) {
-        detachDragRef.current = attachCooperativeMapDrag(map, containerRef.current);
+      let L: typeof import('leaflet');
+      try {
+        L = (await import('leaflet')).default;
+      } catch {
+        if (!cancelled) setLoadError(true);
+        return;
       }
+      if (cancelled || !containerRef.current || mapRef.current) return;
 
-      mapRef.current = map;
-      L.Marker.prototype.options.icon = icon;
-      if (value) place(value.latitude, value.longitude, { pan: true, zoom: PINNED_ZOOM });
-      setReady(true);
-      // The container is often sized by CSS after mount; without this the tiles
-      // render into a stale box and the map looks half-drawn.
-      setTimeout(() => map.invalidateSize(), 0);
+      try {
+        leafletRef.current = L;
+
+        // The default marker icon resolves image URLs relative to the CSS, which
+        // breaks under Next's asset hashing. An inline SVG avoids the whole
+        // problem and needs no static files.
+        const icon = L.divIcon({
+          className: '',
+          html:
+            '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 24 24" fill="#0ea5e9" stroke="#ffffff" stroke-width="1.6">' +
+            '<path d="M12 22s7-6.2 7-12A7 7 0 0 0 5 10c0 5.8 7 12 7 12Z"/><circle cx="12" cy="10" r="2.6" fill="#ffffff" stroke="none"/></svg>',
+          iconSize: [34, 34],
+          iconAnchor: [17, 32],
+        });
+
+        const start = value ?? DEFAULT_CENTRE;
+        const map = L.map(containerRef.current, {
+          center: [start.latitude, start.longitude],
+          zoom: value ? PINNED_ZOOM : DEFAULT_ZOOM,
+          // Desktop mouse-wheel zoom only -- off when embedded so an accidental
+          // wheel-over doesn't hijack the page's own scroll, on for the
+          // full-screen modal with no page underneath to protect. Observed in
+          // Chromium with `hasTouch` at 375px, unfixed: this option alone (plus
+          // the container's `touchAction: 'pan-y'`, below) did not stop a
+          // one-finger swipe on the embedded map from panning the map instead
+          // of scrolling the page -- a longer swipe never advanced `scrollY`
+          // at all. `attachCooperativeMapDrag` (./cooperative-map-drag.ts),
+          // wired up below once the map exists, is the actual fix for touch;
+          // this option by itself only ever covered the desktop wheel.
+          scrollWheelZoom: inModal,
+          // Keep the customer inside the country they are ordering in.
+          maxBounds: L.latLngBounds(
+            [BELIZE_BOUNDS.minLatitude, BELIZE_BOUNDS.minLongitude],
+            [BELIZE_BOUNDS.maxLatitude, BELIZE_BOUNDS.maxLongitude],
+          ),
+          maxBoundsViscosity: 0.8,
+        });
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; OpenStreetMap contributors',
+        }).addTo(map);
+
+        // Tapping the map is the manual placement path — no GPS required.
+        map.on('click', (e: LeafletNS.LeafletMouseEvent) => place(e.latlng.lat, e.latlng.lng));
+
+        // Embedded only: the modal owns every gesture already (no page scroll
+        // underneath to protect), so this is deliberately skipped there.
+        if (!inModal) {
+          detachDragRef.current = attachCooperativeMapDrag(map, containerRef.current);
+        }
+
+        mapRef.current = map;
+        L.Marker.prototype.options.icon = icon;
+        if (value) place(value.latitude, value.longitude, { pan: true, zoom: PINNED_ZOOM });
+        setReady(true);
+        // The container is often sized by CSS after mount; without this the tiles
+        // render into a stale box and the map looks half-drawn.
+        setTimeout(() => map.invalidateSize(), 0);
+      } catch {
+        // Thrown synchronously while building the map itself (container
+        // detached between the await above and here, or Leaflet rejecting
+        // the tile host). Same readable state as an import failure -- the
+        // customer still has the typed address, which is the whole point of
+        // the pin being optional.
+        if (!cancelled) setLoadError(true);
+      }
     })();
 
     return () => {
@@ -462,7 +485,7 @@ function LocationPickerBody({
         // to near-white-on-white (Edward #1, ratio 1.07). Same override Header/Hero
         // already use for the inverse case (light text on a dark hero).
         className="min-h-[44px] flex-1 sm:flex-none !border-slate-300 !text-slate-900"
-        disabled={disabled || geo.kind === 'locating'}
+        disabled={disabled || loadError || geo.kind === 'locating'}
         onClick={useCurrentLocation}
         aria-label="Use my current location to place the delivery pin"
       >
@@ -473,7 +496,7 @@ function LocationPickerBody({
         variant="outline"
         size="sm"
         className="min-h-[44px] flex-1 sm:flex-none !border-slate-300 !text-slate-900"
-        disabled={disabled || lookup.busy}
+        disabled={disabled || loadError || lookup.busy}
         onClick={findAddress}
         aria-label="Show the address you typed on the map"
       >
@@ -484,13 +507,19 @@ function LocationPickerBody({
           Remove pin
         </Button>
       )}
+      {/* `useCurrentLocation` and `findAddress` both end up calling `place()`,
+          which is a no-op without a live map instance -- disabling them here
+          (rather than letting them fail silently) is what makes the failure
+          readable instead of just unresponsive. Full screen would only open
+          onto a second attempt at the same map that just failed, so it is
+          disabled for the same reason. */}
       {!inModal && onExpand && (
         <Button
           type="button"
           variant="outline"
           size="sm"
           className="min-h-[44px] !border-slate-300 !text-slate-900"
-          disabled={disabled}
+          disabled={disabled || loadError}
           onClick={onExpand}
           aria-label="Open the map full screen to place the pin more precisely"
         >
@@ -502,6 +531,12 @@ function LocationPickerBody({
 
   const messages = (
     <>
+      {loadError && (
+        <Alert tone="warning" className="mt-3">
+          The map couldn’t load, so you can’t place or drag a pin right now. Reload the page to try again — or
+          continue on the address you’ve given, which your driver can still be sent to.
+        </Alert>
+      )}
       {geo.kind === 'error' && (
         <Alert tone="warning" className="mt-3">
           {geo.message}
@@ -619,7 +654,7 @@ function LocationPickerBody({
           {messages}
         </div>
         {mapBox}
-        {!ready && <p className="shrink-0 px-3 py-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">Loading map…</p>}
+        {!ready && !loadError && <p className="shrink-0 px-3 py-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">Loading map…</p>}
         <div className="shrink-0 border-t border-slate-200 px-3 py-2">{status}</div>
       </div>
     );
@@ -655,7 +690,7 @@ function LocationPickerBody({
 
       {mapBox}
 
-      {!ready && <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">Loading map…</p>}
+      {!ready && !loadError && <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">Loading map…</p>}
 
       {status}
       {value && (
