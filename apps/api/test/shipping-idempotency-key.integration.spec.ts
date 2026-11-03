@@ -172,6 +172,43 @@ describe('a key already in progress (synthetic state -- NOT what a genuine concu
   });
 });
 
+/**
+ * SHIPPING-E2E (requestHash): the gap found this session — a replayed key
+ * was matched on (userId, scope, key) identity alone, so a SECOND call with
+ * the SAME key but a DIFFERENT body silently returned the FIRST, older
+ * shipment. A customer could believe changed details (a different
+ * destination, say) were accepted when they were not.
+ */
+describe('the same key with a DIFFERENT request body', () => {
+  it('refuses the replay instead of silently returning the older shipment', async () => {
+    const first = await bookShipment(customer, { description: 'Documents' }, 'key-mismatch');
+    expect(first.status).toBe(201);
+    const shipmentId = first.body.id;
+
+    const second = await bookShipment(customer, { description: 'Electronics' }, 'key-mismatch');
+    expect(second.status).toBe(409);
+    expect(JSON.stringify(second.body)).toMatch(/already used with a different request/i);
+
+    // Nothing from the mismatched call landed — still exactly the one
+    // shipment and one charge the first call made.
+    expect(await ctx.prisma.shipment.count({ where: { customerUserId: customerId } })).toBe(1);
+    expect(await ctx.prisma.payment.count({ where: { shipmentId } })).toBe(1);
+    const after = await request(ctx.server).get('/api/wallet').set('Cookie', customer);
+    expect(after.body.availableMinor).toBe(10_000 - PRICE);
+  });
+
+  it('does not refuse two requests that mean the SAME thing, just spelled differently (parsed-DTO hash, not raw-body hash)', async () => {
+    // pieces defaults to 1 -- one call omits it, the other states it
+    // explicitly. Zod already normalizes this; the hash must too.
+    const first = await bookShipment(customer, {}, 'key-same-shape');
+    expect(first.status).toBe(201);
+
+    const second = await bookShipment(customer, { pieces: 1 }, 'key-same-shape');
+    expect(second.status).toBe(201);
+    expect(second.body.id).toBe(first.body.id);
+  });
+});
+
 describe('two real concurrent requests on a brand-new key (the actual field case)', () => {
   it('both calls succeed with the SAME shipment (one creation, one replay) -- never a 500, never two shipments', async () => {
     // Neither request has used this key before, so BOTH pass the fast-path
@@ -201,5 +238,26 @@ describe('two real concurrent requests on a brand-new key (the actual field case
     const row = await ctx.prisma.idempotencyKey.findFirstOrThrow({ where: { userId: customerId, scope: 'shipping', key: 'key-race' } });
     expect(row.status).toBe('COMPLETED');
     expect(row.resultShipmentId).toBe(a.body.id);
+  });
+
+  it('two concurrent requests on a brand-new key with DIFFERENT bodies: one books, the other is refused — never a silent wrong replay', async () => {
+    // Same race as above (both pass the fast-path lookup, one wins the
+    // reservation INSERT, the loser's P2002 only resolves after the winner's
+    // commit) -- but this time the two bodies disagree, so the loser's catch
+    // block must hit assertSameRequest's mismatch, not a bare replay.
+    const [a, b] = await Promise.all([
+      bookShipment(customer, { description: 'Documents' }, 'key-race-mismatch'),
+      bookShipment(customer, { description: 'Electronics' }, 'key-race-mismatch'),
+    ]);
+
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([201, 409]);
+    const refused = a.status === 409 ? a : b;
+    expect(JSON.stringify(refused.body)).toMatch(/already used with a different request/i);
+
+    // Exactly one shipment and one charge, whichever body won.
+    expect(await ctx.prisma.shipment.count({ where: { customerUserId: customerId } })).toBe(1);
+    const after = await request(ctx.server).get('/api/wallet').set('Cookie', customer);
+    expect(after.body.availableMinor).toBe(10_000 - PRICE);
   });
 });
