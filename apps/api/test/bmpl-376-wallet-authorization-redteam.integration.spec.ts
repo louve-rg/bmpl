@@ -1,10 +1,11 @@
 /**
- * BMPL-376 — negative controls on a money boundary, written BEFORE any fix
- * exists. The owner's ruling: "Staff may initiate or prepare a post-custody
- * return, but staff action alone must NEVER authorize charging the
- * customer's wallet" and "payWithWallet: true must not transform an
- * operational staff action into customer payment consent." He asked for the
- * hole demonstrated by a red test, not described in a message.
+ * BMPL-376 — negative controls on a money boundary, originally written
+ * BEFORE any fix existed. The owner's ruling: "Staff may initiate or
+ * prepare a post-custody return, but staff action alone must NEVER
+ * authorize charging the customer's wallet" and "payWithWallet: true must
+ * not transform an operational staff action into customer payment
+ * consent." He asked for the hole demonstrated by a red test, not
+ * described in a message.
  *
  * THE CHAIN, VERIFIED IN CODE BEFORE WRITING ANY ASSERTION (not accepted
  * from the dispatch that asked for this file):
@@ -23,13 +24,23 @@
  *    the customer a "Payment authorized" notification — all synchronously,
  *    all from one staff HTTP call.
  *
- * So: a single `logistics.manage` staff call moves a customer's money with
- * no customer involvement anywhere in the request. Tests 1 and 2 below are
- * expected to FAIL today — that failure is this card's deliverable, not a
- * bug in the test.
+ * So: a single `logistics.manage` staff call could move a customer's money
+ * with no customer involvement anywhere in the request. Tests 1 and 2 below
+ * ("[regression guard] ...") were originally written to FAIL, on purpose,
+ * documenting that hole as this card's deliverable.
  *
- * SCOPE: tests only. The fix is BMPL-375, owned by the API lane, starting
- * now in parallel — nothing here touches the payment path.
+ * RESOLVED: BMPL-375 has since landed and closes the hole described above.
+ * All four tests in this file, including tests 1 and 2, now PASS — verified
+ * by actually running the file (2026-11-02), not inferred from this
+ * comment. They pass because the fix is in place, not because the
+ * assertions were loosened: tests 1 and 2 still assert the customer's
+ * wallet balance is unchanged after the staff-only call, and that
+ * assertion now holds. If this file goes red again, that is a real
+ * regression of BMPL-375's fix — treat it as one, not as this file
+ * reverting to its original, expected-red state.
+ *
+ * SCOPE: tests only. The fix itself lives in the payment/escrow path, not
+ * here.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
