@@ -164,6 +164,14 @@ function fillTownAndDistrict(root: HTMLElement, legend: string, city: string, di
   setSelectValue(districtSelect, district);
 }
 
+function fillAddressLine1(root: HTMLElement, legend: string, line1: string) {
+  const fieldset = root.querySelector(`fieldset[aria-label="${legend}"]`);
+  if (!fieldset) throw new Error(`no fieldset "${legend}"`);
+  const input = fieldset.querySelector<HTMLInputElement>('input[autocomplete="address-line1"]');
+  if (!input) throw new Error(`no address line 1 input under "${legend}"`);
+  setInputValue(input, line1);
+}
+
 async function settleQuote() {
   // page.tsx debounces its quote request 400ms after the last form change.
   await act(async () => {
@@ -223,5 +231,67 @@ describe('NewShipmentPage submit guard (BMPL, dropped-connection double-charge f
 
     expect(container!.textContent).toContain('We lost the connection before we could confirm this booking');
     expect(container!.textContent).not.toContain('We could not book that shipment.');
+  }, 10000);
+});
+
+/** Fills both endpoints with the SAME door address -- the case `sameEndpoint`
+ *  (page.tsx) exists to catch. Shared by all three tests below. */
+async function fillAndQuoteWithSameAddress(): Promise<HTMLButtonElement> {
+  mount();
+  await flush();
+  await waitForNoPulse(container!);
+  fillTownAndDistrict(container!, 'Collect from', 'Belize City', 'BELIZE');
+  fillTownAndDistrict(container!, 'Deliver to', 'Belize City', 'BELIZE');
+  fillAddressLine1(container!, 'Collect from', '12 Freetown Road');
+  fillAddressLine1(container!, 'Deliver to', '12 Freetown Road');
+  await settleQuote();
+  const book = findBookButton(container!);
+  expect(book.disabled).toBe(false);
+  return book;
+}
+
+describe('NewShipmentPage same-address confirmation (SHIPPING-E2E) -- a confirmation, never a block', () => {
+  it('asks for confirmation when collection and delivery are the same door, and books it on confirm', async () => {
+    createMock.mockResolvedValue({ reference: 'BML-TEST0002' });
+    const book = await fillAndQuoteWithSameAddress();
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await act(async () => {
+      book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('same'));
+    expect(createMock).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
+  }, 10000);
+
+  it('books nothing and makes no request when the customer declines the confirmation', async () => {
+    const book = await fillAndQuoteWithSameAddress();
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await act(async () => {
+      book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(createMock).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  }, 10000);
+
+  it('never asks when collection and delivery are different addresses', async () => {
+    createMock.mockResolvedValue({ reference: 'BML-TEST0003' });
+    const book = await fillAndQuote();
+
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    await act(async () => {
+      book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
   }, 10000);
 });

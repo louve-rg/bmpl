@@ -51,6 +51,21 @@ function quotable(service: ShippingService, origin: EndpointValue, destination: 
   return originOk && destOk;
 }
 
+/**
+ * Same door, not just the same town — two different addresses in Belize City
+ * are not this case. A HUB endpoint has no address text to compare, so two
+ * HUB ends are "the same" only when they are literally the same hub.
+ *
+ * Not a validator: someone shipping between two units at one address, or one
+ * hub back to itself, is a real booking. This only decides whether to ask
+ * "are you sure?" before paying — see the confirm in `book()` below.
+ */
+function sameEndpoint(a: EndpointValue, b: EndpointValue): boolean {
+  if (a.mode === 'HUB' || b.mode === 'HUB') return a.mode === b.mode && !!a.hubId && a.hubId === b.hubId;
+  const norm = (s: string) => s.trim().toLowerCase();
+  return !!norm(a.address) && norm(a.address) === norm(b.address) && norm(a.city) === norm(b.city) && a.district === b.district;
+}
+
 /** Today, Belize calendar — the default travel date and the picker's floor. */
 function todayKey(): string {
   return belizeCalendarDateKey(new Date());
@@ -196,6 +211,15 @@ export default function NewShipmentPage() {
 
   async function book() {
     if (submitInFlight.current) return;
+    // A confirmation, not a block -- someone shipping between two units at
+    // one address, or a hub leg back to itself, is a real booking. This only
+    // catches the case nobody meant: picking the same door twice by mistake.
+    if (
+      sameEndpoint(origin, destination) &&
+      !window.confirm('The collection and delivery addresses are the same. Book this shipment anyway?')
+    ) {
+      return;
+    }
     submitInFlight.current = true;
     setBooking(true);
     setErr(null);
