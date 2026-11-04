@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { nextOpenWindow, resolveHoursStatus } from '@bmpl/shared';
+import { nextOpenWindow, resolveHoursStatus, resolveScheduleStatus } from '@bmpl/shared';
 import type { HoursException, PlannerHub, PlannerLane, PlannerRoute, ScheduleException, WeeklyOperatingDay, WeeklyOpeningHours } from '@bmpl/shared';
 import type {
   AddHubHoursExceptionInput,
@@ -16,6 +16,7 @@ import type {
 import { Prisma, type District } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { assertOperableProvider } from './provider-eligibility';
 
 /**
@@ -37,6 +38,7 @@ export class LogisticsNetworkService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /* ------------------------------------------------------------ planning */
@@ -353,13 +355,30 @@ export class LogisticsNetworkService {
         data: input.days.map((d) => ({ routeId, dayOfWeek: d.dayOfWeek, status: d.status, note: d.note ?? null })),
       }),
     ]);
+    const exceptions = await this.prisma.routeScheduleException.findMany({ where: { routeId } });
+    const affected = await this.affectedAcceptedLegs(
+      routeId,
+      input.days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note ?? null })),
+      exceptions.map((e) => ({ date: e.date, status: e.status, reason: e.reason })),
+    );
     await this.audit.record({
       action: 'ROUTE_SCHEDULE_CHANGED',
       actorId,
       previousValue: { routeId, verb: 'WEEKLY_PATTERN_SET', days: before.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status })) },
-      newValue: { routeId, verb: 'WEEKLY_PATTERN_SET', days: input.days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status })) },
+      // MDF-528 (owner ruling, 2026-11-04): "allow-and-surface, not refuse" -
+      // this write is never blocked for closing a date an accepted leg is
+      // scheduled on; collisionLegIds names exactly which legs, in the one
+      // trail an administrator can already read.
+      newValue: {
+        routeId,
+        verb: 'WEEKLY_PATTERN_SET',
+        days: input.days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status })),
+        collisionLegIds: affected.map((a) => a.legId),
+      },
     });
-    return this.routeSchedule(routeId);
+    await this.notifyScheduleCollision(routeId, affected);
+    const schedule = await this.routeSchedule(routeId);
+    return { ...schedule, affectedAcceptedLegs: affected };
   }
 
   /** One date-specific override. Re-submitting the same date replaces it. */
@@ -372,12 +391,21 @@ export class LogisticsNetworkService {
       create: { routeId, date, status: input.status, reason: input.reason ?? null, createdByUserId: actorId },
       update: { status: input.status, reason: input.reason ?? null, createdByUserId: actorId },
     });
+    const affected = await this.scheduleCollisionsAfterWrite(routeId);
     await this.audit.record({
       action: 'ROUTE_SCHEDULE_CHANGED',
       actorId,
-      newValue: { routeId, verb: 'EXCEPTION_SET', exceptionId: exception.id, date: date.toISOString(), status: exception.status },
+      newValue: {
+        routeId,
+        verb: 'EXCEPTION_SET',
+        exceptionId: exception.id,
+        date: date.toISOString(),
+        status: exception.status,
+        collisionLegIds: affected.map((a) => a.legId),
+      },
     });
-    return this.exceptionOut(exception);
+    await this.notifyScheduleCollision(routeId, affected);
+    return { ...this.exceptionOut(exception), affectedAcceptedLegs: affected };
   }
 
   /** Removing an exception falls back to the weekly default for that date, not to OPERATING. */
@@ -385,12 +413,90 @@ export class LogisticsNetworkService {
     const exception = await this.prisma.routeScheduleException.findUnique({ where: { id: exceptionId } });
     if (!exception || exception.routeId !== routeId) throw new NotFoundException('Exception not found.');
     await this.prisma.routeScheduleException.delete({ where: { id: exceptionId } });
+    // MDF-528: removing an exception can CLOSE a date too - if the weekly
+    // default underneath it is NOT_OPERATING, deleting an OPERATING/REDUCED
+    // override reinstates that closure immediately. Checked the same way as
+    // the other two writes, not assumed safe just because this one deletes
+    // rather than adds a row.
+    const affected = await this.scheduleCollisionsAfterWrite(routeId);
     await this.audit.record({
       action: 'ROUTE_SCHEDULE_CHANGED',
       actorId,
-      previousValue: { routeId, verb: 'EXCEPTION_REMOVED', exceptionId, date: exception.date.toISOString(), status: exception.status },
+      previousValue: {
+        routeId,
+        verb: 'EXCEPTION_REMOVED',
+        exceptionId,
+        date: exception.date.toISOString(),
+        status: exception.status,
+        collisionLegIds: affected.map((a) => a.legId),
+      },
     });
-    return { removed: true };
+    await this.notifyScheduleCollision(routeId, affected);
+    return { removed: true, affectedAcceptedLegs: affected };
+  }
+
+  /** Reloads a route's current weekly pattern + exceptions and runs
+   *  affectedAcceptedLegs against exactly what the write just left in place -
+   *  shared by addScheduleException/removeScheduleException, which (unlike
+   *  setWeeklySchedule) don't already have the post-write shape in hand. */
+  private async scheduleCollisionsAfterWrite(routeId: string) {
+    const [days, exceptions] = await Promise.all([
+      this.prisma.routeOperatingDay.findMany({ where: { routeId } }),
+      this.prisma.routeScheduleException.findMany({ where: { routeId } }),
+    ]);
+    return this.affectedAcceptedLegs(
+      routeId,
+      days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note })),
+      exceptions.map((e) => ({ date: e.date, status: e.status, reason: e.reason })),
+    );
+  }
+
+  /**
+   * MDF-528 (owner ruling, 2026-11-04): "ensure schedule changes cannot
+   * silently invalidate accepted shipments." Checked against the schedule
+   * the write just left in place, so all three callers agree on what counts
+   * as a collision.
+   *
+   * Scope: ACCEPTED (operatorAcceptedAt set, never rejected) LINE_HAUL legs
+   * on THIS route, not yet departed (once departed the carrier has already
+   * physically left - there is nothing left to strand), with a real
+   * committed departure time (`scheduledDepartureAt`, BMPL-346) to resolve a
+   * date against. A leg with no scheduledDepartureAt yet has no date to
+   * collide on.
+   */
+  private async affectedAcceptedLegs(
+    routeId: string,
+    weeklyPattern: readonly WeeklyOperatingDay[],
+    exceptions: readonly ScheduleException[],
+  ) {
+    const legs = await this.prisma.shipmentLeg.findMany({
+      where: { routeId, operatorAcceptedAt: { not: null }, operatorRejectedAt: null, departedAt: null, scheduledDepartureAt: { not: null } },
+      select: { id: true, scheduledDepartureAt: true, shipment: { select: { id: true, reference: true } } },
+    });
+    return legs
+      .filter((l) => resolveScheduleStatus(l.scheduledDepartureAt!, weeklyPattern, exceptions).status === 'NOT_OPERATING')
+      .map((l) => ({
+        legId: l.id,
+        shipmentId: l.shipment.id,
+        reference: l.shipment.reference,
+        scheduledDepartureAt: l.scheduledDepartureAt!.toISOString(),
+      }));
+  }
+
+  /** Admin visibility for a collision affectedAcceptedLegs just found - same
+   *  ADMIN_ALERT shape ShippingProviderService.rejectLeg already uses for the
+   *  sibling "something just put a shipment at risk" case. No-op when there
+   *  is nothing to report. */
+  private async notifyScheduleCollision(routeId: string, affected: Array<{ legId: string; reference: string }>) {
+    if (affected.length === 0) return;
+    await this.notifications.notifyAdmins('logistics.read', {
+      type: 'SECURITY',
+      category: 'ADMIN_ALERT',
+      event: 'ROUTE_SCHEDULE_CHANGED',
+      title: `A route schedule change put ${affected.length} accepted ${affected.length === 1 ? 'shipment' : 'shipments'} at risk`,
+      body: affected.map((a) => a.reference).join(', '),
+      data: { routeId, legIds: affected.map((a) => a.legId) },
+    });
   }
 
   private exceptionOut(e: { id: string; date: Date; status: string; reason: string | null }) {

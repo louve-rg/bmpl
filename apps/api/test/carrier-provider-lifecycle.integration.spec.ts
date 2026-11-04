@@ -758,3 +758,112 @@ describe('MDF-500 addition — the owner ruling requires a revoked carrier\'s sh
     expect(suspendedRow.statusGateReason).toContain('suspended');
   });
 });
+
+/**
+ * MDF-528 — owner ruling (2026-11-04): carrier self-service schedule writes
+ * stay (nothing already built comes out), on the explicit condition that
+ * "schedule changes cannot silently invalidate accepted shipments." The
+ * owner's own preference, deliberately followed here: ALLOW-AND-SURFACE, not
+ * refuse — a write that would close a date an ACCEPTED leg is scheduled on
+ * still succeeds, but names exactly which leg(s) it put at risk, to the
+ * caller, to the audit trail, and to an administrator. The accepted leg must
+ * then stay operable through depart regardless (the owner's in-transit
+ * ruling, reaffirmed) — a closed day must never strand work already taken
+ * on.
+ */
+describe('MDF-528 — a schedule write cannot silently invalidate an accepted shipment', () => {
+  const BELIZE_OFFSET_MS = -6 * 60 * 60 * 1000;
+  const isoToday = () => new Date(Date.now() + BELIZE_OFFSET_MS).toISOString().slice(0, 10);
+  const todayWeekday = () => new Date(Date.now() + BELIZE_OFFSET_MS).getUTCDay();
+
+  /** The carrier claims the one seeded route, books a shipment onto it (the
+   *  booking snapshot copies the route's new operator onto the leg), accepts
+   *  that leg, and commits a real departure time a couple of hours from now —
+   *  everything the collision check needs a date to resolve against. */
+  async function acceptedLegOnOwnRoute(carrier: { cookies: string[]; profileId: string }) {
+    const route = await ctx.prisma.logisticsRoute.findFirstOrThrow({ where: { operatedByProviderId: null } });
+    expect((await post(carrier.cookies, `shipping/provider/routes/${route.id}/claim`, {})).status).toBe(201);
+    const s = await bookHubToHub();
+    const [leg] = await legsOf(s.id);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg!.id}/accept`, {})).status).toBe(201);
+    const departureAt = new Date(Date.now() + 2 * 3600_000).toISOString();
+    const scheduled = await post(carrier.cookies, `shipping/provider/legs/${leg!.id}/schedule`, { scheduledDepartureAt: departureAt });
+    expect(scheduled.status, JSON.stringify(scheduled.body)).toBe(201);
+    return { shipment: s, leg: leg!, routeId: route.id };
+  }
+
+  it('closing TODAY via a date exception is let through, names the at-risk leg to the carrier, the audit trail and an admin, and the leg still departs', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg, shipment, routeId } = await acceptedLegOnOwnRoute(carrier);
+
+    const exception = await post(carrier.cookies, `shipping/provider/routes/${routeId}/schedule/exceptions`, {
+      date: isoToday(), status: 'NOT_OPERATING', reason: 'No vessel available today.',
+    });
+    // Allow-and-surface, not refused — the owner's explicit preference.
+    expect(exception.status, JSON.stringify(exception.body)).toBe(201);
+    expect(exception.body.affectedAcceptedLegs).toEqual([
+      expect.objectContaining({ legId: leg.id, shipmentId: shipment.id, reference: shipment.reference }),
+    ]);
+
+    const audit = await ctx.prisma.auditLog.findFirst({ where: { action: 'ROUTE_SCHEDULE_CHANGED' }, orderBy: { createdAt: 'desc' } });
+    expect((audit!.newValue as { collisionLegIds?: string[] }).collisionLegIds).toEqual([leg.id]);
+
+    const notice = await ctx.prisma.notification.findFirst({ where: { event: 'ROUTE_SCHEDULE_CHANGED' }, orderBy: { createdAt: 'desc' } });
+    expect(notice, 'an administrator must be actively notified, not left to go looking').toBeTruthy();
+    expect((notice!.data as { legIds?: string[] }).legIds).toEqual([leg.id]);
+
+    // The owner's in-transit ruling still governs: the closed day never
+    // blocks completion of the leg this carrier already accepted.
+    const departed = await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {});
+    expect(departed.status, JSON.stringify(departed.body)).toBe(201);
+  });
+
+  it('closing the weekday via the weekly pattern surfaces the same collision', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg, routeId } = await acceptedLegOnOwnRoute(carrier);
+
+    const weekly = await put(carrier.cookies, `shipping/provider/routes/${routeId}/schedule`, {
+      days: [{ dayOfWeek: todayWeekday(), status: 'NOT_OPERATING' }],
+    });
+    expect(weekly.status, JSON.stringify(weekly.body)).toBe(200);
+    expect(weekly.body.affectedAcceptedLegs).toEqual([expect.objectContaining({ legId: leg.id })]);
+  });
+
+  it('removing an exception that was keeping a weekly-closed day open also surfaces the collision', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const route = await ctx.prisma.logisticsRoute.findFirstOrThrow({ where: { operatedByProviderId: null } });
+    expect((await post(carrier.cookies, `shipping/provider/routes/${route.id}/claim`, {})).status).toBe(201);
+    // Closed by weekly default, specifically reopened for today.
+    expect((await put(carrier.cookies, `shipping/provider/routes/${route.id}/schedule`, {
+      days: [{ dayOfWeek: todayWeekday(), status: 'NOT_OPERATING' }],
+    })).status).toBe(200);
+    const opened = await post(carrier.cookies, `shipping/provider/routes/${route.id}/schedule/exceptions`, {
+      date: isoToday(), status: 'OPERATING', reason: 'Extra sailing today.',
+    });
+    expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+
+    const s = await bookHubToHub();
+    const [leg] = await legsOf(s.id);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg!.id}/accept`, {})).status).toBe(201);
+    const departureAt = new Date(Date.now() + 2 * 3600_000).toISOString();
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg!.id}/schedule`, { scheduledDepartureAt: departureAt })).status).toBe(201);
+
+    // Removing the reopening exception reinstates the weekly closure underneath it.
+    const removed = await request(ctx.server)
+      .delete(`/api/shipping/provider/routes/${route.id}/schedule/exceptions/${opened.body.id}`)
+      .set('Cookie', carrier.cookies);
+    expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+    expect(removed.body.affectedAcceptedLegs).toEqual([expect.objectContaining({ legId: leg!.id })]);
+  });
+
+  it('a write that closes a date with no accepted leg on it reports no collision', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const route = await ctx.prisma.logisticsRoute.findFirstOrThrow({ where: { operatedByProviderId: null } });
+    expect((await post(carrier.cookies, `shipping/provider/routes/${route.id}/claim`, {})).status).toBe(201);
+    const exception = await post(carrier.cookies, `shipping/provider/routes/${route.id}/schedule/exceptions`, {
+      date: isoToday(), status: 'NOT_OPERATING', reason: 'No bookings today anyway.',
+    });
+    expect(exception.status, JSON.stringify(exception.body)).toBe(201);
+    expect(exception.body.affectedAcceptedLegs).toEqual([]);
+  });
+});
