@@ -24,6 +24,16 @@ interface UserDetail {
   adminPermissions: Array<{ permission: string }>;
 }
 
+interface WalletAccount {
+  id: string;
+  type: string;
+  status: string;
+  currency: string;
+  cachedBalanceMinor: number;
+}
+
+const money = (c: number) => `$${(c / 100).toFixed(2)}`;
+
 export default async function UserDetailPage({ params }: { params: { id: string } }) {
   const res = await serverGet<UserDetail>(`/admin/users/${params.id}`);
   // Refused and missing are different answers (BMPL-144): only a real 404
@@ -51,6 +61,19 @@ export default async function UserDetailPage({ params }: { params: { id: string 
   const canRevokeRole = myPerms.includes('roles.revoke');
   const canSuspendAccount = myPerms.includes('users.suspend');
   const canRestoreAccount = myPerms.includes('users.restore');
+
+  // Fetched only when the viewer actually holds wallet.read, same fail-closed
+  // shape as the permission flags above: a 403 (or the permission simply
+  // being absent) means this section does not render rather than erroring
+  // the whole page (BMPL-COURIER-COMPLETION). Without this, a fraud report
+  // on this exact person left the admin with nothing on this screen about
+  // their wallet at all -- the same shape of gap as the lookup-by-id-only
+  // defect this card fixed one screen over.
+  const canViewWallet = myPerms.includes('wallet.read');
+  const walletRes = canViewWallet ? await serverGet<WalletAccount[]>(`/admin/wallet/users/${u.id}/accounts`) : null;
+  const walletOk = walletRes?.ok ?? false;
+  const walletError = walletRes && !walletRes.ok ? walletRes.message : undefined;
+  const walletAccount = walletRes?.ok ? walletRes.data.find((a) => a.type === 'USER') ?? null : null;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -101,6 +124,29 @@ export default async function UserDetailPage({ params }: { params: { id: string 
           ))}
         </ul>
       </Card>
+
+      {canViewWallet && (
+        <Card className="mb-5 p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Wallet</h2>
+            <Link href="/dashboard/wallet" className="text-sm font-semibold text-belize-blue hover:underline">
+              Open wallet console →
+            </Link>
+          </div>
+          {!walletOk ? (
+            <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">
+              Could not load wallet status{walletError ? ` (${walletError})` : ''}.
+            </p>
+          ) : !walletAccount ? (
+            <p className="text-sm text-[color:var(--bmpl-text-muted-strong)]">No wallet account yet.</p>
+          ) : (
+            <p className="text-sm text-belize-navy">
+              Status <StatusBadge status={walletAccount.status} />, balance {money(walletAccount.cachedBalanceMinor)}{' '}
+              {walletAccount.currency}.
+            </p>
+          )}
+        </Card>
+      )}
 
       <Card className="p-5">
         <div className="mb-3 flex items-center justify-between">

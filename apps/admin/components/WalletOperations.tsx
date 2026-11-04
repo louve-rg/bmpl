@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { ADMIN_TEST_CREDIT_MAX_MINOR } from '@bmpl/validation';
 import { api, type ApiError } from '../lib/api';
 import { Alert, Button, Card } from './ui';
 import { StatusBadge } from './StatusBadge';
@@ -235,6 +237,13 @@ async function fetchUserWalletAccounts(userId: string): Promise<WalletAccountInf
  * on its own failure the way the lock card's does -- that is a deliberate
  * difference, not an oversight: losing read access to status is not a
  * reason to also lose the ability to credit an already-confirmed account.
+ *
+ * `ADMIN_TEST_CREDIT_MAX_MINOR` (BMPL-COURIER-COMPLETION) is a financial-
+ * safety ceiling set by product/ops under delegated authority, not an
+ * engineering guess -- imported from `@bmpl/validation` so the hint shown
+ * here and the server's own rejection can never quote two different numbers.
+ * The server check is the one that matters; this is a round-trip-saving
+ * hint only, same as the disabled-button hint above.
  */
 function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
   const [userId, setUserId] = useState('');
@@ -252,12 +261,14 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
 
   const account = accounts?.[0] ?? null;
   const amountMinor = Math.round(Number(amount) * 100);
+  const overCeiling = Number.isFinite(amountMinor) && amountMinor > ADMIN_TEST_CREDIT_MAX_MINOR;
   const valid =
     !!resolved &&
     resolved.id === userId.trim() &&
     (!account || account.status === 'ACTIVE') &&
     Number.isFinite(amountMinor) &&
     amountMinor >= 100 &&
+    !overCeiling &&
     reason.trim().length >= 3;
 
   function clearSelection() {
@@ -392,9 +403,14 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
               {!statusBusy && !account && accounts !== null && ' No wallet account yet -- one will be created when this credit posts.'}
               {!statusBusy && statusErr && ` Current wallet status could not be loaded (${statusErr}).`}
             </Alert>
-            <Button type="button" variant="ghost" size="sm" onClick={clearSelection} className="shrink-0">
-              Clear
-            </Button>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <Link href={`/dashboard/users/${resolved.id}`} className="text-xs font-semibold text-belize-blue hover:underline">
+                View profile →
+              </Link>
+              <Button type="button" variant="ghost" size="sm" onClick={clearSelection}>
+                Clear
+              </Button>
+            </div>
           </div>
         )}
         {account && account.status !== 'ACTIVE' && (
@@ -402,7 +418,7 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
             This wallet is {account.status.toLowerCase()}; a test credit cannot be posted until that changes.
           </Alert>
         )}
-        <Field label="Amount (BZ$)" htmlFor="tc-amount">
+        <Field label={`Amount (BZ$, up to ${money(ADMIN_TEST_CREDIT_MAX_MINOR)} per credit)`} htmlFor="tc-amount">
           <input
             id="tc-amount"
             value={amount}
@@ -412,6 +428,12 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
             className={input}
           />
         </Field>
+        {overCeiling && (
+          <Alert tone="warning">
+            A single test credit cannot exceed {money(ADMIN_TEST_CREDIT_MAX_MINOR)}. Enter a smaller amount, or post more
+            than one credit.
+          </Alert>
+        )}
         <Field label="Reason (recorded in the audit log)" htmlFor="tc-reason">
           <input
             id="tc-reason"
@@ -626,9 +648,14 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
                 {account.status === 'SUSPENDED' && ' This wallet is suspended; suspension is not managed by the lock control.'}
               </Alert>
             )}
-            <Button type="button" variant="ghost" size="sm" onClick={clearSelection} className="shrink-0">
-              Clear
-            </Button>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <Link href={`/dashboard/users/${resolved.id}`} className="text-xs font-semibold text-belize-blue hover:underline">
+                View profile →
+              </Link>
+              <Button type="button" variant="ghost" size="sm" onClick={clearSelection}>
+                Clear
+              </Button>
+            </div>
           </div>
         )}
         <Field label="Reason (recorded in the audit log, visible to every wallet.lock holder)" htmlFor="wl-reason">

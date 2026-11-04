@@ -44,6 +44,15 @@ export const setUserTestFlagSchema = z.object({
 export type SetUserTestFlagInput = z.infer<typeof setUserTestFlagSchema>;
 
 /**
+ * Operational ceiling on a single administrative test credit, in minor units
+ * (BZD cents): BZD 10,000 per credit. This is a validation/financial-safety
+ * control, not a business rule — set by ops under owner-delegated authority
+ * (BMPL-COURIER-COMPLETION), not invented by engineering. Exported so the
+ * admin UI can mirror it as a client-side hint without restating the number.
+ */
+export const ADMIN_TEST_CREDIT_MAX_MINOR = 1_000_000;
+
+/**
  * Administrative test credit.
  *
  * Capped well below anything that could be mistaken for a real settlement, and
@@ -52,7 +61,7 @@ export type SetUserTestFlagInput = z.infer<typeof setUserTestFlagSchema>;
  */
 export const adminTestCreditSchema = z.object({
   userId: z.string().min(1),
-  amountMinor: z.number().int().min(100).max(100_000),
+  amountMinor: z.number().int().min(100).max(ADMIN_TEST_CREDIT_MAX_MINOR),
   reason: z.string().trim().min(3).max(500),
 });
 export type AdminTestCreditInput = z.infer<typeof adminTestCreditSchema>;
