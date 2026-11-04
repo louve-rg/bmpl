@@ -230,6 +230,17 @@ describe('D5 — the provider status transition table', () => {
     expect((audit!.newValue as { verb: string }).verb).toBe('REINSTATE');
   });
 
+  it('suspend and revoke also refuse with no reason — enforced SERVER-SIDE (the Zod body schema, not merely a client-side form control)', async () => {
+    const carrier = await makeCarrier('Full Lifecycle Co');
+    const noReasonSuspend = await post(admin, `admin/logistics/providers/${carrier.profileId}/suspend`, {});
+    expect(noReasonSuspend.status).toBe(400);
+    expect((await ctx.prisma.shippingProviderProfile.findUniqueOrThrow({ where: { id: carrier.profileId } })).status).toBe('APPROVED');
+
+    const noReasonRevoke = await post(admin, `admin/logistics/providers/${carrier.profileId}/revoke`, {});
+    expect(noReasonRevoke.status).toBe(400);
+    expect((await ctx.prisma.shippingProviderProfile.findUniqueOrThrow({ where: { id: carrier.profileId } })).status).toBe('APPROVED');
+  });
+
   it('REJECTED is NOT terminal — the carrier can resubmit, and admin can re-open it too', async () => {
     const carrier = await registerCarrier('Fixable Rejection Co');
     const rejected = await post(admin, `admin/logistics/providers/${carrier.profileId}/reject`, { reason: 'Missing operating licence.' });
