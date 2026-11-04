@@ -309,9 +309,10 @@ describe('TestCreditCard -- confirm-before-credit (SHIPPING-E2E-CLOSE)', () => {
  * BMPL-COURIER-COMPLETION, R1 + R2: a link back to the resolved customer's
  * own profile (so an admin working the wallet screen is not stuck searching
  * for the same person again), and the server-mirrored amount ceiling --
- * ADMIN_TEST_CREDIT_MAX_MINOR, BZD 10,000, a financial-safety control set by
- * product/ops, not an engineering guess. The real check is server-side; this
- * is a round-trip-saving hint that must quote the exact same number.
+ * ADMIN_TEST_CREDIT_MAX_MINOR, BZD 1,000, a pre-existing financial-safety
+ * control (a1ad2114) that was invisible rather than absent -- the real
+ * defect. The real check is server-side; this is a round-trip-saving hint
+ * that must quote the exact same number.
  */
 describe('TestCreditCard -- profile link and amount ceiling (BMPL-COURIER-COMPLETION)', () => {
   it('links back to the resolved customer\'s own profile page', async () => {
@@ -335,11 +336,11 @@ describe('TestCreditCard -- profile link and amount ceiling (BMPL-COURIER-COMPLE
     await flush();
     clickButton('Look up');
     await flush();
-    setValue(document.getElementById('tc-amount') as HTMLInputElement, '10000.01');
+    setValue(document.getElementById('tc-amount') as HTMLInputElement, '1000.01');
     setValue(document.getElementById('tc-reason') as HTMLInputElement, 'Over the line');
     await flush();
 
-    expect(document.body.textContent).toMatch(/cannot exceed \$10000\.00/);
+    expect(document.body.textContent).toMatch(/cannot exceed \$1000\.00/);
     const confirmBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('Confirm: credit'));
     expect(confirmBtn?.disabled).toBe(true);
   });
@@ -352,14 +353,14 @@ describe('TestCreditCard -- profile link and amount ceiling (BMPL-COURIER-COMPLE
     await flush();
     clickButton('Look up');
     await flush();
-    setValue(document.getElementById('tc-amount') as HTMLInputElement, '10000.00');
+    setValue(document.getElementById('tc-amount') as HTMLInputElement, '1000.00');
     setValue(document.getElementById('tc-reason') as HTMLInputElement, 'At the line');
     await flush();
-    clickButton('Confirm: credit $10000.00 to Jane Doe');
+    clickButton('Confirm: credit $1000.00 to Jane Doe');
     await flush();
 
     expect(posts).toHaveLength(1);
-    expect(posts[0]?.body).toMatchObject({ amountMinor: 1_000_000 });
+    expect(posts[0]?.body).toMatchObject({ amountMinor: 100_000 });
   });
 });
 

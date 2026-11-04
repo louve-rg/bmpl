@@ -45,12 +45,16 @@ export type SetUserTestFlagInput = z.infer<typeof setUserTestFlagSchema>;
 
 /**
  * Operational ceiling on a single administrative test credit, in minor units
- * (BZD cents): BZD 10,000 per credit. This is a validation/financial-safety
- * control, not a business rule — set by ops under owner-delegated authority
- * (BMPL-COURIER-COMPLETION), not invented by engineering. Exported so the
- * admin UI can mirror it as a client-side hint without restating the number.
+ * (BZD cents): BZD 1,000 per credit. Pre-existing (a1ad2114) — the real
+ * defect here was never a missing ceiling, it was an INVISIBLE one: nothing
+ * client-side ever surfaced this number, so a larger amount just got a
+ * generic rejection with no explanation (BMPL-COURIER-COMPLETION). A
+ * constraint someone else imposed gets lifted deliberately, with a reason,
+ * or it is drift — nobody here knows why 1,000 was chosen, which is reason
+ * enough not to raise it. Exported so the admin UI can mirror it as a
+ * client-side hint without restating the number.
  */
-export const ADMIN_TEST_CREDIT_MAX_MINOR = 1_000_000;
+export const ADMIN_TEST_CREDIT_MAX_MINOR = 100_000;
 
 /**
  * Administrative test credit.
