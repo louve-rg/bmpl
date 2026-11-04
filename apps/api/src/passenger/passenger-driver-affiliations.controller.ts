@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
+  passengerAffiliationDirectorySearchSchema,
   passengerAffiliationRequestSchema,
+  type PassengerAffiliationDirectorySearchInput,
   type PassengerAffiliationRequestInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
@@ -28,6 +30,19 @@ export class PassengerDriverAffiliationsController {
   @Get()
   listMine(@CurrentUser() u: AuthContext, @Query('status') status?: string) {
     return this.affiliations.listForDriver(u.userId, status);
+  }
+
+  /**
+   * Discovery — the front door onto `request` below. `q` is required (min 2
+   * characters) so a driver cannot enumerate the whole operator roster with
+   * an empty query; the result set is additionally capped in the service.
+   */
+  @Get('directory/providers')
+  searchProviders(
+    @CurrentUser() u: AuthContext,
+    @Query(ZodBody(passengerAffiliationDirectorySearchSchema)) query: PassengerAffiliationDirectorySearchInput,
+  ) {
+    return this.affiliations.searchProvidersForDriver(u.userId, query.q);
   }
 
   @Post('request')

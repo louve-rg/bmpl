@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
+  passengerAffiliationDirectorySearchSchema,
   passengerAffiliationInviteSchema,
   passengerBookingCancelSchema,
   passengerRouteSchema,
@@ -9,6 +10,7 @@ import {
   passengerTripAssignSchema,
   passengerTripCancelSchema,
   passengerTripCreateSchema,
+  type PassengerAffiliationDirectorySearchInput,
   type PassengerAffiliationInviteInput,
   type PassengerBookingCancelInput,
   type PassengerRouteInput,
@@ -140,6 +142,19 @@ export class PassengerNetworkController {
   @Get('affiliations')
   listAffiliations(@CurrentUser() u: AuthContext, @Query('status') status?: string) {
     return this.affiliations.listForProvider(u.userId, status);
+  }
+
+  /**
+   * Discovery — the front door onto `invite` below. `q` is required (min 2
+   * characters) so an operator cannot enumerate the whole driver roster with
+   * an empty query; the result set is additionally capped in the service.
+   */
+  @Get('affiliations/directory/drivers')
+  searchDrivers(
+    @CurrentUser() u: AuthContext,
+    @Query(ZodBody(passengerAffiliationDirectorySearchSchema)) query: PassengerAffiliationDirectorySearchInput,
+  ) {
+    return this.affiliations.searchDriversForProvider(u.userId, query.q);
   }
 
   @Post('affiliations/invite')

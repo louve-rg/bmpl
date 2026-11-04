@@ -220,3 +220,14 @@ export const passengerAffiliationRequestSchema = z.object({
   message: z.string().trim().max(500).optional(),
 });
 export type PassengerAffiliationRequestInput = z.infer<typeof passengerAffiliationRequestSchema>;
+
+/**
+ * Fleet-affiliation directory search — the front door onto the ask above.
+ * `q` is REQUIRED with a minimum length so an empty or near-empty query can
+ * never be used to enumerate the whole roster; the result count is capped
+ * server-side where the query actually runs, not here.
+ */
+export const passengerAffiliationDirectorySearchSchema = z.object({
+  q: z.string().trim().min(2).max(120),
+});
+export type PassengerAffiliationDirectorySearchInput = z.infer<typeof passengerAffiliationDirectorySearchSchema>;
