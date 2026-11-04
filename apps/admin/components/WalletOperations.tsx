@@ -71,6 +71,97 @@ interface ResolvedAccount {
 }
 
 /**
+ * Finding a customer by name or email, reusing the same search the Users
+ * page already has (`GET /admin/users?query=`, `app/dashboard/users/page.tsx`)
+ * rather than inventing a second one. This is strictly an alternative way to
+ * populate `onSelect` with a resolved account -- it does not touch, replace
+ * or weaken the existing id-field-plus-"Look up" control either card already
+ * had; both paths end at the same identity-confirmed state (ADMIN-WALLET-
+ * LOOKUP, owner correction: a fraud-lock tool whose only way to identify a
+ * customer is copying a cuid out of the address bar is not usable).
+ */
+function AccountSearch({ idPrefix, onSelect }: { idPrefix: string; onSelect: (account: ResolvedAccount) => void }) {
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [results, setResults] = useState<ResolvedAccount[] | null>(null);
+
+  async function search() {
+    const q = query.trim();
+    if (!q) return;
+    setBusy(true);
+    setErr(null);
+    setResults(null);
+    try {
+      const res = await api.get<{ total: number; items: ResolvedAccount[] }>(`/admin/users?query=${encodeURIComponent(q)}`);
+      setResults(res.items);
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Search failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function pick(account: ResolvedAccount) {
+    onSelect(account);
+    setResults(null);
+    setQuery('');
+    setErr(null);
+  }
+
+  return (
+    <Field label="Or search by name or email" htmlFor={`${idPrefix}-search`}>
+      <div className="flex gap-2">
+        <input
+          id={`${idPrefix}-search`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void search();
+            }
+          }}
+          placeholder="Jane Doe, or jane@…"
+          className={input}
+        />
+        <Button type="button" variant="outline" onClick={search} disabled={!query.trim() || busy} className="min-h-[44px] shrink-0">
+          {busy ? 'Searching…' : 'Search'}
+        </Button>
+      </div>
+      {err && (
+        <Alert tone="warning" className="mt-2">
+          {err}
+        </Alert>
+      )}
+      {results && results.length === 0 && (
+        <Alert tone="info" className="mt-2">
+          No matching accounts.
+        </Alert>
+      )}
+      {results && results.length > 0 && (
+        <ul className="mt-2 divide-y divide-slate-200 rounded-bmpl-md border border-slate-200 bg-white">
+          {results.map((r) => (
+            <li key={r.id}>
+              <button
+                type="button"
+                onClick={() => pick(r)}
+                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
+              >
+                <span className="font-medium text-belize-navy">
+                  {r.firstName} {r.lastName}
+                </span>
+                <span className="text-xs text-slate-500">{r.email}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Field>
+  );
+}
+
+/**
  * This card used to post straight to a raw, free-text user id with no
  * lookup and no confirmation -- an admin who mistyped or pasted the wrong
  * id would credit the wrong account, a real customer included, with no
@@ -85,7 +176,9 @@ interface ResolvedAccount {
  * Changing the id after a successful lookup clears the resolution and
  * re-locks the form -- the credit always fires against whichever account
  * was most recently resolved for the id currently in the box, never a
- * stale one left over from an earlier lookup.
+ * stale one left over from an earlier lookup. Picking a name/email search
+ * result (ADMIN-WALLET-LOOKUP) goes through the exact same `selectAccount`
+ * path a successful id lookup does, so it is held to the identical guard.
  *
  * The disabled attribute on the submit button is a hint, not the control:
  * `submit()` re-checks `resolved.id === userId.trim()` itself before the
@@ -116,6 +209,12 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
     // Any edit invalidates the last lookup -- the form must re-confirm
     // identity for whatever id is in the box now, not the one it was for.
     setResolved(null);
+    setLookupErr(null);
+  }
+
+  function selectAccount(picked: ResolvedAccount) {
+    setUserId(picked.id);
+    setResolved(picked);
     setLookupErr(null);
   }
 
@@ -177,6 +276,7 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
       {err && <Alert tone="warning" className="mt-3">{err}</Alert>}
 
       <div className="mt-3 space-y-3">
+        <AccountSearch idPrefix="tc" onSelect={selectAccount} />
         <Field label="Customer user ID" htmlFor="tc-user">
           <div className="flex gap-2">
             <input
@@ -266,6 +366,12 @@ interface LockableAccount {
  * only, no audit row) is the read half of this feature -- attempting
  * `lock` on an ACTIVE wallet to "see" the current state would actually
  * lock it, which is not an inspection method this console will offer.
+ *
+ * Picking a name/email search result (ADMIN-WALLET-LOOKUP) sets identity
+ * the same way a successful id lookup does, then still fetches this
+ * card's own wallet-accounts read -- a search hit does not carry status
+ * or balance, so the direction-from-status derivation stays intact either
+ * way the account got here.
  */
 function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
   const [userId, setUserId] = useState('');
@@ -290,6 +396,11 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
     setLookupErr(null);
   }
 
+  async function fetchAccounts(id: string) {
+    const userAccounts = await api.get<LockableAccount[]>(`/admin/wallet/users/${encodeURIComponent(id)}/accounts`);
+    setAccounts(userAccounts.filter((a) => a.type === 'USER'));
+  }
+
   async function lookup() {
     const id = userId.trim();
     if (!id) return;
@@ -298,15 +409,32 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
     setResolved(null);
     setAccounts(null);
     try {
-      const [person, userAccounts] = await Promise.all([
-        api.get<ResolvedAccount>(`/admin/users/${encodeURIComponent(id)}`),
-        api.get<LockableAccount[]>(`/admin/wallet/users/${encodeURIComponent(id)}/accounts`),
-      ]);
+      const [person] = await Promise.all([api.get<ResolvedAccount>(`/admin/users/${encodeURIComponent(id)}`), fetchAccounts(id)]);
       setResolved(person);
-      setAccounts(userAccounts.filter((a) => a.type === 'USER'));
     } catch (e) {
       const ex = e as ApiError;
       setLookupErr(ex.message ?? 'Could not look up that account.');
+    } finally {
+      setLookupBusy(false);
+    }
+  }
+
+  // The search result already carries identity (ADMIN-WALLET-LOOKUP) --
+  // only the wallet-accounts half still needs fetching, same endpoint and
+  // same USER-type filter `lookup()` uses, so the offered direction is
+  // derived identically regardless of which path resolved the account.
+  async function selectAccount(picked: ResolvedAccount) {
+    setUserId(picked.id);
+    setResolved(picked);
+    setLookupErr(null);
+    setAccounts(null);
+    setLookupBusy(true);
+    try {
+      await fetchAccounts(picked.id);
+    } catch (e) {
+      const ex = e as ApiError;
+      setLookupErr(ex.message ?? 'Could not look up that account.');
+      setResolved(null);
     } finally {
       setLookupBusy(false);
     }
@@ -353,6 +481,7 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
       {err && <Alert tone="warning" className="mt-3">{err}</Alert>}
 
       <div className="mt-3 space-y-3">
+        <AccountSearch idPrefix="wl" onSelect={selectAccount} />
         <Field label="Customer user ID" htmlFor="wl-user">
           <div className="flex gap-2">
             <input
