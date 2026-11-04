@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { DispatchEngineService } from '../dispatch/dispatch-engine.service';
 import { ShipmentDispatchService } from '../shipping/shipment-dispatch.service';
+import { EmailService, type EmailDiagnostics } from '../email/email.service';
 
 export interface Actor {
   userId: string;
@@ -25,6 +26,7 @@ export class OpsService {
     private readonly audit: AuditService,
     private readonly dispatchEngine: DispatchEngineService,
     private readonly shipmentDispatch: ShipmentDispatchService,
+    private readonly email: EmailService,
   ) {}
 
   // ===========================================================================
@@ -178,6 +180,23 @@ export class OpsService {
     `;
     const latest = rows[0];
     return { latestMigration: latest?.migration_name ?? null, appliedAt: latest?.finished_at ?? null };
+  }
+
+  // ===========================================================================
+  // Email transport diagnostic (W8) — gated, never @Public(). Without this,
+  // "which provider is production using, and can it actually deliver mail?"
+  // was unanswerable from outside EmailService itself: the console transport
+  // accepts every send and reports success, so a Railway deploy that forgot
+  // RESEND_API_KEY (or never set EMAIL_PROVIDER at all, which defaults to
+  // `console`) silently discards every verification and reset email while
+  // every caller believes it went out. Same reasoning as migrations() above —
+  // this is the one external surface that can prove anything about the
+  // transport's actual state — and the same gate (ops.read) as the rest of
+  // this read-only console. Never returns the credential itself, a prefix or
+  // a length — presence only, via EmailService.getDiagnostics().
+  // ===========================================================================
+  emailDiagnostics(): EmailDiagnostics {
+    return this.email.getDiagnostics();
   }
 
   // ===========================================================================

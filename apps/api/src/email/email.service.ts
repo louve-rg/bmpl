@@ -9,6 +9,39 @@ export interface OutboundEmail {
 }
 
 /**
+ * Distinguishes WHY `delivered` came out the way it did. `sent` is the only
+ * outcome where a real provider accepted the message. `simulated` is the
+ * console transport's accept-but-discard path — `delivered` stays `true` for
+ * it (see `send()` below) so the dev mailbox and every existing caller keep
+ * working exactly as before, but `outcome` lets a log reader, the admin
+ * diagnostic (`OpsService.emailDiagnostics`) or a future caller of
+ * `sendDetailed()` tell "really sent" apart from "accepted and thrown away".
+ */
+export type EmailSendOutcome = 'sent' | 'simulated' | 'not_implemented' | 'missing_credential' | 'provider_error';
+
+export interface EmailSendResult {
+  /** Same semantics `send()` has always returned: whether the caller may treat
+   *  this as emailed. `true` for `sent` AND `simulated` — changing `simulated`
+   *  to `false` would silently stop the dev mailbox from recording local/test
+   *  verification + reset tokens, which is existing, relied-upon behavior. */
+  delivered: boolean;
+  outcome: EmailSendOutcome;
+}
+
+/** Read-only, admin-facing report of the transport's actual configuration.
+ *  Never includes a credential value, prefix or length — presence only. */
+export interface EmailDiagnostics {
+  provider: Env['EMAIL_PROVIDER'];
+  /** Whether the credential this provider requires is present. `console`
+   *  requires none, so this is vacuously `true` for it. */
+  credentialPresent: boolean;
+  /** Whether this exact provider+credential combination can actually
+   *  deliver mail right now. `false` for `console` (nothing is ever really
+   *  sent) and for `smtp` (transport not implemented) even with a credential. */
+  canDeliver: boolean;
+}
+
+/**
  * Transactional email transport with an environment-selected provider:
  *  - `console` (local/dev): logs a one-line summary; the actual body is captured
  *    by the dev mailbox (dev only) for token retrieval — no real send.
@@ -24,25 +57,47 @@ export class EmailService {
 
   constructor(@Inject(ENV) private readonly env: Env) {}
 
+  /** Back-compat wrapper — existing callers keep the exact boolean they always
+   *  got. New code that needs to tell a real send apart from the console
+   *  transport's simulated accept should call `sendDetailed()` instead. */
   async send(email: OutboundEmail): Promise<boolean> {
+    return (await this.sendDetailed(email)).delivered;
+  }
+
+  async sendDetailed(email: OutboundEmail): Promise<EmailSendResult> {
     switch (this.env.EMAIL_PROVIDER) {
       case 'resend':
         return this.sendViaResend(email);
       case 'smtp':
         this.logger.warn('SMTP transport is not implemented; email not sent.');
-        return false;
+        return { delivered: false, outcome: 'not_implemented' };
       case 'console':
       default:
-        // Do NOT log the body (it contains verification/reset tokens).
-        this.logger.log(`[email:console] to=${email.to} subject="${email.subject}"`);
-        return true;
+        // Do NOT log the body (it contains verification/reset tokens). The
+        // "simulated" tag is what lets a log reader tell this apart from a
+        // real send — see EmailSendOutcome.
+        this.logger.log(`[email:console] simulated accept (not delivered) to=${email.to} subject="${email.subject}"`);
+        return { delivered: true, outcome: 'simulated' };
     }
   }
 
-  private async sendViaResend(email: OutboundEmail): Promise<boolean> {
+  /** Admin-facing diagnostic — see EmailDiagnostics. */
+  getDiagnostics(): EmailDiagnostics {
+    const provider = this.env.EMAIL_PROVIDER;
+    if (provider === 'resend') {
+      const credentialPresent = !!this.env.RESEND_API_KEY;
+      return { provider, credentialPresent, canDeliver: credentialPresent };
+    }
+    if (provider === 'smtp') {
+      return { provider, credentialPresent: !!this.env.SMTP_URL, canDeliver: false };
+    }
+    return { provider: 'console', credentialPresent: true, canDeliver: false };
+  }
+
+  private async sendViaResend(email: OutboundEmail): Promise<EmailSendResult> {
     if (!this.env.RESEND_API_KEY) {
       this.logger.error('EMAIL_PROVIDER=resend but RESEND_API_KEY is missing; email not sent.');
-      return false;
+      return { delivered: false, outcome: 'missing_credential' };
     }
     try {
       const res = await fetch('https://api.resend.com/emails', {
@@ -66,12 +121,12 @@ export class EmailService {
         // between a diagnosable misconfiguration and a silent one.
         const detail = await res.text().catch(() => '');
         this.logger.error(`Resend send failed: HTTP ${res.status}${detail ? ` ${detail.slice(0, 300)}` : ''}`);
-        return false;
+        return { delivered: false, outcome: 'provider_error' };
       }
-      return true;
+      return { delivered: true, outcome: 'sent' };
     } catch (err) {
       this.logger.error(`Resend send error: ${String(err)}`);
-      return false;
+      return { delivered: false, outcome: 'provider_error' };
     }
   }
 }

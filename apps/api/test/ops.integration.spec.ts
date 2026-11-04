@@ -199,6 +199,31 @@ describe('migration state (ops.read) — MDF-100', () => {
   });
 });
 
+describe('email transport diagnostic (ops.read) — W8', () => {
+  it('reports the configured provider, credential presence (boolean only) and whether mail can actually be delivered', async () => {
+    const res = await get(adminCookies, 'admin/ops/email');
+    expect(res.status).toBe(200);
+    // This test env never sets EMAIL_PROVIDER or RESEND_API_KEY, so it is on
+    // the schema default — the exact production hazard this diagnostic exists
+    // to surface: console accepts everything and delivers nothing.
+    expect(res.body).toEqual({ provider: 'console', credentialPresent: true, canDeliver: false });
+    // Never the credential value, a prefix, or a length.
+    expect(JSON.stringify(res.body)).not.toMatch(/resend|RESEND_API_KEY|re_[a-zA-Z0-9]/i);
+  });
+
+  it('gates the email diagnostic (customer 403, guest 401, admin without ops.read 403, ops.read 200)', async () => {
+    const cust = await register(`mail_${uniq()}@example.bz`);
+    expect((await get(cust.cookies, 'admin/ops/email')).status).toBe(403);
+    expect((await request(ctx.server).get('/api/admin/ops/email')).status).toBe(401);
+    const limited = await seedLimitedAdmin(ctx.prisma, `mla2_${uniq()}@example.bz`, ['users.read']);
+    const lc = await login(limited.email, limited.password);
+    expect((await get(lc, 'admin/ops/email')).status).toBe(403);
+    const readOnly = await seedLimitedAdmin(ctx.prisma, `mro2_${uniq()}@example.bz`, ['ops.read']);
+    const rc = await login(readOnly.email, readOnly.password);
+    expect((await get(rc, 'admin/ops/email')).status).toBe(200);
+  });
+});
+
 describe('announcement / maintenance banner', () => {
   it('lets ops.manage edit the banner and surfaces active notices publicly (display-only)', async () => {
     // initially nothing active
