@@ -43,3 +43,23 @@ export function visibleRoleGroups<TItem>(
   const approved = approvedRoles(roles);
   return groups.filter((g) => g.requires.length > 0 && g.requires.some((c) => approved.has(c)));
 }
+
+/**
+ * Same rule as {@link visibleRoleGroups}, but a group named in `forceVisible` is
+ * shown even without an APPROVED role. For MDF-526: a carrier applicant can hold a
+ * `ShippingProviderProfile` (PENDING/REJECTED/SUSPENDED/REVOKED/APPROVED) before the
+ * SHIPPING_PROVIDER role itself is approved — two independent lifecycles — and
+ * without this, their own pending application is reachable only by a direct URL
+ * nobody told them. This module deliberately does not know what a carrier or a
+ * profile is; the caller decides which heading to force, from a signal this module
+ * has no part of. Declaration order is preserved exactly as `visibleRoleGroups`
+ * preserves it — a forced group slots into its normal position, not the end.
+ */
+export function visibleRoleGroupsWithOverrides<TItem>(
+  groups: ReadonlyArray<RoleGatedGroup<TItem>>,
+  roles: readonly HeldRole[],
+  forceVisible: ReadonlySet<string>,
+): Array<RoleGatedGroup<TItem>> {
+  const approved = approvedRoles(roles);
+  return groups.filter((g) => forceVisible.has(g.heading) || (g.requires.length > 0 && g.requires.some((c) => approved.has(c))));
+}

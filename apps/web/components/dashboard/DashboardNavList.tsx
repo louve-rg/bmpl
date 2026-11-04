@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import type { MeView } from '../../lib/types';
-import { visibleRoleGroups } from '../../lib/dashboard-nav';
+import { approvedRoles, visibleRoleGroupsWithOverrides } from '../../lib/dashboard-nav';
 import { BASE_NAV, ROLE_GROUPS, allNavHrefs, isNavItemActive, type NavItem } from '../../lib/dashboard-nav-items';
 import { badgeCount, unreadLabel } from '../../lib/badge';
+import { useCarrierApplicationStatus } from '../../lib/use-carrier-application-status';
+import { navApplicationBadge } from '../../lib/shipping-provider';
 
 function groupHasActiveItem(items: NavItem[], pathname: string, hrefs: string[]): boolean {
   return items.some((item) => isNavItemActive(item.href, pathname, hrefs));
@@ -46,9 +48,20 @@ export function DashboardNavList({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+
+  // MDF-526: a carrier's own pending application (ShippingProviderProfile at
+  // any status) must be findable without a direct URL, even before the
+  // SHIPPING_PROVIDER role is approved -- the two are independent lifecycles.
+  // `carrierStatus` is null for everyone who never started one, so this is a
+  // no-op for every other user.
+  const carrierStatus = useCarrierApplicationStatus();
+  const carrierRoleApproved = useMemo(() => approvedRoles(me.roles).has('SHIPPING_PROVIDER'), [me.roles]);
+  const carrierForcedVisible = carrierStatus !== null && !carrierRoleApproved;
+  const forceVisible = useMemo(() => (carrierForcedVisible ? new Set(['Carrier']) : new Set<string>()), [carrierForcedVisible]);
+
   const groups: Array<{ heading?: string; items: NavItem[] }> = useMemo(
-    () => [{ items: BASE_NAV }, ...visibleRoleGroups(ROLE_GROUPS, me.roles)],
-    [me.roles],
+    () => [{ items: BASE_NAV }, ...visibleRoleGroupsWithOverrides(ROLE_GROUPS, me.roles, forceVisible)],
+    [me.roles, forceVisible],
   );
   const hrefs = useMemo(() => allNavHrefs(groups), [groups]);
 
@@ -86,7 +99,18 @@ export function DashboardNavList({
                 onClick={() => toggle(group)}
                 className="bmpl-nav-heading"
               >
-                {group.heading}
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate">{group.heading}</span>
+                  {/* Legible-not-live: this group is visible only because an application
+                      exists, not because the role was approved -- say so right on the
+                      heading rather than let a pending applicant mistake this for a
+                      working feature. */}
+                  {group.heading === 'Carrier' && carrierForcedVisible && carrierStatus && (
+                    <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold normal-case tracking-normal text-amber-800">
+                      {navApplicationBadge(carrierStatus)}
+                    </span>
+                  )}
+                </span>
                 <svg
                   viewBox="0 0 24 24"
                   fill="none"
