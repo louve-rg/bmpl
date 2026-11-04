@@ -213,6 +213,32 @@ export class WalletService {
         // Parity with selfServiceTestCredit: taken BEFORE the post, so two
         // simultaneous grants to the same wallet serialise rather than race.
         await tx.$queryRaw`SELECT id FROM wallet_accounts WHERE id = ${wallet.id} FOR UPDATE`;
+
+        // The bucketed reference above is NOT a dedupe guarantee on its own:
+        // two requests 1ms apart can straddle a bucket boundary, get two
+        // DIFFERENT references, and both legitimately post — a probabilistic
+        // gap on money, and "never happens" is not a probability. This read
+        // is the deterministic layer: it runs only once the row lock above
+        // is held, so a second racer can never reach it until the first has
+        // committed, and it therefore always sees the first credit — no
+        // boundary, no window of luck. Skipped when an explicit key was
+        // supplied, because that key is already exact-once on its own.
+        if (!idempotencyKey) {
+          const recent = await tx.walletTransaction.findFirst({
+            where: {
+              type: 'TOPUP',
+              currency,
+              reference: { startsWith: `admin-test-credit:${userId}:${amountMinor}:${actorId ?? 'owner'}:` },
+              createdAt: { gte: new Date(Date.now() - ADMIN_TEST_CREDIT_WINDOW_MS) },
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (recent) {
+            replay = true;
+            return { txn: recent, walletId: wallet.id };
+          }
+        }
+
         const clearing = await this.ensureSystemAccount('SYSTEM_TOPUP_CLEARING', currency, tx);
         const txn = await this.postTransaction(
           tx,
@@ -255,7 +281,11 @@ export class WalletService {
     if (!replay) {
       // Same shape topUp() records for every TOPUP, inlined here because
       // this path no longer calls topUp() (the row lock has to live inside
-      // the same transaction as the post).
+      // the same transaction as the post). actorId is passed directly
+      // (not topUp's `opts.actorId === null ? null : (opts.actorId ?? userId)`
+      // guard) because this parameter is typed `string | null` and can never
+      // be `undefined` at this call site — identical result, not a
+      // regression.
       await this.audit.record({
         action: 'WALLET_TOPUP_POSTED',
         actorId,

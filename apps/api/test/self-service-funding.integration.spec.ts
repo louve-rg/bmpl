@@ -12,10 +12,11 @@
  * The flag is read per request from the same Env object the app was built with,
  * so it can be flipped between tests.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, raceOverSeparateConnections, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 import { ENV } from '../src/config/config.module';
+import { ADMIN_TEST_CREDIT_WINDOW_MS } from '../src/wallet/wallet.service';
 
 let ctx: TestContext;
 let env: Record<string, unknown>;
@@ -373,5 +374,46 @@ describe('self-service UAT wallet funding', () => {
     expect(credits, `expected two distinct credits, got: ${credits.length}`).toHaveLength(2);
     const summary = await get(me.cookies, 'wallet');
     expect(summary.body.totalMinor).toBe(amountMinor * 2);
+  });
+
+  // THE test that distinguishes "bucketed reference" from "sliding-window
+  // read under the lock": both P and Q above pass under either design, so
+  // neither proves which one is actually running. A bucketed reference
+  // alone lets two requests straddling a bucket boundary get two DIFFERENT
+  // references and both legitimately post — "duplicates are rare", not
+  // "duplicates never happen". This fails against the bucket alone and
+  // passes once the lock-held lookback read is in place.
+  it('S · two admin test-credits deliberately straddling a bucket boundary still collapse to exactly one credit (MDF-512)', async () => {
+    const me = await registerCustomer(`ssf_admin_straddle_${uniq()}@example.bz`);
+    const amountMinor = 5_000;
+    const base = Date.now();
+    const bucket = Math.floor(base / ADMIN_TEST_CREDIT_WINDOW_MS);
+    const boundary = (bucket + 1) * ADMIN_TEST_CREDIT_WINDOW_MS;
+    // 1ms apart in (mocked) wall-clock time, on opposite sides of
+    // Math.floor(now / WINDOW_MS) — exactly the straddle the bucket alone
+    // cannot catch. Only Date.now() is mocked (never `new Date()` itself),
+    // so the real createdAt Postgres stamps on each row is untouched, and
+    // the window read's lower bound — derived from this same mocked
+    // Date.now() — still sits comfortably before it.
+    const spy = vi.spyOn(Date, 'now');
+    try {
+      spy.mockReturnValue(boundary - 1);
+      const first = await post(admin, 'admin/wallet/test-credit', { userId: me.userId, amountMinor, reason: 'MDF-512 boundary check' });
+      expect(first.status).toBe(201);
+
+      spy.mockReturnValue(boundary + 1);
+      const second = await post(admin, 'admin/wallet/test-credit', { userId: me.userId, amountMinor, reason: 'MDF-512 boundary check' });
+      expect(second.status, `the second call must replay, never post a second credit: ${second.status}`).toBe(201);
+    } finally {
+      spy.mockRestore();
+    }
+
+    const wallet = await walletOf(me.userId);
+    const credits = await ctx.prisma.walletLedgerEntry.findMany({
+      where: { accountId: wallet.id, direction: 'CREDIT', transaction: { description: 'Administrative Test Credit' } },
+    });
+    expect(credits, `expected exactly one credit across the boundary, got: ${credits.length}`).toHaveLength(1);
+    const summary = await get(me.cookies, 'wallet');
+    expect(summary.body.totalMinor).toBe(amountMinor);
   });
 });
