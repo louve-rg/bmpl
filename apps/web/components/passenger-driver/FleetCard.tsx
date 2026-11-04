@@ -185,9 +185,9 @@ export function FleetCard() {
 
 /**
  * The driver's ask. It creates a PENDING request only — joining happens when
- * the operator approves. Finds the operator by name against the directory
- * (BMPL-COURIER-COMPLETION) — no raw operator id is ever shown or typed; the
- * id picked from a search result is carried silently into the request.
+ * the operator approves. Finds the operator by name against the directory —
+ * no raw operator id is ever shown or typed; the id picked from a search
+ * result is carried silently into the request.
  */
 function RequestToJoin({ onDone }: { onDone: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
