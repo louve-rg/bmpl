@@ -116,9 +116,26 @@ export class MarketingAdminService {
       if (!category) throw new BadRequestException('That category does not exist.');
       if (!category.isVisible) throw new BadRequestException('That category is hidden and cannot receive a new ad placement.');
     }
-    const row = existing
-      ? await this.prisma.promotionPlacement.update({ where: { id: existing.id }, data })
-      : await this.prisma.promotionPlacement.create({ data: { promotionId, placement, categoryId, ...data } });
+    // Two concurrent requests can both pass the findFirst above seeing no
+    // existing row, then both attempt create() -- the @@unique([promotionId,
+    // placement, categoryId]) constraint is the real authority here and
+    // always catches it; without this catch the loser of that race saw a raw
+    // 500 instead of the same clean rejection a slower, sequential duplicate
+    // request gets (MDF-499, pattern from passenger-affiliation.service.ts's
+    // createAsk). Not claiming the race is proven closed under true
+    // concurrent load -- only that the constraint's violation is handled
+    // instead of surfacing as an unhandled database error.
+    let row;
+    try {
+      row = existing
+        ? await this.prisma.promotionPlacement.update({ where: { id: existing.id }, data })
+        : await this.prisma.promotionPlacement.create({ data: { promotionId, placement, categoryId, ...data } });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new BadRequestException('This campaign is already assigned to that placement.');
+      }
+      throw e;
+    }
     await this.audit.record({ action: 'PROMOTION_STATUS_CHANGED', actorId: actor.userId, newValue: { promotionId, placement, categoryId, assigned: true } });
     return row;
   }
