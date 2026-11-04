@@ -214,15 +214,22 @@ describe('CarrierDetailPage — suspend vs. revoke, made legible (MDF-524, D-own
     await mount();
 
     expect(buttonTexts()).toContain('Revoke (security / safety)');
-    expect(buttonTexts()).toContain('Reinstate');
+    expect(buttonTexts()).toContain('Reinstate (lift suspension)');
     expect(buttonTexts()).not.toContain('Suspend (administrative)');
   });
 
-  it('reinstate and reopen/reapply do not require a reason and post an empty body when none is typed', async () => {
+  it('lifting a suspension requires a reason, same audit treatment as suspend/revoke (Michael\'s ruling: a suspension nobody can lift is a revocation with a gentler label)', async () => {
     const posts = stubFetch({ provider: { ...PROVIDER, status: 'SUSPENDED' } });
     await mount();
 
-    clickButton('Reinstate');
+    clickButton('Reinstate (lift suspension)');
+    await act(async () => {});
+    expect(container!.textContent).toContain('A reason is required.');
+    expect(posts.some((p) => p.url.includes('/reinstate'))).toBe(false);
+
+    const reasonInput = document.getElementById('carrier-status-reason') as HTMLInputElement;
+    setValue(reasonInput, 'Licence renewed, confirmed current.');
+    clickButton('Reinstate (lift suspension)');
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -230,6 +237,21 @@ describe('CarrierDetailPage — suspend vs. revoke, made legible (MDF-524, D-own
     });
 
     const call = posts.find((p) => p.url.includes('/reinstate'));
+    expect(call?.body).toEqual({ reason: 'Licence renewed, confirmed current.' });
+  });
+
+  it('reopen and reapply (PENDING-for-review paths, not a lift) still do not require a reason', async () => {
+    const posts = stubFetch({ provider: { ...PROVIDER, status: 'REJECTED' } });
+    await mount();
+
+    clickButton('Reopen for review');
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const call = posts.find((p) => p.url.includes('/reopen'));
     expect(call?.body).toEqual({});
   });
 
@@ -259,18 +281,21 @@ describe('CarrierDetailPage — suspend vs. revoke, made legible (MDF-524, D-own
 
     expect(container!.textContent).toContain('REVOKED');
     expect(container!.textContent).toContain('Safety complaint upheld.');
+    expect(container!.textContent).toMatch(/terminal, not reversible/);
     expect(container!.textContent).toMatch(/no path back except an admin action/);
     expect(buttonTexts()).toContain('Reapply (reopen for review)');
-    expect(buttonTexts()).not.toContain('Reinstate');
+    expect(buttonTexts()).not.toContain('Reinstate (lift suspension)');
   });
 
-  it('a suspended carrier reads as a routine, reversible hold, distinct from revoked', async () => {
+  it('a suspended carrier reads as a routine, reversible hold, distinct from revoked -- legible on the page itself, not just by which button is clickable', async () => {
     stubFetch({ provider: { ...PROVIDER, status: 'SUSPENDED', statusReason: 'Routine licence check.' } });
     await mount();
 
     expect(container!.textContent).toContain('SUSPENDED');
+    expect(container!.textContent).toMatch(/reversible administrative hold, not a revocation/);
     expect(container!.textContent).toMatch(/not offered for new work until reinstated/);
     expect(container!.textContent).not.toMatch(/no path back/);
+    expect(container!.textContent).not.toMatch(/terminal/);
   });
 });
 

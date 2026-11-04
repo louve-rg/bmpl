@@ -39,6 +39,18 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Selec
  *     `reapply`; every transition is audited and notifies the carrier --
  *     nothing of either kind is built here.
  *
+ * MICHAEL'S RULING (2026-11-04, MDF-524): an ordinary administrative
+ * suspension must be liftable -- a suspension nobody can lift is a
+ * revocation with a gentler label. Revocation stays terminal; its only
+ * recovery is of the carrier's *shipments* (below), never of the carrier
+ * itself. `reinstate` (SUSPENDED -> APPROVED) therefore now REQUIRES a
+ * reason, the same audit treatment as suspend/revoke -- not a silent flag
+ * flip. `reopen`/`reapply` are unaffected: those are PENDING-for-review
+ * paths, not a lift, and Pam's §9 already has them reason-optional.
+ * Michael believes `approveProviderStatus` already enforces this; Pam is
+ * confirming/adding it server-side -- flagged, not asserted, same as any
+ * other not-yet-confirmed piece of her contract.
+ *
  * STILL NOT READY (Pam's §9, explicit: "do not wire the console to these
  * until that section says done") -- unchanged from the prior pass, each
  * detected defensively rather than assumed:
@@ -77,13 +89,19 @@ interface Provider {
  * re-deriving it -- a second, hand-written version of that table is how
  * the console and the server end up disagreeing about what is legal.
  * `reasonRequired` matches her two body schemas exactly: `reject`,
- * `suspend` and `revoke` require one, the rest accept an optional note.
+ * `suspend` and `revoke` require one, the rest accept an optional note --
+ * EXCEPT `reinstate`, which Michael's ruling (see file header) requires a
+ * reason for too, the same audit treatment as suspend/revoke. That is a
+ * deliberate departure from a verbatim reading of her table, made by the
+ * person whose call it is; Pam is confirming/adding the server-side match.
  */
 const STATUS_ACTIONS: Array<{ verb: string; label: string; from: ProviderStatus[]; reasonRequired: boolean; variant: 'primary' | 'outline' | 'destructive' }> = [
   { verb: 'approve', label: 'Approve', from: ['PENDING'], reasonRequired: false, variant: 'primary' },
   { verb: 'reject', label: 'Reject', from: ['PENDING'], reasonRequired: true, variant: 'destructive' },
   { verb: 'suspend', label: 'Suspend (administrative)', from: ['APPROVED'], reasonRequired: true, variant: 'outline' },
-  { verb: 'reinstate', label: 'Reinstate', from: ['SUSPENDED'], reasonRequired: false, variant: 'primary' },
+  // Lift a suspension -- deliberately NOT a silent flag flip. A suspension
+  // nobody can lift is a revocation with a gentler label (Michael's ruling).
+  { verb: 'reinstate', label: 'Reinstate (lift suspension)', from: ['SUSPENDED'], reasonRequired: true, variant: 'primary' },
   { verb: 'revoke', label: 'Revoke (security / safety)', from: ['APPROVED', 'SUSPENDED'], reasonRequired: true, variant: 'destructive' },
   { verb: 'reopen', label: 'Reopen for review', from: ['REJECTED'], reasonRequired: false, variant: 'outline' },
   // Admin-only "controlled recovery" from a revocation -- there is no
@@ -323,13 +341,15 @@ function StatusCard({ provider, canManage, onChanged }: { provider: Provider; ca
 
       {status === 'REVOKED' && (
         <Alert tone="error" className="mt-3">
-          This carrier is revoked. It has no path back except an admin action: reapply below to send it back to review,
-          or see "In-flight shipments" to reassign anything still assigned to it.
+          This carrier is revoked -- that status is terminal, not reversible. It has no path back except an admin
+          action: reapply below to send it back to review, or see "In-flight shipments" to reassign anything still
+          assigned to it.
         </Alert>
       )}
       {status === 'SUSPENDED' && (
         <Alert tone="warning" className="mt-3">
-          This carrier is suspended. It keeps its history and membership; it is not offered for new work until reinstated.
+          This carrier is suspended -- a reversible administrative hold, not a revocation. It keeps its history and
+          membership; it is not offered for new work until reinstated below, which (like suspending it) needs a reason.
         </Alert>
       )}
       {status === 'REJECTED' && (
