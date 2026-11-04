@@ -163,6 +163,157 @@ describe('security: target ownership + cross-owner isolation', () => {
   });
 });
 
+/**
+ * MDF-503: TargetPicker now auto-resolves VENDOR/EMPLOYER from the caller's
+ * own profile endpoint, so the UI offers no field at all for either — the
+ * existing cross-owner test above only ever exercised PRODUCT, which still
+ * has a picked-by-name value a crafted request could swap out. Confirms the
+ * server-side verifyTargetOwnership check these two types already have is
+ * still what actually stops a caller who skips the UI and posts a foreign
+ * profile id directly.
+ */
+describe('security: VENDOR/EMPLOYER target ownership survives a crafted request (MDF-503)', () => {
+  it('a vendor cannot target another vendor\'s profile by posting its id directly', async () => {
+    const a = await makeApprovedVendor();
+    const b = await makeApprovedVendor();
+    const bad = await post(a.cookies, 'business/marketing/promotions', {
+      type: 'HOMEPAGE_BANNER',
+      title: 'Steal vendor',
+      targets: [{ targetType: 'VENDOR', vendorProfileId: b.vpId }],
+    });
+    expect([403, 404]).toContain(bad.status);
+    const good = await post(a.cookies, 'business/marketing/promotions', {
+      type: 'HOMEPAGE_BANNER',
+      title: 'Own vendor',
+      targets: [{ targetType: 'VENDOR', vendorProfileId: a.vpId }],
+    });
+    expect(good.status).toBe(201);
+  });
+
+  it('an employer cannot target another employer\'s profile by posting its id directly', async () => {
+    async function makeEmployer() {
+      const email = `emp_${uniq()}@ex.bz`;
+      const reg = await request(ctx.server).post('/api/auth/register').send({ email, password: 'EmployerPass123', firstName: 'E', lastName: 'R', acceptedTerms: true });
+      const cookies = cookiesOf(reg);
+      const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
+      await ctx.prisma.userRole.create({ data: { userId: user.id, roleCode: 'EMPLOYER', status: 'APPROVED', approvedAt: new Date() } });
+      const prof = await put(cookies, 'employer/profile', { companyName: `Acme ${uniq()}`, contactEmail: email });
+      expect(prof.status).toBe(200);
+      return { cookies, epId: prof.body.id as string };
+    }
+    const a = await makeEmployer();
+    const b = await makeEmployer();
+    const bad = await post(a.cookies, 'business/marketing/promotions', {
+      type: 'HOMEPAGE_BANNER',
+      title: 'Steal employer',
+      targets: [{ targetType: 'EMPLOYER', employerProfileId: b.epId }],
+    });
+    expect([403, 404]).toContain(bad.status);
+    const good = await post(a.cookies, 'business/marketing/promotions', {
+      type: 'HOMEPAGE_BANNER',
+      title: 'Own employer',
+      targets: [{ targetType: 'EMPLOYER', employerProfileId: a.epId }],
+    });
+    expect(good.status).toBe(201);
+  });
+});
+
+/**
+ * MDF-503: assignPlacement previously had no existence check on categoryId
+ * at all. Now: a category-context placement (CATEGORY_PAGE) must carry one,
+ * it must actually exist, a NEW assignment may only target a VISIBLE
+ * category, and an EXISTING assignment keeps working after its category is
+ * later hidden — the asymmetry is deliberate (marketing-admin.service.ts's
+ * own comment: re-validating on every edit would let a category admins no
+ * longer manage break a promotion that was placed correctly at the time).
+ */
+describe('assignPlacement: categoryId existence, visibility, and the new-vs-existing asymmetry (MDF-503)', () => {
+  async function approvedPromotionNoPlacement() {
+    const vendor = await makeApprovedVendor();
+    const productId = await makeProduct(vendor);
+    const c = await post(vendor.cookies, 'business/marketing/promotions', {
+      type: 'FEATURED_PRODUCT',
+      title: `Promo ${uniq()}`,
+      targets: [{ targetType: 'PRODUCT', productId }],
+    });
+    expect(c.status).toBe(201);
+    const id = c.body.id as string;
+    expect((await post(vendor.cookies, `business/marketing/promotions/${id}/submit`)).body.status).toBe('SUBMITTED');
+    const m = await post(admin, `admin/marketing/promotions/${id}/moderate`, { action: 'APPROVE' });
+    expect(m.status).toBe(201);
+    return id;
+  }
+
+  it('a CATEGORY_PAGE placement without a categoryId is refused', async () => {
+    const id = await approvedPromotionNoPlacement();
+    const r = await post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE' });
+    expect(r.status).toBe(400);
+  });
+
+  it('a categoryId that does not exist is refused, not silently accepted', async () => {
+    const id = await approvedPromotionNoPlacement();
+    const r = await post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE', categoryId: 'does-not-exist' });
+    expect(r.status).toBe(400);
+  });
+
+  it('a NEW assignment may not target a category that is already hidden', async () => {
+    const id = await approvedPromotionNoPlacement();
+    const hidden = await post(admin, 'admin/categories', { name: `Hidden ${uniq()}` });
+    expect((await patch(admin, `admin/categories/${hidden.body.id}`, { isVisible: false })).status).toBe(200);
+
+    const r = await post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE', categoryId: hidden.body.id });
+    expect(r.status).toBe(400);
+  });
+
+  it('an EXISTING assignment keeps working after its category is hidden later — editing it is not re-validated against visibility', async () => {
+    const id = await approvedPromotionNoPlacement();
+    const assign = await post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE', categoryId });
+    expect(assign.status).toBe(201);
+    const placementId = assign.body.id as string;
+
+    expect((await patch(admin, `admin/categories/${categoryId}`, { isVisible: false })).status).toBe(200);
+
+    // Re-assigning the SAME placement/category pair on the SAME promotion
+    // hits the existing-row branch (assignPlacement's own `existing` lookup
+    // by promotionId+placement+categoryId) and must still succeed.
+    const reassign = await post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE', categoryId, position: 1 });
+    expect(reassign.status).toBe(201);
+    expect(reassign.body.id).toBe(placementId);
+
+    // The ordinary update route for an existing placement is also untouched
+    // by the category's visibility.
+    const update = await patch(admin, `admin/marketing/placements/${placementId}`, { position: 2 });
+    expect(update.status).toBe(200);
+
+    // Restore visibility so this category does not leak a hidden side effect
+    // into any test that runs after this one in the same file.
+    expect((await patch(admin, `admin/categories/${categoryId}`, { isVisible: true })).status).toBe(200);
+  });
+
+  it('two concurrent requests to assign the SAME (promotion, placement, category) triple do not both create a row', async () => {
+    // promotion_placements carries a real DB-level @@unique([promotionId,
+    // placement, categoryId]) — but assignPlacement's own existence check
+    // (findFirst, then create-or-update) is NOT inside a transaction, so two
+    // requests racing past that read can both see `existing: null` and both
+    // attempt create(). This fires them genuinely concurrently to check
+    // whether the second one gets a clean, handled refusal or an unhandled
+    // constraint-violation error.
+    const id = await approvedPromotionNoPlacement();
+    const [first, second] = await Promise.all([
+      post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE', categoryId }),
+      post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE', categoryId }),
+    ]);
+    const statuses = [first.status, second.status].sort();
+    // Whichever request loses the race must fail CLEANLY (409/400/201 from
+    // hitting the now-existing row on a retry), never a raw 500 — an
+    // unhandled P2002 reaching the client is the duplicate-request failure
+    // mode this check exists to catch.
+    expect(statuses.every((s) => s !== 500)).toBe(true);
+    const rows = await ctx.prisma.promotionPlacement.findMany({ where: { promotionId: id, placement: 'CATEGORY_PAGE', categoryId } });
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe('coupons: validation policy (no wallet mutation)', () => {
   it('applies percentage/fixed discounts, caps, min-spend, scope, and status rules', async () => {
     const vendor = await makeApprovedVendor();

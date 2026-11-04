@@ -829,3 +829,122 @@ describe('WalletLockCard -- stale selection, loading state, clear (MDF-499)', ()
     expect(links).toContain('/dashboard/users/u1');
   });
 });
+
+/**
+ * MDF-499 -- the race named as fixed by the search-pick path: a customer's
+ * status fetch starting, then the admin picking a DIFFERENT customer before
+ * it resolves. The old bug's shape was the resolved identity going live
+ * before its own status fetch completed; the way that bug would reappear
+ * here is a stale, late-arriving fetch for the FIRST pick overwriting the
+ * status/direction now showing for the SECOND, correctly-resolved one.
+ * Reproduced with controllable promise resolution, same technique as the
+ * existing "loading state" test above, so the order of arrival is explicit
+ * rather than incidental to timing.
+ */
+describe('race: a stale status fetch for an abandoned selection must not attach to the next one (MDF-499)', () => {
+  function stubRaceable(adminPermissions: string[]) {
+    const pending: Record<string, (rows: unknown) => void> = {};
+    const users: Record<string, Account> = {
+      u1: { id: 'u1', firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
+      u2: { id: 'u2', firstName: 'John', lastName: 'Roe', email: 'john@example.com' },
+    };
+    const search: Record<string, Account[]> = { jane: [users.u1!], john: [users.u2!] };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
+        const searchMatch = url.match(/\/api\/admin\/users\?(.*)$/);
+        if (searchMatch && (!init?.method || init.method === 'GET')) {
+          const q = new URLSearchParams(searchMatch[1]).get('query') ?? '';
+          const items = search[q] ?? [];
+          return jsonResponse(200, { total: items.length, items });
+        }
+        const walletAccountsMatch = url.match(/\/api\/admin\/wallet\/users\/([^/?]+)\/accounts$/);
+        if (walletAccountsMatch && (!init?.method || init.method === 'GET')) {
+          const id = decodeURIComponent(walletAccountsMatch[1] ?? '');
+          return new Promise((resolve) => {
+            pending[id] = (rows) => resolve(jsonResponse(200, rows));
+          });
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    return pending;
+  }
+
+  async function pickBySearch(query: string, matchPattern: RegExp) {
+    setValue(document.getElementById('tc-search') as HTMLInputElement, query);
+    await flush();
+    clickButton('Search');
+    await flush();
+    clickButtonMatching(matchPattern);
+    await flush();
+  }
+
+  async function pickBySearchLock(query: string, matchPattern: RegExp) {
+    setValue(document.getElementById('wl-search') as HTMLInputElement, query);
+    await flush();
+    clickButton('Search');
+    await flush();
+    clickButtonMatching(matchPattern);
+    await flush();
+  }
+
+  it('TestCreditCard: picking a second customer before the first one\'s status arrives shows the SECOND customer\'s own status, never the first\'s stale one', async () => {
+    const pending = stubRaceable(['wallet.credit_test']);
+    await mount();
+
+    await pickBySearch('jane', /Jane Doe.*jane@example\.com/);
+    // u1 (Jane)'s /accounts fetch is now in flight, deliberately held.
+    await pickBySearch('john', /John Roe.*john@example\.com/);
+    // u2 (John) is now the resolved identity; u1's fetch is still pending.
+
+    expect(document.body.textContent).toMatch(/This will credit\s*John Roe\s*\(john@example\.com\)/);
+
+    // u1's stale response arrives LAST -- after John was already selected.
+    pending.u1?.([{ id: 'wa1', type: 'USER', status: 'LOCKED', currency: 'BZD', cachedBalanceMinor: 1500 }]);
+    await flush();
+
+    // Jane's stale LOCKED/$15.00 must never attach to John's card: if it
+    // did, John -- whose own wallet has not been checked at all yet --
+    // would be shown as LOCKED and blocked from a credit he is actually
+    // eligible for, or worse, shown stale ACTIVE data that is not his.
+    expect(document.body.textContent).not.toMatch(/\$15\.00/);
+    expect(document.body.textContent).not.toMatch(/This wallet is locked/);
+    expect(document.body.textContent).toMatch(/This will credit\s*John Roe\s*\(john@example\.com\)/);
+
+    // John's own (real) status now arrives -- that is the one that must win.
+    pending.u2?.([{ id: 'wa2', type: 'USER', status: 'ACTIVE', currency: 'BZD', cachedBalanceMinor: 500 }]);
+    await flush();
+    expect(document.body.textContent).toMatch(/Wallet status\s*ACTIVE/);
+    expect(document.body.textContent).toMatch(/\$5\.00/);
+  });
+
+  it('WalletLockCard: picking a second customer before the first one\'s status arrives derives the lock/unlock DIRECTION from the second customer\'s own status, never the first\'s stale one', async () => {
+    const pending = stubRaceable(['wallet.lock']);
+    await mount();
+
+    await pickBySearchLock('jane', /Jane Doe.*jane@example\.com/);
+    // u1 (Jane)'s /accounts fetch is now in flight, deliberately held.
+    await pickBySearchLock('john', /John Roe.*john@example\.com/);
+    // u2 (John) is now the resolved identity; u1's fetch is still pending.
+
+    // u1's stale ACTIVE response arrives LAST -- after John was selected.
+    pending.u1?.([{ id: 'wa1', type: 'USER', status: 'ACTIVE', currency: 'BZD', cachedBalanceMinor: 1500 }]);
+    await flush();
+
+    // If Jane's stale ACTIVE/$15.00 attached to John's row, the card would
+    // offer "Confirm: lock John Roe's wallet" from data that was never
+    // actually read for John -- a half-resolved identity completing a write.
+    expect(document.body.textContent).not.toMatch(/\$15\.00/);
+    expect(buttonTexts().some((t) => t.includes('John Roe'))).toBe(false);
+
+    // John's own (real, LOCKED) status now arrives -- the direction offered
+    // must flip to unlock, derived from HIS status, not Jane's stale one.
+    pending.u2?.([{ id: 'wa2', type: 'USER', status: 'LOCKED', currency: 'BZD', cachedBalanceMinor: 0 }]);
+    await flush();
+    expect(buttonTexts().some((t) => t === "Confirm: unlock John Roe's wallet")).toBe(true);
+    expect(buttonTexts().some((t) => t.includes('lock Jane Doe') || t.includes('unlock Jane Doe'))).toBe(false);
+  });
+});

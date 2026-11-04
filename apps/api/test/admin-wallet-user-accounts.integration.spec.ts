@@ -20,6 +20,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { ADMIN_TEST_CREDIT_MAX_MINOR } from '@bmpl/validation';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, seedLimitedAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -120,5 +121,42 @@ describe('GET /admin/wallet/users/:userId/accounts', () => {
 
     expect(await ctx.prisma.auditLog.count()).toBe(auditBefore);
     expect(await ctx.prisma.notification.count()).toBe(notificationsBefore);
+  });
+});
+
+/**
+ * MDF-499: ADMIN_TEST_CREDIT_MAX_MINOR is exported from @bmpl/validation
+ * specifically so the admin UI's displayed ceiling and the server's own
+ * rejection can never quote two different numbers — but every existing
+ * fixture in this suite posts EXACTLY the cap (100_000) as a convenient
+ * round max value, so the server's own refusal above it had never actually
+ * been exercised. The UI's client-side check is only a round-trip-saving
+ * hint (WalletOperations.tsx); this proves the server enforces its own
+ * copy of the same ceiling even when a request bypasses that hint entirely.
+ */
+describe('POST /admin/wallet/test-credit — server-side amount ceiling (MDF-499)', () => {
+  it('refuses an amount one minor unit over the ceiling, even sent directly with no client-side hint involved', async () => {
+    const customer = await registerCustomer(`target_${uniq()}@example.com`);
+    const r = await post(admin, 'admin/wallet/test-credit', {
+      userId: customer.userId,
+      amountMinor: ADMIN_TEST_CREDIT_MAX_MINOR + 1,
+      reason: 'MDF-499 over-cap probe',
+    });
+    expect(r.status).toBe(400);
+    // Registration creates a USER wallet account eagerly (auth.service.ts:70)
+    // -- the refusal must mean no credit posted, not that the account itself
+    // never existed.
+    const accounts = await get(admin, `admin/wallet/users/${customer.userId}/accounts`);
+    expect(accounts.body[0]?.cachedBalanceMinor ?? 0).toBe(0);
+  });
+
+  it('accepts exactly the ceiling amount — the cap is inclusive, not exclusive', async () => {
+    const customer = await registerCustomer(`target_${uniq()}@example.com`);
+    const r = await post(admin, 'admin/wallet/test-credit', {
+      userId: customer.userId,
+      amountMinor: ADMIN_TEST_CREDIT_MAX_MINOR,
+      reason: 'MDF-499 at-cap probe',
+    });
+    expect(r.status).toBe(201);
   });
 });

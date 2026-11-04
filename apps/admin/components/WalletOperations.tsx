@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ADMIN_TEST_CREDIT_MAX_MINOR } from '@bmpl/validation';
 import { api, type ApiError } from '../lib/api';
@@ -259,6 +259,15 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
   const [note, setNote] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  // Guards the race Dwight reproduced (MDF-499): pick A (status fetch starts),
+  // pick B before A resolves (status fetch starts too), A resolves LAST --
+  // without this, A's balance/status would render under B's name. Every path
+  // that changes WHICH identity is current (a new pick, a manual clear, an
+  // edited id) bumps this; a resolution only commits if it is still the
+  // newest one requested, so a stale response is discarded rather than
+  // overwriting whatever the admin is now looking at.
+  const loadGenerationRef = useRef(0);
+
   const account = accounts?.[0] ?? null;
   const amountMinor = Math.round(Number(amount) * 100);
   const overCeiling = Number.isFinite(amountMinor) && amountMinor > ADMIN_TEST_CREDIT_MAX_MINOR;
@@ -272,6 +281,7 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
     reason.trim().length >= 3;
 
   function clearSelection() {
+    loadGenerationRef.current += 1;
     setUserId('');
     setResolved(null);
     setAccounts(null);
@@ -280,6 +290,7 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
   }
 
   function changeUserId(value: string) {
+    loadGenerationRef.current += 1;
     setUserId(value);
     // Any edit invalidates the last lookup -- the form must re-confirm
     // identity for whatever id is in the box now, not the one it was for.
@@ -290,14 +301,18 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
   }
 
   async function loadStatus(id: string) {
+    const generation = ++loadGenerationRef.current;
     setStatusBusy(true);
     setStatusErr(null);
     try {
-      setAccounts(await fetchUserWalletAccounts(id));
+      const rows = await fetchUserWalletAccounts(id);
+      if (loadGenerationRef.current !== generation) return; // superseded by a later pick/clear/edit
+      setAccounts(rows);
     } catch (e) {
+      if (loadGenerationRef.current !== generation) return;
       setStatusErr((e as ApiError).message ?? 'Could not load current wallet status.');
     } finally {
-      setStatusBusy(false);
+      if (loadGenerationRef.current === generation) setStatusBusy(false);
     }
   }
 
@@ -514,7 +529,16 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
     account?.status === 'ACTIVE' ? 'lock' : account?.status === 'LOCKED' ? 'unlock' : null;
   const valid = !!resolved && resolved.id === userId.trim() && !!account && !!action && reason.trim().length >= 3;
 
+  // Guards the race Dwight reproduced (MDF-499): pick A (status fetch starts),
+  // pick B before A resolves (status fetch starts too), A resolves LAST --
+  // without this, A's status would render under B's name and derive the
+  // wrong lock/unlock DIRECTION for B. Every path that changes which
+  // identity is current bumps this; a resolution only commits (and only
+  // clears lookupBusy) if it is still the newest one requested.
+  const loadGenerationRef = useRef(0);
+
   function clearSelection() {
+    loadGenerationRef.current += 1;
     setUserId('');
     setResolved(null);
     setAccounts(null);
@@ -522,6 +546,7 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
   }
 
   function changeUserId(value: string) {
+    loadGenerationRef.current += 1;
     setUserId(value);
     setResolved(null);
     setAccounts(null);
@@ -531,6 +556,7 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
   async function lookup() {
     const id = userId.trim();
     if (!id) return;
+    const generation = ++loadGenerationRef.current;
     setLookupBusy(true);
     setLookupErr(null);
     setResolved(null);
@@ -540,13 +566,15 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
         api.get<ResolvedAccount>(`/admin/users/${encodeURIComponent(id)}`),
         fetchUserWalletAccounts(id),
       ]);
+      if (loadGenerationRef.current !== generation) return; // superseded by a later pick/clear/edit
       setResolved(person);
       setAccounts(userAccounts);
     } catch (e) {
+      if (loadGenerationRef.current !== generation) return;
       const ex = e as ApiError;
       setLookupErr(ex.message ?? 'Could not look up that account.');
     } finally {
-      setLookupBusy(false);
+      if (loadGenerationRef.current === generation) setLookupBusy(false);
     }
   }
 
@@ -555,19 +583,23 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
   // same USER-type filter `lookup()` uses, so the offered direction is
   // derived identically regardless of which path resolved the account.
   async function selectAccount(picked: ResolvedAccount) {
+    const generation = ++loadGenerationRef.current;
     setUserId(picked.id);
     setResolved(picked);
     setLookupErr(null);
     setAccounts(null);
     setLookupBusy(true);
     try {
-      setAccounts(await fetchUserWalletAccounts(picked.id));
+      const rows = await fetchUserWalletAccounts(picked.id);
+      if (loadGenerationRef.current !== generation) return; // superseded by a later pick/clear/edit
+      setAccounts(rows);
     } catch (e) {
+      if (loadGenerationRef.current !== generation) return;
       const ex = e as ApiError;
       setLookupErr(ex.message ?? 'Could not look up that account.');
       setResolved(null);
     } finally {
-      setLookupBusy(false);
+      if (loadGenerationRef.current === generation) setLookupBusy(false);
     }
   }
 
