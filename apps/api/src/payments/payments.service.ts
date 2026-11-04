@@ -788,6 +788,80 @@ export class PaymentsService {
     return { ...this.detailShape(p), customer: { name: `${p.user.firstName} ${p.user.lastName}`, email: p.user.email } };
   }
 
+  /**
+   * Wallet holds reserved against a customer for longer than the given
+   * threshold — money never captured into escrow and never given back. This
+   * is a READ ONLY preview for the stale-hold sweep: it does not release,
+   * expire or otherwise touch a single row.
+   *
+   * Server-side filtered (status + age) and server-side counted (`count()`
+   * run against the same `where` as the page, in the same `Promise.all`), so
+   * the total can never be a count of the rows that happened to be returned —
+   * the defect a client-side count over `GET /admin/payments` (200 rows, any
+   * status, no filter) would have had once volume passed 200.
+   *
+   * "Reserved" defaults to HELD + AUTHORIZED — the two WalletHoldStatus values
+   * `summary()` already treats as still outstanding against the wallet.
+   * RELEASED is terminal and is never stale.
+   */
+  async adminListStaleHolds(opts: { status?: 'HELD' | 'AUTHORIZED'; olderThanHours: number; page: number; pageSize: number }) {
+    const cutoff = new Date(Date.now() - opts.olderThanHours * 60 * 60 * 1000);
+    const where: Prisma.WalletHoldWhereInput = {
+      status: opts.status ? opts.status : { in: ['HELD', 'AUTHORIZED'] },
+      heldAt: { lt: cutoff },
+    };
+    const [total, rows] = await Promise.all([
+      this.prisma.walletHold.count({ where }),
+      this.prisma.walletHold.findMany({
+        where,
+        // Oldest (most stale) first — the rows an operator should act on soonest.
+        orderBy: { heldAt: 'asc' },
+        skip: (opts.page - 1) * opts.pageSize,
+        take: opts.pageSize,
+        include: {
+          walletAccount: { select: { userId: true, user: { select: { firstName: true, lastName: true, email: true } } } },
+          payment: {
+            select: {
+              id: true,
+              paymentNumber: true,
+              status: true,
+              orderId: true,
+              shipmentId: true,
+              order: { select: { orderNumber: true } },
+              shipment: { select: { reference: true } },
+            },
+          },
+        },
+      }),
+    ]);
+    return {
+      total,
+      page: opts.page,
+      pageSize: opts.pageSize,
+      holds: rows.map((h) => ({
+        id: h.id,
+        status: h.status,
+        amountMinor: money(h.amountMinor),
+        currency: h.currency,
+        heldAt: h.heldAt,
+        ageHours: Math.floor((Date.now() - h.heldAt.getTime()) / (60 * 60 * 1000)),
+        walletAccountId: h.walletAccountId,
+        // The owning account, resolved by name/email so an administrator can
+        // act without ever copying an internal id — same shape adminList/
+        // adminGet above already resolve a payment's customer with.
+        customer: h.walletAccount.user ? `${h.walletAccount.user.firstName} ${h.walletAccount.user.lastName}` : null,
+        customerEmail: h.walletAccount.user?.email ?? null,
+        payment: {
+          id: h.payment.id,
+          paymentNumber: h.payment.paymentNumber,
+          status: h.payment.status,
+          resourceType: h.payment.orderId ? ('ORDER' as const) : ('SHIPMENT' as const),
+          resourceRef: h.payment.order?.orderNumber ?? h.payment.shipment?.reference ?? null,
+        },
+      })),
+    };
+  }
+
   // ===========================================================================
   // Serialization
   // ===========================================================================
