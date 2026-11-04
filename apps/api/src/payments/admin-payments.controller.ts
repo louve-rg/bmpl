@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { expireHoldsSchema, type ExpireHoldsInput } from '@bmpl/validation';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { adminStaleHoldsQuerySchema, expireHoldsSchema, type AdminStaleHoldsQuery, type ExpireHoldsInput } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, RequirePermission } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
@@ -14,6 +14,17 @@ export class AdminPaymentsController {
   @RequirePermission('payments.read')
   list() {
     return this.payments.adminList();
+  }
+
+  /**
+   * Which wallet holds are stale, and how many there are — the read the
+   * stale-hold sweep needs before anyone runs it. Registered before `:id`
+   * so this literal path segment is never swallowed by the id route.
+   */
+  @Get('stale-holds')
+  @RequirePermission('payments.read')
+  staleHolds(@Query(ZodBody(adminStaleHoldsQuerySchema)) query: AdminStaleHoldsQuery) {
+    return this.payments.adminListStaleHolds(query);
   }
 
   @Get(':id')
