@@ -111,6 +111,28 @@ export function orgStatusView(status: ProviderStatus): { tone: Tone; title: stri
   }
 }
 
+/**
+ * Short word for the Carrier nav badge (MDF-526), shown only while the
+ * SHIPPING_PROVIDER role itself is not yet approved — see
+ * `useCarrierApplicationStatus` and `DashboardNavList`. Deliberately shorter
+ * than `orgStatusView`'s own copy, which belongs on the status page a click
+ * away, not crammed into a nav heading.
+ */
+export function navApplicationBadge(status: ProviderStatus): string {
+  switch (status) {
+    case 'PENDING':
+      return 'Pending';
+    case 'REJECTED':
+      return 'Rejected';
+    case 'SUSPENDED':
+      return 'Suspended';
+    case 'REVOKED':
+      return 'Revoked';
+    case 'APPROVED':
+      return 'Role pending';
+  }
+}
+
 /** BZD-free label for a route-schedule operating status — mirrors `packages/shared/src/service-schedule.ts`'s three values. */
 export function operatingStatusLabel(status: string): string {
   if (status === 'OPERATING') return 'Operating';

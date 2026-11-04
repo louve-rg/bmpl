@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RoleCode } from '@bmpl/shared';
-import { approvedRoles, visibleRoleGroups, type HeldRole, type RoleGatedGroup } from './dashboard-nav';
+import { approvedRoles, visibleRoleGroups, visibleRoleGroupsWithOverrides, type HeldRole, type RoleGatedGroup } from './dashboard-nav';
 
 const role = (roleCode: RoleCode, status = 'APPROVED'): HeldRole => ({ roleCode, status });
 
@@ -64,5 +64,34 @@ describe('approvedRoles', () => {
   it('keeps only APPROVED entries', () => {
     const set = approvedRoles([role('VENDOR'), role('EMPLOYER', 'PENDING'), role('CUSTOMER')]);
     expect([...set].sort()).toEqual(['CUSTOMER', 'VENDOR']);
+  });
+});
+
+describe('visibleRoleGroupsWithOverrides (MDF-526)', () => {
+  const headingsWithOverrides = (roles: HeldRole[], forceVisible: ReadonlySet<string>): string[] =>
+    visibleRoleGroupsWithOverrides(GROUPS, roles, forceVisible).map((g) => g.heading);
+
+  it('behaves exactly like visibleRoleGroups when nothing is forced', () => {
+    expect(headingsWithOverrides([role('DELIVERY_DRIVER')], new Set())).toEqual(headings([role('DELIVERY_DRIVER')]));
+    expect(headingsWithOverrides([role('CUSTOMER')], new Set())).toEqual([]);
+  });
+
+  it('shows a named group even with no approved role at all', () => {
+    expect(headingsWithOverrides([role('CUSTOMER')], new Set(['Driver']))).toEqual(['Driver']);
+  });
+
+  it('slots a forced group into its normal declaration position, not the end', () => {
+    // Driver (index 2) and Marketing (index 4) are both forced; Vendor (index 3)
+    // is earned by role. Declaration order must still be Driver, Vendor, Marketing.
+    expect(headingsWithOverrides([role('VENDOR')], new Set(['Driver', 'Marketing']))).toEqual(['Driver', 'Vendor', 'Marketing']);
+  });
+
+  it('does not force a group that is not named', () => {
+    expect(headingsWithOverrides([role('CUSTOMER')], new Set(['Driver']))).not.toContain('Vendor');
+  });
+
+  it('is additive with genuine role approval, not a replacement for it', () => {
+    // Forcing "Driver" does nothing extra for a user who already qualifies by role.
+    expect(headingsWithOverrides([role('DELIVERY_DRIVER')], new Set(['Driver']))).toEqual(['Driver']);
   });
 });

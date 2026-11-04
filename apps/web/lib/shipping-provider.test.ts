@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPendingProposal, operatingStatusLabel, orgStatusView } from './shipping-provider';
+import { isPendingProposal, navApplicationBadge, operatingStatusLabel, orgStatusView, type ProviderStatus } from './shipping-provider';
 
 describe('isPendingProposal', () => {
   it('is a live proposal only while both accept and reject are still open', () => {
@@ -32,6 +32,18 @@ describe('orgStatusView — mirrors assertProviderOperableStatus/assertProviderC
   it('APPROVED and PENDING read as non-error states', () => {
     expect(orgStatusView('APPROVED').tone).toBe('success');
     expect(orgStatusView('PENDING').tone).toBe('info');
+  });
+});
+
+describe('navApplicationBadge (MDF-526) — labels the Carrier nav heading legibly while the role is not yet approved', () => {
+  it('gives every ProviderStatus a short, distinct word', () => {
+    const statuses: ProviderStatus[] = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', 'REVOKED'];
+    const labels = statuses.map(navApplicationBadge);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it('APPROVED still reads as not-yet-live, since the badge only renders before role approval', () => {
+    expect(navApplicationBadge('APPROVED')).toMatch(/pending/i);
   });
 });
 
