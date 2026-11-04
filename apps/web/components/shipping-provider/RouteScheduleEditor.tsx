@@ -14,6 +14,14 @@ import { operatingStatusLabel } from '../../lib/shipping-provider';
  * apps/admin and apps/web are separate Next apps with no shared component
  * import, so this is a deliberate, behavior-preserving port, not a parallel
  * reimplementation — same fields, same endpoints shape, same defaults.
+ *
+ * MDF-528: owner ruling was "allow" — these controls stay exactly as built.
+ * The one thing the ruling added is the two disclosure lines below: marking
+ * a day or a date NOT_OPERATING feeds the pre-existing multimodal planner
+ * and removes this route from customer quotes on that day/date (no price
+ * field is touched; the effect is through route selection). A carrier who
+ * does not know that can suppress its own work by accident, so it is said
+ * next to the controls that cause it, not in a help page.
  */
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -136,6 +144,10 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
 
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Weekly pattern</h3>
       <p className="mt-1 text-xs text-slate-500">A day with no exception below follows this pattern. Absent entirely, a route is treated as operating.</p>
+      <Alert tone="warning" className="mt-2">
+        Marking a day "Not operating" takes this route out of customer quotes on that day of the week — you would be turning off your
+        own availability, not just labeling a calendar.
+      </Alert>
       <div className="mt-2 grid gap-2 sm:grid-cols-7">
         {days.map((d, i) => (
           <div key={d.dayOfWeek} className="rounded-md border border-slate-200 p-2">
@@ -176,6 +188,9 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
 
       <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Date-specific exceptions</h3>
       <p className="mt-1 text-xs text-slate-500">A known future closure, a holiday you observe, a one-off reduced run — overrides the weekly pattern for that date only.</p>
+      <Alert tone="warning" className="mt-2">
+        Adding a "Not operating" exception takes this route out of customer quotes on that date.
+      </Alert>
       {exceptions.length === 0 ? (
         <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">No exceptions configured.</p>
       ) : (
