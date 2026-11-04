@@ -195,7 +195,7 @@ describe('D5 — the provider status transition table', () => {
     expect(suspended.body.status).toBe('SUSPENDED');
     expect(suspended.body.statusReason).toBe('Licence under review.');
 
-    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/reinstate`)).status).toBe(201);
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/reinstate`, { reason: 'Licence cleared.' })).status).toBe(201);
     expect((await ctx.prisma.shippingProviderProfile.findUniqueOrThrow({ where: { id: carrier.profileId } })).status).toBe('APPROVED');
 
     const revoked = await post(admin, `admin/logistics/providers/${carrier.profileId}/revoke`, { reason: 'Repeated handoff failures.' });
@@ -204,6 +204,30 @@ describe('D5 — the provider status transition table', () => {
 
     const audits = await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPPING_PROVIDER_STATUS_CHANGED', targetUserId: carrier.userId }, orderBy: { createdAt: 'asc' } });
     expect(audits.map((a) => (a.newValue as { verb: string }).verb)).toEqual(['APPROVE', 'SUSPEND', 'REINSTATE', 'REVOKE']);
+  });
+
+  it("god's ruling (2026-11-04): lifting a suspension (reinstate) requires a reason, audited the same as suspend/revoke — never a silent flag flip", async () => {
+    const carrier = await registerCarrier('Full Lifecycle Co');
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/approve`)).status).toBe(201);
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/suspend`, { reason: 'Licence under review.' })).status).toBe(201);
+
+    const noReason = await post(admin, `admin/logistics/providers/${carrier.profileId}/reinstate`, {});
+    expect(noReason.status).toBe(400);
+    expect((await ctx.prisma.shippingProviderProfile.findUniqueOrThrow({ where: { id: carrier.profileId } })).status).toBe('SUSPENDED');
+
+    const reinstated = await post(admin, `admin/logistics/providers/${carrier.profileId}/reinstate`, { reason: 'Licence cleared.' });
+    expect(reinstated.status).toBe(201);
+    expect(reinstated.body.status).toBe('APPROVED');
+    // Carrier-VISIBLE statusReason still clears on APPROVED (unchanged D5
+    // convention) — the reason is required and audited, not necessarily
+    // shown back as the current-status reason, same as approve/reopen.
+    expect(reinstated.body.statusReason).toBeNull();
+
+    const audit = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'SHIPPING_PROVIDER_STATUS_CHANGED', targetUserId: carrier.userId, reason: 'Licence cleared.' },
+    });
+    expect(audit).not.toBeNull();
+    expect((audit!.newValue as { verb: string }).verb).toBe('REINSTATE');
   });
 
   it('REJECTED is NOT terminal — the carrier can resubmit, and admin can re-open it too', async () => {
@@ -636,27 +660,36 @@ describe('MDF-500 security fix — status gates NEW commitments, never a continu
 });
 
 describe('MDF-500 addition — the owner ruling requires a revoked carrier\'s shipments to stay administratively visible and recoverable', () => {
-  it('an admin can list a carrier\'s shipments by providerProfileId, including a REVOKED org\'s existing work', async () => {
+  it('an admin can list a carrier\'s shipments by operatedByProviderId, including a REVOKED org\'s existing work, and each leg carries operatedByProviderId for reassignment', async () => {
     const carrier = await makeCarrier('Reef Runner Ltd');
-    const { shipment } = await proposedLeg(carrier.profileId);
+    const { shipment, leg } = await proposedLeg(carrier.profileId);
     expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/revoke`, { reason: 'Safety incident.' })).status).toBe(201);
 
-    const filtered = await get(admin, `admin/logistics/shipments?providerProfileId=${carrier.profileId}`);
+    const filtered = await get(admin, `admin/logistics/shipments?operatedByProviderId=${carrier.profileId}`);
     expect(filtered.status, JSON.stringify(filtered.body)).toBe(200);
     expect(filtered.body.rows.map((r: { id: string }) => r.id)).toContain(shipment.id);
+    const matchedLeg = filtered.body.rows
+      .find((r: { id: string }) => r.id === shipment.id)
+      .legs.find((l: { id: string }) => l.id === leg.id);
+    expect(matchedLeg.operatedByProviderId).toBe(carrier.profileId);
 
     const other = await makeCarrier('Cave Branch Bus Co');
-    const otherFiltered = await get(admin, `admin/logistics/shipments?providerProfileId=${other.profileId}`);
+    const otherFiltered = await get(admin, `admin/logistics/shipments?operatedByProviderId=${other.profileId}`);
     expect(otherFiltered.body.rows.map((r: { id: string }) => r.id)).not.toContain(shipment.id);
   });
 
-  it('an admin can read a carrier\'s current member roster — the read half of add/end member', async () => {
+  it('an admin can read a carrier\'s current member roster, with the name/email needed to confirm WHO it is — the read half of add/end member', async () => {
     const carrier = await makeCarrier('Reef Runner Ltd');
     const roster = await get(admin, `admin/logistics/providers/${carrier.profileId}/members`);
     expect(roster.status, JSON.stringify(roster.body)).toBe(200);
     expect(roster.body).toHaveLength(1);
+    expect(roster.body[0].userId).toBe(carrier.userId);
+    expect(roster.body[0].firstName).toBe('C');
+    expect(roster.body[0].lastName).toBe('U');
+    expect(roster.body[0].email).toBeTruthy();
     expect(roster.body[0].memberRole).toBe('OWNER');
     expect(roster.body[0].status).toBe('ACTIVE');
+    expect(roster.body[0].startedAt).toBeTruthy();
 
     const unknown = await get(admin, `admin/logistics/providers/doesnotexist000000000000/members`);
     expect(unknown.status).toBe(404);

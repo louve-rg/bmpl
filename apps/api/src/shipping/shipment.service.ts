@@ -1531,7 +1531,7 @@ export class ShipmentService {
       // visible and reassignable/recoverable, not merely findable one leg
       // at a time. `some`, not `every`: a multi-leg shipment with only ONE
       // leg on this carrier still needs to be found by it.
-      ...(input.providerProfileId ? { legs: { some: { operatedByProviderId: input.providerProfileId } } } : {}),
+      ...(input.operatedByProviderId ? { legs: { some: { operatedByProviderId: input.operatedByProviderId } } } : {}),
     };
     const [rows, total] = await Promise.all([
       this.prisma.shipment.findMany({
@@ -1550,6 +1550,11 @@ export class ShipmentService {
               destinationHub: { select: { code: true, name: true } },
               assignedDriver: { select: { displayName: true } },
               carrierName: true,
+              // MDF-500: the admin console needs the carrier ORG id, not just
+              // its display name, to know which leg to reassign off a
+              // suspended/revoked carrier — `operator` below is a human
+              // label and cannot be posted back to `setLegOperator`.
+              operatedByProviderId: true,
             },
           },
         },
@@ -1588,6 +1593,7 @@ export class ShipmentService {
           from: l.originHub?.name ?? 'Door',
           to: l.destinationHub?.name ?? 'Door',
           operator: l.assignedDriver?.displayName ?? l.carrierName ?? null,
+          operatedByProviderId: l.operatedByProviderId,
           needsDriver: l.dispatchExhaustedAt != null,
         })),
       })),

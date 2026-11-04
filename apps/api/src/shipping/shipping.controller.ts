@@ -440,9 +440,18 @@ export class AdminLogisticsController {
     return this.providers.suspendProvider(u.userId, id, dto.reason);
   }
 
+  /**
+   * MDF-500/MDF-524, god's ruling (2026-11-04): an ordinary administrative
+   * suspension must be LIFTABLE, with a required reason and the same audit
+   * treatment as suspend/revoke — never a silent flag flip. (Revocation
+   * stays terminal; see `reapply` below, the only way a REVOKED org moves
+   * again, and even that only reaches PENDING, never APPROVED directly.)
+   * `reapply`/`reopen` are unaffected — those are PENDING-for-review paths,
+   * not a lift, and stay reason-optional.
+   */
   @RequirePermission('logistics.manage')
   @Post('providers/:id/reinstate')
-  reinstateProvider(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(providerStatusOptionalNoteSchema)) dto: ProviderStatusOptionalNoteInput) {
+  reinstateProvider(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(providerStatusRequiredReasonSchema)) dto: ProviderStatusRequiredReasonInput) {
     return this.providers.reinstateProvider(u.userId, id, dto.reason);
   }
 

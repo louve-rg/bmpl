@@ -745,7 +745,11 @@ export const shipmentListSchema = z.object({
   // safe completion, reassignment or controlled recovery — this is the
   // discovery filter that makes that possible. Matches any shipment with
   // at least one leg operated by this carrier org (see `listForOps`).
-  providerProfileId: cuidSchema.optional(),
+  // Named for the underlying leg column it matches, not `providerProfileId`
+  // — the admin console (Oscar, MDF-524) was already built against this
+  // name before the two sides reconciled, and the name is arbitrary either
+  // way, so this side matched his rather than making him rework it.
+  operatedByProviderId: cuidSchema.optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });

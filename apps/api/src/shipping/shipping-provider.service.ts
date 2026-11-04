@@ -169,8 +169,15 @@ export class ShippingProviderService {
     const to = providerStatusTarget(action);
     // D5: REJECTED/SUSPENDED/REVOKED need a reason the carrier can see —
     // required here, not merely encouraged, because statusReason is the
-    // ONLY place that reason is ever shown back to them.
-    if ((to === 'REJECTED' || to === 'SUSPENDED' || to === 'REVOKED') && !reason?.trim()) {
+    // ONLY place that reason is ever shown back to them. REINSTATE is the
+    // one addition that does NOT read off its target status (APPROVED is
+    // never otherwise reason-required): god's ruling (2026-11-04,
+    // MDF-500/MDF-524) — lifting a suspension needs the same audit
+    // treatment as suspending it, not a silent flag flip. The controller's
+    // Zod schema already enforces this on the only live caller; checked
+    // again here, by name rather than by target, as defense in depth for
+    // any future caller that reaches this method directly.
+    if (((to === 'REJECTED' || to === 'SUSPENDED' || to === 'REVOKED') || action === 'REINSTATE') && !reason?.trim()) {
       throw new BadRequestException('A reason is required.');
     }
     const carrierVisibleReason = to === 'REJECTED' || to === 'SUSPENDED' || to === 'REVOKED' ? reason!.trim() : null;
@@ -311,8 +318,24 @@ export class ShippingProviderService {
     const rows = await this.prisma.shippingProviderMember.findMany({
       where: { providerProfileId, status: 'ACTIVE' },
       orderBy: [{ memberRole: 'asc' }, { createdAt: 'asc' }],
+      include: { user: { select: { firstName: true, lastName: true, email: true } } },
     });
-    return rows.map((m) => this.serializeMember(m));
+    // Richer than `serializeMember`/`myMembers` on purpose: an admin roster
+    // exists so staff can recognize WHO holds a membership before ending
+    // it, the same reason `admin/users` search returns a name rather than
+    // a bare id — a raw userId told the admin console nothing to confirm
+    // against. Matches the admin console's (Oscar, MDF-524) own shape;
+    // arbitrary either way, so this side matched his already-working code.
+    return rows.map((m) => ({
+      userId: m.userId,
+      firstName: m.user.firstName,
+      lastName: m.user.lastName,
+      email: m.user.email,
+      memberRole: m.memberRole,
+      status: m.status,
+      startedAt: m.createdAt,
+      endedAt: m.endedAt,
+    }));
   }
 
   async addMember(actorId: string, providerProfileId: string, dto: AddProviderMemberInput) {
