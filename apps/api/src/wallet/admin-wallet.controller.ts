@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import { adminTestCreditSchema, adminWalletLockSchema, type AdminTestCreditInput, type AdminWalletLockInput } from '@bmpl/validation';
+import { z } from 'zod';
+import { adminTestCreditSchema, adminWalletLockSchema, type AdminWalletLockInput } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, RequirePermission } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
@@ -18,6 +19,20 @@ import { WalletService } from './wallet.service';
  * lives on the admin payments controller, next to the rest of the payment
  * lifecycle.
  */
+/**
+ * `adminTestCreditSchema` lives in `@bmpl/validation` (shared with the
+ * browser) and stays as-is — the admin console does not send an
+ * idempotency key yet. Extending it HERE, locally, keeps the optional key
+ * entirely inside `apps/api`: no shared package changes, so no Vercel
+ * build cost, and no change forced onto a console that cannot be touched
+ * right now. Once the console starts sending a key, this still parses it
+ * the same way.
+ */
+const adminTestCreditWithKeySchema = adminTestCreditSchema.extend({
+  idempotencyKey: z.string().trim().min(1).max(200).optional(),
+});
+type AdminTestCreditWithKeyInput = z.infer<typeof adminTestCreditWithKeySchema>;
+
 @Controller('admin/wallet')
 export class AdminWalletController {
   constructor(private readonly wallet: WalletService) {}
@@ -53,8 +68,8 @@ export class AdminWalletController {
   @Post('test-credit')
   @RequirePermission('wallet.credit_test')
   @StrictThrottle()
-  testCredit(@CurrentUser() u: AuthContext, @Body(ZodBody(adminTestCreditSchema)) dto: AdminTestCreditInput) {
-    return this.wallet.adminTestCredit(u.userId, dto.userId, BigInt(dto.amountMinor), dto.reason);
+  testCredit(@CurrentUser() u: AuthContext, @Body(ZodBody(adminTestCreditWithKeySchema)) dto: AdminTestCreditWithKeyInput) {
+    return this.wallet.adminTestCredit(u.userId, dto.userId, BigInt(dto.amountMinor), dto.reason, 'BZD', dto.idempotencyKey);
   }
 
   // ---- the fraud/security lock. Addressed by USER (the id an administrator
