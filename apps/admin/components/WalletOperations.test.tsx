@@ -306,7 +306,7 @@ describe('TestCreditCard -- confirm-before-credit (SHIPPING-E2E-CLOSE)', () => {
 });
 
 /**
- * BMPL-COURIER-COMPLETION, R1 + R2: a link back to the resolved customer's
+ * MDF-499, R1 + R2: a link back to the resolved customer's
  * own profile (so an admin working the wallet screen is not stuck searching
  * for the same person again), and the server-mirrored amount ceiling --
  * ADMIN_TEST_CREDIT_MAX_MINOR, BZD 1,000, a pre-existing financial-safety
@@ -314,7 +314,7 @@ describe('TestCreditCard -- confirm-before-credit (SHIPPING-E2E-CLOSE)', () => {
  * defect. The real check is server-side; this is a round-trip-saving hint
  * that must quote the exact same number.
  */
-describe('TestCreditCard -- profile link and amount ceiling (BMPL-COURIER-COMPLETION)', () => {
+describe('TestCreditCard -- profile link and amount ceiling (MDF-499)', () => {
   it('links back to the resolved customer\'s own profile page', async () => {
     stubFetchFull(['wallet.credit_test'], { users: { u1: { id: 'u1', firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' } } });
     await mount();
@@ -620,7 +620,7 @@ describe('WalletLockCard -- name/email search (ADMIN-WALLET-LOOKUP)', () => {
 });
 
 /**
- * BMPL-COURIER-COMPLETION: the owner's usability review of #559's merged
+ * MDF-499: the owner's usability review of #559's merged
  * search found three gaps rather than one -- a resolved customer surviving
  * the search text changing underneath it (the stale-selection bug), no
  * explicit way to abandon a selection, and no wallet status/balance shown
@@ -628,7 +628,7 @@ describe('WalletLockCard -- name/email search (ADMIN-WALLET-LOOKUP)', () => {
  * these loosen any #553 guard: the submit-handler check, the resolved id in
  * the posted body and the status-derived lock direction are untouched.
  */
-describe('TestCreditCard -- wallet status/balance before posting, stale selection, clear (BMPL-COURIER-COMPLETION)', () => {
+describe('TestCreditCard -- wallet status/balance before posting, stale selection, clear (MDF-499)', () => {
   it('shows current wallet status and balance once resolved, and leaves the credit enabled for an ACTIVE wallet', async () => {
     stubFetchFull(['wallet.credit_test'], {
       users: { u1: { id: 'u1', firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' } },
@@ -728,7 +728,7 @@ describe('TestCreditCard -- wallet status/balance before posting, stale selectio
   });
 });
 
-describe('WalletLockCard -- stale selection, loading state, clear (BMPL-COURIER-COMPLETION)', () => {
+describe('WalletLockCard -- stale selection, loading state, clear (MDF-499)', () => {
   it('a resolved customer does not survive the search text changing underneath them', async () => {
     stubFetchFull(['wallet.lock'], {
       search: { jane: [{ id: 'u1', firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' }] },
@@ -813,7 +813,7 @@ describe('WalletLockCard -- stale selection, loading state, clear (BMPL-COURIER-
     expect((document.getElementById('wl-reason') as HTMLInputElement).disabled).toBe(true);
   });
 
-  it('links back to the resolved customer\'s own profile page (BMPL-COURIER-COMPLETION, R1)', async () => {
+  it('links back to the resolved customer\'s own profile page (MDF-499, R1)', async () => {
     stubFetchFull(['wallet.lock'], {
       users: { u1: { id: 'u1', firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' } },
       walletAccounts: { u1: [{ id: 'wa1', type: 'USER', status: 'ACTIVE', currency: 'BZD', cachedBalanceMinor: 1500 }] },

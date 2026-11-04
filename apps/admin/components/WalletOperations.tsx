@@ -85,7 +85,7 @@ interface ResolvedAccount {
  * `onQueryEdit` fires on every keystroke in the search box, independent of
  * whether a search has even run. The caller uses it to drop a stale
  * resolution: a customer resolved a minute ago must not silently survive
- * the admin typing a new name underneath it (BMPL-COURIER-COMPLETION) --
+ * the admin typing a new name underneath it (MDF-499) --
  * the same guarantee the raw id field already gave via `changeUserId`, now
  * extended to this second entry path.
  */
@@ -193,7 +193,7 @@ interface WalletAccountInfo {
  * The one read both cards need once identity resolves: current USER-type
  * wallet status and balance, via the same read-only endpoint
  * (`GET /admin/wallet/users/:userId/accounts`, wallet.read, no audit row).
- * Shared rather than duplicated per-card (BMPL-COURIER-COMPLETION) -- one
+ * Shared rather than duplicated per-card (MDF-499) -- one
  * fetch, one USER-type filter, used by the credit card's status display and
  * the lock card's direction derivation alike.
  */
@@ -226,7 +226,7 @@ async function fetchUserWalletAccounts(userId: string): Promise<WalletAccountInf
  * POST ever fires, so a stale render or a future refactor that moves the
  * button cannot post a credit to an unconfirmed id.
  *
- * Current wallet status/balance (BMPL-COURIER-COMPLETION) is a SEPARATE,
+ * Current wallet status/balance (MDF-499) is a SEPARATE,
  * best-effort fetch after identity resolves, not a second hard gate: the
  * API itself already refuses `topUp` against anything but an ACTIVE wallet
  * (`wallet.service.ts`'s `topUp`), and a brand-new customer legitimately has
@@ -238,7 +238,7 @@ async function fetchUserWalletAccounts(userId: string): Promise<WalletAccountInf
  * difference, not an oversight: losing read access to status is not a
  * reason to also lose the ability to credit an already-confirmed account.
  *
- * `ADMIN_TEST_CREDIT_MAX_MINOR` (BMPL-COURIER-COMPLETION) is a financial-
+ * `ADMIN_TEST_CREDIT_MAX_MINOR` (MDF-499) is a financial-
  * safety ceiling set by product/ops under delegated authority, not an
  * engineering guess -- imported from `@bmpl/validation` so the hint shown
  * here and the server's own rejection can never quote two different numbers.
@@ -490,7 +490,7 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
  * locking requires knowing which direction to offer, and there is no safe
  * default when that read fails, so `selectAccount` still clears the whole
  * resolution rather than leaving a person confirmed with an unknown status
- * (BMPL-COURIER-COMPLETION kept this difference deliberately, see that
+ * (MDF-499 kept this difference deliberately, see that
  * card's own docstring for why its version of this fetch may not).
  *
  * `resolved` can go true a render before `accounts` does (set together in

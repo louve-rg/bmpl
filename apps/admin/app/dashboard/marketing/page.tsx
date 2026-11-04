@@ -1837,7 +1837,7 @@ function AssignPlacementForm({
   // Categories are fetched once, the same list the Categories page itself
   // shows -- the free-typed "Category ID" field this replaced had no lookup
   // at all, so a typo or a stale id silently created a placement that never
-  // rendered anywhere (BMPL-COURIER-COMPLETION). `categories.manage` sits in
+  // rendered anywhere (MDF-503). `categories.manage` sits in
   // the same ADMIN/SUPER_ADMIN bundles as `promotions.manage`, so a holder of
   // this form's own gate normally has it too; a 403 here just disables the
   // category slot rather than taking the whole form down with it.

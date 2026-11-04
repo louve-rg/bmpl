@@ -336,13 +336,13 @@ describe('MarketingPage — promotion-detail panel, two independent permissions 
 });
 
 /**
- * BMPL-COURIER-COMPLETION: "Category ID" used to be a free-typed input with
+ * MDF-503: "Category ID" used to be a free-typed input with
  * no lookup at all -- a typo or a stale id created a placement that would
  * silently never render anywhere. It is now a real selection from the same
  * category list the Categories page shows, filtered to visible categories,
  * and the form will not submit a category placement until one is chosen.
  */
-describe('AssignPlacementForm — real category selection, not a typed id (BMPL-COURIER-COMPLETION)', () => {
+describe('AssignPlacementForm — real category selection, not a typed id (MDF-503)', () => {
   async function openForm() {
     await mount();
     clickButton('Assign a campaign');

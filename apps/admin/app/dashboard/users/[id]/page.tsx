@@ -65,7 +65,7 @@ export default async function UserDetailPage({ params }: { params: { id: string 
   // Fetched only when the viewer actually holds wallet.read, same fail-closed
   // shape as the permission flags above: a 403 (or the permission simply
   // being absent) means this section does not render rather than erroring
-  // the whole page (BMPL-COURIER-COMPLETION). Without this, a fraud report
+  // the whole page (MDF-499). Without this, a fraud report
   // on this exact person left the admin with nothing on this screen about
   // their wallet at all -- the same shape of gap as the lookup-by-id-only
   // defect this card fixed one screen over.

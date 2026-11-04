@@ -6,7 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /**
- * BMPL-COURIER-COMPLETION, ruling R1: the user detail page used to say
+ * MDF-499, ruling R1: the user detail page used to say
  * nothing at all about the person's wallet -- an admin reviewing a fraud
  * report had to leave this screen and search for the same person again on
  * the wallet page just to see their status and balance. This is a SERVER
@@ -90,7 +90,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('UserDetailPage — wallet visibility, gated on wallet.read (BMPL-COURIER-COMPLETION)', () => {
+describe('UserDetailPage — wallet visibility, gated on wallet.read (MDF-499)', () => {
   it('shows wallet status, balance and a link to the wallet console when the viewer holds wallet.read', async () => {
     stubFetch({ adminPermissions: ['users.read', 'wallet.read'] });
     await mount();

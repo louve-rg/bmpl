@@ -128,7 +128,7 @@ describe('admin-controlled ad placement + dual eligibility', () => {
   });
 
   /**
-   * BMPL-COURIER-COMPLETION: the admin console used to post a free-typed
+   * MDF-503: the admin console used to post a free-typed
    * "Category ID" straight through with no existence check at all -- a
    * typo or a stale id would create a row that silently never rendered
    * anywhere, discoverable only by asking why an ad never showed up. The

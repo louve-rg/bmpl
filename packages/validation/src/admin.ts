@@ -48,7 +48,7 @@ export type SetUserTestFlagInput = z.infer<typeof setUserTestFlagSchema>;
  * (BZD cents): BZD 1,000 per credit. Pre-existing (a1ad2114) — the real
  * defect here was never a missing ceiling, it was an INVISIBLE one: nothing
  * client-side ever surfaced this number, so a larger amount just got a
- * generic rejection with no explanation (BMPL-COURIER-COMPLETION). A
+ * generic rejection with no explanation (MDF-499). A
  * constraint someone else imposed gets lifted deliberately, with a reason,
  * or it is drift — nobody here knows why 1,000 was chosen, which is reason
  * enough not to raise it. Exported so the admin UI can mirror it as a
