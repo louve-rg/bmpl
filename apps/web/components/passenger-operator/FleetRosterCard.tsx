@@ -179,9 +179,9 @@ export function FleetRosterCard() {
 
 /**
  * The operator's ask. It creates a PENDING invitation only — the driver joins
- * by accepting it. Finds the driver by name against the directory — no raw
- * driver id is ever shown or typed; the id picked from a search result is
- * carried silently into the invitation.
+ * by accepting it. Finds the driver by name against the directory
+ * (MDF-COURIER) — no raw driver id is ever shown or typed; the id picked from
+ * a search result is carried silently into the invitation.
  */
 function InviteDriver({ onDone }: { onDone: () => Promise<void> }) {
   const [open, setOpen] = useState(false);

@@ -478,7 +478,7 @@ describe('the simulation boundary', () => {
 });
 
 /**
- * Discovery — the front door onto the asks above (BMPL-COURIER-COMPLETION).
+ * Discovery — the front door onto the asks above (MDF-COURIER).
  * Neither side could find a counterparty without already holding its raw
  * profile id; these two reads fix that without touching the write side at
  * all. The cases mirrored here are the exact ones `invite`/`request` already
