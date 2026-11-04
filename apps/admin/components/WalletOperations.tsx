@@ -58,8 +58,35 @@ export function WalletOperations({ onChanged }: { onChanged?: () => void }) {
   );
 }
 
+interface ResolvedAccount {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
+/**
+ * This card used to post straight to a raw, free-text user id with no
+ * lookup and no confirmation -- an admin who mistyped or pasted the wrong
+ * id would credit the wrong account, a real customer included, with no
+ * signal until after the write had already happened (SHIPPING-E2E-CLOSE,
+ * reported against this exact field). The fix reuses the admin console's
+ * own existing account lookup (`GET /admin/users/:id`, the same route the
+ * user-detail page calls) rather than building a new one: the typed id
+ * must resolve to a name and email BEFORE the amount/reason fields even
+ * unlock, and the submit button itself names the resolved person, so there
+ * is no way to post a credit without having first seen who it goes to.
+ *
+ * Changing the id after a successful lookup clears the resolution and
+ * re-locks the form -- the credit always fires against whichever account
+ * was most recently resolved for the id currently in the box, never a
+ * stale one left over from an earlier lookup.
+ */
 function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
   const [userId, setUserId] = useState('');
+  const [resolved, setResolved] = useState<ResolvedAccount | null>(null);
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupErr, setLookupErr] = useState<string | null>(null);
   const [amount, setAmount] = useState('80.00');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -67,20 +94,52 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
   const [err, setErr] = useState<string | null>(null);
 
   const amountMinor = Math.round(Number(amount) * 100);
-  const valid = userId.trim().length > 0 && Number.isFinite(amountMinor) && amountMinor >= 100 && reason.trim().length >= 3;
+  const valid =
+    !!resolved &&
+    resolved.id === userId.trim() &&
+    Number.isFinite(amountMinor) &&
+    amountMinor >= 100 &&
+    reason.trim().length >= 3;
+
+  function changeUserId(value: string) {
+    setUserId(value);
+    // Any edit invalidates the last lookup -- the form must re-confirm
+    // identity for whatever id is in the box now, not the one it was for.
+    setResolved(null);
+    setLookupErr(null);
+  }
+
+  async function lookup() {
+    const id = userId.trim();
+    if (!id) return;
+    setLookupBusy(true);
+    setLookupErr(null);
+    setResolved(null);
+    try {
+      const account = await api.get<ResolvedAccount>(`/admin/users/${encodeURIComponent(id)}`);
+      setResolved(account);
+    } catch (e) {
+      const ex = e as ApiError;
+      setLookupErr(ex.message ?? 'Could not look up that account.');
+    } finally {
+      setLookupBusy(false);
+    }
+  }
 
   async function submit() {
+    if (!resolved || resolved.id !== userId.trim()) return;
     setBusy(true);
     setErr(null);
     setNote(null);
     try {
       const res = await api.post<{ availableMinor: number }>('/admin/wallet/test-credit', {
-        userId: userId.trim(),
+        userId: resolved.id,
         amountMinor,
         reason: reason.trim(),
       });
-      setNote(`Posted ${money(amountMinor)}. Their available balance is now ${money(res.availableMinor)}.`);
+      setNote(`Posted ${money(amountMinor)} to ${resolved.firstName} ${resolved.lastName}. Their available balance is now ${money(res.availableMinor)}.`);
       setUserId('');
+      setResolved(null);
       setReason('');
       onChanged?.();
     } catch (e) {
@@ -109,16 +168,40 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
 
       <div className="mt-3 space-y-3">
         <Field label="Customer user ID" htmlFor="tc-user">
+          <div className="flex gap-2">
+            <input
+              id="tc-user"
+              value={userId}
+              onChange={(e) => changeUserId(e.target.value)}
+              placeholder="cmsgz…"
+              className={input}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={lookup}
+              disabled={!userId.trim() || lookupBusy}
+              className="min-h-[44px] shrink-0"
+            >
+              {lookupBusy ? 'Looking up…' : 'Look up'}
+            </Button>
+          </div>
+        </Field>
+        {lookupErr && <Alert tone="warning">{lookupErr}</Alert>}
+        {resolved && (
+          <Alert tone="info">
+            This will credit <strong>{resolved.firstName} {resolved.lastName}</strong> ({resolved.email}).
+          </Alert>
+        )}
+        <Field label="Amount (BZ$)" htmlFor="tc-amount">
           <input
-            id="tc-user"
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            placeholder="cmsgz…"
+            id="tc-amount"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            inputMode="decimal"
+            disabled={!resolved}
             className={input}
           />
-        </Field>
-        <Field label="Amount (BZ$)" htmlFor="tc-amount">
-          <input id="tc-amount" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" className={input} />
         </Field>
         <Field label="Reason (recorded in the audit log)" htmlFor="tc-reason">
           <input
@@ -126,11 +209,16 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Why this credit is being granted"
+            disabled={!resolved}
             className={input}
           />
         </Field>
         <Button onClick={submit} disabled={!valid || busy} className="min-h-[44px]">
-          {busy ? 'Posting…' : `Post ${money(Number.isFinite(amountMinor) ? amountMinor : 0)} test credit`}
+          {busy
+            ? 'Posting…'
+            : resolved
+              ? `Confirm: credit ${money(Number.isFinite(amountMinor) ? amountMinor : 0)} to ${resolved.firstName} ${resolved.lastName}`
+              : `Post ${money(Number.isFinite(amountMinor) ? amountMinor : 0)} test credit`}
         </Button>
       </div>
     </Card>
