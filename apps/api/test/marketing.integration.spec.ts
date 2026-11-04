@@ -318,8 +318,9 @@ describe('assignPlacement: categoryId existence, visibility, and the new-vs-exis
     // race is closed. It is a BEHAVIOUR assertion only (exactly one row, no
     // raw 500). The actual authority against the real race is the P2002 catch
     // added to assignPlacement (mirroring passenger-affiliation.service.ts's
-    // createAsk); a two-connection concurrency harness to prove the race
-    // itself was explicitly ruled out as not worth the cost (MDF-503).
+    // createAsk). A two-connection concurrency harness to prove the race
+    // itself is being built separately (MDF-503 follow-up); until it reports,
+    // this case must not be read as proof the race is closed.
   });
 });
 
