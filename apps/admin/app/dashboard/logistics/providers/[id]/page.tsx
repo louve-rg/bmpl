@@ -64,12 +64,24 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Selec
  * reading in the banner copy below, not the "terminal" framing -- that
  * framing is what was wrong, not the `reapply` button.
  *
- * STILL NOT READY (Pam's §9, explicit: "do not wire the console to these
- * until that section says done") -- unchanged from the prior pass, each
- * detected defensively rather than assumed:
- *   - GET /admin/logistics/providers/:id/members -> Member[]
- *   - GET /admin/logistics/shipments?operatedByProviderId=<id>, with each
- *     row's `legs[]` carrying `operatedByProviderId`.
+ * ALL FIVE ASSUMED SHAPES NOW CONFIRMED (Pam's §11, 2026-11-04): she read
+ * this file directly rather than guessing, and corrected her own branch
+ * to match the working code rather than asking for a rewrite --
+ *   - GET /admin/logistics/providers/:id/members -> Member[]: path was
+ *     already real, response shape was not ({id, providerProfileId,
+ *     userId, memberRole, status, endedAt} with no name/email); she
+ *     changed it server-side to match `Member` here exactly. Only ACTIVE
+ *     rows are returned, so the client-side ENDED filter below is a
+ *     no-op by design, not dead code.
+ *   - Shipments filter param: she renamed hers (`providerProfileId`) to
+ *     `operatedByProviderId` to match what this page already sends.
+ *   - Per-leg `operatedByProviderId`: was missing from the shipment-list
+ *     response entirely; she added it, so `legsCarryProviderId` below
+ *     should now resolve true rather than false.
+ * The 404/field-presence detection in `MembersCard`/`InFlightShipmentsCard`
+ * is left exactly as it was -- it was always meant to upgrade itself the
+ * moment real data arrives, with no second push required, and that is
+ * exactly what happens now with no code change.
  */
 
 type ProviderStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED' | 'REVOKED';
