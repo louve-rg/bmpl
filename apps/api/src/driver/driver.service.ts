@@ -673,6 +673,44 @@ export class DriverService {
       .filter((d) => d.roleStatus === 'APPROVED' && !d.licenceExpired && d.vehicles.length > 0);
   }
 
+  /**
+   * Has ANYONE ever been configured to serve this district — independent of
+   * who happens to be online right now?
+   *
+   * Deliberately a different question from `eligibleDriversForDistrict`'s
+   * pool: that one answers "who could take a job this second" and is
+   * naturally zero when every qualifying driver is offline, which is a
+   * normal, temporary, self-correcting state. This one answers "would ANY
+   * number of drivers coming online ever fix it" — a district with zero
+   * rows here will stay undeliverable no matter how long a customer waits,
+   * because nobody has ever declared it a place they serve. Confusing the
+   * two is exactly how a customer paying for an unreachable district looks
+   * identical, from the API's point of view, to one paying for a district
+   * where a driver is simply offline for their lunch break.
+   *
+   * `availability`/online status is deliberately NOT checked — that is the
+   * live fact the other method already owns. A role still APPROVED, a
+   * profile still active, and an active service-area row for the district
+   * is the structural fact this one owns: it does not change from minute to
+   * minute, only from an admin decision or an application being approved.
+   */
+  async districtHasConfiguredCoverage(district: string, isTest: boolean): Promise<boolean> {
+    const approved = await this.prisma.userRole.count({
+      where: {
+        roleCode: 'DELIVERY_DRIVER',
+        status: 'APPROVED',
+        user: {
+          driverProfile: {
+            isActive: true,
+            isTest,
+            serviceAreas: { some: { district: district as never, isActive: true } },
+          },
+        },
+      },
+    });
+    return approved > 0;
+  }
+
   // ===========================================================================
   // Dashboard (aggregate; safe for a pending applicant to view)
   // ===========================================================================

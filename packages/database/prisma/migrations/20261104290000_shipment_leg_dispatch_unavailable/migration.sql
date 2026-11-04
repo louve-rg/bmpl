@@ -1,0 +1,42 @@
+-- A customer could pay for a driver-worked leg (FIRST_MILE/LAST_MILE/DIRECT)
+-- that nobody could ever fulfil, and nothing in the system ever told anyone.
+--
+-- WHAT WAS WRONG. ShipmentDispatchService#dispatchLeg's "no eligible driver
+-- is available" branch returned SKIPPED and did nothing else. offerCount only
+-- increments when a real offer is made, so a leg with zero candidates could
+-- NEVER reach the existing EXHAUSTED branch (markExhausted) either -- it sat
+-- SKIPPED forever, re-checked every 20s by the sweeper, silent to ops and to
+-- the customer who paid for it. Measured in production: one of Belize's six
+-- districts has any configured driver coverage at all.
+--
+-- THE FIX. Two parts, in apps/api/src, both additive:
+--   1. Booking time (ShipmentService#runCreate) now classifies each
+--      driver-worked leg's district as SUPPORTED / UNSUPPORTED / TEMPORARILY
+--      UNAVAILABLE (packages/shared/src/service-coverage.ts, pure and unit
+--      tested). UNSUPPORTED (nobody has EVER configured coverage there)
+--      refuses the booking before any wallet lock, with a plain reason.
+--      TEMPORARILY_UNAVAILABLE (coverage configured, nobody online this
+--      second) does NOT refuse -- an otherwise-valid future booking must
+--      still go through -- but rides a `fulfilmentNotices` field in the
+--      booking response instead of silently succeeding.
+--   2. Dispatch time (ShipmentDispatchService#recordUnavailableIfNew) makes
+--      a leg stuck SKIPPED visible the first time it is observed: one audit
+--      row (this migration's new value) plus an admin alert (existing
+--      logistics.read notifyAdmins channel) plus, new, a customer-facing
+--      in-app notification. Same transition-only dedup as the existing
+--      SHIPMENT_LEG_DISPATCH_DEFERRED mechanism immediately above it in the
+--      source file -- reusing the pattern, not inventing a second one -- so
+--      one alert per episode, not one every sweep tick, and a later
+--      SHIPMENT_LEG_OFFERED row naturally resets it.
+--
+-- No ShipmentLeg column was needed: the dedup reads the most recent relevant
+-- AuditLog row for the leg (exactly like SHIPMENT_LEG_DISPATCH_DEFERRED
+-- already does), so this migration is nothing but one new enum value.
+--
+-- Additive and idempotent; no existing column, table or enum value is
+-- touched, changed or removed.
+--
+-- ROLLBACK: none needed -- AuditAction values are never removed (see
+-- packages/database/CLAUDE.md §2, "Enum values").
+
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE';

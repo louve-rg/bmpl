@@ -154,5 +154,10 @@ export const NOTIFICATION_EVENTS = [
   // BMPL-345: the shipment's own ETA moved materially since the customer was
   // last told — never emitted while the new ETA is UNKNOWN.
   'SHIPMENT_ETA_CHANGED',
+  // A driver-worked leg has sat with zero eligible drivers past the alert
+  // threshold — distinct from SHIPMENT_LEG_DISPATCH_EXHAUSTED
+  // (that one means a driver existed and declined the offer N times; this one
+  // means nobody was ever offered it because nobody eligible was online).
+  'SHIPMENT_COURIER_UNAVAILABLE',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];

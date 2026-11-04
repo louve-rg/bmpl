@@ -11,7 +11,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
 import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
 import { DELIVERY_PIN_MAX_ATTEMPTS } from '@bmpl/shared';
 
@@ -157,6 +157,7 @@ beforeEach(async () => {
   await ctx.prisma.driverProfile.deleteMany();
   await enableDispatch(true);
   await seedNetwork();
+  await seedBaselineCourierCoverage(ctx.prisma);
 });
 
 describe('a leg that enforces a pickup code fails closed; one that does not keeps working (SHIPPING-E2E, RULING 1)', () => {
