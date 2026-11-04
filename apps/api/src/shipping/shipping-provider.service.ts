@@ -18,7 +18,7 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SCHEDULABLE_LEG_STATUSES, ShipmentService } from './shipment.service';
 import { LogisticsNetworkService } from './logistics-network.service';
-import { assertOperableProvider, providerEligibilityReasons } from './provider-eligibility';
+import { assertOperableProvider, assertProviderOperableStatus, providerEligibilityReasons } from './provider-eligibility';
 
 /** What the carrier-operator projection is allowed to read. Nothing more is loaded. */
 const PROVIDER_LEG_INCLUDE = {
@@ -492,6 +492,16 @@ export class ShippingProviderService {
    * discarded: a carrier gets back their own leg shape, never the customer's
    * details.
    */
+  // MDF-500 security review (Dwight, 2026-11-04): a SUSPENDED/REVOKED org
+  // can still depart/arrive a leg it already accepted before the status
+  // change. DELIBERATELY LEFT AS-IS — god's ruling, not an oversight:
+  // whether a suspended carrier may finish a leg already in transit is a
+  // BUSINESS decision (stopping it dead strands a real shipment mid-journey
+  // for a real customer), not a security one, and the owner is deciding it.
+  // Do not "fix" this by writing isActive=false on suspend — that overloads
+  // a flag that means something else everywhere else in this file and
+  // strands in-flight legs as an accidental side effect. This comment
+  // stands until that answer lands.
   async depart(userId: string, legId: string, input: LegDepartInput) {
     await this.assertMyAcceptedLeg(userId, legId);
     await this.shipments.departLeg(legId, input, { userId });
@@ -519,6 +529,12 @@ export class ShippingProviderService {
     });
     if (leg.operatorAcceptedAt) throw new BadRequestException('This leg was already accepted.');
     if (leg.operatorRejectedAt) throw new BadRequestException('This leg was already rejected and is no longer yours to accept.');
+    // MDF-500 security fix: accepting is a NEW commitment, not a
+    // continuation of one already made. assertMyLeg above proves OWNERSHIP
+    // only — a SUSPENDED/REVOKED org's isActive is untouched by design, so
+    // it would otherwise keep passing assertMyLeg and be able to accept a
+    // proposal it should never have been able to take on.
+    await assertProviderOperableStatus(this.prisma, leg.operatedByProviderId!);
     const claimed = await this.prisma.shipmentLeg.updateMany({
       where: { id: leg.id, operatedByProviderId: leg.operatedByProviderId, operatorAcceptedAt: null, operatorRejectedAt: null },
       data: { operatorAcceptedAt: new Date() },
@@ -548,6 +564,12 @@ export class ShippingProviderService {
    * simply needs a NEW operator proposed — the same shape W4's
    * "no eligible driver available" escalation already uses for courier legs
    * with nobody to carry them.
+   *
+   * MDF-500 security review: NOT status-gated, deliberately. Rejecting —
+   * giving a proposal BACK — is not a new commitment the way accepting is;
+   * there is nothing here for a suspended/revoked org to be refused. A
+   * revoked carrier giving up work it was never going to fulfil is the
+   * behaviour this exists for, not a hole.
    */
   async rejectLeg(userId: string, legId: string, input: LegOperatorRejectInput) {
     await this.assertMyLeg(userId, legId);
@@ -601,6 +623,16 @@ export class ShippingProviderService {
    * BMPL-346: the carrier's own commitment for their leg's departure and/or
    * arrival — same ownership gate as depart/arrive, same underlying writer
    * the admin desk uses (`ShipmentService.scheduleLeg`).
+   *
+   * MDF-500 security review: god's ruling named depart/arrive explicitly as
+   * "leave alone, business decision pending the owner" and did not name
+   * this method. Treated the same way here — same gate
+   * (`assertMyAcceptedLeg`), same already-accepted leg, recording a timing
+   * detail on work this org is already executing rather than taking on
+   * anything new — but that reading is MINE, not stated outright, so
+   * flagging it rather than deciding it silently. If the owner's answer on
+   * depart/arrive does not extend here the same way, this needs its own
+   * line.
    */
   async schedule(userId: string, legId: string, input: LegScheduleInput) {
     await this.assertMyAcceptedLeg(userId, legId);
@@ -678,6 +710,12 @@ export class ShippingProviderService {
    * only required in the input when genuinely ambiguous. Any ACTIVE member
    * may claim on behalf of their org, not owner-only — this is an
    * operational act like depart/arrive/schedule, not a membership change.
+   *
+   * MDF-500 security review: already correctly status-gated below via
+   * assertOperableProvider — test-confirmed safe (a PENDING/SUSPENDED/
+   * REVOKED org claiming here gets 400, every time). No change needed;
+   * noted so MDF-500-carrier-review.md's write-up has one real line per
+   * method, not a guess.
    */
   async claimRoute(userId: string, routeId: string, input: ClaimRouteOperatorInput) {
     const providerProfileId = await this.resolveMyOrgId(userId, input.providerProfileId);
@@ -707,7 +745,12 @@ export class ShippingProviderService {
 
   /** The reverse: a carrier gives up a route it currently operates. Scoped
    *  by assertMyRoute exactly like depart/arrive/schedule — a 404 on a
-   *  cross-org id, never a 403 that would confirm the route exists. */
+   *  cross-org id, never a 403 that would confirm the route exists.
+   *
+   *  MDF-500 security review: NOT status-gated, deliberately — god's
+   *  explicit ruling. A revoked carrier GIVING UP a route is arguably the
+   *  behaviour wanted, not a hole; there is no new commitment here to
+   *  refuse. */
   async releaseRoute(userId: string, routeId: string) {
     const orgIds = await this.myOrgIds(userId);
     const route = await this.prisma.logisticsRoute.findUnique({ where: { id: routeId }, select: { operatedByProviderId: true } });
@@ -746,18 +789,27 @@ export class ShippingProviderService {
     return this.network.routeSchedule(routeId);
   }
 
+  // MDF-500 security fix: setting/changing a route's own weekly schedule or
+  // exceptions is a NEW commitment about future service, not a continuation
+  // of work already underway — assertMyRoute proves OWNERSHIP only, so a
+  // SUSPENDED/REVOKED org (isActive untouched by design) must be refused
+  // here by status, the same AND-gate claimRoute already applies to a new
+  // claim.
   async setMyRouteWeeklySchedule(userId: string, routeId: string, input: SetRouteWeeklyScheduleInput) {
-    await this.assertMyRoute(userId, routeId);
+    const providerProfileId = await this.assertMyRoute(userId, routeId);
+    await assertProviderOperableStatus(this.prisma, providerProfileId);
     return this.network.setWeeklySchedule(routeId, input, userId);
   }
 
   async addMyRouteScheduleException(userId: string, routeId: string, input: AddRouteScheduleExceptionInput) {
-    await this.assertMyRoute(userId, routeId);
+    const providerProfileId = await this.assertMyRoute(userId, routeId);
+    await assertProviderOperableStatus(this.prisma, providerProfileId);
     return this.network.addScheduleException(routeId, input, userId);
   }
 
   async removeMyRouteScheduleException(userId: string, routeId: string, exceptionId: string) {
-    await this.assertMyRoute(userId, routeId);
+    const providerProfileId = await this.assertMyRoute(userId, routeId);
+    await assertProviderOperableStatus(this.prisma, providerProfileId);
     return this.network.removeScheduleException(routeId, exceptionId, userId);
   }
 
@@ -765,14 +817,18 @@ export class ShippingProviderService {
    * 404 on a cross-org route id, exactly like assertMyLeg: a carrier probing
    * a route id that is real but not theirs learns nothing more than if it did
    * not exist. This is the ONE check that makes the whole schedule surface
-   * safe - every method above calls it before touching a row.
+   * safe - every method above calls it before touching a row. Returns the
+   * validated providerProfileId (additive — existing void-ignoring callers
+   * are unaffected) so a write method that also needs the MDF-500 status
+   * gate does not have to re-fetch the route a second time.
    */
-  private async assertMyRoute(userId: string, routeId: string) {
+  private async assertMyRoute(userId: string, routeId: string): Promise<string> {
     const orgIds = await this.myOrgIds(userId);
     const route = await this.prisma.logisticsRoute.findUnique({ where: { id: routeId }, select: { operatedByProviderId: true } });
     if (!route || !route.operatedByProviderId || !orgIds.includes(route.operatedByProviderId)) {
       throw new NotFoundException('Route not found.');
     }
+    return route.operatedByProviderId;
   }
 
   /* ---- shaping ------------------------------------------------------------ */

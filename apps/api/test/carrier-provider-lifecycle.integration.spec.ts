@@ -488,3 +488,107 @@ describe('self-service scope — own membership and route claim/release', () => 
     expect((await post(carrier.cookies, `shipping/provider/routes/${route.id}/claim`, {})).status).toBe(400);
   });
 });
+
+/**
+ * MDF-500 security review (Dwight, 2026-11-04, test-confirmed on Pam's own
+ * commit 2c55091b before this fix): every self-service ownership gate
+ * checked isActive + membership and NEVER status, because suspend/revoke
+ * deliberately never touch isActive. Net effect, test-confirmed live: a
+ * SUSPENDED carrier departed a leg it already held (201); a REVOKED
+ * carrier ACCEPTED a still-pending leg proposal (201); a revoked carrier
+ * read and released a route it holds. A new assignment to the same
+ * suspended org correctly got 400 — the asymmetry was real.
+ *
+ * God's ruling, split deliberately: NEW commitments (accepting a proposal,
+ * claiming a route — already covered — and changing a route's own weekly
+ * schedule/exceptions) must be refused once SUSPENDED or REVOKED.
+ * CONTINUING already-accepted work (depart/arrive) and GIVING WORK BACK
+ * (reject/release) are deliberately left alone — the first is a business
+ * decision awaiting the owner, the second was never a hole.
+ */
+describe('MDF-500 security fix — status gates NEW commitments, never a continuation or a give-back', () => {
+  it('a SUSPENDED carrier cannot accept a still-pending leg proposal — the exact gap Dwight found, now closed', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/suspend`, { reason: 'Licence under review.' })).status).toBe(201);
+
+    const accept = await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {});
+    expect(accept.status).toBe(400);
+    expect(accept.body.message).toContain('suspended');
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } })).operatorAcceptedAt).toBeNull();
+  });
+
+  it('a REVOKED carrier cannot accept a still-pending leg proposal — the sharper case, REVOKED is meant to be the harder stop', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/revoke`, { reason: 'Repeated handoff failures.' })).status).toBe(201);
+
+    const accept = await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {});
+    expect(accept.status).toBe(400);
+    expect(accept.body.message).toContain('revoked');
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } })).operatorAcceptedAt).toBeNull();
+  });
+
+  it('DELIBERATELY UNCHANGED: a SUSPENDED carrier may still depart/arrive a leg it already accepted before suspension — a business decision, not a security one', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/suspend`, { reason: 'Licence under review.' })).status).toBe(201);
+
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(201);
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/arrive`, {})).status).toBe(201);
+
+    // The asymmetry Dwight's review flagged: a NEW assignment to the same
+    // suspended org is correctly refused, even though continuing this one
+    // already-accepted leg is allowed.
+    const s2 = await bookHubToHub();
+    const [newLeg] = await legsOf(s2.id);
+    expect((await setOperator(newLeg!.id, carrier.profileId)).status).toBe(400);
+  });
+
+  it('DELIBERATELY UNCHANGED: a REVOKED carrier may still reject a pending proposal or release a route it operates — giving work BACK is not a new commitment', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrier.profileId);
+    const route = await ctx.prisma.logisticsRoute.findFirstOrThrow({ where: { operatedByProviderId: null } });
+    expect((await post(carrier.cookies, `shipping/provider/routes/${route.id}/claim`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/revoke`, { reason: 'Repeated handoff failures.' })).status).toBe(201);
+
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/reject`, { reason: 'Cannot take it.' })).status).toBe(201);
+    expect((await post(carrier.cookies, `shipping/provider/routes/${route.id}/release`, {})).status).toBe(201);
+    expect((await ctx.prisma.logisticsRoute.findUniqueOrThrow({ where: { id: route.id } })).operatedByProviderId).toBeNull();
+  });
+
+  it('a SUSPENDED carrier cannot set its own route weekly schedule or add/remove a schedule exception — all three are NEW commitments about future service', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const route = await ctx.prisma.logisticsRoute.findFirstOrThrow({ where: { operatedByProviderId: null } });
+    expect((await post(carrier.cookies, `shipping/provider/routes/${route.id}/claim`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/suspend`, { reason: 'Licence under review.' })).status).toBe(201);
+
+    const weekly = await put(carrier.cookies, `shipping/provider/routes/${route.id}/schedule`, {
+      days: [{ dayOfWeek: 1, status: 'OPERATING' }],
+    });
+    expect(weekly.status, `weekly schedule: ${JSON.stringify(weekly.body)}`).toBe(400);
+    expect(weekly.body.message).toContain('suspended');
+
+    const addException = await post(carrier.cookies, `shipping/provider/routes/${route.id}/schedule/exceptions`, {
+      date: '2026-12-25', status: 'NOT_OPERATING', reason: 'Holiday.',
+    });
+    expect(addException.status, `add exception: ${JSON.stringify(addException.body)}`).toBe(400);
+    expect(addException.body.message).toContain('suspended');
+
+    const removeException = await request(ctx.server)
+      .delete(`/api/shipping/provider/routes/${route.id}/schedule/exceptions/nonexistent00000000000000`)
+      .set('Cookie', carrier.cookies);
+    expect(removeException.status, `remove exception: ${JSON.stringify(removeException.body)}`).toBe(400);
+    expect(removeException.body.message).toContain('suspended');
+  });
+
+  it('claimRoute was already correctly gated by status before this fix — a REVOKED carrier still cannot claim', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/revoke`, { reason: 'Repeated handoff failures.' })).status).toBe(201);
+    const route = await ctx.prisma.logisticsRoute.findFirstOrThrow({ where: { operatedByProviderId: null } });
+    const claim = await post(carrier.cookies, `shipping/provider/routes/${route.id}/claim`, {});
+    expect(claim.status).toBe(400);
+    expect(claim.body.message).toContain('revoked');
+  });
+});

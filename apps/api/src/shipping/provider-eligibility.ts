@@ -67,6 +67,37 @@ export async function assertOperableProvider(db: Db, providerProfileId: string, 
 }
 
 /**
+ * MDF-500 security review (Dwight, 2026-11-04): may this carrier
+ * organization take on a NEW commitment regarding work it already holds —
+ * accept a still-pending proposal, change a route's own weekly schedule or
+ * exceptions? Every self-service ownership gate (`myOrgIds`/`assertMyLeg`/
+ * `assertMyRoute`) checks `isActive` + membership and NEVER `status`, so a
+ * SUSPENDED or REVOKED org — whose `isActive` is untouched by
+ * suspend/revoke on purpose, see `transitionStatus`'s own comment — kept
+ * passing every one of them. This is the fix: the same AND-gate
+ * `assertOperableProvider` already applies to a brand-new assignment,
+ * reused here for a commitment on something already owned. Deliberately
+ * NOT applied to `depart`/`arrive`/`schedule` (finishing a leg already
+ * accepted and in flight is a business question the owner is deciding, not
+ * a security one — see those methods' own comments) or to `rejectLeg`/
+ * `releaseRoute` (giving work BACK is not a new commitment, so there is
+ * nothing here for a revoked org to be refused).
+ *
+ * The isTest side of the AND-gate is passed as the profile's OWN isTest —
+ * never the caller's, never derived from the work — because ownership was
+ * already established before this call runs, and an org's isTest side
+ * cannot change after that point; passing it back at itself makes the
+ * isTest-specific reasons structurally unreachable without duplicating
+ * `providerEligibilityReasons`' logic or string-matching its output.
+ */
+export async function assertProviderOperableStatus(db: Db, providerProfileId: string) {
+  const profile = await loadForEligibility(db, providerProfileId);
+  if (!profile) throw new NotFoundException('That carrier does not exist.');
+  const [reason] = providerEligibilityReasons(profile, profile.isTest);
+  if (reason) throw new BadRequestException(`Your organization cannot do this right now: ${reason}.`);
+}
+
+/**
  * D4 — the read-only preview `assertOperableProvider` cannot give: every
  * reason this carrier is ineligible for the given side of the simulation
  * boundary, or none if it may be handed work right now. A flat boolean
