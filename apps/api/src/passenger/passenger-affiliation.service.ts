@@ -111,7 +111,11 @@ export class PassengerAffiliationService {
   //  - role APPROVED for the target role (same check as invite/request)
   //  - isActive, and isTest matching the caller's own side
   //  - driver search: already-in-a-fleet drivers excluded (mirrors
-  //    refuseIfTaken — inviting one always 400s today)
+  //    refuseIfTaken — inviting one always 400s today), AND a driver with a
+  //    PENDING ask already outstanding with this caller (mirrors
+  //    refuseIfPending, MDF-502 follow-up — closed to match the provider
+  //    search below rather than leaving an operator to discover the refusal
+  //    by clicking a driver the directory already knew was unavailable)
   //  - provider search: providers with a PENDING ask already outstanding
   //    with this caller are excluded (mirrors refuseIfPending)
   // Results never carry anything beyond a display identity and the row's own
@@ -129,6 +133,13 @@ export class PassengerAffiliationService {
         providerProfileId: null,
         displayName: { contains: q, mode: 'insensitive' },
         user: { roles: { some: { roleCode: 'PASSENGER_DRIVER', status: 'APPROVED' } } },
+        // Mirrors the provider-search exclusion below, closing the
+        // asymmetry: a driver this caller already invited (PENDING,
+        // uniquely this provider) would 400 as "already awaiting" on a
+        // second invite — the directory must not offer them in the first
+        // place. Uses the same relation and status the write side already
+        // checks (refuseIfPending); no second notion of "pending".
+        affiliations: { none: { providerProfileId: provider.id, status: 'PENDING' } },
       },
       select: { id: true, displayName: true, homeDistrict: true, availability: true, isActive: true },
       orderBy: { displayName: 'asc' },

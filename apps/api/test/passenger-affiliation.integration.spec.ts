@@ -537,6 +537,32 @@ describe('discovery directory', () => {
     expect(blocked.body.message).toMatch(/already drives for a fleet/i);
   });
 
+  it('a driver this operator already invited is excluded from that operator\'s own search — inviting again would 400 anyway (MDF-502 follow-up)', async () => {
+    // Closes the asymmetry: the driver-search exclusion above already
+    // hides an operator the driver is awaiting; this is its mirror on the
+    // operator side, so an operator is never shown a driver a second
+    // invite would immediately refuse.
+    const op = await makeProvider(`Test AlreadyInvited Lines ${uniq()}`);
+    const drv = await makeDriver();
+    expect((await post(op.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: drv.driverProfileId })).status).toBe(201);
+
+    const found = await get(op.cookies, `passenger/provider/affiliations/directory/drivers?q=${encodeURIComponent(drv.displayName.slice(0, -2))}`);
+    expect(found.status).toBe(200);
+    expect(found.body).not.toContainEqual(expect.objectContaining({ id: drv.driverProfileId }));
+    // The exclusion and the write-side refusal agree: inviting the same
+    // driver the directory just hid would 400 for the identical reason.
+    const blocked = await post(op.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: drv.driverProfileId });
+    expect(blocked.status).toBe(400);
+    expect(blocked.body.message).toMatch(/already awaiting/i);
+
+    // A DIFFERENT operator, with no ask of their own outstanding, still
+    // finds the same driver — the exclusion is scoped to THIS caller's own
+    // pending ask, not a blanket "ever invited by anyone" hide.
+    const other = await makeProvider(`Test AlreadyInvited Lines Two ${uniq()}`);
+    const foundByOther = await get(other.cookies, `passenger/provider/affiliations/directory/drivers?q=${encodeURIComponent(drv.displayName.slice(0, -2))}`);
+    expect(foundByOther.body).toContainEqual(expect.objectContaining({ id: drv.driverProfileId }));
+  });
+
   it('an operator already awaiting this driver\'s answer is excluded from that driver\'s own search — requesting again would 400 anyway', async () => {
     const op = await makeProvider(`Test Awaiting Lines ${uniq()}`);
     const drv = await makeDriver();
@@ -567,5 +593,139 @@ describe('discovery directory', () => {
     const forTestDriver = await get(testDrv.cookies, `passenger/driver/affiliations/directory/providers?q=${encodeURIComponent(op.businessName.slice(0, 10))}`);
     expect(forTestDriver.status).toBe(200);
     expect(forTestDriver.body).not.toContainEqual(expect.objectContaining({ id: op.profileId }));
+  });
+
+  /**
+   * MDF-502 follow-up coverage — the four gaps named as unverified when the
+   * directory endpoints landed (d8f9953f): the role guard on the read routes
+   * themselves, the ownership check proven rather than assumed from the
+   * helper, non-APPROVED/inactive counterparties as a disclosure risk (not
+   * merely a correctness nuance), and the unauthenticated query shape.
+   */
+
+  it('the role guard applies to the directory routes themselves, not just the write actions', async () => {
+    const drv = await makeDriver();
+    const op = await makeProvider(`Test Roleguard Lines ${uniq()}`);
+
+    // A driver-only account holds no PASSENGER_PROVIDER role: the
+    // provider-side directory is gated the same as every write route on that
+    // controller — this had never been exercised for a GET before.
+    const wrongSide = await get(drv.cookies, `passenger/provider/affiliations/directory/drivers?q=${encodeURIComponent('anyone')}`);
+    expect(wrongSide.status).toBe(403);
+    const wrongSide2 = await get(op.cookies, `passenger/driver/affiliations/directory/providers?q=${encodeURIComponent('anyone')}`);
+    expect(wrongSide2.status).toBe(403);
+
+    // Unauthenticated: 401 before any role or ownership check runs at all.
+    const anon = await request(ctx.server).get('/api/passenger/provider/affiliations/directory/drivers?q=anyone');
+    expect(anon.status).toBe(401);
+  });
+
+  it('the ownership check is on the session, not a client-suppliable id — proven, not assumed from the helper', async () => {
+    const drv = await makeDriver();
+    const opA = await makeProvider(`Test OwnershipA Lines ${uniq()}`);
+    const opB = await makeProvider(`Test OwnershipB Lines ${uniq()}`);
+
+    // drv is already awaiting opA's own answer to drv's own request, so
+    // drv's own search must exclude opA — but opB has no ask outstanding
+    // with drv at all (the exclusion this mirrors: 'an operator already
+    // awaiting this driver's answer is excluded from that driver's own
+    // search', above — here attacked from the ownership-proof angle).
+    expect((await post(drv.cookies, 'passenger/driver/affiliations/request', { providerProfileId: opA.profileId })).status).toBe(201);
+
+    const plain = await get(drv.cookies, `passenger/driver/affiliations/directory/providers?q=${encodeURIComponent(opA.businessName.slice(0, 10))}`);
+    expect(plain.status).toBe(200);
+    expect(plain.body).not.toContainEqual(expect.objectContaining({ id: opA.profileId }));
+
+    // Smuggling opB's id (or a stray userId) alongside q changes nothing: the
+    // schema strips unknown keys and the service only ever reads identity off
+    // the authenticated session (ownDriverOrThrow(userId)). If it read an id
+    // off the query instead, this call would start returning opA as
+    // available (opB has no pending ask with drv) instead of excluding it.
+    const smuggled = await get(
+      drv.cookies,
+      `passenger/driver/affiliations/directory/providers?q=${encodeURIComponent(opA.businessName.slice(0, 10))}&providerProfileId=${opB.profileId}&userId=${opB.userId}`,
+    );
+    expect(smuggled.status).toBe(200);
+    expect(smuggled.body).toEqual(plain.body);
+    expect(smuggled.body).not.toContainEqual(expect.objectContaining({ id: opA.profileId }));
+  });
+
+  it('a not-yet-approved role is excluded from the directory, in both directions — a leak here would disclose who applied', async () => {
+    const op = await makeProvider(`Test Pendingrole Lines ${uniq()}`);
+    const pendingDrv = await makeDriver();
+    // Demote the role back to PENDING after makeDriver's own approval — the
+    // profile exists, as it would mid-application, but is not yet
+    // operational and must not be discoverable as if it were.
+    await ctx.prisma.userRole.update({
+      where: { userId_roleCode: { userId: pendingDrv.userId, roleCode: 'PASSENGER_DRIVER' } },
+      data: { status: 'PENDING' },
+    });
+    const forOperator = await get(op.cookies, `passenger/provider/affiliations/directory/drivers?q=${encodeURIComponent(pendingDrv.displayName.slice(0, -2))}`);
+    expect(forOperator.status).toBe(200);
+    expect(forOperator.body).not.toContainEqual(expect.objectContaining({ id: pendingDrv.driverProfileId }));
+    // The exclusion and the write-side refusal agree, exactly like every
+    // other exclusion in this suite.
+    const blocked = await post(op.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: pendingDrv.driverProfileId });
+    expect(blocked.status).toBe(400);
+    expect(blocked.body.message).toMatch(/not approved/i);
+
+    const drv = await makeDriver();
+    const pendingOp = await makeProvider(`Test Pendingrole Lines Two ${uniq()}`);
+    await ctx.prisma.userRole.update({
+      where: { userId_roleCode: { userId: pendingOp.userId, roleCode: 'PASSENGER_PROVIDER' } },
+      data: { status: 'PENDING' },
+    });
+    const forDriver = await get(drv.cookies, `passenger/driver/affiliations/directory/providers?q=${encodeURIComponent(pendingOp.businessName.slice(0, 10))}`);
+    expect(forDriver.status).toBe(200);
+    expect(forDriver.body).not.toContainEqual(expect.objectContaining({ id: pendingOp.profileId }));
+    const blocked2 = await post(drv.cookies, 'passenger/driver/affiliations/request', { providerProfileId: pendingOp.profileId });
+    expect(blocked2.status).toBe(400);
+    expect(blocked2.body.message).toMatch(/not approved/i);
+  });
+
+  it('an inactive counterparty is excluded from the directory, in both directions', async () => {
+    const op = await makeProvider(`Test Inactive Lines ${uniq()}`);
+    const inactiveDrv = await makeDriver();
+    await ctx.prisma.passengerDriverProfile.update({ where: { id: inactiveDrv.driverProfileId }, data: { isActive: false } });
+    const forOperator = await get(op.cookies, `passenger/provider/affiliations/directory/drivers?q=${encodeURIComponent(inactiveDrv.displayName.slice(0, -2))}`);
+    expect(forOperator.status).toBe(200);
+    expect(forOperator.body).not.toContainEqual(expect.objectContaining({ id: inactiveDrv.driverProfileId }));
+
+    const drv = await makeDriver();
+    const inactiveOp = await makeProvider(`Test Inactive Lines Two ${uniq()}`);
+    await ctx.prisma.passengerProviderProfile.update({ where: { id: inactiveOp.profileId }, data: { isActive: false } });
+    const forDriver = await get(drv.cookies, `passenger/driver/affiliations/directory/providers?q=${encodeURIComponent(inactiveOp.businessName.slice(0, 10))}`);
+    expect(forDriver.status).toBe(200);
+    expect(forDriver.body).not.toContainEqual(expect.objectContaining({ id: inactiveOp.profileId }));
+  });
+
+  it('the query length ceiling and the 25-result cap are enforced server-side, not merely in the UI (MDF-502)', async () => {
+    const op = await makeProvider(`Test Capacity Lines ${uniq()}`);
+    const over = await get(op.cookies, `passenger/provider/affiliations/directory/drivers?q=${'a'.repeat(121)}`);
+    expect(over.status).toBe(400);
+    const atMax = await get(op.cookies, `passenger/provider/affiliations/directory/drivers?q=${'a'.repeat(120)}`);
+    expect(atMax.status).not.toBe(400);
+
+    // 26 independent, eligible drivers sharing one findable token — every one
+    // of them is a legitimate match, so the cap must hold on its own, not by
+    // coincidence of a thin result set.
+    const token = `Capline${uniq()}`;
+    for (let i = 0; i < 26; i += 1) {
+      const u = await registerUser(`af_cap_${uniq()}@example.com`);
+      await approveRole(u.userId, 'PASSENGER_DRIVER');
+      const r = await put(u.cookies, 'passenger/driver/profile', {
+        legalName: 'Cap Line',
+        displayName: `${token}-${i}`,
+        phone: '+5016200001',
+        homeDistrict: 'TOLEDO',
+        licenceNumber: `CAPDL-${uniq()}`,
+        licenceExpiry: TOMORROW().toISOString(),
+        termsAccepted: true,
+      });
+      expect(r.status).toBe(200);
+    }
+    const capped = await get(op.cookies, `passenger/provider/affiliations/directory/drivers?q=${encodeURIComponent(token)}`);
+    expect(capped.status).toBe(200);
+    expect(capped.body.length).toBeLessThanOrEqual(25);
   });
 });
