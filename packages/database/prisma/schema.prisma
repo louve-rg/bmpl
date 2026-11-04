@@ -373,6 +373,23 @@ enum AuditAction {
   SHIPMENT_LEG_DRIVER_ASSIGNED
   SHIPMENT_LEG_OPERATOR_ASSIGNED
   SHIPPING_PROVIDER_MEMBER_CHANGED
+  // MDF-COURIER D1/D5: one action for every ShippingProviderStatus
+  // transition (approve/reject/suspend/reinstate/revoke/carrier
+  // resubmission) — the verb and actor-type travel in newValue, same
+  // precedent as SHIPPING_PROVIDER_MEMBER_CHANGED immediately above.
+  SHIPPING_PROVIDER_STATUS_CHANGED
+  // MDF-COURIER D3: mutual consent on an assigned LINE_HAUL leg. Two
+  // distinct actions, not one generic "responded" — mirrors the existing
+  // SHIPMENT_LEG_ACCEPTED/SHIPMENT_LEG_DECLINED split for driver legs above.
+  SHIPMENT_LEG_OPERATOR_ACCEPTED
+  SHIPMENT_LEG_OPERATOR_REJECTED
+  // MDF-COURIER self-service scope: a carrier claiming or releasing an
+  // EXISTING, currently-unassigned LogisticsRoute. Never creates a route,
+  // never sets its price or schedule — those stay admin-entered business
+  // configuration (root CLAUDE.md §5); this only records who may now
+  // operate one that already exists. Verb travels in newValue, same
+  // precedent as SHIPPING_PROVIDER_MEMBER_CHANGED.
+  LOGISTICS_ROUTE_OPERATOR_CHANGED
   // BMPL-186: one action for the route schedule surface (weekly pattern set,
   // exception added, exception removed) - the verb travels in newValue,
   // same precedent as the two actions immediately above.
@@ -5271,6 +5288,19 @@ model ShipmentLeg {
   operatedByProvider   ShippingProviderProfile? @relation("LegOperatorOrg", fields: [operatedByProviderId], references: [id], onDelete: SetNull)
   carrierName          String?
   carrierBookingRef    String?
+  /// MDF-COURIER D3: mutual consent on the assignment above. setLegOperator
+  /// unilaterally PROPOSES an operator (admin write, compare-and-set — D2);
+  /// the carrier itself must then accept or reject before the leg is truly
+  /// theirs. Both null = either unassigned or a pre-D3 leg with no
+  /// assignment awaiting consent — either way, "not applicable", never
+  /// "pending" by default, so every leg that existed before this feature
+  /// reads exactly as it did. Set together with operatedByProviderId on
+  /// every (re)proposal, so a fresh offer always starts both null again.
+  /// A REJECT clears operatedByProviderId back to null in the same
+  /// transaction (returns the leg to unassigned) and records an exception —
+  /// it must never silently advance the shipment.
+  operatorAcceptedAt   DateTime?
+  operatorRejectedAt   DateTime?
   scheduledDepartureAt DateTime?
   scheduledArrivalAt   DateTime?
   departedAt           DateTime?
@@ -5572,6 +5602,34 @@ enum PassengerAffiliationParty {
 /// behind PASSENGER_PROVIDER, and created the same way: self-service upsert by
 /// the applying account. THE ORG IS THIS ROW: transport legs are operated by a
 /// profile, never by a person, so staff can change without history rewriting.
+/// MDF-COURIER D1/D5: the carrier ORG's own operational lifecycle — distinct
+/// from, and never auto-derived from, the generic SHIPPING_PROVIDER role
+/// grant on the owning user (UserRole/RoleStatus). D1b ruling: role
+/// application stays the entry point for how a person BECOMES a shipping
+/// provider; this column is the sole authority for whether the ORG may be
+/// HANDED WORK. `assertOperableProvider` AND-gates both — reads them,
+/// derives neither from the other — so a suspended role can never read as
+/// an operationally eligible org and an APPROVED org with a suspended role
+/// can never either; nothing here promotes or demotes the UserRole row.
+///
+/// Transitions (enforced in ShippingProviderStatusService, never just in the
+/// UI — the owner's "no state reachable only a developer can leave"
+/// principle): PENDING -> APPROVED|REJECTED (admin); APPROVED ->
+/// SUSPENDED|REVOKED (admin); SUSPENDED -> APPROVED|REVOKED (admin);
+/// REJECTED -> PENDING (carrier resubmission OR admin re-open); REVOKED ->
+/// PENDING (ADMIN ONLY — terminal in practice, never terminal in code).
+/// The self-service resubmission path may leave REJECTED only, and only to
+/// PENDING (zero privilege gained); it is refused at the SERVICE layer for
+/// every other status, so a carrier can never un-suspend or un-revoke
+/// itself from the UI alone.
+enum ShippingProviderStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+  REVOKED
+}
+
 model ShippingProviderProfile {
   id                     String    @id @default(cuid())
   /// A simulation carrier. Never request input: DERIVED from the creating
@@ -5594,6 +5652,21 @@ model ShippingProviderProfile {
   operatingLicenceNumber String?
   operatingLicenceExpiry DateTime?
   isActive               Boolean   @default(true)
+  /// MDF-COURIER D1: operational eligibility, independent of isActive (left
+  /// untouched, see root CLAUDE.md on not repurposing an existing column).
+  /// Defaults PENDING — self-registration carries ZERO operational
+  /// privilege until an explicit admin transition reaches APPROVED. See the
+  /// enum doc comment above for the full transition table and the D1b
+  /// AND-gate this participates in.
+  status                 ShippingProviderStatus @default(PENDING)
+  /// Carrier-VISIBLE reason for the current status — shown back on the
+  /// carrier's own profile read for REJECTED/SUSPENDED/REVOKED, same
+  /// audience rule as courier exception text (the admin audit log's own
+  /// `reason` on the same transition is the internal-only record; this
+  /// column is deliberately the one a carrier may read). Cleared on
+  /// APPROVED/PENDING.
+  statusReason           String?
+  statusChangedAt        DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -5602,6 +5675,7 @@ model ShippingProviderProfile {
   operatedRoutes LogisticsRoute[]         @relation("RouteOperatorOrg")
 
   @@index([isActive, isTest])
+  @@index([status, isTest])
   @@map("shipping_provider_profiles")
 }
 

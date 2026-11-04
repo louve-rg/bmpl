@@ -16,7 +16,11 @@ import {
   addHubHoursExceptionSchema,
   addProviderMemberSchema,
   addRouteScheduleExceptionSchema,
+  claimRouteOperatorSchema,
+  legOperatorRejectSchema,
   previewRerouteSchema,
+  providerStatusOptionalNoteSchema,
+  providerStatusRequiredReasonSchema,
   rerouteSchema,
   resolveLegExceptionSchema,
   returnToSenderSchema,
@@ -33,6 +37,7 @@ import {
   updateRouteSchema,
   type AssignShipmentLegInput,
   type CancelShipmentInput,
+  type ClaimRouteOperatorInput,
   type CollectShipmentInput,
   type CreateCourierLaneInput,
   type CreateHubInput,
@@ -41,12 +46,15 @@ import {
   type LegDepartInput,
   type LegExceptionInput,
   type LegHandoffInput,
+  type LegOperatorRejectInput,
   type LegScheduleInput,
   type ReassignShipmentLegInput,
   type AddHubHoursExceptionInput,
   type AddProviderMemberInput,
   type AddRouteScheduleExceptionInput,
   type PreviewRerouteInput,
+  type ProviderStatusOptionalNoteInput,
+  type ProviderStatusRequiredReasonInput,
   type RerouteInput,
   type ResolveLegExceptionInput,
   type ReturnToSenderInput,
@@ -384,6 +392,72 @@ export class AdminLogisticsController {
   @Post('legs/:id/operator')
   setOperator(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(setLegOperatorSchema)) dto: SetLegOperatorInput) {
     return this.providers.setLegOperator(id, dto, u.userId);
+  }
+
+  /**
+   * D4 — the read-only "why is this carrier ineligible" preview, mirroring
+   * `GET legs/:id/eligible-drivers`'s own place in this controller.
+   * logistics.operate, same gate as the write it previews: this is the
+   * check an admin runs immediately before setOperator above.
+   */
+  @RequirePermission('logistics.operate')
+  @Get('legs/:id/eligible-operators')
+  eligibleOperators(@Param('id') id: string) {
+    return this.providers.eligibleOperatorsForLeg(id);
+  }
+
+  /* ---- carrier operational status lifecycle (MDF-COURIER D1/D5) ---- */
+  //
+  // logistics.manage, not logistics.operate: deciding whether an ORG may
+  // take work at all is network configuration (the same bucket adding a
+  // member or assigning a route operator already sits in), not running a
+  // leg by hand.
+
+  @RequirePermission('logistics.manage')
+  @Post('providers/:id/approve')
+  approveProvider(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(providerStatusOptionalNoteSchema)) dto: ProviderStatusOptionalNoteInput) {
+    return this.providers.approveProvider(u.userId, id, dto.reason);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Post('providers/:id/reject')
+  rejectProvider(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(providerStatusRequiredReasonSchema)) dto: ProviderStatusRequiredReasonInput) {
+    return this.providers.rejectProvider(u.userId, id, dto.reason);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Post('providers/:id/suspend')
+  suspendProvider(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(providerStatusRequiredReasonSchema)) dto: ProviderStatusRequiredReasonInput) {
+    return this.providers.suspendProvider(u.userId, id, dto.reason);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Post('providers/:id/reinstate')
+  reinstateProvider(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(providerStatusOptionalNoteSchema)) dto: ProviderStatusOptionalNoteInput) {
+    return this.providers.reinstateProvider(u.userId, id, dto.reason);
+  }
+
+  @RequirePermission('logistics.manage')
+  @Post('providers/:id/revoke')
+  revokeProvider(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(providerStatusRequiredReasonSchema)) dto: ProviderStatusRequiredReasonInput) {
+    return this.providers.revokeProvider(u.userId, id, dto.reason);
+  }
+
+  /** Admin re-opens a REJECTED application without waiting for the carrier
+   *  to resubmit it themselves (distinct from the carrier's own self-service
+   *  resubmit — see ShippingProviderProfileController below). */
+  @RequirePermission('logistics.manage')
+  @Post('providers/:id/reopen')
+  reopenProvider(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(providerStatusOptionalNoteSchema)) dto: ProviderStatusOptionalNoteInput) {
+    return this.providers.reopenProvider(u.userId, id, dto.reason);
+  }
+
+  /** REVOKED -> PENDING, admin only, by design (D5's security line) — never
+   *  reachable from the carrier's own self-service surface. */
+  @RequirePermission('logistics.manage')
+  @Post('providers/:id/reapply')
+  reapplyProvider(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(providerStatusOptionalNoteSchema)) dto: ProviderStatusOptionalNoteInput) {
+    return this.providers.reapplyProvider(u.userId, id, dto.reason);
   }
 
   /* ---- the network, as data ---- */
@@ -776,6 +850,17 @@ export class ShippingProviderProfileController {
   update(@CurrentUser() u: AuthContext, @Body(ZodBody(shippingProviderProfileUpdateSchema)) dto: ShippingProviderProfileUpdateInput) {
     return this.providers.updateProfile(u.userId, dto);
   }
+
+  /**
+   * D5's one self-service status transition: REJECTED -> PENDING only,
+   * refused at the service layer for every other status. No body — there
+   * is nothing to submit beyond "review me again"; a carrier editing what
+   * was wrong uses PATCH profile first.
+   */
+  @Post('profile/resubmit')
+  resubmit(@CurrentUser() u: AuthContext) {
+    return this.providers.resubmit(u.userId);
+  }
 }
 
 /**
@@ -825,6 +910,20 @@ export class ShippingProviderLegsController {
   schedule(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legScheduleSchema)) dto: LegScheduleInput) {
     return this.providers.schedule(u.userId, id, dto);
   }
+
+  /** D3 — mutual consent. setOperator (admin) only proposes; this is the
+   *  carrier accepting that proposal before depart/arrive/schedule unlock. */
+  @Post('legs/:id/accept')
+  acceptLeg(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.providers.acceptLeg(u.userId, id);
+  }
+
+  /** The other half: returns the leg to unassigned and alerts operations —
+   *  never silently advances the shipment (D3's named risk area). */
+  @Post('legs/:id/reject')
+  rejectLeg(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legOperatorRejectSchema)) dto: LegOperatorRejectInput) {
+    return this.providers.rejectLeg(u.userId, id, dto);
+  }
 }
 
 /**
@@ -873,5 +972,51 @@ export class ShippingProviderRoutesController {
   @Delete('routes/:id/schedule/exceptions/:exceptionId')
   removeScheduleException(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('exceptionId') exceptionId: string) {
     return this.providers.removeMyRouteScheduleException(u.userId, id, exceptionId);
+  }
+
+  /**
+   * Self-service scope: claim an EXISTING, currently-unassigned route.
+   * Never creates a route or sets its price/schedule/mode — those stay
+   * admin-entered business configuration. `providerProfileId` is optional
+   * in the body; omitted, it resolves to the caller's own org when they
+   * belong to exactly one.
+   */
+  @Post('routes/:id/claim')
+  claim(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(claimRouteOperatorSchema)) dto: ClaimRouteOperatorInput) {
+    return this.providers.claimRoute(u.userId, id, dto);
+  }
+
+  @Post('routes/:id/release')
+  release(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.providers.releaseRoute(u.userId, id);
+  }
+}
+
+/**
+ * Carrier own-membership self-service (MDF-COURIER): "lift the admin-only
+ * constraint for a provider's OWN membership only — ownership check, not a
+ * role bypass." Same two-gate shape as the legs/routes controllers above,
+ * plus a THIRD check inside the service itself: only the org's OWNER
+ * membership may add or end anyone else, exactly mirroring the asymmetry
+ * addMember/endMember already enforce on the admin door this reuses.
+ */
+@Roles('SHIPPING_PROVIDER')
+@Controller('shipping/provider')
+export class ShippingProviderMembersController {
+  constructor(private readonly providers: ShippingProviderService) {}
+
+  @Get('members')
+  myMembers(@CurrentUser() u: AuthContext) {
+    return this.providers.myMembers(u.userId);
+  }
+
+  @Post('members')
+  addMember(@CurrentUser() u: AuthContext, @Body(ZodBody(addProviderMemberSchema)) dto: AddProviderMemberInput) {
+    return this.providers.addMyMember(u.userId, dto);
+  }
+
+  @Post('members/:userId/end')
+  endMember(@CurrentUser() u: AuthContext, @Param('userId') userId: string) {
+    return this.providers.endMyMember(u.userId, userId);
   }
 }

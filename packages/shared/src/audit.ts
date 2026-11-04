@@ -209,6 +209,14 @@ export const AUDIT_ACTIONS = [
   // PASSENGER_AFFILIATION_CHANGED precedent.
   'SHIPMENT_LEG_OPERATOR_ASSIGNED',
   'SHIPPING_PROVIDER_MEMBER_CHANGED',
+  // MDF-COURIER D1/D5: every ShippingProviderStatus transition.
+  'SHIPPING_PROVIDER_STATUS_CHANGED',
+  // MDF-COURIER D3: mutual consent on an assigned LINE_HAUL leg.
+  'SHIPMENT_LEG_OPERATOR_ACCEPTED',
+  'SHIPMENT_LEG_OPERATOR_REJECTED',
+  // MDF-COURIER self-service scope: a carrier claiming/releasing an
+  // existing, unassigned LogisticsRoute.
+  'LOGISTICS_ROUTE_OPERATOR_CHANGED',
   // BMPL-186: route schedule surface (weekly pattern, date exceptions).
   'ROUTE_SCHEDULE_CHANGED',
   // BMPL-263: hub hours surface (weekly pattern, date exceptions) — same
