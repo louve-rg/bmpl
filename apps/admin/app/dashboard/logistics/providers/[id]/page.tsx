@@ -9,12 +9,14 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Selec
 
 /**
  * Carrier detail (MDF-524). Built against Pam's carrier-lifecycle contract
- * BEFORE it has landed on `origin/main` -- her branch is complete and
- * security-reviewed but held unpushed under the owner's Vercel ceiling
- * (MDF-520/MDF-524 reconciliation, 2026-11-04). Every shape below that is
- * not already real on `origin/main` today is marked ASSUMED, with the
- * reasoning for the guess, so it is cheap to reconcile once her exact
- * contract message arrives rather than silently treated as confirmed.
+ * BEFORE it has landed on `origin/main` -- her branch (`feat/carrier-api-
+ * provider-lifecycle`, commit `2c55091b`) is complete and security-reviewed
+ * but held unpushed under the owner's Vercel ceiling. It does not exist on
+ * `origin/main` today, which is why nothing below needs a guess for the
+ * status actions anymore -- her write-up (`MDF-500-carrier-review.md §9`,
+ * 2026-11-04) gives the exact routes, body schemas, response shape and
+ * every error message. Two pieces are still genuinely not ready (see the
+ * last bullet) and stay guarded exactly as before.
  *
  * CONFIRMED REAL on origin/main (used as-is, no guess):
  *   - GET  /admin/logistics/providers                              (listProviders)
@@ -22,33 +24,30 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Selec
  *   - POST /admin/logistics/providers/:id/members/:userId/end      (endMember)
  *   - POST /admin/logistics/legs/:id/operator                      (setLegOperator)
  *
- * ASSUMED (Pam's branch, per the owner's description of it -- a four-state
- * `ProviderStatus` and `suspendProvider`/`revokeProvider` writing status,
- * reason and changed-at):
- *   - Provider gains `status` ('PENDING'|'APPROVED'|'SUSPENDED'|'REVOKED'),
- *     `statusReason`, `statusChangedAt`. `isActive` is kept as a fallback
- *     read for data that predates the migration.
- *   - POST /admin/logistics/providers/:id/suspend  { reason }
- *   - POST /admin/logistics/providers/:id/revoke   { reason }
- *     (REST verb and path chosen to match the addMember/endMember sibling
- *     routes on the SAME controller -- the lowest-surprise guess, not a
- *     wire format taken from anywhere else.)
+ * CONFIRMED by Pam's §9 (real on her branch, not yet on main -- same
+ * reconciliation as above, not a guess):
+ *   - Provider gains `status` ('PENDING'|'APPROVED'|'REJECTED'|'SUSPENDED'|
+ *     'REVOKED'), `statusReason`, `statusChangedAt`, `canResubmit` --
+ *     already returned by the SAME `GET providers` read used today.
+ *   - `POST providers/:id/<verb>` for `approve`, `reject`, `suspend`,
+ *     `reinstate`, `revoke`, `reopen`, `reapply` -- see `STATUS_ACTIONS`
+ *     below for the exact from/to/reason-required table, copied verbatim
+ *     from her §9. `logistics.manage`, full `serializeProfile` response on
+ *     success; this page reloads via the list read rather than trusting
+ *     the POST response, since both return the identical shape.
+ *   - `statusReason` clears itself server-side on `approve`/`reopen`/
+ *     `reapply`; every transition is audited and notifies the carrier --
+ *     nothing of either kind is built here.
  *
- * ASSUMED (not yet named by anyone, inferred from "manage carrier members"
- * being a stated requirement with no read endpoint found on main):
+ * STILL NOT READY (Pam's §9, explicit: "do not wire the console to these
+ * until that section says done") -- unchanged from the prior pass, each
+ * detected defensively rather than assumed:
  *   - GET /admin/logistics/providers/:id/members -> Member[]
- *
- * ASSUMED (the owner confirmed the GAP -- no provider field on
- * `shipmentListSchema` -- but not the eventual filter's exact name or
- * whether the list's leg projection will carry `operatedByProviderId`):
- *   - GET /admin/logistics/shipments?operatedByProviderId=<id> and each
- *     row's `legs[]` carrying `operatedByProviderId`. The page defensively
- *     detects whether this field is actually present in what comes back
- *     (see `legsCarryProviderId` below) rather than assuming it and
- *     silently showing an empty, indistinguishable-from-"none" list.
+ *   - GET /admin/logistics/shipments?operatedByProviderId=<id>, with each
+ *     row's `legs[]` carrying `operatedByProviderId`.
  */
 
-type ProviderStatus = 'PENDING' | 'APPROVED' | 'SUSPENDED' | 'REVOKED';
+type ProviderStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED' | 'REVOKED';
 
 interface Provider {
   id: string;
@@ -65,10 +64,33 @@ interface Provider {
   status?: ProviderStatus;
   statusReason?: string | null;
   statusChangedAt?: string | null;
+  canResubmit?: boolean;
   isTest: boolean;
   createdAt: string;
   activeMembers: number;
 }
+
+/**
+ * Verbatim from Pam's §9: `from` is the ONLY status each verb may fire
+ * from, mirroring the real transition table
+ * (`packages/shared/src/shipping-provider-status.ts`) rather than
+ * re-deriving it -- a second, hand-written version of that table is how
+ * the console and the server end up disagreeing about what is legal.
+ * `reasonRequired` matches her two body schemas exactly: `reject`,
+ * `suspend` and `revoke` require one, the rest accept an optional note.
+ */
+const STATUS_ACTIONS: Array<{ verb: string; label: string; from: ProviderStatus[]; reasonRequired: boolean; variant: 'primary' | 'outline' | 'destructive' }> = [
+  { verb: 'approve', label: 'Approve', from: ['PENDING'], reasonRequired: false, variant: 'primary' },
+  { verb: 'reject', label: 'Reject', from: ['PENDING'], reasonRequired: true, variant: 'destructive' },
+  { verb: 'suspend', label: 'Suspend (administrative)', from: ['APPROVED'], reasonRequired: true, variant: 'outline' },
+  { verb: 'reinstate', label: 'Reinstate', from: ['SUSPENDED'], reasonRequired: false, variant: 'primary' },
+  { verb: 'revoke', label: 'Revoke (security / safety)', from: ['APPROVED', 'SUSPENDED'], reasonRequired: true, variant: 'destructive' },
+  { verb: 'reopen', label: 'Reopen for review', from: ['REJECTED'], reasonRequired: false, variant: 'outline' },
+  // Admin-only "controlled recovery" from a revocation -- there is no
+  // carrier-actor edge out of REVOKED at all (Pam's §5), so this is the
+  // ONLY way a revoked carrier ever moves again.
+  { verb: 'reapply', label: 'Reapply (reopen for review)', from: ['REVOKED'], reasonRequired: false, variant: 'outline' },
+];
 
 interface Member {
   userId: string;
@@ -116,9 +138,16 @@ const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleSt
  * owner's requirement here is specific to the carrier screen: an ordinary
  * administrative suspension must read differently from an urgent security
  * or safety revocation. */
+const STATUS_TONE: Record<ProviderStatus, 'success' | 'warning' | 'error'> = {
+  APPROVED: 'success',
+  PENDING: 'warning',
+  SUSPENDED: 'warning',
+  REJECTED: 'error',
+  REVOKED: 'error',
+};
+
 function CarrierStatusBadge({ status }: { status: ProviderStatus }) {
-  const tone = status === 'APPROVED' ? 'success' : status === 'PENDING' ? 'warning' : status === 'SUSPENDED' ? 'warning' : 'error';
-  return <Badge tone={tone}>{status}</Badge>;
+  return <Badge tone={STATUS_TONE[status]}>{status}</Badge>;
 }
 
 export default function CarrierDetailPage() {
@@ -244,34 +273,35 @@ function Row({ label, value }: { label: string; value: string }) {
 /**
  * Suspend vs. revoke, made legible (the owner's explicit requirement): an
  * ordinary administrative SUSPEND reads as a routine, reversible hold
- * (warning tone, outline button); an urgent REVOKE reads as a security or
- * safety action (error tone, destructive button) and, once revoked, the
- * banner points straight at the in-flight-shipments section below --
- * "controlled recovery" here means recovering the carrier's OWN shipments
- * by reassigning them, not reinstating the carrier (no reinstate endpoint
- * was named, so none is built).
+ * (outline button); an urgent REVOKE reads as a security or safety action
+ * (destructive button). Once revoked, the banner points at BOTH recovery
+ * paths Pam's contract actually offers: reapplying the carrier itself
+ * (back to PENDING, for review) and reassigning its in-flight shipments
+ * below -- revocation is not a dead end, but nothing moves it except an
+ * admin action naming a reason, same as getting into it did.
  */
 function StatusCard({ provider, canManage, onChanged }: { provider: Provider; canManage: boolean; onChanged: () => void }) {
   const [reason, setReason] = useState('');
-  const [busy, setBusy] = useState<'suspend' | 'revoke' | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const status: ProviderStatus = provider.status ?? (provider.isActive ? 'APPROVED' : 'SUSPENDED');
+  const actions = STATUS_ACTIONS.filter((a) => a.from.includes(status));
 
-  async function act(action: 'suspend' | 'revoke') {
+  async function act(verb: string, reasonRequired: boolean) {
     const r = reason.trim();
-    if (r.length < 3) {
-      setErr('Give a reason (at least 3 characters) -- it is recorded against this carrier.');
+    if (reasonRequired && r.length < 1) {
+      setErr('A reason is required.');
       return;
     }
-    setBusy(action);
+    setBusy(verb);
     setErr(null);
     try {
-      await api.post(`/admin/logistics/providers/${provider.id}/${action}`, { reason: r });
+      await api.post(`/admin/logistics/providers/${provider.id}/${verb}`, r ? { reason: r } : {});
       setReason('');
       onChanged();
     } catch (e) {
-      setErr((e as ApiError).message ?? `Could not ${action} this carrier.`);
+      setErr((e as ApiError).message ?? `Could not complete that action.`);
     } finally {
       setBusy(null);
     }
@@ -293,7 +323,8 @@ function StatusCard({ provider, canManage, onChanged }: { provider: Provider; ca
 
       {status === 'REVOKED' && (
         <Alert tone="error" className="mt-3">
-          This carrier is revoked. Any shipment still assigned to it needs a new carrier -- see "In-flight shipments" below.
+          This carrier is revoked. It has no path back except an admin action: reapply below to send it back to review,
+          or see "In-flight shipments" to reassign anything still assigned to it.
         </Alert>
       )}
       {status === 'SUSPENDED' && (
@@ -301,20 +332,28 @@ function StatusCard({ provider, canManage, onChanged }: { provider: Provider; ca
           This carrier is suspended. It keeps its history and membership; it is not offered for new work until reinstated.
         </Alert>
       )}
+      {status === 'REJECTED' && (
+        <Alert tone="warning" className="mt-3">
+          This carrier's application was rejected.{provider.canResubmit ? ' The carrier may also resubmit it themselves.' : ''}
+        </Alert>
+      )}
 
-      {canManage && status === 'APPROVED' && (
+      {canManage && actions.length > 0 && (
         <div className="mt-3 space-y-2">
           {err && <Alert tone="warning">{err}</Alert>}
-          <Field label="Reason (recorded against this carrier)" htmlFor="carrier-status-reason">
+          <Field
+            label="Reason (recorded against this carrier)"
+            htmlFor="carrier-status-reason"
+            hint={actions.some((a) => a.reasonRequired) ? 'Required for: ' + actions.filter((a) => a.reasonRequired).map((a) => a.label).join(', ') : undefined}
+          >
             <Input id="carrier-status-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why this action is being taken" />
           </Field>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" disabled={busy != null} onClick={() => void act('suspend')}>
-              {busy === 'suspend' ? 'Suspending…' : 'Suspend (administrative)'}
-            </Button>
-            <Button variant="destructive" disabled={busy != null} onClick={() => void act('revoke')}>
-              {busy === 'revoke' ? 'Revoking…' : 'Revoke (security / safety)'}
-            </Button>
+            {actions.map((a) => (
+              <Button key={a.verb} variant={a.variant} disabled={busy != null} onClick={() => void act(a.verb, a.reasonRequired)}>
+                {busy === a.verb ? '…' : a.label}
+              </Button>
+            ))}
           </div>
         </div>
       )}

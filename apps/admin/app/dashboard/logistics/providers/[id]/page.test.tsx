@@ -78,13 +78,10 @@ function stubFetch(opts: StubOpts = {}) {
         posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : null });
         return jsonResponse(200, {});
       }
-      if (url.includes('/api/admin/logistics/providers/prov_1/suspend') && init?.method === 'POST') {
+      const statusVerbMatch = url.match(/\/api\/admin\/logistics\/providers\/prov_1\/(approve|reject|suspend|reinstate|revoke|reopen|reapply)$/);
+      if (statusVerbMatch && init?.method === 'POST') {
         posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : null });
-        return jsonResponse(200, { id: 'prov_1', status: 'SUSPENDED' });
-      }
-      if (url.includes('/api/admin/logistics/providers/prov_1/revoke') && init?.method === 'POST') {
-        posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : null });
-        return jsonResponse(200, { id: 'prov_1', status: 'REVOKED' });
+        return jsonResponse(200, { ...provider, status: 'APPROVED' });
       }
       if (url.includes('/api/admin/logistics/shipments') && (!init?.method || init.method === 'GET')) {
         return jsonResponse(200, { rows: opts.shipmentRows ?? [] });
@@ -180,11 +177,19 @@ describe('CarrierDetailPage — suspend vs. revoke, made legible (MDF-524, D-own
 
     expect(buttonTexts()).toContain('Suspend (administrative)');
     expect(buttonTexts()).toContain('Revoke (security / safety)');
+    // APPROVED is not PENDING, REJECTED, SUSPENDED or REVOKED -- none of
+    // those verbs' actions are legal from here, matching Pam's §9 table.
+    expect(buttonTexts()).not.toContain('Approve');
+    expect(buttonTexts()).not.toContain('Reinstate');
+    expect(buttonTexts()).not.toContain('Reopen for review');
+    expect(buttonTexts()).not.toContain('Reapply (reopen for review)');
 
     clickButton('Suspend (administrative)');
     await act(async () => {});
-    // No reason typed yet -- must refuse, not silently proceed.
-    expect(container!.textContent).toContain('Give a reason');
+    // No reason typed yet -- must refuse, not silently proceed. Verbatim
+    // match to the server's own Zod message (Pam's §9) rather than a
+    // console-invented one, so the two can never read as disagreeing.
+    expect(container!.textContent).toContain('A reason is required.');
   });
 
   it('suspend posts the reason to the suspend route and reloads to the new status', async () => {
@@ -204,6 +209,42 @@ describe('CarrierDetailPage — suspend vs. revoke, made legible (MDF-524, D-own
     expect(call?.body).toEqual({ reason: 'Licence expired, pending renewal.' });
   });
 
+  it('revoke is also offered from SUSPENDED, not only APPROVED (Pam\'s §9: APPROVED | SUSPENDED -> REVOKED)', async () => {
+    stubFetch({ provider: { ...PROVIDER, status: 'SUSPENDED' } });
+    await mount();
+
+    expect(buttonTexts()).toContain('Revoke (security / safety)');
+    expect(buttonTexts()).toContain('Reinstate');
+    expect(buttonTexts()).not.toContain('Suspend (administrative)');
+  });
+
+  it('reinstate and reopen/reapply do not require a reason and post an empty body when none is typed', async () => {
+    const posts = stubFetch({ provider: { ...PROVIDER, status: 'SUSPENDED' } });
+    await mount();
+
+    clickButton('Reinstate');
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const call = posts.find((p) => p.url.includes('/reinstate'));
+    expect(call?.body).toEqual({});
+  });
+
+  it('a PENDING carrier offers approve and reject, reject refuses with no reason', async () => {
+    stubFetch({ provider: { ...PROVIDER, status: 'PENDING' } });
+    await mount();
+
+    expect(buttonTexts()).toContain('Approve');
+    expect(buttonTexts()).toContain('Reject');
+
+    clickButton('Reject');
+    await act(async () => {});
+    expect(container!.textContent).toContain('A reason is required.');
+  });
+
   it('a reader with no logistics.manage sees the current status but no action to change it', async () => {
     stubFetch({ adminPermissions: ['logistics.read'] });
     await mount();
@@ -212,13 +253,14 @@ describe('CarrierDetailPage — suspend vs. revoke, made legible (MDF-524, D-own
     expect(buttonTexts()).not.toContain('Revoke (security / safety)');
   });
 
-  it('a revoked carrier reads as urgent and points at the in-flight shipments section, not a reinstate button', async () => {
+  it('a revoked carrier reads as urgent and offers the only recovery path Pam\'s contract actually has -- reapply, never a reinstate button', async () => {
     stubFetch({ provider: { ...PROVIDER, status: 'REVOKED', statusReason: 'Safety complaint upheld.' } });
     await mount();
 
     expect(container!.textContent).toContain('REVOKED');
     expect(container!.textContent).toContain('Safety complaint upheld.');
-    expect(container!.textContent).toMatch(/needs a new carrier/);
+    expect(container!.textContent).toMatch(/no path back except an admin action/);
+    expect(buttonTexts()).toContain('Reapply (reopen for review)');
     expect(buttonTexts()).not.toContain('Reinstate');
   });
 
@@ -228,7 +270,7 @@ describe('CarrierDetailPage — suspend vs. revoke, made legible (MDF-524, D-own
 
     expect(container!.textContent).toContain('SUSPENDED');
     expect(container!.textContent).toMatch(/not offered for new work until reinstated/);
-    expect(container!.textContent).not.toMatch(/needs a new carrier/);
+    expect(container!.textContent).not.toMatch(/no path back/);
   });
 });
 
