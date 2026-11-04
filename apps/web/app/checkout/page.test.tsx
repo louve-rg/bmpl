@@ -190,10 +190,30 @@ async function flush() {
  * instead of guessing a tick count, the same way LocationPicker.test.tsx's
  * own `flush()` only had to clear one such layer; this one clears two
  * (dynamic()'s own loader, then LocationPicker's own `import('leaflet')`).
+ *
+ * MDF-511: bounded by a WALL-CLOCK deadline, not a fixed attempt count. A
+ * fixed count (the original `maxAttempts = 30`) assumes each poll tick
+ * advances the real dynamic-import resolution by a roughly fixed amount of
+ * work — true in isolation, false under CPU contention, where this floor's
+ * agents run full local suites concurrently on one shared machine (never
+ * observed in CI, which runs this job alone; local full-suite timing is not
+ * evidence about CI, in either direction). Under contention the import can
+ * need more real ticks to settle than a fixed count allows, even with the
+ * test's own 15000ms outer ceiling barely touched.
+ *
+ * Also throws on expiry, naming what it was waiting for — the original
+ * silently RETURNED after exhausting its attempts, with the pulse still
+ * showing, which turned "the map had not loaded yet" into a confusing
+ * failure on the later `[role="application"]` assertion that read as "the
+ * map widget is broken". A genuine hang must still fail; it should fail
+ * saying the pulse never cleared, not implicate the widget.
  */
-async function waitForNoPulse(el: HTMLElement, maxAttempts = 30) {
-  for (let i = 0; i < maxAttempts; i++) {
-    if (!el.innerHTML.includes('animate-pulse')) return;
+async function waitForNoPulse(el: HTMLElement, timeoutMs = 12000) {
+  const deadline = Date.now() + timeoutMs;
+  while (el.innerHTML.includes('animate-pulse')) {
+    if (Date.now() >= deadline) {
+      throw new Error(`waitForNoPulse: "animate-pulse" never cleared within ${timeoutMs}ms — the map/LocationPicker dynamic import did not finish loading in time.`);
+    }
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
     });
