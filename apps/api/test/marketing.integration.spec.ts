@@ -300,6 +300,28 @@ describe('assignPlacement: categoryId existence, visibility, and the new-vs-exis
     // sampling on a side connection, whether two of them were ever actually
     // mid-query at the same instant — not assumed from the requests being
     // unawaited relative to each other.
+    //
+    // The INVARIANT under test (asserted unconditionally): exactly one row
+    // ever exists, and every loser fails CLEANLY (4xx from hitting the
+    // now-existing row), never a raw 500 — an unhandled P2002 reaching the
+    // client is the duplicate-request failure mode this exists to catch. The
+    // real authority behind that invariant is the P2002 catch added to
+    // assignPlacement (mirroring passenger-affiliation.service.ts's
+    // createAsk), not this test.
+    //
+    // OBSERVED, not assumed: raceOverSeparateConnections's pg_stat_activity
+    // probe caught peakConcurrentActive=3 (20 samples) on the run that
+    // confirmed this — two or more of these requests' queries were genuinely
+    // mid-flight at the same instant, measured, not inferred from timing.
+    //
+    // AND THE RACE IS REAL: that same confirmed run returned 500 for 2 of 5
+    // concurrent requests ("Unique constraint failed on the fields:
+    // (promotionId,placement,categoryId)") — an unhandled P2002, exactly the
+    // failure mode this test exists to catch. THIS TEST IS LEFT FAILING ON
+    // PURPOSE. It is the forcing reproduction for the P2002 catch landing in
+    // assignPlacement (mirroring createAsk) — once that catch is in place,
+    // the `statuses.every((s) => s !== 500)` assertion below should turn
+    // green against this same concurrent load, not a softer one.
     const id = await approvedPromotionNoPlacement();
     const probe = await raceOverSeparateConnections(ctx.prisma, [1, 2, 3, 4, 5].map(() => () =>
       post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE', categoryId }),
@@ -314,19 +336,6 @@ describe('assignPlacement: categoryId existence, visibility, and the new-vs-exis
     expect(statuses.every((s) => s !== 500), `statuses: ${JSON.stringify(statuses)}`).toBe(true);
     const rows = await ctx.prisma.promotionPlacement.findMany({ where: { promotionId: id, placement: 'CATEGORY_PAGE', categoryId } });
     expect(rows).toHaveLength(1);
-    //
-    // VERIFIED under a real multi-connection race (MDF-503 follow-up).
-    // raceOverSeparateConnections fires these requests over separate TCP
-    // connections and proves concurrency by polling pg_stat_activity for
-    // other backends in state='active': this case recorded OBSERVED with
-    // peakConcurrentActive=3 over 20 samples. Before the P2002 catch was
-    // added to assignPlacement, 2 of 5 concurrent requests returned a RAW
-    // 500 ("Unique constraint failed on the fields:
-    // (promotionId,placement,categoryId)") - the race was reproducible,
-    // not latent. The catch is what turns that into a clean 400.
-    // `observed` is logged, never asserted, so a loaded CI runner that
-    // fails to interleave cannot make this test flaky; the invariant
-    // (exactly one row, no raw 500) is asserted unconditionally.
   });
 });
 
