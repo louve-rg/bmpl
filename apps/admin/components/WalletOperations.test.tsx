@@ -1009,7 +1009,8 @@ describe('StaleHoldCard -- preview before sweeping (MDF-510)', () => {
     await mount();
     await waitForPreview();
 
-    expect(document.body.textContent).toMatch(/This will release 2 holds/);
+    expect(document.body.textContent).toMatch(/Up to 2 holds match this window/);
+    expect(document.body.textContent).toMatch(/upper bound, not an exact count/);
     expect(document.body.textContent).toMatch(/Jane Doe/);
     expect(document.body.textContent).toMatch(/\$25\.00/);
     expect(document.body.textContent).toMatch(/\+1 more not shown/);
@@ -1025,6 +1026,7 @@ describe('StaleHoldCard -- preview before sweeping (MDF-510)', () => {
     await waitForPreview();
 
     expect(document.body.textContent).toMatch(/release nothing/);
+    expect(document.body.textContent).toMatch(/not a guarantee/);
     expect(document.body.textContent).not.toMatch(/Couldn.t load a preview/);
   });
 

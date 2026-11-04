@@ -755,13 +755,29 @@ function StaleHoldCard({ onChanged }: { onChanged?: () => void }) {
   // HELD+AUTHORIZED: expireStaleHolds (the sweep this previews) only ever
   // touches a hold that is still HELD, never one that already AUTHORIZED --
   // showing AUTHORIZED rows here would preview holds the sweep will not
-  // actually release. Debounced so every keystroke doesn't fire a request;
-  // the generation guard discards a response whose request has been
-  // superseded by a newer one, same pattern as TestCreditCard/WalletLockCard
-  // above -- this needs payments.read, a DIFFERENT permission from the
-  // wallet.reconcile this card is already gated on by its caller, so a
-  // holder of wallet.reconcile without payments.read must see "forbidden"
-  // here, never a broken or disabled sweep button.
+  // actually release.
+  //
+  // THIS IS STILL ONLY AN UPPER BOUND, not the exact set the sweep acts on --
+  // the two queries diverge in four ways the copy below has to carry, not
+  // the query: (1) adminListStaleHolds has no payment-status filter at all,
+  // so a HELD hold whose payment already went AUTHORIZED/EXPIRED/FAILED is
+  // counted here but never swept; (2) it cuts on hold.heldAt, the sweep cuts
+  // on payment.createdAt -- usually close, not identical; (3) it counts
+  // HOLDS, the sweep iterates PAYMENTS, so one payment with two HELD holds
+  // is 2 here and 1 there; (4) it has no 500 cap, the sweep does. Closing
+  // these at the query layer needs a payment-status filter on
+  // adminListStaleHolds (apps/api, outside this change's scope) -- carded as
+  // a follow-up. Until then: never render preview.total as a promised
+  // outcome, only as a bound, with the unpaid-payment criterion stated next
+  // to it (see StaleHoldPreviewBlock).
+  //
+  // Debounced so every keystroke doesn't fire a request; the generation
+  // guard discards a response whose request has been superseded by a newer
+  // one, same pattern as TestCreditCard/WalletLockCard above -- this needs
+  // payments.read, a DIFFERENT permission from the wallet.reconcile this
+  // card is already gated on by its caller, so a holder of wallet.reconcile
+  // without payments.read must see "forbidden" here, never a broken or
+  // disabled sweep button.
   useEffect(() => {
     const parsedHours = Number(hours) || 24;
     const generation = ++previewGenerationRef.current;
@@ -862,11 +878,21 @@ function StaleHoldPreviewBlock({ state, preview }: { state: PreviewState; previe
     );
   }
   if (preview.total === 0) {
-    return <Alert tone="info">No stale holds older than this window — the sweep would release nothing.</Alert>;
+    return (
+      <Alert tone="info">
+        No HELD holds are old enough to match this window. The sweep itself goes by payment age, not hold age, so
+        this is a strong signal it would release nothing here — not a guarantee.
+      </Alert>
+    );
   }
   const hiddenCount = preview.total - preview.holds.length;
   return (
-    <Alert tone="warning" title={`This will release ${preview.total} hold${preview.total === 1 ? '' : 's'}`}>
+    <Alert tone="warning" title={`Up to ${preview.total} hold${preview.total === 1 ? '' : 's'} match this window`}>
+      <p>
+        This is an upper bound, not an exact count: it lists every HELD hold old enough by hold age, but the sweep
+        itself goes by payment age and only releases one whose payment is still unpaid (created or pending), up to
+        500 payments per run. Some of what&apos;s below may already be authorized, expired or settled.
+      </p>
       <ul className="mt-2 space-y-1">
         {preview.holds.map((h) => (
           <li key={h.id}>
