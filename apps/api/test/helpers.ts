@@ -94,6 +94,70 @@ export async function expectUnchangedBy<T>(
   expect(await read()).toEqual(before);
 }
 
+/**
+ * MDF-499 FOLLOW-UP: a reusable harness for the owner's §10 "duplicate,
+ * concurrent and retried actions" requirement, built because `Promise.all`
+ * of N HTTP requests was already shown, twice independently in this suite, to
+ * be WEAK evidence of a real race — each call does open its own TCP
+ * connection (supertest does not reuse one across separate `request(...)`
+ * calls), but whether the underlying database work for two of them was ever
+ * genuinely in flight AT THE SAME INSTANT was never measured, only assumed
+ * from the HTTP calls being unawaited relative to each other.
+ *
+ * This measures it directly: while the N request-thunks run, a side
+ * connection polls `pg_stat_activity` in a tight loop (bounded only by its
+ * own round-trip time — no sleep between samples, to maximise the sampling
+ * rate) for how many OTHER backends on this same database are `state =
+ * 'active'` (mid-query) at that instant. `pid <> pg_backend_pid()` excludes
+ * the poll's own backend; no column that requires same-role/superuser
+ * visibility is read, only `state`, so this works regardless of which DB
+ * role the pool connects as.
+ *
+ * `observed: true` is real, DB-level proof that two requests' queries
+ * overlapped — not inferred from timing or from the response shape.
+ * `observed: false` means only that THIS run's sampling never caught an
+ * overlap; it is not proof no race is possible, since a short critical
+ * section on a fast local Postgres can start and finish between two samples.
+ * Report whichever one actually came back — do not round a `false` up to "a
+ * race was impossible", and do not round a `true` down to "probably nothing".
+ */
+export interface ConcurrencyProbe<T> {
+  responses: T[];
+  observed: boolean;
+  peakConcurrentActive: number;
+  samples: number;
+  elapsedMs: number;
+}
+
+export async function raceOverSeparateConnections<T>(
+  prisma: PrismaClient,
+  fns: Array<() => Promise<T>>,
+): Promise<ConcurrencyProbe<T>> {
+  const start = Date.now();
+  let peak = 0;
+  let samples = 0;
+  let polling = true;
+  const poll = (async () => {
+    while (polling) {
+      samples += 1;
+      try {
+        const rows = await prisma.$queryRawUnsafe<Array<{ n: number | bigint }>>(
+          `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND state = 'active' AND pid <> pg_backend_pid()`,
+        );
+        const n = Number(rows[0]?.n ?? 0);
+        if (n > peak) peak = n;
+      } catch {
+        // A transient probe failure (e.g. a pool connection momentarily
+        // unavailable) must not fail the thing it only exists to observe.
+      }
+    }
+  })();
+  const responses = await Promise.all(fns.map((fn) => fn()));
+  polling = false;
+  await poll;
+  return { responses, observed: peak >= 2, peakConcurrentActive: peak, samples, elapsedMs: Date.now() - start };
+}
+
 /** Wipe all application data between test groups (keeps schema + migrations). */
 export async function resetDb(prisma: PrismaClient): Promise<void> {
   const rows = await prisma.$queryRaw<Array<{ tablename: string }>>`

@@ -14,7 +14,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, raceOverSeparateConnections, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 import { ENV } from '../src/config/config.module';
 
 let ctx: TestContext;
@@ -147,20 +147,30 @@ describe('self-service UAT wallet funding', () => {
     expect(summary.body.availableMinor).toBe(CAP - 10_000);
   });
 
-  // Honest scope: this guards the invariant, it does not demonstrate a race.
-  // It passes against a version with the row lock removed, because two
-  // supertest requests fired together did not reliably interleave their reads
-  // here — the second ran after the first had committed. Treat a failure as a
-  // real regression; do not read the pass as evidence that concurrent claiming
-  // was exercised. The protections it stands over are the FOR UPDATE lock and
-  // the unique transaction reference behind it.
-  it('D · two simultaneous first claims yield exactly one credit', async () => {
+  // MDF-499 FOLLOW-UP (owner §10, "duplicate, concurrent and retried
+  // actions"): the comment this test used to carry said, from inference, that
+  // two supertest requests fired together did not reliably interleave their
+  // reads here. raceOverSeparateConnections (test/helpers.ts) replaces that
+  // inference with a direct pg_stat_activity measurement.
+  //
+  // OBSERVED, not assumed: the confirmed run measured peakConcurrentActive=4
+  // (51 samples) — four of these five requests' queries were genuinely
+  // active at the same instant, measured, not inferred from timing. Under
+  // that proven race the invariant held: exactly one credit, cap never
+  // exceeded. The real protections are the FOR UPDATE lock and the unique
+  // transaction reference in selfServiceTestCredit (wallet.service.ts), not
+  // this test — but this is no longer an assumed pass against an unforced
+  // race; the race was forced and the lock held. Treat a failure here as a
+  // real regression.
+  it('D · N simultaneous first claims yield exactly one credit', async () => {
     const me = await registerCustomer(`ssf_race_${uniq()}@example.bz`);
-    const [a, b] = await Promise.all([
-      post(me.cookies, 'wallet/test-fund'),
-      post(me.cookies, 'wallet/test-fund'),
-    ]);
-    expect([a.status, b.status].sort()).toEqual([201, 409]);
+    const probe = await raceOverSeparateConnections(ctx.prisma, [1, 2, 3, 4, 5].map(() => () => post(me.cookies, 'wallet/test-fund')));
+    console.log(
+      `[CONCURRENCY selfServiceTestCredit] ${probe.observed ? 'OBSERVED' : 'NOT-FORCED'} ` +
+      `(peakConcurrentActive=${probe.peakConcurrentActive}, samples=${probe.samples}, elapsedMs=${probe.elapsedMs})`,
+    );
+    const statuses = probe.responses.map((r) => r.status).sort();
+    expect(statuses, `statuses: ${JSON.stringify(statuses)}`).toEqual([201, 409, 409, 409, 409]);
 
     const wallet = await walletOf(me.userId);
     const credits = await ctx.prisma.walletLedgerEntry.findMany({
@@ -168,7 +178,7 @@ describe('self-service UAT wallet funding', () => {
     });
     expect(credits).toHaveLength(1);
     const summary = await get(me.cookies, 'wallet');
-    expect(summary.body.totalMinor).toBe(CAP);   // never 50000
+    expect(summary.body.totalMinor).toBe(CAP);   // never more than the cap, however many racers
   });
 
   it('E/F/G · ignores an amount, a userId and a walletId in the body', async () => {

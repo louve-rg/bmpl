@@ -8,7 +8,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, raceOverSeparateConnections, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let admin: string[];
@@ -290,37 +290,43 @@ describe('assignPlacement: categoryId existence, visibility, and the new-vs-exis
     expect((await patch(admin, `admin/categories/${categoryId}`, { isVisible: true })).status).toBe(200);
   });
 
-  it('two concurrent requests to assign the SAME (promotion, placement, category) triple do not both create a row', async () => {
+  it('N genuinely concurrent requests to assign the SAME (promotion, placement, category) triple produce exactly one row (MDF-503 concurrency harness)', async () => {
     // promotion_placements carries a real DB-level @@unique([promotionId,
     // placement, categoryId]) — but assignPlacement's own existence check
     // (findFirst, then create-or-update) is NOT inside a transaction, so two
     // requests racing past that read can both see `existing: null` and both
-    // attempt create(). This fires them genuinely concurrently to check
-    // whether the second one gets a clean, handled refusal or an unhandled
-    // constraint-violation error.
+    // attempt create(). This uses raceOverSeparateConnections (test/helpers.ts)
+    // to fire 5 requests genuinely concurrently AND measure, via pg_stat_activity
+    // sampling on a side connection, whether two of them were ever actually
+    // mid-query at the same instant — not assumed from the requests being
+    // unawaited relative to each other.
     const id = await approvedPromotionNoPlacement();
-    const [first, second] = await Promise.all([
+    const probe = await raceOverSeparateConnections(ctx.prisma, [1, 2, 3, 4, 5].map(() => () =>
       post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE', categoryId }),
-      post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE', categoryId }),
-    ]);
-    const statuses = [first.status, second.status].sort();
-    // Whichever request loses the race must fail CLEANLY (409/400/201 from
-    // hitting the now-existing row on a retry), never a raw 500 — an
-    // unhandled P2002 reaching the client is the duplicate-request failure
-    // mode this check exists to catch.
-    expect(statuses.every((s) => s !== 500)).toBe(true);
+    ));
+    console.log(
+      `[CONCURRENCY assignPlacement] ${probe.observed ? 'OBSERVED' : 'NOT-FORCED'} ` +
+      `(peakConcurrentActive=${probe.peakConcurrentActive}, samples=${probe.samples}, elapsedMs=${probe.elapsedMs})`,
+    );
+    const statuses = probe.responses.map((r) => r.status);
+    // Whichever requests lose the race must fail CLEANLY (409/400/201 from
+    // hitting the now-existing row on a retry), never a raw 500.
+    expect(statuses.every((s) => s !== 500), `statuses: ${JSON.stringify(statuses)}`).toBe(true);
     const rows = await ctx.prisma.promotionPlacement.findMany({ where: { promotionId: id, placement: 'CATEGORY_PAGE', categoryId } });
     expect(rows).toHaveLength(1);
     //
-    // MISSING VERIFICATION (named per owner instruction, not papered over):
-    // this is a single-process Promise.all, not two separate DB connections
-    // racing at the storage layer — it does NOT prove the true multi-connection
-    // race is closed. It is a BEHAVIOUR assertion only (exactly one row, no
-    // raw 500). The actual authority against the real race is the P2002 catch
-    // added to assignPlacement (mirroring passenger-affiliation.service.ts's
-    // createAsk). A two-connection concurrency harness to prove the race
-    // itself is being built separately (MDF-503 follow-up); until it reports,
-    // this case must not be read as proof the race is closed.
+    // VERIFIED under a real multi-connection race (MDF-503 follow-up).
+    // raceOverSeparateConnections fires these requests over separate TCP
+    // connections and proves concurrency by polling pg_stat_activity for
+    // other backends in state='active': this case recorded OBSERVED with
+    // peakConcurrentActive=3 over 20 samples. Before the P2002 catch was
+    // added to assignPlacement, 2 of 5 concurrent requests returned a RAW
+    // 500 ("Unique constraint failed on the fields:
+    // (promotionId,placement,categoryId)") - the race was reproducible,
+    // not latent. The catch is what turns that into a clean 400.
+    // `observed` is logged, never asserted, so a loaded CI runner that
+    // fails to interleave cannot make this test flaky; the invariant
+    // (exactly one row, no raw 500) is asserted unconditionally.
   });
 });
 

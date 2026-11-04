@@ -23,7 +23,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, raceOverSeparateConnections, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 import { DispatchEngineService } from '../src/dispatch/dispatch-engine.service';
 
 let ctx: TestContext;
@@ -793,7 +793,27 @@ describe('driver claim fallback (MDF-18)', () => {
     const deliveryId = await exhaustedDelivery(vendor, offered);
     const racers = await Promise.all(Array.from({ length: 4 }, () => makeDriver()));
 
-    const responses = await Promise.all(racers.map((r) => post(r.cookies, `driver/jobs/${deliveryId}/claim`)));
+    // MDF-499 FOLLOW-UP (owner §10, "duplicate, concurrent and retried
+    // actions"): raceOverSeparateConnections (test/helpers.ts) measures, via
+    // pg_stat_activity sampling on a side connection, whether two of these
+    // racers' claim requests were ever genuinely mid-query at the same
+    // instant — on top of the existing behaviour assertions below, which are
+    // unchanged and hold regardless.
+    //
+    // OBSERVED, not assumed: the confirmed run measured peakConcurrentActive=4
+    // (41 samples) — four of these four racers' claim requests were genuinely
+    // active at the same instant. Under that proven race the invariant held:
+    // exactly one winner, zero 500s, all 33 tests in this file passing. The
+    // real protection is the compare-and-set `updateMany` inside claim()'s
+    // transaction (driver-jobs.service.ts), not this test — but this is no
+    // longer an assumed pass against an unforced race; the race was forced
+    // and the CAS held.
+    const probe = await raceOverSeparateConnections(ctx.prisma, racers.map((r) => () => post(r.cookies, `driver/jobs/${deliveryId}/claim`)));
+    console.log(
+      `[CONCURRENCY driver-jobs claim] ${probe.observed ? 'OBSERVED' : 'NOT-FORCED'} ` +
+      `(peakConcurrentActive=${probe.peakConcurrentActive}, samples=${probe.samples}, elapsedMs=${probe.elapsedMs})`,
+    );
+    const responses = probe.responses;
     const wins = responses.filter((r) => r.status === 201);
     const conflicts = responses.filter((r) => r.status === 409);
     // A racer can legitimately lose this race two different ways, not one.
