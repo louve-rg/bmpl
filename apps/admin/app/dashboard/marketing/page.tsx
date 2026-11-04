@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   PROMOTION_TYPES,
   PROMOTION_TYPE_LABELS,
@@ -43,6 +43,7 @@ import { StatusBadge } from '../../../components/StatusBadge';
 import { Alert, Badge, Button, EmptyState, Field, Input, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 import { LIVE_PLACEMENTS, rendersNowhereYet } from '../../../lib/placement-liveness';
+import { type AdminCategory, orderCategories } from '../../../lib/categories';
 
 /**
  * Marketing & Business Promotion admin console — M26. Client shapes mirror the
@@ -1830,16 +1831,46 @@ function AssignPlacementForm({
   const [form, setForm] = useState<AssignFormState>(() => emptyAssignForm());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<AdminCategory[]>([]);
+  const [categoriesState, setCategoriesState] = useState<ListState>('loading');
+
+  // Categories are fetched once, the same list the Categories page itself
+  // shows -- the free-typed "Category ID" field this replaced had no lookup
+  // at all, so a typo or a stale id silently created a placement that never
+  // rendered anywhere (BMPL-COURIER-COMPLETION). `categories.manage` sits in
+  // the same ADMIN/SUPER_ADMIN bundles as `promotions.manage`, so a holder of
+  // this form's own gate normally has it too; a 403 here just disables the
+  // category slot rather than taking the whole form down with it.
+  useEffect(() => {
+    api
+      .get<AdminCategory[]>('/admin/categories')
+      .then((cats) => {
+        setCategories(cats);
+        setCategoriesState('ready');
+      })
+      .catch((err) => setCategoriesState(apiStatus(err) === 403 ? 'forbidden' : 'error'));
+  }, []);
 
   function set<K extends keyof AssignFormState>(key: K, value: AssignFormState[K]) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
   const needsCategory = isCategoryPlacement(form.placement);
+  // A NEW assignment may only target a category an admin can currently see --
+  // the server enforces this too (`assignPlacement`), this just keeps the
+  // picker from ever offering a choice the submit would then reject.
+  const selectableCategories = useMemo(
+    () => orderCategories(categories.filter((c) => c.isVisible)),
+    [categories],
+  );
 
   async function submit() {
     if (!form.promotionId) {
       setError('Choose an approved campaign to place.');
+      return;
+    }
+    if (needsCategory && !form.categoryId) {
+      setError('Choose a category for this placement.');
       return;
     }
     setBusy(true);
@@ -1912,7 +1943,13 @@ function AssignPlacementForm({
             <Select
               id="pf-slot"
               value={form.placement}
-              onChange={(e) => set('placement', e.target.value as PromotionPlacementType)}
+              onChange={(e) => {
+                const placement = e.target.value as PromotionPlacementType;
+                set('placement', placement);
+                // A category chosen for the previous slot must not silently
+                // ride along into one that does not use it.
+                if (!isCategoryPlacement(placement)) set('categoryId', '');
+              }}
             >
               {PROMOTION_PLACEMENTS.map((p) => (
                 <option key={p} value={p}>
@@ -1932,17 +1969,34 @@ function AssignPlacementForm({
           </Field>
 
           <Field
-            label="Category ID"
+            label="Category"
             htmlFor="pf-cat"
-            hint={needsCategory ? 'Required for the category page slot.' : 'Only used by the category page slot.'}
+            hint={
+              !needsCategory
+                ? 'Only used by the category page slot.'
+                : categoriesState === 'forbidden'
+                  ? "You don't have the categories.manage permission needed to choose a category."
+                  : categoriesState === 'error'
+                    ? 'Categories could not be loaded. Try reopening this form.'
+                    : categoriesState === 'ready' && selectableCategories.length === 0
+                      ? 'No categories are available to choose. Add one on the Categories page first.'
+                      : 'Required for the category page slot.'
+            }
           >
-            <Input
+            <Select
               id="pf-cat"
               value={form.categoryId}
               onChange={(e) => set('categoryId', e.target.value)}
-              disabled={!needsCategory}
-              placeholder={needsCategory ? 'Category id' : '—'}
-            />
+              disabled={!needsCategory || categoriesState !== 'ready' || selectableCategories.length === 0}
+            >
+              <option value="">{categoriesState === 'loading' ? 'Loading categories…' : 'Select a category…'}</option>
+              {selectableCategories.map(({ cat, depth }) => (
+                <option key={cat.id} value={cat.id}>
+                  {'  '.repeat(depth)}
+                  {cat.name}
+                </option>
+              ))}
+            </Select>
           </Field>
 
           <Field label="Position (priority in slot)" htmlFor="pf-pos" hint="Higher shows first. Optional.">
@@ -1973,7 +2027,11 @@ function AssignPlacementForm({
       {error && <Alert tone="error">{error}</Alert>}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={busy || approved.length === 0} onClick={() => void submit()}>
+        <Button
+          size="sm"
+          disabled={busy || approved.length === 0 || (needsCategory && !form.categoryId)}
+          onClick={() => void submit()}
+        >
           {busy ? (
             <>
               <Spinner className="h-4 w-4" /> Assigning…
