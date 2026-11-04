@@ -16,7 +16,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
 import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
 
 let ctx: TestContext;
@@ -233,6 +233,7 @@ beforeEach(async () => {
   await post(admin, 'admin/wallet/test-credit', { userId: c.userId, amountMinor: 100_000, reason: 'Shipping test fixture.' });
   await enableDispatch(true);
   await seedNetwork();
+  await seedBaselineCourierCoverage(ctx.prisma);
 });
 
 /* ------------------------------------------------------------------------- */

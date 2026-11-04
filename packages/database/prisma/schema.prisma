@@ -351,6 +351,13 @@ enum AuditAction {
   SHIPMENT_LEG_OFFERED
   SHIPMENT_LEG_OFFER_EXPIRED
   SHIPMENT_LEG_DISPATCH_EXHAUSTED
+  /// A driver-worked leg has zero eligible drivers online, ever (not just
+  /// this sweep). Distinct from SHIPMENT_LEG_DISPATCH_EXHAUSTED (that one needs a
+  /// real offer to have been made and declined/expired `maxOffers` times) —
+  /// this leg was never offered to anyone because nobody eligible was ever
+  /// online to offer it to. Written on the TRANSITION into this state only,
+  /// same dedup as SHIPMENT_LEG_DISPATCH_DEFERRED below.
+  SHIPMENT_LEG_DISPATCH_UNAVAILABLE
   /// BMPL-275: a first-mile leg's projected arrival fell outside its
   /// destination terminal's configured hours, so dispatch was deferred
   /// rather than offered. Written on the TRANSITION into deferred only

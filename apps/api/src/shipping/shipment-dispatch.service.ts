@@ -260,6 +260,13 @@ export class ShipmentDispatchService {
     );
     if (ranked.length === 0) {
       // Not exhausted — nobody is online right now. The sweeper will try again.
+      // Previously this was silent forever: offerCount never increments
+      // without an offer, so a leg stuck here could never even reach
+      // EXHAUSTED's own alert. recordUnavailableIfNew is what closes that —
+      // same transition-only dedup as recordDeferralIfNew above, so a
+      // district stuck empty for hours gets exactly one alert, not one every
+      // 20-second sweep.
+      await this.recordUnavailableIfNew(leg, district);
       return { result: 'SKIPPED', reason: 'no eligible driver is available' };
     }
 
@@ -839,6 +846,59 @@ export class ShipmentDispatchService {
       newValue: { legId, shipmentId, reference, ...extra },
       reason,
     });
+  }
+
+  /**
+   * Make "nobody eligible is online" visible to ops AND the customer who
+   * paid for it — distinct from EXHAUSTED (`markExhausted`), which fires
+   * only once a real offer has been made and declined/expired `maxOffers`
+   * times. A leg with zero candidates is never offered at all, so
+   * `offerCount` never increments and EXHAUSTED can never trigger — before
+   * this, the leg sat here forever, re-checked every 20s, telling nobody.
+   *
+   * Same transition-only dedup as recordDeferralIfNew just above: read the
+   * most recent OFFERED/UNAVAILABLE row for this leg, skip if it already
+   * says the same thing. One alert per episode, not one per sweep tick; a
+   * later OFFERED row (a driver came online) naturally resets it for the
+   * next time this happens.
+   */
+  private async recordUnavailableIfNew(
+    leg: { id: string; shipment: { id: string; reference: string; customerUserId: string | null } },
+    district: string,
+  ): Promise<void> {
+    const latest = await this.prisma.auditLog.findFirst({
+      where: {
+        action: { in: ['SHIPMENT_LEG_OFFERED', 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE'] },
+        newValue: { path: ['legId'], equals: leg.id },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { action: true },
+    });
+    if (latest?.action === 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE') return;
+    await this.audit.record({
+      action: 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE',
+      newValue: { legId: leg.id, shipmentId: leg.shipment.id, reference: leg.shipment.reference, district },
+      reason: 'no eligible driver is available',
+    });
+    const districtLabel = String(district).replace(/_/g, ' ');
+    await this.notifications.notifyAdmins('logistics.read', {
+      type: 'SECURITY',
+      category: 'ADMIN_ALERT',
+      event: 'SHIPMENT_COURIER_UNAVAILABLE',
+      title: `Shipment ${leg.shipment.reference} has no courier available`,
+      body: `No eligible driver is online in ${districtLabel} right now. Assign one by hand, or wait for a driver to come online.`,
+      data: { legId: leg.id, reference: leg.shipment.reference, district },
+    });
+    if (leg.shipment.customerUserId) {
+      await this.notifications.notifyUsers([leg.shipment.customerUserId], {
+        type: 'MARKETPLACE',
+        category: 'DELIVERY',
+        event: 'SHIPMENT_COURIER_UNAVAILABLE',
+        title: `Shipment ${leg.shipment.reference}`,
+        body: `No courier is currently available in ${districtLabel}. We are still looking and will assign one as soon as possible.`,
+        data: { shipmentId: leg.shipment.id, reference: leg.shipment.reference },
+      });
+    }
   }
 
   /**

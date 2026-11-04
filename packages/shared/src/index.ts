@@ -25,6 +25,7 @@ export * from './shipment-eta';
 export * from './route-planner';
 export * from './dispatch-ranking';
 export * from './driver-queue';
+export * from './service-coverage';
 export * from './driver-job';
 export * from './route-optimizer';
 export * from './delivery-progress';

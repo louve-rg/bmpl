@@ -159,6 +159,88 @@ export async function seedRoles(prisma: PrismaClient): Promise<void> {
     const existing = await prisma.walletAccount.findFirst({ where: { type, userId: null } });
     if (!existing) await prisma.walletAccount.create({ data: { type, currency: 'BZD' } });
   }
+  // A driver-worked leg now refuses booking outright when nobody has ever
+  // configured coverage for its district (districtHasConfiguredCoverage).
+  // Almost every existing spec books a shipment to assert something else
+  // entirely, with no driver fixture of its own, so the baseline goes here
+  // — the one setup call every integration spec already makes — rather than
+  // threading it individually through every file that books a shipment.
+  // Offline and invisible to assignment (see seedBaselineCourierCoverage's
+  // own comment); a spec whose own beforeEach wipes driver tables between
+  // tests calls seedBaselineCourierCoverage itself, after its own fixture,
+  // to restore it.
+  await seedBaselineCourierCoverage(prisma);
+}
+
+/**
+ * A driver-worked leg (FIRST_MILE/LAST_MILE/DIRECT) now refuses booking
+ * outright when nobody has ever configured coverage for its district
+ * (ShipmentService#runCreate, districtHasConfiguredCoverage). Almost no
+ * existing shipping spec cares about driver assignment at all — they book a
+ * parcel to assert something else entirely — so most need this called once
+ * in their own `beforeAll`, for every district their fixtures use, to keep
+ * booking exactly as unblocked as it always was.
+ *
+ * Deliberately OFFLINE: this exists ONLY to satisfy "configured", never to
+ * be dispatched. `eligibleDriversForDistrict`'s pool requires `ONLINE`, so
+ * this driver can never be offered, assigned, ranked above, or otherwise
+ * interfere with a test's own specific driver/assignment fixtures — it is
+ * invisible to every assertion except the new UNSUPPORTED gate.
+ */
+export async function seedBaselineCourierCoverage(
+  prisma: PrismaClient,
+  districts: string[] = ['BELIZE', 'CAYO', 'COROZAL', 'ORANGE_WALK', 'STANN_CREEK', 'TOLEDO'],
+): Promise<void> {
+  // Both sides of the simulation boundary — a test driver can never satisfy
+  // a real booking's coverage check (districtHasConfiguredCoverage filters
+  // on isTest, same as every other driver-matching query), and the reverse,
+  // so one baseline account per side.
+  for (const isTest of [false, true]) {
+    const email = isTest ? 'it-baseline-courier-test@example.bz' : 'it-baseline-courier@example.bz';
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: {},
+      create: {
+        email,
+        isTest,
+        passwordHash: await hashPassword('BaselinePass123'),
+        firstName: 'Baseline',
+        lastName: 'Courier',
+        emailVerifiedAt: new Date(),
+        roles: { create: [{ roleCode: 'CUSTOMER', status: 'APPROVED', approvedAt: new Date() }] },
+        walletAccounts: { create: { type: 'USER', currency: 'BZD' } },
+      },
+    });
+    await prisma.userRole.upsert({
+      where: { userId_roleCode: { userId: user.id, roleCode: 'DELIVERY_DRIVER' } },
+      update: { status: 'APPROVED', approvedAt: new Date() },
+      create: { userId: user.id, roleCode: 'DELIVERY_DRIVER', status: 'APPROVED', approvedAt: new Date() },
+    });
+    const profile = await prisma.driverProfile.upsert({
+      where: { userId: user.id },
+      update: { isActive: true, isTest },
+      create: {
+        userId: user.id,
+        isTest,
+        legalName: 'Baseline Courier',
+        displayName: 'Baseline Courier',
+        phone: '+5016000001',
+        homeDistrict: 'BELIZE',
+        licenceNumber: `DL-BASELINE${isTest ? '-T' : ''}`,
+        licenceExpiry: new Date(Date.now() + 365 * 24 * 3600 * 1000),
+        vehicleOwnership: 'OWNED',
+        availability: 'OFFLINE',
+        isActive: true,
+      },
+    });
+    for (const district of districts) {
+      await prisma.driverServiceArea.upsert({
+        where: { driverProfileId_district: { driverProfileId: profile.id, district: district as never } },
+        update: { isActive: true },
+        create: { driverProfileId: profile.id, district: district as never, isActive: true },
+      });
+    }
+  }
 }
 
 /** Create a super-admin with all permissions (for admin-workflow tests). */

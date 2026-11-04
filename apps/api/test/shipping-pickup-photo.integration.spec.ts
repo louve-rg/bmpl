@@ -35,7 +35,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
 import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
 
 let ctx: TestContext;
@@ -208,6 +208,7 @@ beforeEach(async () => {
   await ctx.prisma.driverProfile.deleteMany();
   await enableDispatch(true);
   await seedNetwork();
+  await seedBaselineCourierCoverage(ctx.prisma);
 });
 
 describe('shipment pickup photo (BMPL-178)', () => {

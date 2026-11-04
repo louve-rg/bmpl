@@ -14,6 +14,7 @@ import {
   isLocalDoorToDoor,
   planRoute,
   resolveScheduleStatus,
+  classifyDriverLegCoverage,
   userInitials,
   customerFacingExceptionReason,
   LEG_KIND_LABELS,
@@ -64,6 +65,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { ShipmentDispatchService } from './shipment-dispatch.service';
 import { assertOperableProvider } from './provider-eligibility';
+import { DriverService } from '../driver/driver.service';
 import { StorageService } from '../storage/storage.service';
 import { AVATAR_SELECT, publicAvatarUrl } from '../common/avatar-url';
 import { ENV } from '../config/config.module';
@@ -385,6 +387,7 @@ export class ShipmentService {
     private readonly payments: PaymentsService,
     private readonly settlement: SettlementService,
     private readonly storage: StorageService,
+    private readonly drivers: DriverService,
     @Inject(ENV) private readonly env: Env,
   ) {}
 
@@ -806,6 +809,45 @@ export class ShipmentService {
       );
     }
 
+    // A customer can pay for a journey the hub/route/lane network can plan
+    // but no driver anywhere has ever agreed to work — the planner only
+    // knows about terminals and transport legs, never about who is actually
+    // on the ground to run a FIRST_MILE/LAST_MILE/DIRECT leg. UNSUPPORTED
+    // (nobody has ever configured coverage in that district) refuses the
+    // booking outright, before any wallet lock is taken, with a plain
+    // explanation — the planner's own refuse-with-explanation pattern, not a
+    // new one. TEMPORARILY_UNAVAILABLE (coverage is configured, nobody is
+    // online this second) does NOT refuse: a driver coming online later is
+    // exactly the "otherwise-valid future booking" that must still go
+    // through, so the booking proceeds and the warning rides along in the
+    // response instead (`fulfilmentNotice` below) — the dispatch sweeper's
+    // own escalation (ShipmentDispatchService.recordUnavailableIfNew) is
+    // what tells the customer AGAIN if it is still unfulfilled later.
+    const fulfilmentNotices: string[] = [];
+    for (const leg of plan.legs) {
+      if (leg.kind === 'LINE_HAUL') continue; // carrier-worked; assertOperableProvider below is that leg's own gate.
+      const district =
+        leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT'
+          ? input.origin.district
+          : hubs.find((h) => h.id === leg.originHubId)?.district;
+      if (!district) continue; // No district to check yet (e.g. a hub lookup miss) — the planner's own checks already cover this leg's feasibility.
+      const [configured, pool] = await Promise.all([
+        this.drivers.districtHasConfiguredCoverage(district, simulated),
+        this.drivers.eligibleDriversForDistrict(district, { isTest: simulated, excludeUserId: userId }),
+      ]);
+      const coverage = classifyDriverLegCoverage({ configuredCount: configured ? 1 : 0, eligibleNowCount: pool.length });
+      if (coverage.status === 'UNSUPPORTED') {
+        throw new BadRequestException(
+          `We do not yet have a courier serving ${String(district).replace(/_/g, ' ')}, so this journey cannot be booked yet. Please choose a different service or contact support.`,
+        );
+      }
+      if (coverage.status === 'TEMPORARILY_UNAVAILABLE') {
+        fulfilmentNotices.push(
+          `No courier is currently online in ${String(district).replace(/_/g, ' ')}. We will assign one as soon as one becomes available.`,
+        );
+      }
+    }
+
     const endsAtHub = !needsLastMile(input.service);
     const originHubId = plan.legs.find((l) => l.kind === 'LINE_HAUL')?.originHubId ?? null;
     const destinationHubId = [...plan.legs].reverse().find((l) => l.kind === 'LINE_HAUL')?.destinationHubId ?? null;
@@ -994,7 +1036,14 @@ export class ShipmentService {
       await this.dispatch.dispatchLeg(firstLeg.id);
     }
 
-    return this.serialize(shipment, { audience: 'CUSTOMER' });
+    const serialized = await this.serialize(shipment, { audience: 'CUSTOMER' });
+    // Additive: present only when a driver-worked leg is booked into a
+    // district with configured coverage but nobody online right now — the
+    // booking still succeeded (the forbidden-solutions list is explicit:
+    // never block an otherwise-valid future booking over who happens to be
+    // online this second), but the customer is told plainly rather than
+    // left to assume dispatch is guaranteed just because a quote existed.
+    return fulfilmentNotices.length > 0 ? { ...serialized, fulfilmentNotices } : serialized;
   }
 
   /**
