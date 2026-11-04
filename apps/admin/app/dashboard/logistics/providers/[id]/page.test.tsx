@@ -281,8 +281,14 @@ describe('CarrierDetailPage — suspend vs. revoke, made legible (MDF-524, D-own
 
     expect(container!.textContent).toContain('REVOKED');
     expect(container!.textContent).toContain('Safety complaint upheld.');
-    expect(container!.textContent).toMatch(/terminal, not reversible/);
-    expect(container!.textContent).toMatch(/no path back except an admin action/);
+    // Revocation does NOT read as terminal (Michael's own correction of his
+    // first ruling, same day, once Pam's reapply verb clarified the design):
+    // it ends the ability to operate and has no reinstate-style undo, but
+    // reapply is a real, offered way back -- to PENDING, restoring nothing
+    // on its own.
+    expect(container!.textContent).toMatch(/ability to operate ends here/);
+    expect(container!.textContent).toMatch(/reapply.*restores no privileges on its own/s);
+    expect(container!.textContent).not.toMatch(/terminal/);
     expect(buttonTexts()).toContain('Reapply (reopen for review)');
     expect(buttonTexts()).not.toContain('Reinstate (lift suspension)');
   });
@@ -292,9 +298,9 @@ describe('CarrierDetailPage — suspend vs. revoke, made legible (MDF-524, D-own
     await mount();
 
     expect(container!.textContent).toContain('SUSPENDED');
-    expect(container!.textContent).toMatch(/reversible administrative hold, not a revocation/);
+    expect(container!.textContent).toMatch(/reversible hold that returns straight to APPROVED/);
     expect(container!.textContent).toMatch(/not offered for new work until reinstated/);
-    expect(container!.textContent).not.toMatch(/no path back/);
+    expect(container!.textContent).not.toMatch(/ability to operate ends/);
     expect(container!.textContent).not.toMatch(/terminal/);
   });
 });

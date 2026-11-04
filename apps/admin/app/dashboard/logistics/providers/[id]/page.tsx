@@ -39,17 +39,30 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Selec
  *     `reapply`; every transition is audited and notifies the carrier --
  *     nothing of either kind is built here.
  *
- * MICHAEL'S RULING (2026-11-04, MDF-524): an ordinary administrative
- * suspension must be liftable -- a suspension nobody can lift is a
- * revocation with a gentler label. Revocation stays terminal; its only
- * recovery is of the carrier's *shipments* (below), never of the carrier
- * itself. `reinstate` (SUSPENDED -> APPROVED) therefore now REQUIRES a
- * reason, the same audit treatment as suspend/revoke -- not a silent flag
- * flip. `reopen`/`reapply` are unaffected: those are PENDING-for-review
- * paths, not a lift, and Pam's §9 already has them reason-optional.
- * Michael believes `approveProviderStatus` already enforces this; Pam is
- * confirming/adding it server-side -- flagged, not asserted, same as any
- * other not-yet-confirmed piece of her contract.
+ * MICHAEL'S RULING (2026-11-04, MDF-524) -- revised same day, see below:
+ * an ordinary administrative suspension must be liftable -- a suspension
+ * nobody can lift is a revocation with a gentler label. `reinstate`
+ * (SUSPENDED -> APPROVED) therefore REQUIRES a reason, the same audit
+ * treatment as suspend/revoke -- not a silent flag flip. `reopen`/
+ * `reapply` are unaffected: those are PENDING-for-review paths, not a
+ * lift, and Pam's §9 already has them reason-optional. Michael believes
+ * `approveProviderStatus` already enforces the reinstate-reason
+ * requirement; Pam is confirming/adding it server-side -- flagged, not
+ * asserted, same as any other not-yet-confirmed piece of her contract.
+ *
+ * ASYMMETRY, CORRECTED (2026-11-04, same card, Michael's own correction
+ * of his first ruling): revocation does NOT stay terminal -- that was
+ * Michael's initial call, superseded the same day once Pam's `reapply`
+ * verb (REVOKED -> PENDING, admin-only) arrived, because her design beats
+ * the terminal ruling at the thing he actually cared about: `reapply`
+ * restores NO privileges on its own (the carrier re-enters at PENDING and
+ * must clear full re-approval again), which makes a one-click undo of a
+ * revocation impossible without being a dead end either. So: revocation
+ * ends the carrier's ability to operate and has no reinstate-style undo;
+ * its only way back is `reapply`, to the back of the queue. Suspension
+ * stays the reversible hold that returns straight to APPROVED. Keep this
+ * reading in the banner copy below, not the "terminal" framing -- that
+ * framing is what was wrong, not the `reapply` button.
  *
  * STILL NOT READY (Pam's §9, explicit: "do not wire the console to these
  * until that section says done") -- unchanged from the prior pass, each
@@ -291,12 +304,16 @@ function Row({ label, value }: { label: string; value: string }) {
 /**
  * Suspend vs. revoke, made legible (the owner's explicit requirement): an
  * ordinary administrative SUSPEND reads as a routine, reversible hold
- * (outline button); an urgent REVOKE reads as a security or safety action
- * (destructive button). Once revoked, the banner points at BOTH recovery
- * paths Pam's contract actually offers: reapplying the carrier itself
- * (back to PENDING, for review) and reassigning its in-flight shipments
- * below -- revocation is not a dead end, but nothing moves it except an
- * admin action naming a reason, same as getting into it did.
+ * (outline button) that returns straight to APPROVED via `reinstate`; an
+ * urgent REVOKE reads as a security or safety action (destructive button)
+ * that ends the carrier's ability to operate with no reinstate-style undo.
+ * Revocation's only way back is `reapply`, to PENDING for full
+ * re-approval -- it restores no privileges on its own, which is what
+ * makes it safe to offer at all (see the file header for why Michael
+ * corrected his own first "terminal" ruling once this verb's shape
+ * clarified the tradeoff). The banner also points at reassigning the
+ * carrier's in-flight shipments, independent of whichever recovery path
+ * applies.
  */
 function StatusCard({ provider, canManage, onChanged }: { provider: Provider; canManage: boolean; onChanged: () => void }) {
   const [reason, setReason] = useState('');
@@ -341,15 +358,17 @@ function StatusCard({ provider, canManage, onChanged }: { provider: Provider; ca
 
       {status === 'REVOKED' && (
         <Alert tone="error" className="mt-3">
-          This carrier is revoked -- that status is terminal, not reversible. It has no path back except an admin
-          action: reapply below to send it back to review, or see "In-flight shipments" to reassign anything still
-          assigned to it.
+          This carrier's ability to operate ends here -- a reinstate-style undo does not exist for revocation. The
+          only way back is reapply below, which sends it to the back of the queue for full re-approval and restores
+          no privileges on its own. In the meantime, see "In-flight shipments" to reassign anything still assigned to
+          it.
         </Alert>
       )}
       {status === 'SUSPENDED' && (
         <Alert tone="warning" className="mt-3">
-          This carrier is suspended -- a reversible administrative hold, not a revocation. It keeps its history and
-          membership; it is not offered for new work until reinstated below, which (like suspending it) needs a reason.
+          This carrier is suspended -- a reversible hold that returns straight to APPROVED, not a cutoff like
+          revocation. It keeps its history and membership; it is not offered for new work until reinstated below,
+          which (like suspending it) needs a reason.
         </Alert>
       )}
       {status === 'REJECTED' && (
