@@ -251,4 +251,80 @@ describe('self-service UAT wallet funding', () => {
     expect(descriptions).toContain('Administrative Test Credit');
     expect(descriptions).toContain('Self-Service Test Credit');
   });
+
+  // MDF-512. The exact counterpart of test D above, and it does NOT hold.
+  //
+  // Jim live-proved the UI half with Playwright: the admin console's test-credit
+  // control dispatches two real requests in one synchronous tick on a double
+  // click (code-confirmed, not completed against the shared UAT wallet — he
+  // deliberately stopped short of that). This is the server-side measurement
+  // that turns it from code-confirmed into OBSERVED.
+  //
+  // adminTestCredit (wallet.service.ts) has neither of selfServiceTestCredit's
+  // two defences: no `SELECT ... FOR UPDATE` lock, and its transaction
+  // reference — `admin-test-credit:${userId}:${Date.now()}` — is wall-clock
+  // derived, not state-derived. Two racers milliseconds apart get two
+  // different references and never collide at all; two racers landing in the
+  // SAME millisecond collide on that reference by accident, which is luck,
+  // not a defence — and when they do, nothing catches the P2002 the way
+  // selfServiceTestCredit's `.catch` does, so it reaches the client as a raw
+  // 500 instead of a clean 409.
+  //
+  // THE INVARIANT under test (asserted unconditionally): exactly one credit
+  // posts for one authorised admin action, and no racer gets a raw 500.
+  //
+  // OBSERVED, not assumed, across two confirmed runs — both measured
+  // peakConcurrentActive=5 (all five requests' queries genuinely active at
+  // the same instant), and both show the double-credit, just via different
+  // symptoms depending on whether any two racers' Date.now() happened to
+  // collide:
+  //   - one run: statuses [201,201,201,201,201] — no collision, FIVE separate
+  //     credits posted for one administrator action;
+  //   - another run: statuses [500,201,201,201,201] — one collision, caught
+  //     as an unhandled P2002 (raw 500, the "luck" case above), the other
+  //     FOUR each still posted their own separate credit.
+  // Either way: one authorised action, far more than one credit.
+  //
+  // Left FAILING on purpose, same as assignPlacement's. This is the forcing
+  // reproduction for Pam's fix (owner §11 financial-safety lane, after the
+  // carrier API) — a red test is how she knows when she is done.
+  //
+  // DESIGN NOTE for whoever fixes this, including god if he'd specified it
+  // himself: do NOT copy selfServiceTestCredit's state-derived reference
+  // pattern here. That pattern works only because a cumulative CAP makes any
+  // repeat illegitimate by construction. An administrator may legitimately
+  // grant the same user the same amount twice, on purpose, as two separate
+  // decisions — so a server-derived reference would either still let true
+  // duplicates through (if derived from something that differs per call) or
+  // start blocking real, intentional second grants (if derived from something
+  // that doesn't). The honest fix needs an idempotency key supplied PER USER
+  // ACTION — meaning the admin console UI has to generate and send one per
+  // click — not a cleverer server-side derivation.
+  it('P · N simultaneous admin test-credits for the same user do NOT collapse to one (MDF-512)', async () => {
+    const me = await registerCustomer(`ssf_admin_race_${uniq()}@example.bz`);
+    const amountMinor = 8_000;
+    const probe = await raceOverSeparateConnections(
+      ctx.prisma,
+      [1, 2, 3, 4, 5].map(() => () => post(admin, 'admin/wallet/test-credit', { userId: me.userId, amountMinor, reason: 'MDF-512 race reproduction' })),
+    );
+    console.log(
+      `[CONCURRENCY adminTestCredit] ${probe.observed ? 'OBSERVED' : 'NOT-FORCED'} ` +
+      `(peakConcurrentActive=${probe.peakConcurrentActive}, samples=${probe.samples}, elapsedMs=${probe.elapsedMs})`,
+    );
+    const statuses = probe.responses.map((r) => r.status);
+    // A losing racer colliding on the wall-clock reference must still fail
+    // CLEANLY, never leak a raw 500 — same clean-failure bar as assignPlacement.
+    expect(statuses.every((s) => s !== 500), `statuses: ${JSON.stringify(statuses)}`).toBe(true);
+
+    const wallet = await walletOf(me.userId);
+    const credits = await ctx.prisma.walletLedgerEntry.findMany({
+      where: { accountId: wallet.id, direction: 'CREDIT', transaction: { description: 'Administrative Test Credit' } },
+    });
+    // The real invariant, and the one expected to fail: one authorised admin
+    // action must post exactly one credit, not one credit per racer that
+    // happened to get a distinct wall-clock reference.
+    expect(credits, `credits posted: ${credits.length} (expected 1); statuses: ${JSON.stringify(statuses)}`).toHaveLength(1);
+    const summary = await get(me.cookies, 'wallet');
+    expect(summary.body.totalMinor, `totalMinor: ${summary.body.totalMinor} (expected ${amountMinor})`).toBe(amountMinor);
+  });
 });
