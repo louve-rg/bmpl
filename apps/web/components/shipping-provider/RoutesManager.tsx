@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Button, Card as UiCard, EmptyState, Spinner } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
-import type { ShippingProviderRoute } from '../../lib/shipping-provider';
+import type { AvailableRoutesResponse, ShippingProviderRoute } from '../../lib/shipping-provider';
 import { ApprovalRequired } from './data';
 import { RouteScheduleEditor } from './RouteScheduleEditor';
 
@@ -14,16 +14,13 @@ import { RouteScheduleEditor } from './RouteScheduleEditor';
  * operates. Never creates a route or sets its price/mode — those stay
  * admin-entered business configuration (`claimRoute`'s own doc comment).
  *
- * "See and claim an AVAILABLE route" is the one piece of this item with no
- * backing read today: `myRoutes()` only returns routes this org already
- * operates, and there is no self-service list of unclaimed ones to pick
- * from by name (flagged to Pam directly, MDF-526). Rather than typing a raw
- * database id — forbidden for this surface — the claim section below
- * probes a proposed `GET routes/available` first and reads its own 404 as
- * "not supported here yet" (the same self-upgrading detection pattern used
- * for the admin console's roster/shipment-filter gaps last round): it
- * activates on its own, with no second push from this side, the moment
- * that endpoint exists.
+ * "See and claim an AVAILABLE route" is the one piece of this item that had
+ * no backing read when this file was first written: `myRoutes()` only
+ * returns routes this org already operates. Flagged to Pam directly
+ * (MDF-526); `GET routes/available` has since landed (MDF-500 §13),
+ * status-gated the same way `claimRoute` itself is. See
+ * `AvailableRoutesSection`'s own doc comment for the response shape and why
+ * the 404 fallback stays in place regardless.
  */
 export function RoutesManager() {
   const [routes, setRoutes] = useState<ShippingProviderRoute[] | null>(null);
@@ -139,25 +136,37 @@ function RouteCard({
 }
 
 /**
- * Honest-gap section: tries the proposed discovery endpoint and shows
- * EXACTLY what it gets back — real rows to claim, a genuine empty list, or
- * "not supported yet" on a 404. Never invents a browsing mechanism around
- * the gap (e.g. by asking for a pasted route id).
+ * Discovery section for `GET routes/available` (landed server-side as of
+ * MDF-500 §13, same branch): status-gated exactly like `claimRoute` itself —
+ * claiming is a new commitment, so a SUSPENDED/REVOKED org never gets to
+ * enumerate newly-claimable routes either, not just blocked from claiming one.
+ * `statusGateReason` is shown verbatim, same reason the suspend/revoke UI
+ * already shows a reason string rather than a bare refusal.
+ *
+ * The 404 branch is kept deliberately even though the endpoint now exists on
+ * this branch: a stale deployment without it degrades to "not supported yet"
+ * rather than an error banner — the same self-upgrading detection pattern
+ * used for the admin console's roster/shipment-filter gaps last round, now
+ * proven out by this exact endpoint landing without a second push from here.
  */
 function AvailableRoutesSection({ onClaimed, onError }: { onClaimed: () => Promise<void>; onError: (m: string) => void }) {
   const [available, setAvailable] = useState<ShippingProviderRoute[] | null>(null);
+  const [gateReason, setGateReason] = useState<string | null>(null);
   const [supported, setSupported] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setAvailable(await api.get<ShippingProviderRoute[]>('/shipping/provider/routes/available'));
+      const res = await api.get<AvailableRoutesResponse>('/shipping/provider/routes/available');
+      setAvailable(res.routes);
+      setGateReason(res.statusGateEligible ? null : res.statusGateReason);
       setSupported(true);
     } catch (e) {
       const ex = e as ApiError;
       if (ex.status === 404) {
         setSupported(false);
         setAvailable(null);
+        setGateReason(null);
       } else {
         onError(ex.message ?? 'Could not load available routes.');
       }
@@ -190,10 +199,11 @@ function AvailableRoutesSection({ onClaimed, onError }: { onClaimed: () => Promi
           route id is ever needed to claim one.
         </p>
       )}
-      {supported && available && available.length === 0 && (
+      {supported && gateReason && <Alert tone="warning">{gateReason}</Alert>}
+      {supported && !gateReason && available && available.length === 0 && (
         <p className="text-xs text-[color:var(--bmpl-text-muted)]">No unclaimed routes right now.</p>
       )}
-      {supported && available && available.length > 0 && (
+      {supported && !gateReason && available && available.length > 0 && (
         <div className="space-y-2">
           {available.map((r) => (
             <UiCard key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-3">

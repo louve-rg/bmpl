@@ -69,6 +69,19 @@ export interface ShippingProviderRoute {
   destination: { id: string; code: string; name: string; city: string };
 }
 
+/**
+ * `GET /shipping/provider/routes/available` — status-gated the same way
+ * `claimRoute` itself is (claiming is a new commitment, so a SUSPENDED/REVOKED
+ * org must not even enumerate newly-claimable routes). When `statusGateEligible`
+ * is false, `routes` is always `[]` and `statusGateReason` names why — same
+ * vocabulary as the admin console's providers directory.
+ */
+export interface AvailableRoutesResponse {
+  statusGateEligible: boolean;
+  statusGateReason: string | null;
+  routes: ShippingProviderRoute[];
+}
+
 /** A leg this org already holds, awaiting an accept/reject answer — mirrors `providerLegOut`'s own `canAccept`/`canReject` flags rather than re-deriving the same thing from a second field. */
 export function isPendingProposal(l: Pick<ShippingProviderLeg, 'canAccept' | 'canReject'>): boolean {
   return l.canAccept && l.canReject;
