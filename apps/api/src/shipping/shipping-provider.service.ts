@@ -775,6 +775,72 @@ export class ShippingProviderService {
   }
 
   /**
+   * MDF-526: the self-service list a carrier claims FROM. Without this,
+   * `claimRoute` is only reachable by already knowing a route id — there was
+   * no read a carrier could use to discover one.
+   *
+   * Gated by the SAME AND-gate `claimRoute` itself enforces via
+   * `assertOperableProvider` (status === APPROVED, AND-ed with the generic
+   * SHIPPING_PROVIDER role status) — claiming is a NEW commitment, exactly
+   * like accepting a leg proposal, so a SUSPENDED or REVOKED org must not
+   * even be able to enumerate what's newly claimable (god's ruling,
+   * 2026-11-04). `statusGateEligible`/`statusGateReason` name is deliberately
+   * the same one `listProviders` already uses for the identical AND-gate —
+   * one vocabulary for "why can't this org take new work," not a second one
+   * invented here. Eligible if ANY of the caller's orgs currently passes the
+   * gate (the common case is exactly one); `routes` is empty whenever none
+   * do, so nothing new is disclosed to an org that cannot act on it anyway.
+   *
+   * `isActive`/unassigned/`isTest`-matching stay the base filter regardless —
+   * this is read-only and advisory. It must never become a read-then-write
+   * that pre-reserves a row: `claimRoute`'s own `updateMany` CAS, tested
+   * under real concurrency (5 racers -> [201,409,409,409,409]), remains the
+   * only authority on who actually gets a route.
+   */
+  async availableRoutes(userId: string) {
+    const orgIds = await this.myOrgIds(userId);
+    const profiles = await this.prisma.shippingProviderProfile.findMany({
+      where: { id: { in: orgIds } },
+      select: {
+        isTest: true,
+        status: true,
+        user: { select: { roles: { where: { roleCode: 'SHIPPING_PROVIDER' }, select: { status: true } } } },
+      },
+    });
+    let statusGateReason: string | null = null;
+    const statusGateEligible = profiles.some((p) => {
+      const [reason] = providerStatusEligibilityReasons(p);
+      if (!reason) return true;
+      statusGateReason ??= reason;
+      return false;
+    });
+    if (!statusGateEligible) {
+      return { statusGateEligible: false, statusGateReason: statusGateReason ?? 'organization not eligible to take new work', routes: [] };
+    }
+    const isTest = profiles[0]!.isTest;
+    const routes = await this.prisma.logisticsRoute.findMany({
+      where: { operatedByProviderId: null, isActive: true, isTest },
+      orderBy: { id: 'asc' },
+      include: {
+        originHub: { select: { id: true, code: true, name: true, city: true } },
+        destinationHub: { select: { id: true, code: true, name: true, city: true } },
+      },
+    });
+    return {
+      statusGateEligible: true,
+      statusGateReason: null,
+      routes: routes.map((r) => ({
+        id: r.id,
+        mode: r.mode,
+        isActive: r.isActive,
+        scheduleNote: r.scheduleNote,
+        origin: { id: r.originHub.id, code: r.originHub.code, name: r.originHub.name, city: r.originHub.city },
+        destination: { id: r.destinationHub.id, code: r.destinationHub.code, name: r.destinationHub.name, city: r.destinationHub.city },
+      })),
+    };
+  }
+
+  /**
    * MDF-COURIER self-service scope: "service areas / routes". A carrier
    * CLAIMS an EXISTING, currently-UNASSIGNED route — never creates one, and
    * never touches its price, mode or schedule. Those stay admin-entered

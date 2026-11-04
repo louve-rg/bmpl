@@ -967,6 +967,14 @@ export class ShippingProviderRoutesController {
     return this.providers.myRoutes(u.userId);
   }
 
+  /** MDF-526: every active, unclaimed route on my side of the simulation
+   *  boundary — how a carrier finds a route id to claim, without ever being
+   *  handed or typing one it can't see named by hub. */
+  @Get('routes/available')
+  availableRoutes(@CurrentUser() u: AuthContext) {
+    return this.providers.availableRoutes(u.userId);
+  }
+
   @Get('routes/:id/schedule')
   schedule(@CurrentUser() u: AuthContext, @Param('id') id: string) {
     return this.providers.myRouteSchedule(u.userId, id);

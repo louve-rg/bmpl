@@ -474,6 +474,44 @@ describe('self-service scope — own membership and route claim/release', () => 
     expect((await post(other.cookies, `shipping/provider/routes/${route.id}/claim`, {})).status).toBe(201);
   });
 
+  it('MDF-526: routes/available lists an unassigned route by hub name for any carrier to discover, and drops it the moment it is claimed', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const route = await ctx.prisma.logisticsRoute.findFirstOrThrow({ where: { operatedByProviderId: null } });
+
+    const before = await get(carrier.cookies, 'shipping/provider/routes/available');
+    expect(before.status).toBe(200);
+    expect(before.body.statusGateEligible).toBe(true);
+    expect(before.body.statusGateReason).toBeNull();
+    expect(before.body.routes).toEqual([
+      expect.objectContaining({
+        id: route.id,
+        origin: expect.objectContaining({ city: 'San Pedro' }),
+        destination: expect.objectContaining({ city: 'Belize City' }),
+      }),
+    ]);
+
+    expect((await post(carrier.cookies, `shipping/provider/routes/${route.id}/claim`, {})).status).toBe(201);
+
+    const after = await get(carrier.cookies, 'shipping/provider/routes/available');
+    expect(after.body.routes).toEqual([]);
+    // Claimed, it now shows up as mine instead.
+    expect((await get(carrier.cookies, 'shipping/provider/routes')).body).toHaveLength(1);
+  });
+
+  it('MDF-526: a SUSPENDED or REVOKED carrier cannot even enumerate what is newly claimable — routes/available reports the gate instead of the routes', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    await ctx.prisma.logisticsRoute.findFirstOrThrow({ where: { operatedByProviderId: null } }); // an unassigned route exists
+
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/suspend`, { reason: 'Licence under review.' })).status).toBe(201);
+    const suspended = await get(carrier.cookies, 'shipping/provider/routes/available');
+    expect(suspended.status).toBe(200);
+    expect(suspended.body).toEqual({ statusGateEligible: false, statusGateReason: expect.stringContaining('suspended'), routes: [] });
+
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/revoke`, { reason: 'Repeated handoff failures.' })).status).toBe(201);
+    const revoked = await get(carrier.cookies, 'shipping/provider/routes/available');
+    expect(revoked.body).toEqual({ statusGateEligible: false, statusGateReason: expect.stringContaining('revoked'), routes: [] });
+  });
+
   it("release is an OWNERSHIP check, not merely a permission check — a different SHIPPING_PROVIDER org cannot release a route it does not operate", async () => {
     const owner = await makeCarrier('Reef Runner Ltd');
     const intruder = await makeCarrier('Cave Branch Bus Co');
