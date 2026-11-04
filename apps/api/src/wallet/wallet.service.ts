@@ -17,6 +17,18 @@ const money = (v: bigint) => Number(v);
 export const SELF_SERVICE_TEST_CREDIT = 'Self-Service Test Credit';
 
 /**
+ * MDF-512. `adminTestCredit`'s fallback idempotency window when the caller
+ * supplies no explicit key: two requests landing in the same
+ * `ADMIN_TEST_CREDIT_WINDOW_MS` bucket collide on the transaction reference
+ * and the second replays the first's credit rather than posting a second
+ * one. A deliberate second grant made after the window elapses still posts
+ * normally. See `adminTestCredit`'s own comment for why this — rather than
+ * a purely state-derived reference — is the right shape for money an
+ * administrator may legitimately grant twice on purpose.
+ */
+export const ADMIN_TEST_CREDIT_WINDOW_MS = 10_000;
+
+/**
  * Persistence layer for the double-entry ledger — the FIRST real money movement
  * (M12). Reuses the `@bmpl/wallet` primitives (`assertBalanced`,
  * `assertMoneyMovementEnabled`) so the balancing rules live in one place. Every
@@ -172,29 +184,101 @@ export class WalletService {
     amountMinor: bigint,
     reason: string,
     currency: Currency = 'BZD',
+    idempotencyKey?: string,
   ) {
-    const summary = await this.topUp(userId, amountMinor, currency, {
-      reference: `admin-test-credit:${userId}:${Date.now()}`,
-      description: 'Administrative Test Credit',
-      actorId,
-      forceIsTest: true,
-    });
-    await this.audit.record({
-      action: 'WALLET_TEST_FUNDING_GRANTED',
-      actorId,
-      targetUserId: userId,
-      reason,
-      newValue: {
-        amountMinor: money(amountMinor),
-        currency,
+    if (amountMinor <= 0n) throw new BadRequestException('Enter an amount greater than zero.');
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) throw new NotFoundException('Account not found.');
+
+    // MDF-512 (two defences, parity with selfServiceTestCredit's own pair —
+    // see that method's comment): a FOR UPDATE row lock below serialises
+    // concurrent grants to the same wallet, and this reference is the second
+    // line. It deliberately does NOT copy selfServiceTestCredit's
+    // state-derived reference: a cap makes a repeat illegitimate there, but
+    // an administrator may legitimately grant the same amount to the same
+    // user twice, on purpose, as two separate decisions. An explicit
+    // caller-supplied key (once a UI sends one) makes that exact-once. With
+    // no key, a short wall-clock bucket still refuses the accidental
+    // double-click this exists to close, while a deliberate second grant a
+    // few seconds later still posts normally.
+    const reference = idempotencyKey
+      ? `admin-test-credit:${userId}:key:${idempotencyKey}`
+      : `admin-test-credit:${userId}:${amountMinor}:${actorId ?? 'owner'}:${Math.floor(Date.now() / ADMIN_TEST_CREDIT_WINDOW_MS)}`;
+
+    let replay = false;
+    const result = await this.prisma
+      .$transaction(async (tx) => {
+        const wallet = await this.ensureUserAccount(userId, currency, tx);
+        if (wallet.status !== 'ACTIVE') throw new BadRequestException('This wallet is not active.');
+        // Parity with selfServiceTestCredit: taken BEFORE the post, so two
+        // simultaneous grants to the same wallet serialise rather than race.
+        await tx.$queryRaw`SELECT id FROM wallet_accounts WHERE id = ${wallet.id} FOR UPDATE`;
+        const clearing = await this.ensureSystemAccount('SYSTEM_TOPUP_CLEARING', currency, tx);
+        const txn = await this.postTransaction(
+          tx,
+          {
+            type: 'TOPUP',
+            currency,
+            reference,
+            description: 'Administrative Test Credit',
+            lines: [
+              { accountId: wallet.id, direction: 'CREDIT', amountMinor },
+              { accountId: clearing.id, direction: 'DEBIT', amountMinor },
+            ],
+          },
+          true,
+          // Always simulation money regardless of who receives it — same
+          // rule topUp applies via forceIsTest, inlined here because the
+          // lock has to sit inside this same transaction.
+          true,
+        );
+        return { txn, walletId: wallet.id };
+      })
+      .catch(async (err: unknown) => {
+        // The owner named this explicitly: a losing racer must never surface
+        // as a raw 500. Unlike selfServiceTestCredit (where a collision is a
+        // refusal — "you already claimed your cap"), a collision here is an
+        // idempotent REPLAY: the administrator already authorised exactly
+        // this credit, so the honest answer is to hand back the SAME credit
+        // that posted, not a new one and not an error.
+        if (typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002') {
+          const existing = await this.prisma.walletTransaction.findUnique({ where: { reference } });
+          if (existing) {
+            replay = true;
+            const wallet = await this.prisma.walletAccount.findFirstOrThrow({ where: { userId, type: 'USER', currency } });
+            return { txn: existing, walletId: wallet.id };
+          }
+        }
+        throw err;
+      });
+
+    if (!replay) {
+      // Same shape topUp() records for every TOPUP, inlined here because
+      // this path no longer calls topUp() (the row lock has to live inside
+      // the same transaction as the post).
+      await this.audit.record({
+        action: 'WALLET_TOPUP_POSTED',
+        actorId,
+        targetUserId: userId,
+        newValue: { walletTransactionId: result.txn.id, amountMinor: money(amountMinor), currency, isTest: true },
+      });
+      await this.audit.record({
+        action: 'WALLET_TEST_FUNDING_GRANTED',
+        actorId,
+        targetUserId: userId,
         reason,
-        label: 'Administrative Test Credit',
-        // Says which door this came through, so a null actor reads as a
-        // recorded fact rather than missing data.
-        source: actorId ? 'ADMIN_CONSOLE' : 'OWNER_AUTHORIZED_MAINTENANCE',
-      },
-    });
-    return summary;
+        newValue: {
+          amountMinor: money(amountMinor),
+          currency,
+          reason,
+          label: 'Administrative Test Credit',
+          // Says which door this came through, so a null actor reads as a
+          // recorded fact rather than missing data.
+          source: actorId ? 'ADMIN_CONSOLE' : 'OWNER_AUTHORIZED_MAINTENANCE',
+        },
+      });
+    }
+    return this.summary(userId, currency);
   }
 
   /**

@@ -327,4 +327,51 @@ describe('self-service UAT wallet funding', () => {
     const summary = await get(me.cookies, 'wallet');
     expect(summary.body.totalMinor, `totalMinor: ${summary.body.totalMinor} (expected ${amountMinor})`).toBe(amountMinor);
   });
+
+  // The fix for P above. "No duplicate" is not satisfied by the second call
+  // silently doing nothing — it must hand back the SAME credit it already
+  // posted, as a success, not a refusal and not a second row.
+  it('Q · a replayed admin test-credit (same user/amount/actor, inside the window) returns the SAME credit id, not a silent no-op (MDF-512)', async () => {
+    const me = await registerCustomer(`ssf_admin_replay_${uniq()}@example.bz`);
+    const amountMinor = 6_000;
+    const wallet = await walletOf(me.userId);
+    const creditIds = () =>
+      ctx.prisma.walletLedgerEntry
+        .findMany({ where: { accountId: wallet.id, direction: 'CREDIT', transaction: { description: 'Administrative Test Credit' } }, select: { transactionId: true } })
+        .then((rows) => rows.map((r) => r.transactionId));
+
+    const first = await post(admin, 'admin/wallet/test-credit', { userId: me.userId, amountMinor, reason: 'MDF-512 replay check' });
+    expect(first.status).toBe(201);
+    const afterFirst = await creditIds();
+    expect(afterFirst).toHaveLength(1);
+
+    const second = await post(admin, 'admin/wallet/test-credit', { userId: me.userId, amountMinor, reason: 'MDF-512 replay check' });
+    expect(second.status, `replay must succeed, never a raw 500: ${second.status}`).toBe(201);
+    const afterSecond = await creditIds();
+    expect(afterSecond, `expected the same single credit back, got: ${JSON.stringify(afterSecond)}`).toEqual(afterFirst);
+
+    const summary = await get(me.cookies, 'wallet');
+    expect(summary.body.totalMinor).toBe(amountMinor);
+  });
+
+  // The legitimate case the bucket must never break: an administrator who
+  // really does mean to grant the same user the same amount twice, as two
+  // separate decisions, each carrying its own explicit key.
+  it('R · two admin test-credits with DIFFERENT explicit idempotency keys post as two separate credits, even same user and amount (MDF-512)', async () => {
+    const me = await registerCustomer(`ssf_admin_keys_${uniq()}@example.bz`);
+    const amountMinor = 4_000;
+
+    const first = await post(admin, 'admin/wallet/test-credit', { userId: me.userId, amountMinor, reason: 'MDF-512 key A', idempotencyKey: `k1-${uniq()}` });
+    expect(first.status).toBe(201);
+    const second = await post(admin, 'admin/wallet/test-credit', { userId: me.userId, amountMinor, reason: 'MDF-512 key B', idempotencyKey: `k2-${uniq()}` });
+    expect(second.status).toBe(201);
+
+    const wallet = await walletOf(me.userId);
+    const credits = await ctx.prisma.walletLedgerEntry.findMany({
+      where: { accountId: wallet.id, direction: 'CREDIT', transaction: { description: 'Administrative Test Credit' } },
+    });
+    expect(credits, `expected two distinct credits, got: ${credits.length}`).toHaveLength(2);
+    const summary = await get(me.cookies, 'wallet');
+    expect(summary.body.totalMinor).toBe(amountMinor * 2);
+  });
 });
