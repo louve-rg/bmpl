@@ -54,23 +54,33 @@ interface WalletAccountRow {
   cachedBalanceMinor: number;
 }
 
-/** Same as stubFetch, plus the account-lookup, wallet-accounts and write
- * routes the confirm-before-write cards (SHIPPING-E2E-CLOSE) exercise. */
+/** Same as stubFetch, plus the account-lookup, name/email search,
+ * wallet-accounts and write routes the confirm-before-write cards
+ * (SHIPPING-E2E-CLOSE, ADMIN-WALLET-LOOKUP) exercise. */
 function stubFetchFull(
   adminPermissions: string[],
   opts: {
     users?: Record<string, Account>;
     walletAccounts?: Record<string, WalletAccountRow[]>;
+    search?: Record<string, Account[]>;
   } = {},
 ) {
   const users = opts.users ?? {};
   const walletAccounts = opts.walletAccounts ?? {};
+  const search = opts.search ?? {};
   const posts: Array<{ url: string; body: unknown }> = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
+
+      const searchMatch = url.match(/\/api\/admin\/users\?(.*)$/);
+      if (searchMatch && (!init?.method || init.method === 'GET')) {
+        const q = new URLSearchParams(searchMatch[1]).get('query') ?? '';
+        const items = search[q] ?? [];
+        return jsonResponse(200, { total: items.length, items });
+      }
 
       const walletAccountsMatch = url.match(/\/api\/admin\/wallet\/users\/([^/?]+)\/accounts$/);
       if (walletAccountsMatch && (!init?.method || init.method === 'GET')) {
@@ -119,6 +129,17 @@ function setValue(el: HTMLInputElement, value: string) {
 function clickButton(text: string) {
   const btn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === text);
   if (!btn) throw new Error(`no button with text "${text}"`);
+  act(() => {
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
+/** A search-result row's two spans sit on separate JSX lines, so their
+ * combined textContent has no space between name and email -- match by
+ * substring/regex rather than an exact string. */
+function clickButtonMatching(pattern: RegExp) {
+  const btn = Array.from(document.body.querySelectorAll('button')).find((b) => pattern.test(b.textContent ?? ''));
+  if (!btn) throw new Error(`no button matching ${pattern}`);
   act(() => {
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
@@ -404,5 +425,137 @@ describe('WalletLockCard -- confirm-before-lock, direction-aware (SHIPPING-E2E-C
 
     expect(document.body.textContent).not.toMatch(/wallet status/);
     expect((document.getElementById('wl-reason') as HTMLInputElement).disabled).toBe(true);
+  });
+});
+
+/**
+ * ADMIN-WALLET-LOOKUP: an administrator must be able to find a customer by
+ * name or email in both wallet cards, without ever hand-typing a user id.
+ * This reuses the Users page's own search (GET /admin/users?query=) and
+ * must not weaken #553's guards: the submit handler still refuses until an
+ * account is resolved, the posted body still carries the resolved id (never
+ * a raw value), and the lock card still derives its offered direction from
+ * current status.
+ */
+describe('TestCreditCard -- name/email search (ADMIN-WALLET-LOOKUP)', () => {
+  it('a search with several matches lists all of them, and the form stays locked until one is picked', async () => {
+    stubFetchFull(['wallet.credit_test'], {
+      search: {
+        jane: [
+          { id: 'u1', firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
+          { id: 'u2', firstName: 'Jane', lastName: 'Smith', email: 'jane.smith@example.com' },
+        ],
+      },
+    });
+    await mount();
+
+    const amountInput = document.getElementById('tc-amount') as HTMLInputElement;
+    expect(amountInput.disabled).toBe(true);
+
+    setValue(document.getElementById('tc-search') as HTMLInputElement, 'jane');
+    await flush();
+    clickButton('Search');
+    await flush();
+
+    expect(document.body.textContent).toMatch(/Jane Doe/);
+    expect(document.body.textContent).toMatch(/Jane Smith/);
+    // Two results on screen and neither picked yet -- the credit-posting
+    // guard must still refuse: the button names no one and the fields stay
+    // locked, exactly as it does before any id lookup ever runs.
+    expect(amountInput.disabled).toBe(true);
+    expect(buttonTexts().some((t) => t.startsWith('Confirm: credit'))).toBe(false);
+  });
+
+  it('picking a search result resolves the account without ever typing an id, and posts that resolved id', async () => {
+    const posts = stubFetchFull(['wallet.credit_test'], {
+      search: { jane: [{ id: 'u1', firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' }] },
+    });
+    await mount();
+
+    setValue(document.getElementById('tc-search') as HTMLInputElement, 'jane');
+    await flush();
+    clickButton('Search');
+    await flush();
+    clickButtonMatching(/Jane Doe.*jane@example\.com/);
+    await flush();
+
+    // The id field now reflects the pick -- never hand-typed -- and the
+    // same confirm-before-write guard from #553 governs from here on.
+    expect((document.getElementById('tc-user') as HTMLInputElement).value).toBe('u1');
+    expect(document.body.textContent).toMatch(/This will credit\s*Jane Doe\s*\(jane@example\.com\)/);
+    expect((document.getElementById('tc-amount') as HTMLInputElement).disabled).toBe(false);
+
+    setValue(document.getElementById('tc-reason') as HTMLInputElement, 'UAT testing');
+    await flush();
+    clickButton('Confirm: credit $80.00 to Jane Doe');
+    await flush();
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.body).toMatchObject({ userId: 'u1', reason: 'UAT testing' });
+  });
+
+  it('a search with no matches reports it and leaves the form locked', async () => {
+    stubFetchFull(['wallet.credit_test'], { search: {} });
+    await mount();
+
+    setValue(document.getElementById('tc-search') as HTMLInputElement, 'nobody');
+    await flush();
+    clickButton('Search');
+    await flush();
+
+    expect(document.body.textContent).toMatch(/No matching accounts\./);
+    expect((document.getElementById('tc-amount') as HTMLInputElement).disabled).toBe(true);
+  });
+});
+
+describe('WalletLockCard -- name/email search (ADMIN-WALLET-LOOKUP)', () => {
+  it('a search with several matches lists all of them, and the form stays locked until one is picked', async () => {
+    stubFetchFull(['wallet.lock'], {
+      search: {
+        jane: [
+          { id: 'u1', firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
+          { id: 'u2', firstName: 'Jane', lastName: 'Smith', email: 'jane.smith@example.com' },
+        ],
+      },
+    });
+    await mount();
+
+    setValue(document.getElementById('wl-search') as HTMLInputElement, 'jane');
+    await flush();
+    clickButton('Search');
+    await flush();
+
+    expect(document.body.textContent).toMatch(/Jane Doe/);
+    expect(document.body.textContent).toMatch(/Jane Smith/);
+    expect((document.getElementById('wl-reason') as HTMLInputElement).disabled).toBe(true);
+    expect(buttonTexts().some((t) => t.startsWith('Confirm: lock') || t.startsWith('Confirm: unlock'))).toBe(false);
+  });
+
+  it('picking a search result fetches wallet status and still derives the offered direction from it, never asked for', async () => {
+    const posts = stubFetchFull(['wallet.lock'], {
+      search: { jane: [{ id: 'u1', firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' }] },
+      walletAccounts: { u1: [{ id: 'wa1', type: 'USER', status: 'ACTIVE', currency: 'BZD', cachedBalanceMinor: 1500 }] },
+    });
+    await mount();
+
+    setValue(document.getElementById('wl-search') as HTMLInputElement, 'jane');
+    await flush();
+    clickButton('Search');
+    await flush();
+    clickButtonMatching(/Jane Doe.*jane@example\.com/);
+    await flush();
+
+    expect((document.getElementById('wl-user') as HTMLInputElement).value).toBe('u1');
+    expect(document.body.textContent).toMatch(/\$15\.00/);
+    expect(buttonTexts().some((t) => t === "Confirm: lock Jane Doe's wallet")).toBe(true);
+    expect(buttonTexts().some((t) => t.includes('unlock'))).toBe(false);
+
+    setValue(document.getElementById('wl-reason') as HTMLInputElement, 'Suspected fraud, case #412');
+    await flush();
+    clickButton("Confirm: lock Jane Doe's wallet");
+    await flush();
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.url).toMatch(/\/admin\/wallet\/users\/u1\/lock$/);
   });
 });
