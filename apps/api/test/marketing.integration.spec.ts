@@ -311,6 +311,15 @@ describe('assignPlacement: categoryId existence, visibility, and the new-vs-exis
     expect(statuses.every((s) => s !== 500)).toBe(true);
     const rows = await ctx.prisma.promotionPlacement.findMany({ where: { promotionId: id, placement: 'CATEGORY_PAGE', categoryId } });
     expect(rows).toHaveLength(1);
+    //
+    // MISSING VERIFICATION (named per owner instruction, not papered over):
+    // this is a single-process Promise.all, not two separate DB connections
+    // racing at the storage layer — it does NOT prove the true multi-connection
+    // race is closed. It is a BEHAVIOUR assertion only (exactly one row, no
+    // raw 500). The actual authority against the real race is the P2002 catch
+    // added to assignPlacement (mirroring passenger-affiliation.service.ts's
+    // createAsk); a two-connection concurrency harness to prove the race
+    // itself was explicitly ruled out as not worth the cost (MDF-503).
   });
 });
 
