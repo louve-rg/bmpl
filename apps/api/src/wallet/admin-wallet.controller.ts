@@ -34,6 +34,13 @@ export class AdminWalletController {
     return this.wallet.adminAccounts();
   }
 
+  /** One user's own wallet account(s) — read-only, no audit row, no notification. */
+  @Get('users/:userId/accounts')
+  @RequirePermission('wallet.read')
+  userAccounts(@Param('userId') userId: string) {
+    return this.wallet.adminAccountsForUser(userId);
+  }
+
   /**
    * Post simulation credit to somebody's wallet.
    *

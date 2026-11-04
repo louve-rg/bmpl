@@ -550,6 +550,25 @@ export class WalletService {
     return rows.map((a) => ({ id: a.id, type: a.type, currency: a.currency, status: a.status, cachedBalanceMinor: money(a.cachedBalanceMinor) }));
   }
 
+  /**
+   * One person's own wallet account(s) (read-only).
+   *
+   * Addressed by USER id, symmetric with `setUserWalletLock` above — an
+   * administrator deciding whether to lock a wallet needs to SEE its status
+   * without firing the lock/unlock endpoint itself to probe it, which would
+   * post a real audit row and alert every `wallet.lock` holder just to look.
+   * Includes the balance deliberately: knowing whether there is money in the
+   * wallet is part of the same decision as knowing whether it is locked.
+   *
+   * A user with no wallet account returns an empty array, not a 404 — this is
+   * a normal, unremarkable state (plenty of accounts never transact), not a
+   * fault.
+   */
+  async adminAccountsForUser(userId: string) {
+    const rows = await this.prisma.walletAccount.findMany({ where: { userId, type: 'USER' }, orderBy: { currency: 'asc' } });
+    return rows.map((a) => ({ id: a.id, type: a.type, currency: a.currency, status: a.status, cachedBalanceMinor: money(a.cachedBalanceMinor) }));
+  }
+
   private shape(t: {
     id: string; type: string; status: string; currency: string; isTest: boolean; reference: string | null; description: string | null; postedAt: Date | null; createdAt: Date;
     entries: Array<{ id: string; direction: string; amountMinor: bigint; account: { type: string; userId: string | null } }>;
