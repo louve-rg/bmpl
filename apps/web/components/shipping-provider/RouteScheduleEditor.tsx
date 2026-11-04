@@ -22,6 +22,17 @@ import { operatingStatusLabel } from '../../lib/shipping-provider';
  * field is touched; the effect is through route selection). A carrier who
  * does not know that can suppress its own work by accident, so it is said
  * next to the controls that cause it, not in a help page.
+ *
+ * MDF-528 (Pam's guard, 807e22eb): none of the three writes below is ever
+ * refused for this reason — a schedule change always succeeds, then reports
+ * `affectedAcceptedLegs`, the already-accepted legs that now sit on a closed
+ * date. `removeScheduleException` can cause this too (deleting an OPERATING
+ * override can reinstate a NOT_OPERATING weekly default underneath it), so
+ * all three paths capture and surface it, not just the two obvious writes.
+ * Those legs are never blocked — Pam exempted an accepted leg from the
+ * not-operating departure gate specifically so a closed day can never strand
+ * committed work — and `CollisionNotice` says that explicitly, so a carrier
+ * reads this as "here is what changed," not "something is now broken."
  */
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -46,6 +57,18 @@ interface RouteSchedule {
   exceptions: ScheduleException[];
 }
 
+/** An already-accepted leg that a schedule write just left sitting on a closed date. */
+interface AffectedAcceptedLeg {
+  legId: string;
+  shipmentId: string;
+  reference: string;
+  scheduledDepartureAt: string | null;
+}
+
+interface ScheduleWriteResult {
+  affectedAcceptedLegs?: AffectedAcceptedLeg[];
+}
+
 /** All seven days, defaulting to OPERATING where the route has no configured row yet. */
 function fullWeek(configured: ScheduleDay[]): ScheduleDay[] {
   return Array.from({ length: 7 }, (_, dayOfWeek) => {
@@ -62,6 +85,7 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [newException, setNewException] = useState({ date: '', status: 'NOT_OPERATING' as Status, reason: '' });
   const [addingException, setAddingException] = useState(false);
+  const [affectedLegs, setAffectedLegs] = useState<AffectedAcceptedLeg[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -85,9 +109,10 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
     setSavingWeek(true);
     setErr(null);
     try {
-      await api.put(`/shipping/provider/routes/${routeId}/schedule`, {
+      const res = await api.put<ScheduleWriteResult>(`/shipping/provider/routes/${routeId}/schedule`, {
         days: days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note || undefined })),
       });
+      setAffectedLegs(res.affectedAcceptedLegs ?? []);
     } catch (e) {
       const a = e as ApiError;
       setErr(a.errors?.[0]?.message ?? a.message ?? 'Could not save the weekly pattern.');
@@ -101,11 +126,12 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
     setAddingException(true);
     setErr(null);
     try {
-      await api.post(`/shipping/provider/routes/${routeId}/schedule/exceptions`, {
+      const res = await api.post<ScheduleWriteResult>(`/shipping/provider/routes/${routeId}/schedule/exceptions`, {
         date: newException.date,
         status: newException.status,
         reason: newException.reason || undefined,
       });
+      setAffectedLegs(res.affectedAcceptedLegs ?? []);
       setNewException({ date: '', status: 'NOT_OPERATING', reason: '' });
       await load();
     } catch (e) {
@@ -119,7 +145,8 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
   async function removeException(id: string) {
     setErr(null);
     try {
-      await api.del(`/shipping/provider/routes/${routeId}/schedule/exceptions/${id}`);
+      const res = await api.del<ScheduleWriteResult>(`/shipping/provider/routes/${routeId}/schedule/exceptions/${id}`);
+      setAffectedLegs(res.affectedAcceptedLegs ?? []);
       await load();
     } catch (e) {
       setErr((e as ApiError).message ?? 'Could not remove that exception.');
@@ -141,6 +168,8 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
           {err}
         </Alert>
       )}
+
+      {affectedLegs.length > 0 && <CollisionNotice legs={affectedLegs} />}
 
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Weekly pattern</h3>
       <p className="mt-1 text-xs text-slate-500">A day with no exception below follows this pattern. Absent entirely, a route is treated as operating.</p>
@@ -229,5 +258,33 @@ export function RouteScheduleEditor({ routeId }: { routeId: string }) {
         {addingException ? 'Adding…' : 'Add exception'}
       </Button>
     </div>
+  );
+}
+
+/**
+ * Shown after a successful schedule write that left an already-accepted leg
+ * sitting on a now-closed date. Reads as a consequence of a save that
+ * worked, not an error -- the write is never refused for this reason (Pam's
+ * guard, MDF-528) -- and says the reassuring true thing explicitly: none of
+ * these legs is blocked. Identifies each leg the way a human reads one, by
+ * `reference` and its own departure date, never by `legId` or `shipmentId`.
+ */
+function CollisionNotice({ legs }: { legs: AffectedAcceptedLeg[] }) {
+  return (
+    <Alert tone="warning" className="mb-3">
+      <p className="font-semibold">This closed a date you have already accepted work on.</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-4">
+        {legs.map((l) => (
+          <li key={l.legId}>
+            {l.reference}
+            {l.scheduledDepartureAt ? ` — departing ${new Date(l.scheduledDepartureAt).toLocaleString()}` : ''}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1">
+        These legs are not blocked — a closed day never strands work you already accepted. You can still depart and arrive them
+        normally.
+      </p>
+    </Alert>
   );
 }
