@@ -693,7 +693,7 @@ describe('WalletLockCard -- stale selection, loading state, clear (BMPL-COURIER-
   });
 
   it('shows a loading state, never the false "no wallet account" warning, while the status read is still in flight after a pick', async () => {
-    let resolveAccounts: ((rows: unknown) => void) | null = null;
+    const pending: { resolveAccounts: ((rows: unknown) => void) | null } = { resolveAccounts: null };
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -706,7 +706,7 @@ describe('WalletLockCard -- stale selection, loading state, clear (BMPL-COURIER-
         const walletAccountsMatch = url.match(/\/api\/admin\/wallet\/users\/([^/?]+)\/accounts$/);
         if (walletAccountsMatch && (!init?.method || init.method === 'GET')) {
           return new Promise((resolve) => {
-            resolveAccounts = (rows) => resolve(jsonResponse(200, rows));
+            pending.resolveAccounts = (rows) => resolve(jsonResponse(200, rows));
           });
         }
         return jsonResponse(404, { message: 'not mocked: ' + url });
@@ -726,7 +726,7 @@ describe('WalletLockCard -- stale selection, loading state, clear (BMPL-COURIER-
     expect(document.body.textContent).toMatch(/Checking current wallet status/);
     expect(document.body.textContent).not.toMatch(/has no wallet account to lock/);
 
-    resolveAccounts?.([{ id: 'wa1', type: 'USER', status: 'ACTIVE', currency: 'BZD', cachedBalanceMinor: 1500 }]);
+    pending.resolveAccounts?.([{ id: 'wa1', type: 'USER', status: 'ACTIVE', currency: 'BZD', cachedBalanceMinor: 1500 }]);
     await flush();
 
     expect(document.body.textContent).not.toMatch(/Checking current wallet status/);
