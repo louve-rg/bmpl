@@ -100,6 +100,61 @@ export class PassengerAffiliationService {
     }));
   }
 
+  // ---- discovery ------------------------------------------------------------
+  //
+  // The one gap in an otherwise-complete mutual-consent lifecycle: neither
+  // side could find a counterparty without already holding its raw profile
+  // id. Both reads below are the front door onto `invite`/`request` above —
+  // not a new lifecycle, and no schema change. Each reuses the exact
+  // eligibility this service already enforces on write, so the directory
+  // never offers a counterparty the next call would reject:
+  //  - role APPROVED for the target role (same check as invite/request)
+  //  - isActive, and isTest matching the caller's own side
+  //  - driver search: already-in-a-fleet drivers excluded (mirrors
+  //    refuseIfTaken — inviting one always 400s today)
+  //  - provider search: providers with a PENDING ask already outstanding
+  //    with this caller are excluded (mirrors refuseIfPending)
+  // Results never carry anything beyond a display identity and the row's own
+  // id — the id is not rendered as a label anywhere on the web side; it is
+  // carried silently from this list into invite/request, exactly as a
+  // product or job id is in TargetPicker's own-list selects.
+
+  /** An operator searches independent, eligible drivers to invite. */
+  async searchDriversForProvider(userId: string, q: string) {
+    const provider = await this.ownProviderOrThrow(userId);
+    const rows = await this.prisma.passengerDriverProfile.findMany({
+      where: {
+        isActive: true,
+        isTest: provider.isTest,
+        providerProfileId: null,
+        displayName: { contains: q, mode: 'insensitive' },
+        user: { roles: { some: { roleCode: 'PASSENGER_DRIVER', status: 'APPROVED' } } },
+      },
+      select: { id: true, displayName: true, homeDistrict: true, availability: true, isActive: true },
+      orderBy: { displayName: 'asc' },
+      take: 25,
+    });
+    return rows;
+  }
+
+  /** A driver searches eligible operators to ask to join. */
+  async searchProvidersForDriver(userId: string, q: string) {
+    const driver = await this.ownDriverOrThrow(userId);
+    const rows = await this.prisma.passengerProviderProfile.findMany({
+      where: {
+        isActive: true,
+        isTest: driver.isTest,
+        businessName: { contains: q, mode: 'insensitive' },
+        user: { roles: { some: { roleCode: 'PASSENGER_PROVIDER', status: 'APPROVED' } } },
+        affiliations: { none: { driverProfileId: driver.id, status: 'PENDING' } },
+      },
+      select: { id: true, businessName: true, district: true, isActive: true },
+      orderBy: { businessName: 'asc' },
+      take: 25,
+    });
+    return rows;
+  }
+
   // ---- the two asks -------------------------------------------------------
 
   /** Operator invites a driver. Creates a PENDING ask — never an ACCEPTED row. */

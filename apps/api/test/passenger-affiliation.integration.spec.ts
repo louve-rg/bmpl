@@ -51,16 +51,17 @@ async function makeProvider(businessName: string) {
   await approveRole(u.userId, 'PASSENGER_PROVIDER');
   const prof = await put(u.cookies, 'passenger/provider/profile', { businessName, contactEmail: 'ops@example.com' });
   expect(prof.status).toBe(200);
-  return { ...u, profileId: prof.body.id as string };
+  return { ...u, profileId: prof.body.id as string, businessName };
 }
 
 /** An approved, INDEPENDENT driver — no affiliation of any kind. */
 async function makeDriver() {
   const u = await registerUser(`af_drv_${uniq()}@example.com`);
   await approveRole(u.userId, 'PASSENGER_DRIVER');
+  const displayName = `AFDrv${uniq()}`;
   const prof = await put(u.cookies, 'passenger/driver/profile', {
     legalName: 'Alex Fleet',
-    displayName: `AFDrv${uniq()}`,
+    displayName,
     phone: '+5016200000',
     homeDistrict: 'TOLEDO',
     licenceNumber: `AFDL-${uniq()}`,
@@ -68,7 +69,7 @@ async function makeDriver() {
     termsAccepted: true,
   });
   expect(prof.status).toBe(200);
-  return { ...u, driverProfileId: prof.body.id as string };
+  return { ...u, driverProfileId: prof.body.id as string, displayName };
 }
 
 /** The operational proof: whether this driver can staff this fleet's departure. */
@@ -473,5 +474,98 @@ describe('the simulation boundary', () => {
     // Ending it releases both — the flip succeeds afterwards.
     expect((await post(drv.cookies, `passenger/driver/affiliations/${invite.body.id}/end`)).status).toBe(201);
     expect((await patch(admin, `admin/passengers/drivers/${drv.driverProfileId}/test-mode`, { isTest: true })).status).toBe(200);
+  });
+});
+
+/**
+ * Discovery — the front door onto the asks above (MDF-COURIER).
+ * Neither side could find a counterparty without already holding its raw
+ * profile id; these two reads fix that without touching the write side at
+ * all. The cases mirrored here are the exact ones `invite`/`request` already
+ * refuse on write — proven as list EXCLUSIONS, not merely asserted, so a
+ * directory result is never a dead end the next call would reject.
+ */
+describe('discovery directory', () => {
+  it('an operator finds an eligible independent driver by partial name, and a driver finds an eligible operator the same way', async () => {
+    const op = await makeProvider(`Test Discoverable Lines ${uniq()}`);
+    const drv = await makeDriver();
+
+    // Both sides can see each other BEFORE either asks — neither has a
+    // pending/accepted affiliation yet, so no exclusion applies.
+    const forOperator = await get(op.cookies, `passenger/provider/affiliations/directory/drivers?q=${encodeURIComponent(drv.displayName.slice(0, -2))}`);
+    expect(forOperator.status).toBe(200);
+    expect(forOperator.body).toContainEqual(
+      expect.objectContaining({ id: drv.driverProfileId, displayName: drv.displayName, isActive: true }),
+    );
+    const forDriver = await get(drv.cookies, `passenger/driver/affiliations/directory/providers?q=${encodeURIComponent(op.businessName.slice(0, 10))}`);
+    expect(forDriver.status).toBe(200);
+    expect(forDriver.body).toContainEqual(expect.objectContaining({ id: op.profileId, businessName: op.businessName, isActive: true }));
+
+    // No raw id was ever typed to find it — handle === the same id the
+    // write side already accepts, carried straight through.
+    const foundDriver = forOperator.body.find((d: { id: string }) => d.id === drv.driverProfileId);
+    expect((await post(op.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: foundDriver.id })).status).toBe(201);
+  });
+
+  it('q is required with a minimum of 2 characters, enforced server-side — not merely in the UI', async () => {
+    const op = await makeProvider('Test Shortquery Lines');
+    const drv = await makeDriver();
+
+    expect((await get(op.cookies, 'passenger/provider/affiliations/directory/drivers')).status).toBe(400);
+    expect((await get(op.cookies, 'passenger/provider/affiliations/directory/drivers?q=a')).status).toBe(400);
+    expect((await get(op.cookies, 'passenger/provider/affiliations/directory/drivers?q=%20%20')).status).toBe(400);
+
+    expect((await get(drv.cookies, 'passenger/driver/affiliations/directory/providers')).status).toBe(400);
+    expect((await get(drv.cookies, 'passenger/driver/affiliations/directory/providers?q=a')).status).toBe(400);
+  });
+
+  it('a driver already in a fleet is excluded from an operator search — inviting one would 400 anyway', async () => {
+    const homeFleet = await makeProvider(`Test Homefleet Lines ${uniq()}`);
+    const drv = await makeDriver();
+    const invite = await post(homeFleet.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: drv.driverProfileId });
+    expect((await post(drv.cookies, `passenger/driver/affiliations/${invite.body.id}/accept`)).status).toBe(201);
+    expect(await pointerOf(drv.driverProfileId)).toBe(homeFleet.profileId);
+
+    const suitor = await makeProvider(`Test Suitor Lines ${uniq()}`);
+    const found = await get(suitor.cookies, `passenger/provider/affiliations/directory/drivers?q=${encodeURIComponent(drv.displayName.slice(0, -2))}`);
+    expect(found.status).toBe(200);
+    expect(found.body).not.toContainEqual(expect.objectContaining({ id: drv.driverProfileId }));
+    // The exclusion and the write-side refusal agree: inviting the same
+    // driver the directory just hid would 400 for the identical reason.
+    const blocked = await post(suitor.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: drv.driverProfileId });
+    expect(blocked.status).toBe(400);
+    expect(blocked.body.message).toMatch(/already drives for a fleet/i);
+  });
+
+  it('an operator already awaiting this driver\'s answer is excluded from that driver\'s own search — requesting again would 400 anyway', async () => {
+    const op = await makeProvider(`Test Awaiting Lines ${uniq()}`);
+    const drv = await makeDriver();
+    expect((await post(op.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: drv.driverProfileId })).status).toBe(201);
+
+    const found = await get(drv.cookies, `passenger/driver/affiliations/directory/providers?q=${encodeURIComponent(op.businessName.slice(0, 10))}`);
+    expect(found.status).toBe(200);
+    expect(found.body).not.toContainEqual(expect.objectContaining({ id: op.profileId }));
+    // The exclusion and the write-side refusal agree: requesting the same
+    // operator the directory just hid would 400 for the identical reason —
+    // the driver should answer the existing invitation instead.
+    const blocked = await post(drv.cookies, 'passenger/driver/affiliations/request', { providerProfileId: op.profileId });
+    expect(blocked.status).toBe(400);
+    expect(blocked.body.message).toMatch(/already awaiting/i);
+  });
+
+  it('the simulation boundary applies to discovery too — a test-mode counterparty never appears to a real one, or vice versa', async () => {
+    const op = await makeProvider(`Test Boundary Discover Lines ${uniq()}`);
+    const testDrv = await makeDriver();
+    expect((await patch(admin, `admin/passengers/drivers/${testDrv.driverProfileId}/test-mode`, { isTest: true })).status).toBe(200);
+
+    // A real operator never finds the test-mode driver…
+    const forRealOperator = await get(op.cookies, `passenger/provider/affiliations/directory/drivers?q=${encodeURIComponent(testDrv.displayName.slice(0, -2))}`);
+    expect(forRealOperator.status).toBe(200);
+    expect(forRealOperator.body).not.toContainEqual(expect.objectContaining({ id: testDrv.driverProfileId }));
+
+    // …and the same test-mode driver never finds a real operator, either.
+    const forTestDriver = await get(testDrv.cookies, `passenger/driver/affiliations/directory/providers?q=${encodeURIComponent(op.businessName.slice(0, 10))}`);
+    expect(forTestDriver.status).toBe(200);
+    expect(forTestDriver.body).not.toContainEqual(expect.objectContaining({ id: op.profileId }));
   });
 });

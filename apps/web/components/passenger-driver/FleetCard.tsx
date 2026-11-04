@@ -6,6 +6,13 @@ import { Alert, Badge, Button, Card as UiCard, Field, Input, Spinner, Textarea }
 import { errMessage } from '../driver/dashboard-data';
 import { affiliationView, settledLabel, type DriverAffiliationRow } from '../../lib/passenger-fleet';
 
+interface ProviderDirectoryRow {
+  id: string;
+  businessName: string;
+  district?: string | null;
+  isActive: boolean;
+}
+
 /**
  * The driver's fleet membership — the seat reserved since this card first
  * shipped, now filled by the mutual-consent affiliation API (BMPL-39).
@@ -22,7 +29,7 @@ import { affiliationView, settledLabel, type DriverAffiliationRow } from '../../
  * affiliation row is terms-free and that is load-bearing — it is why
  * answering an existing ask counts as consenting to the same thing.
  */
-export function FleetCard({ driverProfileId }: { driverProfileId: string }) {
+export function FleetCard() {
   const [rows, setRows] = useState<DriverAffiliationRow[] | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -163,11 +170,6 @@ export function FleetCard({ driverProfileId }: { driverProfileId: string }) {
 
       {!active && <RequestToJoin onDone={reload} />}
 
-      <p className="mt-4 text-xs text-[color:var(--bmpl-text-muted)]">
-        Your driver ID: <code className="rounded bg-slate-100 px-1 py-0.5">{driverProfileId}</code> — share it with an
-        operator who wants to invite you.
-      </p>
-
       {settled.length > 0 && (
         <ul className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
           {settled.slice(0, 5).map((r) => (
@@ -181,26 +183,58 @@ export function FleetCard({ driverProfileId }: { driverProfileId: string }) {
   );
 }
 
-/** The driver's ask. It creates a PENDING request only — joining happens when the operator approves. */
+/**
+ * The driver's ask. It creates a PENDING request only — joining happens when
+ * the operator approves. Finds the operator by name against the directory
+ * (MDF-COURIER) — no raw operator id is ever shown or typed; the id picked
+ * from a search result is carried silently into the request.
+ */
 function RequestToJoin({ onDone }: { onDone: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
-  const [providerId, setProviderId] = useState('');
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<ProviderDirectoryRow[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [picked, setPicked] = useState<ProviderDirectoryRow | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  useEffect(() => {
+    const query = q.trim();
+    if (!open || picked || query.length < 2) {
+      setResults(null);
+      return;
+    }
+    setSearching(true);
+    const t = setTimeout(() => {
+      void api
+        .get<ProviderDirectoryRow[]>(`/passenger/driver/affiliations/directory/providers?q=${encodeURIComponent(query)}`)
+        .then(setResults)
+        .catch((e) => setErr(errMessage(e)))
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q, open, picked]);
+
+  function reset() {
+    setOpen(false);
+    setQ('');
+    setResults(null);
+    setPicked(null);
+    setMessage('');
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (!picked) return;
     setBusy(true);
     setErr(null);
     try {
       await api.post('/passenger/driver/affiliations/request', {
-        providerProfileId: providerId.trim(),
+        providerProfileId: picked.id,
         message: message.trim() || undefined,
       });
-      setOpen(false);
-      setProviderId('');
-      setMessage('');
+      reset();
       await onDone();
     } catch (e) {
       setErr(errMessage(e));
@@ -220,22 +254,55 @@ function RequestToJoin({ onDone }: { onDone: () => Promise<void> }) {
   return (
     <form className="mt-3 space-y-3 rounded-bmpl-md border border-slate-200 p-3" onSubmit={submit}>
       {err && <Alert tone="error">{err}</Alert>}
-      <Field
-        label="Operator ID"
-        htmlFor="fleetReqProvider"
-        hint="Ask the operator for their operator ID — it's shown on their Operator Dashboard."
-      >
-        <Input id="fleetReqProvider" value={providerId} onChange={(e) => setProviderId(e.target.value)} required />
-      </Field>
+
+      {picked ? (
+        <div className="flex items-center justify-between gap-2 rounded-bmpl-md border border-slate-200 bg-slate-50 p-2 text-sm">
+          <span>
+            Requesting to join <b>{picked.businessName}</b>
+            {picked.district && <span className="text-slate-500"> — {picked.district}</span>}
+          </span>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setPicked(null)}>
+            Change
+          </Button>
+        </div>
+      ) : (
+        <>
+          <Field label="Operator name" htmlFor="fleetReqQuery" hint="Search by business name — at least 2 characters.">
+            <Input id="fleetReqQuery" value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. Belize Transfers Co." />
+          </Field>
+          {q.trim().length >= 2 && (
+            <div className="max-h-40 space-y-1 overflow-y-auto">
+              {searching ? (
+                <p className="text-xs text-slate-500">Searching…</p>
+              ) : results && results.length > 0 ? (
+                results.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className="block w-full rounded-bmpl-md border border-slate-200 p-2 text-left text-sm hover:bg-slate-50"
+                    onClick={() => setPicked(r)}
+                  >
+                    <b>{r.businessName}</b>
+                    {r.district && <span className="text-slate-500"> — {r.district}</span>}
+                  </button>
+                ))
+              ) : results ? (
+                <p className="text-xs text-slate-500">No matching operators found.</p>
+              ) : null}
+            </div>
+          )}
+        </>
+      )}
+
       <Field label="Message" htmlFor="fleetReqMessage" hint="Optional — the operator sees this with your request.">
         <Textarea id="fleetReqMessage" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} />
       </Field>
       <p className="text-xs text-slate-500">This sends a request the operator must approve — it does not join you to the fleet.</p>
       <div className="flex gap-2">
-        <Button size="sm" disabled={busy || !providerId.trim()}>
+        <Button size="sm" disabled={busy || !picked}>
           Send request
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={() => setOpen(false)}>
+        <Button type="button" size="sm" variant="outline" onClick={reset}>
           Cancel
         </Button>
       </div>
