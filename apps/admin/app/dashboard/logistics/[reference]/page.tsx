@@ -128,6 +128,27 @@ function controlsFor(leg: Leg): { depart: boolean; arrive: boolean; handoff: boo
 const SCHEDULABLE_LEG_STATUSES = new Set(['PENDING', 'READY', 'IN_PROGRESS', 'EXCEPTION']);
 const canScheduleLeg = (leg: Leg) => leg.kind === 'LINE_HAUL' && SCHEDULABLE_LEG_STATUSES.has(leg.status);
 
+/**
+ * D4 (owner): "when a provider or lane cannot take a line-haul the screen
+ * must say WHY, gate by gate" — a flat omission from the dropdown fails that
+ * bar as badly as a flat "not eligible" would, because the admin has no way
+ * to tell a deactivated carrier from one that was never onboarded. Mirrors
+ * the first two gates `assertOperableProvider` (apps/api) enforces, in the
+ * same order, so the reason shown here can never describe a different rule
+ * than the one that will actually refuse the POST.
+ *
+ * Deliberately NOT a third gate: whether the carrier's own SHIPPING_PROVIDER
+ * role is still APPROVED is not part of the `GET /admin/logistics/providers`
+ * response, so it cannot be checked here — that one case still only
+ * surfaces reactively, via the POST's own error message below the picker.
+ */
+function operatorIneligibilityReason(p: Provider, shipmentIsTest: boolean): string | null {
+  if (!p.isActive) return 'deactivated';
+  if (shipmentIsTest && !p.isTest) return 'not a simulation carrier';
+  if (!shipmentIsTest && p.isTest) return 'a simulation-only carrier';
+  return null;
+}
+
 export default function ShipmentOpsPage() {
   const params = useParams<{ reference: string }>();
   const reference = decodeURIComponent(String(params.reference ?? ''));
@@ -227,14 +248,18 @@ export default function ShipmentOpsPage() {
   }
 
   /**
-   * MDF-500: which carrier organization operates this
-   * LINE_HAUL leg — the interface Pam's D2/D4 work will later make smarter
-   * (an "eligible operators only" list, a why-ineligible preview), but the
-   * request/response shape here does not change under that work, only its
-   * internal guarantee does, so this is safe to build against today's
-   * `POST legs/:id/operator`. An empty pick clears the assignment (the
-   * server accepts `providerProfileId: null`) rather than being disabled —
-   * taking a carrier off a leg is a real, named action, not an error state.
+   * MDF-500/MDF-520 (D4): which carrier organization operates this
+   * LINE_HAUL leg. The picker now shows every carrier with the two
+   * client-checkable ineligibility gates (deactivated, wrong simulation
+   * side) disabled and named inline, rather than silently omitting them —
+   * see `operatorIneligibilityReason` above. The one gate that cannot be
+   * checked here (whether the carrier's SHIPPING_PROVIDER role is still
+   * APPROVED) still surfaces only reactively, via the POST's own error
+   * below, because that field is not part of the providers list response.
+   * Closing that one needs `apps/api` work, outside this change. An empty
+   * pick clears the assignment (the server accepts `providerProfileId:
+   * null`) rather than being disabled — taking a carrier off a leg is a
+   * real, named action, not an error state.
    */
   async function assignOperator(legId: string) {
     const picked = operatorPick[legId] ?? '';
@@ -472,13 +497,14 @@ export default function ShipmentOpsPage() {
                                 className="w-56"
                               >
                                 <option value="">— none —</option>
-                                {providers
-                                  .filter((p) => p.isActive && p.isTest === s.isTest)
-                                  .map((p) => (
-                                    <option key={p.id} value={p.id}>
-                                      {p.businessName}
+                                {providers.map((p) => {
+                                  const reason = operatorIneligibilityReason(p, s.isTest);
+                                  return (
+                                    <option key={p.id} value={p.id} disabled={!!reason}>
+                                      {reason ? `${p.businessName} — ${reason}` : p.businessName}
                                     </option>
-                                  ))}
+                                  );
+                                })}
                               </Select>
                             </Field>
                             <Button

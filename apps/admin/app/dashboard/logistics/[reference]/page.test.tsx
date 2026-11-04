@@ -531,16 +531,25 @@ describe('ShipmentOpsPage — carrier operator assignment (MDF-500)', () => {
     expect(document.body.querySelector('select#op-leg_1')).toBeNull();
   });
 
-  it('a logistics.operate holder sees the active, non-simulation carriers only -- not the retired or simulation ones', async () => {
+  it('a logistics.operate holder sees every carrier, with the eligible ones pickable and the ineligible ones disabled and named why (MDF-520, D4)', async () => {
     stubFetchWithProviders(['logistics.operate']);
     await mount();
 
     const select = document.body.querySelector('select#op-leg_1') as HTMLSelectElement;
-    const options = Array.from(select.options).map((o) => o.textContent);
-    expect(options).toContain('Tropic Air');
-    expect(options).toContain('Maya Island Air');
-    expect(options).not.toContain('Retired Carrier');
-    expect(options).not.toContain('Sim Carrier');
+    const options = Array.from(select.options);
+    const byLabel = (text: string) => options.find((o) => o.textContent === text);
+
+    expect(byLabel('Tropic Air')?.disabled).toBe(false);
+    expect(byLabel('Maya Island Air')?.disabled).toBe(false);
+
+    // Ineligible carriers stay IN the list -- an admin who omits one from the
+    // dropdown cannot tell "deactivated" from "never existed" -- but each is
+    // disabled and labelled with the specific gate it fails, mirroring
+    // assertOperableProvider (apps/api) rather than a flat "not eligible".
+    const retired = byLabel('Retired Carrier — deactivated');
+    expect(retired?.disabled).toBe(true);
+    const sim = byLabel('Sim Carrier — a simulation-only carrier');
+    expect(sim?.disabled).toBe(true);
   });
 
   it('assigning posts the picked providerProfileId and reloads', async () => {
