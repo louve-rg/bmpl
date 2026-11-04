@@ -6,6 +6,14 @@ import { Alert, Badge, Button, Card as UiCard, Field, Input, Spinner, Textarea }
 import { errMessage } from '../driver/dashboard-data';
 import { affiliationView, settledLabel, type ProviderAffiliationRow } from '../../lib/passenger-fleet';
 
+interface DriverDirectoryRow {
+  id: string;
+  displayName: string;
+  homeDistrict?: string | null;
+  availability?: string;
+  isActive: boolean;
+}
+
 /**
  * The operator's fleet roster — the seat reserved since this card first
  * shipped, now filled by the mutual-consent affiliation API (BMPL-39).
@@ -22,7 +30,7 @@ import { affiliationView, settledLabel, type ProviderAffiliationRow } from '../.
  * affiliation row is terms-free, which is why answering an existing ask
  * counts as consenting to the same thing.
  */
-export function FleetRosterCard({ providerProfileId }: { providerProfileId: string }) {
+export function FleetRosterCard() {
   const [rows, setRows] = useState<ProviderAffiliationRow[] | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -156,11 +164,6 @@ export function FleetRosterCard({ providerProfileId }: { providerProfileId: stri
 
       <InviteDriver onDone={reload} />
 
-      <p className="mt-4 text-xs text-[color:var(--bmpl-text-muted)]">
-        Your operator ID: <code className="rounded bg-slate-100 px-1 py-0.5">{providerProfileId}</code> — share it with a
-        driver who wants to request to join.
-      </p>
-
       {settled.length > 0 && (
         <ul className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
           {settled.slice(0, 5).map((r) => (
@@ -174,26 +177,58 @@ export function FleetRosterCard({ providerProfileId }: { providerProfileId: stri
   );
 }
 
-/** The operator's ask. It creates a PENDING invitation only — the driver joins by accepting it. */
+/**
+ * The operator's ask. It creates a PENDING invitation only — the driver joins
+ * by accepting it. Finds the driver by name against the directory
+ * (BMPL-COURIER-COMPLETION) — no raw driver id is ever shown or typed; the id
+ * picked from a search result is carried silently into the invitation.
+ */
 function InviteDriver({ onDone }: { onDone: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
-  const [driverId, setDriverId] = useState('');
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<DriverDirectoryRow[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [picked, setPicked] = useState<DriverDirectoryRow | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  useEffect(() => {
+    const query = q.trim();
+    if (!open || picked || query.length < 2) {
+      setResults(null);
+      return;
+    }
+    setSearching(true);
+    const t = setTimeout(() => {
+      void api
+        .get<DriverDirectoryRow[]>(`/passenger/provider/affiliations/directory/drivers?q=${encodeURIComponent(query)}`)
+        .then(setResults)
+        .catch((e) => setErr(errMessage(e)))
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q, open, picked]);
+
+  function reset() {
+    setOpen(false);
+    setQ('');
+    setResults(null);
+    setPicked(null);
+    setMessage('');
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (!picked) return;
     setBusy(true);
     setErr(null);
     try {
       await api.post('/passenger/provider/affiliations/invite', {
-        driverProfileId: driverId.trim(),
+        driverProfileId: picked.id,
         message: message.trim() || undefined,
       });
-      setOpen(false);
-      setDriverId('');
-      setMessage('');
+      reset();
       await onDone();
     } catch (e) {
       setErr(errMessage(e));
@@ -213,22 +248,55 @@ function InviteDriver({ onDone }: { onDone: () => Promise<void> }) {
   return (
     <form className="mt-3 space-y-3 rounded-bmpl-md border border-slate-200 p-3" onSubmit={submit}>
       {err && <Alert tone="error">{err}</Alert>}
-      <Field
-        label="Driver ID"
-        htmlFor="fleetInvDriver"
-        hint="Ask the driver for their driver ID — it's shown on their Passenger Dashboard."
-      >
-        <Input id="fleetInvDriver" value={driverId} onChange={(e) => setDriverId(e.target.value)} required />
-      </Field>
+
+      {picked ? (
+        <div className="flex items-center justify-between gap-2 rounded-bmpl-md border border-slate-200 bg-slate-50 p-2 text-sm">
+          <span>
+            Inviting <b>{picked.displayName}</b>
+            {picked.homeDistrict && <span className="text-slate-500"> — {picked.homeDistrict}</span>}
+          </span>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setPicked(null)}>
+            Change
+          </Button>
+        </div>
+      ) : (
+        <>
+          <Field label="Driver name" htmlFor="fleetInvQuery" hint="Search by display name — at least 2 characters.">
+            <Input id="fleetInvQuery" value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. Alex Fleet" />
+          </Field>
+          {q.trim().length >= 2 && (
+            <div className="max-h-40 space-y-1 overflow-y-auto">
+              {searching ? (
+                <p className="text-xs text-slate-500">Searching…</p>
+              ) : results && results.length > 0 ? (
+                results.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className="block w-full rounded-bmpl-md border border-slate-200 p-2 text-left text-sm hover:bg-slate-50"
+                    onClick={() => setPicked(r)}
+                  >
+                    <b>{r.displayName}</b>
+                    {r.homeDistrict && <span className="text-slate-500"> — {r.homeDistrict}</span>}
+                  </button>
+                ))
+              ) : results ? (
+                <p className="text-xs text-slate-500">No matching independent drivers found.</p>
+              ) : null}
+            </div>
+          )}
+        </>
+      )}
+
       <Field label="Message" htmlFor="fleetInvMessage" hint="Optional — the driver sees this with your invitation.">
         <Textarea id="fleetInvMessage" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} />
       </Field>
       <p className="text-xs text-slate-500">This sends an invitation the driver must accept — it does not add them to your fleet.</p>
       <div className="flex gap-2">
-        <Button size="sm" disabled={busy || !driverId.trim()}>
+        <Button size="sm" disabled={busy || !picked}>
           Send invitation
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={() => setOpen(false)}>
+        <Button type="button" size="sm" variant="outline" onClick={reset}>
           Cancel
         </Button>
       </div>
