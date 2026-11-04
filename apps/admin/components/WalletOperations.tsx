@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ADMIN_TEST_CREDIT_MAX_MINOR } from '@bmpl/validation';
+import { ADMIN_TEST_CREDIT_MAX_MINOR, type AdminStaleHoldsQuery } from '@bmpl/validation';
 import { api, type ApiError } from '../lib/api';
 import { Alert, Button, Card } from './ui';
 import { StatusBadge } from './StatusBadge';
@@ -719,11 +719,92 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
   );
 }
 
+interface StaleHoldPreviewRow {
+  id: string;
+  status: 'HELD' | 'AUTHORIZED';
+  amountMinor: number;
+  currency: string;
+  ageHours: number;
+  customer: string | null;
+  customerEmail: string | null;
+  payment: { resourceType: 'ORDER' | 'SHIPMENT'; resourceRef: string | null };
+}
+
+interface StaleHoldPreview {
+  total: number;
+  holds: StaleHoldPreviewRow[];
+}
+
+type PreviewState = 'loading' | 'ready' | 'error' | 'forbidden';
+
+const PREVIEW_PAGE_SIZE = 10;
+
 function StaleHoldCard({ onChanged }: { onChanged?: () => void }) {
   const [hours, setHours] = useState('24');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ examined: number; expired: string[] } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  const [preview, setPreview] = useState<StaleHoldPreview | null>(null);
+  const [previewState, setPreviewState] = useState<PreviewState>('loading');
+  const previewGenerationRef = useRef(0);
+
+  // The preview MUST read the same window the sweep below will send -- a
+  // preview of a different window than the sweep is worse than no preview
+  // (MDF-510). Filtered to status HELD, not the endpoint's default of
+  // HELD+AUTHORIZED: expireStaleHolds (the sweep this previews) only ever
+  // touches a hold that is still HELD, never one that already AUTHORIZED --
+  // showing AUTHORIZED rows here would preview holds the sweep will not
+  // actually release.
+  //
+  // THIS IS STILL ONLY AN UPPER BOUND, not the exact set the sweep acts on --
+  // the two queries diverge in four ways the copy below has to carry, not
+  // the query: (1) adminListStaleHolds has no payment-status filter at all,
+  // so a HELD hold whose payment already went AUTHORIZED/EXPIRED/FAILED is
+  // counted here but never swept; (2) it cuts on hold.heldAt, the sweep cuts
+  // on payment.createdAt -- usually close, not identical; (3) it counts
+  // HOLDS, the sweep iterates PAYMENTS, so one payment with two HELD holds
+  // is 2 here and 1 there; (4) it has no 500 cap, the sweep does. Closing
+  // these at the query layer needs a payment-status filter on
+  // adminListStaleHolds (apps/api, outside this change's scope) -- carded as
+  // a follow-up. Until then: never render preview.total as a promised
+  // outcome, only as a bound, with the unpaid-payment criterion stated next
+  // to it (see StaleHoldPreviewBlock).
+  //
+  // Debounced so every keystroke doesn't fire a request; the generation
+  // guard discards a response whose request has been superseded by a newer
+  // one, same pattern as TestCreditCard/WalletLockCard above -- this needs
+  // payments.read, a DIFFERENT permission from the wallet.reconcile this
+  // card is already gated on by its caller, so a holder of wallet.reconcile
+  // without payments.read must see "forbidden" here, never a broken or
+  // disabled sweep button.
+  useEffect(() => {
+    const parsedHours = Number(hours) || 24;
+    const generation = ++previewGenerationRef.current;
+    setPreviewState('loading');
+    const timer = setTimeout(() => {
+      const query: AdminStaleHoldsQuery = { status: 'HELD', olderThanHours: parsedHours, page: 1, pageSize: PREVIEW_PAGE_SIZE };
+      const qs = new URLSearchParams({
+        status: query.status as string,
+        olderThanHours: String(query.olderThanHours),
+        page: String(query.page),
+        pageSize: String(query.pageSize),
+      });
+      api
+        .get<StaleHoldPreview>(`/admin/payments/stale-holds?${qs.toString()}`)
+        .then((data) => {
+          if (previewGenerationRef.current !== generation) return;
+          setPreview(data);
+          setPreviewState('ready');
+        })
+        .catch((e: ApiError) => {
+          if (previewGenerationRef.current !== generation) return;
+          setPreview(null);
+          setPreviewState(e.status === 403 ? 'forbidden' : 'error');
+        });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [hours]);
 
   async function run() {
     setBusy(true);
@@ -763,11 +844,65 @@ function StaleHoldCard({ onChanged }: { onChanged?: () => void }) {
         <Field label="Older than (hours)" htmlFor="sh-hours">
           <input id="sh-hours" value={hours} onChange={(e) => setHours(e.target.value)} inputMode="numeric" className={input} />
         </Field>
+
+        <StaleHoldPreviewBlock state={previewState} preview={preview} />
+
         <Button variant="outline" onClick={run} disabled={busy} className="min-h-[44px]">
           {busy ? 'Sweeping…' : 'Release stale holds'}
         </Button>
       </div>
     </Card>
+  );
+}
+
+function StaleHoldPreviewBlock({ state, preview }: { state: PreviewState; preview: StaleHoldPreview | null }) {
+  if (state === 'forbidden') {
+    return (
+      <p className="text-xs text-[color:var(--bmpl-text-muted)]">
+        You don&apos;t have <code>payments.read</code>, so a preview isn&apos;t available here. The sweep button still works.
+      </p>
+    );
+  }
+  if (state === 'loading') {
+    return (
+      <p className="text-xs text-[color:var(--bmpl-text-muted)]" aria-live="polite">
+        Checking what this would release…
+      </p>
+    );
+  }
+  if (state === 'error' || !preview) {
+    return (
+      <p className="text-xs text-[color:var(--bmpl-text-muted)]">
+        Couldn&apos;t load a preview right now. The sweep button still works.
+      </p>
+    );
+  }
+  if (preview.total === 0) {
+    return (
+      <Alert tone="info">
+        No HELD holds are old enough to match this window. The sweep itself goes by payment age, not hold age, so
+        this is a strong signal it would release nothing here — not a guarantee.
+      </Alert>
+    );
+  }
+  const hiddenCount = preview.total - preview.holds.length;
+  return (
+    <Alert tone="warning" title={`Up to ${preview.total} hold${preview.total === 1 ? '' : 's'} match this window`}>
+      <p>
+        This is an upper bound, not an exact count: it lists every HELD hold old enough by hold age, but the sweep
+        itself goes by payment age and only releases one whose payment is still unpaid (created or pending), up to
+        500 payments per run. Some of what&apos;s below may already be authorized, expired or settled.
+      </p>
+      <ul className="mt-2 space-y-1">
+        {preview.holds.map((h) => (
+          <li key={h.id}>
+            {money(h.amountMinor)} {h.currency} — {h.customer ?? h.customerEmail ?? 'unknown customer'} — {h.ageHours}h old
+            {h.payment.resourceRef ? ` — ${h.payment.resourceType === 'ORDER' ? 'order' : 'shipment'} ${h.payment.resourceRef}` : ''}
+          </li>
+        ))}
+      </ul>
+      {hiddenCount > 0 && <p className="mt-2">+{hiddenCount} more not shown.</p>}
+    </Alert>
   );
 }
 
