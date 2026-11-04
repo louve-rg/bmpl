@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
-import { Alert, Button, Card, Field, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
+import { Alert, Badge, Button, Card, Field, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 import { CourierPricing } from '../../../components/CourierPricing';
 
@@ -44,6 +44,20 @@ interface Overview {
   queues: Queues;
   totalActionable: number;
   settings: PlatformSetting;
+}
+
+type EmailProvider = 'console' | 'resend' | 'smtp';
+
+interface EmailDiagnostics {
+  provider: EmailProvider;
+  /** Whether the credential this provider requires is present. Boolean only —
+   *  never render the value, a prefix or a length. */
+  credentialPresent: boolean;
+  /** Whether this provider+credential combination can actually deliver mail
+   *  right now. `false` is the production hazard this section exists to
+   *  surface — the console transport accepts and discards every message
+   *  while reporting success to its caller. */
+  canDeliver: boolean;
 }
 
 type LoadState = 'loading' | 'ready' | 'error' | 'forbidden';
@@ -141,6 +155,9 @@ export default function OpsPage() {
               productionMinor={overview.settings.localCourierFeeMinor ?? 0}
               simulationMinor={overview.settings.localCourierFeeTestMinor ?? 0}
             />
+          </div>
+          <div className="mt-6">
+            <DiagnosticsSection />
           </div>
         </>
       )}
@@ -396,6 +413,99 @@ function SettingsSection({ initial }: { initial: PlatformSetting }) {
           </div>
         </fieldset>
       </Card>
+    </section>
+  );
+}
+
+/* --------------------------------------------------------- diagnostics */
+
+const PROVIDER_LABELS: Record<EmailProvider, string> = {
+  console: 'Console (dev/test only — nothing is actually delivered)',
+  resend: 'Resend',
+  smtp: 'SMTP (not implemented)',
+};
+
+/** W8: email transport state — see OpsService.emailDiagnostics(). Same
+ *  ops.read gate as the rest of this page; `canDeliver: false` is rendered as
+ *  a warning, never a neutral field, because the console transport accepts
+ *  and discards every message while reporting success to its caller. */
+function DiagnosticsSection() {
+  const [diag, setDiag] = useState<EmailDiagnostics | null>(null);
+  const [state, setState] = useState<LoadState>('loading');
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      setState('loading');
+      try {
+        const d = await api.get<EmailDiagnostics>('/admin/ops/email');
+        if (!active) return;
+        setDiag(d);
+        setState('ready');
+      } catch (err) {
+        if (!active) return;
+        setState(apiStatus(err) === 403 ? 'forbidden' : 'error');
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <section aria-label="Email transport diagnostics" className="space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Email transport</h2>
+        <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
+          Whether production can actually deliver verification, reset and notification email right now.
+        </p>
+      </div>
+
+      {state === 'forbidden' ? (
+        <Alert tone="warning" title="Access restricted">
+          You don&apos;t have the <code>ops.read</code> permission.
+        </Alert>
+      ) : state === 'loading' ? (
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="h-4 w-4" /> Loading email transport state…
+        </div>
+      ) : state === 'error' || !diag ? (
+        <Alert tone="error">We couldn&apos;t load the email transport diagnostic right now. Please try again shortly.</Alert>
+      ) : (
+        <Card className="space-y-4 p-5">
+          <Alert
+            tone={diag.canDeliver ? 'success' : 'warning'}
+            title={diag.canDeliver ? 'Email can be delivered' : 'Email is NOT being delivered'}
+          >
+            {diag.canDeliver
+              ? 'This provider and credential combination is live.'
+              : diag.provider === 'console'
+                ? 'The console transport is configured. It accepts every send and logs it, but never actually delivers anything — verification, reset and notification email are all silently discarded.'
+                : diag.credentialPresent
+                  ? 'A credential is present, but this transport cannot deliver mail right now.'
+                  : 'The required credential is missing, so no mail can be sent.'}
+          </Alert>
+
+          <dl className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Provider</dt>
+              <dd className="mt-1 text-sm font-medium text-[color:var(--bmpl-text)]">{PROVIDER_LABELS[diag.provider]}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Credential</dt>
+              <dd className="mt-1">
+                <Badge tone={diag.credentialPresent ? 'success' : 'error'}>{diag.credentialPresent ? 'Present' : 'Missing'}</Badge>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Can deliver</dt>
+              <dd className="mt-1">
+                <Badge tone={diag.canDeliver ? 'success' : 'warning'}>{diag.canDeliver ? 'Yes' : 'No'}</Badge>
+              </dd>
+            </div>
+          </dl>
+        </Card>
+      )}
     </section>
   );
 }
