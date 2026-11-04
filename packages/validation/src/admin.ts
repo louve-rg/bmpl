@@ -44,6 +44,19 @@ export const setUserTestFlagSchema = z.object({
 export type SetUserTestFlagInput = z.infer<typeof setUserTestFlagSchema>;
 
 /**
+ * Operational ceiling on a single administrative test credit, in minor units
+ * (BZD cents): BZD 1,000 per credit. Pre-existing (a1ad2114) — the real
+ * defect here was never a missing ceiling, it was an INVISIBLE one: nothing
+ * client-side ever surfaced this number, so a larger amount just got a
+ * generic rejection with no explanation (MDF-499). A
+ * constraint someone else imposed gets lifted deliberately, with a reason,
+ * or it is drift — nobody here knows why 1,000 was chosen, which is reason
+ * enough not to raise it. Exported so the admin UI can mirror it as a
+ * client-side hint without restating the number.
+ */
+export const ADMIN_TEST_CREDIT_MAX_MINOR = 100_000;
+
+/**
  * Administrative test credit.
  *
  * Capped well below anything that could be mistaken for a real settlement, and
@@ -52,7 +65,7 @@ export type SetUserTestFlagInput = z.infer<typeof setUserTestFlagSchema>;
  */
 export const adminTestCreditSchema = z.object({
   userId: z.string().min(1),
-  amountMinor: z.number().int().min(100).max(100_000),
+  amountMinor: z.number().int().min(100).max(ADMIN_TEST_CREDIT_MAX_MINOR),
   reason: z.string().trim().min(3).max(500),
 });
 export type AdminTestCreditInput = z.infer<typeof adminTestCreditSchema>;

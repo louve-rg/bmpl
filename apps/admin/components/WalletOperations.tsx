@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { ADMIN_TEST_CREDIT_MAX_MINOR } from '@bmpl/validation';
 import { api, type ApiError } from '../lib/api';
 import { Alert, Button, Card } from './ui';
 import { StatusBadge } from './StatusBadge';
@@ -79,8 +81,23 @@ interface ResolvedAccount {
  * had; both paths end at the same identity-confirmed state (ADMIN-WALLET-
  * LOOKUP, owner correction: a fraud-lock tool whose only way to identify a
  * customer is copying a cuid out of the address bar is not usable).
+ *
+ * `onQueryEdit` fires on every keystroke in the search box, independent of
+ * whether a search has even run. The caller uses it to drop a stale
+ * resolution: a customer resolved a minute ago must not silently survive
+ * the admin typing a new name underneath it (MDF-499) --
+ * the same guarantee the raw id field already gave via `changeUserId`, now
+ * extended to this second entry path.
  */
-function AccountSearch({ idPrefix, onSelect }: { idPrefix: string; onSelect: (account: ResolvedAccount) => void }) {
+function AccountSearch({
+  idPrefix,
+  onSelect,
+  onQueryEdit,
+}: {
+  idPrefix: string;
+  onSelect: (account: ResolvedAccount) => void;
+  onQueryEdit?: () => void;
+}) {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -115,7 +132,10 @@ function AccountSearch({ idPrefix, onSelect }: { idPrefix: string; onSelect: (ac
         <input
           id={`${idPrefix}-search`}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            onQueryEdit?.();
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
@@ -161,6 +181,27 @@ function AccountSearch({ idPrefix, onSelect }: { idPrefix: string; onSelect: (ac
   );
 }
 
+interface WalletAccountInfo {
+  id: string;
+  type: string;
+  status: string;
+  currency: string;
+  cachedBalanceMinor: number;
+}
+
+/**
+ * The one read both cards need once identity resolves: current USER-type
+ * wallet status and balance, via the same read-only endpoint
+ * (`GET /admin/wallet/users/:userId/accounts`, wallet.read, no audit row).
+ * Shared rather than duplicated per-card (MDF-499) -- one
+ * fetch, one USER-type filter, used by the credit card's status display and
+ * the lock card's direction derivation alike.
+ */
+async function fetchUserWalletAccounts(userId: string): Promise<WalletAccountInfo[]> {
+  const rows = await api.get<WalletAccountInfo[]>(`/admin/wallet/users/${encodeURIComponent(userId)}/accounts`);
+  return rows.filter((a) => a.type === 'USER');
+}
+
 /**
  * This card used to post straight to a raw, free-text user id with no
  * lookup and no confirmation -- an admin who mistyped or pasted the wrong
@@ -184,38 +225,88 @@ function AccountSearch({ idPrefix, onSelect }: { idPrefix: string; onSelect: (ac
  * `submit()` re-checks `resolved.id === userId.trim()` itself before the
  * POST ever fires, so a stale render or a future refactor that moves the
  * button cannot post a credit to an unconfirmed id.
+ *
+ * Current wallet status/balance (MDF-499) is a SEPARATE,
+ * best-effort fetch after identity resolves, not a second hard gate: the
+ * API itself already refuses `topUp` against anything but an ACTIVE wallet
+ * (`wallet.service.ts`'s `topUp`), and a brand-new customer legitimately has
+ * no wallet row yet (one is created on first credit) -- neither is a reason
+ * to block the admin from ever seeing this card. So this fetch only adds an
+ * earlier warning for the case that would fail anyway (status shown before
+ * the click, not discovered after it from a generic error) and never blocks
+ * on its own failure the way the lock card's does -- that is a deliberate
+ * difference, not an oversight: losing read access to status is not a
+ * reason to also lose the ability to credit an already-confirmed account.
+ *
+ * `ADMIN_TEST_CREDIT_MAX_MINOR` (MDF-499) is a financial-
+ * safety ceiling set by product/ops under delegated authority, not an
+ * engineering guess -- imported from `@bmpl/validation` so the hint shown
+ * here and the server's own rejection can never quote two different numbers.
+ * The server check is the one that matters; this is a round-trip-saving
+ * hint only, same as the disabled-button hint above.
  */
 function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
   const [userId, setUserId] = useState('');
   const [resolved, setResolved] = useState<ResolvedAccount | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupErr, setLookupErr] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<WalletAccountInfo[] | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusErr, setStatusErr] = useState<string | null>(null);
   const [amount, setAmount] = useState('80.00');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  const account = accounts?.[0] ?? null;
   const amountMinor = Math.round(Number(amount) * 100);
+  const overCeiling = Number.isFinite(amountMinor) && amountMinor > ADMIN_TEST_CREDIT_MAX_MINOR;
   const valid =
     !!resolved &&
     resolved.id === userId.trim() &&
+    (!account || account.status === 'ACTIVE') &&
     Number.isFinite(amountMinor) &&
     amountMinor >= 100 &&
+    !overCeiling &&
     reason.trim().length >= 3;
+
+  function clearSelection() {
+    setUserId('');
+    setResolved(null);
+    setAccounts(null);
+    setLookupErr(null);
+    setStatusErr(null);
+  }
 
   function changeUserId(value: string) {
     setUserId(value);
     // Any edit invalidates the last lookup -- the form must re-confirm
     // identity for whatever id is in the box now, not the one it was for.
     setResolved(null);
+    setAccounts(null);
     setLookupErr(null);
+    setStatusErr(null);
+  }
+
+  async function loadStatus(id: string) {
+    setStatusBusy(true);
+    setStatusErr(null);
+    try {
+      setAccounts(await fetchUserWalletAccounts(id));
+    } catch (e) {
+      setStatusErr((e as ApiError).message ?? 'Could not load current wallet status.');
+    } finally {
+      setStatusBusy(false);
+    }
   }
 
   function selectAccount(picked: ResolvedAccount) {
     setUserId(picked.id);
     setResolved(picked);
     setLookupErr(null);
+    setAccounts(null);
+    void loadStatus(picked.id);
   }
 
   async function lookup() {
@@ -224,9 +315,11 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
     setLookupBusy(true);
     setLookupErr(null);
     setResolved(null);
+    setAccounts(null);
     try {
       const account = await api.get<ResolvedAccount>(`/admin/users/${encodeURIComponent(id)}`);
       setResolved(account);
+      void loadStatus(account.id);
     } catch (e) {
       const ex = e as ApiError;
       setLookupErr(ex.message ?? 'Could not look up that account.');
@@ -236,7 +329,7 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
   }
 
   async function submit() {
-    if (!resolved || resolved.id !== userId.trim()) return;
+    if (!resolved || resolved.id !== userId.trim() || (account && account.status !== 'ACTIVE')) return;
     setBusy(true);
     setErr(null);
     setNote(null);
@@ -247,8 +340,7 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
         reason: reason.trim(),
       });
       setNote(`Posted ${money(amountMinor)} to ${resolved.firstName} ${resolved.lastName}. Their available balance is now ${money(res.availableMinor)}.`);
-      setUserId('');
-      setResolved(null);
+      clearSelection();
       setReason('');
       onChanged?.();
     } catch (e) {
@@ -276,7 +368,7 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
       {err && <Alert tone="warning" className="mt-3">{err}</Alert>}
 
       <div className="mt-3 space-y-3">
-        <AccountSearch idPrefix="tc" onSelect={selectAccount} />
+        <AccountSearch idPrefix="tc" onSelect={selectAccount} onQueryEdit={() => { if (resolved) clearSelection(); }} />
         <Field label="Customer user ID" htmlFor="tc-user">
           <div className="flex gap-2">
             <input
@@ -299,11 +391,34 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
         </Field>
         {lookupErr && <Alert tone="warning">{lookupErr}</Alert>}
         {resolved && (
-          <Alert tone="info">
-            This will credit <strong>{resolved.firstName} {resolved.lastName}</strong> ({resolved.email}).
+          <div className="flex items-start justify-between gap-2">
+            <Alert tone="info" className="flex-1">
+              This will credit <strong>{resolved.firstName} {resolved.lastName}</strong> ({resolved.email}).
+              {statusBusy && ' Checking current wallet status…'}
+              {!statusBusy && account && (
+                <>
+                  {' '}Wallet status <StatusBadge status={account.status} />, balance {money(account.cachedBalanceMinor)} {account.currency}.
+                </>
+              )}
+              {!statusBusy && !account && accounts !== null && ' No wallet account yet -- one will be created when this credit posts.'}
+              {!statusBusy && statusErr && ` Current wallet status could not be loaded (${statusErr}).`}
+            </Alert>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <Link href={`/dashboard/users/${resolved.id}`} className="text-xs font-semibold text-belize-blue hover:underline">
+                View profile →
+              </Link>
+              <Button type="button" variant="ghost" size="sm" onClick={clearSelection}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        )}
+        {account && account.status !== 'ACTIVE' && (
+          <Alert tone="warning">
+            This wallet is {account.status.toLowerCase()}; a test credit cannot be posted until that changes.
           </Alert>
         )}
-        <Field label="Amount (BZ$)" htmlFor="tc-amount">
+        <Field label={`Amount (BZ$, up to ${money(ADMIN_TEST_CREDIT_MAX_MINOR)} per credit)`} htmlFor="tc-amount">
           <input
             id="tc-amount"
             value={amount}
@@ -313,6 +428,12 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
             className={input}
           />
         </Field>
+        {overCeiling && (
+          <Alert tone="warning">
+            A single test credit cannot exceed {money(ADMIN_TEST_CREDIT_MAX_MINOR)}. Enter a smaller amount, or post more
+            than one credit.
+          </Alert>
+        )}
         <Field label="Reason (recorded in the audit log)" htmlFor="tc-reason">
           <input
             id="tc-reason"
@@ -333,14 +454,6 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
       </div>
     </Card>
   );
-}
-
-interface LockableAccount {
-  id: string;
-  type: string;
-  status: string;
-  currency: string;
-  cachedBalanceMinor: number;
 }
 
 /**
@@ -372,11 +485,23 @@ interface LockableAccount {
  * card's own wallet-accounts read -- a search hit does not carry status
  * or balance, so the direction-from-status derivation stays intact either
  * way the account got here.
+ *
+ * Status/balance IS a hard gate here, unlike the credit card just above:
+ * locking requires knowing which direction to offer, and there is no safe
+ * default when that read fails, so `selectAccount` still clears the whole
+ * resolution rather than leaving a person confirmed with an unknown status
+ * (MDF-499 kept this difference deliberately, see that
+ * card's own docstring for why its version of this fetch may not).
+ *
+ * `resolved` can go true a render before `accounts` does (set together in
+ * the same tick, but genuinely loading in between) -- `lookupBusy` covers
+ * that window so "no wallet account to lock" never flashes while the read
+ * is still in flight.
  */
 function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
   const [userId, setUserId] = useState('');
   const [resolved, setResolved] = useState<ResolvedAccount | null>(null);
-  const [accounts, setAccounts] = useState<LockableAccount[] | null>(null);
+  const [accounts, setAccounts] = useState<WalletAccountInfo[] | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupErr, setLookupErr] = useState<string | null>(null);
   const [reason, setReason] = useState('');
@@ -389,16 +514,18 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
     account?.status === 'ACTIVE' ? 'lock' : account?.status === 'LOCKED' ? 'unlock' : null;
   const valid = !!resolved && resolved.id === userId.trim() && !!account && !!action && reason.trim().length >= 3;
 
-  function changeUserId(value: string) {
-    setUserId(value);
+  function clearSelection() {
+    setUserId('');
     setResolved(null);
     setAccounts(null);
     setLookupErr(null);
   }
 
-  async function fetchAccounts(id: string) {
-    const userAccounts = await api.get<LockableAccount[]>(`/admin/wallet/users/${encodeURIComponent(id)}/accounts`);
-    setAccounts(userAccounts.filter((a) => a.type === 'USER'));
+  function changeUserId(value: string) {
+    setUserId(value);
+    setResolved(null);
+    setAccounts(null);
+    setLookupErr(null);
   }
 
   async function lookup() {
@@ -409,8 +536,12 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
     setResolved(null);
     setAccounts(null);
     try {
-      const [person] = await Promise.all([api.get<ResolvedAccount>(`/admin/users/${encodeURIComponent(id)}`), fetchAccounts(id)]);
+      const [person, userAccounts] = await Promise.all([
+        api.get<ResolvedAccount>(`/admin/users/${encodeURIComponent(id)}`),
+        fetchUserWalletAccounts(id),
+      ]);
       setResolved(person);
+      setAccounts(userAccounts);
     } catch (e) {
       const ex = e as ApiError;
       setLookupErr(ex.message ?? 'Could not look up that account.');
@@ -430,7 +561,7 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
     setAccounts(null);
     setLookupBusy(true);
     try {
-      await fetchAccounts(picked.id);
+      setAccounts(await fetchUserWalletAccounts(picked.id));
     } catch (e) {
       const ex = e as ApiError;
       setLookupErr(ex.message ?? 'Could not look up that account.');
@@ -481,7 +612,7 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
       {err && <Alert tone="warning" className="mt-3">{err}</Alert>}
 
       <div className="mt-3 space-y-3">
-        <AccountSearch idPrefix="wl" onSelect={selectAccount} />
+        <AccountSearch idPrefix="wl" onSelect={selectAccount} onQueryEdit={() => { if (resolved) clearSelection(); }} />
         <Field label="Customer user ID" htmlFor="wl-user">
           <div className="flex gap-2">
             <input
@@ -503,17 +634,29 @@ function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
           </div>
         </Field>
         {lookupErr && <Alert tone="warning">{lookupErr}</Alert>}
-        {resolved && !account && (
-          <Alert tone="warning">
-            {resolved.firstName} {resolved.lastName} ({resolved.email}) has no wallet account to lock.
-          </Alert>
-        )}
-        {resolved && account && (
-          <Alert tone="info">
-            <strong>{resolved.firstName} {resolved.lastName}</strong> ({resolved.email}) — wallet status{' '}
-            <StatusBadge status={account.status} />, balance {money(account.cachedBalanceMinor)} {account.currency}.
-            {account.status === 'SUSPENDED' && ' This wallet is suspended; suspension is not managed by the lock control.'}
-          </Alert>
+        {resolved && lookupBusy && <Alert tone="info">Checking current wallet status…</Alert>}
+        {resolved && !lookupBusy && (
+          <div className="flex items-start justify-between gap-2">
+            {!account ? (
+              <Alert tone="warning" className="flex-1">
+                {resolved.firstName} {resolved.lastName} ({resolved.email}) has no wallet account to lock.
+              </Alert>
+            ) : (
+              <Alert tone="info" className="flex-1">
+                <strong>{resolved.firstName} {resolved.lastName}</strong> ({resolved.email}) — wallet status{' '}
+                <StatusBadge status={account.status} />, balance {money(account.cachedBalanceMinor)} {account.currency}.
+                {account.status === 'SUSPENDED' && ' This wallet is suspended; suspension is not managed by the lock control.'}
+              </Alert>
+            )}
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <Link href={`/dashboard/users/${resolved.id}`} className="text-xs font-semibold text-belize-blue hover:underline">
+                View profile →
+              </Link>
+              <Button type="button" variant="ghost" size="sm" onClick={clearSelection}>
+                Clear
+              </Button>
+            </div>
+          </div>
         )}
         <Field label="Reason (recorded in the audit log, visible to every wallet.lock holder)" htmlFor="wl-reason">
           <input

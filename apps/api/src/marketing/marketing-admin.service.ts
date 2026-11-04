@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { HOMEPAGE_PLACEMENTS, PROMOTION_PLACEMENTS, type PromotionPlacementType } from '@bmpl/shared';
+import { HOMEPAGE_PLACEMENTS, PROMOTION_PLACEMENTS, CATEGORY_CONTEXT_PLACEMENTS, type PromotionPlacementType } from '@bmpl/shared';
 import type { ResolvePromotionReportInput } from '@bmpl/validation';
 import { Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
@@ -92,6 +92,9 @@ export class MarketingAdminService {
     if (promo.status !== 'APPROVED') throw new BadRequestException('Only an approved campaign can be assigned to a placement.');
     const placement = this.assertPlacement(dto.placement);
     const categoryId = dto.categoryId ?? null;
+    if (CATEGORY_CONTEXT_PLACEMENTS.includes(placement) && !categoryId) {
+      throw new BadRequestException('This placement requires a category.');
+    }
     const data = {
       position: dto.position ?? 0,
       device: this.toDevice(dto.device),
@@ -103,6 +106,16 @@ export class MarketingAdminService {
     // Nullable categoryId can't be used in the compound-unique `where` (Prisma types it
     // non-null), so resolve the existing assignment explicitly.
     const existing = await this.prisma.promotionPlacement.findFirst({ where: { promotionId, placement, categoryId } });
+    // Eligibility is only checked for a NEW assignment. An existing row whose
+    // category has since gone hidden (or, in principle, been removed) must
+    // keep working for every other edit -- re-validating here would let a
+    // category admins no longer manage break a promotion that was placed
+    // correctly at the time.
+    if (!existing && categoryId) {
+      const category = await this.prisma.category.findUnique({ where: { id: categoryId }, select: { id: true, isVisible: true } });
+      if (!category) throw new BadRequestException('That category does not exist.');
+      if (!category.isVisible) throw new BadRequestException('That category is hidden and cannot receive a new ad placement.');
+    }
     const row = existing
       ? await this.prisma.promotionPlacement.update({ where: { id: existing.id }, data })
       : await this.prisma.promotionPlacement.create({ data: { promotionId, placement, categoryId, ...data } });

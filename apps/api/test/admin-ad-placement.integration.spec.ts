@@ -126,4 +126,61 @@ describe('admin-controlled ad placement + dual eligibility', () => {
     expect((await get(admin, 'admin/marketing/placements')).status).toBe(200);
     expect((await get(biz.cookies, 'admin/marketing/placements')).status).toBe(403);
   });
+
+  /**
+   * MDF-503: the admin console used to post a free-typed
+   * "Category ID" straight through with no existence check at all -- a
+   * typo or a stale id would create a row that silently never rendered
+   * anywhere, discoverable only by asking why an ad never showed up. The
+   * admin UI now picks from the real category list instead of typing an
+   * id; this proves the SAME eligibility is enforced here, server-side,
+   * independent of what the UI sends.
+   */
+  it('a CATEGORY_PAGE placement requires a real, visible category -- and never breaks one already placed', async () => {
+    const biz = await makeVendor();
+
+    // No category at all on a placement that requires one.
+    const noCategory = await approvedCampaign(biz);
+    expect((await post(admin, `admin/marketing/promotions/${noCategory}/placements`, { placement: 'CATEGORY_PAGE' })).status).toBe(400);
+
+    // A category id that does not exist.
+    const bogus = await approvedCampaign(biz);
+    expect(
+      (await post(admin, `admin/marketing/promotions/${bogus}/placements`, { placement: 'CATEGORY_PAGE', categoryId: 'does-not-exist' })).status,
+    ).toBe(400);
+
+    // A real but hidden category cannot receive a NEW placement.
+    const hiddenSlug = uniq();
+    const hidden = await ctx.prisma.category.create({ data: { name: `Hidden ${hiddenSlug}`, slug: `hidden-${hiddenSlug}`, isVisible: false } });
+    const hiddenCampaign = await approvedCampaign(biz);
+    expect(
+      (await post(admin, `admin/marketing/promotions/${hiddenCampaign}/placements`, { placement: 'CATEGORY_PAGE', categoryId: hidden.id })).status,
+    ).toBe(400);
+
+    // A real, visible category works, and the ad is scoped to exactly that category.
+    const visibleSlug = uniq();
+    const visible = await ctx.prisma.category.create({ data: { name: `Shown ${visibleSlug}`, slug: `shown-${visibleSlug}` } });
+    const id = await approvedCampaign(biz);
+    const assign = await post(admin, `admin/marketing/promotions/${id}/placements`, { placement: 'CATEGORY_PAGE', categoryId: visible.id });
+    expect(assign.status).toBe(201);
+    expect(await inSlot('CATEGORY_PAGE', id, `?categoryId=${visible.id}`)).toBe(true);
+    expect(await inSlot('CATEGORY_PAGE', id, `?categoryId=${hidden.id}`)).toBe(false);
+
+    // Hiding the category AFTER the fact never breaks the existing placement
+    // -- only a NEW assignment is checked, not an edit of one that already exists.
+    const toHideSlug = uniq();
+    const toHide = await ctx.prisma.category.create({ data: { name: `WillHide ${toHideSlug}`, slug: `will-hide-${toHideSlug}` } });
+    const stillGood = await approvedCampaign(biz);
+    const placed = await post(admin, `admin/marketing/promotions/${stillGood}/placements`, { placement: 'CATEGORY_PAGE', categoryId: toHide.id });
+    expect(placed.status).toBe(201);
+    await ctx.prisma.category.update({ where: { id: toHide.id }, data: { isVisible: false } });
+    // Re-submitting the same assignment (e.g. to change its position) updates in place.
+    const reSubmit = await post(admin, `admin/marketing/promotions/${stillGood}/placements`, {
+      placement: 'CATEGORY_PAGE',
+      categoryId: toHide.id,
+      position: 5,
+    });
+    expect(reSubmit.status).toBe(201);
+    expect(reSubmit.body.position).toBe(5);
+  });
 });
