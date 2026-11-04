@@ -213,15 +213,15 @@ describe('dispatch-time escalation (ShipmentDispatchService#recordUnavailableIfN
     const outcome = await dispatch.dispatchLeg(leg.id);
     expect(outcome.result).toBe('OFFERED');
 
-    // Decline the offer through the real endpoint — the leg returns to
-    // unassigned (DRIVER_DECLINED is dispatchable again, same as PENDING_ASSIGNMENT).
-    // Also take the driver offline: rankFor ranks a prior-decliner LAST rather
-    // than dropping them, so with only one driver in the district they would
-    // otherwise just be re-offered — going offline is what makes the pool
-    // genuinely empty for a real "no eligible driver" episode.
-    expect((await post(driverCookies, `driver/shipping-jobs/${leg.id}/decline`, { reason: 'Too far.' })).status).toBe(201);
+    // Take the driver offline BEFORE declining: decline() re-dispatches
+    // internally (shipment-driver.service.ts "straight to the next driver,
+    // same as a declined delivery"), and rankFor ranks a prior-decliner LAST
+    // rather than dropping them — so declining while still online with only
+    // one driver in the district would just re-offer the same driver to
+    // themselves. Offline first is what makes decline's own internal
+    // re-dispatch find nobody and raise the new episode.
     await ctx.prisma.driverProfile.update({ where: { id: driverProfileId }, data: { availability: 'OFFLINE' } });
-    await dispatch.dispatchLeg(leg.id);
+    expect((await post(driverCookies, `driver/shipping-jobs/${leg.id}/decline`, { reason: 'Too far.' })).status).toBe(201);
     expect(await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE' } })).toBe(before + 1);
   });
 });
