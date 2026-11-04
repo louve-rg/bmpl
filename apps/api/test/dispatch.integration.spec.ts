@@ -224,9 +224,41 @@ describe('admin assignment + eligibility', () => {
     );
 
     const wins = responses.filter((r) => r.status === 201);
-    const losses = responses.filter((r) => r.status === 409);
-    expect(wins).toHaveLength(1);
-    expect(losses).toHaveLength(N - 1);
+    const conflicts = responses.filter((r) => r.status === 409);
+    // A racer can legitimately lose this race two different ways, not one —
+    // same shape as driver-jobs.service.ts's claim() race (MDF-18, PR #488).
+    // assignInternal (dispatch.service.ts) reads the delivery's status once
+    // (assertAction's pre-check) and only reaches the status-conditioned
+    // transaction after several more awaited calls. A racer whose own read
+    // lands while the delivery is still PENDING_ASSIGNMENT loses INSIDE that
+    // transaction (409, the CAS's `updateMany` matched zero rows). A racer
+    // whose read happens to land after some other racer's whole pipeline has
+    // already committed never reaches the transaction at all — its own read
+    // already shows the delivery ASSIGNED, so the pre-check (assertAction)
+    // rejects it first, as 400 "Cannot assign a delivery that is \"Driver
+    // assigned\"." Both are the same business event — "someone else got it
+    // first" — caught at a different point in the request lifecycle
+    // depending on scheduling, not on business logic. Confirmed in CI, not
+    // theoretical: run 41785692513 / job 119590524661, 2026-10-22T01:51:43Z,
+    // this exact test, "expected [...] to have a length of 5 but got 4" —
+    // one racer's 400 fell into neither bucket. Deliberately narrow: ANY
+    // other status or message (500, a different 400 reason, 404, ...) still
+    // falls into `unexpected` below and fails the test loudly.
+    const lateRejections = responses.filter(
+      (r) => r.status === 400 && typeof r.body?.message === 'string' && r.body.message.startsWith('Cannot assign a delivery that is "Driver assigned"'),
+    );
+    const losses = [...conflicts, ...lateRejections];
+    // Richer failure message only — what counts as a legitimate loss is the
+    // only thing that changed above; a bare length mismatch gives no way to
+    // tell a 500 from an unrelated 400 from a 404 on whichever response
+    // wasn't a clean win or a clean loss — the individual statuses are never
+    // otherwise printed, so each occurrence destroyed its own evidence.
+    const unexpected = responses.filter((r) => r.status !== 201 && !losses.includes(r));
+    const detail =
+      `status distribution: ${JSON.stringify(responses.map((r) => r.status))}` +
+      (unexpected.length > 0 ? `; unexpected response(s): ${JSON.stringify(unexpected.map((r) => ({ status: r.status, body: r.body })))}` : '');
+    expect(wins, detail).toHaveLength(1);
+    expect(losses, detail).toHaveLength(N - 1);
 
     // The winner recorded in the database is the SAME one the HTTP response
     // named - not a different driver that happened to commit last underneath it.
@@ -268,9 +300,29 @@ describe('admin assignment + eligibility', () => {
     );
 
     const wins = responses.filter((r) => r.status === 201);
-    const losses = responses.filter((r) => r.status === 409);
-    expect(wins).toHaveLength(1);
-    expect(losses).toHaveLength(N - 1);
+    const conflicts = responses.filter((r) => r.status === 409);
+    // Same two-loss-mode shape as the ASSIGN race above and as claim()'s
+    // (MDF-18, PR #488) — ported here for the same reason: a bare 409 filter
+    // has no bucket for a racer whose read landed late enough that the
+    // pre-check (assertAction) rejected it before the transaction, and any
+    // such response today falls out of both `wins` and `losses` as a
+    // confusing length mismatch instead of a loud, printed failure. REASSIGN's
+    // legal `from` is 'ASSIGNED' and stays 'ASSIGNED' throughout this race, so
+    // assertAction does not reject on status here the way it does for ASSIGN
+    // from PENDING_ASSIGNMENT — but the CAS and the pre-check are the same
+    // mechanism, and `unexpected` below is what actually matters: it turns
+    // any status this race was not written to anticipate, for either test,
+    // into a loud, detailed failure instead of a silent gap in the oracle.
+    const lateRejections = responses.filter(
+      (r) => r.status === 400 && typeof r.body?.message === 'string' && r.body.message.startsWith('Cannot reassign a delivery that is "Driver assigned"'),
+    );
+    const losses = [...conflicts, ...lateRejections];
+    const unexpected = responses.filter((r) => r.status !== 201 && !losses.includes(r));
+    const detail =
+      `status distribution: ${JSON.stringify(responses.map((r) => r.status))}` +
+      (unexpected.length > 0 ? `; unexpected response(s): ${JSON.stringify(unexpected.map((r) => ({ status: r.status, body: r.body })))}` : '');
+    expect(wins, detail).toHaveLength(1);
+    expect(losses, detail).toHaveLength(N - 1);
 
     const row = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: order.deliveryId } });
     expect(row.assignedDriverProfileId).not.toBe(original.driverProfileId);
