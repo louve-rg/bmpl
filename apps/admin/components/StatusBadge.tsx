@@ -8,6 +8,12 @@ const STATUS_TONE: Record<string, Tone> = {
   APPROVED: 'success', ACTIVE: 'success', PAID: 'success', AUTHORIZED: 'success', POSTED: 'success', RELEASED: 'success', DELIVERED: 'success', COMPLETED: 'success', BALANCED: 'success', PUBLISHED: 'success',
   PENDING: 'warning', PENDING_REVIEW: 'warning', MORE_INFO_REQUIRED: 'info', PROCESSING: 'info', HELD: 'info', RESERVED: 'info',
   REJECTED: 'error', FAILED: 'error', CANCELLED: 'error', SUSPENDED: 'warning', UNBALANCED: 'error',
+  // LOCKED (SHIPPING-E2E-CLOSE): a security state, not a routine terminal
+  // one -- it used to fall through to the same neutral default as DRAFT/
+  // ARCHIVED, which read as "nothing special" on the one status that means
+  // a customer cannot transact. 'error' matches REJECTED/FAILED/CANCELLED:
+  // red is reserved for "this blocks something," which locking is.
+  LOCKED: 'error',
   DRAFT: 'neutral', REVOKED: 'neutral', WITHDRAWN: 'neutral', VOID: 'neutral', DEACTIVATED: 'neutral', ARCHIVED: 'neutral',
 };
 const DOT: Record<Tone, string> = {

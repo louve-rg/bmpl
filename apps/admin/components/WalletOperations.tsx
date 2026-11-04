@@ -3,36 +3,38 @@
 import { useEffect, useState } from 'react';
 import { api, type ApiError } from '../lib/api';
 import { Alert, Button, Card } from './ui';
+import { StatusBadge } from './StatusBadge';
 
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 
 /**
- * The two wallet actions an administrator can take, and nothing else.
+ * The administrative wallet actions available from this console, and
+ * nothing else: a labelled simulation credit, releasing reservations that
+ * were never authorized, and the fraud/security lock. None of the three is
+ * a balance adjustment -- there is still no way to set a balance from this
+ * console, and that is deliberate -- the ledger is the record, and a screen
+ * that could overwrite it would make it not the record.
  *
- * Neither is a balance adjustment. One posts a labelled simulation credit
- * through the ordinary ledger; the other gives back reservations that were
- * never authorized. There is still no way to set a balance from this console,
- * and that is deliberate — the ledger is the record, and a screen that could
- * overwrite it would make it not the record.
- *
- * The credit form asks for a reason because an unexplained credit in the audit
- * log is only half a record, and it says TEST CREDIT in the interface as well
- * as in the transaction description, so nobody has to remember which button
- * makes simulated money.
+ * Every write here asks for a reason because an unexplained action in the
+ * audit log is only half a record. The credit card says TEST CREDIT in the
+ * interface as well as in the transaction description, so nobody has to
+ * remember which button makes simulated money; the lock card says FRAUD /
+ * SECURITY for the same reason.
  */
 export function WalletOperations({ onChanged }: { onChanged?: () => void }) {
   // Each card is drawn only for the specific permission its own write call
-  // needs — wallet.credit_test and wallet.reconcile are two different,
-  // HIGHLY RESTRICTED permissions (neither is in any standing bundle), not
-  // one boolean covering both. /me returns the same grant rows the
+  // needs — wallet.credit_test, wallet.reconcile and wallet.lock are three
+  // different, HIGHLY RESTRICTED permissions (none in any standing bundle),
+  // not one boolean covering all three. /me returns the same grant rows the
   // PermissionsGuard evaluates, so what this screen shows and what the API
   // enforces cannot disagree. On any doubt (request fails, field absent)
-  // both stay hidden: fail closed. Reaching this component only ever needed
-  // wallet.read (BMPL-270) — until now, anyone who could view the wallet
-  // page also saw both money-creation forms rendered, whether or not they
-  // held either restricted permission.
+  // all three stay hidden: fail closed. Reaching this component only ever
+  // needed wallet.read (BMPL-270) — until now, anyone who could view the
+  // wallet page also saw both money-creation forms rendered, whether or not
+  // they held either restricted permission.
   const [canCreditTest, setCanCreditTest] = useState(false);
   const [canReconcile, setCanReconcile] = useState(false);
+  const [canLock, setCanLock] = useState(false);
 
   useEffect(() => {
     api
@@ -41,19 +43,22 @@ export function WalletOperations({ onChanged }: { onChanged?: () => void }) {
         const perms = me.adminPermissions ?? [];
         setCanCreditTest(perms.includes('wallet.credit_test'));
         setCanReconcile(perms.includes('wallet.reconcile'));
+        setCanLock(perms.includes('wallet.lock'));
       })
       .catch(() => {
         setCanCreditTest(false);
         setCanReconcile(false);
+        setCanLock(false);
       });
   }, []);
 
-  if (!canCreditTest && !canReconcile) return null;
+  if (!canCreditTest && !canReconcile && !canLock) return null;
 
   return (
     <div className="mb-8 grid gap-3 lg:grid-cols-2">
       {canCreditTest && <TestCreditCard onChanged={onChanged} />}
       {canReconcile && <StaleHoldCard onChanged={onChanged} />}
+      {canLock && <WalletLockCard onChanged={onChanged} />}
     </div>
   );
 }
@@ -81,6 +86,11 @@ interface ResolvedAccount {
  * re-locks the form -- the credit always fires against whichever account
  * was most recently resolved for the id currently in the box, never a
  * stale one left over from an earlier lookup.
+ *
+ * The disabled attribute on the submit button is a hint, not the control:
+ * `submit()` re-checks `resolved.id === userId.trim()` itself before the
+ * POST ever fires, so a stale render or a future refactor that moves the
+ * button cannot post a credit to an unconfirmed id.
  */
 function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
   const [userId, setUserId] = useState('');
@@ -219,6 +229,186 @@ function TestCreditCard({ onChanged }: { onChanged?: () => void }) {
             : resolved
               ? `Confirm: credit ${money(Number.isFinite(amountMinor) ? amountMinor : 0)} to ${resolved.firstName} ${resolved.lastName}`
               : `Post ${money(Number.isFinite(amountMinor) ? amountMinor : 0)} test credit`}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+interface LockableAccount {
+  id: string;
+  type: string;
+  status: string;
+  currency: string;
+  cachedBalanceMinor: number;
+}
+
+/**
+ * The fraud/security lock, exposed for the first time (SHIPPING-E2E-CLOSE)
+ * -- the API has carried `POST /admin/wallet/users/:userId/lock` and
+ * `/unlock` since before this card existed, gated on `wallet.lock`, with no
+ * UI surface at all.
+ *
+ * Same confirm-before-write shape as `TestCreditCard` just above, and for
+ * the same reason: no free-text id posts directly, the typed id must
+ * resolve through the existing account lookup first, and `submit()`
+ * re-checks the resolution itself rather than trusting the disabled
+ * button. One difference, because a lock is not symmetric with a credit:
+ * crediting the wrong person is recoverable by reconciliation, but locking
+ * the wrong person cuts a real customer off from booking immediately with
+ * no notification to them. So the confirm button names the DIRECTION as
+ * well as the person ("Confirm: lock Jane Doe's wallet"), not just the
+ * person -- the realistic failure here is one mis-click between two
+ * adjacent buttons, not a mistyped id.
+ *
+ * Current status has to come from somewhere other than attempting the
+ * action: `GET /admin/wallet/users/:userId/accounts` (wallet.read, read
+ * only, no audit row) is the read half of this feature -- attempting
+ * `lock` on an ACTIVE wallet to "see" the current state would actually
+ * lock it, which is not an inspection method this console will offer.
+ */
+function WalletLockCard({ onChanged }: { onChanged?: () => void }) {
+  const [userId, setUserId] = useState('');
+  const [resolved, setResolved] = useState<ResolvedAccount | null>(null);
+  const [accounts, setAccounts] = useState<LockableAccount[] | null>(null);
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupErr, setLookupErr] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const account = accounts?.[0] ?? null;
+  const action: 'lock' | 'unlock' | null =
+    account?.status === 'ACTIVE' ? 'lock' : account?.status === 'LOCKED' ? 'unlock' : null;
+  const valid = !!resolved && resolved.id === userId.trim() && !!account && !!action && reason.trim().length >= 3;
+
+  function changeUserId(value: string) {
+    setUserId(value);
+    setResolved(null);
+    setAccounts(null);
+    setLookupErr(null);
+  }
+
+  async function lookup() {
+    const id = userId.trim();
+    if (!id) return;
+    setLookupBusy(true);
+    setLookupErr(null);
+    setResolved(null);
+    setAccounts(null);
+    try {
+      const [person, userAccounts] = await Promise.all([
+        api.get<ResolvedAccount>(`/admin/users/${encodeURIComponent(id)}`),
+        api.get<LockableAccount[]>(`/admin/wallet/users/${encodeURIComponent(id)}/accounts`),
+      ]);
+      setResolved(person);
+      setAccounts(userAccounts.filter((a) => a.type === 'USER'));
+    } catch (e) {
+      const ex = e as ApiError;
+      setLookupErr(ex.message ?? 'Could not look up that account.');
+    } finally {
+      setLookupBusy(false);
+    }
+  }
+
+  async function submit() {
+    if (!resolved || resolved.id !== userId.trim() || !account || !action) return;
+    setBusy(true);
+    setErr(null);
+    setNote(null);
+    try {
+      const res = await api.post<{ status: string }>(`/admin/wallet/users/${resolved.id}/${action}`, {
+        reason: reason.trim(),
+      });
+      setNote(
+        `${action === 'lock' ? 'Locked' : 'Unlocked'} ${resolved.firstName} ${resolved.lastName}'s wallet. Status is now ${res.status}.`,
+      );
+      setAccounts((prev) => prev?.map((a) => (a.id === account.id ? { ...a, status: res.status } : a)) ?? prev);
+      setReason('');
+      onChanged?.();
+    } catch (e) {
+      const ex = e as ApiError;
+      setErr(ex.errors?.[0]?.message ?? ex.message ?? `The ${action} could not be posted.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Wallet lock</h3>
+        <span className="rounded bg-red-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-red-800">
+          Fraud / security
+        </span>
+      </div>
+      <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
+        Removes a wallet's permission to originate new movement -- spend, top-up, test credit. Money already authorized
+        keeps moving on its existing rails. The customer is not notified, so a lock should only follow a real fraud or
+        security review.
+      </p>
+
+      {note && <Alert tone="success" className="mt-3">{note}</Alert>}
+      {err && <Alert tone="warning" className="mt-3">{err}</Alert>}
+
+      <div className="mt-3 space-y-3">
+        <Field label="Customer user ID" htmlFor="wl-user">
+          <div className="flex gap-2">
+            <input
+              id="wl-user"
+              value={userId}
+              onChange={(e) => changeUserId(e.target.value)}
+              placeholder="cmsgz…"
+              className={input}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={lookup}
+              disabled={!userId.trim() || lookupBusy}
+              className="min-h-[44px] shrink-0"
+            >
+              {lookupBusy ? 'Looking up…' : 'Look up'}
+            </Button>
+          </div>
+        </Field>
+        {lookupErr && <Alert tone="warning">{lookupErr}</Alert>}
+        {resolved && !account && (
+          <Alert tone="warning">
+            {resolved.firstName} {resolved.lastName} ({resolved.email}) has no wallet account to lock.
+          </Alert>
+        )}
+        {resolved && account && (
+          <Alert tone="info">
+            <strong>{resolved.firstName} {resolved.lastName}</strong> ({resolved.email}) — wallet status{' '}
+            <StatusBadge status={account.status} />, balance {money(account.cachedBalanceMinor)} {account.currency}.
+            {account.status === 'SUSPENDED' && ' This wallet is suspended; suspension is not managed by the lock control.'}
+          </Alert>
+        )}
+        <Field label="Reason (recorded in the audit log, visible to every wallet.lock holder)" htmlFor="wl-reason">
+          <input
+            id="wl-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={action === 'unlock' ? 'Why this wallet is being unlocked' : 'Why this wallet is being locked'}
+            disabled={!action}
+            className={input}
+          />
+        </Field>
+        <Button
+          onClick={submit}
+          disabled={!valid || busy}
+          variant={action === 'lock' ? 'destructive' : 'primary'}
+          className="min-h-[44px]"
+        >
+          {busy
+            ? action === 'lock'
+              ? 'Locking…'
+              : 'Unlocking…'
+            : resolved && action
+              ? `Confirm: ${action} ${resolved.firstName} ${resolved.lastName}'s wallet`
+              : 'Confirm'}
         </Button>
       </div>
     </Card>
