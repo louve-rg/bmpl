@@ -1010,6 +1010,8 @@ paths:
     get: { tags: [Wallet], summary: All wallet transactions (read-only, each balances to net 0), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read" }
   /admin/wallet/accounts:
     get: { tags: [Wallet], summary: System / escrow account balances (read-only), security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read" }
+  /admin/wallet/users/{userId}/accounts:
+    get: { tags: [Wallet], summary: One user's own wallet account(s) (read-only), parameters: [ { name: userId, in: path, required: true, schema: { type: string } } ], security: [{ cookieAuth: [] }], responses: { "200": { description: OK }, "403": { $ref: "#/components/responses/Forbidden" } }, description: "Requires wallet.read; empty array if the user has no wallet; no audit row, no notification" }
   /admin/wallet/test-credit:
     post:
       tags: [Wallet]

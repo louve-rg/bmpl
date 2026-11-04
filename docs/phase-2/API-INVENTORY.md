@@ -129,7 +129,7 @@ Validation: wallet exists / active / correct currency / sufficient balance / not
 | GET | `/api/admin/orders` · `/:id` | `orders.read` (read-only; no editing) |
 | POST | `/api/admin/orders/:id/release-reservations` | `orders.manage` (M10.1; idempotent; releases an order's inventory reservations + wallet hold, cancels the payment — no money moves) |
 | GET | `/api/admin/payments` · `/:id` | `payments.read` (M11; read-only; + holds/events/ledger refs) |
-| GET | `/api/admin/wallet/transactions` · `/accounts` | `wallet.read` (M12; read-only ledger + escrow/system balances) |
+| GET | `/api/admin/wallet/transactions` · `/accounts` · `/users/:userId/accounts` | `wallet.read` (M12; read-only ledger + escrow/system balances + one user's own wallet account(s)) |
 | GET/POST | `/api/admin/categories` | `categories.manage` |
 | PATCH/DELETE | `/api/admin/categories/:id` | `categories.manage` |
 | GET | `/api/admin/vendors` `?status=` · `/:id` | `vendors.read` |
