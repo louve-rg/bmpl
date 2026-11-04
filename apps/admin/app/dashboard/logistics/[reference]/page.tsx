@@ -55,7 +55,7 @@ interface Leg {
    */
   pickupPhotoUrls?: string[];
   /**
-   * BMPL-COURIER-COMPLETION: the carrier ORG operating this LINE_HAUL leg —
+   * MDF-500: the carrier ORG operating this LINE_HAUL leg —
    * optional for the same cross-deploy reason as pickupPhotoUrls above, since
    * shipment.service.ts started returning it in this same change. Null means
    * no carrier organization assigned yet, not "the API doesn't know".
@@ -227,7 +227,7 @@ export default function ShipmentOpsPage() {
   }
 
   /**
-   * BMPL-COURIER-COMPLETION: which carrier organization operates this
+   * MDF-500: which carrier organization operates this
    * LINE_HAUL leg — the interface Pam's D2/D4 work will later make smarter
    * (an "eligible operators only" list, a why-ineligible preview), but the
    * request/response shape here does not change under that work, only its
@@ -446,7 +446,7 @@ export default function ShipmentOpsPage() {
                      * the real refusal message below, not a silently wrong UI.
                      */}
                     {/*
-                     * BMPL-COURIER-COMPLETION: which carrier ORG operates
+                     * MDF-500: which carrier ORG operates
                      * this line-haul leg, through the interface rather than
                      * only by API. The current assignment is visible to
                      * anyone who can load this page (same read as the rest

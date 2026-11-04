@@ -467,13 +467,13 @@ describe('ShipmentOpsPage — per-leg carrier scheduling wiring (MDF-318, requir
 });
 
 /**
- * BMPL-COURIER-COMPLETION: assigning the carrier organization that operates
+ * MDF-500: assigning the carrier organization that operates
  * a LINE_HAUL leg, through this screen rather than only by API — Stage 2's
  * read-only-inspection-plus-assignment slice, built against the existing
  * `POST legs/:id/operator` (its shape does not move under D1-D4, only the
  * internal eligibility guarantee does).
  */
-describe('ShipmentOpsPage — carrier operator assignment (BMPL-COURIER-COMPLETION)', () => {
+describe('ShipmentOpsPage — carrier operator assignment (MDF-500)', () => {
   const PROVIDERS = [
     { id: 'prov_1', businessName: 'Tropic Air', isActive: true, isTest: false },
     { id: 'prov_2', businessName: 'Maya Island Air', isActive: true, isTest: false },

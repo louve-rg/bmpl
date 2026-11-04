@@ -7,7 +7,7 @@ import CarrierProvidersPage from './page';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /**
- * BMPL-COURIER-COMPLETION: the carrier directory, read-only this round (see
+ * MDF-500: the carrier directory, read-only this round (see
  * the page's own docstring for why management controls are not here yet —
  * there is no per-provider members read to confirm against). Covers the
  * list render and the honest "refused" vs "empty" distinction (BMPL-144).
@@ -77,7 +77,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('CarrierProvidersPage (BMPL-COURIER-COMPLETION)', () => {
+describe('CarrierProvidersPage (MDF-500)', () => {
   it('lists each carrier with its contact details, licence and active member count', async () => {
     stubFetch(200, [PROVIDER_ACTIVE]);
     await mount();

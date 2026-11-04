@@ -3815,7 +3815,7 @@ export class ShipmentService {
       s.availabilityWindows.map((w) => ({ role: w.role, startTime: w.startTime, endTime: w.endTime })),
     );
     const etaBySequence = new Map(eta.legs.map((l) => [l.sequence, l]));
-    // BMPL-COURIER-COMPLETION: which carrier ORG operates a line-haul leg,
+    // MDF-500: which carrier ORG operates a line-haul leg,
     // staff-only like assignedDriverProfileId just below — a customer gets no
     // operational detail about who BML subcontracts to. Resolved bounded to
     // this one shipment's own legs, same "single-shipment caller resolves its

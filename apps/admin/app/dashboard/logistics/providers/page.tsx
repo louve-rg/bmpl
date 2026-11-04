@@ -6,7 +6,7 @@ import { adminCrumbs } from '../../../../lib/admin-nav';
 import { Alert, Badge, Card, EmptyState, PageHeader, Spinner } from '../../../../components/ui';
 
 /**
- * The carrier directory (BMPL-137, surfaced BMPL-COURIER-COMPLETION).
+ * The carrier directory (BMPL-137, surfaced MDF-500).
  *
  * Read-only, on purpose, this round: `GET /admin/logistics/providers` is the
  * one carrier read that exists today (`logistics.read`) — a list with a
