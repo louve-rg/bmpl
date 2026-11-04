@@ -72,3 +72,20 @@ export function providerStatusTarget(action: ShippingProviderStatusAction): Ship
 export function isOperableProviderStatus(status: ShippingProviderStatus): boolean {
   return status === 'APPROVED';
 }
+
+/**
+ * MDF-500 owner's ruling (2026-11-04), distinct from `isOperableProviderStatus`
+ * above: may a carrier CONTINUE work it already holds — depart, arrive, or
+ * record a schedule on a leg it already accepted? The owner drew the line
+ * between SUSPENDED (an ordinary administrative hold: existing in-progress
+ * work completes, so a shipment is never stranded by a routine action) and
+ * REVOKED (a security/safety cutoff: an administrator must be able to stop
+ * this org touching a shipment immediately, and the shipment instead becomes
+ * an administrative recovery/reassignment case). A POSITIVE allow-list (root
+ * CLAUDE.md apps/api §6), not `status !== 'REVOKED'` — a status added to this
+ * enum later is excluded by default and needs an explicit decision to be
+ * allowed to continue, rather than silently passing through a negative check.
+ */
+export function mayContinueExistingProviderWork(status: ShippingProviderStatus): boolean {
+  return status === 'APPROVED' || status === 'SUSPENDED';
+}

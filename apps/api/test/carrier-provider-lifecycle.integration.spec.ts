@@ -529,7 +529,7 @@ describe('MDF-500 security fix — status gates NEW commitments, never a continu
     expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } })).operatorAcceptedAt).toBeNull();
   });
 
-  it('DELIBERATELY UNCHANGED: a SUSPENDED carrier may still depart/arrive a leg it already accepted before suspension — a business decision, not a security one', async () => {
+  it("the owner's final ruling (2026-11-04): a SUSPENDED carrier may still depart/arrive a leg it already accepted before suspension — an ordinary administrative hold must not strand a real shipment", async () => {
     const carrier = await makeCarrier('Reef Runner Ltd');
     const { leg } = await proposedLeg(carrier.profileId);
     expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/accept`, {})).status).toBe(201);
@@ -544,6 +544,48 @@ describe('MDF-500 security fix — status gates NEW commitments, never a continu
     const s2 = await bookHubToHub();
     const [newLeg] = await legsOf(s2.id);
     expect((await setOperator(newLeg!.id, carrier.profileId)).status).toBe(400);
+  });
+
+  it("the owner's final ruling (2026-11-04): a REVOKED carrier may NOT depart or arrive a leg it already accepted — revocation is a security/safety cutoff, not an ordinary hold", async () => {
+    const carrierA = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await proposedLeg(carrierA.profileId);
+    expect((await post(carrierA.cookies, `shipping/provider/legs/${leg.id}/accept`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/providers/${carrierA.profileId}/revoke`, { reason: 'Safety incident.' })).status).toBe(201);
+
+    const depart = await post(carrierA.cookies, `shipping/provider/legs/${leg.id}/depart`, {});
+    expect(depart.status).toBe(400);
+    expect(depart.body.message).toContain('revoked');
+    const arrive = await post(carrierA.cookies, `shipping/provider/legs/${leg.id}/arrive`, {});
+    expect(arrive.status).toBe(400);
+    expect(arrive.body.message).toContain('revoked');
+
+    // Not stranded: admin can still recover the leg — hand it to a different
+    // carrier, which immediately departs/arrives it, proving the shipment
+    // itself was never blocked, only this now-revoked org's own access was.
+    const carrierB = await makeCarrier('Cave Branch Bus Co');
+    expect((await setOperator(leg.id, carrierB.profileId)).status).toBe(201);
+    expect((await post(carrierB.cookies, `shipping/provider/legs/${leg.id}/accept`, {})).status).toBe(201);
+    expect((await post(carrierB.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(201);
+    expect((await post(carrierB.cookies, `shipping/provider/legs/${leg.id}/arrive`, {})).status).toBe(201);
+  });
+
+  it("schedule() IS covered by the same ruling, exactly like depart/arrive: SUSPENDED may still schedule an already-accepted leg, REVOKED may not", async () => {
+    const departureAt = new Date(Date.now() + 3600_000).toISOString();
+
+    const suspended = await makeCarrier('Reef Runner Ltd');
+    const { leg: legA } = await proposedLeg(suspended.profileId);
+    expect((await post(suspended.cookies, `shipping/provider/legs/${legA.id}/accept`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/providers/${suspended.profileId}/suspend`, { reason: 'Licence under review.' })).status).toBe(201);
+    const scheduleSuspended = await post(suspended.cookies, `shipping/provider/legs/${legA.id}/schedule`, { scheduledDepartureAt: departureAt });
+    expect(scheduleSuspended.status, JSON.stringify(scheduleSuspended.body)).toBe(201);
+
+    const revoked = await makeCarrier('Cave Branch Bus Co');
+    const { leg: legB } = await proposedLeg(revoked.profileId);
+    expect((await post(revoked.cookies, `shipping/provider/legs/${legB.id}/accept`, {})).status).toBe(201);
+    expect((await post(admin, `admin/logistics/providers/${revoked.profileId}/revoke`, { reason: 'Safety incident.' })).status).toBe(201);
+    const scheduleRevoked = await post(revoked.cookies, `shipping/provider/legs/${legB.id}/schedule`, { scheduledDepartureAt: departureAt });
+    expect(scheduleRevoked.status).toBe(400);
+    expect(scheduleRevoked.body.message).toContain('revoked');
   });
 
   it('DELIBERATELY UNCHANGED: a REVOKED carrier may still reject a pending proposal or release a route it operates — giving work BACK is not a new commitment', async () => {
@@ -590,5 +632,47 @@ describe('MDF-500 security fix — status gates NEW commitments, never a continu
     const claim = await post(carrier.cookies, `shipping/provider/routes/${route.id}/claim`, {});
     expect(claim.status).toBe(400);
     expect(claim.body.message).toContain('revoked');
+  });
+});
+
+describe('MDF-500 addition — the owner ruling requires a revoked carrier\'s shipments to stay administratively visible and recoverable', () => {
+  it('an admin can list a carrier\'s shipments by providerProfileId, including a REVOKED org\'s existing work', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { shipment } = await proposedLeg(carrier.profileId);
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/revoke`, { reason: 'Safety incident.' })).status).toBe(201);
+
+    const filtered = await get(admin, `admin/logistics/shipments?providerProfileId=${carrier.profileId}`);
+    expect(filtered.status, JSON.stringify(filtered.body)).toBe(200);
+    expect(filtered.body.rows.map((r: { id: string }) => r.id)).toContain(shipment.id);
+
+    const other = await makeCarrier('Cave Branch Bus Co');
+    const otherFiltered = await get(admin, `admin/logistics/shipments?providerProfileId=${other.profileId}`);
+    expect(otherFiltered.body.rows.map((r: { id: string }) => r.id)).not.toContain(shipment.id);
+  });
+
+  it('an admin can read a carrier\'s current member roster — the read half of add/end member', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const roster = await get(admin, `admin/logistics/providers/${carrier.profileId}/members`);
+    expect(roster.status, JSON.stringify(roster.body)).toBe(200);
+    expect(roster.body).toHaveLength(1);
+    expect(roster.body[0].memberRole).toBe('OWNER');
+    expect(roster.body[0].status).toBe('ACTIVE');
+
+    const unknown = await get(admin, `admin/logistics/providers/doesnotexist000000000000/members`);
+    expect(unknown.status).toBe(404);
+  });
+
+  it('the providers directory surfaces WHY a carrier fails the status gate, not just its raw status — the third, server-only-computable reason', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const approved = await get(admin, 'admin/logistics/providers');
+    const approvedRow = approved.body.find((p: { id: string }) => p.id === carrier.profileId);
+    expect(approvedRow.statusGateEligible).toBe(true);
+    expect(approvedRow.statusGateReason).toBeNull();
+
+    expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/suspend`, { reason: 'Licence under review.' })).status).toBe(201);
+    const suspended = await get(admin, 'admin/logistics/providers');
+    const suspendedRow = suspended.body.find((p: { id: string }) => p.id === carrier.profileId);
+    expect(suspendedRow.statusGateEligible).toBe(false);
+    expect(suspendedRow.statusGateReason).toContain('suspended');
   });
 });

@@ -365,6 +365,15 @@ export class AdminLogisticsController {
     return this.providers.listProviders();
   }
 
+  /** MDF-500: the roster a console needs before showing an add/end member
+   *  control — same permission as those writes (see `listMembers`'s own
+   *  doc comment for why `logistics.manage`, not `logistics.read`). */
+  @RequirePermission('logistics.manage')
+  @Get('providers/:id/members')
+  listMembers(@Param('id') id: string) {
+    return this.providers.listMembers(id);
+  }
+
   /**
    * Add (or reactivate) a member of a carrier organization. logistics.manage —
    * granting a person the ability to act for a carrier is network

@@ -1526,6 +1526,12 @@ export class ShipmentService {
       ...(input.service ? { service: input.service } : {}),
       // Test shipments are hidden by default so the board reflects real work.
       ...(input.includeTest ? {} : { isTest: false }),
+      // MDF-500: admin discovery of a carrier's shipments — required so a
+      // SUSPENDED/REVOKED org's existing work stays administratively
+      // visible and reassignable/recoverable, not merely findable one leg
+      // at a time. `some`, not `every`: a multi-leg shipment with only ONE
+      // leg on this carrier still needs to be found by it.
+      ...(input.providerProfileId ? { legs: { some: { operatedByProviderId: input.providerProfileId } } } : {}),
     };
     const [rows, total] = await Promise.all([
       this.prisma.shipment.findMany({

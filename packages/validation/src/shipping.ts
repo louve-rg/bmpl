@@ -740,6 +740,12 @@ export const shipmentListSchema = z.object({
   status: z.string().trim().max(40).optional(),
   service: z.enum(SHIPPING_SERVICES).optional(),
   includeTest: queryBoolean.optional(),
+  // MDF-500: the owner's ruling requires a SUSPENDED/REVOKED carrier's
+  // existing shipments to remain visible to administrators and support
+  // safe completion, reassignment or controlled recovery — this is the
+  // discovery filter that makes that possible. Matches any shipment with
+  // at least one leg operated by this carrier org (see `listForOps`).
+  providerProfileId: cuidSchema.optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });

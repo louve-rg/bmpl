@@ -18,7 +18,13 @@ import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SCHEDULABLE_LEG_STATUSES, ShipmentService } from './shipment.service';
 import { LogisticsNetworkService } from './logistics-network.service';
-import { assertOperableProvider, assertProviderOperableStatus, providerEligibilityReasons } from './provider-eligibility';
+import {
+  assertOperableProvider,
+  assertProviderContinuationAllowed,
+  assertProviderOperableStatus,
+  providerEligibilityReasons,
+  providerStatusEligibilityReasons,
+} from './provider-eligibility';
 
 /** What the carrier-operator projection is allowed to read. Nothing more is loaded. */
 const PROVIDER_LEG_INCLUDE = {
@@ -258,14 +264,55 @@ export class ShippingProviderService {
 
   /* ---- membership (admin-managed, phase 1) ------------------------------- */
 
-  /** The carrier directory for the console: pick an operator, manage its staff. */
+  /**
+   * The carrier directory for the console: pick an operator, manage its
+   * staff.
+   *
+   * MDF-500 (Oscar, admin console): `status`/`statusReason` already told a
+   * reader WHAT this org's own status is; `statusGateEligible`/
+   * `statusGateReason` now tell it whether that status (AND-gated with the
+   * org's SHIPPING_PROVIDER role status, D1b) currently blocks new work —
+   * the one eligibility gate Oscar's console could not compute client-side
+   * the way it already does for `isActive`/`isTest`. Deliberately NOT the
+   * full `providerEligibilityReasons` (which needs a per-shipment isTestWork
+   * side this directory-level list doesn't have, and would otherwise leak
+   * the isActive/isTest reasons this already covers by other fields).
+   */
   async listProviders() {
     const rows = await this.prisma.shippingProviderProfile.findMany({
       orderBy: [{ isActive: 'desc' }, { businessName: 'asc' }],
-      include: { _count: { select: { members: { where: { status: 'ACTIVE' } } } } },
+      include: {
+        _count: { select: { members: { where: { status: 'ACTIVE' } } } },
+        user: { select: { roles: { where: { roleCode: 'SHIPPING_PROVIDER' }, select: { status: true } } } },
+      },
       take: 200,
     });
-    return rows.map((p) => ({ ...this.serializeProfile(p), activeMembers: p._count.members }));
+    return rows.map((p) => {
+      const [statusGateReason] = providerStatusEligibilityReasons(p);
+      return { ...this.serializeProfile(p), activeMembers: p._count.members, statusGateEligible: !statusGateReason, statusGateReason: statusGateReason ?? null };
+    });
+  }
+
+  /**
+   * MDF-500 (Oscar, admin console): the read half of addMember/endMember —
+   * ANY carrier's current roster, by id, not just the caller's own
+   * (`myMembers` below is the self-service, ownership-scoped equivalent).
+   * Oscar deliberately refused to ship a write-only "add member" control
+   * with no visible roster to confirm against — the same free-text-with-
+   * no-confirmation hazard the wallet cards were corrected away from. Same
+   * `logistics.manage` permission as the writes it mirrors, not the
+   * coarser `logistics.read` `listProviders` already uses (which only
+   * exposes an active-member COUNT) — reading WHO currently acts for an
+   * org is the same sensitivity as changing it.
+   */
+  async listMembers(providerProfileId: string) {
+    const profile = await this.prisma.shippingProviderProfile.findUnique({ where: { id: providerProfileId }, select: { id: true } });
+    if (!profile) throw new NotFoundException('That carrier does not exist.');
+    const rows = await this.prisma.shippingProviderMember.findMany({
+      where: { providerProfileId, status: 'ACTIVE' },
+      orderBy: [{ memberRole: 'asc' }, { createdAt: 'asc' }],
+    });
+    return rows.map((m) => this.serializeMember(m));
   }
 
   async addMember(actorId: string, providerProfileId: string, dto: AddProviderMemberInput) {
@@ -492,24 +539,27 @@ export class ShippingProviderService {
    * discarded: a carrier gets back their own leg shape, never the customer's
    * details.
    */
-  // MDF-500 security review (Dwight, 2026-11-04): a SUSPENDED/REVOKED org
-  // can still depart/arrive a leg it already accepted before the status
-  // change. DELIBERATELY LEFT AS-IS — god's ruling, not an oversight:
-  // whether a suspended carrier may finish a leg already in transit is a
-  // BUSINESS decision (stopping it dead strands a real shipment mid-journey
-  // for a real customer), not a security one, and the owner is deciding it.
-  // Do not "fix" this by writing isActive=false on suspend — that overloads
-  // a flag that means something else everywhere else in this file and
-  // strands in-flight legs as an accidental side effect. This comment
-  // stands until that answer lands.
+  // MDF-500 — the owner's final ruling (2026-11-04): a SUSPENDED org may
+  // still depart/arrive a leg it already accepted before the status change
+  // (an ordinary administrative hold must not strand a real shipment
+  // mid-journey for a real customer); a REVOKED org may not — revocation is
+  // a security/safety cutoff, and an administrator must be able to prevent
+  // further carrier access immediately. assertProviderContinuationAllowed
+  // is the owner's answer, applied identically here and to schedule().
+  // Do not "fix" this by writing isActive=false on suspend/revoke — that
+  // overloads a flag that means something else everywhere else in this
+  // file and would strand a leg accidentally rather than route it to
+  // administrative recovery on purpose.
   async depart(userId: string, legId: string, input: LegDepartInput) {
-    await this.assertMyAcceptedLeg(userId, legId);
+    const providerProfileId = await this.assertMyAcceptedLeg(userId, legId);
+    await assertProviderContinuationAllowed(this.prisma, providerProfileId);
     await this.shipments.departLeg(legId, input, { userId });
     return this.myLeg(userId, legId);
   }
 
   async arrive(userId: string, legId: string) {
-    await this.assertMyAcceptedLeg(userId, legId);
+    const providerProfileId = await this.assertMyAcceptedLeg(userId, legId);
+    await assertProviderContinuationAllowed(this.prisma, providerProfileId);
     await this.shipments.arriveLeg(legId, { userId });
     return this.myLeg(userId, legId);
   }
@@ -624,18 +674,18 @@ export class ShippingProviderService {
    * arrival — same ownership gate as depart/arrive, same underlying writer
    * the admin desk uses (`ShipmentService.scheduleLeg`).
    *
-   * MDF-500 security review: god's ruling named depart/arrive explicitly as
-   * "leave alone, business decision pending the owner" and did not name
-   * this method. Treated the same way here — same gate
-   * (`assertMyAcceptedLeg`), same already-accepted leg, recording a timing
-   * detail on work this org is already executing rather than taking on
-   * anything new — but that reading is MINE, not stated outright, so
-   * flagging it rather than deciding it silently. If the owner's answer on
-   * depart/arrive does not extend here the same way, this needs its own
-   * line.
+   * MDF-500 — the owner's final ruling (2026-11-04) resolved the flag this
+   * comment used to carry: `schedule()` IS covered by the depart/arrive
+   * answer, explicitly, because it runs through the same `assertMyAcceptedLeg`
+   * gate on a leg this org already holds, and a carrier permitted to
+   * depart/arrive a leg must be able to state when — stating a time on work
+   * it may legally perform is part of performing it, not a new commitment.
+   * Same continuation gate as depart/arrive: SUSPENDED may still schedule an
+   * already-accepted leg, REVOKED may not.
    */
   async schedule(userId: string, legId: string, input: LegScheduleInput) {
-    await this.assertMyAcceptedLeg(userId, legId);
+    const providerProfileId = await this.assertMyAcceptedLeg(userId, legId);
+    await assertProviderContinuationAllowed(this.prisma, providerProfileId);
     await this.shipments.scheduleLeg(legId, input, { userId });
     return this.myLeg(userId, legId);
   }
@@ -658,9 +708,12 @@ export class ShippingProviderService {
    * matches) while still being an unanswered proposal. Enforced here, not
    * only in the `canDepart`/`canArrive`/`canSchedule` read-side flags, which
    * are advisory for the UI and would otherwise be the only thing stopping
-   * a direct POST.
+   * a direct POST. Returns the validated providerProfileId (additive —
+   * MDF-500, same pattern as `assertMyRoute`'s own return value) so
+   * depart/arrive/schedule can run the continuation status gate without a
+   * second fetch.
    */
-  private async assertMyAcceptedLeg(userId: string, legId: string) {
+  private async assertMyAcceptedLeg(userId: string, legId: string): Promise<string> {
     const orgIds = await this.myOrgIds(userId);
     const leg = await this.prisma.shipmentLeg.findUnique({
       where: { id: legId },
@@ -672,6 +725,7 @@ export class ShippingProviderService {
     if (!leg.operatorAcceptedAt) {
       throw new BadRequestException('Accept this leg before recording its departure, arrival or schedule.');
     }
+    return leg.operatedByProviderId;
   }
 
   /* ---- the carrier's own route schedule (BMPL-186) ------------------------ */

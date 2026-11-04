@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canChangeProviderStatus,
   isOperableProviderStatus,
+  mayContinueExistingProviderWork,
   providerStatusTarget,
   SHIPPING_PROVIDER_STATUS_ACTIONS,
   SHIPPING_PROVIDER_STATUSES,
@@ -44,6 +45,12 @@ describe('the provider status transition table (D5)', () => {
   it('only APPROVED is operable', () => {
     for (const status of SHIPPING_PROVIDER_STATUSES) {
       expect(isOperableProviderStatus(status)).toBe(status === 'APPROVED');
+    }
+  });
+
+  it('MDF-500: APPROVED and SUSPENDED may continue existing work; REVOKED, REJECTED and PENDING may not', () => {
+    for (const status of SHIPPING_PROVIDER_STATUSES) {
+      expect(mayContinueExistingProviderWork(status)).toBe(status === 'APPROVED' || status === 'SUSPENDED');
     }
   });
 });
