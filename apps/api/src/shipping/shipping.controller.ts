@@ -1002,10 +1002,16 @@ export class ShippingProviderRoutesController {
 
   /**
    * Self-service scope: claim an EXISTING, currently-unassigned route.
-   * Never creates a route or sets its price/schedule/mode — those stay
-   * admin-entered business configuration. `providerProfileId` is optional
-   * in the body; omitted, it resolves to the caller's own org when they
-   * belong to exactly one.
+   * Never creates a route or sets its price/mode — those stay admin-entered
+   * business configuration. `providerProfileId` is optional in the body;
+   * omitted, it resolves to the caller's own org when they belong to
+   * exactly one.
+   *
+   * Schedule is a separate matter — see `claimRoute`'s own doc comment
+   * (`shipping-provider.service.ts`) and the MDF-528 migration comment
+   * (`packages/database`): the weekly-schedule/exception routes just above
+   * ARE carrier self-service, and DO reach a real customer quote through
+   * the pre-existing planner path.
    */
   @Post('routes/:id/claim')
   claim(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(claimRouteOperatorSchema)) dto: ClaimRouteOperatorInput) {

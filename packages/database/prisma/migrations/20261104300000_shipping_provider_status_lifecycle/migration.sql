@@ -47,8 +47,17 @@
 -- EXISTING, currently-unassigned LogisticsRoute needs its own audit action
 -- (LOGISTICS_ROUTE_OPERATOR_CHANGED) — no schema change on LogisticsRoute
 -- itself, operatedByProviderId already exists and is already nullable.
--- This never lets a carrier create a route or set its price/schedule;
--- those remain admin-entered business configuration.
+-- This never lets a carrier create a route or touch its price — no price
+-- field is anywhere in this path. It DOES let a carrier write its own
+-- RouteOperatingDay/RouteScheduleException rows (self-service weekly
+-- schedule and date exceptions), and that data feeds the pre-existing
+-- BMPL-186/196 planner path a real customer quote already ran through:
+-- it can change which route — and therefore which price — quote() offers
+-- on a requested date, or make the journey unavailable. That consumption
+-- path already existed and was already admin-writable; this migration's
+-- contribution is a new carrier self-service door onto the same write,
+-- not a new consumer of it. Whether a carrier should be allowed to move
+-- this is a business ruling (MDF-528), not an engineering one.
 --
 -- All additive: one new enum; four new values on the existing AuditAction
 -- enum; five new columns — one NOT NULL with a default (status, whose

@@ -689,9 +689,12 @@ export type LegOperatorRejectInput = z.infer<typeof legOperatorRejectSchema>;
  * every carrier belongs to exactly one organization (born as its OWNER),
  * so the common case needs no id at all — the service resolves "my org" and
  * only asks for one when the caller genuinely belongs to more than one.
- * Never a route to CREATE a route or set its price/schedule — those stay
+ * Never a route to CREATE a route or set its price — those stay
  * admin-entered business configuration; this only claims or releases one
- * that already exists and is currently unassigned.
+ * that already exists and is currently unassigned. (Schedule is separate:
+ * the weekly-schedule/exception routes ARE carrier self-service and DO
+ * reach a real customer quote — see the MDF-528 migration comment in
+ * `packages/database`.)
  */
 export const claimRouteOperatorSchema = z.object({
   providerProfileId: cuidSchema.optional(),

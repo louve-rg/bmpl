@@ -843,10 +843,22 @@ export class ShippingProviderService {
   /**
    * MDF-COURIER self-service scope: "service areas / routes". A carrier
    * CLAIMS an EXISTING, currently-UNASSIGNED route — never creates one, and
-   * never touches its price, mode or schedule. Those stay admin-entered
-   * business configuration (root CLAUDE.md §5); this only records who may
-   * now operate infrastructure that already exists, the same boundary
+   * never touches its price or mode. Those stay admin-entered business
+   * configuration (root CLAUDE.md §5); THIS method only records who may now
+   * operate infrastructure that already exists, the same boundary
    * `setLegOperator` already draws for a single leg.
+   *
+   * "Schedule" is deliberately left off that list — a carrier's weekly
+   * schedule and date exceptions ARE self-service (`setMyRouteWeeklySchedule`/
+   * `addMyRouteScheduleException`/`removeMyRouteScheduleException` below),
+   * and that data feeds the pre-existing BMPL-186/196 planner path a real
+   * customer quote runs through (`LogisticsNetworkService.plannerInputs` ->
+   * `route-planner.ts`'s `cheapestPath`/`routeRunsOn` -> `ShipmentService.
+   * quote()`): it can change which route — and therefore which price — is
+   * offered on a requested date, or make the journey unavailable. See the
+   * MDF-528 migration comment (`packages/database`) for the full trace; whether a
+   * carrier should be allowed to move this is a business ruling, not an
+   * engineering one, and is open on the owner board.
    *
    * `providerProfileId` is resolved from the caller when they belong to
    * exactly one org (the common case — born as OWNER of their own); it is
