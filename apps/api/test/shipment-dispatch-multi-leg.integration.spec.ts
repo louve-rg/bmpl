@@ -233,6 +233,7 @@ beforeEach(async () => {
   await ctx.prisma.driverProfile.deleteMany();
   await disableDispatch();
   await seedNetwork();
+  await seedBaselineCourierCoverage(ctx.prisma);
 });
 
 describe('automatic dispatch releases LAST_MILE across two line-haul hops, with no admin assign() call (a)', () => {

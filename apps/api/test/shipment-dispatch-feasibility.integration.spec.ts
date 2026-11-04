@@ -61,7 +61,7 @@ async function fund(userId: string, amountMinor: number) {
 }
 
 async function onlineDriverFor(district: string) {
-  const { userId } = await registerCustomer(`drv_${uniq()}@example.com`);
+  const { userId, cookies } = await registerCustomer(`drv_${uniq()}@example.com`);
   await ctx.prisma.userRole.upsert({
     where: { userId_roleCode: { userId, roleCode: 'DELIVERY_DRIVER' } },
     create: { userId, roleCode: 'DELIVERY_DRIVER', status: 'APPROVED', approvedAt: new Date() },
@@ -84,7 +84,14 @@ async function onlineDriverFor(district: string) {
     },
   });
   await ctx.prisma.driverServiceArea.create({ data: { driverProfileId: profile.id, district: district as never, isActive: true } });
-  return profile.id;
+  return { driverProfileId: profile.id, cookies };
+}
+
+async function enableDispatch() {
+  const row = await ctx.prisma.platformSetting.findFirst();
+  const data = { dispatchAutomatic: true, dispatchOfferTimeoutSeconds: 90, dispatchMaxOffers: 3, dispatchMaxConcurrentPerDriver: 3 };
+  if (row) await ctx.prisma.platformSetting.update({ where: { id: row.id }, data });
+  else await ctx.prisma.platformSetting.create({ data });
 }
 
 beforeAll(async () => {
@@ -94,6 +101,7 @@ beforeAll(async () => {
   const a = await seedSuperAdmin(ctx.prisma);
   admin = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password }));
   await patch(admin, 'admin/ops/settings', { localCourierFeeMinor: 1500, localCourierFeeTestMinor: 1500, localCourierMinutes: 60 });
+  await enableDispatch(); // runCreate's own synchronous dispatchLeg call, and dispatch-time escalation below, both need cfg.automatic on.
   dispatch = ctx.app.get(ShipmentDispatchService);
   // The one deliberate gap: remove the baseline's TOLEDO coverage so this
   // file has a genuinely UNSUPPORTED district to test against, without
@@ -152,6 +160,12 @@ describe('booking-time feasibility (UNSUPPORTED vs TEMPORARILY_UNAVAILABLE)', ()
 
 describe('dispatch-time escalation (ShipmentDispatchService#recordUnavailableIfNew)', () => {
   it('alerts admin and the customer exactly once per episode, not once per sweep tick', async () => {
+    // Scoped by delta, not an absolute count: other tests in this file also
+    // book into a TEMPORARILY_UNAVAILABLE district (COROZAL) and trigger this
+    // same alert on their own unrelated leg.
+    const auditBefore = await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE' } });
+    const notifBefore = await ctx.prisma.notification.count({ where: { event: 'SHIPMENT_COURIER_UNAVAILABLE' } });
+
     const customer = await registerCustomer(`escalate_${uniq()}@example.com`);
     await fund(customer.userId, 10_000);
     const r = await post(customer.cookies, 'shipping', { ...parcel('STANN_CREEK', 'Dangriga'), payWithWallet: true });
@@ -160,20 +174,25 @@ describe('dispatch-time escalation (ShipmentDispatchService#recordUnavailableIfN
 
     // Booking itself already dispatched once (runCreate's own synchronous
     // dispatchLeg call for a paid FIRST_MILE/DIRECT first leg) — confirm the
-    // alert already landed from that alone, exactly once.
-    const auditAfterBooking = await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE' } });
-    expect(auditAfterBooking).toBe(1);
-
-    const notifAfterBooking = await ctx.prisma.notification.count({ where: { event: 'SHIPMENT_COURIER_UNAVAILABLE' } });
-    expect(notifAfterBooking).toBe(1); // admin only so far? re-dispatch below proves the customer side too
+    // alert already landed from that alone, exactly once: one Notification
+    // row from notifyAdmins, one more from notifyUsers (the customer) — two
+    // separate fan-outs, not one shared row.
+    expect(await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE' } })).toBe(auditBefore + 1);
+    expect(await ctx.prisma.notification.count({ where: { event: 'SHIPMENT_COURIER_UNAVAILABLE' } })).toBe(notifBefore + 2);
 
     // A second sweep tick on the same still-unavailable leg must NOT alert again.
     await dispatch.dispatchLeg(leg.id);
     await dispatch.dispatchLeg(leg.id);
-    expect(await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE' } })).toBe(1);
+    expect(await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE' } })).toBe(auditBefore + 1);
+    expect(await ctx.prisma.notification.count({ where: { event: 'SHIPMENT_COURIER_UNAVAILABLE' } })).toBe(notifBefore + 2);
 
     const recipients = await ctx.prisma.notificationRecipient.findMany({
-      where: { notification: { event: 'SHIPMENT_COURIER_UNAVAILABLE' } },
+      where: {
+        notification: {
+          event: 'SHIPMENT_COURIER_UNAVAILABLE',
+          data: { path: ['reference'], equals: r.body.reference },
+        },
+      },
       include: { notification: true },
     });
     // One admin (every logistics.read holder) and the customer who paid.
@@ -190,12 +209,17 @@ describe('dispatch-time escalation (ShipmentDispatchService#recordUnavailableIfN
     expect(await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE' } })).toBeGreaterThanOrEqual(1);
     const before = await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE' } });
 
-    const driverProfileId = await onlineDriverFor('ORANGE_WALK');
+    const { driverProfileId, cookies: driverCookies } = await onlineDriverFor('ORANGE_WALK');
     const outcome = await dispatch.dispatchLeg(leg.id);
     expect(outcome.result).toBe('OFFERED');
 
-    // Decline the offer so the leg returns to SKIPPED's "no eligible driver"
-    // path once the only driver goes offline again — a genuinely NEW episode.
+    // Decline the offer through the real endpoint — the leg returns to
+    // unassigned (DRIVER_DECLINED is dispatchable again, same as PENDING_ASSIGNMENT).
+    // Also take the driver offline: rankFor ranks a prior-decliner LAST rather
+    // than dropping them, so with only one driver in the district they would
+    // otherwise just be re-offered — going offline is what makes the pool
+    // genuinely empty for a real "no eligible driver" episode.
+    expect((await post(driverCookies, `driver/shipping-jobs/${leg.id}/decline`, { reason: 'Too far.' })).status).toBe(201);
     await ctx.prisma.driverProfile.update({ where: { id: driverProfileId }, data: { availability: 'OFFLINE' } });
     await dispatch.dispatchLeg(leg.id);
     expect(await ctx.prisma.auditLog.count({ where: { action: 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE' } })).toBe(before + 1);

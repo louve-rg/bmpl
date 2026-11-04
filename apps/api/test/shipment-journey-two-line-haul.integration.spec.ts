@@ -166,6 +166,7 @@ beforeEach(async () => {
   await ctx.prisma.driverProfile.deleteMany();
   await disableDispatch();
   await seedNetwork();
+  await seedBaselineCourierCoverage(ctx.prisma);
 });
 
 describe('the complete journey over two line-haul hops (SHIPPING-E2E-JOURNEY)', () => {

@@ -172,6 +172,7 @@ beforeEach(async () => {
   await ctx.prisma.driverProfile.deleteMany();
   await enableDispatch(true);
   await seedNetwork();
+  await seedBaselineCourierCoverage(ctx.prisma);
 });
 
 describe('a driver sees the exact coordinates the customer selected (SHIPPING-E2E)', () => {

@@ -284,6 +284,7 @@ beforeEach(async () => {
   await post(admin, 'admin/wallet/test-credit', { userId: c.userId, amountMinor: 100_000, reason: 'Return-to-sender fixture.' });
   await disableDispatch();
   await seedNetwork();
+  await seedBaselineCourierCoverage(ctx.prisma);
 });
 
 /* ------------------------------------------------------------------------- */

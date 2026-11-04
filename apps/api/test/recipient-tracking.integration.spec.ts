@@ -192,6 +192,7 @@ beforeEach(async () => {
   await post(admin, 'admin/wallet/test-credit', { userId: c.userId, amountMinor: 100_000, reason: 'Recipient tracking fixture.' });
   await disableDispatch();
   await seedNetwork();
+  await seedBaselineCourierCoverage(ctx.prisma);
 });
 
 /* ------------------------------------------------------------------------- */

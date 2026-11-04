@@ -192,6 +192,7 @@ beforeEach(async () => {
   await ctx.prisma.driverProfile.deleteMany();
   await disableDispatch();
   await seedNetwork();
+  await seedBaselineCourierCoverage(ctx.prisma);
 });
 
 describe('shipment ETA across two real LINE_HAUL hops (BMPL-340, item 3)', () => {

@@ -205,6 +205,7 @@ beforeEach(async () => {
   customerId = c.userId;
   await enableDispatch(true);
   await seedNetwork();
+  await seedBaselineCourierCoverage(ctx.prisma);
 });
 
 /* ------------------------------------------------------------------------- */
