@@ -70,3 +70,17 @@ export const expireHoldsSchema = z.object({
   olderThanHours: z.number().int().min(1).max(24 * 90).optional().default(24),
 });
 export type ExpireHoldsInput = z.infer<typeof expireHoldsSchema>;
+
+/**
+ * The stale-hold preview read: which reserved holds to list, how old
+ * "reserved" has to mean, and a server-enforced page size so the count this
+ * returns can never be mistaken for "the rows that happened to come back" —
+ * see PaymentsService.adminListStaleHolds.
+ */
+export const adminStaleHoldsQuerySchema = z.object({
+  status: z.enum(['HELD', 'AUTHORIZED']).optional(),
+  olderThanHours: z.coerce.number().int().min(1).max(24 * 90).default(24),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+});
+export type AdminStaleHoldsQuery = z.infer<typeof adminStaleHoldsQuerySchema>;

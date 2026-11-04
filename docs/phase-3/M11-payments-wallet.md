@@ -102,8 +102,13 @@ result — a duplicate **never** creates a second order or payment (test-verifie
 ## 7. API (read-only foundation)
 Customer: `GET /api/payments`, `/api/payments/for-order/:orderId`,
 `/api/payments/:id`, `/api/payments/:id/status`. Admin (`payments.read`, read-only):
-`GET /api/admin/payments`, `/api/admin/payments/:id`. **No** capture / debit /
-settlement endpoints.
+`GET /api/admin/payments`, `/api/admin/payments/:id`, and
+`GET /api/admin/payments/stale-holds` (a preview for the stale-hold sweep
+(`POST /api/admin/payments/expire-stale-holds`, `wallet.reconcile`): holds
+still HELD/AUTHORIZED whose `heldAt` is older than a threshold, server-filtered
+and server-counted so the total can never be fewer than one page's worth of
+rows pretending to be the whole answer). **No** capture / debit / settlement
+endpoints.
 
 ## 8. Web & admin
 Customer: a payment-status placeholder on the order detail (status + wallet hold +
