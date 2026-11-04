@@ -948,3 +948,130 @@ describe('race: a stale status fetch for an abandoned selection must not attach 
     expect(buttonTexts().some((t) => t.includes('lock Jane Doe') || t.includes('unlock Jane Doe'))).toBe(false);
   });
 });
+
+/**
+ * MDF-510: GET /admin/payments/stale-holds (#565) had no admin presentation
+ * at all -- the sweep button posted blind, with no preview of what it was
+ * about to release. The preview needs payments.read; the sweep itself needs
+ * wallet.reconcile -- two different permissions -- so a holder of one
+ * without the other must still get a working, undisabled sweep button.
+ */
+describe('StaleHoldCard -- preview before sweeping (MDF-510)', () => {
+  const HOLD = (overrides: Partial<Record<string, unknown>> = {}) => ({
+    id: 'hold_1',
+    status: 'HELD',
+    amountMinor: 2500,
+    currency: 'BZD',
+    ageHours: 48,
+    customer: 'Jane Doe',
+    customerEmail: 'jane@example.com',
+    payment: { resourceType: 'ORDER', resourceRef: 'ORD-100' },
+    ...overrides,
+  });
+
+  function stubStaleHolds(opts: {
+    preview: { status: number; body: unknown } | 'network-error';
+    sweep?: { examined: number; expired: string[] };
+  }) {
+    const sweepPosts: Array<{ body: unknown }> = [];
+    const previewRequests: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['wallet.reconcile'] });
+        if (url.includes('/api/admin/payments/stale-holds')) {
+          previewRequests.push(url);
+          if (opts.preview === 'network-error') throw new Error('network down');
+          return jsonResponse(opts.preview.status, opts.preview.body);
+        }
+        if (url.includes('/api/admin/payments/expire-stale-holds') && init?.method === 'POST') {
+          sweepPosts.push({ body: init.body ? JSON.parse(String(init.body)) : null });
+          return jsonResponse(200, opts.sweep ?? { examined: 0, expired: [] });
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    return { sweepPosts, previewRequests };
+  }
+
+  /** The debounce is 400ms; wait past it with a real timer so the preview
+   *  request actually fires, then flush its resolution. */
+  async function waitForPreview() {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 450));
+    });
+    await flush();
+  }
+
+  it('a non-empty preview names exactly what the sweep will release, and never disables the sweep button', async () => {
+    const { previewRequests } = stubStaleHolds({ preview: { status: 200, body: { total: 2, holds: [HOLD()] } } });
+    await mount();
+    await waitForPreview();
+
+    expect(document.body.textContent).toMatch(/This will release 2 holds/);
+    expect(document.body.textContent).toMatch(/Jane Doe/);
+    expect(document.body.textContent).toMatch(/\$25\.00/);
+    expect(document.body.textContent).toMatch(/\+1 more not shown/);
+    expect(document.body.querySelector('button[disabled]')).toBeNull();
+    // The preview must read status=HELD explicitly, not the endpoint's
+    // default (HELD+AUTHORIZED) -- the sweep never touches an AUTHORIZED hold.
+    expect(previewRequests[0]).toMatch(/status=HELD/);
+  });
+
+  it('an empty preview says the sweep would release nothing, distinct from a failed preview', async () => {
+    stubStaleHolds({ preview: { status: 200, body: { total: 0, holds: [] } } });
+    await mount();
+    await waitForPreview();
+
+    expect(document.body.textContent).toMatch(/release nothing/);
+    expect(document.body.textContent).not.toMatch(/Couldn.t load a preview/);
+  });
+
+  it('a 403 on the preview alone degrades to "cannot preview" and the sweep button still works', async () => {
+    const { sweepPosts } = stubStaleHolds({
+      preview: { status: 403, body: { message: 'forbidden' } },
+      sweep: { examined: 3, expired: ['p1', 'p2'] },
+    });
+    await mount();
+    await waitForPreview();
+
+    expect(document.body.textContent).toMatch(/payments\.read/);
+    expect(document.body.textContent).toMatch(/sweep button still works/);
+    expect(document.body.querySelector('button[disabled]')).toBeNull();
+
+    clickButton('Release stale holds');
+    await flush();
+
+    expect(sweepPosts).toHaveLength(1);
+    expect(document.body.textContent).toMatch(/Examined 3\. Released 2\./);
+  });
+
+  it('a preview request failure (not 403) also leaves the sweep button enabled', async () => {
+    stubStaleHolds({ preview: 'network-error' });
+    await mount();
+    await waitForPreview();
+
+    expect(document.body.textContent).toMatch(/Couldn.t load a preview right now/);
+    expect(document.body.querySelector('button[disabled]')).toBeNull();
+  });
+
+  it('changing "Older than (hours)" changes the window the preview reads with, matching what the sweep would send', async () => {
+    const { previewRequests, sweepPosts } = stubStaleHolds({
+      preview: { status: 200, body: { total: 0, holds: [] } },
+      sweep: { examined: 0, expired: [] },
+    });
+    await mount();
+    await waitForPreview();
+    expect(previewRequests[previewRequests.length - 1]).toMatch(/olderThanHours=24/);
+
+    const hoursInput = document.getElementById('sh-hours') as HTMLInputElement;
+    setValue(hoursInput, '72');
+    await waitForPreview();
+    expect(previewRequests[previewRequests.length - 1]).toMatch(/olderThanHours=72/);
+
+    clickButton('Release stale holds');
+    await flush();
+    expect(sweepPosts[sweepPosts.length - 1]?.body).toEqual({ olderThanHours: 72 });
+  });
+});
