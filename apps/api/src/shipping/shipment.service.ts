@@ -3815,6 +3815,29 @@ export class ShipmentService {
       s.availabilityWindows.map((w) => ({ role: w.role, startTime: w.startTime, endTime: w.endTime })),
     );
     const etaBySequence = new Map(eta.legs.map((l) => [l.sequence, l]));
+    // BMPL-COURIER-COMPLETION: which carrier ORG operates a line-haul leg,
+    // staff-only like assignedDriverProfileId just below — a customer gets no
+    // operational detail about who BML subcontracts to. Resolved bounded to
+    // this one shipment's own legs, same "single-shipment caller resolves its
+    // own small batch" discipline as conversationIds/cancellationAuthorship
+    // above; skipped entirely for a customer or a shipment with no operator
+    // set, so the common case costs nothing extra. A bare id with no name
+    // would repeat the exact "opaque id, not a name" defect fixed elsewhere
+    // in this admin console — so the business name travels with the id.
+    const operatorIds =
+      opts.audience === 'STAFF'
+        ? [...new Set(s.legs.map((l) => l.operatedByProviderId).filter((id): id is string => id != null))]
+        : [];
+    const operatorNames = operatorIds.length
+      ? new Map(
+          (
+            await this.prisma.shippingProviderProfile.findMany({
+              where: { id: { in: operatorIds } },
+              select: { id: true, businessName: true },
+            })
+          ).map((p) => [p.id, p.businessName]),
+        )
+      : new Map<string, string>();
     // The sender and staff both already see the whole story here (ownership /
     // permission was checked before `serialize` was ever called) — the pickup
     // photo needs no extra gate on top, same as every other leg field below.
@@ -3838,6 +3861,12 @@ export class ShipmentService {
         // before acting on it; the courier pipeline is staff-facing detail.
         courierStatus: opts.audience === 'STAFF' ? l.courierStatus : null,
         assignedDriverProfileId: opts.audience === 'STAFF' ? l.assignedDriverProfileId : null,
+        // The carrier org operating this LINE_HAUL leg, staff-only — see the
+        // batched resolution just above `legs` for why operatorName always
+        // travels with the id rather than the admin console showing a bare one.
+        operatedByProviderId: opts.audience === 'STAFF' ? l.operatedByProviderId : null,
+        operatorName:
+          opts.audience === 'STAFF' && l.operatedByProviderId ? operatorNames.get(l.operatedByProviderId) ?? null : null,
         // Who is actually showing up, once someone is (BMPL-180). Same shape and
         // same privacy line as the marketplace delivery card in
         // delivery-core.service.ts: face + first name + rating, never legal

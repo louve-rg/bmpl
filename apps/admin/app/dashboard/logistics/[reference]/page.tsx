@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { legScheduleSchema } from '@bmpl/validation';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
-import { Alert, Badge, Button, Card, Field, Input, PageHeader, Spinner } from '../../../../components/ui';
+import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, Spinner } from '../../../../components/ui';
 import { ExceptionResolution } from '../../../../components/logistics/ExceptionResolution';
 import { ExceptionRecovery } from '../../../../components/logistics/ExceptionRecovery';
 
@@ -54,6 +54,21 @@ interface Leg {
    * a merge (BMPL-349); absence means nothing attached yet, same as empty.
    */
   pickupPhotoUrls?: string[];
+  /**
+   * BMPL-COURIER-COMPLETION: the carrier ORG operating this LINE_HAUL leg —
+   * optional for the same cross-deploy reason as pickupPhotoUrls above, since
+   * shipment.service.ts started returning it in this same change. Null means
+   * no carrier organization assigned yet, not "the API doesn't know".
+   */
+  operatedByProviderId?: string | null;
+  operatorName?: string | null;
+}
+
+interface Provider {
+  id: string;
+  businessName: string;
+  isActive: boolean;
+  isTest: boolean;
 }
 
 interface Custody {
@@ -125,6 +140,8 @@ export default function ShipmentOpsPage() {
   const [schedule, setSchedule] = useState<Record<string, { departure: string; arrival: string }>>({});
   const [canOperate, setCanOperate] = useState(false);
   const [canManage, setCanManage] = useState(false);
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [operatorPick, setOperatorPick] = useState<Record<string, string>>({});
 
   // Every control on this screen — depart/arrive, confirm handover, flag a
   // problem, record a hub collection — is drawn only for logistics.operate.
@@ -161,6 +178,17 @@ export default function ShipmentOpsPage() {
     }
   }, [reference]);
 
+  // The carrier directory, for the operator picker below. logistics.read,
+  // same tier this whole page already needs to load at all — a reader with
+  // no logistics.operate still sees who runs each leg, just not the control
+  // to change it (canOperate gates the picker, not this fetch).
+  useEffect(() => {
+    api
+      .get<Provider[]>('/admin/logistics/providers')
+      .then(setProviders)
+      .catch(() => setProviders([]));
+  }, []);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -196,6 +224,21 @@ export default function ShipmentOpsPage() {
       return;
     }
     await act(legId, 'schedule', body);
+  }
+
+  /**
+   * BMPL-COURIER-COMPLETION: which carrier organization operates this
+   * LINE_HAUL leg — the interface Pam's D2/D4 work will later make smarter
+   * (an "eligible operators only" list, a why-ineligible preview), but the
+   * request/response shape here does not change under that work, only its
+   * internal guarantee does, so this is safe to build against today's
+   * `POST legs/:id/operator`. An empty pick clears the assignment (the
+   * server accepts `providerProfileId: null`) rather than being disabled —
+   * taking a carrier off a leg is a real, named action, not an error state.
+   */
+  async function assignOperator(legId: string) {
+    const picked = operatorPick[legId] ?? '';
+    await act(legId, 'operator', { providerProfileId: picked || null });
   }
 
   async function recordCollection() {
@@ -402,6 +445,54 @@ export default function ShipmentOpsPage() {
                      * any drift between this list and that one surfaces through
                      * the real refusal message below, not a silently wrong UI.
                      */}
+                    {/*
+                     * BMPL-COURIER-COMPLETION: which carrier ORG operates
+                     * this line-haul leg, through the interface rather than
+                     * only by API. The current assignment is visible to
+                     * anyone who can load this page (same read as the rest
+                     * of the leg); only logistics.operate gets the control
+                     * to change it, same gate the depart/arrive buttons use.
+                     * Courier legs (FIRST_MILE/LAST_MILE) are BML driver
+                     * work and never show this — a carrier organization has
+                     * nothing to do with them.
+                     */}
+                    {leg.kind === 'LINE_HAUL' && leg.status !== 'COMPLETED' && leg.status !== 'CANCELLED' && (
+                      <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">Carrier</p>
+                        <p className="mt-1 text-sm text-[color:var(--bmpl-text)]">
+                          {leg.operatorName ?? <span className="text-[color:var(--bmpl-text-muted)]">Not assigned</span>}
+                        </p>
+                        {canOperate && (
+                          <div className="mt-2 flex flex-wrap items-end gap-2">
+                            <Field label="Assign carrier" htmlFor={`op-${leg.id}`}>
+                              <Select
+                                id={`op-${leg.id}`}
+                                value={operatorPick[leg.id] ?? leg.operatedByProviderId ?? ''}
+                                onChange={(e) => setOperatorPick({ ...operatorPick, [leg.id]: e.target.value })}
+                                className="w-56"
+                              >
+                                <option value="">— none —</option>
+                                {providers
+                                  .filter((p) => p.isActive && p.isTest === s.isTest)
+                                  .map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.businessName}
+                                    </option>
+                                  ))}
+                              </Select>
+                            </Field>
+                            <Button
+                              variant="outline"
+                              disabled={busy != null || (operatorPick[leg.id] ?? leg.operatedByProviderId ?? '') === (leg.operatedByProviderId ?? '')}
+                              onClick={() => void assignOperator(leg.id)}
+                            >
+                              {busy === `${leg.id}:operator` ? 'Saving…' : 'Assign'}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {canOperate && canScheduleLeg(leg) && (
                       <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
                         <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">Carrier schedule</p>

@@ -140,6 +140,9 @@ export default function LogisticsOpsPage() {
             <Link href="/dashboard/logistics/courier-lanes" className="rounded-bmpl-md border border-slate-300 px-3 py-2 text-sm font-medium">
               Courier lanes
             </Link>
+            <Link href="/dashboard/logistics/providers" className="rounded-bmpl-md border border-slate-300 px-3 py-2 text-sm font-medium">
+              Carriers
+            </Link>
           </div>
         }
       />

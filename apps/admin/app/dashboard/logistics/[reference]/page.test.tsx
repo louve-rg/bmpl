@@ -465,3 +465,180 @@ describe('ShipmentOpsPage — per-leg carrier scheduling wiring (MDF-318, requir
     expect(document.body.textContent).toContain('That departure time has already passed.');
   });
 });
+
+/**
+ * BMPL-COURIER-COMPLETION: assigning the carrier organization that operates
+ * a LINE_HAUL leg, through this screen rather than only by API — Stage 2's
+ * read-only-inspection-plus-assignment slice, built against the existing
+ * `POST legs/:id/operator` (its shape does not move under D1-D4, only the
+ * internal eligibility guarantee does).
+ */
+describe('ShipmentOpsPage — carrier operator assignment (BMPL-COURIER-COMPLETION)', () => {
+  const PROVIDERS = [
+    { id: 'prov_1', businessName: 'Tropic Air', isActive: true, isTest: false },
+    { id: 'prov_2', businessName: 'Maya Island Air', isActive: true, isTest: false },
+    { id: 'prov_3', businessName: 'Retired Carrier', isActive: false, isTest: false },
+    { id: 'prov_4', businessName: 'Sim Carrier', isActive: true, isTest: true },
+  ];
+
+  function stubFetchWithProviders(adminPermissions: string[], shipment: unknown = SHIPMENT) {
+    const posted: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
+        if (url.includes('/api/admin/logistics/providers')) return jsonResponse(200, PROVIDERS);
+        if (url.includes('/api/admin/logistics/legs/leg_1/operator') && init?.method === 'POST') {
+          posted.push({ url, body: init.body ? JSON.parse(String(init.body)) : null });
+          return jsonResponse(200, { legId: 'leg_1', operatedByProviderId: JSON.parse(String(init.body)).providerProfileId });
+        }
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001') && (!init?.method || init.method === 'GET')) {
+          return jsonResponse(200, shipment);
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    return posted;
+  }
+
+  it('shows "Not assigned" for a line-haul leg with no operator yet', async () => {
+    stubFetchWithProviders(['logistics.read']);
+    await mount();
+
+    expect(document.body.textContent).toContain('Not assigned');
+  });
+
+  it('shows the resolved carrier name, not a bare id, once one is assigned', async () => {
+    // A name distinct from the fixture's free-text leg.carrier ("Tropic Air")
+    // so this assertion cannot pass on the pre-existing field by accident.
+    stubFetchWithProviders(['logistics.read'], {
+      ...SHIPMENT,
+      legs: [{ ...SHIPMENT.legs[0], operatedByProviderId: 'prov_1', operatorName: 'Really Reliable Air' }],
+    });
+    await mount();
+
+    expect(document.body.textContent).toMatch(/Really Reliable Air/);
+    expect(document.body.textContent).not.toMatch(/Not assigned/);
+  });
+
+  it('a logistics.read-only viewer sees the assignment but not the control to change it', async () => {
+    stubFetchWithProviders(['logistics.read']);
+    await mount();
+
+    expect(document.body.textContent).toMatch(/Not assigned/);
+    expect(buttonTexts()).not.toContain('Assign');
+    expect(document.body.querySelector('select#op-leg_1')).toBeNull();
+  });
+
+  it('a logistics.operate holder sees the active, non-simulation carriers only -- not the retired or simulation ones', async () => {
+    stubFetchWithProviders(['logistics.operate']);
+    await mount();
+
+    const select = document.body.querySelector('select#op-leg_1') as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => o.textContent);
+    expect(options).toContain('Tropic Air');
+    expect(options).toContain('Maya Island Air');
+    expect(options).not.toContain('Retired Carrier');
+    expect(options).not.toContain('Sim Carrier');
+  });
+
+  it('assigning posts the picked providerProfileId and reloads', async () => {
+    const posted = stubFetchWithProviders(['logistics.operate']);
+    await mount();
+
+    const select = document.body.querySelector('select#op-leg_1') as HTMLSelectElement;
+    await act(async () => {
+      select.value = 'prov_1';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const assignBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Assign')!;
+    expect(assignBtn.hasAttribute('disabled')).toBe(false);
+    await act(async () => {
+      assignBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.body).toMatchObject({ providerProfileId: 'prov_1' });
+  });
+
+  it('picking "— none —" on an already-assigned leg clears the operator (providerProfileId: null)', async () => {
+    const posted = stubFetchWithProviders(['logistics.operate'], {
+      ...SHIPMENT,
+      legs: [{ ...SHIPMENT.legs[0], operatedByProviderId: 'prov_1', operatorName: 'Tropic Air' }],
+    });
+    await mount();
+
+    const select = document.body.querySelector('select#op-leg_1') as HTMLSelectElement;
+    await act(async () => {
+      select.value = '';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const assignBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Assign')!;
+    await act(async () => {
+      assignBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.body).toMatchObject({ providerProfileId: null });
+  });
+
+  it('surfaces the server refusal verbatim when an ineligible carrier is picked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/providers')) return jsonResponse(200, PROVIDERS);
+        if (url.includes('/api/admin/logistics/legs/leg_1/operator') && init?.method === 'POST') {
+          return jsonResponse(400, { message: 'That carrier is not an approved shipping provider.' });
+        }
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, SHIPMENT);
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    const select = document.body.querySelector('select#op-leg_1') as HTMLSelectElement;
+    await act(async () => {
+      select.value = 'prov_1';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const assignBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Assign')!;
+    await act(async () => {
+      assignBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(document.body.textContent).toContain('That carrier is not an approved shipping provider.');
+  });
+
+  it('does not show the carrier block for a non-line-haul leg', async () => {
+    stubFetchWithProviders(['logistics.operate'], {
+      ...SHIPMENT,
+      legs: [{ ...SHIPMENT.legs[0], kind: 'LAST_MILE' as const }],
+    });
+    await mount();
+
+    expect(document.body.textContent).not.toMatch(/Not assigned/);
+    expect(document.body.querySelector('select#op-leg_1')).toBeNull();
+  });
+
+  it('does not show the carrier block once the leg is COMPLETED', async () => {
+    stubFetchWithProviders(['logistics.operate'], {
+      ...SHIPMENT,
+      legs: [{ ...SHIPMENT.legs[0], status: 'COMPLETED', completedAt: '2026-10-01T10:00:00.000Z' }],
+    });
+    await mount();
+
+    expect(document.body.querySelector('select#op-leg_1')).toBeNull();
+  });
+});
