@@ -39,10 +39,12 @@ import { useEffect, useRef } from 'react';
  * already correct and identical in both, and are left as they are; this
  * hook owns only the focus behaviour that had drifted.
  *
- * Ported verbatim from apps/web/lib/use-dialog-focus-trap.ts (MDF-538): a
- * dependency of FullScreenMapModal.tsx, which apps/admin had no equivalent
- * of before this. Port, not shared package — see FullScreenMapModal.tsx's
- * own header comment for why.
+ * SOURCE OF TRUTH: apps/web/lib/use-dialog-focus-trap.ts. PORTED FROM THERE
+ * verbatim (MDF-538): a dependency of FullScreenMapModal.tsx, which
+ * apps/admin had no equivalent of before this. Port, not shared package —
+ * see FullScreenMapModal.tsx's own header comment for why. A fix made to
+ * one copy must be applied to the other; this is a known, accepted
+ * duplication, not a drift to tolerate.
  */
 export function useDialogFocusTrap({
   open,

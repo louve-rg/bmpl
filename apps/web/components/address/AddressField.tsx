@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { DISTRICTS, DISTRICT_LABELS, type Coordinates } from '@bmpl/shared';
 import {
   addressGap,
+  savedAddressLine,
   switchMethod,
   toSavedAddressPayload,
   type AddressMethod,
@@ -322,7 +323,11 @@ export function AddressField({
                 {saved.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.label}
-                    {s.isDefault ? ' (default)' : ''} — {s.addressLine1}, {s.city}
+                    {/* MDF-534/539 (god): this is the text a customer reads while
+                        CHOOSING -- a pin-only row rendered unguarded here would be
+                        worse than the list row's same defect. Reuses savedAddressLine
+                        rather than growing a second, silently different fallback. */}
+                    {s.isDefault ? ' (default)' : ''} — {savedAddressLine(s)}, {s.city}
                   </option>
                 ))}
               </select>

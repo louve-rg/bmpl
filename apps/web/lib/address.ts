@@ -67,6 +67,24 @@ export interface SavedAddress {
   isDefault: boolean;
 }
 
+/**
+ * What to read for a saved address with no street -- god (MDF-534/539): a
+ * row with `addressLine1` rendered unguarded reads as a leading comma with
+ * nothing saying a pin exists, which is the shape of thing that makes a
+ * working feature look broken. Falls back street -> landmark -> "Pinned
+ * location" -> "No street or pin yet". The ONE place this logic lives --
+ * the address-book list row and AddressField's own saved-address dropdown
+ * both call this rather than each growing their own fallback, because the
+ * dropdown is the text a customer reads while CHOOSING, which makes a second,
+ * silently different fallback there worse, not just redundant.
+ */
+export function savedAddressLine(row: Pick<SavedAddress, 'addressLine1' | 'addressLine2' | 'landmark' | 'latitude' | 'longitude'>): string {
+  if (row.addressLine1) return [row.addressLine1, row.addressLine2].filter(Boolean).join(', ');
+  if (row.landmark) return row.landmark;
+  if (row.latitude != null && row.longitude != null) return 'Pinned location';
+  return 'No street or pin yet';
+}
+
 /** The shape the address-book API takes for a create or an update. */
 export interface SavedAddressPayload {
   label: string;

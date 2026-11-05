@@ -32,10 +32,12 @@ import { useDialogFocusTrap } from '../../lib/use-dialog-focus-trap';
  * are `useDialogFocusTrap` — the same hook `EnlargeableImage` uses, so the
  * two dialogs cannot drift apart on this again.
  *
- * PORTED FROM apps/web (MDF-538), verbatim, together with MapPreview.tsx,
+ * SOURCE OF TRUTH: apps/web/components/maps/FullScreenMapModal.tsx. PORTED
+ * FROM THERE verbatim (MDF-538), together with MapPreview.tsx,
  * cooperative-map-drag.ts and trip-map.ts's MapPoint/labelStops -- a near-
- * duplicate of apps/web/components/maps/FullScreenMapModal.tsx, not a
- * refactor of it. The first plan was a single copy shared from packages/ui
+ * duplicate, not a refactor of it. A fix made to one copy must be applied
+ * to the other; this is a known, accepted duplication, not a drift to
+ * tolerate. The first plan was a single copy shared from packages/ui
  * (apps/admin already depends on it, and these four files have no
  * @bmpl/web-specific imports), but packages/ui's build is plain `tsc` with
  * `module: commonjs`, which rewrites a dynamic `import('leaflet')` into a

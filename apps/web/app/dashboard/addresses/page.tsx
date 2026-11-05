@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { api, type ApiError } from '../../../lib/api';
-import type { SavedAddress } from '../../../lib/address';
+import { savedAddressLine, type SavedAddress } from '../../../lib/address';
 import {
   EMPTY_ADDRESS_BOOK_FORM,
   addressBookProblem,
@@ -117,20 +117,6 @@ export default function AddressesPage() {
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const coords: Coordinates | null = form.latitude != null && form.longitude != null ? { latitude: form.latitude, longitude: form.longitude } : null;
-
-  /**
-   * What to read on a row with no street (god, MDF-534): the landmark if set,
-   * otherwise the pin. Rendering `row.addressLine1` unguarded on a pin-only
-   * row used to read as ", Belize City, Belize District" -- a leading comma
-   * and nothing saying a pin exists, the shape of thing that makes a working
-   * feature look broken.
-   */
-  function addressRowLine(row: SavedAddress): string {
-    if (row.addressLine1) return [row.addressLine1, row.addressLine2].filter(Boolean).join(', ');
-    if (row.landmark) return row.landmark;
-    if (row.latitude != null && row.longitude != null) return 'Pinned location';
-    return 'No street or pin yet';
-  }
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -253,10 +239,14 @@ export default function AddressesPage() {
                     <p className="font-semibold text-belize-navy">
                       {row.label}
                       {row.isDefault && <span className="ml-2 text-xs font-medium text-belize-accent">Default</span>}
-                      {/* MDF-534: quiet, not a badge-fest -- the list is the only place a
-                          customer can tell which saved addresses still need a pin added. */}
+                      {/* MDF-534/539: quiet, not a badge-fest -- the list is the only place
+                          a customer can tell which saved addresses still need a pin added.
+                          A bare emoji with only `title` is not reliably announced to a
+                          screen reader (god's fix); role="img" + aria-label makes the
+                          marker's meaning exist non-visually, same standard as elsewhere
+                          in this app, while staying visually quiet. */}
                       {row.latitude != null && row.longitude != null && (
-                        <span className="ml-2 text-xs font-medium text-slate-400" title="Has a pin">
+                        <span className="ml-2 text-xs font-medium text-slate-400" role="img" aria-label="Has a pin">
                           📍
                         </span>
                       )}
@@ -264,7 +254,7 @@ export default function AddressesPage() {
                     <p className="text-sm text-slate-700">{row.fullName}</p>
                     <p className="text-sm text-slate-600">{row.phone}</p>
                     <p className="text-sm text-slate-600">
-                      {addressRowLine(row)}, {row.city}, {DISTRICT_LABELS[row.district as keyof typeof DISTRICT_LABELS] ?? row.district}
+                      {savedAddressLine(row)}, {row.city}, {DISTRICT_LABELS[row.district as keyof typeof DISTRICT_LABELS] ?? row.district}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">

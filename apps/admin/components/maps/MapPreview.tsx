@@ -42,9 +42,11 @@ function markerIcon(L: typeof import('leaflet'), letter: string | undefined) {
  * exists here, and a drawn line would claim a road or a crossing this app
  * knows nothing about.
  *
- * PORTED FROM apps/web/components/maps/MapPreview.tsx (MDF-538), verbatim --
- * see FullScreenMapModal.tsx's own header comment in this directory for why
- * this is a port rather than a packages/ui extraction.
+ * SOURCE OF TRUTH: apps/web/components/maps/MapPreview.tsx. PORTED FROM
+ * THERE verbatim (MDF-538) -- see FullScreenMapModal.tsx's own header
+ * comment in this directory for why this is a port rather than a
+ * packages/ui extraction. A fix made to one copy must be applied to the
+ * other; this is a known, accepted duplication, not a drift to tolerate.
  */
 export function MapPreview({
   points,

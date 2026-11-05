@@ -32,9 +32,11 @@ import type * as LeafletNS from 'leaflet';
  * active touch means dragging off, anything else (zero or two-plus) means
  * dragging on.
  *
- * Ported verbatim from apps/web/components/maps/cooperative-map-drag.ts
- * (MDF-538) -- see MapPreview.tsx's own header comment for why this is a
- * port rather than a packages/ui extraction.
+ * SOURCE OF TRUTH: apps/web/components/maps/cooperative-map-drag.ts. PORTED
+ * FROM THERE verbatim (MDF-538) -- see MapPreview.tsx's own header comment
+ * for why this is a port rather than a packages/ui extraction. A fix made
+ * to one copy must be applied to the other; this is a known, accepted
+ * duplication, not a drift to tolerate.
  */
 export function attachCooperativeMapDrag(map: LeafletNS.Map, container: HTMLElement): () => void {
   const sync = (e: TouchEvent) => {
