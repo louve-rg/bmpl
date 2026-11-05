@@ -13,22 +13,18 @@ import type { MapPoint } from '../../../../../lib/trip-map';
  * MDF-549, admin half. god's own correction: `passengers/[id]` is the
  * driver-vetting screen, keyed by a DRIVER id -- not a booking detail route,
  * which did not exist until this file. Keyed by booking `id` (not
- * `reference`) because `BookingRow` already carries it and
- * `serializeBooking()` already returns it -- no new lookup endpoint needed
- * from the API side for that part.
+ * `reference`) because `BookingRow` already carries it.
  *
- * NO single-booking GET exists yet (checked: `admin-passenger-network.controller.ts`
- * has `GET bookings` (list) and the two confirm/cancel POSTs, nothing keyed
- * by one id). This page fetches the same list `BookingsTab` already calls
- * and finds the one row client-side.
- *
- * NOT a minor inefficiency -- `listBookings()` at
- * `passenger-operations.service.ts:846` is `orderBy createdAt desc, take: 300`,
- * so this page silently returns "not found" for any real booking outside the
- * 300 most recent, a gap that only grows. Pam is adding
- * `GET admin/passenger/bookings/:id` (reusing `serializeBooking()`) --
- * TODO(MDF-549): switch this fetch to that endpoint once it ships, instead
- * of filtering the list.
+ * `GET admin/passengers/bookings/:id` (plural "passengers" -- the existing
+ * controller prefix, `@Controller('admin/passengers')`; an earlier relayed
+ * instruction said the singular path and was wrong) was added by Pam on
+ * `feat/passenger-api-booking-pins`, guarded by
+ * `@RequirePermission('passengers.read')`, reusing `serializeBooking()`.
+ * This retires the original version of this page's own list-fetch-and-filter
+ * (`listBookings()` caps at 300 rows, so that version silently 404'd on any
+ * real booking outside the 300 most recent -- god caught this, not a minor
+ * inefficiency as first reported). Fetches the one booking directly, same
+ * pattern as `orders/[id]/page.tsx`.
  */
 
 /**
@@ -156,11 +152,10 @@ export default function AdminBookingDetailPage() {
 
   useEffect(() => {
     api
-      .get<BookingDetail[]>('/admin/passengers/bookings')
-      .then((rows) => {
-        const found = rows.find((r) => r.id === params.id) ?? null;
-        setBooking(found);
-        setState(found ? 'ready' : 'error');
+      .get<BookingDetail>(`/admin/passengers/bookings/${params.id}`)
+      .then((b) => {
+        setBooking(b);
+        setState('ready');
       })
       .catch(() => setState('error'));
   }, [params.id]);

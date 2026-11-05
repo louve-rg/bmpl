@@ -6,9 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /**
- * MDF-549, admin half. No single-booking GET exists yet -- this page fetches
- * the same list `BookingsTab` already calls and finds the one row
- * client-side, so the fetch stub below answers the LIST path with an array.
+ * MDF-549, admin half. Fetches the single-booking endpoint Pam added on
+ * `feat/passenger-api-booking-pins` (`GET admin/passengers/bookings/:id`,
+ * plural "passengers" -- god's own correction of an earlier relayed
+ * singular path).
  */
 
 vi.mock('next/navigation', () => ({
@@ -78,13 +79,15 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-/** Stubs the LIST endpoint the page actually calls -- no single-booking GET exists yet. */
-function stubFetch(rows: ReturnType<typeof baseBooking>[]) {
+/** Stubs the single-booking endpoint the page calls. `null` answers 404 — the not-found case. */
+function stubFetch(booking: ReturnType<typeof baseBooking> | null) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/api/admin/passengers/bookings')) return jsonResponse(200, rows);
+      if (url.includes('/api/admin/passengers/bookings/')) {
+        return booking ? jsonResponse(200, booking) : jsonResponse(404, { message: 'Booking not found' });
+      }
       return jsonResponse(404, { message: 'not mocked: ' + url });
     }),
   );
@@ -111,14 +114,14 @@ afterEach(() => {
 });
 
 describe('AdminBookingDetailPage (MDF-549)', () => {
-  it('shows "Booking not found" when the id is not among the rows the list returns', async () => {
-    stubFetch([baseBooking({ id: 'some_other_booking' })]);
+  it('shows "Booking not found" when the endpoint 404s', async () => {
+    stubFetch(null);
     await mount();
     expect(container!.textContent).toContain('Booking not found');
   });
 
   it('shows "Not specified" for pickup/drop-off, and no map, when neither is set -- the normal case for a scheduled-route booking', async () => {
-    stubFetch([baseBooking()]);
+    stubFetch(baseBooking());
     await mount();
 
     expect(container!.textContent).toContain('BK-2001');
@@ -131,7 +134,7 @@ describe('AdminBookingDetailPage (MDF-549)', () => {
     const leaflet = (await import('leaflet')).default as unknown as { map: ReturnType<typeof vi.fn>; marker: ReturnType<typeof vi.fn> };
     leaflet.map.mockClear();
     leaflet.marker.mockClear();
-    stubFetch([
+    stubFetch(
       baseBooking({
         pickupDistrict: 'CAYO',
         pickupCity: 'San Ignacio',
@@ -148,7 +151,7 @@ describe('AdminBookingDetailPage (MDF-549)', () => {
         dropoffLatitude: 17.5,
         dropoffLongitude: -88.2,
       }),
-    ]);
+    );
     await mount();
 
     expect(container!.textContent).toContain('5 Burns Ave');
