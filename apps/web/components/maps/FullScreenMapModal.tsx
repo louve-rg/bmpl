@@ -20,6 +20,14 @@ import { useDialogFocusTrap } from '../../lib/use-dialog-focus-trap';
  * inside the body, because on a map that tap is a pan or a marker select, not
  * a dismissal.
  *
+ * MDF-485 M1/M2: `onConfirm`, separate from `onClose`, is what gives a caller
+ * an actual confirm-or-cancel choice rather than one action with two buttons.
+ * Without it (the original, still-default shape) both the ✕/Escape and the
+ * bottom button just call `onClose` — fine for a read-only body like
+ * `ExpandableRouteMap`'s, where there is nothing to discard. `LocationPicker`
+ * passes `onConfirm` because its full-screen body edits a draft pin that must
+ * NOT reach the caller on a dismiss, only on an explicit confirm.
+ *
  * Focus containment, background isolation and return-to-opener (BMPL-208)
  * are `useDialogFocusTrap` — the same hook `EnlargeableImage` uses, so the
  * two dialogs cannot drift apart on this again.
@@ -27,12 +35,15 @@ import { useDialogFocusTrap } from '../../lib/use-dialog-focus-trap';
 export function FullScreenMapModal({
   open,
   onClose,
+  onConfirm,
   title,
   confirmLabel = 'Done',
   children,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Called by the bottom button only. Defaults to `onClose` when omitted, so every existing caller is unchanged. */
+  onConfirm?: () => void;
   title: string;
   confirmLabel?: string;
   children: React.ReactNode;
@@ -114,7 +125,7 @@ export function FullScreenMapModal({
       <div className="shrink-0 border-t border-slate-200 p-3" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
         <button
           type="button"
-          onClick={onClose}
+          onClick={onConfirm ?? onClose}
           className="flex min-h-[48px] w-full items-center justify-center rounded-bmpl-md bg-belize-blue text-base font-semibold text-white transition hover:bg-belize-deep"
         >
           {confirmLabel}

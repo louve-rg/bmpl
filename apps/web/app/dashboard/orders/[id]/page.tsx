@@ -11,6 +11,8 @@ import { VendorDeliveryPanel } from '../../../../components/VendorDeliveryPanel'
 import { VendorPickupPanel } from '../../../../components/VendorPickupPanel';
 import { VendorFulfilmentPanel } from '../../../../components/VendorFulfilmentPanel';
 import { addressLines } from '@bmpl/shared';
+import { ExpandableRouteMap } from '../../../../components/maps/ExpandableRouteMap';
+import type { MapPoint } from '../../../../lib/trip-map';
 
 export default function VendorOrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -84,6 +86,29 @@ export default function VendorOrderDetailPage() {
                     </Fragment>
                   ))}
                 </p>
+                {/*
+                 * MDF-538 (owner section 5): the vendor already sees this
+                 * exact written address unconditionally, with no gate -- a
+                 * map of the same address is the same information presented
+                 * better, not new exposure. For a pin-only address the pin
+                 * is the only location that exists, so withholding it would
+                 * tell the vendor nothing at all. Read-only; a vendor packs
+                 * and labels, it never navigates, so there is no "current
+                 * location" or turn-by-turn affordance here.
+                 */}
+                {vo.deliveryAddress.latitude != null && vo.deliveryAddress.longitude != null && (
+                  <ExpandableRouteMap
+                    points={[
+                      {
+                        latitude: vo.deliveryAddress.latitude,
+                        longitude: vo.deliveryAddress.longitude,
+                        label: vo.deliveryAddress.fullName,
+                      } satisfies MapPoint,
+                    ]}
+                    title={`${vo.orderNumber} · delivery address`}
+                    className="mt-3"
+                  />
+                )}
               </Card>
             )}
             {vo.deliveryMethod === 'DELIVERY' && vo.delivery && (

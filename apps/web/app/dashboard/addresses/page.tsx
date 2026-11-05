@@ -1,18 +1,25 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { api, type ApiError } from '../../../lib/api';
-import type { SavedAddress } from '../../../lib/address';
+import { savedAddressLine, type SavedAddress } from '../../../lib/address';
 import {
   EMPTY_ADDRESS_BOOK_FORM,
-  PIN_NOTE,
   addressBookProblem,
   buildAddressBookPayload,
   formFromRow,
   type AddressBookForm,
 } from '../../../lib/address-book';
-import { DISTRICTS, DISTRICT_LABELS } from '@bmpl/shared';
+import { DISTRICTS, DISTRICT_LABELS, type Coordinates } from '@bmpl/shared';
 import { Alert, Button, Card, EmptyState, Field, Input, PageHeader, Select, Spinner } from '../../../components/ui';
+
+// Client-only and heavy -- same reasoning and loading placeholder as
+// AddressField.tsx's own import of this component.
+const LocationPicker = dynamic(() => import('../../../components/maps/LocationPicker').then((m) => m.LocationPicker), {
+  ssr: false,
+  loading: () => <div className="h-[252px] animate-pulse rounded-bmpl-md bg-slate-100 sm:col-span-2" />,
+});
 
 /**
  * Favorites > Addresses: the signed-in customer's saved addresses.
@@ -61,8 +68,7 @@ export default function AddressesPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!editing) return;
-    const row = rows?.find((r) => r.id === editing);
-    const payload = buildAddressBookPayload(form, row);
+    const payload = buildAddressBookPayload(form);
     const problem = addressBookProblem(payload);
     if (problem) {
       setFormError(problem);
@@ -110,7 +116,7 @@ export default function AddressesPage() {
   const set = (k: keyof AddressBookForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const editingRow = editing && editing !== 'new' ? rows?.find((r) => r.id === editing) : undefined;
+  const coords: Coordinates | null = form.latitude != null && form.longitude != null ? { latitude: form.latitude, longitude: form.longitude } : null;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -157,11 +163,21 @@ export default function AddressesPage() {
                 ))}
               </Select>
             </Field>
-            <Field label="Street or landmark" htmlFor="ab-line1">
+            <Field label="Street" htmlFor="ab-line1">
               <Input id="ab-line1" value={form.addressLine1} onChange={set('addressLine1')} maxLength={200} />
             </Field>
             <Field label="Second line (optional)" htmlFor="ab-line2">
               <Input id="ab-line2" value={form.addressLine2} onChange={set('addressLine2')} maxLength={200} />
+            </Field>
+            {/* MDF-539: its own field now, distinct from the street line and
+                from directions below -- most useful exactly when there is no
+                street given, which is why the list row below reads it. */}
+            <Field
+              label="Landmark (optional)"
+              htmlFor="ab-landmark"
+              hint="A nearby place your driver would recognise -- especially useful with no street given."
+            >
+              <Input id="ab-landmark" value={form.landmark} onChange={set('landmark')} maxLength={200} />
             </Field>
             <Field label="Town or village" htmlFor="ab-city">
               <Input id="ab-city" value={form.city} onChange={set('city')} maxLength={120} />
@@ -170,9 +186,20 @@ export default function AddressesPage() {
               <Input id="ab-instructions" value={form.instructions} onChange={set('instructions')} maxLength={500} />
             </Field>
 
-            {editingRow && (editingRow.latitude != null || editingRow.longitude != null) && (
-              <p className="text-sm text-slate-600 sm:col-span-2">{PIN_NOTE}</p>
-            )}
+            <div className="sm:col-span-2">
+              <LocationPicker
+                value={coords}
+                onChange={(next) => setForm((f) => ({ ...f, latitude: next?.latitude ?? null, longitude: next?.longitude ?? null }))}
+                address={[form.addressLine1, form.city].filter(Boolean).join(', ')}
+                district={form.district}
+                heading="Pin on the map"
+                hint={
+                  coords
+                    ? 'This is what your driver follows -- drag the pin if it is not quite right.'
+                    : 'Optional, but it is what your driver follows. This address has no pin yet -- centred on the district for now. Tap the map, use your current location, or try "Show my address" to add one.'
+                }
+              />
+            </div>
 
             {formError && (
               <div className="sm:col-span-2">
@@ -212,12 +239,22 @@ export default function AddressesPage() {
                     <p className="font-semibold text-belize-navy">
                       {row.label}
                       {row.isDefault && <span className="ml-2 text-xs font-medium text-belize-accent">Default</span>}
+                      {/* MDF-534/539: quiet, not a badge-fest -- the list is the only place
+                          a customer can tell which saved addresses still need a pin added.
+                          A bare emoji with only `title` is not reliably announced to a
+                          screen reader (god's fix); role="img" + aria-label makes the
+                          marker's meaning exist non-visually, same standard as elsewhere
+                          in this app, while staying visually quiet. */}
+                      {row.latitude != null && row.longitude != null && (
+                        <span className="ml-2 text-xs font-medium text-slate-400" role="img" aria-label="Has a pin">
+                          📍
+                        </span>
+                      )}
                     </p>
                     <p className="text-sm text-slate-700">{row.fullName}</p>
                     <p className="text-sm text-slate-600">{row.phone}</p>
                     <p className="text-sm text-slate-600">
-                      {row.addressLine1}
-                      {row.addressLine2 ? `, ${row.addressLine2}` : ''}, {row.city}, {DISTRICT_LABELS[row.district as keyof typeof DISTRICT_LABELS] ?? row.district}
+                      {savedAddressLine(row)}, {row.city}, {DISTRICT_LABELS[row.district as keyof typeof DISTRICT_LABELS] ?? row.district}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">

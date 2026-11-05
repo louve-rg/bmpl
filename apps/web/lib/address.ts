@@ -36,6 +36,14 @@ export interface AddressValue {
   addressLine2: string;
   city: string;
   district: string;
+  /**
+   * MDF-539: a named place -- "behind the blue gate" -- distinct from both
+   * the street line and the driver instructions. Its whole purpose is to be
+   * the thing a human reads when there IS no street line (a pin-only
+   * address), so it is never cleared by `switchMethod` the way addressLine1/2
+   * are -- a landmark is equally true in every mode, same as the pin.
+   */
+  landmark: string;
   instructions: string;
   latitude: number | null;
   longitude: number | null;
@@ -52,10 +60,29 @@ export interface SavedAddress {
   addressLine2: string | null;
   city: string;
   district: string;
+  landmark: string | null;
   instructions: string | null;
   latitude: number | null;
   longitude: number | null;
   isDefault: boolean;
+}
+
+/**
+ * What to read for a saved address with no street -- god (MDF-534/539): a
+ * row with `addressLine1` rendered unguarded reads as a leading comma with
+ * nothing saying a pin exists, which is the shape of thing that makes a
+ * working feature look broken. Falls back street -> landmark -> "Pinned
+ * location" -> "No street or pin yet". The ONE place this logic lives --
+ * the address-book list row and AddressField's own saved-address dropdown
+ * both call this rather than each growing their own fallback, because the
+ * dropdown is the text a customer reads while CHOOSING, which makes a second,
+ * silently different fallback there worse, not just redundant.
+ */
+export function savedAddressLine(row: Pick<SavedAddress, 'addressLine1' | 'addressLine2' | 'landmark' | 'latitude' | 'longitude'>): string {
+  if (row.addressLine1) return [row.addressLine1, row.addressLine2].filter(Boolean).join(', ');
+  if (row.landmark) return row.landmark;
+  if (row.latitude != null && row.longitude != null) return 'Pinned location';
+  return 'No street or pin yet';
 }
 
 /** The shape the address-book API takes for a create or an update. */
@@ -69,6 +96,7 @@ export interface SavedAddressPayload {
   addressLine2: string | null;
   city: string;
   district: string;
+  landmark: string | null;
   instructions: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -91,6 +119,7 @@ export function toSavedAddressPayload(v: AddressValue, label: string): SavedAddr
     addressLine2: v.addressLine2.trim() || null,
     city: v.city.trim(),
     district: v.district,
+    landmark: v.landmark.trim() || null,
     instructions: v.instructions.trim() || null,
     latitude: v.latitude,
     longitude: v.longitude,
@@ -108,6 +137,7 @@ export const emptyAddress = (method: AddressMethod = 'TYPED'): AddressValue => (
   addressLine2: '',
   city: '',
   district: '',
+  landmark: '',
   instructions: '',
   latitude: null,
   longitude: null,

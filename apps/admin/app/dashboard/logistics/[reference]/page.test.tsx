@@ -17,6 +17,39 @@ vi.mock('next/navigation', () => ({
   useParams: () => ({ reference: 'SHP-1001' }),
 }));
 
+// MDF-538: a minimal fake Leaflet, same shape as apps/web's map tests --
+// only exercised by the two tests below that actually reveal the map; every
+// existing test here has no coordinates on origin/destination and never
+// imports 'leaflet' at all.
+vi.mock('leaflet', () => {
+  function fakeMarker() {
+    const marker = { addTo: vi.fn(), bindPopup: vi.fn(), on: vi.fn(), openPopup: vi.fn() };
+    marker.addTo.mockReturnValue(marker);
+    marker.bindPopup.mockReturnValue(marker);
+    return marker;
+  }
+  function fakeMap() {
+    return {
+      setView: vi.fn(),
+      on: vi.fn(),
+      getZoom: vi.fn(() => 13),
+      invalidateSize: vi.fn(),
+      remove: vi.fn(),
+      fitBounds: vi.fn(),
+      dragging: { enable: vi.fn(), disable: vi.fn() },
+    };
+  }
+  const L = {
+    map: vi.fn(() => fakeMap()),
+    tileLayer: vi.fn(() => ({ addTo: vi.fn().mockReturnThis() })),
+    divIcon: vi.fn(() => ({})),
+    marker: vi.fn(() => fakeMarker()),
+    latLngBounds: vi.fn(() => ({})),
+  };
+  return { default: L };
+});
+vi.mock('leaflet/dist/leaflet.css', () => ({}));
+
 const { default: ShipmentOpsPage } = await import('./page');
 
 const SHIPMENT = {
@@ -649,5 +682,87 @@ describe('ShipmentOpsPage — carrier operator assignment (MDF-500)', () => {
     await mount();
 
     expect(document.body.querySelector('select#op-leg_1')).toBeNull();
+  });
+});
+
+describe('ShipmentOpsPage — map preview makes a text/pin mismatch visible (MDF-538, owner section 8)', () => {
+  const SHIPMENT_WITH_PINS = {
+    ...SHIPMENT,
+    origin: { ...SHIPMENT.origin, latitude: 17.5, longitude: -88.2 },
+    destination: { ...SHIPMENT.destination, latitude: 17.92, longitude: -87.96 },
+  };
+
+  function stubFetchWithPins() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.read'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, SHIPMENT_WITH_PINS);
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+  }
+
+  it('never touches Leaflet until "Show map" is tapped, even though both ends have a pin', async () => {
+    const leaflet = (await import('leaflet')).default as unknown as { map: ReturnType<typeof vi.fn> };
+    leaflet.map.mockClear();
+    stubFetchWithPins();
+    await mount();
+
+    expect(document.body.textContent).toContain('On the map');
+    expect(leaflet.map).not.toHaveBeenCalled();
+  });
+
+  it('shows no map and a clear hint when neither end has a pin, rather than a blank box', async () => {
+    stubFetch(['logistics.read']);
+    await mount();
+
+    expect(document.body.textContent).toContain('No pin on file for either end of this shipment.');
+    expect(buttonTexts()).not.toContain('Show map');
+  });
+
+  it('draws both ends, lettered, once "Show map" is tapped', async () => {
+    const leaflet = (await import('leaflet')).default as unknown as { map: ReturnType<typeof vi.fn>; marker: ReturnType<typeof vi.fn> };
+    leaflet.map.mockClear();
+    leaflet.marker.mockClear();
+    stubFetchWithPins();
+    await mount();
+
+    const showMap = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Show map');
+    expect(showMap).not.toBeUndefined();
+    await act(async () => {
+      showMap!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(leaflet.map).toHaveBeenCalledTimes(1);
+    expect(leaflet.marker).toHaveBeenCalledTimes(2);
+    expect(leaflet.marker).toHaveBeenCalledWith([17.5, -88.2], expect.anything());
+    expect(leaflet.marker).toHaveBeenCalledWith([17.92, -87.96], expect.anything());
+    expect(document.body.textContent).toMatch(/A\s*From/);
+    expect(document.body.textContent).toMatch(/B\s*To/);
+  });
+
+  it('expanding opens the full-screen modal with the same two stops', async () => {
+    stubFetchWithPins();
+    await mount();
+
+    const showMap = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Show map')!;
+    await act(async () => {
+      showMap.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    const expand = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Expand')!;
+    await act(async () => {
+      expand.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog!.textContent).toContain(`${SHIPMENT.reference} · route`);
   });
 });

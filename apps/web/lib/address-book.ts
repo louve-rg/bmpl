@@ -17,7 +17,7 @@ import { emptyAddress, toSavedAddressPayload, type SavedAddress, type SavedAddre
  * order or shipment row references a saved address.
  */
 
-/** The editable fields. The map pin is not edited here (see `pinNote`). */
+/** The editable fields, including the pin (MDF-485 M1/M2 -- see LocationPicker on the page itself). */
 export interface AddressBookForm {
   label: string;
   fullName: string;
@@ -28,7 +28,11 @@ export interface AddressBookForm {
   addressLine2: string;
   city: string;
   district: string;
+  /** MDF-539: a named place, distinct from the street and from instructions -- see lib/address.ts. */
+  landmark: string;
   instructions: string;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export const EMPTY_ADDRESS_BOOK_FORM: AddressBookForm = {
@@ -41,7 +45,10 @@ export const EMPTY_ADDRESS_BOOK_FORM: AddressBookForm = {
   addressLine2: '',
   city: '',
   district: 'BELIZE',
+  landmark: '',
   instructions: '',
+  latitude: null,
+  longitude: null,
 };
 
 /** Pre-fill the form from a saved row. */
@@ -56,18 +63,22 @@ export function formFromRow(row: SavedAddress): AddressBookForm {
     addressLine2: row.addressLine2 ?? '',
     city: row.city,
     district: row.district,
+    landmark: row.landmark ?? '',
     instructions: row.instructions ?? '',
+    latitude: row.latitude,
+    longitude: row.longitude,
   };
 }
 
 /**
  * Build the payload for create (no row) or update (the row being edited).
  *
- * The pin on an existing row is carried through untouched. The form has no pin
- * field, so a save must never drop or move it: that would silently change where
- * the driver goes.
+ * The pin is the form's own field now, same as every other field here -- a
+ * save sends whatever the form currently holds, whether that is the pin the
+ * row was loaded with, one dragged to a new spot, or none yet on a brand-new
+ * address.
  */
-export function buildAddressBookPayload(form: AddressBookForm, row?: SavedAddress): SavedAddressPayload {
+export function buildAddressBookPayload(form: AddressBookForm): SavedAddressPayload {
   return toSavedAddressPayload(
     {
       ...emptyAddress('SAVED'),
@@ -79,9 +90,10 @@ export function buildAddressBookPayload(form: AddressBookForm, row?: SavedAddres
       addressLine2: form.addressLine2,
       city: form.city,
       district: form.district,
+      landmark: form.landmark,
       instructions: form.instructions,
-      latitude: row?.latitude ?? null,
-      longitude: row?.longitude ?? null,
+      latitude: form.latitude,
+      longitude: form.longitude,
     },
     form.label,
   );
@@ -108,6 +120,3 @@ export function addressBookProblem(payload: SavedAddressPayload): string | null 
   };
   return names[field] ?? 'Check this address and try again.';
 }
-
-export const PIN_NOTE =
-  'The map pin on this address is kept as it is. To move the pin, use the map at checkout.';

@@ -42,6 +42,9 @@ importers:
       '@bmpl/validation':
         specifier: workspace:*
         version: link:../../packages/validation
+      leaflet:
+        specifier: 1.9.4
+        version: 1.9.4
       next:
         specifier: 14.2.35
         version: 14.2.35(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -55,6 +58,9 @@ importers:
       '@playwright/test':
         specifier: ^1.63.0
         version: 1.63.0
+      '@types/leaflet':
+        specifier: 1.9.12
+        version: 1.9.12
       '@types/node':
         specifier: ^22.5.4
         version: 22.20.1

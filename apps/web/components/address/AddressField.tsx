@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { DISTRICTS, DISTRICT_LABELS, type Coordinates } from '@bmpl/shared';
 import {
   addressGap,
+  savedAddressLine,
   switchMethod,
   toSavedAddressPayload,
   type AddressMethod,
@@ -125,6 +126,7 @@ export function AddressField({
       addressLine2: row.addressLine2 ?? '',
       city: row.city,
       district: row.district,
+      landmark: row.landmark ?? '',
       instructions: row.instructions ?? '',
       latitude: row.latitude,
       longitude: row.longitude,
@@ -321,7 +323,11 @@ export function AddressField({
                 {saved.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.label}
-                    {s.isDefault ? ' (default)' : ''} — {s.addressLine1}, {s.city}
+                    {/* MDF-534/539 (god): this is the text a customer reads while
+                        CHOOSING -- a pin-only row rendered unguarded here would be
+                        worse than the list row's same defect. Reuses savedAddressLine
+                        rather than growing a second, silently different fallback. */}
+                    {s.isDefault ? ' (default)' : ''} — {savedAddressLine(s)}, {s.city}
                   </option>
                 ))}
               </select>
@@ -374,7 +380,7 @@ export function AddressField({
       {value.method !== 'PIN' && (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="sm:col-span-2">
-            <Labelled id={`${uid}-line1`} label="Street name and address" required>
+            <Labelled id={`${uid}-line1`} label="Street" required>
               <input
                 id={`${uid}-line1`}
                 value={value.addressLine1}
@@ -385,7 +391,7 @@ export function AddressField({
             </Labelled>
           </div>
           <div className="sm:col-span-2">
-            <Labelled id={`${uid}-line2`} label="Apartment, suite, landmark" optional>
+            <Labelled id={`${uid}-line2`} label="Apartment, suite" optional>
               <input
                 id={`${uid}-line2`}
                 value={value.addressLine2}
@@ -457,6 +463,28 @@ export function AddressField({
           </Labelled>
         </div>
       )}
+
+      {/* MDF-539: a named place -- distinct from the street line and from the
+          driver instructions below -- shown in every method, because it is
+          equally true in all of them. Its hint grows stronger with no street
+          line, since that is exactly when a human (or a driver reading the
+          saved address later) has nothing else to read. */}
+      <div className="mt-4">
+        <Labelled id={`${uid}-landmark`} label="Landmark" optional>
+          <input
+            id={`${uid}-landmark`}
+            value={value.landmark}
+            onChange={(e) => set({ landmark: e.target.value })}
+            placeholder="Behind the market, next to the clinic…"
+            className={inputClass}
+          />
+        </Labelled>
+        <p className="mt-1 text-xs text-slate-500">
+          {value.addressLine1.trim()
+            ? 'A nearby landmark, if it helps your driver.'
+            : 'With no street given, this is the thing your driver will read -- worth adding.'}
+        </p>
+      </div>
 
       {/* ------------------------------------------------------- the map */}
       <div className="mt-5">
@@ -546,7 +574,7 @@ export function AddressField({
               id={`${uid}-instructions`}
               value={value.instructions}
               onChange={(e) => set({ instructions: e.target.value })}
-              placeholder="Gate code, landmark, who to ask for"
+              placeholder="Gate code, who to ask for"
               className={inputClass}
             />
           </Labelled>
