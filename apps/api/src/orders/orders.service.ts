@@ -1006,6 +1006,8 @@ export class OrdersService {
             district: address.district,
             country: address.country,
             landmark: address.landmark,
+            latitude: address.latitude,
+            longitude: address.longitude,
           }
         : null,
       vendorOrders,
@@ -1034,6 +1036,8 @@ export class OrdersService {
                       district: address.district,
                       country: address.country,
                       landmark: address.landmark,
+                      latitude: address.latitude,
+                      longitude: address.longitude,
                     }
                   : null,
             }
