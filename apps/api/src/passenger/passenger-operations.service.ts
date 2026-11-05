@@ -290,6 +290,31 @@ export class PassengerOperationsService {
           seats: dto.seats,
           status: 'REQUESTED',
           // fareQuotedMinor deliberately untouched: no pricing policy exists.
+          // Pickup/dropoff (MDF-548): by value, no FK to anything — the same
+          // snapshot pattern as OrderAddress and the shipment endpoints, so
+          // nothing booked here can ever change retroactively. dto.pickup and
+          // dto.dropoff are two separately-validated objects (the schema
+          // additionally refuses them being the same place); copied field by
+          // field rather than spread so a future field added to one input
+          // shape can never silently land on both.
+          ...(dto.pickup && {
+            pickupDistrict: dto.pickup.district,
+            pickupCity: dto.pickup.city,
+            pickupAddress: dto.pickup.address ?? null,
+            pickupLandmark: dto.pickup.landmark ?? null,
+            pickupInstructions: dto.pickup.instructions ?? null,
+            pickupLatitude: dto.pickup.latitude ?? null,
+            pickupLongitude: dto.pickup.longitude ?? null,
+          }),
+          ...(dto.dropoff && {
+            dropoffDistrict: dto.dropoff.district,
+            dropoffCity: dto.dropoff.city,
+            dropoffAddress: dto.dropoff.address ?? null,
+            dropoffLandmark: dto.dropoff.landmark ?? null,
+            dropoffInstructions: dto.dropoff.instructions ?? null,
+            dropoffLatitude: dto.dropoff.latitude ?? null,
+            dropoffLongitude: dto.dropoff.longitude ?? null,
+          }),
         },
       });
     });
@@ -303,7 +328,7 @@ export class PassengerOperationsService {
         data: { bookingId: booking.id, tripId: trip.id },
       });
     }
-    return this.serializeBooking(booking);
+    return this.serializeBooking(booking, { includeLocations: true });
   }
 
   async listOwnBookings(userId: string) {
@@ -313,7 +338,7 @@ export class PassengerOperationsService {
       take: 100,
       include: { trip: { include: { route: { select: { name: true, originCity: true, destinationCity: true } } } } },
     });
-    return rows.map((b) => this.serializeBooking(b));
+    return rows.map((b) => this.serializeBooking(b, { includeLocations: true }));
   }
 
   async cancelOwnBooking(actor: Actor, bookingId: string, reason?: string) {
@@ -322,7 +347,21 @@ export class PassengerOperationsService {
       include: { trip: { select: { status: true } } },
     });
     if (!b || b.passengerUserId !== actor.userId) throw new NotFoundException('Booking not found.');
-    return this.cancelBooking(actor, b, 'PASSENGER', reason);
+    return this.cancelBooking(actor, b, 'PASSENGER', reason, { includeLocations: true });
+  }
+
+  /* ---------------------------------------------------- driver surface */
+
+  /**
+   * The assigned driver's view of who is riding (MDF-548). Scoped to the
+   * driver's OWN trip the same way `listProviderBookings` scopes to the
+   * operator's own: resolve the caller's driver profile first, then filter
+   * bookings through `trip.driverProfileId`, never a bare tripId a driver
+   * could pass for someone else's departure.
+   */
+  async listDriverTripBookings(userId: string, filter: { tripId?: string; status?: string } = {}) {
+    const d = await this.driverProfileOf(userId);
+    return this.listBookings({ ...filter, driverProfileId: d.id, includeLocations: true });
   }
 
   /* --------------------------------------------------- provider surface */
@@ -359,17 +398,17 @@ export class PassengerOperationsService {
   /* ------------------------------------------------------ admin surface */
 
   async listAllBookings(filter: { tripId?: string; status?: string } = {}) {
-    return this.listBookings(filter);
+    return this.listBookings({ ...filter, includeLocations: true });
   }
 
   async confirmBookingAsAdmin(actor: Actor, bookingId: string) {
     const b = await this.bookingOrThrow(bookingId);
-    return this.confirmBooking(actor, b);
+    return this.confirmBooking(actor, b, { includeLocations: true });
   }
 
   async cancelBookingAsAdmin(actor: Actor, bookingId: string, reason?: string) {
     const b = await this.bookingOrThrow(bookingId);
-    return this.cancelBooking(actor, b, 'ADMIN', reason);
+    return this.cancelBooking(actor, b, 'ADMIN', reason, { includeLocations: true });
   }
 
   async assignTripAsAdmin(actor: Actor, tripId: string, dto: PassengerTripAssignInput) {
@@ -598,7 +637,11 @@ export class PassengerOperationsService {
    * not enough seats left. The capacity check runs under a row lock on the
    * trip so concurrent confirmations serialize instead of overselling.
    */
-  private async confirmBooking(actor: Actor, b: PassengerBooking & { trip: { status: string } | null }) {
+  private async confirmBooking(
+    actor: Actor,
+    b: PassengerBooking & { trip: { status: string } | null },
+    opts: { includeLocations?: boolean } = {},
+  ) {
     if (b.status !== 'REQUESTED') throw new BadRequestException('Only a requested booking can be confirmed.');
     if (!b.tripId || !b.trip || !(BOOKABLE_TRIP_STATUSES as readonly string[]).includes(b.trip.status)) {
       throw new BadRequestException('This departure is no longer taking confirmations.');
@@ -652,7 +695,7 @@ export class PassengerOperationsService {
         data: { bookingId: b.id },
       });
     }
-    return this.serializeBooking(updated);
+    return this.serializeBooking(updated, opts);
   }
 
   private async cancelBooking(
@@ -660,6 +703,7 @@ export class PassengerOperationsService {
     b: PassengerBooking & { trip: { status: string } | null },
     party: PassengerCancellationParty,
     reason?: string,
+    opts: { includeLocations?: boolean } = {},
   ) {
     if (b.status !== 'REQUESTED' && b.status !== 'CONFIRMED') {
       throw new BadRequestException('This booking is already settled.');
@@ -731,7 +775,7 @@ export class PassengerOperationsService {
         });
       }
     }
-    return this.serializeBooking(updated);
+    return this.serializeBooking(updated, opts);
   }
 
   /**
@@ -843,10 +887,19 @@ export class PassengerOperationsService {
     return updated;
   }
 
-  private async listBookings(filter: { providerProfileId?: string; tripId?: string; status?: string }) {
+  private async listBookings(filter: {
+    providerProfileId?: string;
+    driverProfileId?: string;
+    tripId?: string;
+    status?: string;
+    includeLocations?: boolean;
+  }) {
     const where: Prisma.PassengerBookingWhereInput = {};
     if (filter.tripId) where.tripId = filter.tripId;
-    if (filter.providerProfileId) where.trip = { providerProfileId: filter.providerProfileId };
+    const tripWhere: Prisma.PassengerTripWhereInput = {};
+    if (filter.providerProfileId) tripWhere.providerProfileId = filter.providerProfileId;
+    if (filter.driverProfileId) tripWhere.driverProfileId = filter.driverProfileId;
+    if (Object.keys(tripWhere).length > 0) where.trip = tripWhere;
     if (filter.status && filter.status in PassengerBookingStatus) where.status = filter.status as PassengerBookingStatus;
     const rows = await this.prisma.passengerBooking.findMany({
       where,
@@ -858,7 +911,7 @@ export class PassengerOperationsService {
       },
     });
     return rows.map((b) => ({
-      ...this.serializeBooking(b),
+      ...this.serializeBooking(b, { includeLocations: filter.includeLocations }),
       passengerName: b.passenger ? `${b.passenger.firstName} ${b.passenger.lastName}` : null,
     }));
   }
@@ -878,8 +931,16 @@ export class PassengerOperationsService {
     throw new BadRequestException('Could not allocate a booking reference. Please try again.');
   }
 
+  /**
+   * `includeLocations` (MDF-548): pickup/dropoff are the rider's own pin —
+   * shown back to the rider who set them, to the driver actually assigned to
+   * the trip, and to admins. NOT included by default, so a caller must opt
+   * in deliberately rather than a new field reaching an audience nobody
+   * reviewed it against — see the per-surface flags at each call site below.
+   */
   serializeBooking(
     b: PassengerBooking & { trip?: ({ reference: string; scheduledDepartureAt: Date | null; status: string; route?: { name: string; originCity: string; destinationCity: string } | null }) | null },
+    opts: { includeLocations?: boolean } = {},
   ) {
     return {
       id: b.id,
@@ -900,6 +961,27 @@ export class PassengerOperationsService {
       cancelledBy: b.cancelledBy,
       cancellationReason: b.cancellationReason,
       createdAt: b.createdAt,
+      ...(opts.includeLocations && {
+        pickup: this.serializeBookingStop(b, 'pickup'),
+        dropoff: this.serializeBookingStop(b, 'dropoff'),
+      }),
+    };
+  }
+
+  private serializeBookingStop(
+    b: Pick<PassengerBooking, 'pickupDistrict' | 'pickupCity' | 'pickupAddress' | 'pickupLandmark' | 'pickupInstructions' | 'pickupLatitude' | 'pickupLongitude' | 'dropoffDistrict' | 'dropoffCity' | 'dropoffAddress' | 'dropoffLandmark' | 'dropoffInstructions' | 'dropoffLatitude' | 'dropoffLongitude'>,
+    end: 'pickup' | 'dropoff',
+  ) {
+    const district = end === 'pickup' ? b.pickupDistrict : b.dropoffDistrict;
+    if (!district) return null; // this booking was not pinned on this end
+    return {
+      district,
+      city: end === 'pickup' ? b.pickupCity : b.dropoffCity,
+      address: end === 'pickup' ? b.pickupAddress : b.dropoffAddress,
+      landmark: end === 'pickup' ? b.pickupLandmark : b.dropoffLandmark,
+      instructions: end === 'pickup' ? b.pickupInstructions : b.dropoffInstructions,
+      latitude: end === 'pickup' ? b.pickupLatitude : b.dropoffLatitude,
+      longitude: end === 'pickup' ? b.pickupLongitude : b.dropoffLongitude,
     };
   }
 }

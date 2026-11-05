@@ -6078,16 +6078,20 @@ model PassengerBooking {
   // ---- Pickup / dropoff (snapshot; on-demand and flag-stop riders) ----
   // Town and district required by validation wherever these are used - a pin
   // never implies them.
-  pickupDistrict   District?
-  pickupCity       String?
-  pickupAddress    String?
-  pickupLatitude   Float?
-  pickupLongitude  Float?
-  dropoffDistrict  District?
-  dropoffCity      String?
-  dropoffAddress   String?
-  dropoffLatitude  Float?
-  dropoffLongitude Float?
+  pickupDistrict      District?
+  pickupCity          String?
+  pickupAddress       String?
+  pickupLandmark      String?
+  pickupInstructions  String?
+  pickupLatitude      Float?
+  pickupLongitude     Float?
+  dropoffDistrict     District?
+  dropoffCity         String?
+  dropoffAddress      String?
+  dropoffLandmark     String?
+  dropoffInstructions String?
+  dropoffLatitude     Float?
+  dropoffLongitude    Float?
 
   /// Structure for pricing to attach later. Null means no fare policy exists
   /// yet; nothing in this phase computes, quotes or charges one.
