@@ -147,28 +147,12 @@ describe('LocationPicker full-screen picking (Edward REQ 8)', () => {
     expect(container!.querySelectorAll('[role="application"]')).toHaveLength(1);
   });
 
-  it('a pin placed on the full-screen map reaches the caller immediately, not only on confirm', async () => {
-    mount();
-    const onChange = vi.fn();
-    act(() => {
-      root!.render(<LocationPicker value={null} onChange={onChange} />);
-    });
-    await flush();
-    act(() => findButton(container!, 'full screen').dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    await flush();
-
-    // The pin is a live human choice as soon as it's placed (exactly like the
-    // embedded map) — simulate the tap Leaflet itself would report.
-    const leaflet = (await import('leaflet')).default as unknown as { map: ReturnType<typeof vi.fn> };
-    const mapInstance = leaflet.map.mock.results.at(-1)!.value as { on: ReturnType<typeof vi.fn> };
-    const onClick = mapInstance.on.mock.calls.find((c: unknown[]) => c[0] === 'click')?.[1] as
-      | ((e: { latlng: { lat: number; lng: number } }) => void)
-      | undefined;
-    expect(onClick).toBeTruthy();
-    act(() => onClick!({ latlng: { lat: 17.5, lng: -88.2 } }));
-
-    expect(onChange).toHaveBeenCalledWith({ latitude: 17.5, longitude: -88.2 });
-  });
+  // MDF-485 M1/M2, owner behaviour 10: a pin placed on the full-screen map
+  // used to reach the caller immediately, same as the embedded map -- that
+  // assertion moved to LocationPicker.search.test.tsx and was INVERTED on
+  // purpose. The full-screen map now stages a draft; only "Use this
+  // location" commits it, and X/Escape discard it. See the "full-screen
+  // confirm/cancel" describe block there for the replacement coverage.
 });
 
 describe('LocationPicker repositioning an existing pin (MDF-376 section 6: placement AND repositioning)', () => {

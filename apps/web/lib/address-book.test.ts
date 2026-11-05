@@ -32,13 +32,21 @@ describe('address book form', () => {
     expect(form.company).toBe('');
     expect(form.addressLine2).toBe('');
     expect(form.instructions).toBe('');
+    expect(form.latitude).toBe(17.5);
+    expect(form.longitude).toBe(-88.2);
   });
 
-  it('keeps the saved pin on an edit, because the form has no pin field', () => {
-    const payload = buildAddressBookPayload({ ...formFromRow(row), city: 'Orange Walk' }, row);
+  it('carries the pin through on an edit that leaves it untouched (MDF-485: the pin is a form field now)', () => {
+    const payload = buildAddressBookPayload({ ...formFromRow(row), city: 'Orange Walk' });
     expect(payload.latitude).toBe(17.5);
     expect(payload.longitude).toBe(-88.2);
     expect(payload.city).toBe('Orange Walk');
+  });
+
+  it('sends the dragged pin, not the one the row was loaded with, once the form has moved it', () => {
+    const payload = buildAddressBookPayload({ ...formFromRow(row), latitude: 17.6, longitude: -88.3 });
+    expect(payload.latitude).toBe(17.6);
+    expect(payload.longitude).toBe(-88.3);
   });
 
   it('sends no pin on a new address, and blank optionals as null', () => {

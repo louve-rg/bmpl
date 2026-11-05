@@ -7,7 +7,7 @@ import type * as LeafletNS from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BELIZE_BOUNDS, DISTRICT_CENTROIDS, OUT_OF_BOUNDS_MESSAGE, asDistrict, isWithinBelize, type Coordinates } from '@bmpl/shared';
 import { api } from '../../lib/api';
-import { Alert, Button, Spinner } from '../ui';
+import { Alert, Button, Input, Spinner } from '../ui';
 import { FullScreenMapModal } from './FullScreenMapModal';
 import { attachCooperativeMapDrag } from './cooperative-map-drag';
 
@@ -73,7 +73,15 @@ interface LocationPickerProps {
   value: Coordinates | null;
   onChange: (next: Coordinates | null) => void;
   disabled?: boolean;
-  /** The typed street address, so the customer can find it on the map. */
+  /**
+   * The typed street address, so the customer can find it on the map.
+   *
+   * Omitted entirely (not just empty), the picker is STANDALONE (MDF-485 M1/M2,
+   * owner behaviour 6): it grows its own search box for an address, business
+   * or landmark, rather than depending on a caller's own text field. Every
+   * current caller (AddressField) passes this, so their "Show my address"
+   * button, bound to that field, is unchanged.
+   */
   address?: string;
   /** The chosen district — the map follows it immediately, with no network call. */
   district?: string;
@@ -120,19 +128,42 @@ interface LocationPickerProps {
  * the caller, so the pin itself survives the switch; only the map's own
  * transient state (GPS accuracy circle, address-lookup results) does not —
  * the same accepted trade ExpandableRouteMap's own viewport already makes.
+ *
+ * MDF-485 M1/M2, owner behaviour 10 ("confirm or cancel the selection"): the
+ * full-screen map edits a DRAFT, seeded from `value` every time it opens, and
+ * only calls the caller's `onChange` from the confirm button. Closing any
+ * other way (✕, Escape) discards the draft untouched -- the embedded value
+ * the picker opened with survives exactly as it was. The embedded body below
+ * still reports every tap/drag live, same as always: it has no confirm/cancel
+ * chrome of its own, and the surrounding form's own save is the real confirm.
  */
 export function LocationPicker(props: LocationPickerProps) {
   const [expanded, setExpanded] = useState(false);
+  const [draft, setDraft] = useState<Coordinates | null>(props.value);
+
+  function openExpanded() {
+    setDraft(props.value);
+    setExpanded(true);
+  }
+  function confirmExpanded() {
+    props.onChange(draft);
+    setExpanded(false);
+  }
+  function cancelExpanded() {
+    setExpanded(false);
+  }
+
   return (
     <>
-      {!expanded && <LocationPickerBody {...props} onExpand={() => setExpanded(true)} />}
+      {!expanded && <LocationPickerBody {...props} onExpand={openExpanded} />}
       <FullScreenMapModal
         open={expanded}
-        onClose={() => setExpanded(false)}
+        onClose={cancelExpanded}
+        onConfirm={confirmExpanded}
         title={props.heading ?? 'Delivery location'}
         confirmLabel="Use this location"
       >
-        {expanded && <LocationPickerBody {...props} inModal />}
+        {expanded && <LocationPickerBody {...props} value={draft} onChange={setDraft} inModal />}
       </FullScreenMapModal>
     </>
   );
@@ -184,6 +215,10 @@ function LocationPickerBody({
     message: null,
     results: [],
   });
+  /** Only read when `address` is omitted -- see `standalone` below. */
+  const [searchQuery, setSearchQuery] = useState('');
+  /** No caller-supplied address text: the picker needs its own search box. */
+  const standalone = address === undefined;
   const headingId = useId();
   const accuracy = describeAccuracy(geo.kind === 'located' ? geo.accuracyM : null);
 
@@ -389,9 +424,15 @@ function LocationPickerBody({
    * a geocoder's guess never silently becomes the delivery address.
    */
   const findAddress = useCallback(async () => {
-    const q = (address ?? '').trim();
+    const q = (standalone ? searchQuery : address ?? '').trim();
     if (q.length < 3) {
-      setLookup({ busy: false, message: 'Type your street address above first, then tap this.', results: [] });
+      setLookup({
+        busy: false,
+        message: standalone
+          ? 'Type an address, business or landmark above first, then search.'
+          : 'Type your street address above first, then tap this.',
+        results: [],
+      });
       return;
     }
     setLookup({ busy: true, message: null, results: [] });
@@ -402,7 +443,7 @@ function LocationPickerBody({
       if (res.results.length === 0) {
         setLookup({
           busy: false,
-          message: 'We couldn’t find that address on the map — many Belize addresses aren’t mapped. Tap the map to place your pin.',
+          message: 'We couldn’t find that on the map — many Belize places aren’t mapped. Tap the map to place your pin.',
           results: [],
         });
         return;
@@ -413,11 +454,11 @@ function LocationPickerBody({
     } catch {
       setLookup({
         busy: false,
-        message: 'Address lookup isn’t available right now. Tap the map to place your pin instead.',
+        message: 'Search isn’t available right now. Tap the map to place your pin instead.',
         results: [],
       });
     }
-  }, [address, district, place]);
+  }, [standalone, searchQuery, address, district, place]);
 
   /**
    * Put the typed address on the map without being asked.
@@ -491,6 +532,40 @@ function LocationPickerBody({
     onChangeRef.current(null);
   }, [clearAccuracyCircle]);
 
+  // MDF-485 M1/M2, owner behaviour 6: standalone only, a search box of the
+  // picker's own -- every current caller supplies `address` instead and keeps
+  // its existing "Show my address" button unchanged, below.
+  const searchBox = standalone && (
+    <div className="mt-3 flex gap-2">
+      <Input
+        type="search"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            void findAddress();
+          }
+        }}
+        placeholder="Search address, business or landmark"
+        aria-label="Search for an address, business or landmark on the map"
+        disabled={disabled || loadError}
+        className="min-h-[44px] flex-1 !border-slate-300 !text-slate-900"
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="min-h-[44px] !border-slate-300 !text-slate-900"
+        disabled={disabled || loadError || lookup.busy || searchQuery.trim().length === 0}
+        onClick={findAddress}
+        aria-label="Search for this on the map"
+      >
+        {lookup.busy ? <Spinner className="h-4 w-4" /> : '🔎 Search'}
+      </Button>
+    </div>
+  );
+
   const buttons = (
     <div className="mt-3 flex flex-wrap gap-2">
       <Button
@@ -511,17 +586,19 @@ function LocationPickerBody({
       >
         {geo.kind === 'locating' ? 'Finding you…' : '📍 Use my current location'}
       </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="min-h-[44px] flex-1 sm:flex-none !border-slate-300 !text-slate-900"
-        disabled={disabled || loadError || lookup.busy}
-        onClick={findAddress}
-        aria-label="Show the address you typed on the map"
-      >
-        {lookup.busy ? <Spinner className="h-4 w-4" /> : '🔎 Show my address'}
-      </Button>
+      {!standalone && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-[44px] flex-1 sm:flex-none !border-slate-300 !text-slate-900"
+          disabled={disabled || loadError || lookup.busy}
+          onClick={findAddress}
+          aria-label="Show the address you typed on the map"
+        >
+          {lookup.busy ? <Spinner className="h-4 w-4" /> : '🔎 Show my address'}
+        </Button>
+      )}
       {value && (
         <Button type="button" variant="outline" size="sm" className="min-h-[44px] !border-slate-300 !text-slate-900" disabled={disabled} onClick={clear}>
           Remove pin
@@ -670,6 +747,7 @@ function LocationPickerBody({
           <p className="text-xs text-slate-500">
             {hint ?? 'Tap the map to place the pin, then drag it until it is exactly right.'}
           </p>
+          {searchBox}
           {buttons}
           {messages}
         </div>
@@ -702,9 +780,12 @@ function LocationPickerBody({
       </h3>
       <p className="mt-0.5 text-xs text-slate-500">
         {hint ??
-          'Place the pin at the exact spot where you want your order delivered — the map follows the district you choose, and “Show my address” will try to find what you typed. This is optional, but it helps your driver find you.'}
+          (standalone
+            ? 'Search for an address, business or landmark, use your current location, or tap the map to place the pin.'
+            : 'Place the pin at the exact spot where you want your order delivered — the map follows the district you choose, and “Show my address” will try to find what you typed. This is optional, but it helps your driver find you.')}
       </p>
 
+      {searchBox}
       {buttons}
       {messages}
 
