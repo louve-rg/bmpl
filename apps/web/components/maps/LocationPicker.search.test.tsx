@@ -172,10 +172,45 @@ describe('LocationPicker standalone search box (MDF-485 M1/M2, owner behaviour 6
 
     expect(findButton(container!, 'Search for this on the map').disabled).toBe(true);
   });
+
+  // Nominatim's published policy is ~1 request/sec; the API already
+  // serialises its own calls to respect it, but a search-as-you-type box on
+  // THIS side would still breach that policy from a single user typing. The
+  // search here is submit-driven only -- never a request per keystroke.
+  it('makes no request from typing alone -- only the explicit search action does (Nominatim ~1 req/sec policy)', async () => {
+    mount();
+    act(() => {
+      root!.render(<LocationPicker value={null} onChange={() => {}} />);
+    });
+    await flush();
+
+    const input = container!.querySelector('input[aria-label*="Search for an address"]') as HTMLInputElement;
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    for (const partial of ['R', 'Ra', 'Rad', 'Radisson']) {
+      act(() => {
+        nativeInputValueSetter.call(input, partial);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    }
+    await flush();
+
+    expect(apiGet).not.toHaveBeenCalled();
+  });
 });
 
 describe('LocationPicker full-screen confirm/cancel (MDF-485 M1/M2, owner behaviour 10)', () => {
-  it('a pin placed on the full-screen map does NOT reach the caller until "Use this location" is pressed', async () => {
+  // RULING (god, 2026-11-05): cancel is an UNDO at the MODAL'S boundary, not
+  // a staged draft inside the picker -- `AddressField`'s `movedFromSaved`
+  // (and anything else in checkout keyed on live pin movement) reacts to
+  // `onChange` immediately, and staging would silently break that as a side
+  // effect of adding a button. So every tap/drag inside the full-screen map
+  // still reaches the caller immediately, exactly like the embedded map
+  // (LocationPicker.test.tsx's own test of that is unmodified). What's new
+  // is only what happens at dismissal: X/Escape replay the value the picker
+  // had the moment it opened, undoing whatever was placed meanwhile;
+  // "Use this location" does nothing extra, because the right value is
+  // already live by then.
+  it('confirming ("Use this location") does not revert -- whatever was placed while the modal was open stays', async () => {
     mount();
     const onChange = vi.fn();
     act(() => {
@@ -186,62 +221,54 @@ describe('LocationPicker full-screen confirm/cancel (MDF-485 M1/M2, owner behavi
     await flush();
 
     await clickMap(17.5, -88.2);
-    expect(onChange).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalledWith({ latitude: 17.5, longitude: -88.2 });
+    onChange.mockClear();
 
     act(() => findButton(document.body, 'Use this location').dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await flush();
 
-    expect(onChange).toHaveBeenCalledWith({ latitude: 17.5, longitude: -88.2 });
-  });
-
-  it('closing the full-screen map with X discards the pin just placed there, leaving the caller\'s value untouched', async () => {
-    mount();
-    const onChange = vi.fn();
-    act(() => {
-      root!.render(<LocationPicker value={{ latitude: 17.4995, longitude: -88.1976 }} onChange={onChange} />);
-    });
-    await flush();
-    act(() => findButton(container!, 'full screen').dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    await flush();
-
-    await clickMap(16.0, -89.0);
-    act(() => findButton(document.body, 'Close map').dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    await flush();
-
-    // The embedded map remounting after the modal closes re-reports its own
-    // seed value (pre-existing behaviour, unrelated to this feature) -- what
-    // this test guards is that the DISCARDED draft never reaches the caller.
-    expect(onChange).not.toHaveBeenCalledWith({ latitude: 16.0, longitude: -89.0 });
-    for (const [arg] of onChange.mock.calls) {
-      expect(arg).toEqual({ latitude: 17.4995, longitude: -88.1976 });
-    }
+    // Confirm is a no-op on top of the live commit -- no further onChange call.
+    expect(onChange).not.toHaveBeenCalled();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it('reopening the full-screen map after a cancelled edit seeds the draft from the real value again, not the discarded one', async () => {
+  it('dismissing the full-screen map with X undoes a pin placed while it was open, by replaying the value it opened with', async () => {
     mount();
     const onChange = vi.fn();
     act(() => {
       root!.render(<LocationPicker value={{ latitude: 17.4995, longitude: -88.1976 }} onChange={onChange} />);
     });
     await flush();
-
-    // First visit: place a different pin, then cancel.
     act(() => findButton(container!, 'full screen').dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await flush();
+
     await clickMap(16.0, -89.0);
+    expect(onChange).toHaveBeenCalledWith({ latitude: 16.0, longitude: -89.0 });
+    onChange.mockClear();
+
     act(() => findButton(document.body, 'Close map').dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await flush();
 
-    // Second visit: confirm immediately, with no new tap -- should commit the
-    // ORIGINAL value, proving the draft was reseeded from it, not left over
-    // from the cancelled 16.0/-89.0 edit.
+    // The undo: X replays the OPENING value, overriding the 16.0/-89.0 tap.
+    expect(onChange).toHaveBeenCalledWith({ latitude: 17.4995, longitude: -88.1976 });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('dismissing with X when nothing was placed replays the same value it opened with -- a harmless no-op', async () => {
+    mount();
+    const onChange = vi.fn();
+    act(() => {
+      root!.render(<LocationPicker value={{ latitude: 17.4995, longitude: -88.1976 }} onChange={onChange} />);
+    });
+    await flush();
     act(() => findButton(container!, 'full screen').dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await flush();
-    act(() => findButton(document.body, 'Use this location').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    act(() => findButton(document.body, 'Close map').dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await flush();
 
-    expect(onChange).toHaveBeenCalledWith({ latitude: 17.4995, longitude: -88.1976 });
-    expect(onChange).not.toHaveBeenCalledWith({ latitude: 16.0, longitude: -89.0 });
+    for (const [arg] of onChange.mock.calls) {
+      expect(arg).toEqual({ latitude: 17.4995, longitude: -88.1976 });
+    }
   });
 });

@@ -129,27 +129,37 @@ interface LocationPickerProps {
  * transient state (GPS accuracy circle, address-lookup results) does not —
  * the same accepted trade ExpandableRouteMap's own viewport already makes.
  *
- * MDF-485 M1/M2, owner behaviour 10 ("confirm or cancel the selection"): the
- * full-screen map edits a DRAFT, seeded from `value` every time it opens, and
- * only calls the caller's `onChange` from the confirm button. Closing any
- * other way (✕, Escape) discards the draft untouched -- the embedded value
- * the picker opened with survives exactly as it was. The embedded body below
- * still reports every tap/drag live, same as always: it has no confirm/cancel
- * chrome of its own, and the surrounding form's own save is the real confirm.
+ * MDF-485 M1/M2, owner behaviour 10 ("confirm or cancel the selection") --
+ * RULING (god, 2026-11-05): cancel is an UNDO AT THE MODAL BOUNDARY, not a
+ * staged draft inside the picker. `AddressField` reacts to every `onChange`
+ * immediately -- `movedFromSaved` warns the instant a pin drifts from a
+ * saved one -- and a staged commit would silently break that and anything
+ * else in checkout keyed on live pin movement, as a side effect of adding a
+ * button. So: the modal body commits every tap/drag immediately, exactly
+ * like the embedded one always has (`LocationPicker.test.tsx`'s own "reaches
+ * the caller immediately" test stays true and stays unmodified). What
+ * changes is only what happens AT THE MODAL'S OWN BOUNDARY: `openExpanded`
+ * remembers the value the picker had the moment it opened; dismissing by ✕
+ * or Escape (`onClose`) replays that captured value through `onChange`,
+ * undoing whatever was placed while the modal was open; "Use this location"
+ * (`onConfirm`) does nothing extra, because by then the right value is
+ * already live. "Remove pin" (`clear()`, inside the body) stays a distinct
+ * action from this revert -- clearing to null and undoing back to the
+ * opening value are not the same thing and must not be merged.
  */
 export function LocationPicker(props: LocationPickerProps) {
   const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState<Coordinates | null>(props.value);
+  const openingValueRef = useRef<Coordinates | null>(props.value);
 
   function openExpanded() {
-    setDraft(props.value);
+    openingValueRef.current = props.value;
     setExpanded(true);
   }
   function confirmExpanded() {
-    props.onChange(draft);
     setExpanded(false);
   }
   function cancelExpanded() {
+    props.onChange(openingValueRef.current);
     setExpanded(false);
   }
 
@@ -163,7 +173,7 @@ export function LocationPicker(props: LocationPickerProps) {
         title={props.heading ?? 'Delivery location'}
         confirmLabel="Use this location"
       >
-        {expanded && <LocationPickerBody {...props} value={draft} onChange={setDraft} inModal />}
+        {expanded && <LocationPickerBody {...props} inModal />}
       </FullScreenMapModal>
     </>
   );
@@ -688,6 +698,19 @@ function LocationPickerBody({
       {value ? (
         <>
           <p className="font-semibold text-emerald-700">✓ Location selected</p>
+          {/*
+            MDF-485 M1/M2, owner behaviour 9 (god OVERRULES noted-not-a-gap):
+            "display the selected location AND its coordinates" is a named
+            requirement, not an optional disclosure -- in Belize the
+            coordinate is frequently the only unambiguous thing on screen, so
+            it must be visible the instant a pin exists, with no tap. This
+            used to live behind a <details> at the bottom of the embedded-only
+            render; it is here now, in `status`, so both the embedded and
+            full-screen bodies show it without one.
+          */}
+          <p className="mt-0.5 font-mono text-xs text-slate-500">
+            {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)}
+          </p>
           {/* The accuracy line only applies while the pin is still where the
               DEVICE put it. `place` clears the circle on any manual tap or
               drag, so once the customer has corrected it we stop quoting a
@@ -702,7 +725,9 @@ function LocationPickerBody({
           )}
         </>
       ) : (
-        <p className="text-slate-500">No pin yet — your typed address will be used.</p>
+        <p className="text-slate-500">
+          {standalone ? 'No pin yet.' : 'No pin yet — your typed address will be used.'}
+        </p>
       )}
     </div>
   );
@@ -794,14 +819,6 @@ function LocationPickerBody({
       {!ready && !loadError && <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">Loading map…</p>}
 
       {status}
-      {value && (
-        <details className="mt-1">
-          <summary className="flex min-h-11 cursor-pointer items-center text-xs text-[color:var(--bmpl-text-muted-strong)]">Coordinates</summary>
-          <p className="mt-1 font-mono text-xs text-slate-500">
-            {value.latitude.toFixed(6)}, {value.longitude.toFixed(6)}
-          </p>
-        </details>
-      )}
     </section>
   );
 }

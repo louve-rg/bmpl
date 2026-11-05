@@ -147,12 +147,56 @@ describe('LocationPicker full-screen picking (Edward REQ 8)', () => {
     expect(container!.querySelectorAll('[role="application"]')).toHaveLength(1);
   });
 
-  // MDF-485 M1/M2, owner behaviour 10: a pin placed on the full-screen map
-  // used to reach the caller immediately, same as the embedded map -- that
-  // assertion moved to LocationPicker.search.test.tsx and was INVERTED on
-  // purpose. The full-screen map now stages a draft; only "Use this
-  // location" commits it, and X/Escape discard it. See the "full-screen
-  // confirm/cancel" describe block there for the replacement coverage.
+  it('a pin placed on the full-screen map reaches the caller immediately, not only on confirm', async () => {
+    mount();
+    const onChange = vi.fn();
+    act(() => {
+      root!.render(<LocationPicker value={null} onChange={onChange} />);
+    });
+    await flush();
+    act(() => findButton(container!, 'full screen').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await flush();
+
+    // The pin is a live human choice as soon as it's placed (exactly like the
+    // embedded map) — simulate the tap Leaflet itself would report. MDF-485
+    // M1/M2 (god's ruling, 2026-11-05): confirm/cancel is built as an UNDO at
+    // the modal's own boundary, not a staged draft inside the picker, so
+    // this stays true exactly as it always was -- see
+    // LocationPicker.search.test.tsx's "full-screen confirm/cancel" block
+    // for the new coverage of the revert-on-dismiss half.
+    const leaflet = (await import('leaflet')).default as unknown as { map: ReturnType<typeof vi.fn> };
+    const mapInstance = leaflet.map.mock.results.at(-1)!.value as { on: ReturnType<typeof vi.fn> };
+    const onClick = mapInstance.on.mock.calls.find((c: unknown[]) => c[0] === 'click')?.[1] as
+      | ((e: { latlng: { lat: number; lng: number } }) => void)
+      | undefined;
+    expect(onClick).toBeTruthy();
+    act(() => onClick!({ latlng: { lat: 17.5, lng: -88.2 } }));
+
+    expect(onChange).toHaveBeenCalledWith({ latitude: 17.5, longitude: -88.2 });
+  });
+});
+
+describe('LocationPicker coordinates display (MDF-485 M1/M2, owner behaviour 9)', () => {
+  it('shows the coordinates the instant a pin exists, with no tap -- not behind a <details>', async () => {
+    mount();
+    act(() => {
+      root!.render(<LocationPicker value={{ latitude: 17.4995, longitude: -88.1976 }} onChange={() => {}} />);
+    });
+    await flush();
+
+    expect(container!.querySelector('details')).toBeNull();
+    expect(container!.textContent).toContain('17.499500, -88.197600');
+  });
+
+  it('shows nothing coordinate-shaped when there is no pin yet', async () => {
+    mount();
+    act(() => {
+      root!.render(<LocationPicker value={null} onChange={() => {}} />);
+    });
+    await flush();
+
+    expect(container!.textContent).not.toMatch(/-?\d+\.\d{6}/);
+  });
 });
 
 describe('LocationPicker repositioning an existing pin (MDF-376 section 6: placement AND repositioning)', () => {

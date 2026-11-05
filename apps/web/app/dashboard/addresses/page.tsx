@@ -183,7 +183,11 @@ export default function AddressesPage() {
                 address={[form.addressLine1, form.city].filter(Boolean).join(', ')}
                 district={form.district}
                 heading="Pin on the map"
-                hint="Optional, but it is what your driver follows -- drag the pin if it is not quite right."
+                hint={
+                  coords
+                    ? 'This is what your driver follows -- drag the pin if it is not quite right.'
+                    : 'Optional, but it is what your driver follows. This address has no pin yet -- centred on the district for now. Tap the map, use your current location, or try "Show my address" to add one.'
+                }
               />
             </div>
 
