@@ -9,6 +9,7 @@
  */
 
 import type { AddressValue } from './address';
+import type { TripBookingLocation } from './passenger-driver';
 
 /**
  * One end of a booking's pickup/drop-off (MDF-549), in the shape
@@ -156,6 +157,16 @@ export interface RiderBooking {
   cancelledBy?: string | null;
   cancellationReason?: string | null;
   createdAt: string;
+  /**
+   * The rider's own pickup/drop-off (MDF-549 gap B: the rider who places a
+   * pin could never see it again -- found live by Dwight, god read all 141
+   * lines of this file's pre-fix self and confirmed zero references to
+   * pickup/dropoff/landmark anywhere in it). Same nested, wholesale-null
+   * shape as the driver and admin payloads -- `TripBookingLocation`, reused
+   * rather than redeclared.
+   */
+  pickup: TripBookingLocation | null;
+  dropoff: TripBookingLocation | null;
 }
 
 /**
