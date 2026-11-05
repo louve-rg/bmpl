@@ -28,22 +28,29 @@ import type { MapPoint } from '../../../../../lib/trip-map';
  */
 
 /**
- * One end of a booking's pickup/drop-off snapshot. Every field optional:
- * ABSENT, not null, until Pam's `serializeBooking()` change ships these --
- * same "optional until the API change lands" convention
- * `apps/admin/app/dashboard/orders/[id]/page.tsx` already uses for
- * `deliveryAddress.latitude`/`longitude` (MDF-538). District/city are what
- * price the booking and match a driver; a street or a pin may be either or
- * both absent -- a pin never implies them (root CLAUDE.md, settled MDF-485).
+ * One end of a booking's pickup/drop-off snapshot -- the real, NESTED shape
+ * `serializeBooking()` emits (`pickup: this.serializeBookingStop(b, 'pickup')`),
+ * `null` wholesale when that end was never pinned, never individually-absent
+ * fields. (MDF-549 gap A: this file originally declared FLAT `pickupDistrict`/
+ * `pickupCity`/... fields the API never sends, under a comment claiming they
+ * were "absent until shipped" -- that was true when written and silently
+ * stopped being true once Pam shipped the nested shape; the page typechecked
+ * against its own wrong assumption instead of the server and always rendered
+ * "Not specified", even for a booking with real pins. Caught live by Dwight,
+ * fixed by reading the real shape instead of re-declaring one.) Matches
+ * `apps/web/lib/passenger-driver.ts`'s `TripBookingLocation` field-for-field --
+ * can't share the type across apps, so kept in sync by hand. District/city are
+ * what price the booking and match a driver; a street or a pin may be either
+ * or both absent -- a pin never implies them (root CLAUDE.md, settled MDF-485).
  */
 interface BookingEndSnapshot {
-  district?: string | null;
-  city?: string | null;
-  address?: string | null;
-  landmark?: string | null;
-  instructions?: string | null;
-  latitude?: number | null;
-  longitude?: number | null;
+  district: string | null;
+  city: string | null;
+  address: string | null;
+  landmark: string | null;
+  instructions: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 interface BookingDetail {
@@ -65,20 +72,8 @@ interface BookingDetail {
   cancelledBy: string | null;
   cancellationReason: string | null;
   createdAt: string;
-  pickupDistrict?: string | null;
-  pickupCity?: string | null;
-  pickupAddress?: string | null;
-  pickupLandmark?: string | null;
-  pickupInstructions?: string | null;
-  pickupLatitude?: number | null;
-  pickupLongitude?: number | null;
-  dropoffDistrict?: string | null;
-  dropoffCity?: string | null;
-  dropoffAddress?: string | null;
-  dropoffLandmark?: string | null;
-  dropoffInstructions?: string | null;
-  dropoffLatitude?: number | null;
-  dropoffLongitude?: number | null;
+  pickup: BookingEndSnapshot | null;
+  dropoff: BookingEndSnapshot | null;
 }
 
 /** Mirrors `BookingsTab`'s own map in `../../page.tsx` -- keep both in sync. */
@@ -93,30 +88,6 @@ const BOOKING_TONE: Record<BookingDetail['status'], 'info' | 'success' | 'neutra
 
 const when = (iso: string) => new Date(iso).toLocaleString();
 
-function pickupOf(b: BookingDetail): BookingEndSnapshot {
-  return {
-    district: b.pickupDistrict,
-    city: b.pickupCity,
-    address: b.pickupAddress,
-    landmark: b.pickupLandmark,
-    instructions: b.pickupInstructions,
-    latitude: b.pickupLatitude,
-    longitude: b.pickupLongitude,
-  };
-}
-
-function dropoffOf(b: BookingDetail): BookingEndSnapshot {
-  return {
-    district: b.dropoffDistrict,
-    city: b.dropoffCity,
-    address: b.dropoffAddress,
-    landmark: b.dropoffLandmark,
-    instructions: b.dropoffInstructions,
-    latitude: b.dropoffLatitude,
-    longitude: b.dropoffLongitude,
-  };
-}
-
 /** What a human reads for one end -- street if given, otherwise the landmark, otherwise just town/district. */
 function endLine(end: BookingEndSnapshot): string {
   if (end.address) return [end.address, end.city, end.district].filter(Boolean).join(', ');
@@ -125,12 +96,11 @@ function endLine(end: BookingEndSnapshot): string {
   return 'Not given';
 }
 
-function EndCard({ title, end }: { title: string; end: BookingEndSnapshot }) {
-  const given = end.district != null || end.city != null || end.address != null || end.landmark != null;
+function EndCard({ title, end }: { title: string; end: BookingEndSnapshot | null }) {
   return (
     <Card className="p-4 text-sm">
       <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">{title}</p>
-      {given ? (
+      {end ? (
         <>
           <p className="mt-1 break-words text-[color:var(--bmpl-text-muted)]">{endLine(end)}</p>
           {end.landmark && end.address && <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">Landmark: {end.landmark}</p>}
@@ -143,6 +113,16 @@ function EndCard({ title, end }: { title: string; end: BookingEndSnapshot }) {
       )}
     </Card>
   );
+}
+
+/** Mirrors `apps/web`'s own `endPoint()` in `TripBookings.tsx` -- same shape, kept in sync by hand. */
+function endPoint(label: string, end: BookingEndSnapshot | null): MapPoint | null {
+  if (!end || end.latitude == null || end.longitude == null) return null;
+  return {
+    latitude: end.latitude,
+    longitude: end.longitude,
+    label: `${label}: ${end.address ?? end.landmark ?? [end.city, end.district].filter(Boolean).join(', ')}`,
+  };
 }
 
 export default function AdminBookingDetailPage() {
@@ -177,8 +157,8 @@ export default function AdminBookingDetailPage() {
       </div>
     );
 
-  const pickup = pickupOf(booking);
-  const dropoff = dropoffOf(booking);
+  const pickup = booking.pickup;
+  const dropoff = booking.dropoff;
 
   return (
     <div>
@@ -227,18 +207,7 @@ export default function AdminBookingDetailPage() {
           actually has a pin, which is honest: pickup/drop-off are optional
           on a booking, so having neither is the normal case, not an error. */}
       <AddressMapPreview
-        points={(
-          [
-            ['Pickup', pickup],
-            ['Drop-off', dropoff],
-          ] as const
-        )
-          .filter(([, end]) => end.latitude != null && end.longitude != null)
-          .map(([label, end]): MapPoint => ({
-            latitude: end.latitude!,
-            longitude: end.longitude!,
-            label: `${label}: ${end.address ?? end.landmark ?? [end.city, end.district].filter(Boolean).join(', ')}`,
-          }))}
+        points={[endPoint('Pickup', pickup), endPoint('Drop-off', dropoff)].filter((p): p is MapPoint => p !== null)}
         title={`${booking.reference} · pickup & drop-off`}
         className="mt-4"
       />

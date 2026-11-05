@@ -10,6 +10,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * `feat/passenger-api-booking-pins` (`GET admin/passengers/bookings/:id`,
  * plural "passengers" -- god's own correction of an earlier relayed
  * singular path).
+ *
+ * Gap A (caught live, not by this file): `baseBooking()` originally used the
+ * same FLAT pickupX/dropoffX fields the page's own (wrong) type declared --
+ * so this suite passed the whole time the live page was broken, a textbook
+ * false green from a fixture sharing the production code's wrong
+ * assumption instead of the server's real shape. Fixed to the real nested
+ * `pickup`/`dropoff` objects below.
  */
 
 vi.mock('next/navigation', () => ({
@@ -68,6 +75,8 @@ function baseBooking(extra: Record<string, unknown> = {}) {
     cancelledBy: null,
     cancellationReason: null,
     createdAt: new Date().toISOString(),
+    pickup: null,
+    dropoff: null,
     ...extra,
   };
 }
@@ -136,20 +145,24 @@ describe('AdminBookingDetailPage (MDF-549)', () => {
     leaflet.marker.mockClear();
     stubFetch(
       baseBooking({
-        pickupDistrict: 'CAYO',
-        pickupCity: 'San Ignacio',
-        pickupAddress: '5 Burns Ave',
-        pickupLandmark: null,
-        pickupInstructions: 'Call on arrival',
-        pickupLatitude: 17.16,
-        pickupLongitude: -89.07,
-        dropoffDistrict: 'BELIZE',
-        dropoffCity: 'Belize City',
-        dropoffAddress: null,
-        dropoffLandmark: 'Near the market',
-        dropoffInstructions: null,
-        dropoffLatitude: 17.5,
-        dropoffLongitude: -88.2,
+        pickup: {
+          district: 'CAYO',
+          city: 'San Ignacio',
+          address: '5 Burns Ave',
+          landmark: null,
+          instructions: 'Call on arrival',
+          latitude: 17.16,
+          longitude: -89.07,
+        },
+        dropoff: {
+          district: 'BELIZE',
+          city: 'Belize City',
+          address: null,
+          landmark: 'Near the market',
+          instructions: null,
+          latitude: 17.5,
+          longitude: -88.2,
+        },
       }),
     );
     await mount();
