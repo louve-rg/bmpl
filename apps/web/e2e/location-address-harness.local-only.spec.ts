@@ -12,6 +12,8 @@ import {
   UAT_DRIVER_PASSWORD,
   SUPER_ADMIN_EMAIL,
   SUPER_ADMIN_PASSWORD,
+  UAT_PASSENGER_DRIVER_EMAIL,
+  UAT_PASSENGER_PROVIDER_EMAIL,
 } from './support/auth';
 import {
   mapContainer,
@@ -1026,5 +1028,315 @@ test.describe('[LOCAL ONLY, skips in CI] "Show my address" and the search box ea
     // over `address`, one of these would fail.
     expect(searchReqUrl, `search box request was: ${searchReqUrl}`).not.toContain(encodeURIComponent(addressQuery));
     expect(addressReqUrl, `"Show my address" request was: ${addressReqUrl}`).not.toContain(encodeURIComponent(searchQuery));
+  });
+});
+
+/* ---------------------------------------------------- MDF-550: passenger pins */
+
+/**
+ * MDF-550, owner directive 2026-11-05: the twelve named checks for a
+ * passenger's pickup/destination pins, plus the reversal check god added as
+ * first-class ("the single requirement most likely to pass a component test
+ * and fail in a real page, because a swap is invisible unless you assert
+ * which coordinate landed in which column"). Runs against this harness's own
+ * local combined tree -- Pam's `feat/passenger-api-booking-pins` (897435a9)
+ * and Oscar's `feat/passenger-location-web` (2c38d5f0) merged on top of this
+ * branch, clean by construction (pairwise-disjoint changed-file sets, shared
+ * merge-base 46d12c8a — see this harness's report to god).
+ *
+ * FIXTURE SETUP (route, trip, fleet affiliation, vehicle, assignment) is a
+ * real, un-mocked round trip through the live API via `page.request` --
+ * same discipline as every other fixture in this file. It is deliberately
+ * NOT one of the twelve checks (those are the RIDER-facing flow and its
+ * downstream driver view); driving it directly rather than through operator
+ * UI that has nothing to do with location matches this file's own existing
+ * exception for adding a product to cart. Reuses the already-seeded,
+ * already-approved UAT_PASSENGER_PROVIDER / UAT_PASSENGER_DRIVER accounts
+ * (seed-uat-roles.ts) rather than registering throwaway ones.
+ *
+ * ASYMMETRIC locations for the reversal check, god's own instruction: Belize
+ * City pickup, Punta Gorda dropoff -- the same two towns Pam's own
+ * integration test (apps/api/test/passenger-booking.integration.spec.ts)
+ * uses for exactly this reason, not invented here.
+ *
+ * #11 (GPS denial does not block manual placement) needs no dedicated test:
+ * this describe's rider context never calls `context.grantPermissions
+ * (['geolocation'])` anywhere, so it is already running in the denied state
+ * throughout -- the same reasoning this file's own `denyGeolocationPermission`
+ * no-op documents ("a fresh context already starts in exactly this state").
+ * Every successful manual pin placement below IS #11, not a separate case.
+ *
+ * ADMIN visibility (#9 of god's list to me, the owner's own list's final
+ * check) is NOT in this file -- apps/admin is a separate app, separate
+ * Playwright config, separate dev-server lifecycle. See
+ * apps/admin/e2e/passenger-booking-pin-visibility.local-only.spec.ts.
+ */
+const PAX_PROVIDER_STORAGE = storagePathFor('pax-provider');
+const PAX_DRIVER_STORAGE = storagePathFor('pax-driver');
+const PAX_ADMIN_SETUP_STORAGE = storagePathFor('pax-admin-setup');
+let paxFixtureOk = false;
+let paxTripId = '';
+let paxTripNoPinId = '';
+const PAX_ROUTE_NAME = `MDF-550 UAT run ${Date.now()}`;
+const PAX_ROUTE_NAME_NOPIN = `MDF-550 UAT run (no pin) ${Date.now()}`;
+
+function skipIfNoPaxFixture() {
+  test.skip(!paxFixtureOk, 'Needs a live API + seeded dev database (UAT_PASSENGER_PROVIDER/UAT_PASSENGER_DRIVER/SUPER_ADMIN). See file header.');
+}
+
+test.beforeAll(async ({ browser }) => {
+  // Dev-server first-compile + three sequential UI logins + ~8 API round
+  // trips comfortably exceeds the file's default 30s per-test timeout
+  // (playwright.config.ts), which a bare hook inherits.
+  test.setTimeout(90_000);
+  if (!customerLoginOk) return;
+  const providerOk = await loginAndSave(browser, UAT_PASSENGER_PROVIDER_EMAIL, UAT_FIXTURE_PASSWORD, PAX_PROVIDER_STORAGE);
+  const driverOk = await loginAndSave(browser, UAT_PASSENGER_DRIVER_EMAIL, UAT_FIXTURE_PASSWORD, PAX_DRIVER_STORAGE);
+  const adminOk = await loginAndSave(browser, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD ?? '', PAX_ADMIN_SETUP_STORAGE);
+  if (!providerOk || !driverOk || !adminOk) return;
+
+  const provider = await authedPage(browser, PAX_PROVIDER_STORAGE);
+  const driver = await authedPage(browser, PAX_DRIVER_STORAGE);
+  const admin = await authedPage(browser, PAX_ADMIN_SETUP_STORAGE);
+  try {
+    const driverProfileRes = await driver.page.request.get('/api/passenger/driver/profile');
+    if (!driverProfileRes.ok()) return;
+    const driverProfileId = (await driverProfileRes.json()).id as string;
+
+    const routeRes = await provider.page.request.post('/api/passenger/provider/routes', {
+      data: {
+        name: PAX_ROUTE_NAME,
+        originDistrict: 'BELIZE',
+        originCity: 'Belize City',
+        destinationDistrict: 'TOLEDO',
+        destinationCity: 'Punta Gorda',
+        scheduleNote: 'MDF-550 harness fixture',
+        baseFareMinor: 2500,
+      },
+    });
+    if (!routeRes.ok()) return;
+    const route = await routeRes.json();
+
+    const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+    const tripRes = await provider.page.request.post('/api/passenger/provider/trips', {
+      data: { routeId: route.id, scheduledDepartureAt: tomorrow },
+    });
+    if (!tripRes.ok()) return;
+    paxTripId = (await tripRes.json()).id;
+
+    // A SECOND route+trip, distinctly named — #10's regression needs a fresh
+    // departure the rider has no open booking on yet (one open booking per
+    // departure is a pre-existing, unrelated rule) and an unpinned booking
+    // only needs a fare, never an assignment. A separate route (not just a
+    // second trip on the SAME route) keeps the two departure cards
+    // unambiguous to select by name in the UI — no reliance on list order.
+    const routeNoPinRes = await provider.page.request.post('/api/passenger/provider/routes', {
+      data: {
+        name: PAX_ROUTE_NAME_NOPIN,
+        originDistrict: 'BELIZE',
+        originCity: 'Belize City',
+        destinationDistrict: 'TOLEDO',
+        destinationCity: 'Punta Gorda',
+        scheduleNote: 'MDF-550 harness fixture (regression, no pins)',
+        baseFareMinor: 2500,
+      },
+    });
+    if (!routeNoPinRes.ok()) return;
+    const routeNoPin = await routeNoPinRes.json();
+    const tripNoPinRes = await provider.page.request.post('/api/passenger/provider/trips', {
+      data: { routeId: routeNoPin.id, scheduledDepartureAt: tomorrow },
+    });
+    if (!tripNoPinRes.ok()) return;
+    paxTripNoPinId = (await tripNoPinRes.json()).id;
+
+    // Idempotent: a prior run of this same suite (or a retry) may already
+    // hold an ACCEPTED affiliation between this provider and this driver —
+    // re-inviting then 400s ("already affiliated"). Reuse it rather than
+    // assuming a fresh operator with zero affiliations, which is only true
+    // the first time this ever runs against a given database.
+    const existingRes = await provider.page.request.get('/api/passenger/provider/affiliations');
+    const existing = existingRes.ok() ? await existingRes.json() : [];
+    const already = (existing as Array<{ id: string; driverProfileId: string; status: string }>).find(
+      (a) => a.driverProfileId === driverProfileId && a.status === 'ACCEPTED',
+    );
+    if (!already) {
+      const inviteRes = await provider.page.request.post('/api/passenger/provider/affiliations/invite', {
+        data: { driverProfileId },
+      });
+      if (!inviteRes.ok()) return;
+      const invite = await inviteRes.json();
+      const acceptRes = await driver.page.request.post(`/api/passenger/driver/affiliations/${invite.id}/accept`);
+      if (!acceptRes.ok()) return;
+    }
+
+    const vehicleRes = await provider.page.request.post('/api/passenger/provider/vehicles', {
+      data: { type: 'VAN', make: 'Toyota', model: 'Hiace', licencePlate: `UAT550${Date.now()}`.slice(0, 18), seatCapacity: 12 },
+    });
+    if (!vehicleRes.ok()) return;
+    const vehicle = await vehicleRes.json();
+    const approveRes = await admin.page.request.post(`/api/admin/passengers/vehicles/${vehicle.id}/approve`);
+    if (!approveRes.ok()) return;
+
+    const assignRes = await provider.page.request.post(`/api/passenger/provider/trips/${paxTripId}/assign`, {
+      data: { driverProfileId, vehicleId: vehicle.id },
+    });
+    paxFixtureOk = assignRes.ok();
+  } finally {
+    await provider.close();
+    await driver.close();
+    await admin.close();
+  }
+});
+
+test.afterAll(() => {
+  fs.rmSync(PAX_PROVIDER_STORAGE, { force: true });
+  fs.rmSync(PAX_DRIVER_STORAGE, { force: true });
+  fs.rmSync(PAX_ADMIN_SETUP_STORAGE, { force: true });
+});
+
+/** Scopes to the one DepartureCard whose route name matches -- UiCard's own
+ *  `bmpl-card` class (apps/web/components/ui.tsx), not a selector this
+ *  harness invented, same reasoning as `mapContainer`'s own doc comment. */
+function departureCard(page: Page, routeName: string) {
+  return page.locator('b', { hasText: routeName }).locator('xpath=ancestor::*[contains(@class, "bmpl-card")][1]');
+}
+
+test.describe('[LOCAL ONLY, skips in CI] MDF-550 #1-#6/#8/#10/#11/#12 + reversal — passenger pickup/destination pins on a real booking', () => {
+  test('rider drops an asymmetric pickup and destination pin, adjusts the pickup, submits, and both ends land in their own column — not swapped, not lost, no street address required', async ({ browser }) => {
+    skipIfNoCustomer();
+    skipIfNoPaxFixture();
+    const { page, close } = await authedPage(browser, CUSTOMER_STORAGE);
+
+    try {
+      // #1 open passenger booking
+      await page.goto('/dashboard/passenger');
+      const card = departureCard(page, PAX_ROUTE_NAME);
+      await card.getByRole('button', { name: 'Request seats' }).click();
+
+      // #2/#3 — drop a pickup pin, adjust it, read back the committed value.
+      // Ladyville/Dangriga (not Belize City/Punta Gorda, the ROUTE's own
+      // origin/destination, which the departure card already renders as
+      // "Belize City → Punta Gorda") — deliberately distinct towns, so a
+      // later text match against the PIN can never be satisfied by the
+      // route's own, unrelated origin/destination line.
+      await page.getByLabel(/Pick me up somewhere other than the route.s stop/i).check();
+      const pickupSection = page.getByRole('group', { name: 'Pickup location' });
+      await pickupSection.getByLabel(/city, town or village/i).fill('Ladyville');
+      await pickupSection.getByLabel(/district or island/i).selectOption('BELIZE');
+      await clickMapToPlacePin(page, { x: 0.3, y: 0.3 }, 0);
+      const firstPickup = await readPinCoordinates(page, 0);
+      await dragPinBy(page, 40, 40, 10, 0);
+      const adjustedPickup = await readPinCoordinates(page, 0);
+      expect(adjustedPickup, 'dragging the pin must move it — this IS the "adjust" half of #2/#3').not.toEqual(firstPickup);
+
+      // #4 — drop and confirm a destination pin, visibly far from pickup.
+      await page.getByLabel(/Drop me off somewhere other than the route.s stop/i).check();
+      const dropoffSection = page.getByRole('group', { name: 'Destination' });
+      await dropoffSection.getByLabel(/city, town or village/i).fill('Dangriga');
+      await dropoffSection.getByLabel(/district or island/i).selectOption('STANN_CREEK');
+      await clickMapToPlacePin(page, { x: 0.8, y: 0.85 }, 1);
+      const dropoff = await readPinCoordinates(page, 1);
+
+      // Reversal check (god's addition, section 3): asymmetric by construction
+      // (Belize City vs Punta Gorda), asserted here on the UI's OWN read-back
+      // before submission ever happens — if the two pins already read
+      // identically this far, nothing downstream can be trusted either.
+      expect(dropoff, 'pickup and dropoff pins must not read as the same coordinate').not.toEqual(adjustedPickup);
+
+      // #5 — submit.
+      await card.getByRole('button', { name: 'Send request' }).click();
+      await expect(page.getByText('Request sent')).toBeVisible({ timeout: 10_000 });
+
+      // #6 — both coordinates persist in the database (API round-trip, not
+      // the UI's own claim — same discipline as #3 in describe A above).
+      const bookingsRes = await page.request.get('/api/passenger/bookings');
+      expect(bookingsRes.ok()).toBe(true);
+      const bookings = (await bookingsRes.json()) as Array<{
+        tripId: string;
+        pickup: { city: string; district: string; address: string | null; latitude: number; longitude: number } | null;
+        dropoff: { city: string; district: string; address: string | null; latitude: number; longitude: number } | null;
+      }>;
+      const mine = bookings.find((b) => b.tripId === paxTripId);
+      if (!mine) throw new Error('Could not find the just-submitted booking in /passenger/bookings.');
+
+      // Not reversed, not collapsed: each end's own column holds its own data.
+      expect(mine.pickup?.city).toBe('Ladyville');
+      expect(mine.pickup?.district).toBe('BELIZE');
+      expect(mine.pickup?.latitude).toBeCloseTo(adjustedPickup.latitude, 3);
+      expect(mine.pickup?.longitude).toBeCloseTo(adjustedPickup.longitude, 3);
+      expect(mine.dropoff?.city).toBe('Dangriga');
+      expect(mine.dropoff?.district).toBe('STANN_CREEK');
+      expect(mine.dropoff?.latitude).toBeCloseTo(dropoff.latitude, 3);
+      expect(mine.dropoff?.longitude).toBeCloseTo(dropoff.longitude, 3);
+
+      // #12 — no formal street address required: PIN mode never shows a
+      // street-line field at all (AddressField.tsx), so `address` must be
+      // absent on both ends of a pin-only booking like this one.
+      expect(mine.pickup?.address ?? null).toBeNull();
+      expect(mine.dropoff?.address ?? null).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
+  test('#10 — an existing, unpinned passenger booking still works exactly as before', async ({ browser }) => {
+    skipIfNoCustomer();
+    skipIfNoPaxFixture();
+    const { page, close } = await authedPage(browser, CUSTOMER_STORAGE);
+    try {
+      await page.goto('/dashboard/passenger');
+      const card = departureCard(page, PAX_ROUTE_NAME_NOPIN);
+      await card.getByRole('button', { name: 'Request seats' }).click();
+      // Neither checkbox touched — the regression case: pickup/dropoff are
+      // optional per booking, and the normal case on a scheduled route.
+      await card.getByRole('button', { name: 'Send request' }).click();
+      await expect(page.getByText('Request sent')).toBeVisible({ timeout: 10_000 });
+
+      const bookingsRes = await page.request.get('/api/passenger/bookings');
+      const bookings = (await bookingsRes.json()) as Array<{ tripId: string; pickup: unknown; dropoff: unknown }>;
+      const mine = bookings.find((b) => b.tripId === paxTripNoPinId);
+      if (!mine) throw new Error('Could not find the unpinned booking in /passenger/bookings.');
+      expect(mine.pickup).toBeNull();
+      expect(mine.dropoff).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
+  test('#8 — the authorized driver can view the pinned pickup and destination through their own interface', async ({ browser }) => {
+    skipIfNoPaxFixture();
+    const { page, close } = await authedPage(browser, PAX_DRIVER_STORAGE);
+    try {
+      await page.goto('/dashboard/passenger-driver/trips');
+      const tripCard = page.locator('b', { hasText: PAX_ROUTE_NAME }).locator('xpath=ancestor::*[contains(@class, "bmpl-card")][1]');
+      await tripCard.getByRole('button', { name: 'View passengers' }).click();
+      // Ladyville/Dangriga are the PIN towns, deliberately distinct from the
+      // route's own Belize City/Punta Gorda origin-destination line this
+      // same card already renders — a match here can only come from the
+      // booking's actual pickup/dropoff snapshot, not route text.
+      await expect(tripCard.getByText('Ladyville', { exact: false })).toBeVisible({ timeout: 10_000 });
+      await expect(tripCard.getByText('Dangriga', { exact: false })).toBeVisible();
+    } finally {
+      await close();
+    }
+  });
+
+  test('#7 — the booking displays the correct pickup and destination to the RIDER who set them, on their own My Bookings page', async ({ browser }) => {
+    skipIfNoCustomer();
+    skipIfNoPaxFixture();
+    const { page, close } = await authedPage(browser, CUSTOMER_STORAGE);
+    try {
+      await page.goto('/dashboard/passenger/bookings');
+      // Honest-fail check (god: "an honest fail is the outcome I want if it
+      // is the true one"): apps/web/components/travel/MyBookings.tsx
+      // (confirmed by grep before writing this) never renders pickup/dropoff
+      // anywhere, on any booking row. The driver (#8 above) and admin see it
+      // correctly; the rider who actually set the pins cannot see their own
+      // choice reflected back on this page at all.
+      await expect(page.getByText('Ladyville', { exact: false })).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText('Dangriga', { exact: false })).toBeVisible();
+    } finally {
+      await close();
+    }
   });
 });

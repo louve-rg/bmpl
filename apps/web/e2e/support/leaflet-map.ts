@@ -37,9 +37,17 @@ import type { BrowserContext, Locator, Page } from '@playwright/test';
 
 /** The map's own container — `role="application"`, a stable, already-shipped
  *  accessible name (LocationPicker.tsx:657-658), not a selector this harness
- *  invented. Matches both the embedded and full-screen-modal instances. */
-export function mapContainer(page: Page): Locator {
-  return page.getByRole('application', { name: /map for choosing/i });
+ *  invented. Matches both the embedded and full-screen-modal instances.
+ *
+ *  `index` (MDF-550): the passenger `BookingForm` is the first caller to put
+ *  TWO of these on screen at once — pickup and dropoff are "always visible
+ *  TOGETHER once added, never a wizard" (DeparturesList.tsx's own comment) —
+ *  so a bare page-wide role query is no longer guaranteed to match exactly
+ *  one element. `.nth(index)` defaults to 0, so every existing single-map
+ *  call site is unaffected (nth(0) on a one-element locator is that element);
+ *  pickup is DOM order 0, dropoff is 1, fixed by BookingForm's own JSX order. */
+export function mapContainer(page: Page, index = 0): Locator {
+  return page.getByRole('application', { name: /map for choosing/i }).nth(index);
 }
 
 /**
@@ -48,8 +56,8 @@ export function mapContainer(page: Page): Locator {
  * Leaflet's `whenReady` callback. Waiting for it to disappear before
  * interacting matches the component's own readiness signal.
  */
-export async function waitForMapReady(page: Page): Promise<void> {
-  await page.getByText('Loading map…').waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => {});
+export async function waitForMapReady(page: Page, index = 0): Promise<void> {
+  await page.getByText('Loading map…').nth(index).waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => {});
 }
 
 /**
@@ -74,10 +82,11 @@ export async function waitForMapReady(page: Page): Promise<void> {
 export async function clickMapToPlacePin(
   page: Page,
   offset: { x: number; y: number } = { x: 0.5, y: 0.5 },
+  index = 0,
 ): Promise<void> {
-  await waitForMapReady(page);
-  await mapContainer(page).scrollIntoViewIfNeeded();
-  const box = await mapContainer(page).boundingBox();
+  await waitForMapReady(page, index);
+  await mapContainer(page, index).scrollIntoViewIfNeeded();
+  const box = await mapContainer(page, index).boundingBox();
   if (!box) throw new Error('Map container has no bounding box — is it rendered and visible?');
   await page.mouse.click(box.x + box.width * offset.x, box.y + box.height * offset.y);
 }
@@ -104,9 +113,9 @@ export async function clickMapToPlacePin(
  * `clickMapToPlacePin`, which scrolls) — that was luck, not a guarantee this
  * function's own contract should rely on.
  */
-export async function dragPinBy(page: Page, deltaX: number, deltaY: number, steps = 10): Promise<void> {
-  await mapContainer(page).scrollIntoViewIfNeeded();
-  const marker = mapContainer(page).locator('.leaflet-marker-icon').first();
+export async function dragPinBy(page: Page, deltaX: number, deltaY: number, steps = 10, index = 0): Promise<void> {
+  await mapContainer(page, index).scrollIntoViewIfNeeded();
+  const marker = mapContainer(page, index).locator('.leaflet-marker-icon').first();
   const box = await marker.boundingBox();
   if (!box) throw new Error('No marker to drag — call clickMapToPlacePin first.');
   const startX = box.x + box.width / 2;
@@ -139,9 +148,9 @@ export async function dragPinBy(page: Page, deltaX: number, deltaY: number, step
  * `scrollIntoViewIfNeeded()` first — see `dragPinBy`'s own comment above for
  * why this is not optional at this function's own call boundary either.
  */
-export async function touchDragPinBy(page: Page, deltaX: number, deltaY: number, steps = 6): Promise<void> {
-  await mapContainer(page).scrollIntoViewIfNeeded();
-  const marker = mapContainer(page).locator('.leaflet-marker-icon').first();
+export async function touchDragPinBy(page: Page, deltaX: number, deltaY: number, steps = 6, index = 0): Promise<void> {
+  await mapContainer(page, index).scrollIntoViewIfNeeded();
+  const marker = mapContainer(page, index).locator('.leaflet-marker-icon').first();
   const box = await marker.boundingBox();
   if (!box) throw new Error('No marker to touch-drag — call clickMapToPlacePin first.');
   const startX = box.x + box.width / 2;
@@ -177,12 +186,12 @@ export async function touchDragPinBy(page: Page, deltaX: number, deltaY: number,
  * bare `p.font-mono` match, since other font-mono text exists elsewhere on
  * the page (e.g. the address-search results list).
  */
-export function pinCoordinatesLocator(page: Page): Locator {
-  return page.locator('[aria-live="polite"]', { hasText: '✓ Location selected' }).locator('p.font-mono');
+export function pinCoordinatesLocator(page: Page, index = 0): Locator {
+  return page.locator('[aria-live="polite"]', { hasText: '✓ Location selected' }).nth(index).locator('p.font-mono');
 }
 
-export async function readPinCoordinates(page: Page): Promise<{ latitude: number; longitude: number }> {
-  const loc = pinCoordinatesLocator(page);
+export async function readPinCoordinates(page: Page, index = 0): Promise<{ latitude: number; longitude: number }> {
+  const loc = pinCoordinatesLocator(page, index);
   const text = await loc.textContent();
   const match = /(-?\d+\.\d+),\s*(-?\d+\.\d+)/.exec(text ?? '');
   if (!match) throw new Error(`Could not parse coordinates from "${text}" — has the "✓ Location selected" state actually been reached?`);
