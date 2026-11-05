@@ -129,37 +129,32 @@ interface LocationPickerProps {
  * transient state (GPS accuracy circle, address-lookup results) does not —
  * the same accepted trade ExpandableRouteMap's own viewport already makes.
  *
- * MDF-485 M1/M2, owner behaviour 10 ("confirm or cancel the selection") --
- * RULING (god, 2026-11-05): cancel is an UNDO AT THE MODAL BOUNDARY, not a
- * staged draft inside the picker. `AddressField` reacts to every `onChange`
- * immediately -- `movedFromSaved` warns the instant a pin drifts from a
- * saved one -- and a staged commit would silently break that and anything
- * else in checkout keyed on live pin movement, as a side effect of adding a
- * button. So: the modal body commits every tap/drag immediately, exactly
- * like the embedded one always has (`LocationPicker.test.tsx`'s own "reaches
- * the caller immediately" test stays true and stays unmodified). What
- * changes is only what happens AT THE MODAL'S OWN BOUNDARY: `openExpanded`
- * remembers the value the picker had the moment it opened; dismissing by ✕
- * or Escape (`onClose`) replays that captured value through `onChange`,
- * undoing whatever was placed while the modal was open; "Use this location"
- * (`onConfirm`) does nothing extra, because by then the right value is
- * already live. "Remove pin" (`clear()`, inside the body) stays a distinct
- * action from this revert -- clearing to null and undoing back to the
- * opening value are not the same thing and must not be merged.
+ * MDF-485 M1/M2, owner behaviour 10 ("confirm or cancel the selection"): the
+ * full-screen map edits a DRAFT, seeded from `value` every time it opens, and
+ * only calls the caller's `onChange` from the confirm button. Closing any
+ * other way (✕, Escape) discards the draft untouched -- the embedded value
+ * the picker opened with survives exactly as it was. The embedded body below
+ * still reports every tap/drag live, same as always: it has no confirm/cancel
+ * chrome of its own, and the surrounding form's own save is the real confirm.
+ * (god, 2026-11-05: re-verified against the diff and confirmed this scoping
+ * — the embedded body always gets the real `value`/`onChange`, so
+ * `AddressField`'s `movedFromSaved` keeps reacting live; only the
+ * modal-rendered body is handed the draft — holds, and is the stronger
+ * design: zero transient `onChange` writes, versus one write-then-undo.)
  */
 export function LocationPicker(props: LocationPickerProps) {
   const [expanded, setExpanded] = useState(false);
-  const openingValueRef = useRef<Coordinates | null>(props.value);
+  const [draft, setDraft] = useState<Coordinates | null>(props.value);
 
   function openExpanded() {
-    openingValueRef.current = props.value;
+    setDraft(props.value);
     setExpanded(true);
   }
   function confirmExpanded() {
+    props.onChange(draft);
     setExpanded(false);
   }
   function cancelExpanded() {
-    props.onChange(openingValueRef.current);
     setExpanded(false);
   }
 
@@ -173,7 +168,7 @@ export function LocationPicker(props: LocationPickerProps) {
         title={props.heading ?? 'Delivery location'}
         confirmLabel="Use this location"
       >
-        {expanded && <LocationPickerBody {...props} inModal />}
+        {expanded && <LocationPickerBody {...props} value={draft} onChange={setDraft} inModal />}
       </FullScreenMapModal>
     </>
   );
