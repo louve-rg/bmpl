@@ -18,6 +18,7 @@ const row: SavedAddress = {
   addressLine2: null,
   city: 'Belize City',
   district: 'BELIZE',
+  landmark: null,
   instructions: null,
   latitude: 17.5,
   longitude: -88.2,
@@ -31,9 +32,16 @@ describe('address book form', () => {
     expect(form.email).toBe('');
     expect(form.company).toBe('');
     expect(form.addressLine2).toBe('');
+    expect(form.landmark).toBe('');
     expect(form.instructions).toBe('');
     expect(form.latitude).toBe(17.5);
     expect(form.longitude).toBe(-88.2);
+  });
+
+  it('sends the landmark, distinct from instructions (MDF-539)', () => {
+    const payload = buildAddressBookPayload({ ...formFromRow(row), landmark: 'Behind the blue gate', instructions: 'Ring the bell' });
+    expect(payload.landmark).toBe('Behind the blue gate');
+    expect(payload.instructions).toBe('Ring the bell');
   });
 
   it('carries the pin through on an edit that leaves it untouched (MDF-485: the pin is a form field now)', () => {

@@ -118,6 +118,20 @@ export default function AddressesPage() {
 
   const coords: Coordinates | null = form.latitude != null && form.longitude != null ? { latitude: form.latitude, longitude: form.longitude } : null;
 
+  /**
+   * What to read on a row with no street (god, MDF-534): the landmark if set,
+   * otherwise the pin. Rendering `row.addressLine1` unguarded on a pin-only
+   * row used to read as ", Belize City, Belize District" -- a leading comma
+   * and nothing saying a pin exists, the shape of thing that makes a working
+   * feature look broken.
+   */
+  function addressRowLine(row: SavedAddress): string {
+    if (row.addressLine1) return [row.addressLine1, row.addressLine2].filter(Boolean).join(', ');
+    if (row.landmark) return row.landmark;
+    if (row.latitude != null && row.longitude != null) return 'Pinned location';
+    return 'No street or pin yet';
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
@@ -163,11 +177,21 @@ export default function AddressesPage() {
                 ))}
               </Select>
             </Field>
-            <Field label="Street or landmark" htmlFor="ab-line1">
+            <Field label="Street" htmlFor="ab-line1">
               <Input id="ab-line1" value={form.addressLine1} onChange={set('addressLine1')} maxLength={200} />
             </Field>
             <Field label="Second line (optional)" htmlFor="ab-line2">
               <Input id="ab-line2" value={form.addressLine2} onChange={set('addressLine2')} maxLength={200} />
+            </Field>
+            {/* MDF-539: its own field now, distinct from the street line and
+                from directions below -- most useful exactly when there is no
+                street given, which is why the list row below reads it. */}
+            <Field
+              label="Landmark (optional)"
+              htmlFor="ab-landmark"
+              hint="A nearby place your driver would recognise -- especially useful with no street given."
+            >
+              <Input id="ab-landmark" value={form.landmark} onChange={set('landmark')} maxLength={200} />
             </Field>
             <Field label="Town or village" htmlFor="ab-city">
               <Input id="ab-city" value={form.city} onChange={set('city')} maxLength={120} />
@@ -229,12 +253,18 @@ export default function AddressesPage() {
                     <p className="font-semibold text-belize-navy">
                       {row.label}
                       {row.isDefault && <span className="ml-2 text-xs font-medium text-belize-accent">Default</span>}
+                      {/* MDF-534: quiet, not a badge-fest -- the list is the only place a
+                          customer can tell which saved addresses still need a pin added. */}
+                      {row.latitude != null && row.longitude != null && (
+                        <span className="ml-2 text-xs font-medium text-slate-400" title="Has a pin">
+                          📍
+                        </span>
+                      )}
                     </p>
                     <p className="text-sm text-slate-700">{row.fullName}</p>
                     <p className="text-sm text-slate-600">{row.phone}</p>
                     <p className="text-sm text-slate-600">
-                      {row.addressLine1}
-                      {row.addressLine2 ? `, ${row.addressLine2}` : ''}, {row.city}, {DISTRICT_LABELS[row.district as keyof typeof DISTRICT_LABELS] ?? row.district}
+                      {addressRowLine(row)}, {row.city}, {DISTRICT_LABELS[row.district as keyof typeof DISTRICT_LABELS] ?? row.district}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">

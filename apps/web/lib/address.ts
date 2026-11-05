@@ -36,6 +36,14 @@ export interface AddressValue {
   addressLine2: string;
   city: string;
   district: string;
+  /**
+   * MDF-539: a named place -- "behind the blue gate" -- distinct from both
+   * the street line and the driver instructions. Its whole purpose is to be
+   * the thing a human reads when there IS no street line (a pin-only
+   * address), so it is never cleared by `switchMethod` the way addressLine1/2
+   * are -- a landmark is equally true in every mode, same as the pin.
+   */
+  landmark: string;
   instructions: string;
   latitude: number | null;
   longitude: number | null;
@@ -52,6 +60,7 @@ export interface SavedAddress {
   addressLine2: string | null;
   city: string;
   district: string;
+  landmark: string | null;
   instructions: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -69,6 +78,7 @@ export interface SavedAddressPayload {
   addressLine2: string | null;
   city: string;
   district: string;
+  landmark: string | null;
   instructions: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -91,6 +101,7 @@ export function toSavedAddressPayload(v: AddressValue, label: string): SavedAddr
     addressLine2: v.addressLine2.trim() || null,
     city: v.city.trim(),
     district: v.district,
+    landmark: v.landmark.trim() || null,
     instructions: v.instructions.trim() || null,
     latitude: v.latitude,
     longitude: v.longitude,
@@ -108,6 +119,7 @@ export const emptyAddress = (method: AddressMethod = 'TYPED'): AddressValue => (
   addressLine2: '',
   city: '',
   district: '',
+  landmark: '',
   instructions: '',
   latitude: null,
   longitude: null,

@@ -28,6 +28,8 @@ export interface AddressBookForm {
   addressLine2: string;
   city: string;
   district: string;
+  /** MDF-539: a named place, distinct from the street and from instructions -- see lib/address.ts. */
+  landmark: string;
   instructions: string;
   latitude: number | null;
   longitude: number | null;
@@ -43,6 +45,7 @@ export const EMPTY_ADDRESS_BOOK_FORM: AddressBookForm = {
   addressLine2: '',
   city: '',
   district: 'BELIZE',
+  landmark: '',
   instructions: '',
   latitude: null,
   longitude: null,
@@ -60,6 +63,7 @@ export function formFromRow(row: SavedAddress): AddressBookForm {
     addressLine2: row.addressLine2 ?? '',
     city: row.city,
     district: row.district,
+    landmark: row.landmark ?? '',
     instructions: row.instructions ?? '',
     latitude: row.latitude,
     longitude: row.longitude,
@@ -86,6 +90,7 @@ export function buildAddressBookPayload(form: AddressBookForm): SavedAddressPayl
       addressLine2: form.addressLine2,
       city: form.city,
       district: form.district,
+      landmark: form.landmark,
       instructions: form.instructions,
       latitude: form.latitude,
       longitude: form.longitude,
