@@ -413,6 +413,27 @@ export class PassengerOperationsService {
     return this.listBookings(filter);
   }
 
+  /**
+   * Single-booking admin read. Did not exist before (BMPL-548 follow-up): the
+   * admin detail page fetched the list and found the row client-side, which
+   * only works while the booking is among the 300 most recent — row 301
+   * silently read as "not found" for a booking that exists. Admin has no
+   * ownership scope to fail closed on, so the only failure mode is a plain
+   * not-found for an id that does not resolve, matching the body
+   * `bookingOnProviderTrip` already gives a foreign operator's booking id.
+   */
+  async getBookingAdmin(bookingId: string) {
+    const b = await this.prisma.passengerBooking.findUnique({
+      where: { id: bookingId },
+      include: {
+        trip: { include: { route: { select: { name: true, originCity: true, destinationCity: true } } } },
+        passenger: { select: { firstName: true, lastName: true } },
+      },
+    });
+    if (!b) throw new NotFoundException('Booking not found.');
+    return { ...this.serializeBooking(b), passengerName: b.passenger ? `${b.passenger.firstName} ${b.passenger.lastName}` : null };
+  }
+
   async confirmBookingAsAdmin(actor: Actor, bookingId: string) {
     const b = await this.bookingOrThrow(bookingId);
     return this.confirmBooking(actor, b);

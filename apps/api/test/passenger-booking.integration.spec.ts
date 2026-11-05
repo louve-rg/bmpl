@@ -1041,7 +1041,7 @@ describe('pickup/dropoff pins on a flag-stop booking', () => {
     expect(confirmed.body.dropoff).toMatchObject(DROPOFF);
   });
 
-  it('reaches admins', async () => {
+  it('reaches admins, through the list and the single-booking read, which 404s identically to a foreign/missing confirm', async () => {
     const op = await makeProvider('Test Admin Visible Lines');
     const { tripId } = await makeDeparture(op, 2000);
     const rider = await registerUser(`pbp_r7_${uniq()}@example.com`);
@@ -1053,6 +1053,27 @@ describe('pickup/dropoff pins on a flag-stop booking', () => {
     const row = list.body.find((x: { id: string }) => x.id === b.body.id);
     expect(row.pickup).toMatchObject(PICKUP);
     expect(row.dropoff).toMatchObject(DROPOFF);
+
+    // The single-booking read (BMPL-548 follow-up): the same allowlist, same
+    // fields, and — unlike the rider/driver reads — a passenger name, so the
+    // admin detail page is not a downgrade from the list.
+    const single = await get(admin, `admin/passengers/bookings/${b.body.id}`);
+    expect(single.status).toBe(200);
+    expect(single.body.pickup).toMatchObject(PICKUP);
+    expect(single.body.dropoff).toMatchObject(DROPOFF);
+    expect(single.body.passengerName).toBeTruthy();
+
+    // A booking id that does not exist must read identically to one the
+    // caller is not entitled to see — the property already proven for the
+    // foreign-operator confirm/cancel path (passenger-booking-scope.spec).
+    // Admin has no ownership scope to fail closed on, so the only comparable
+    // case is "does not resolve at all" — proven against the admin confirm
+    // door reading the same way.
+    const missingGet = await get(admin, 'admin/passengers/bookings/nonexistent00000000000000');
+    const missingConfirm = await post(admin, 'admin/passengers/bookings/nonexistent00000000000000/confirm');
+    expect(missingGet.status).toBe(404);
+    expect(missingConfirm.status).toBe(404);
+    expect(missingGet.body).toEqual(missingConfirm.body);
   });
 
   it('editing or cancelling the booking never touches the snapshot', async () => {
