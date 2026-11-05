@@ -43,6 +43,16 @@ export function mapContainer(page: Page): Locator {
 }
 
 /**
+ * LocationPicker shows its own "Loading map…" placeholder
+ * (LocationPicker.tsx:677/713) until its `ready` state flips true inside
+ * Leaflet's `whenReady` callback. Waiting for it to disappear before
+ * interacting matches the component's own readiness signal.
+ */
+export async function waitForMapReady(page: Page): Promise<void> {
+  await page.getByText('Loading map…').waitFor({ state: 'hidden', timeout: 15_000 }).catch(() => {});
+}
+
+/**
  * Click inside the map container to drop (or move) the pin — the manual
  * placement path every one of the 14 checks can reach with zero GPS
  * involvement (check #11 depends on exactly this still working when
@@ -51,11 +61,22 @@ export function mapContainer(page: Page): Locator {
  * `offset` is a FRACTION of the container's own box (0..1 each axis, default
  * dead centre) rather than an absolute pixel — keeps call sites readable and
  * independent of the embedded-vs-full-screen box size.
+ *
+ * `scrollIntoViewIfNeeded()` is load-bearing, not cosmetic: this harness's
+ * own first live run found `boundingBox()` returning page coordinates below
+ * the viewport (the map sits well down a long /checkout page on first load),
+ * and `page.mouse.click(x, y)` — unlike `locator.click()` — does not
+ * auto-scroll. The click landed outside the viewport and hit nothing;
+ * confirmed via `document.elementsFromPoint()` at the computed point
+ * returning `[]`. Looked exactly like a flaky map-readiness race the first
+ * time it was seen; it was a scroll-position bug in this harness.
  */
 export async function clickMapToPlacePin(
   page: Page,
   offset: { x: number; y: number } = { x: 0.5, y: 0.5 },
 ): Promise<void> {
+  await waitForMapReady(page);
+  await mapContainer(page).scrollIntoViewIfNeeded();
   const box = await mapContainer(page).boundingBox();
   if (!box) throw new Error('Map container has no bounding box — is it rendered and visible?');
   await page.mouse.click(box.x + box.width * offset.x, box.y + box.height * offset.y);

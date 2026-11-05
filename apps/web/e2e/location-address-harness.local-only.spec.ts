@@ -20,6 +20,7 @@ import {
   touchDragPinBy,
   readPinCoordinates,
   denyGeolocationPermission,
+  waitForMapReady,
 } from './support/leaflet-map';
 
 /**
@@ -104,6 +105,26 @@ import {
 const STORAGE_DIR = os.tmpdir();
 const storagePathFor = (who: string) => path.join(STORAGE_DIR, `bmpl-e2e-${who}-state-${process.pid}.json`);
 
+/**
+ * Next's dev server compiles each route on first visit, not at startup — this
+ * harness's own live runs hit that directly: whichever test is first to
+ * navigate to /checkout can take long enough to compile that a plain
+ * `selectOption` several steps later blows the test's own timeout, with no
+ * relation to Leaflet, the map, or anything this harness is meant to be
+ * checking. global-setup.ts (shared by every spec in this repo, not owned by
+ * this file) already waits for the SERVER process to be ready; it does not
+ * and should not warm individual routes for one spec's sake. Doing the warm-up
+ * here instead keeps the fix local to this file. The request's outcome is
+ * irrelevant — a redirect to login is exactly as good as a 200 for forcing
+ * the compile — only the wait matters.
+ */
+test.beforeAll(async ({ browser }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto('/checkout', { timeout: 60_000 }).catch(() => {});
+  await context.close();
+});
+
 async function loginAndSave(browser: Browser, email: string, password: string | undefined, storagePath: string): Promise<boolean> {
   if (!password) return false;
   const context = await browser.newContext();
@@ -175,6 +196,44 @@ test.beforeAll(async ({ browser }) => {
 });
 test.afterAll(() => fs.rmSync(ADMIN_STORAGE, { force: true }));
 
+/* ----------------------------------------------------- location-harness product */
+
+/**
+ * The location-harness product's vendor is deliberately isTest:true (the
+ * same pattern every UAT fixture uses — keeps simulation data out of real
+ * marketplace results). products.service.ts#publicList enforces this at the
+ * SQL level (`AND vp."isTest" = FALSE`), so the PUBLIC `/marketplace/products`
+ * search a real customer uses will NEVER return it — correct production
+ * behaviour, not a bug this harness found. (First live run of this harness
+ * used that endpoint and every product-dependent check skipped as a result —
+ * caught by checking why, not by assuming the skips were fine.)
+ *
+ * The known-good fixture pattern (seed-uat-logistics.ts's dispatch fixture)
+ * resolves the id directly via a call the vendor or an admin can make, not
+ * public search. Resolving it once here, via the admin product-moderation
+ * list (`products.read` permission, already covered by the super admin
+ * fixture), is the equivalent for a spec that is not logged in as the vendor.
+ */
+let locationProductId: string | null = null;
+
+test.beforeAll(async ({ browser }) => {
+  if (!adminLoginOk) return;
+  const { page, close } = await authedPage(browser, ADMIN_STORAGE);
+  const res = await page.request.get('/api/admin/products?status=PUBLISHED');
+  if (res.ok()) {
+    const rows = (await res.json()) as Array<{ id: string; sku: string }>;
+    locationProductId = rows.find((r) => r.sku === 'UATLOCATIONE2E-1')?.id ?? null;
+  }
+  await close();
+});
+
+function skipIfNoLocationProduct() {
+  test.skip(
+    !locationProductId,
+    'Needs the location-harness product (seed-uat-location-e2e.ts, sku UATLOCATIONE2E-1) resolved via admin/products — public marketplace search excludes isTest vendors by design, so it is never found that way.',
+  );
+}
+
 /* ----------------------------------------------------------------- helpers */
 
 /** Unique per run so repeated local runs never collide on label uniqueness
@@ -205,11 +264,9 @@ test.describe('[LOCAL ONLY, skips in CI] #1/#2/#3 — drop a pin, drag it, coord
     // Pick a product belonging to the location-harness vendor so checkout has
     // a real DELIVERY-eligible cart. Direct API call — see file header for
     // why this one call is not "the thing under test" and is still real.
-    const search = await page.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
-    const found = (await search.json()) as { items?: Array<{ id: string; slug: string }> };
-    const product = found.items?.[0];
-    test.skip(!product, 'Needs the location-harness product from seed-uat-location-e2e.ts.');
-    await page.request.post('/api/cart/items', { data: { productId: product!.id, quantity: 1 } });
+    skipIfNoLocationProduct();
+    await page.request.delete('/api/cart'); // real local runs accumulate cart state across repeated runs otherwise
+    await page.request.post('/api/cart/items', { data: { productId: locationProductId!, quantity: 1 } });
 
     await page.goto('/checkout');
     await page.locator('label', { hasText: 'Delivery' }).filter({ has: page.locator('input[type=radio]') }).first().click();
@@ -268,7 +325,7 @@ test.describe('[LOCAL ONLY, skips in CI] #4/#6/#12 — saved address labelling, 
     await deleteAllSavedAddresses(page);
     await page.goto('/dashboard/addresses');
 
-    await page.getByRole('button', { name: 'Add an address' }).click();
+    await page.getByRole('button', { name: 'Add an address' }).first().click();
     const label = uniqueLabel('Home');
     await page.locator('#ab-label').fill(label);
     await page.locator('#ab-name').fill('MDF-535 Book Customer');
@@ -322,7 +379,7 @@ test.describe('[LOCAL ONLY, skips in CI] #4/#6/#12 — saved address labelling, 
     await deleteAllSavedAddresses(page);
     await page.goto('/dashboard/addresses');
 
-    await page.getByRole('button', { name: 'Add an address' }).click();
+    await page.getByRole('button', { name: 'Add an address' }).first().click();
     const label = uniqueLabel('No Formal Address');
     await page.locator('#ab-label').fill(label);
     await page.locator('#ab-name').fill('MDF-535 Landmark Customer');
@@ -386,10 +443,9 @@ test.describe('[LOCAL ONLY, skips in CI] #11 — GPS permission denial does not 
     await denyGeolocationPermission(context); // documents the choice; a fresh context already denies by default
     const page = await context.newPage();
 
-    const search = await page.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
-    const found = (await search.json()) as { items?: Array<{ id: string }> };
-    test.skip(!found.items?.[0], 'Needs the location-harness product from seed-uat-location-e2e.ts.');
-    await page.request.post('/api/cart/items', { data: { productId: found.items![0]!.id, quantity: 1 } });
+    skipIfNoLocationProduct();
+    await page.request.delete('/api/cart');
+    await page.request.post('/api/cart/items', { data: { productId: locationProductId!, quantity: 1 } });
 
     await page.goto('/checkout');
     await page.locator('label', { hasText: 'Delivery' }).filter({ has: page.locator('input[type=radio]') }).first().click();
@@ -431,10 +487,9 @@ test.describe('[LOCAL ONLY, skips in CI] #7/#8 — a saved address selected at c
     });
     const savedAddress = (await created.json()) as { id: string; addressLine1: string };
 
-    const search = await page.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
-    const found = (await search.json()) as { items?: Array<{ id: string }> };
-    test.skip(!found.items?.[0], 'Needs the location-harness product from seed-uat-location-e2e.ts.');
-    await page.request.post('/api/cart/items', { data: { productId: found.items![0]!.id, quantity: 1 } });
+    skipIfNoLocationProduct();
+    await page.request.delete('/api/cart');
+    await page.request.post('/api/cart/items', { data: { productId: locationProductId!, quantity: 1 } });
 
     await page.goto('/checkout');
     await page.locator('label', { hasText: 'Delivery' }).filter({ has: page.locator('input[type=radio]') }).first().click();
@@ -512,6 +567,11 @@ test.describe('[LOCAL ONLY, skips in CI] #13 — a user cannot access or modify 
 
 test.describe('[LOCAL ONLY, skips in CI] #9 — a driver views the delivery location through their authorized interface, both before and after accepting', () => {
   test('BEFORE accepting: area only, no exact pin, no name/phone/street. AFTER accepting: the full address and the exact pin', async ({ browser }) => {
+    // This test drives a real checkout order, a real admin assignment, and a
+    // real driver accept in sequence — three real round trips through a dev
+    // stack that is genuinely slower than production. Default 30s was too
+    // tight; observed consistently, not a one-off.
+    test.setTimeout(60_000);
     skipIfNoCustomer();
     skipIfNoDriver();
     test.skip(!adminLoginOk, 'Needs the super admin fixture to assign the delivery (deliveries.assign permission).');
@@ -521,10 +581,9 @@ test.describe('[LOCAL ONLY, skips in CI] #9 — a driver views the delivery loca
     // so this test fully owns the PENDING_ASSIGNMENT -> ASSIGNED -> accepted
     // transition (a seeded, already-accepted order could prove this only once).
     const customer = await authedPage(browser, CUSTOMER_STORAGE);
-    const search = await customer.page.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
-    const found = (await search.json()) as { items?: Array<{ id: string }> };
-    test.skip(!found.items?.[0], 'Needs the location-harness product from seed-uat-location-e2e.ts.');
-    await customer.page.request.post('/api/cart/items', { data: { productId: found.items![0]!.id, quantity: 1 } });
+    skipIfNoLocationProduct();
+    await customer.page.request.delete('/api/cart');
+    await customer.page.request.post('/api/cart/items', { data: { productId: locationProductId!, quantity: 1 } });
 
     await customer.page.goto('/checkout');
     await customer.page.locator('label', { hasText: 'Delivery' }).filter({ has: customer.page.locator('input[type=radio]') }).first().click();
@@ -539,7 +598,11 @@ test.describe('[LOCAL ONLY, skips in CI] #9 — a driver views the delivery loca
     const canSubmit = await placeOrderButton.isVisible().catch(() => false);
     test.skip(!canSubmit, 'Checkout\'s place-order control was not reachable in this environment.');
     await placeOrderButton.click();
-    await customer.page.waitForURL(/\/orders\//, { timeout: 15_000 });
+    // 15s was too tight against this local dev stack (unoptimized Next dev
+    // server + Nest watch mode) for a real order with a freshly-geocoded pin
+    // address — observed twice, consistently, not a one-off: see the harness
+    // report. 30s matches the test's own outer timeout headroom.
+    await customer.page.waitForURL(/\/orders\//, { timeout: 30_000 });
     const orderId = customer.page.url().split('/orders/')[1]?.split(/[/?]/)[0];
     const orderDetail = (await (await customer.page.request.get(`/api/orders/${orderId}`)).json()) as {
       vendorOrders: Array<{ delivery: { id: string } | null }>;
@@ -560,8 +623,10 @@ test.describe('[LOCAL ONLY, skips in CI] #9 — a driver views the delivery loca
     const assignResponse = await admin.page.request.post(`/api/admin/deliveries/${deliveryId}/assign`, {
       data: { driverProfileId: uatDriverCandidate!.driverProfileId, vehicleId: uatDriverCandidate!.vehicles[0]!.id },
     });
+    const assignOk = assignResponse.ok();
+    const assignBody = assignOk ? '' : await assignResponse.text();
     await admin.close();
-    expect(assignResponse.ok(), `assign failed: ${await assignResponse.text()}`).toBe(true);
+    expect(assignOk, `assign failed: ${assignBody}`).toBe(true);
 
     // 3. BEFORE acceptance: the driver's own page shows area only.
     const driver = await authedPage(browser, DRIVER_STORAGE);
@@ -596,7 +661,12 @@ test.describe('[LOCAL ONLY, skips in CI] #9 — a driver views the delivery loca
     expect(postAcceptBody.navigationUrl).not.toBeNull();
     expect(postAcceptBody.deliveryAddress.fullName).toBe('MDF-535 Driver-Gate Customer');
     expect(postAcceptBody.deliveryAddress.phone).toBe('501-600-9008');
-    expect(postAcceptBody.deliveryAddress.addressLine1).not.toBeNull();
+    // addressLine1 null here is CORRECT, not a gap: this order was placed via
+    // checkout's PIN mode, which never collects a street line — the pin IS
+    // the address, by the same design `isLocatable()` encodes everywhere else
+    // (packages/validation/src/marketplace.ts). Asserting it non-null was
+    // this harness's own mistake on an earlier pass, caught by actually
+    // running it rather than assumed.
   });
 });
 
@@ -619,20 +689,26 @@ test.describe('[LOCAL ONLY, skips in CI] TOUCH pin-drag — the one gesture Osca
     // reachable today.
     const checkoutContext = await browser.newContext({ storageState: CUSTOMER_STORAGE, hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
     const checkoutPage = await checkoutContext.newPage();
-    const search = await checkoutPage.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
-    const found = (await search.json()) as { items?: Array<{ id: string }> };
-    test.skip(!found.items?.[0], 'Needs the location-harness product from seed-uat-location-e2e.ts.');
-    await checkoutPage.request.post('/api/cart/items', { data: { productId: found.items![0]!.id, quantity: 1 } });
+    skipIfNoLocationProduct();
+    await checkoutPage.request.delete('/api/cart');
+    await checkoutPage.request.post('/api/cart/items', { data: { productId: locationProductId!, quantity: 1 } });
     await checkoutPage.goto('/checkout');
     await checkoutPage.locator('label', { hasText: 'Delivery' }).filter({ has: checkoutPage.locator('input[type=radio]') }).first().click();
     const methodSelect = checkoutPage.locator('select').filter({ has: checkoutPage.locator('option', { hasText: 'Drop a pin' }) }).first();
     await methodSelect.selectOption('PIN');
 
-    // Drop via a real touch tap (the browser synthesizes the click Leaflet
-    // listens for — same real-event-path reasoning as the mouse click path).
-    const box = await mapContainer(checkoutPage).boundingBox();
-    if (!box) throw new Error('Map container not visible.');
-    await checkoutPage.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    // Drop the initial pin via the already-proven click path, NOT
+    // touchscreen.tap(): a real finding from this harness's first live run —
+    // Playwright/Chromium's touch emulation does not synthesize the 'click'
+    // event LocationPicker's own tap-to-place listener relies on (confirmed
+    // via the UI's own "No pin yet" status staying put after a real tap, not
+    // a guess). A physical phone's browser synthesizes that click after a
+    // tap; whether Chromium's CDP touch emulation ever does is a separate,
+    // narrower question than the one this test exists to answer. Oscar's own
+    // gap-table finding was specifically about DRAG being repo-untested, not
+    // drop — so the drag below is what must be driven by real touch events;
+    // establishing the starting pin by the mouse path does not dilute that.
+    await clickMapToPlacePin(checkoutPage);
     const beforeDrag = await readPinCoordinates(checkoutPage);
 
     await touchDragPinBy(checkoutPage, 50, 50);
@@ -661,10 +737,9 @@ test.describe('[LOCAL ONLY, skips in CI, EXPECTED TO FAIL until Oscar ships Full
     skipIfNoCustomer();
     const context = await browser.newContext({ storageState: CUSTOMER_STORAGE });
     const page = await context.newPage();
-    const search = await page.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
-    const found = (await search.json()) as { items?: Array<{ id: string }> };
-    test.skip(!found.items?.[0], 'Needs the location-harness product from seed-uat-location-e2e.ts.');
-    await page.request.post('/api/cart/items', { data: { productId: found.items![0]!.id, quantity: 1 } });
+    skipIfNoLocationProduct();
+    await page.request.delete('/api/cart');
+    await page.request.post('/api/cart/items', { data: { productId: locationProductId!, quantity: 1 } });
     await page.goto('/checkout');
     await page.locator('label', { hasText: 'Delivery' }).filter({ has: page.locator('input[type=radio]') }).first().click();
     const methodSelect = page.locator('select').filter({ has: page.locator('option', { hasText: 'Drop a pin' }) }).first();
@@ -700,10 +775,9 @@ test.describe('[LOCAL ONLY, skips in CI, PENDING Oscar\'s LocationPicker search 
     skipIfNoCustomer();
     const context = await browser.newContext({ storageState: CUSTOMER_STORAGE });
     const page = await context.newPage();
-    const search = await page.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
-    const found = (await search.json()) as { items?: Array<{ id: string }> };
-    test.skip(!found.items?.[0], 'Needs the location-harness product from seed-uat-location-e2e.ts.');
-    await page.request.post('/api/cart/items', { data: { productId: found.items![0]!.id, quantity: 1 } });
+    skipIfNoLocationProduct();
+    await page.request.delete('/api/cart');
+    await page.request.post('/api/cart/items', { data: { productId: locationProductId!, quantity: 1 } });
     await page.goto('/checkout');
     await page.locator('label', { hasText: 'Delivery' }).filter({ has: page.locator('input[type=radio]') }).first().click();
     const methodSelect = page.locator('select').filter({ has: page.locator('option', { hasText: 'Drop a pin' }) }).first();
