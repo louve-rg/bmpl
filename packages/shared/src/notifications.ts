@@ -159,5 +159,11 @@ export const NOTIFICATION_EVENTS = [
   // (that one means a driver existed and declined the offer N times; this one
   // means nobody was ever offered it because nobody eligible was online).
   'SHIPMENT_COURIER_UNAVAILABLE',
+  // Carrier self-service (MDF-526/MDF-528/MDF-530) — emitted by the provider
+  // lifecycle and route-schedule paths since those landed; the catalog never
+  // caught up.
+  'ROUTE_SCHEDULE_CHANGED',
+  'SHIPPING_PROVIDER_STATUS_CHANGED',
+  'SHIPMENT_LEG_OPERATOR_REJECTED',
 ] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
