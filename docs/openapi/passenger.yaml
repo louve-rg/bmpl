@@ -542,15 +542,30 @@ paths:
   /passenger/driver/trips:
     get:
       tags: [DriverTrips]
-      summary: The driver's own ASSIGNED and IN_PROGRESS departures, soonest first
+      summary: The driver's own departures — active by default, or any status, paginated (MDF-553)
+      description: >-
+        No `status` — unchanged: the driver's own ASSIGNED and IN_PROGRESS
+        departures, soonest first, as a bare array of up to 100. Passing
+        `status` (e.g. `COMPLETED`) opts into a different, explicit query —
+        a completed trip was otherwise unreachable through this endpoint at
+        all — and switches the response to a paginated `DriverTripsPage`,
+        reusing the sitewide pagination shape, because work history grows
+        without bound and a second silent cap would recreate the truncation
+        already fixed on the admin booking list.
+      parameters:
+        - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/TripStatus" } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
         "200":
-          description: Up to 100 trips
+          description: Up to 100 active trips (no status), or a paginated page (status given)
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: "#/components/schemas/DriverTrip" }
+                oneOf:
+                  - type: array
+                    items: { $ref: "#/components/schemas/DriverTrip" }
+                  - $ref: "#/components/schemas/DriverTripsPage"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1886,11 +1901,27 @@ components:
         reference: { type: string }
         status: { $ref: "#/components/schemas/TripStatus" }
         scheduledDepartureAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time, description: "Set once the trip is COMPLETED (MDF-553) — a completed trip with no timestamp is not history." }
         routeName: { type: [string, "null"] }
         from: { type: [string, "null"] }
         to: { type: [string, "null"] }
         operator: { type: [string, "null"] }
         seatCapacity: { type: [integer, "null"] }
+    DriverTripsPage:
+      type: object
+      description: >-
+        Real pagination (MDF-553) for the driver's own trip history, modelled
+        on StaffBookingsPage — the admin booking list's own fix for the same
+        failure mode (a hand-capped bare array silently losing rows past the
+        cap). Returned only when `status` is passed; the default call keeps
+        its unpaginated bare array.
+      properties:
+        total: { type: integer, description: Rows matching the filter, independent of page/pageSize }
+        page: { type: integer }
+        pageSize: { type: integer }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/DriverTrip" }
     TripTransitionResult:
       type: object
       description: start returns startedAt; complete returns completedAt
