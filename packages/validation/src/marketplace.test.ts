@@ -19,6 +19,8 @@ import {
   inventorySettingsSchema,
   vendorQuerySchema,
   orderAddressSchema,
+  savedAddressSchema,
+  savedAddressUpdateSchema,
 } from './marketplace';
 import { timeOfDaySchema } from './common';
 import { UNLOCATABLE_ADDRESS_MESSAGE } from '@bmpl/shared';
@@ -232,5 +234,62 @@ describe('orderAddressSchema — an address is written OR pinned (M10)', () => {
     expect(orderAddressSchema.safeParse({ ...base, fullName: '', ...BELIZE_CITY }).success).toBe(false);
     const { district: _omitted, ...noDistrict } = base;
     expect(orderAddressSchema.safeParse({ ...noDistrict, ...BELIZE_CITY }).success).toBe(false);
+  });
+});
+
+/**
+ * A saved address is written OR pinned, same rule as orderAddressSchema
+ * (MDF-485). The update schema is a PATCH — partial by definition — so it is
+ * only expected to enforce the pin-pair and Belize-bounds rules; full
+ * locatability-after-merge is AddressesService's job, not the schema's.
+ */
+describe('savedAddressSchema — pin-first Belize addresses (MDF-485)', () => {
+  const BELIZE_CITY = { latitude: 17.4995, longitude: -88.1976 };
+  const base = { label: 'Home', fullName: 'Edward Flowers', phone: '501-600-1234', city: 'Belize City', district: 'BELIZE' as const };
+
+  it('accepts a pin with no street address at all', () => {
+    const r = savedAddressSchema.safeParse({ ...base, ...BELIZE_CITY });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.addressLine1).toBeUndefined();
+  });
+
+  it('accepts a written address with no pin', () => {
+    expect(savedAddressSchema.safeParse({ ...base, addressLine1: '12 Queen Street' }).success).toBe(true);
+  });
+
+  it('rejects an address that is neither written nor pinned', () => {
+    const r = savedAddressSchema.safeParse(base);
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0]!.message).toBe(UNLOCATABLE_ADDRESS_MESSAGE);
+  });
+
+  it('still refuses half a pin and a pin outside Belize', () => {
+    expect(savedAddressSchema.safeParse({ ...base, latitude: BELIZE_CITY.latitude }).success).toBe(false);
+    expect(savedAddressSchema.safeParse({ ...base, latitude: 40.7, longitude: -74 }).success).toBe(false);
+  });
+
+  it('accepts a landmark distinct from instructions', () => {
+    const r = savedAddressSchema.safeParse({ ...base, ...BELIZE_CITY, landmark: 'Behind the blue gate', instructions: 'Ring twice' });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.landmark).toBe('Behind the blue gate');
+      expect(r.data.instructions).toBe('Ring twice');
+    }
+  });
+
+  it('does not accept pinConfirmedAt from the request — it is not a field in the schema at all', () => {
+    const r = savedAddressSchema.safeParse({ ...base, addressLine1: '12 Queen Street', pinConfirmedAt: '2020-01-01T00:00:00Z' });
+    expect(r.success).toBe(true);
+    if (r.success) expect('pinConfirmedAt' in r.data).toBe(false);
+  });
+
+  it('the update schema is a partial patch: an empty object is valid on its own', () => {
+    expect(savedAddressUpdateSchema.safeParse({}).success).toBe(true);
+  });
+
+  it('the update schema still enforces the pin pair and Belize bounds when a pin is present', () => {
+    expect(savedAddressUpdateSchema.safeParse({ latitude: BELIZE_CITY.latitude }).success).toBe(false);
+    expect(savedAddressUpdateSchema.safeParse({ latitude: 40.7, longitude: -74 }).success).toBe(false);
+    expect(savedAddressUpdateSchema.safeParse({ ...BELIZE_CITY }).success).toBe(true);
   });
 });

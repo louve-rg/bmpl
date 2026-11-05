@@ -169,3 +169,98 @@ describe('saved addresses — cross-user isolation', () => {
     expect(anon.status).toBe(401);
   });
 });
+
+/**
+ * MDF-485: `addressLine1` became optional so a pin-only Belize address can be
+ * saved at all, `landmark` is a new field distinct from `instructions`, and
+ * `pinConfirmedAt` is the owner's checkable invariant — set only when the
+ * API actually receives coordinates, and never accepted from the request.
+ */
+describe('saved addresses — pin-first (MDF-485)', () => {
+  const BELIZE_CITY = { latitude: 17.4995, longitude: -88.1976 };
+
+  it('saves a pin-only address with no street at all, and records the pin as confirmed', async () => {
+    const cust = await makeCustomer();
+    const res = await post(cust, 'addresses', {
+      label: 'Home',
+      fullName: 'Edward Flowers',
+      phone: '501-600-1234',
+      city: 'Belize City',
+      district: 'BELIZE',
+      landmark: 'Behind the blue gate',
+      ...BELIZE_CITY,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.addressLine1).toBeFalsy();
+    expect(res.body.landmark).toBe('Behind the blue gate');
+    expect(res.body.latitude).toBe(BELIZE_CITY.latitude);
+    expect(res.body.pinConfirmedAt).toBeTruthy();
+
+    const stored = await ctx.prisma.savedAddress.findUniqueOrThrow({ where: { id: res.body.id } });
+    expect(stored.pinConfirmedAt).not.toBeNull();
+  });
+
+  it('a street-only address (no pin) has no confirmed pin', async () => {
+    const cust = await makeCustomer();
+    const res = await post(cust, 'addresses', addressBody({ label: 'Office' }));
+    expect(res.status).toBe(201);
+    expect(res.body.pinConfirmedAt).toBeNull();
+  });
+
+  it('a client cannot set pinConfirmedAt directly — it is derived from whether coordinates are present', async () => {
+    const cust = await makeCustomer();
+    const res = await post(cust, 'addresses', { ...addressBody({ label: 'Office' }), pinConfirmedAt: '2020-01-01T00:00:00Z' });
+    expect(res.status).toBe(201);
+    // No coordinates were sent, so the pin is not confirmed regardless of the
+    // (ignored) client-supplied value.
+    expect(res.body.pinConfirmedAt).toBeNull();
+  });
+
+  it('adding a pin by PATCH confirms it; removing the pin by PATCH clears the confirmation', async () => {
+    const cust = await makeCustomer();
+    const created = (await post(cust, 'addresses', addressBody({ label: 'Office' }))).body;
+    expect(created.pinConfirmedAt).toBeNull();
+
+    const pinned = await patch(cust, `addresses/${created.id}`, BELIZE_CITY);
+    expect(pinned.status).toBe(200);
+    expect(pinned.body.pinConfirmedAt).toBeTruthy();
+
+    const unpinned = await patch(cust, `addresses/${created.id}`, { latitude: null, longitude: null });
+    expect(unpinned.status).toBe(200);
+    expect(unpinned.body.pinConfirmedAt).toBeNull();
+    // The street line is still there, so the address stays locatable.
+    expect(unpinned.body.addressLine1).toBeTruthy();
+  });
+
+  it('a PATCH that leaves no street and no pin is refused, not silently saved unlocatable', async () => {
+    const cust = await makeCustomer();
+    const created = (await post(cust, 'addresses', addressBody({ label: 'Office' }))).body;
+
+    const res = await patch(cust, `addresses/${created.id}`, { addressLine1: null });
+    expect(res.status).toBe(400);
+
+    // The stored row is untouched by the refused write.
+    const stillThere = await ctx.prisma.savedAddress.findUniqueOrThrow({ where: { id: created.id } });
+    expect(stillThere.addressLine1).toBe('12 Queen Street');
+  });
+
+  it('a PATCH that drops the street is fine when a pin already covers the address', async () => {
+    const cust = await makeCustomer();
+    const created = (await post(cust, 'addresses', { ...addressBody({ label: 'Office' }), ...BELIZE_CITY })).body;
+
+    const res = await patch(cust, `addresses/${created.id}`, { addressLine1: null });
+    expect(res.status).toBe(200);
+    expect(res.body.addressLine1).toBeFalsy();
+    expect(res.body.latitude).toBe(BELIZE_CITY.latitude);
+  });
+
+  it('editing an unrelated field leaves a previously confirmed pin confirmed', async () => {
+    const cust = await makeCustomer();
+    const created = (await post(cust, 'addresses', { ...addressBody({ label: 'Office' }), ...BELIZE_CITY })).body;
+    expect(created.pinConfirmedAt).toBeTruthy();
+
+    const res = await patch(cust, `addresses/${created.id}`, { instructions: 'Ring twice' });
+    expect(res.status).toBe(200);
+    expect(res.body.pinConfirmedAt).toBe(created.pinConfirmedAt);
+  });
+});
