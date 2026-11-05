@@ -684,33 +684,40 @@ export type WalletTopUpInput = z.infer<typeof walletTopUpSchema>;
  * (same rule as `isTest`: a client-controlled field for something the server
  * must assert on its own).
  *
- * `addressLine1` normalises a blank string to absent (MDF-485/MDF-533):
- * `toSavedAddressPayload` (apps/web/lib/address.ts) sends it raw-trimmed on
- * both the create and the edit path, with no undefined conversion — a
- * pin-only address posts `""`, not a missing key. `.optional()` alone does
- * not help here: an empty string is still a string, and it would fail a
- * `.min(1)` exactly as a required field would. Collapsing it to `undefined`
- * before `isLocatable` runs is what actually makes a pin-only save work,
- * not just a pin-only field omission — that distinction is the entire fix.
+ * `addressLine1`, `addressLine2`, `landmark` and `instructions` all normalise
+ * a blank string to absent (MDF-485/MDF-533, owner ruling): `toSavedAddressPayload`
+ * (apps/web/lib/address.ts) trims every one of these before sending, and the
+ * owner's ruling is that the API — not the client — must be the one place
+ * robust to a blank meaning "nothing here", for every caller, not just this
+ * one. `addressLine1` is the one that mattered for `isLocatable`: `.optional()`
+ * alone does not help there, because an empty string is still a string, and
+ * it would fail a `.min(1)` exactly as a required field would. Collapsing it
+ * to `undefined` before `isLocatable` runs is what actually makes a pin-only
+ * save work, not just a pin-only field omission — that distinction is the
+ * entire fix. The same shape on the other three is the same reasoning, kept
+ * consistent rather than leaving one field normalised and three not.
  */
+const optionalTrimmedText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v : undefined));
+
 export const savedAddressFieldsSchema = z.object({
   label: z.string().trim().min(1).max(60),
   fullName: z.string().trim().min(1).max(120),
   phone: z.string().trim().min(5).max(40),
   email: z.string().trim().email().max(160).optional().nullable(),
   company: z.string().trim().max(120).optional().nullable(),
-  addressLine1: z
-    .string()
-    .trim()
-    .max(200)
-    .optional()
-    .nullable()
-    .transform((v) => (v ? v : undefined)),
-  addressLine2: z.string().trim().max(200).optional().nullable(),
+  addressLine1: optionalTrimmedText(200),
+  addressLine2: optionalTrimmedText(200),
   city: z.string().trim().min(1).max(120),
   district: z.enum(DISTRICTS),
-  landmark: z.string().trim().max(200).optional().nullable(),
-  instructions: z.string().trim().max(500).optional().nullable(),
+  landmark: optionalTrimmedText(200),
+  instructions: optionalTrimmedText(500),
   latitude: z.number().min(-90).max(90).optional().nullable(),
   longitude: z.number().min(-180).max(180).optional().nullable(),
   isDefault: z.boolean().optional().default(false),

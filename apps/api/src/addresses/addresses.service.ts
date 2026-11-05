@@ -4,6 +4,16 @@ import { UNLOCATABLE_ADDRESS_MESSAGE } from '@bmpl/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
+ * `savedAddressUpdateSchema` normalises a blank or null value on any of these
+ * to `undefined` (MDF-533, owner ruling) so `isLocatable` reads addressLine1
+ * correctly — but Prisma's `update()` treats an explicit `undefined` field as
+ * "do not touch", not "clear it". Left to the input spread alone, a PATCH
+ * sent with a blank value on one of these (present key, normalised away)
+ * would silently fail to clear the stored one.
+ */
+const CLEARABLE_TEXT_FIELDS = ['addressLine1', 'addressLine2', 'landmark', 'instructions'] as const;
+
+/**
  * The customer's own address book.
  *
  * Every read and write is scoped to the signed-in user; there is no route here
@@ -67,19 +77,19 @@ export class AddressesService {
         if (!next) throw new BadRequestException('This is your only address, so it has to stay your default.');
         await tx.savedAddress.update({ where: { id: next.id }, data: { isDefault: true } });
       }
-      const data: Omit<Partial<SavedAddressInput>, 'addressLine1'> & { addressLine1?: string | null; pinConfirmedAt?: Date | null } = {
-        ...input,
-      };
-      // `savedAddressUpdateSchema` normalises a blank or null addressLine1 to
-      // `undefined` (MDF-533) so `isLocatable` above reads it correctly - but
-      // Prisma's `update()` treats an explicit `undefined` field as "do not
-      // touch", not "clear it". Left alone, a patch that was SENT with a
-      // blank street (present key, normalised value) would silently fail to
-      // clear the stored one, same bug Jim found in reverse. A key that was
-      // genuinely never sent stays genuinely absent here, so this only fires
-      // when the client actually touched the field.
-      if ('addressLine1' in input && input.addressLine1 === undefined) {
-        data.addressLine1 = null;
+      const data: Omit<Partial<SavedAddressInput>, (typeof CLEARABLE_TEXT_FIELDS)[number]> & {
+        addressLine1?: string | null;
+        addressLine2?: string | null;
+        landmark?: string | null;
+        instructions?: string | null;
+        pinConfirmedAt?: Date | null;
+      } = { ...input };
+      // A key that was genuinely never sent stays genuinely absent on `input`,
+      // so this only fires when the client actually touched the field.
+      for (const key of CLEARABLE_TEXT_FIELDS) {
+        if (key in input && input[key] === undefined) {
+          data[key] = null;
+        }
       }
       // Only touch provenance when the patch actually touches the pin -
       // leaving it alone otherwise keeps an untouched, previously confirmed

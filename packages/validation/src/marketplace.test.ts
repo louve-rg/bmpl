@@ -324,4 +324,20 @@ describe('savedAddressSchema — pin-first Belize addresses (MDF-485)', () => {
     expect(savedAddressUpdateSchema.safeParse({ latitude: 40.7, longitude: -74 }).success).toBe(false);
     expect(savedAddressUpdateSchema.safeParse({ ...BELIZE_CITY }).success).toBe(true);
   });
+
+  /**
+   * Owner ruling (MDF-533): the same blank-to-absent normalisation applies to
+   * addressLine2, landmark and instructions — toSavedAddressPayload trims all
+   * of them, and the API, not the client, is the one place that must be
+   * robust to a blank meaning "nothing here" for every caller.
+   */
+  it('a blank addressLine2, landmark or instructions normalises to absent, not an empty string', () => {
+    const r = savedAddressSchema.safeParse({ ...base, addressLine1: '12 Queen Street', addressLine2: '', landmark: '', instructions: '' });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.addressLine2).toBeUndefined();
+      expect(r.data.landmark).toBeUndefined();
+      expect(r.data.instructions).toBeUndefined();
+    }
+  });
 });
