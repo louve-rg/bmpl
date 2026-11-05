@@ -394,4 +394,24 @@ describe('NewShipmentPage sticky-bar blocking reason (MDF-559)', () => {
     expect(findStickyBar(container!).textContent).not.toMatch(/insufficient|no terminal|operator has to set/i);
     void book;
   });
+
+  /**
+   * MDF-560 (owner, reproduced with a dropped pin and no typed town): a pin
+   * is never allowed to imply the town or district (root CLAUDE.md §6,
+   * `lib/address.ts`'s `isLocatable`/`addressGap`) -- so EndpointPicker's own
+   * AddressField already asks for both in PIN mode, same as every other
+   * mode. Leaving them blank is a real, correct block, not a defect. This
+   * proves that block is now reachable from the sticky bar via the same
+   * `!ready` reason the review panel never had its own copy of, rather than
+   * the previous silence Jim measured for the balance/no-hub cases.
+   */
+  it('restates "tell us the town" beside the disabled button when neither endpoint has a town yet -- the pin-dropped-no-town case', async () => {
+    mount();
+    await flush();
+    await waitForNoPulse(container!);
+
+    const book = findBookButton(container!);
+    expect(book.disabled).toBe(true);
+    expect(findStickyBar(container!).textContent).toContain('Tell us the town at each end and we will price the whole journey.');
+  });
 });
