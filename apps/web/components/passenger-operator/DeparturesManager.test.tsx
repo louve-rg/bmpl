@@ -132,6 +132,7 @@ describe('DeparturesManager — "View passengers" (MDF-554 gap B)', () => {
             status: 'CONFIRMED',
             seats: 1,
             isTest: false,
+            passengerName: 'Jane Rider',
             pickup: {
               district: 'CAYO',
               city: 'San Ignacio',
@@ -156,5 +157,8 @@ describe('DeparturesManager — "View passengers" (MDF-554 gap B)', () => {
     });
 
     expect(container!.textContent).toContain('5 Burns Ave');
+    // MDF-554 follow-up: the operator pairs a pin to a person at exactly this
+    // moment, unlike the driver's identical view, which never gets a name.
+    expect(container!.textContent).toContain('Jane Rider');
   });
 });

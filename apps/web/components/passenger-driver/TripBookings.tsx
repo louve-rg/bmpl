@@ -32,6 +32,15 @@ interface BookingPinRow {
   isTest: boolean;
   pickup: TripBookingLocation | null;
   dropoff: TripBookingLocation | null;
+  /**
+   * Present on the operator's own payload, absent on the driver's -- the
+   * driver endpoint passes `includePassengerName: false` server-side, so
+   * this is absent there by construction, not by a flag kept in sync here
+   * (god's ruling, MDF-554: an operator pairing a pin to a person is the
+   * operational moment for the name, so it renders whenever the payload
+   * carries one).
+   */
+  passengerName?: string | null;
 }
 
 /**
@@ -44,14 +53,14 @@ interface BookingPinRow {
  * keeps this mounted (a row's own expand/collapse toggle), same on-demand
  * shape as the map tiles underneath it.
  *
- * No rider name or phone rendered here on EITHER path. On the driver's own
- * endpoint the server never includes one (god's ruling, asserted in Pam's
- * test); the operator's endpoint does include `passengerName`, but this
- * per-trip pin view still doesn't render it -- the operator already has it
- * on the main Bookings page, and a second place to show the same name is
- * not what this view is for. A trip the caller has no standing to see
- * returns 200 with an empty array, not 404, so an empty list renders as the
- * normal "nothing to show" case, not an error.
+ * No phone rendered here on either path. The passenger name renders only
+ * when the payload carries one: absent on the driver's own endpoint (the
+ * server never includes it there, by design -- god's ruling, asserted in
+ * Pam's test), present on the operator's -- an operator pairing a pin to a
+ * person is the operational moment for the name (god's ruling, MDF-554).
+ * A trip the caller has no standing to see returns 200 with an empty array,
+ * not 404, so an empty list renders as the normal "nothing to show" case,
+ * not an error.
  */
 export function TripBookings({
   tripId,
@@ -131,6 +140,7 @@ function BookingRow({ booking }: { booking: BookingPinRow }) {
     <Card className="p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={BOOKING_TONE[booking.status] ?? 'neutral'}>{booking.status.replace(/_/g, ' ').toLowerCase()}</Badge>
+        {booking.passengerName && <span className="font-semibold text-belize-navy">{booking.passengerName}</span>}
         <span className="font-semibold text-belize-navy">{booking.reference}</span>
         <span className="text-slate-500">
           {booking.seats} seat{booking.seats === 1 ? '' : 's'}
