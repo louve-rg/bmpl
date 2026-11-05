@@ -4,12 +4,12 @@ import { useEffect, useState } from 'react';
 import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Card, EmptyState, Spinner } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
-import { tripBookingEndLine, type TripBooking } from '../../lib/passenger-driver';
+import { tripBookingEndLine, type TripBookingLocation } from '../../lib/passenger-driver';
 import { ExpandableRouteMap } from '../maps/ExpandableRouteMap';
 import type { MapPoint } from '../../lib/trip-map';
 
 /** Mirrors admin's own map in `passengers/bookings/[id]/page.tsx` -- keep both in sync. */
-const BOOKING_TONE: Record<TripBooking['status'], 'info' | 'success' | 'neutral' | 'warning'> = {
+const BOOKING_TONE: Record<string, 'info' | 'success' | 'neutral' | 'warning'> = {
   REQUESTED: 'info',
   CONFIRMED: 'success',
   COMPLETED: 'success',
@@ -19,19 +19,49 @@ const BOOKING_TONE: Record<TripBooking['status'], 'info' | 'success' | 'neutral'
 };
 
 /**
- * A trip's passenger bookings, for the driver assigned to it (MDF-549,
- * MDF-548's `GET /passenger/driver/trips/:id/bookings`). Fetched only while
- * the caller keeps this mounted (TripsList expands/collapses it per row),
- * same on-demand shape as the map tiles underneath it.
- *
- * No rider name or phone on this payload by design (god's ruling, asserted
- * in Pam's own test) -- each booking identifies itself by reference and
- * seat count only. A trip the driver is not assigned to returns 200 with an
- * empty array, not 404, so an empty list renders as the normal "nothing to
- * show" case, not an error.
+ * The fields this view needs, satisfied structurally by both `TripBooking`
+ * (driver) and `OperatorBooking` (operator) without either importing the
+ * other -- the two roles' response shapes already agree on these because
+ * both come from the same server `serializeBooking()`.
  */
-export function TripBookings({ tripId }: { tripId: string }) {
-  const [bookings, setBookings] = useState<TripBooking[] | null>(null);
+interface BookingPinRow {
+  id: string;
+  reference: string;
+  status: string;
+  seats: number;
+  isTest: boolean;
+  pickup: TripBookingLocation | null;
+  dropoff: TripBookingLocation | null;
+}
+
+/**
+ * A trip's passenger bookings, with pins — for the driver assigned to it
+ * (MDF-549, MDF-548's `GET /passenger/driver/trips/:id/bookings`, the
+ * default `endpoint`) and reused as-is for the operator (MDF-554 gap B:
+ * `DeparturesManager`'s `TripCard` had no "view passengers" control at all,
+ * while this one already existed for the driver) via
+ * `GET /passenger/provider/bookings?tripId=`. Fetched only while the caller
+ * keeps this mounted (a row's own expand/collapse toggle), same on-demand
+ * shape as the map tiles underneath it.
+ *
+ * No rider name or phone rendered here on EITHER path. On the driver's own
+ * endpoint the server never includes one (god's ruling, asserted in Pam's
+ * test); the operator's endpoint does include `passengerName`, but this
+ * per-trip pin view still doesn't render it -- the operator already has it
+ * on the main Bookings page, and a second place to show the same name is
+ * not what this view is for. A trip the caller has no standing to see
+ * returns 200 with an empty array, not 404, so an empty list renders as the
+ * normal "nothing to show" case, not an error.
+ */
+export function TripBookings({
+  tripId,
+  endpoint = `/passenger/driver/trips/${tripId}/bookings`,
+}: {
+  tripId: string;
+  /** Override for a non-driver caller; see the operator mount in `DeparturesManager`. */
+  endpoint?: string;
+}) {
+  const [bookings, setBookings] = useState<BookingPinRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,7 +69,7 @@ export function TripBookings({ tripId }: { tripId: string }) {
     setBookings(null);
     setErr(null);
     api
-      .get<TripBooking[]>(`/passenger/driver/trips/${tripId}/bookings`)
+      .get<BookingPinRow[]>(endpoint)
       .then((rows) => {
         if (!cancelled) setBookings(rows);
       })
@@ -49,7 +79,7 @@ export function TripBookings({ tripId }: { tripId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [tripId]);
+  }, [endpoint]);
 
   if (err)
     return (
@@ -83,7 +113,7 @@ export function TripBookings({ tripId }: { tripId: string }) {
   );
 }
 
-function endPoint(label: string, end: TripBooking['pickup']): MapPoint | null {
+function endPoint(label: string, end: TripBookingLocation | null): MapPoint | null {
   if (end?.latitude == null || end.longitude == null) return null;
   return {
     latitude: end.latitude,
@@ -92,7 +122,7 @@ function endPoint(label: string, end: TripBooking['pickup']): MapPoint | null {
   };
 }
 
-function BookingRow({ booking }: { booking: TripBooking }) {
+function BookingRow({ booking }: { booking: BookingPinRow }) {
   const points: MapPoint[] = [endPoint('Pickup', booking.pickup), endPoint('Drop-off', booking.dropoff)].filter(
     (p): p is MapPoint => p !== null,
   );
@@ -100,7 +130,7 @@ function BookingRow({ booking }: { booking: TripBooking }) {
   return (
     <Card className="p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={BOOKING_TONE[booking.status]}>{booking.status.replace(/_/g, ' ').toLowerCase()}</Badge>
+        <Badge tone={BOOKING_TONE[booking.status] ?? 'neutral'}>{booking.status.replace(/_/g, ' ').toLowerCase()}</Badge>
         <span className="font-semibold text-belize-navy">{booking.reference}</span>
         <span className="text-slate-500">
           {booking.seats} seat{booking.seats === 1 ? '' : 's'}
