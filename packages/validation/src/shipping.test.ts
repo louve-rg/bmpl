@@ -207,6 +207,15 @@ describe('createShipmentSchema — a door end is written OR pinned', () => {
     expect(createShipmentSchema.safeParse(doorToDoor(pin, { ...pin, phone: undefined })).success).toBe(false);
   });
 
+  it('carries a landmark through on either end (MDF-533)', () => {
+    const r = createShipmentSchema.safeParse(doorToDoor({ ...street, landmark: 'Behind the blue gate' }, { ...pin, landmark: 'Opposite the clinic' }));
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.origin.landmark).toBe('Behind the blue gate');
+      expect(r.data.destination.landmark).toBe('Opposite the clinic');
+    }
+  });
+
   it('asks for neither town nor address at an end the customer handles at a terminal', () => {
     expect(
       createShipmentSchema.safeParse({

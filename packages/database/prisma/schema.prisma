@@ -2702,15 +2702,26 @@ model SavedAddress {
   email     String?
   company   String?
 
-  addressLine1 String
+  // Optional: an address is written down OR pinned (see savedAddressSchema).
+  addressLine1 String?
   addressLine2 String?
   city         String
   district     District
   country      String   @default("BZ")
+  // Distinct from `instructions` (MDF-485): a landmark is a wayfinding
+  // reference ("behind the blue gate"), not a delivery note.
+  landmark     String?
   instructions String?
 
   latitude  Float?
   longitude Float?
+  // Set when `latitude`/`longitude` were saved through a confirmed map pin,
+  // never taken from a request directly (MDF-485). Null means no pin, or a
+  // pin whose provenance isn't confirmed: the written address, if any, is
+  // what's authoritative. A non-null value is the invariant the owner asked
+  // to be checkable: a manually confirmed pin must never be silently
+  // overwritten by an approximate geocoded guess.
+  pinConfirmedAt DateTime?
 
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
@@ -2733,6 +2744,12 @@ model OrderAddress {
   city         String
   district     District
   country      String           @default("BZ")
+  /// A wayfinding reference ("behind the blue gate"), distinct from delivery
+  /// instructions — which live on OrderDelivery.instructions, not here — and
+  /// copied in at checkout from the saved address the customer picked
+  /// (MDF-485/MDF-533). A later edit to that saved address must never change
+  /// this snapshot, same as every other field on this row.
+  landmark     String?
   latitude     Float?
   longitude    Float?
   createdAt    DateTime         @default(now())
@@ -5069,6 +5086,11 @@ model Shipment {
   originLatitude     Float?
   originLongitude    Float?
   originInstructions String?
+  /// A wayfinding reference, distinct from originInstructions, copied in from
+  /// the saved address the customer picked (MDF-485/MDF-533 — same reasoning
+  /// as OrderAddress.landmark; a shipment booked DOOR-side from a saved
+  /// address has the identical gap a marketplace order did).
+  originLandmark     String?
 
   // ---- Destination (snapshot) ----
   destinationHubId        String?
@@ -5084,6 +5106,8 @@ model Shipment {
   destinationLatitude     Float?
   destinationLongitude    Float?
   destinationInstructions String?
+  /// See originLandmark.
+  destinationLandmark     String?
 
   // ---- The plan ----
   preferredMode    TransportMode?

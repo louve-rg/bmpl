@@ -549,6 +549,9 @@ export const orderAddressSchema = z
     // recognises on arrival and what the delivery quote is priced against.
     city: z.string().trim().min(1, 'City is required.').max(120),
     district: z.enum(DISTRICTS),
+    // A wayfinding reference, distinct from delivery instructions (which live
+    // on OrderDelivery, not here) — MDF-485/MDF-533.
+    landmark: z.string().trim().max(200).optional(),
     latitude: z.coerce.number().min(-90).max(90).optional(),
     longitude: z.coerce.number().min(-180).max(180).optional(),
   })
@@ -667,27 +670,81 @@ export type WalletTopUpInput = z.infer<typeof walletTopUpSchema>;
 /**
  * A saved address.
  *
- * Coordinates are optional but strongly wanted: the customer can always type an
- * address and skip the pin, and a form that refuses to save without one would
- * simply stop people saving addresses. Where a pin IS given it is validated to
- * be a real coordinate, because a driver is going to be sent to it.
+ * `addressLine1` is optional for the same reason `orderAddressSchema`'s is
+ * (MDF-485): a customer who drops a pin on their house has given a complete
+ * answer and must be able to save it with no street at all. The `isLocatable`
+ * refine below is what actually decides whether enough of the address is
+ * present — written down OR pinned, never neither. It only runs here, on the
+ * full object; `savedAddressUpdateSchema` is a PATCH and cannot know the rest
+ * of the row, so `AddressesService.update()` re-checks locatability itself
+ * after merging the patch onto the stored row.
+ *
+ * `landmark` is distinct from `instructions`: the owner lists them
+ * separately, and "behind the blue gate" is a landmark, not a delivery note.
+ *
+ * `pinConfirmedAt` is NOT accepted from the request — it is derived by the
+ * service from whether coordinates are present, never taken from the body
+ * (same rule as `isTest`: a client-controlled field for something the server
+ * must assert on its own).
+ *
+ * `addressLine1`, `addressLine2`, `landmark` and `instructions` all normalise
+ * a blank string to absent (MDF-485/MDF-533, owner ruling): `toSavedAddressPayload`
+ * (apps/web/lib/address.ts) trims every one of these before sending, and the
+ * owner's ruling is that the API — not the client — must be the one place
+ * robust to a blank meaning "nothing here", for every caller, not just this
+ * one. `addressLine1` is the one that mattered for `isLocatable`: `.optional()`
+ * alone does not help there, because an empty string is still a string, and
+ * it would fail a `.min(1)` exactly as a required field would. Collapsing it
+ * to `undefined` before `isLocatable` runs is what actually makes a pin-only
+ * save work, not just a pin-only field omission — that distinction is the
+ * entire fix. The same shape on the other three is the same reasoning, kept
+ * consistent rather than leaving one field normalised and three not.
  */
-export const savedAddressSchema = z.object({
+const optionalTrimmedText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v : undefined));
+
+export const savedAddressFieldsSchema = z.object({
   label: z.string().trim().min(1).max(60),
   fullName: z.string().trim().min(1).max(120),
   phone: z.string().trim().min(5).max(40),
   email: z.string().trim().email().max(160).optional().nullable(),
   company: z.string().trim().max(120).optional().nullable(),
-  addressLine1: z.string().trim().min(1).max(200),
-  addressLine2: z.string().trim().max(200).optional().nullable(),
+  addressLine1: optionalTrimmedText(200),
+  addressLine2: optionalTrimmedText(200),
   city: z.string().trim().min(1).max(120),
   district: z.enum(DISTRICTS),
-  instructions: z.string().trim().max(500).optional().nullable(),
+  landmark: optionalTrimmedText(200),
+  instructions: optionalTrimmedText(500),
   latitude: z.number().min(-90).max(90).optional().nullable(),
   longitude: z.number().min(-180).max(180).optional().nullable(),
   isDefault: z.boolean().optional().default(false),
 });
+
+/** Pin-pair completeness and the Belize bounds check: both depend only on
+ *  latitude/longitude, so unlike full locatability they are safe to apply to
+ *  a partial PATCH too. One pair of predicates, applied to both schemas
+ *  below, rather than two copies that could drift apart. */
+const pinPairComplete = (v: { latitude?: number | null; longitude?: number | null }) => (v.latitude == null) === (v.longitude == null);
+const pinWithinBelize = (v: { latitude?: number | null; longitude?: number | null }) => v.latitude == null || isWithinBelize(v.latitude, v.longitude);
+const PIN_PAIR_MESSAGE = 'A pinned location needs both a latitude and a longitude.';
+
+export const savedAddressSchema = savedAddressFieldsSchema
+  .refine(pinPairComplete, { message: PIN_PAIR_MESSAGE, path: ['latitude'] })
+  .refine(pinWithinBelize, { message: OUT_OF_BOUNDS_MESSAGE, path: ['latitude'] })
+  .refine((v) => isLocatable({ street: v.addressLine1, latitude: v.latitude, longitude: v.longitude }), {
+    message: UNLOCATABLE_ADDRESS_MESSAGE,
+    path: ['addressLine1'],
+  });
 export type SavedAddressInput = z.infer<typeof savedAddressSchema>;
 
-export const savedAddressUpdateSchema = savedAddressSchema.partial();
+export const savedAddressUpdateSchema = savedAddressFieldsSchema
+  .partial()
+  .refine(pinPairComplete, { message: PIN_PAIR_MESSAGE, path: ['latitude'] })
+  .refine(pinWithinBelize, { message: OUT_OF_BOUNDS_MESSAGE, path: ['latitude'] });
 export type SavedAddressUpdateInput = z.infer<typeof savedAddressUpdateSchema>;
