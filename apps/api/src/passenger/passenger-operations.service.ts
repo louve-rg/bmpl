@@ -4,7 +4,7 @@ import type {
   PassengerBookingCreateInput,
   PassengerTripAssignInput,
 } from '@bmpl/validation';
-import { PassengerBookingStatus } from '@bmpl/database';
+import { PassengerBookingStatus, PassengerTripStatus } from '@bmpl/database';
 import type { PassengerBooking, PassengerCancellationParty, Prisma } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -582,25 +582,76 @@ export class PassengerOperationsService {
 
   /* ------------------------------------------------------ driver surface */
 
-  async listDriverTrips(userId: string) {
-    const d = await this.driverProfileOf(userId);
-    const rows = await this.prisma.passengerTrip.findMany({
-      where: { driverProfileId: d.id, status: { in: ['ASSIGNED', 'IN_PROGRESS'] } },
-      orderBy: { scheduledDepartureAt: 'asc' },
-      take: 100,
-      include: { route: { select: { name: true, originCity: true, destinationCity: true } }, providerProfile: { select: { businessName: true } } },
-    });
-    return rows.map((t) => ({
+  private serializeDriverTrip(t: {
+    id: string;
+    reference: string;
+    status: string;
+    scheduledDepartureAt: Date | null;
+    completedAt: Date | null;
+    seatCapacity: number | null;
+    route: { name: string; originCity: string; destinationCity: string } | null;
+    providerProfile: { businessName: string } | null;
+  }) {
+    return {
       id: t.id,
       reference: t.reference,
       status: t.status,
       scheduledDepartureAt: t.scheduledDepartureAt,
+      completedAt: t.completedAt,
       routeName: t.route?.name ?? null,
       from: t.route?.originCity ?? null,
       to: t.route?.destinationCity ?? null,
       operator: t.providerProfile?.businessName ?? null,
       seatCapacity: t.seatCapacity,
-    }));
+    };
+  }
+
+  private readonly driverTripInclude = {
+    route: { select: { name: true, originCity: true, destinationCity: true } },
+    providerProfile: { select: { businessName: true } },
+  } as const;
+
+  /**
+   * `status`/`page`/`pageSize` are additive and optional (MDF-553 gap 3): a
+   * completed trip was genuinely unreachable through this endpoint — the
+   * default call hardcodes `ASSIGNED`/`IN_PROGRESS`, so a driver's own
+   * finished work had nowhere to be read back, even though `completeTrip`
+   * writes it. Calling with no filter keeps today's exact shape and rows
+   * (bare array, `take: 100`, active trips only) for the existing My
+   * Departures surface. Passing `status` opts into a different, explicit
+   * query — history can grow without bound, so that path is genuinely
+   * paginated (reusing the sitewide `paginationSchema`) rather than given a
+   * second silent cap.
+   */
+  async listDriverTrips(userId: string, filter: { status?: string; page?: number; pageSize?: number } = {}) {
+    const d = await this.driverProfileOf(userId);
+    if (!filter.status) {
+      const rows = await this.prisma.passengerTrip.findMany({
+        where: { driverProfileId: d.id, status: { in: ['ASSIGNED', 'IN_PROGRESS'] } },
+        orderBy: { scheduledDepartureAt: 'asc' },
+        take: 100,
+        include: this.driverTripInclude,
+      });
+      return rows.map((t) => this.serializeDriverTrip(t));
+    }
+
+    const page = filter.page ?? 1;
+    const pageSize = filter.pageSize ?? 20;
+    const where: Prisma.PassengerTripWhereInput = {
+      driverProfileId: d.id,
+      ...(filter.status in PassengerTripStatus ? { status: filter.status as PassengerTripStatus } : {}),
+    };
+    const [rows, total] = await Promise.all([
+      this.prisma.passengerTrip.findMany({
+        where,
+        orderBy: { scheduledDepartureAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: this.driverTripInclude,
+      }),
+      this.prisma.passengerTrip.count({ where }),
+    ]);
+    return { rows: rows.map((t) => this.serializeDriverTrip(t)), total, page, pageSize };
   }
 
   async startTrip(actor: Actor, tripId: string) {

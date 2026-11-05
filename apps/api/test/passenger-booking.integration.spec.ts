@@ -393,6 +393,27 @@ describe('movement', () => {
     expect((await ctx.prisma.passengerTripAssignment.findFirstOrThrow({ where: { tripId } })).status).toBe('COMPLETED');
     expect((await ctx.prisma.passengerDriverProfile.findUniqueOrThrow({ where: { id: driver.driverProfileId } })).completedTrips).toBe(1);
 
+    // MDF-553 gap 3: a completed trip used to be unreachable through this
+    // endpoint at all — the default call hardcodes ASSIGNED/IN_PROGRESS, so
+    // the driver's own finished work had nowhere to be read back.
+    const activeList = await get(driver.cookies, 'passenger/driver/trips');
+    expect(activeList.status).toBe(200);
+    expect(Array.isArray(activeList.body)).toBe(true);
+    expect(activeList.body.find((t: { id: string }) => t.id === tripId)).toBeUndefined();
+
+    const history = await get(driver.cookies, 'passenger/driver/trips?status=COMPLETED');
+    expect(history.status).toBe(200);
+    expect(history.body.total).toBe(1);
+    expect(history.body.page).toBe(1);
+    const historyRow = history.body.rows.find((t: { id: string }) => t.id === tripId);
+    expect(historyRow).toBeDefined();
+    expect(historyRow.status).toBe('COMPLETED');
+    expect(historyRow.completedAt).not.toBeNull();
+
+    // A driver's history is still their own — not the fleet's.
+    const otherHistory = await get(other.cookies, 'passenger/driver/trips?status=COMPLETED');
+    expect(otherHistory.body.rows.find((t: { id: string }) => t.id === tripId)).toBeUndefined();
+
     // …but the rider is never trapped with it (QA finding F1): withdrawing
     // your own unanswered request works even AFTER the departure completed —
     // the state that previously had no exit at all. This decides nothing
