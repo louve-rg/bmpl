@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import AddressesPage from './page';
+import { api } from '../../../lib/api';
 
 // Same convention as LocationPicker.test.tsx / checkout/page.test.tsx -- no
 // @testing-library/react dependency in this repo.
@@ -71,7 +72,10 @@ const ROWS = [
 ];
 
 const apiGet = vi.fn((_path: string) => Promise.resolve(ROWS));
-vi.mock('../../../lib/api', () => ({
+// `errorMessage` kept real via `importOriginal` -- page.tsx's own save/
+// makeDefault/remove catches import it from this same mocked module.
+vi.mock('../../../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../lib/api')>()),
   api: {
     get: (...args: [string]) => apiGet(...args),
     post: vi.fn(),
@@ -153,5 +157,59 @@ describe('AddressesPage list row — a pin-only address must not look broken', (
     const office = cards.find((li) => li.textContent?.includes('Office'));
     expect(home?.textContent).not.toContain('📍');
     expect(office?.textContent).toContain('📍');
+  });
+});
+
+describe('AddressesPage save/makeDefault/remove error rendering (MDF-559)', () => {
+  it('makeDefault shows the clean field reason, not the generic "Validation failed" wrapper, for a Zod-shape 400', async () => {
+    mount();
+    act(() => {
+      root!.render(<AddressesPage />);
+    });
+    await flush();
+
+    vi.mocked(api.patch).mockRejectedValueOnce({
+      status: 400,
+      message: 'Validation failed',
+      errors: [{ path: 'district', message: 'Choose the district.' }],
+    });
+
+    const office = Array.from(container!.querySelectorAll('li')).find((li) => li.textContent?.includes('Office'));
+    const makeDefaultButton = Array.from(office!.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Make default',
+    )!;
+    await act(async () => {
+      makeDefaultButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(container!.textContent).toContain('Choose the district.');
+    expect(container!.textContent).not.toContain('Validation failed');
+  });
+
+  it('falls back to .message for a business refusal with no errors[] at all', async () => {
+    mount();
+    act(() => {
+      root!.render(<AddressesPage />);
+    });
+    await flush();
+
+    vi.mocked(api.del).mockRejectedValueOnce({
+      status: 400,
+      message: 'This is your only address, so it has to stay your default.',
+    });
+
+    const homeCard = Array.from(container!.querySelectorAll('li')).find((li) => li.textContent?.includes('Home'));
+    const deleteButton = Array.from(homeCard!.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Delete')!;
+
+    const originalConfirm = window.confirm;
+    window.confirm = () => true;
+    await act(async () => {
+      deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    window.confirm = originalConfirm;
+
+    expect(container!.textContent).toContain('This is your only address, so it has to stay your default.');
   });
 });

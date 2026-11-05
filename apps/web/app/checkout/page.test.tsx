@@ -130,7 +130,11 @@ const apiPost = vi.fn((path: string, _body?: unknown) => {
   if (path === '/checkout/delivery-quote') return Promise.resolve(QUOTE);
   return Promise.resolve(null);
 });
-vi.mock('../../lib/api', () => ({
+// `errorMessage` kept real via `importOriginal` -- checkout's own submit
+// catch, and the embedded AddressField's save catches, both import it from
+// this same mocked module.
+vi.mock('../../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/api')>()),
   api: {
     get: (...args: [string]) => apiGet(...args),
     post: (...args: [string, unknown?]) => apiPost(...args),

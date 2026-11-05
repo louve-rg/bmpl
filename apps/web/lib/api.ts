@@ -133,6 +133,22 @@ async function uploadBinary<T>(path: string, body: Blob, retry = true): Promise<
   return data as T;
 }
 
+/**
+ * MDF-559: `message` already folds `errors[]` in (see `withFieldErrors`
+ * above, BMPL-141) — so every caller gets a real reason from `.message`
+ * alone, never a bare "Validation failed". This is the one further step on
+ * top of that: `errors[0].message` is the SAME reason again but without the
+ * generic "Validation failed: " prefix still attached, so a caller that can
+ * show a single clean line (most of them) should prefer it. `.message` is
+ * still the right fallback for a business refusal — those carry no
+ * `errors[]` at all, and are already the real reason on their own, not a
+ * generic placeholder.
+ */
+export function errorMessage(e: unknown, fallback: string): string {
+  const err = e as Partial<ApiError> | null | undefined;
+  return err?.errors?.[0]?.message ?? err?.message ?? fallback;
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path, { method: 'GET' }),
   upload: <T>(path: string, body: Blob) => uploadBinary<T>(path, body),

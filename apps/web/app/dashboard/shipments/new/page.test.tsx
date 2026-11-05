@@ -49,7 +49,11 @@ const apiPost = vi.fn((path: string, body?: unknown) => {
   if (path === '/shipping') return createMock(body);
   return Promise.resolve(null);
 });
-vi.mock('../../../../lib/api', () => ({
+// `errorMessage` kept real via `importOriginal` -- the embedded
+// EndpointPicker/AddressField's own save catches import it from this same
+// mocked module.
+vi.mock('../../../../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../lib/api')>()),
   api: {
     get: (...args: [string]) => apiGet(...args),
     post: (...args: [string, unknown?]) => apiPost(...args),

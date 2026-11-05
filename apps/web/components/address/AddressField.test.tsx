@@ -18,7 +18,13 @@ import { AddressField, emptyAddress, type AddressValue } from './AddressField';
  */
 const apiGet = vi.fn<(path: string) => Promise<unknown>>(() => Promise.resolve([]));
 const apiPost = vi.fn<(path: string, body?: unknown) => Promise<unknown>>();
-vi.mock('../../lib/api', () => ({
+// `errorMessage` is kept real (via `importOriginal`) -- only `api` itself is
+// faked. It's a pure function read by AddressField's own catch blocks; the
+// component imports it from this same module, so a mock that dropped it
+// would make every save-error assertion throw "not a function" instead of
+// testing anything.
+vi.mock('../../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/api')>()),
   api: {
     get: (path: string) => apiGet(path),
     post: (path: string, body?: unknown) => apiPost(path, body),

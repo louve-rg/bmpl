@@ -18,7 +18,10 @@ import type { Departure } from '../../lib/passenger-travel';
  * reinvented).
  */
 const apiPost = vi.fn((_path: string, _body?: unknown) => Promise.resolve({}));
-vi.mock('../../lib/api', () => ({
+// `errorMessage` kept real via `importOriginal` -- the AddressField these
+// tests reveal (pickup/dropoff) imports it from this same mocked module.
+vi.mock('../../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/api')>()),
   api: {
     get: vi.fn(() => Promise.resolve([])),
     post: (...args: [string, unknown?]) => apiPost(...args),

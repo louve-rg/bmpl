@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { api, type ApiError } from '../../../lib/api';
+import { api, errorMessage, type ApiError } from '../../../lib/api';
 import { savedAddressLine, type SavedAddress } from '../../../lib/address';
 import {
   EMPTY_ADDRESS_BOOK_FORM,
@@ -85,7 +85,11 @@ export default function AddressesPage() {
       setEditing(null);
       await load();
     } catch (err) {
-      setFormError((err as ApiError).message ?? 'We could not save this address. Please try again.');
+      // MDF-559: prefer the clean per-field reason (errors[0].message) over
+      // the generic "Validation failed: field — reason" string `.message`
+      // alone would show -- same preference AddressField.tsx's own save
+      // already applies, now shared rather than duplicated.
+      setFormError(errorMessage(err, 'We could not save this address. Please try again.'));
     } finally {
       setBusy(false);
     }
@@ -97,7 +101,7 @@ export default function AddressesPage() {
       await api.patch(`/addresses/${row.id}`, { isDefault: true });
       await load();
     } catch (err) {
-      setRowError((err as ApiError).message ?? 'We could not change the default address.');
+      setRowError(errorMessage(err, 'We could not change the default address.'));
     }
   }
 
@@ -109,7 +113,7 @@ export default function AddressesPage() {
       if (editing === row.id) setEditing(null);
       await load();
     } catch (err) {
-      setRowError((err as ApiError).message ?? 'We could not remove this address.');
+      setRowError(errorMessage(err, 'We could not remove this address.'));
     }
   }
 

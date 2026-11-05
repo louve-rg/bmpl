@@ -14,7 +14,7 @@ import {
   emptyAddress,
   type AddressValue,
 } from '../../components/address/AddressField';
-import { api, type ApiError } from '../../lib/api';
+import { api, errorMessage, type ApiError } from '../../lib/api';
 import { affordability, bzd, walletApi, type WalletSummary } from '../../lib/wallet';
 import { Alert, Button, Card, EmptyState, ButtonLink, Input, PageHeader, Spinner } from '../../components/ui';
 import { vendorClosingSoonWarning, type VendorHoursExceptionPublic, type VendorWeeklyHour } from '../../lib/vendor-hours';
@@ -217,7 +217,12 @@ export default function CheckoutPage() {
       const err = e as ApiError;
       if (err.status === 401) router.push(`/login?next=${encodeURIComponent('/checkout')}`);
       else {
-        setError(err.message || 'Checkout failed. Please review your cart and try again.');
+        // MDF-559: same clean-field-reason preference as the address
+        // surfaces -- a pin-dropped delivery address with no typed town
+        // fails `orderAddressSchema`'s locatability refine and comes back
+        // as a Zod 400, and `errors[0].message` is that refine's own
+        // message, not the generic "Validation failed" wrapper.
+        setError(errorMessage(err, 'Checkout failed. Please review your cart and try again.'));
         setPlacing(false);
         // A payment refusal is worth re-reading the balance for: it may have
         // changed under another tab, and the customer is about to be told what
