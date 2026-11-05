@@ -76,11 +76,13 @@ interface LocationPickerProps {
   /**
    * The typed street address, so the customer can find it on the map.
    *
-   * Omitted entirely (not just empty), the picker is STANDALONE (MDF-485 M1/M2,
-   * owner behaviour 6): it grows its own search box for an address, business
-   * or landmark, rather than depending on a caller's own text field. Every
-   * current caller (AddressField) passes this, so their "Show my address"
-   * button, bound to that field, is unchanged.
+   * When supplied, a "Show my address" button geocodes THIS text. The picker
+   * ALSO always shows its own search box (owner behaviour 6, MDF-543) for a
+   * business or landmark that has no street address to type into the form in
+   * the first place -- the two are both rendered and clearly labelled, never
+   * one in place of the other. Omitted entirely (not just empty), there is no
+   * "Show my address" button (nothing to geocode) and the picker is
+   * STANDALONE: the search box is the only lookup, with wording to match.
    */
   address?: string;
   /** The chosen district — the map follows it immediately, with no network call. */
@@ -420,7 +422,11 @@ function LocationPickerBody({
   }, [district, ready]);
 
   /**
-   * Find the typed address on the map.
+   * Look a typed query up on the map and drop a provisional pin on the best
+   * match. Shared by "Show my address" (the typed form address) and the
+   * search box (a freely typed address, business or landmark, MDF-543) below
+   * -- same endpoint, same best-effort behaviour; only the source of the query
+   * text and the empty-query message differ.
    *
    * Best-effort by design. OpenStreetMap's Belize address coverage is patchy, so
    * a miss is normal and is reported as "place the pin yourself" rather than as
@@ -428,16 +434,10 @@ function LocationPickerBody({
    * is asked to confirm or drag — the pin stays the authoritative location, and
    * a geocoder's guess never silently becomes the delivery address.
    */
-  const findAddress = useCallback(async () => {
-    const q = (standalone ? searchQuery : address ?? '').trim();
+  const geocode = useCallback(async (query: string, emptyMessage: string) => {
+    const q = query.trim();
     if (q.length < 3) {
-      setLookup({
-        busy: false,
-        message: standalone
-          ? 'Type an address, business or landmark above first, then search.'
-          : 'Type your street address above first, then tap this.',
-        results: [],
-      });
+      setLookup({ busy: false, message: emptyMessage, results: [] });
       return;
     }
     setLookup({ busy: true, message: null, results: [] });
@@ -463,7 +463,27 @@ function LocationPickerBody({
         results: [],
       });
     }
-  }, [standalone, searchQuery, address, district, place]);
+  }, [district, place]);
+
+  /** "Show my address": geocodes the street/city text already in the form. */
+  const findAddress = useCallback(
+    () => geocode(address ?? '', 'Type your street address above first, then tap this.'),
+    [geocode, address],
+  );
+
+  /**
+   * The search box: geocodes whatever the customer typed THERE, never
+   * `address` -- this is the path for a business or landmark that has no
+   * street address to type into the form in the first place (MDF-543, owner
+   * behaviour 6). Submit-driven only, same as `findAddress` -- never
+   * search-as-you-type, which would breach Nominatim's ~1 request/sec policy
+   * from a single user typing. See LocationPicker.search.test.tsx's
+   * "makes no request from typing alone" for the test that proves it.
+   */
+  const searchPlace = useCallback(
+    () => geocode(searchQuery, 'Type an address, business or landmark above first, then search.'),
+    [geocode, searchQuery],
+  );
 
   /**
    * Put the typed address on the map without being asked.
@@ -537,37 +557,48 @@ function LocationPickerBody({
     onChangeRef.current(null);
   }, [clearAccuracyCircle]);
 
-  // MDF-485 M1/M2, owner behaviour 6: standalone only, a search box of the
-  // picker's own -- every current caller supplies `address` instead and keeps
-  // its existing "Show my address" button unchanged, below.
-  const searchBox = standalone && (
-    <div className="mt-3 flex gap-2">
-      <Input
-        type="search"
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            void findAddress();
-          }
-        }}
-        placeholder="Search address, business or landmark"
-        aria-label="Search for an address, business or landmark on the map"
-        disabled={disabled || loadError}
-        className="min-h-[44px] flex-1 !border-slate-300 !text-slate-900"
-      />
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="min-h-[44px] !border-slate-300 !text-slate-900"
-        disabled={disabled || loadError || lookup.busy || searchQuery.trim().length === 0}
-        onClick={findAddress}
-        aria-label="Search for this on the map"
-      >
-        {lookup.busy ? <Spinner className="h-4 w-4" /> : '🔎 Search'}
-      </Button>
+  // MDF-543: on every picker, alongside "Show my address" when that button is
+  // also present -- the two do different jobs (geocode the typed form address
+  // vs. find a place that has no street address at all), and hiding one
+  // behind the other's absence left this box reachable only in tests, never
+  // by a customer (every live caller already passes `address`). The caption
+  // only appears when "Show my address" is also on screen, so the two stay
+  // visually distinct without changing wording for the standalone case.
+  const searchBox = (
+    <div className="mt-3">
+      {!standalone && (
+        <p className="mb-1 text-xs text-slate-500">
+          Can&rsquo;t find it by address? Search for a nearby business or landmark instead.
+        </p>
+      )}
+      <div className="flex gap-2">
+        <Input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void searchPlace();
+            }
+          }}
+          placeholder="Search address, business or landmark"
+          aria-label="Search for an address, business or landmark on the map"
+          disabled={disabled || loadError}
+          className="min-h-[44px] flex-1 !border-slate-300 !text-slate-900"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-[44px] !border-slate-300 !text-slate-900"
+          disabled={disabled || loadError || lookup.busy || searchQuery.trim().length === 0}
+          onClick={searchPlace}
+          aria-label="Search for this on the map"
+        >
+          {lookup.busy ? <Spinner className="h-4 w-4" /> : '🔎 Search'}
+        </Button>
+      </div>
     </div>
   );
 
@@ -802,7 +833,7 @@ function LocationPickerBody({
         {hint ??
           (standalone
             ? 'Search for an address, business or landmark, use your current location, or tap the map to place the pin.'
-            : 'Place the pin at the exact spot where you want your order delivered — the map follows the district you choose, and “Show my address” will try to find what you typed. This is optional, but it helps your driver find you.')}
+            : 'Place the pin at the exact spot where you want your order delivered — the map follows the district you choose. “Show my address” finds what you typed; if you don’t have a street address, search for a nearby business or landmark instead. This is optional, but it helps your driver find you.')}
       </p>
 
       {searchBox}

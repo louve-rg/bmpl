@@ -126,15 +126,48 @@ describe('LocationPicker standalone search box (MDF-485 M1/M2, owner behaviour 6
     ).toBe(false);
   });
 
-  it('does not render the standalone search box when the caller supplies an address, and keeps "Show my address"', async () => {
+  // MDF-543: this assertion used to be inverted -- it asserted the search box
+  // did NOT render when `address` was supplied, which is every live render
+  // site (AddressField always passes `address`). That made the box, built and
+  // tested here, unreachable by any real customer; only this suite ever saw
+  // it. Flagged per god's instruction rather than changed quietly -- this is
+  // the test that documented the defect, not the requirement.
+  it('renders the search box ALONGSIDE "Show my address" when the caller supplies an address -- not instead of it', async () => {
     mount();
     act(() => {
       root!.render(<LocationPicker value={null} onChange={() => {}} address="12 Front St, Belize City" />);
     });
     await flush();
 
-    expect(container!.querySelector('input[aria-label*="Search for an address"]')).toBeNull();
+    expect(container!.querySelector('input[aria-label*="Search for an address"]')).not.toBeNull();
     expect(findButton(container!, 'Show the address')).not.toBeNull();
+  });
+
+  it('with an address prop present, the search box still searches its own typed query, not the address prop -- the exact case that was unreachable before MDF-543', async () => {
+    apiGet.mockResolvedValue({ results: [{ label: 'Radisson Fort George Hotel', latitude: 17.503, longitude: -88.197 }] });
+    mount();
+    const onChange = vi.fn();
+    act(() => {
+      root!.render(<LocationPicker value={null} onChange={onChange} address="12 Front St, Belize City" />);
+    });
+    await flush();
+
+    const input = container!.querySelector('input[aria-label*="Search for an address"]') as HTMLInputElement;
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    act(() => {
+      nativeInputValueSetter.call(input, 'Radisson Fort George Hotel');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      findButton(container!, 'Search for this on the map').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(apiGet).toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent('Radisson Fort George Hotel')));
+    expect(apiGet).not.toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent('12 Front St, Belize City')));
+    expect(onChange).toHaveBeenCalledWith({ latitude: 17.503, longitude: -88.197 });
   });
 
   it('searches the typed query, not any address prop, and places the pin on the best match', async () => {
@@ -161,6 +194,33 @@ describe('LocationPicker standalone search box (MDF-485 M1/M2, owner behaviour 6
 
     expect(apiGet).toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent('Radisson Fort George Hotel')));
     expect(onChange).toHaveBeenCalledWith({ latitude: 17.503, longitude: -88.197 });
+  });
+
+  it('"Show my address" geocodes the address prop, not whatever is typed in the search box -- the two never cross', async () => {
+    apiGet.mockResolvedValue({ results: [{ label: '12 Front St, Belize City', latitude: 17.5, longitude: -88.198 }] });
+    mount();
+    const onChange = vi.fn();
+    act(() => {
+      root!.render(<LocationPicker value={null} onChange={onChange} address="12 Front St, Belize City" />);
+    });
+    await flush();
+
+    const input = container!.querySelector('input[aria-label*="Search for an address"]') as HTMLInputElement;
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    act(() => {
+      nativeInputValueSetter.call(input, 'Radisson Fort George Hotel');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      findButton(container!, 'Show the address').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(apiGet).toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent('12 Front St, Belize City')));
+    expect(apiGet).not.toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent('Radisson Fort George Hotel')));
+    expect(onChange).toHaveBeenCalledWith({ latitude: 17.5, longitude: -88.198 });
   });
 
   it('disables the search button until something is typed', async () => {
