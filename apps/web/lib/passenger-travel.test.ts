@@ -1,5 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { riderAccessView, riderBookingView, seatsLeft, stopLabel } from './passenger-travel';
+import { emptyAddress, type AddressValue } from './address';
+import { riderAccessView, riderBookingView, seatsLeft, stopLabel, toBookingLocation } from './passenger-travel';
+
+describe('toBookingLocation (MDF-549): maps an AddressField value onto the booking payload shape', () => {
+  function addr(patch: Partial<AddressValue>): AddressValue {
+    return { ...emptyAddress('TYPED'), ...patch };
+  }
+
+  it('carries district/city/pin through, and trims+omits empty optional text fields', () => {
+    const v = addr({
+      district: 'BELIZE',
+      city: 'Belize City',
+      addressLine1: '  12 Front St  ',
+      landmark: '',
+      instructions: '  ',
+      latitude: 17.5,
+      longitude: -88.2,
+    });
+    expect(toBookingLocation(v)).toEqual({
+      latitude: 17.5,
+      longitude: -88.2,
+      district: 'BELIZE',
+      city: 'Belize City',
+      address: '12 Front St',
+    });
+  });
+
+  it('keeps a pin-only location valid -- latitude/longitude carry through with no address text', () => {
+    const v = addr({ method: 'PIN', district: 'CAYO', city: 'San Ignacio', latitude: 17.16, longitude: -89.07 });
+    expect(toBookingLocation(v)).toEqual({
+      latitude: 17.16,
+      longitude: -89.07,
+      district: 'CAYO',
+      city: 'San Ignacio',
+    });
+  });
+
+  it('includes landmark and instructions when present, trimmed', () => {
+    const v = addr({
+      district: 'BELIZE',
+      city: 'Belize City',
+      landmark: '  Behind the market  ',
+      instructions: ' Gate code 1234 ',
+      latitude: 17.5,
+      longitude: -88.2,
+    });
+    const out = toBookingLocation(v);
+    expect(out.landmark).toBe('Behind the market');
+    expect(out.instructions).toBe('Gate code 1234');
+  });
+});
 
 describe('seatsLeft', () => {
   it('is unknowable until a vehicle is assigned — null, never an invented number', () => {

@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { MAX_PASSENGER_SEATS } from '@bmpl/shared';
+import { AddressField, addressGap, emptyAddress, type AddressValue } from '../address/AddressField';
 import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Button, Card as UiCard, EmptyState, Field, Input, Spinner } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
 import { formatBzd } from '../../lib/passenger-operator';
-import { riderAccessView, seatsLeft, type Departure } from '../../lib/passenger-travel';
+import { riderAccessView, seatsLeft, toBookingLocation, type Departure } from '../../lib/passenger-travel';
 
 /**
  * Published departures a rider can ask to travel on.
@@ -168,17 +169,42 @@ export function DepartureCard({
   );
 }
 
+/**
+ * MDF-549, owner objective: a rider drops a pin for pickup, another for the
+ * destination, sees both, and confirms. Both are OPTIONAL on the booking --
+ * `pickupDistrict` etc. on `PassengerBooking` are all nullable, and the
+ * published route already has its own stops a rider can simply travel to --
+ * so each is its own checkbox, off by default, rather than a street/pin pair
+ * nobody can skip. Checking one reveals its `AddressField` immediately, so
+ * pickup and destination are always visible TOGETHER once added (the owner
+ * asked for this specifically), never a wizard that shows one at a time.
+ * `contact="NONE"`: the rider's name and phone are already on their account,
+ * and MDF-549 is explicit that this adds no new personal field.
+ */
 function BookingForm({ tripId, onClose, onDone }: { tripId: string; onClose: () => void; onDone: () => Promise<void> }) {
   const [seats, setSeats] = useState('1');
+  const [pickupEnabled, setPickupEnabled] = useState(false);
+  const [dropoffEnabled, setDropoffEnabled] = useState(false);
+  const [pickup, setPickup] = useState<AddressValue>(() => emptyAddress('PIN'));
+  const [dropoff, setDropoff] = useState<AddressValue>(() => emptyAddress('PIN'));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const pickupGap = pickupEnabled ? addressGap(pickup, { contact: 'NONE' }) : null;
+  const dropoffGap = dropoffEnabled ? addressGap(dropoff, { contact: 'NONE' }) : null;
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (pickupGap || dropoffGap) return;
     setBusy(true);
     setErr(null);
     try {
-      await api.post('/passenger/bookings', { tripId, seats: Number(seats) });
+      await api.post('/passenger/bookings', {
+        tripId,
+        seats: Number(seats),
+        ...(pickupEnabled ? { pickup: toBookingLocation(pickup) } : {}),
+        ...(dropoffEnabled ? { dropoff: toBookingLocation(dropoff) } : {}),
+      });
       await onDone();
     } catch (e) {
       setErr(errMessage(e));
@@ -202,12 +228,51 @@ function BookingForm({ tripId, onClose, onDone }: { tripId: string; onClose: () 
           required
         />
       </Field>
+
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={pickupEnabled}
+          onChange={(e) => setPickupEnabled(e.target.checked)}
+          className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-belize-accent"
+        />
+        Add a pickup location
+      </label>
+      {pickupEnabled && (
+        <AddressField
+          value={pickup}
+          onChange={setPickup}
+          heading="Pickup location"
+          description="Where should the driver collect you? This is in addition to the route's own stops."
+          contact="NONE"
+        />
+      )}
+
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={dropoffEnabled}
+          onChange={(e) => setDropoffEnabled(e.target.checked)}
+          className="h-4 w-4 rounded border-slate-300 text-belize-blue focus:ring-belize-accent"
+        />
+        Add a destination
+      </label>
+      {dropoffEnabled && (
+        <AddressField
+          value={dropoff}
+          onChange={setDropoff}
+          heading="Destination"
+          description="Where should the driver drop you off? This is in addition to the route's own stops."
+          contact="NONE"
+        />
+      )}
+
       <p className="text-xs text-slate-600">
         This sends a request to the operator. <b>Your seats are only held once the operator confirms</b> — until then,
         nothing is reserved.
       </p>
       <div className="flex gap-2">
-        <Button size="sm" disabled={busy || !seats}>
+        <Button size="sm" disabled={busy || !seats || !!pickupGap || !!dropoffGap}>
           Send request
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={onClose}>
