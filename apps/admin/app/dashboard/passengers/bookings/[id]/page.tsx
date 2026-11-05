@@ -20,9 +20,15 @@ import type { MapPoint } from '../../../../../lib/trip-map';
  * NO single-booking GET exists yet (checked: `admin-passenger-network.controller.ts`
  * has `GET bookings` (list) and the two confirm/cancel POSTs, nothing keyed
  * by one id). This page fetches the same list `BookingsTab` already calls
- * and finds the one row client-side -- a known, minor inefficiency (the
- * whole list for one row), reported rather than worked around with a new
- * backend route of its own in this pass.
+ * and finds the one row client-side.
+ *
+ * NOT a minor inefficiency -- `listBookings()` at
+ * `passenger-operations.service.ts:846` is `orderBy createdAt desc, take: 300`,
+ * so this page silently returns "not found" for any real booking outside the
+ * 300 most recent, a gap that only grows. Pam is adding
+ * `GET admin/passenger/bookings/:id` (reusing `serializeBooking()`) --
+ * TODO(MDF-549): switch this fetch to that endpoint once it ships, instead
+ * of filtering the list.
  */
 
 /**
