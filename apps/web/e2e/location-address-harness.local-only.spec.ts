@@ -8,10 +8,16 @@ import {
   UAT_FIXTURE_PASSWORD,
   UAT_CUSTOMER_2_EMAIL,
   UAT_CUSTOMER_2_PASSWORD,
+  UAT_DRIVER_EMAIL,
+  UAT_DRIVER_PASSWORD,
+  SUPER_ADMIN_EMAIL,
+  SUPER_ADMIN_PASSWORD,
 } from './support/auth';
 import {
+  mapContainer,
   clickMapToPlacePin,
   dragPinBy,
+  touchDragPinBy,
   readPinCoordinates,
   denyGeolocationPermission,
 } from './support/leaflet-map';
@@ -52,19 +58,47 @@ import {
  *   #6 edit and delete     -> describe B
  *   #7 selects saved addr at checkout -> describe E
  *   #8 reaches the order record       -> describe E
+ *   #9 driver views pickup/delivery location, BOTH halves of the gate -> describe G
  *   #11 GPS denial doesn't block manual pin -> describe D
  *   #12 no formal street address saves -> describe B
  *   #13 cross-customer isolation       -> describe F
- *   #9, #10: NOT in this file. No authorized interface exists yet for a
- *     driver/carrier to VIEW a pickup/delivery pin (MapPreview has zero real
- *     call sites outside the maps package itself, confirmed before writing
- *     this file), and no passenger-service booking page uses LocationPicker
- *     at all — both are Pam/Oscar's new work, not something existing code can
- *     be driven to prove yet.
+ *   TOUCH pin-drag (Oscar's gap-table finding #1, not an owner-numbered
+ *     check on its own, but the forcing function for "does the map actually
+ *     work on mobile" the owner's tablet/mobile requirement implies) -> describe H
+ *
+ * CORRECTIONS TO AN EARLIER VERSION OF THIS HARNESS, both caught by god
+ * re-checking the refs rather than taking my first report on faith — kept
+ * here so the next person does not repeat either mistake:
+ *   - AddressField is NOT checkout-only. `EndpointPicker.tsx` (shipping's
+ *     DOOR/TERMINAL picker) imports it directly — "the door case is the
+ *     shared AddressField," per that file's own comment. One map
+ *     implementation serves both checkout AND shipping door bookings, so
+ *     #7/#8 already have a second real surface beyond marketplace checkout.
+ *   - The driver interface for #9 already existed. My first grep was for
+ *     `MapPreview` directly and found no real call sites — true, but the
+ *     wrong question: `ExpandableRouteMap` WRAPS `MapPreview`, and
+ *     `app/dashboard/driver/jobs/[id]/page.tsx` imports and renders
+ *     `ExpandableRouteMap`, gated on `job.addressUnlocked` exactly as
+ *     described in describe G below. Only the CARRIER half of #9 is
+ *     actually unbuilt (no location surface anywhere in carrier
+ *     self-service yet, confirmed independently by Jim) — Milestone 3 work.
+ *
+ *   #10 and the carrier half of #9: NOT in this file, correctly blocked.
+ *     No passenger-service page uses LocationPicker/MapPreview at all (and
+ *     the owner has an open scope question on passenger service generally —
+ *     fixed-route seat booking has no pickup/destination concept — so this
+ *     harness does not build toward either answer). Carrier self-service has
+ *     no location surface to test yet.
  *   #14 (regression): not new specs here — the existing suites this harness
  *     sits beside already cover checkout/wallet/carrier/booking; re-running
  *     them once Pam/Oscar's changes land is the actual #14 check, not a new
  *     test written against code that does not exist yet.
+ *
+ * FORWARD-LOOKING CHECKS, written against semantics that do not exist in the
+ * tree yet (Oscar is actively building them) — see describe I and J below.
+ * Both are EXPECTED TO FAIL OR SKIP until that work lands; that is
+ * information, not a problem (god's own framing) — written now so the check
+ * exists the moment the semantics do, rather than as a round-trip later.
  */
 
 const STORAGE_DIR = os.tmpdir();
@@ -116,6 +150,30 @@ function skipIfNoIsolationFixtures() {
     'Needs BOTH UAT_CUSTOMER and the second customer from seed-uat-location-e2e.ts — see that script\'s own header. Not provisioned in CI.',
   );
 }
+
+/* ----------------------------------------------------------------- driver */
+
+const DRIVER_STORAGE = storagePathFor('location-driver');
+let driverLoginOk = false;
+
+test.beforeAll(async ({ browser }) => {
+  driverLoginOk = await loginAndSave(browser, UAT_DRIVER_EMAIL, UAT_DRIVER_PASSWORD, DRIVER_STORAGE);
+});
+test.afterAll(() => fs.rmSync(DRIVER_STORAGE, { force: true }));
+
+function skipIfNoDriver() {
+  test.skip(!driverLoginOk, 'Needs the UAT_DRIVER fixture (packages/database/prisma/seed-uat-logistics.ts — DELIVERY_DRIVER role approved, vehicle approved, isTest, ONLINE). No new driver seed was needed: this fixture already existed and is already eligible for a test marketplace delivery (same isTest-partitioned candidate pool driver.service.ts#eligibleDriversForDistrict enforces).');
+}
+
+/* --------------------------------------------------------------- super admin (assigns the delivery) */
+
+const ADMIN_STORAGE = storagePathFor('location-admin');
+let adminLoginOk = false;
+
+test.beforeAll(async ({ browser }) => {
+  adminLoginOk = await loginAndSave(browser, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD, ADMIN_STORAGE);
+});
+test.afterAll(() => fs.rmSync(ADMIN_STORAGE, { force: true }));
 
 /* ----------------------------------------------------------------- helpers */
 
@@ -445,5 +503,231 @@ test.describe('[LOCAL ONLY, skips in CI] #13 — a user cannot access or modify 
     const row = (await (await final.page.request.get('/api/addresses')).json()) as Array<{ id: string; label: string }>;
     await final.close();
     expect(row.find((r) => r.id === id)?.label).toBe(label);
+  });
+});
+
+/* ========================================================================
+ * G — #9 driver views pickup/delivery location, BOTH halves of the gate
+ * ======================================================================== */
+
+test.describe('[LOCAL ONLY, skips in CI] #9 — a driver views the delivery location through their authorized interface, both before and after accepting', () => {
+  test('BEFORE accepting: area only, no exact pin, no name/phone/street. AFTER accepting: the full address and the exact pin', async ({ browser }) => {
+    skipIfNoCustomer();
+    skipIfNoDriver();
+    test.skip(!adminLoginOk, 'Needs the super admin fixture to assign the delivery (deliveries.assign permission).');
+
+    // 1. A fresh real order, PINNED delivery address, via the real checkout —
+    // same product/vendor as describe E, built fresh here rather than reused
+    // so this test fully owns the PENDING_ASSIGNMENT -> ASSIGNED -> accepted
+    // transition (a seeded, already-accepted order could prove this only once).
+    const customer = await authedPage(browser, CUSTOMER_STORAGE);
+    const search = await customer.page.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
+    const found = (await search.json()) as { items?: Array<{ id: string }> };
+    test.skip(!found.items?.[0], 'Needs the location-harness product from seed-uat-location-e2e.ts.');
+    await customer.page.request.post('/api/cart/items', { data: { productId: found.items![0]!.id, quantity: 1 } });
+
+    await customer.page.goto('/checkout');
+    await customer.page.locator('label', { hasText: 'Delivery' }).filter({ has: customer.page.locator('input[type=radio]') }).first().click();
+    const methodSelect = customer.page.locator('select').filter({ has: customer.page.locator('option', { hasText: 'Drop a pin' }) }).first();
+    await methodSelect.selectOption('PIN');
+    await clickMapToPlacePin(customer.page); // real pin first — exact value overwritten next
+    await customer.page.getByLabel('Full name').fill('MDF-535 Driver-Gate Customer');
+    await customer.page.getByLabel('Phone').fill('501-600-9008');
+    await customer.page.getByLabel(/city, town or village/i).fill('Belize City');
+    await customer.page.getByLabel(/district or island/i).selectOption('BELIZE');
+    const placeOrderButton = customer.page.getByRole('button', { name: /place order|pay|complete/i }).first();
+    const canSubmit = await placeOrderButton.isVisible().catch(() => false);
+    test.skip(!canSubmit, 'Checkout\'s place-order control was not reachable in this environment.');
+    await placeOrderButton.click();
+    await customer.page.waitForURL(/\/orders\//, { timeout: 15_000 });
+    const orderId = customer.page.url().split('/orders/')[1]?.split(/[/?]/)[0];
+    const orderDetail = (await (await customer.page.request.get(`/api/orders/${orderId}`)).json()) as {
+      vendorOrders: Array<{ delivery: { id: string } | null }>;
+    };
+    const deliveryId = orderDetail.vendorOrders.find((vo) => vo.delivery)?.delivery?.id;
+    await customer.close();
+    test.skip(!deliveryId, 'Checkout did not produce an OrderDelivery row — cannot test the driver gate without one.');
+
+    // 2. Admin assigns it to the UAT driver (the real admin/deliveries/:id/assign
+    // flow — not a direct DB write), discovering driverProfileId/vehicleId the
+    // same way the admin console does: the eligible-drivers endpoint.
+    const admin = await authedPage(browser, ADMIN_STORAGE);
+    const eligible = (await (await admin.page.request.get(`/api/admin/deliveries/${deliveryId}/eligible-drivers`)).json()) as Array<{
+      driverProfileId: string; name: string; vehicles: Array<{ id: string }>;
+    }>;
+    const uatDriverCandidate = eligible.find((d) => d.name.toLowerCase().includes('driver') || d.vehicles.length > 0);
+    test.skip(!uatDriverCandidate, `UAT driver was not in the eligible pool for this delivery (got: ${JSON.stringify(eligible)}) — isTest/district/service-area mismatch, not a harness bug to paper over.`);
+    const assignResponse = await admin.page.request.post(`/api/admin/deliveries/${deliveryId}/assign`, {
+      data: { driverProfileId: uatDriverCandidate!.driverProfileId, vehicleId: uatDriverCandidate!.vehicles[0]!.id },
+    });
+    await admin.close();
+    expect(assignResponse.ok(), `assign failed: ${await assignResponse.text()}`).toBe(true);
+
+    // 3. BEFORE acceptance: the driver's own page shows area only.
+    const driver = await authedPage(browser, DRIVER_STORAGE);
+    await driver.page.goto(`/dashboard/driver/jobs/${deliveryId}`);
+    await expect(driver.page.getByText(/appear once you accept|appear here once you accept/i)).toBeVisible();
+    const preAccept = await driver.page.request.get(`/api/driver/jobs/${deliveryId}`);
+    const preAcceptBody = (await preAccept.json()) as {
+      addressUnlocked: boolean; pinnedLocation: unknown; navigationUrl: string | null;
+      deliveryAddress: { fullName: string | null; phone: string | null; addressLine1: string | null; city: string };
+    };
+    expect(preAcceptBody.addressUnlocked).toBe(false);
+    expect(preAcceptBody.pinnedLocation).toBeNull();
+    expect(preAcceptBody.navigationUrl).toBeNull();
+    expect(preAcceptBody.deliveryAddress.fullName).toBeNull();
+    expect(preAcceptBody.deliveryAddress.phone).toBeNull();
+    expect(preAcceptBody.deliveryAddress.addressLine1).toBeNull();
+    expect(preAcceptBody.deliveryAddress.city).toBe('Belize City'); // the area IS shown — this is the privacy-correct half, not an over-redaction bug
+
+    // 4. Accept, through the real endpoint — then the SAME page shows the exact pin.
+    const acceptResponse = await driver.page.request.post(`/api/driver/jobs/${deliveryId}/accept`);
+    expect(acceptResponse.ok(), `accept failed: ${await acceptResponse.text()}`).toBe(true);
+    await driver.page.goto(`/dashboard/driver/jobs/${deliveryId}`);
+    await expect(driver.page.getByText(/customer pinned an exact location/i)).toBeVisible();
+    const postAccept = await driver.page.request.get(`/api/driver/jobs/${deliveryId}`);
+    const postAcceptBody = (await postAccept.json()) as {
+      addressUnlocked: boolean; pinnedLocation: { latitude: number; longitude: number } | null; navigationUrl: string | null;
+      deliveryAddress: { fullName: string | null; phone: string | null; addressLine1: string | null };
+    };
+    await driver.close();
+    expect(postAcceptBody.addressUnlocked).toBe(true);
+    expect(postAcceptBody.pinnedLocation).not.toBeNull();
+    expect(postAcceptBody.navigationUrl).not.toBeNull();
+    expect(postAcceptBody.deliveryAddress.fullName).toBe('MDF-535 Driver-Gate Customer');
+    expect(postAcceptBody.deliveryAddress.phone).toBe('501-600-9008');
+    expect(postAcceptBody.deliveryAddress.addressLine1).not.toBeNull();
+  });
+});
+
+/* ========================================================================
+ * H — TOUCH pin-drag (Oscar's gap-table finding; forcing function for the
+ *     owner's desktop/tablet/mobile requirement)
+ * ======================================================================== */
+
+test.describe('[LOCAL ONLY, skips in CI] TOUCH pin-drag — the one gesture Oscar flagged as repo-untested', () => {
+  test('a touch-emulated context can drop and drag the pin via real touchstart/touchmove/touchend, not just mouse events', async ({ browser }) => {
+    skipIfNoCustomer();
+    // hasTouch:true is load-bearing, not cosmetic — see touchDragPinBy's own
+    // header comment: without it, L.Browser.touch is false and Leaflet never
+    // attaches the touch listeners this test is trying to exercise, which
+    // would make this test pass for the wrong reason (mouse fallback) rather
+    // than proving anything about touch.
+    // /dashboard/addresses has no map yet (Oscar is adding one — see the
+    // file header's "about to change" note); until then, exercise the touch
+    // drag against checkout's PIN mode map, the one real Leaflet instance
+    // reachable today.
+    const checkoutContext = await browser.newContext({ storageState: CUSTOMER_STORAGE, hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+    const checkoutPage = await checkoutContext.newPage();
+    const search = await checkoutPage.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
+    const found = (await search.json()) as { items?: Array<{ id: string }> };
+    test.skip(!found.items?.[0], 'Needs the location-harness product from seed-uat-location-e2e.ts.');
+    await checkoutPage.request.post('/api/cart/items', { data: { productId: found.items![0]!.id, quantity: 1 } });
+    await checkoutPage.goto('/checkout');
+    await checkoutPage.locator('label', { hasText: 'Delivery' }).filter({ has: checkoutPage.locator('input[type=radio]') }).first().click();
+    const methodSelect = checkoutPage.locator('select').filter({ has: checkoutPage.locator('option', { hasText: 'Drop a pin' }) }).first();
+    await methodSelect.selectOption('PIN');
+
+    // Drop via a real touch tap (the browser synthesizes the click Leaflet
+    // listens for — same real-event-path reasoning as the mouse click path).
+    const box = await mapContainer(checkoutPage).boundingBox();
+    if (!box) throw new Error('Map container not visible.');
+    await checkoutPage.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    const beforeDrag = await readPinCoordinates(checkoutPage);
+
+    await touchDragPinBy(checkoutPage, 50, 50);
+    const afterDrag = await readPinCoordinates(checkoutPage);
+    await checkoutContext.close();
+
+    expect(
+      afterDrag.latitude !== beforeDrag.latitude || afterDrag.longitude !== beforeDrag.longitude,
+      'a real touchstart/touchmove/touchend sequence against the marker should move the pin, same as the mouse path already proven in describe A',
+    ).toBe(true);
+  });
+});
+
+/* ========================================================================
+ * I — FORWARD-LOOKING: FullScreenMapModal confirm/cancel semantics
+ *     (owner check #2, refined — "confirm" only becomes a distinct action
+ *     once this lands, per god's MDF-535 follow-up). NOT YET SHIPPED:
+ *     today the modal's ✕/Escape/confirm all call the same onClose, so this
+ *     is EXPECTED TO FAIL until Oscar's change lands — written now so the
+ *     check exists the moment it's needed, same discipline as this
+ *     engagement's other pre-written verification contracts.
+ * ======================================================================== */
+
+test.describe('[LOCAL ONLY, skips in CI, EXPECTED TO FAIL until Oscar ships FullScreenMapModal confirm/cancel] #2 refined — cancel reverts to the opening value, confirm keeps the moved pin', () => {
+  test('dragging the pin inside the full-screen modal then Cancel restores the value the modal opened with', async ({ browser }) => {
+    skipIfNoCustomer();
+    const context = await browser.newContext({ storageState: CUSTOMER_STORAGE });
+    const page = await context.newPage();
+    const search = await page.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
+    const found = (await search.json()) as { items?: Array<{ id: string }> };
+    test.skip(!found.items?.[0], 'Needs the location-harness product from seed-uat-location-e2e.ts.');
+    await page.request.post('/api/cart/items', { data: { productId: found.items![0]!.id, quantity: 1 } });
+    await page.goto('/checkout');
+    await page.locator('label', { hasText: 'Delivery' }).filter({ has: page.locator('input[type=radio]') }).first().click();
+    const methodSelect = page.locator('select').filter({ has: page.locator('option', { hasText: 'Drop a pin' }) }).first();
+    await methodSelect.selectOption('PIN');
+    await clickMapToPlacePin(page);
+    const openingValue = await readPinCoordinates(page);
+
+    await page.getByRole('button', { name: /full screen/i }).click();
+    await dragPinBy(page, 60, 60);
+    // Today there is no distinct Cancel — closing the modal via ✕/Escape
+    // just closes it; the pin (already committed immediately on drag,
+    // per AddressField's own immediate-onChange contract) stays moved. The
+    // NEW semantics this check pins: Cancel must REVERT to openingValue.
+    await page.keyboard.press('Escape');
+    const afterCancel = await readPinCoordinates(page);
+    await context.close();
+
+    expect(afterCancel.latitude).toBeCloseTo(openingValue.latitude, 5);
+    expect(afterCancel.longitude).toBeCloseTo(openingValue.longitude, 5);
+  });
+});
+
+/* ========================================================================
+ * J — FORWARD-LOOKING: search box must not breach Nominatim rate policy
+ *     (Oscar's gap-table finding #2). NOT YET SHIPPED: LocationPicker has no
+ *     search input at all today (confirmed by grep before writing this) —
+ *     this test SKIPS cleanly until one exists, rather than erroring on a
+ *     missing element, and documents the exact assertion to run once it does.
+ * ======================================================================== */
+
+test.describe('[LOCAL ONLY, skips in CI, PENDING Oscar\'s LocationPicker search input] typing a search query never sends one geocode request per keystroke', () => {
+  test('a rapid multi-character query produces far fewer real /geocode requests than characters typed', async ({ browser }) => {
+    skipIfNoCustomer();
+    const context = await browser.newContext({ storageState: CUSTOMER_STORAGE });
+    const page = await context.newPage();
+    const search = await page.request.get('/api/marketplace/products?q=UAT+Location-E2E+Widget');
+    const found = (await search.json()) as { items?: Array<{ id: string }> };
+    test.skip(!found.items?.[0], 'Needs the location-harness product from seed-uat-location-e2e.ts.');
+    await page.request.post('/api/cart/items', { data: { productId: found.items![0]!.id, quantity: 1 } });
+    await page.goto('/checkout');
+    await page.locator('label', { hasText: 'Delivery' }).filter({ has: page.locator('input[type=radio]') }).first().click();
+    const methodSelect = page.locator('select').filter({ has: page.locator('option', { hasText: 'Drop a pin' }) }).first();
+    await methodSelect.selectOption('PIN');
+
+    const searchInput = mapContainer(page).locator('..').getByRole('searchbox').or(page.getByPlaceholder(/search for a place|search address/i));
+    const hasSearchBox = await searchInput.first().isVisible().catch(() => false);
+    test.skip(!hasSearchBox, 'LocationPicker has no search input yet — Oscar is adding one (MDF-535 follow-up). This check is ready the moment it ships; nothing to run against today.');
+
+    // REAL network observation, not a mock — passively counts actual
+    // requests the browser makes while the real UI runs, against the
+    // Nominatim-backed /api/geocode endpoint (apps/api/src/geocoding/).
+    let geocodeRequests = 0;
+    page.on('request', (req) => {
+      if (req.url().includes('/api/geocode')) geocodeRequests += 1;
+    });
+    const query = 'San Ignacio Belize';
+    await searchInput.first().pressSequentially(query, { delay: 30 });
+    await page.waitForTimeout(1500); // settle any trailing debounce before counting
+    await context.close();
+
+    expect(
+      geocodeRequests,
+      `typed ${query.length} characters and observed ${geocodeRequests} /geocode requests — one per keystroke is exactly the Nominatim rate-policy breach god ruled out`,
+    ).toBeLessThan(query.length);
   });
 });

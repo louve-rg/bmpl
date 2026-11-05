@@ -87,6 +87,48 @@ export async function dragPinBy(page: Page, deltaX: number, deltaY: number, step
 }
 
 /**
+ * The TOUCH equivalent of `dragPinBy` (MDF-535 follow-up: Oscar reports the
+ * marker is draggable and Leaflet's `Draggable` is touch-capable natively,
+ * but flagged that no repo-level test exercises that gesture specifically —
+ * "the library probably handles it" is not evidence the owner's desktop/
+ * tablet/mobile requirement is actually met).
+ *
+ * Playwright's `Touchscreen` class only offers `.tap()` — no drag primitive —
+ * so this dispatches raw `touchstart`/`touchmove`/`touchend` events directly
+ * via `page.evaluate`, constructing real `Touch` objects the way a touch
+ * browser would. Leaflet 1.9's `Draggable` listens for exactly these events
+ * when `L.Browser.touch` is true (`Draggable.START = Browser.touch ?
+ * ['touchstart', 'mousedown'] : ['mousedown']`), and `L.Browser.touch`
+ * resolves true under Chromium's real touch emulation — which is why the
+ * calling test MUST use a context created with `hasTouch: true` (and
+ * typically `isMobile: true`), or this exercises nothing: without touch
+ * emulation, `ontouchstart` is absent from `window` and Leaflet never
+ * attaches the touch listeners this function is trying to drive.
+ */
+export async function touchDragPinBy(page: Page, deltaX: number, deltaY: number, steps = 6): Promise<void> {
+  const marker = mapContainer(page).locator('.leaflet-marker-icon').first();
+  const box = await marker.boundingBox();
+  if (!box) throw new Error('No marker to touch-drag — call clickMapToPlacePin first.');
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+
+  await marker.evaluate(
+    (el, { startX, startY, deltaX, deltaY, steps }) => {
+      const fire = (type: string, x: number, y: number) => {
+        const touch = new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+        el.dispatchEvent(new TouchEvent(type, { touches: type === 'touchend' ? [] : [touch], changedTouches: [touch], bubbles: true, cancelable: true }));
+      };
+      fire('touchstart', startX, startY);
+      for (let i = 1; i <= steps; i++) {
+        fire('touchmove', startX + (deltaX * i) / steps, startY + (deltaY * i) / steps);
+      }
+      fire('touchend', startX + deltaX, startY + deltaY);
+    },
+    { startX, startY, deltaX, deltaY, steps },
+  );
+}
+
+/**
  * Read back the coordinate LocationPicker itself reports for the current
  * pin, from its own "Coordinates" disclosure (`value.latitude.toFixed(6)},
  * ${value.longitude.toFixed(6)}`, LocationPicker.tsx:719-721) — the same
