@@ -94,8 +94,18 @@ export async function clickMapToPlacePin(
  * a click-drag-release too fast for its own internal drag-start threshold.
  * Several intermediate moves reproduces what a real mouse drag looks like at
  * the DOM event level.
+ *
+ * `scrollIntoViewIfNeeded()` first, same reasoning as `clickMapToPlacePin`'s
+ * own (see that function's doc comment) and found the same way: a pin placed
+ * via the SEARCH box rather than a prior same-page map click left nothing to
+ * scroll the map into view, so this function's own `boundingBox()` read a
+ * marker sitting below the fold and silently dragged nothing. Every existing
+ * call site happened to be scroll-safe already (always preceded by
+ * `clickMapToPlacePin`, which scrolls) — that was luck, not a guarantee this
+ * function's own contract should rely on.
  */
 export async function dragPinBy(page: Page, deltaX: number, deltaY: number, steps = 10): Promise<void> {
+  await mapContainer(page).scrollIntoViewIfNeeded();
   const marker = mapContainer(page).locator('.leaflet-marker-icon').first();
   const box = await marker.boundingBox();
   if (!box) throw new Error('No marker to drag — call clickMapToPlacePin first.');
@@ -125,8 +135,12 @@ export async function dragPinBy(page: Page, deltaX: number, deltaY: number, step
  * typically `isMobile: true`), or this exercises nothing: without touch
  * emulation, `ontouchstart` is absent from `window` and Leaflet never
  * attaches the touch listeners this function is trying to drive.
+ *
+ * `scrollIntoViewIfNeeded()` first — see `dragPinBy`'s own comment above for
+ * why this is not optional at this function's own call boundary either.
  */
 export async function touchDragPinBy(page: Page, deltaX: number, deltaY: number, steps = 6): Promise<void> {
+  await mapContainer(page).scrollIntoViewIfNeeded();
   const marker = mapContainer(page).locator('.leaflet-marker-icon').first();
   const box = await marker.boundingBox();
   if (!box) throw new Error('No marker to touch-drag — call clickMapToPlacePin first.');

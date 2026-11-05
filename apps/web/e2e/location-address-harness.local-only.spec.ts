@@ -59,6 +59,7 @@ import {
  *   #6 edit and delete     -> describe B
  *   #7 selects saved addr at checkout -> describe E
  *   #8 reaches the order record       -> describe E
+ *   #6/#7 PAIR — search a landmark, then drag overrides it -> describe L
  *   #9 driver views pickup/delivery location, BOTH halves of the gate -> describe G
  *   #11 GPS denial doesn't block manual pin -> describe D
  *   #12 no formal street address saves -> describe B
@@ -95,11 +96,19 @@ import {
  *     them once Pam/Oscar's changes land is the actual #14 check, not a new
  *     test written against code that does not exist yet.
  *
- * FORWARD-LOOKING CHECKS, written against semantics that do not exist in the
- * tree yet (Oscar is actively building them) — see describe I and J below.
- * Both are EXPECTED TO FAIL OR SKIP until that work lands; that is
- * information, not a problem (god's own framing) — written now so the check
- * exists the moment the semantics do, rather than as a round-trip later.
+ * describe I and J were both originally written against semantics that did
+ * not exist in the tree yet, before Oscar shipped the work each one checks
+ * (FullScreenMapModal confirm/cancel, and the search box being reachable on
+ * a live page). Both now run for real against the final code — their own
+ * header comments record what changed and when, rather than silently
+ * dropping the history once the check stopped skipping or failing.
+ *
+ * describe L and M are god's MDF-535 follow-up, added against the two final
+ * merged heads (feat/location-api-saved-addresses 60a85ab0,
+ * feat/location-web-map-picker 6a95d9aa): L is owner behaviours #6/#7 as a
+ * pair (search a landmark, then prove a drag overrides it), M is the
+ * cross-contamination check for "Show my address" and the search box now
+ * sharing one screen.
  */
 
 const STORAGE_DIR = os.tmpdir();
@@ -765,18 +774,22 @@ test.describe('[LOCAL ONLY, skips in CI] #2 refined — cancel reverts to the op
 
 /* ========================================================================
  * J — search box must not breach Nominatim rate policy (Oscar's gap-table
- *     finding #2). PARTIALLY SHIPPED, correctly still skips: LocationPicker
- *     now grows its own search box in "standalone" mode when no `address`
- *     prop is supplied (feat/location-web-map-picker eebfb5c2), but every
- *     real caller today (checkout's AddressField, /dashboard/addresses,
- *     /dashboard/store) still passes `address`, so standalone mode is not
- *     reachable from any live page yet — confirmed by reading every real
- *     <LocationPicker> render site, not assumed. This test SKIPS cleanly
- *     until some M3 surface wires standalone mode up, rather than erroring
- *     on a missing element, and documents the exact assertion to run then.
+ *     finding #2). FORMERLY a correct skip, now a real check: god's own
+ *     independent read of every live <LocationPicker> caller found the
+ *     search box reachable on NO real page (every caller passed `address`,
+ *     which used to gate it off) — owner behaviour 6 ("search for an
+ *     address, business or landmark") classified MISSING OR UNUSABLE
+ *     INTERFACE FUNCTIONALITY and dispatched to Oscar as a blocking fix.
+ *     He landed it at feat/location-web-map-picker 6a95d9aa: the search box
+ *     now renders on every picker, standalone or not (LocationPicker.tsx's
+ *     `searchBox` is no longer gated on `standalone`). This test's own
+ *     `hasSearchBox` guard is left in place but turned from `test.skip` into
+ *     a hard `expect` — a correct skip was the point once; now that the
+ *     gap is closed, a reappearing skip here would itself be the regression,
+ *     not a reason to quietly pass.
  * ======================================================================== */
 
-test.describe('[LOCAL ONLY, skips in CI, PENDING a real caller using LocationPicker\'s standalone search mode] typing a search query never sends one geocode request per keystroke', () => {
+test.describe('[LOCAL ONLY, skips in CI] typing a search query never sends one geocode request per keystroke', () => {
   test('a rapid multi-character query produces far fewer real /geocode requests than characters typed', async ({ browser }) => {
     skipIfNoCustomer();
     const context = await browser.newContext({ storageState: CUSTOMER_STORAGE });
@@ -791,7 +804,7 @@ test.describe('[LOCAL ONLY, skips in CI, PENDING a real caller using LocationPic
 
     const searchInput = mapContainer(page).locator('..').getByRole('searchbox').or(page.getByPlaceholder(/search for a place|search address/i));
     const hasSearchBox = await searchInput.first().isVisible().catch(() => false);
-    test.skip(!hasSearchBox, 'LocationPicker has no search input yet — Oscar is adding one (MDF-535 follow-up). This check is ready the moment it ships; nothing to run against today.');
+    expect(hasSearchBox, 'LocationPicker\'s search box should render on every picker as of feat/location-web-map-picker 6a95d9aa (MDF-543) — its absence here is the owner-behaviour-6 regression, not an environment gap to skip past.').toBe(true);
 
     // REAL network observation, not a mock — passively counts actual
     // requests the browser makes while the real UI runs, against the
@@ -873,5 +886,145 @@ test.describe('[LOCAL ONLY, skips in CI] saved-address dropdown is wired to the 
     // function the list row does, not a second copy that happens to also
     // avoid the comma but says something different (or nothing).
     expect(optionText).toContain('Pinned location');
+  });
+});
+
+/* ========================================================================
+ * L — owner behaviours 6 and 7 as a PAIR (god's follow-up, MDF-535): a
+ *     searched result is a STARTING point, not a final answer. #6 (find a
+ *     business or landmark with no street address) is only half proven by
+ *     the fact that a search box now exists — #7 is the half that proves the
+ *     customer is still free to correct it. Runs against the real, live
+ *     Nominatim endpoint (apps/api/src/geocoding/) exactly like every other
+ *     geocode call in this file — no mock, per the file header. The landmark
+ *     chosen is Belize's main international airport specifically because it
+ *     is about as reliably mapped as anything in OpenStreetMap's genuinely
+ *     patchy Belize coverage; a miss here would say more about this harness's
+ *     test-data choice than about the feature, which is why an obscure local
+ *     business was deliberately NOT used.
+ * ======================================================================== */
+
+test.describe('[LOCAL ONLY, skips in CI] #6/#7 — searching a landmark drops a provisional pin, and dragging it afterwards is what actually gets saved', () => {
+  test('search finds the landmark, drag moves the pin, and the SAVED coordinate is the dragged one, not the searched one', async ({ browser }) => {
+    skipIfNoCustomer();
+    const { page, close } = await authedPage(browser, CUSTOMER_STORAGE);
+    await deleteAllSavedAddresses(page);
+    skipIfNoLocationProduct();
+    await page.request.delete('/api/cart');
+    await page.request.post('/api/cart/items', { data: { productId: locationProductId!, quantity: 1 } });
+
+    await page.goto('/checkout');
+    await page.locator('label', { hasText: 'Delivery' }).filter({ has: page.locator('input[type=radio]') }).first().click();
+    const methodSelect = page.locator('select').filter({ has: page.locator('option', { hasText: 'Drop a pin' }) }).first();
+    await methodSelect.selectOption('PIN');
+
+    // #6 — find a place by name that has no street address to type into the
+    // form in the first place. The search box's own query, never the typed
+    // form address ("Show my address" is a separate control — see describe M).
+    await waitForMapReady(page);
+    await page.getByLabel('Search for an address, business or landmark on the map').fill('Philip Goldson International Airport');
+    await page.getByRole('button', { name: 'Search for this on the map' }).click();
+    await expect(page.getByText(/is this the right place|couldn.t find that on the map/i)).toBeVisible({ timeout: 15_000 });
+    test.skip(
+      await page.getByText(/couldn.t find that on the map/i).isVisible().catch(() => false),
+      'Live OpenStreetMap search genuinely missed a well-known landmark this run — honest coverage gap the component itself expects (see GeocodingService\'s own doc comment), not a harness or product bug to force past.',
+    );
+    const searchedPin = await readPinCoordinates(page);
+    expect(searchedPin.latitude).not.toBe(0);
+
+    // #7 — a search result is provisional. Dragging it afterwards must win.
+    await dragPinBy(page, 50, 50);
+    const draggedPin = await readPinCoordinates(page);
+    expect(
+      draggedPin.latitude !== searchedPin.latitude || draggedPin.longitude !== searchedPin.longitude,
+      'dragging after a search should move the pin, same as dragging after a click already proven in describe A',
+    ).toBe(true);
+
+    await page.getByLabel('Full name').fill('MDF-535 Search Customer');
+    await page.getByLabel('Phone').fill('501-600-9011');
+    await page.getByLabel(/city, town or village/i).fill('Ladyville');
+    await page.getByLabel(/district or island/i).selectOption('BELIZE');
+    const label = uniqueLabel('MDF-535 Searched');
+    await page.getByPlaceholder('Name it — Home, Office…').fill(label);
+    await page.getByRole('button', { name: 'Save to my addresses' }).click();
+    await expect(page.getByText(`Saved in your address book as “${label}”`)).toBeVisible();
+
+    const savedRows = (await (await page.request.get('/api/addresses')).json()) as Array<{
+      label: string; latitude: number | null; longitude: number | null;
+    }>;
+    const savedRow = savedRows.find((r) => r.label === label);
+    await close();
+
+    expect(savedRow, `expected a saved address labelled "${label}"`).toBeTruthy();
+    // The assertion that actually proves #7: the saved coordinate is the
+    // DRAGGED position, not the one the search dropped.
+    expect(savedRow!.latitude).toBeCloseTo(draggedPin.latitude, 5);
+    expect(savedRow!.longitude).toBeCloseTo(draggedPin.longitude, 5);
+    expect(
+      Math.abs(savedRow!.latitude! - searchedPin.latitude) > 1e-5 || Math.abs(savedRow!.longitude! - searchedPin.longitude) > 1e-5,
+      'the saved address should NOT still be the raw searched position — that would mean the drag never overrode it',
+    ).toBe(true);
+  });
+});
+
+/* ========================================================================
+ * M — "the one thing I specifically want exercised in a browser" (god's
+ *     follow-up, MDF-535): both "Show my address" and the search box are now
+ *     on screen at once in every real AddressField render. Oscar split the
+ *     single findAddress() into a shared geocode() plus two thin callers —
+ *     findAddress() bound to the typed form address, searchPlace() bound to
+ *     the search box's own query — and unit-tested the split. Proving the
+ *     two controls do not cross in a REAL rendered page, where both share one
+ *     component instance and one `lookup` state, is exactly the class of bug
+ *     a unit test of the split function cannot see: a unit test calls each
+ *     function directly with the right argument by construction; only a real
+ *     page proves the onClick handlers are wired to the right one.
+ * ======================================================================== */
+
+test.describe('[LOCAL ONLY, skips in CI] "Show my address" and the search box each geocode only their own text, never the other\'s', () => {
+  test('with both controls on screen, each one\'s real /geocode request carries only its own query text', async ({ browser }) => {
+    skipIfNoCustomer();
+    const { page, close } = await authedPage(browser, CUSTOMER_STORAGE);
+    skipIfNoLocationProduct();
+    await page.request.delete('/api/cart');
+    await page.request.post('/api/cart/items', { data: { productId: locationProductId!, quantity: 1 } });
+
+    await page.goto('/checkout');
+    await page.locator('label', { hasText: 'Delivery' }).filter({ has: page.locator('input[type=radio]') }).first().click();
+    const methodSelect = page.locator('select').filter({ has: page.locator('option', { hasText: 'Drop a pin' }) }).first();
+    await methodSelect.selectOption('PIN');
+    await waitForMapReady(page);
+
+    // PIN mode has no street-line field, so AddressField's `address` prop
+    // (what "Show my address" geocodes) is driven by the city field alone —
+    // real, not a harness fabrication (AddressField.tsx:
+    // `[addressLine1, city].filter(Boolean).join(', ')`).
+    const addressQuery = 'Dangriga';
+    const searchQuery = 'Mayan ruins Xunantunich';
+    await page.getByLabel(/city, town or village/i).fill(addressQuery);
+
+    const searchReq = page.waitForResponse(
+      (r) => r.url().includes('/api/geocode') && r.url().includes(encodeURIComponent(searchQuery)),
+      { timeout: 15_000 },
+    );
+    await page.getByLabel('Search for an address, business or landmark on the map').fill(searchQuery);
+    await page.getByRole('button', { name: 'Search for this on the map' }).click();
+    const searchReqUrl = (await searchReq).url();
+
+    const addressReq = page.waitForResponse(
+      (r) => r.url().includes('/api/geocode') && r.url().includes(encodeURIComponent(addressQuery)),
+      { timeout: 15_000 },
+    );
+    await page.getByRole('button', { name: 'Show the address you typed on the map' }).click();
+    const addressReqUrl = (await addressReq).url();
+
+    await close();
+
+    // The cross-contamination god named, made concrete: neither control's
+    // real network request carries the OTHER control's text. If `searchPlace`
+    // and `findAddress` had been swapped, or both wired to the same closed-
+    // over `address`, one of these would fail.
+    expect(searchReqUrl, `search box request was: ${searchReqUrl}`).not.toContain(encodeURIComponent(addressQuery));
+    expect(addressReqUrl, `"Show my address" request was: ${addressReqUrl}`).not.toContain(encodeURIComponent(searchQuery));
   });
 });
