@@ -8,6 +8,8 @@ import { StatusBadge } from '../../../../components/StatusBadge';
 import { Badge, Breadcrumbs, Card, Spinner } from '../../../../components/ui';
 import { adminCrumbs } from '../../../../lib/admin-nav';
 import { addressLines } from '@bmpl/shared';
+import { AddressMapPreview } from '../../../../components/maps/AddressMapPreview';
+import type { MapPoint } from '../../../../lib/trip-map';
 
 interface Item {
   productTitle: string;
@@ -58,7 +60,9 @@ interface AdminOrder {
   placedAt: string;
   customer: { name: string; email: string };
   // addressLine1 is nullable: an address may be pinned rather than written.
-  deliveryAddress: { fullName: string; phone: string; addressLine1: string | null; addressLine2: string | null; city: string; district: string; country: string } | null;
+  // latitude/longitude are optional until MDF-538's apps/api change lands --
+  // absent, not null, on today's API response.
+  deliveryAddress: { fullName: string; phone: string; addressLine1: string | null; addressLine2: string | null; city: string; district: string; country: string; latitude?: number | null; longitude?: number | null } | null;
   vendorOrders: VendorOrder[];
 }
 
@@ -115,6 +119,26 @@ export default function AdminOrderDetailPage() {
             {order.deliveryAddress.fullName} — {addressLines(order.deliveryAddress).join(', ')}
           </p>
           <p className="mt-1 text-[color:var(--bmpl-text-muted)]">{order.deliveryAddress.phone}</p>
+          {/* MDF-538 (owner section 8): the pin, against the written address
+              above, not instead of it -- read-only, tap-to-load, no editing
+              here. Shows nothing until the address actually has a pin, which
+              is honest: a text-only order never claims a location it wasn't
+              given one for. */}
+          <AddressMapPreview
+            points={
+              order.deliveryAddress.latitude != null && order.deliveryAddress.longitude != null
+                ? ([
+                    {
+                      latitude: order.deliveryAddress.latitude,
+                      longitude: order.deliveryAddress.longitude,
+                      label: order.deliveryAddress.fullName,
+                    },
+                  ] as MapPoint[])
+                : []
+            }
+            title={`${order.orderNumber} · delivery address`}
+            className="mt-3"
+          />
         </Card>
       )}
 

@@ -24,6 +24,11 @@ export interface Address {
   city: string;
   district: string;
   country: string;
+  // MDF-538: optional until the API change lands -- absent, not null, on
+  // today's response. A pin-only Belize address has no other location a
+  // vendor could read; this is what makes section 5's map preview honest.
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface DeliveryEstimate {

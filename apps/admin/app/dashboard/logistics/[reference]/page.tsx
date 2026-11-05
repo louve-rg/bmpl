@@ -8,6 +8,8 @@ import { adminCrumbs } from '../../../../lib/admin-nav';
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, Spinner } from '../../../../components/ui';
 import { ExceptionResolution } from '../../../../components/logistics/ExceptionResolution';
 import { ExceptionRecovery } from '../../../../components/logistics/ExceptionRecovery';
+import { AddressMapPreview } from '../../../../components/maps/AddressMapPreview';
+import type { MapPoint } from '../../../../lib/trip-map';
 
 /**
  * Operating one shipment.
@@ -92,8 +94,8 @@ interface Shipment {
   explanation: string | null;
   exceptionReason: string | null;
   cancelledAt: string | null;
-  origin: { name: string | null; address: string | null; city: string | null; district: string | null };
-  destination: { name: string | null; address: string | null; city: string | null; district: string | null };
+  origin: { name: string | null; address: string | null; city: string | null; district: string | null; latitude: number | null; longitude: number | null };
+  destination: { name: string | null; address: string | null; city: string | null; district: string | null; latitude: number | null; longitude: number | null };
   legs: Leg[];
   custody: Custody[];
 }
@@ -336,6 +338,34 @@ export default function ShipmentOpsPage() {
                 </div>
               ))}
             </div>
+
+            {/*
+             * MDF-538 (owner section 8): with no map, a text/pin mismatch is
+             * invisible to an administrator -- the exact disagreement
+             * `movedFromSaved` already warns the CUSTOMER about at checkout.
+             * Shown against the written address above, not instead of it, so
+             * the disagreement (if any) is something a human can actually
+             * see. Read-only, tap-to-load (AddressMapPreview never loads
+             * tiles until asked) -- no pin editing here; a correction to a
+             * customer-confirmed location is a different decision.
+             */}
+            <AddressMapPreview
+              points={(
+                [
+                  ['From', s.origin],
+                  ['To', s.destination],
+                ] as const
+              )
+                .filter(([, end]) => end.latitude != null && end.longitude != null)
+                .map(([label, end]): MapPoint => ({
+                  latitude: end.latitude!,
+                  longitude: end.longitude!,
+                  label: `${label}: ${end.name ?? end.address ?? [end.city, end.district].filter(Boolean).join(', ')}`,
+                }))}
+              title={`${reference} · route`}
+              emptyHint="No pin on file for either end of this shipment."
+              className="mt-4"
+            />
           </Card>
 
           {/* Ready to collect: the one thing no leg transition can close out. */}
