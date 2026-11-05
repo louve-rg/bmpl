@@ -76,6 +76,66 @@ export interface PassengerTrip {
 }
 
 /**
+ * One end of a booking's pickup/drop-off (MDF-549, MDF-548's
+ * `GET /passenger/driver/trips/:id/bookings`). Null, not absent, when that
+ * end was never pinned — the feature is optional per booking, so null is the
+ * normal case on a scheduled route, not missing data (god's ruling, same
+ * reasoning as admin's no-`emptyHint` call).
+ */
+export interface TripBookingLocation {
+  district: string | null;
+  city: string | null;
+  address: string | null;
+  landmark: string | null;
+  instructions: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/**
+ * One row of `GET /passenger/driver/trips/:id/bookings`. Deliberately no
+ * `passengerName` and no phone — god's ruling, asserted in Pam's own test: a
+ * driver card must not need a rider's name. A trip the caller is not
+ * assigned to returns 200 with an empty array, not 404 — an empty list is
+ * the normal "nothing to show" case, not an error.
+ *
+ * Shape transcribed from god's report of Pam's MDF-548 branch
+ * (`feat/passenger-api-booking-pins`), not yet read directly — verify
+ * against that branch once it is pushed.
+ */
+export interface TripBooking {
+  id: string;
+  reference: string;
+  status: 'REQUESTED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW' | 'EXPIRED';
+  seats: number;
+  isTest: boolean;
+  tripId: string;
+  tripReference: string | null;
+  tripStatus: string | null;
+  scheduledDepartureAt: string | null;
+  routeName: string | null;
+  from: string | null;
+  to: string | null;
+  confirmedAt: string | null;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+  cancellationReason: string | null;
+  createdAt: string;
+  pickup: TripBookingLocation | null;
+  dropoff: TripBookingLocation | null;
+}
+
+/** What a human reads for one end — street if given, else the landmark, else just town/district. */
+export function tripBookingEndLine(end: TripBookingLocation | null): string {
+  if (!end) return 'Not specified — travelling to/from the route’s own stop';
+  if (end.address) return [end.address, end.city, end.district].filter(Boolean).join(', ');
+  if (end.landmark) return [end.landmark, end.city, end.district].filter(Boolean).join(', ');
+  if (end.city || end.district) return [end.city, end.district].filter(Boolean).join(', ');
+  return 'Not specified — travelling to/from the route’s own stop';
+}
+
+/**
  * The availability states a driver may set — exactly the server's
  * DRIVER_SETTABLE_AVAILABILITY, hinted for passenger work. SUSPENDED is a
  * fourth server state a driver cannot set and is never offered as a button.

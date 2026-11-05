@@ -5,6 +5,7 @@ import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Button, Card as UiCard, EmptyState, Spinner, StatusBadge } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
 import { tripAction, type PassengerTrip } from '../../lib/passenger-driver';
+import { TripBookings } from './TripBookings';
 
 /**
  * The driver's assigned departures — the movement surface. The list endpoint
@@ -75,6 +76,7 @@ export function TripsList() {
 function TripRow({ trip, onChanged }: { trip: PassengerTrip; onChanged: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showBookings, setShowBookings] = useState(false);
   const act = tripAction(trip.status);
   const journey = trip.from && trip.to ? `${trip.from} → ${trip.to}` : null;
 
@@ -108,17 +110,23 @@ function TripRow({ trip, onChanged }: { trip: PassengerTrip; onChanged: () => Pr
             </p>
             {trip.operator && <p className="mt-1 text-xs text-slate-500">Operator: {trip.operator}</p>}
           </div>
-          {act && (
-            <Button size="sm" disabled={busy} onClick={() => perform(act.action)}>
-              {busy ? 'Working…' : act.label}
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setShowBookings((v) => !v)}>
+              {showBookings ? 'Hide passengers' : 'View passengers'}
             </Button>
-          )}
+            {act && (
+              <Button size="sm" disabled={busy} onClick={() => perform(act.action)}>
+                {busy ? 'Working…' : act.label}
+              </Button>
+            )}
+          </div>
         </div>
         {err && (
           <Alert tone="error" className="mt-3">
             {err}
           </Alert>
         )}
+        {showBookings && <TripBookings tripId={trip.id} />}
       </UiCard>
     </li>
   );
