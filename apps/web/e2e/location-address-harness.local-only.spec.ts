@@ -1327,14 +1327,15 @@ test.describe('[LOCAL ONLY, skips in CI] MDF-550 #1-#6/#8/#10/#11/#12 + reversal
     const { page, close } = await authedPage(browser, CUSTOMER_STORAGE);
     try {
       await page.goto('/dashboard/passenger/bookings');
-      // Honest-fail check (god: "an honest fail is the outcome I want if it
-      // is the true one"): apps/web/components/travel/MyBookings.tsx
-      // (confirmed by grep before writing this) never renders pickup/dropoff
-      // anywhere, on any booking row. The driver (#8 above) and admin see it
-      // correctly; the rider who actually set the pins cannot see their own
-      // choice reflected back on this page at all.
-      await expect(page.getByText('Ladyville', { exact: false })).toBeVisible({ timeout: 10_000 });
-      await expect(page.getByText('Dangriga', { exact: false })).toBeVisible();
+      // Oscar's MDF-549 gap B fix (16edb344): MyBookings.tsx now renders both
+      // ends via tripBookingEndLine. Scoped to THIS booking's own <li> (by
+      // its route name) rather than a bare page-wide text match — other UAT
+      // fixture runs on this same seeded account also carry Ladyville/
+      // Dangriga pins, so an unscoped match is a strict-mode violation across
+      // rows, not proof this row renders its own data.
+      const row = page.locator('li', { hasText: PAX_ROUTE_NAME });
+      await expect(row.getByText('Ladyville', { exact: false })).toBeVisible({ timeout: 10_000 });
+      await expect(row.getByText('Dangriga', { exact: false })).toBeVisible();
     } finally {
       await close();
     }
