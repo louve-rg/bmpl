@@ -213,3 +213,53 @@ describe('AddressesPage save/makeDefault/remove error rendering (MDF-559)', () =
     expect(container!.textContent).toContain('This is your only address, so it has to stay your default.');
   });
 });
+
+function setValue(root: HTMLElement, id: string, value: string) {
+  const el = root.querySelector<HTMLInputElement | HTMLSelectElement>(`#${id}`);
+  if (!el) throw new Error(`no input/select #${id}`);
+  const proto = el.tagName === 'SELECT' ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+  act(() => {
+    setter.call(el, value);
+    el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+  });
+}
+
+/**
+ * MDF-559 (Jim, reproduced live): with every field filled the save works;
+ * with Full Name blank, clicking Save produced zero network requests and
+ * the only feedback was an inline hint in the form -- indistinguishable
+ * from nothing happening once the customer has scrolled past that field.
+ * Moving focus to the actual blocking field is the fix.
+ */
+describe('AddressesPage save() — focus jumps to the first blocking field (MDF-559)', () => {
+  it('focuses Full Name when it is the one field left blank, and never posts', async () => {
+    mount();
+    act(() => {
+      root!.render(<AddressesPage />);
+    });
+    await flush();
+
+    const addButton = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Add an address')!;
+    act(() => {
+      addButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    setValue(container!, 'ab-label', 'Home');
+    // ab-name (Full Name) deliberately left blank -- the one field under test.
+    setValue(container!, 'ab-line1', '12 Front St');
+    setValue(container!, 'ab-city', 'Belize City');
+    setValue(container!, 'ab-district', 'BELIZE');
+
+    const saveButton = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Save address')!;
+    await act(async () => {
+      saveButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await flush();
+
+    expect(container!.textContent).toContain('Add the name of whoever receives parcels here.');
+    expect(document.activeElement?.id).toBe('ab-name');
+    expect(api.post).not.toHaveBeenCalled();
+  });
+});

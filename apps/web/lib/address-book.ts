@@ -120,3 +120,19 @@ export function addressBookProblem(payload: SavedAddressPayload): string | null 
   };
   return names[field] ?? 'Check this address and try again.';
 }
+
+/**
+ * Which field the same rule above blocked on, naming it rather than
+ * describing it -- so the page can move focus there. MDF-559 (Jim,
+ * reproduced live): with a blank Full Name, the only feedback was the
+ * sentence above sitting in the form, indistinguishable from nothing
+ * happening once the customer had scrolled past that field. Kept separate
+ * from `addressBookProblem` so every existing caller that only needs the
+ * sentence is untouched.
+ */
+export function addressBookProblemField(payload: SavedAddressPayload): string | null {
+  const result = savedAddressSchema.safeParse(payload);
+  if (result.success) return null;
+  const issue = result.error.issues[0];
+  return issue ? String(issue.path[0] ?? '') : null;
+}

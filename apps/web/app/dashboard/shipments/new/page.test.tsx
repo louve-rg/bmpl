@@ -38,12 +38,13 @@ quoteMock.mockResolvedValue({
 
 const WALLET = { currency: 'BZD', availableMinor: 100000, onHoldMinor: 0, totalMinor: 100000, status: 'ACTIVE', exists: true };
 
-const apiGet = vi.fn((path: string) => {
+function defaultApiGetImpl(path: string) {
   if (path === '/shipping/hubs') return Promise.resolve([]);
   if (path === '/shipping/modes') return Promise.resolve(['LAND']);
   if (path === '/wallet') return Promise.resolve(WALLET);
   return Promise.resolve(null);
-});
+}
+const apiGet = vi.fn(defaultApiGetImpl);
 const apiPost = vi.fn((path: string, body?: unknown) => {
   if (path === '/shipping/quote') return quoteMock(body);
   if (path === '/shipping') return createMock(body);
@@ -95,7 +96,11 @@ afterEach(() => {
   if (container) container.remove();
   root = null;
   container = null;
-  apiGet.mockClear();
+  // `mockReset` + reassign, not just `mockClear`: the wallet-shortfall test
+  // below overrides this implementation for its one test, and must not
+  // leak a short wallet into every test that mounts after it.
+  apiGet.mockReset();
+  apiGet.mockImplementation(defaultApiGetImpl);
   apiPost.mockClear();
   createMock.mockReset();
   router.push.mockClear();
@@ -190,19 +195,36 @@ function findBookButton(root: HTMLElement): HTMLButtonElement {
   return btn;
 }
 
-/** Mounts, fills both endpoints, waits for a priced quote, and returns the
- *  now-enabled book button -- the shared setup both tests below need before
- *  they can exercise the submit guard itself. */
-async function fillAndQuote(): Promise<HTMLButtonElement> {
+/** Mounts and fills both endpoints, with no assertion on the resulting quote
+ *  or button state -- the shared setup for every test below, including the
+ *  ones that expect the button to stay disabled. */
+async function fillBothEnds(): Promise<void> {
   mount();
   await flush();
   await waitForNoPulse(container!);
   fillTownAndDistrict(container!, 'Collect from', 'Belize City', 'BELIZE');
   fillTownAndDistrict(container!, 'Deliver to', 'San Ignacio', 'CAYO');
   await settleQuote();
+}
+
+/** `fillBothEnds`, then asserts the quote priced and the book button is
+ *  enabled -- the shared setup the submit-guard/same-address tests below
+ *  need before they can exercise the submit itself. */
+async function fillAndQuote(): Promise<HTMLButtonElement> {
+  await fillBothEnds();
   const book = findBookButton(container!);
   expect(book.disabled).toBe(false);
   return book;
+}
+
+/** The sticky bar's own outer element (StickyActionBar.tsx) -- `z-30` is
+ *  unique to it in this page, so this is how a test proves a reason is
+ *  co-located with the book button rather than merely present somewhere
+ *  else on the page. */
+function findStickyBar(root: HTMLElement): HTMLElement {
+  const bar = root.querySelector<HTMLElement>('.z-30');
+  if (!bar) throw new Error('sticky action bar not found');
+  return bar;
 }
 
 describe('NewShipmentPage submit guard (BMPL, dropped-connection double-charge fix)', () => {
@@ -298,4 +320,78 @@ describe('NewShipmentPage same-address confirmation (SHIPPING-E2E) -- a confirma
     expect(createMock).toHaveBeenCalledTimes(1);
     confirmSpy.mockRestore();
   }, 10000);
+});
+
+/**
+ * MDF-559 (owner-reported, measured by Jim at 390x844): the button is in a
+ * StickyActionBar pinned to the bottom of the viewport; every reason it can
+ * be disabled sits up in the quote/review panel instead, which scrolls off
+ * screen while the button stays reachable. These tests prove the fix: the
+ * SAME existing sentence -- never a new one -- now also renders inside the
+ * sticky bar itself, alongside the button, for every cause that can disable
+ * it, including the one with no other explanation on the page at all (an
+ * unavailable quote, where the affordability Alert cannot render because it
+ * reads `quote.totalMinor` and `priced` is null).
+ */
+describe('NewShipmentPage sticky-bar blocking reason (MDF-559)', () => {
+  it('restates the planner\'s own unavailable-quote message beside the disabled button -- the case with no OTHER explanation on the page at all', async () => {
+    const message = 'There is no terminal serving BELIZE for collection.';
+    quoteMock.mockResolvedValueOnce({
+      available: false,
+      reason: 'NO_ORIGIN_HUB',
+      message,
+      useLocalDelivery: false,
+      requestedDate: '2026-11-03',
+      dateUnavailable: false,
+      nextAvailableDate: null,
+    });
+    await fillBothEnds();
+
+    const book = findBookButton(container!);
+    expect(book.disabled).toBe(true);
+    expect(findStickyBar(container!).textContent).toContain(message);
+  });
+
+  it('restates the exact wallet-shortfall sentence beside the disabled button -- the same figures as the review panel, not a second wording', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path === '/wallet' ? Promise.resolve({ ...WALLET, availableMinor: 100 }) : defaultApiGetImpl(path),
+    );
+    await fillBothEnds();
+
+    const book = findBookButton(container!);
+    expect(book.disabled).toBe(true);
+    const bar = findStickyBar(container!);
+    expect(bar.textContent).toContain('Insufficient wallet balance.');
+    expect(bar.textContent).toContain('your available balance is BZ$1.00, so you are BZ$49.00 short');
+    // The review panel states the identical figures -- proof the two share
+    // one sentence builder rather than risking two different numbers.
+    expect(container!.textContent?.match(/BZ\$49\.00 short/g)?.length).toBe(2);
+  });
+
+  it('restates the pricing-incomplete note beside the disabled button', async () => {
+    quoteMock.mockResolvedValueOnce({
+      available: true,
+      service: 'DOOR_TO_DOOR',
+      serviceLabel: 'Door to door',
+      serviceDescription: 'We collect and deliver.',
+      totalMinor: 5000,
+      transportMinutes: 60,
+      explanation: 'Collected and delivered by road.',
+      requestedDate: '2026-11-03',
+      pricingIncomplete: true,
+      pricingNote: 'An operator has to set a rate for this leg.',
+      legs: [{ sequence: 1, kind: 'DIRECT', mode: 'LAND', modeLabel: 'Road', description: 'Door to door by road', priceMinor: 5000, durationMinutes: 60 }],
+    });
+    await fillBothEnds();
+
+    const book = findBookButton(container!);
+    expect(book.disabled).toBe(true);
+    expect(findStickyBar(container!).textContent).toContain('An operator has to set a rate for this leg.');
+  });
+
+  it('shows no blocking reason once the button is actually enabled', async () => {
+    const book = await fillAndQuote();
+    expect(findStickyBar(container!).textContent).not.toMatch(/insufficient|no terminal|operator has to set/i);
+    void book;
+  });
 });

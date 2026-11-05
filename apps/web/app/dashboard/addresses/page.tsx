@@ -7,6 +7,7 @@ import { savedAddressLine, type SavedAddress } from '../../../lib/address';
 import {
   EMPTY_ADDRESS_BOOK_FORM,
   addressBookProblem,
+  addressBookProblemField,
   buildAddressBookPayload,
   formFromRow,
   type AddressBookForm,
@@ -20,6 +21,26 @@ const LocationPicker = dynamic(() => import('../../../components/maps/LocationPi
   ssr: false,
   loading: () => <div className="h-[252px] animate-pulse rounded-bmpl-md bg-slate-100 sm:col-span-2" />,
 });
+
+/**
+ * MDF-559: maps the Zod issue's own field name (what `addressBookProblemField`
+ * returns) to the input actually on this page, so a blocked save can move
+ * focus there -- never a guess, and never duplicated into `lib/address-book.ts`
+ * itself, which stays framework-free and has no DOM ids of its own to know.
+ */
+const FIELD_INPUT_IDS: Record<string, string> = {
+  label: 'ab-label',
+  fullName: 'ab-name',
+  phone: 'ab-phone',
+  email: 'ab-email',
+  company: 'ab-company',
+  district: 'ab-district',
+  addressLine1: 'ab-line1',
+  addressLine2: 'ab-line2',
+  landmark: 'ab-landmark',
+  city: 'ab-city',
+  instructions: 'ab-instructions',
+};
 
 /**
  * Favorites > Addresses: the signed-in customer's saved addresses.
@@ -72,6 +93,11 @@ export default function AddressesPage() {
     const problem = addressBookProblem(payload);
     if (problem) {
       setFormError(problem);
+      // MDF-559 (Jim, reproduced live): the banner above is not feedback for
+      // a field the customer has scrolled past. Moving focus to it is the
+      // cheap, conventional fix, and it works regardless of scroll position.
+      const fieldId = FIELD_INPUT_IDS[addressBookProblemField(payload) ?? ''];
+      if (fieldId) document.getElementById(fieldId)?.focus();
       return;
     }
     setBusy(true);

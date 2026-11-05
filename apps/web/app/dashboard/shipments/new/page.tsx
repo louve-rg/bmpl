@@ -93,6 +93,15 @@ function isApiError(e: unknown): e is ApiError {
 const CONNECTION_LOST_MESSAGE =
   'We lost the connection before we could confirm this booking. Please do not submit again — check My Shipments to see whether it already went through, or contact us if you are not sure.';
 
+/**
+ * The exact numbers of a wallet shortfall, shared by the review panel's own
+ * Alert and the sticky bar below (MDF-559) so the two can never state the
+ * figures differently -- only the bold lead-in sentence differs between them.
+ */
+function shortfallSentence(totalMinor: number, availableMinor: number): string {
+  return `This shipment costs ${shippingMoney(totalMinor)}, your available balance is ${bzd(availableMinor)}, so you are ${bzd(totalMinor - availableMinor)} short.`;
+}
+
 /** The request body both quoting and booking use, so they cannot disagree. */
 function toRequest(
   service: ShippingService,
@@ -243,6 +252,37 @@ export default function NewShipmentPage() {
   const priced = quote?.available === true ? quote : null;
   const affordable = wallet == null || priced == null || wallet.availableMinor >= priced.totalMinor;
   const canBook = priced != null && !priced.pricingIncomplete && !booking && affordable;
+
+  /**
+   * MDF-559 (owner-reported, measured by Jim at 390x844): every one of these
+   * reasons already existed somewhere on this page -- the ready-gate text,
+   * the planner's own `quote.message`, the pricing note, the wallet
+   * shortfall sentence. The defect was never a missing message; it was that
+   * the quote panel carrying it scrolls away while this bar stays pinned to
+   * the bottom (MDF-376), so the control and its one reason were never
+   * guaranteed on screen together. Restating the SAME sentence beside the
+   * button, never a new one, is the fix -- same pattern as `addressGap()`
+   * beside "Save to my addresses" (MDF-554).
+   *
+   * Order matters: an unavailable quote (no hub, no coverage, bad date) and
+   * a wallet shortfall are mutually exclusive by construction (`priced` is
+   * null in the first case), but an incomplete-pricing quote is also
+   * `available: true`, so it must be checked before affordability or a
+   * configuration gap would be reported as a money problem.
+   */
+  const blockReason: string | null = booking
+    ? null
+    : !ready
+      ? 'Tell us the town at each end and we will price the whole journey.'
+      : quote && !quote.available
+        ? quote.message
+        : quote?.available && quote.pricingIncomplete
+          ? `${quote.pricingNote ?? ''} We cannot take this booking until that is set — please contact us.`.trim()
+          : quote?.available && wallet && wallet.availableMinor < quote.totalMinor
+            ? `Insufficient wallet balance. ${shortfallSentence(quote.totalMinor, wallet.availableMinor)}`
+            : quoting
+              ? 'Working out your route…'
+              : null;
 
   return (
     // No manual bottom padding here any more -- StickyActionBar now reserves
@@ -462,9 +502,8 @@ export default function NewShipmentPage() {
             )}
             {wallet && wallet.availableMinor < quote.totalMinor && (
               <Alert tone="warning" className="mt-3">
-                <span className="font-semibold">Insufficient wallet balance.</span> This shipment costs{' '}
-                {shippingMoney(quote.totalMinor)}, your available balance is {bzd(wallet.availableMinor)}, so you are{' '}
-                {bzd(quote.totalMinor - wallet.availableMinor)} short.
+                <span className="font-semibold">Insufficient wallet balance.</span>{' '}
+                {shortfallSentence(quote.totalMinor, wallet.availableMinor)}
               </Alert>
             )}
           </div>
@@ -483,26 +522,33 @@ export default function NewShipmentPage() {
              see components/ui.tsx for why both are the bar's job, not a
              one-off class here. */}
       <StickyActionBar className="sm:static sm:mt-4 sm:border-0 sm:bg-transparent sm:pt-0 sm:pb-0">
-        <div className="mx-auto flex max-w-2xl items-center gap-3">
-          {quote?.available && (
-            <span className="shrink-0 text-lg font-bold tabular-nums text-belize-navy sm:hidden">
-              {shippingMoney(quote.totalMinor)}
-            </span>
-          )}
-          {/* Never "Book" — booking now takes the money, and the button should
-              say so before it is pressed. */}
-          {/* `canBook` already folds in `!booking`, so this is redundant today --
-              it is here so the button staying disabled through the request
-              cannot silently regress if `canBook`'s own definition ever drops
-              that clause; the ref (submitInFlight, above) is what actually
-              keeps a double-submit safe either way. */}
-          <Button onClick={book} disabled={!canBook || booking} className="min-h-[48px] w-full text-base">
-            {booking
-              ? 'Paying…'
-              : quote?.available
-                ? `Pay ${shippingMoney(quote.totalMinor)} & book shipment`
-                : 'Pay & book shipment'}
-          </Button>
+        <div className="mx-auto max-w-2xl">
+          {/* MDF-559: the one reason the button below is disabled, restated
+              here rather than left up in the quote panel, which this bar's
+              own pinning (MDF-376) can scroll out of view while the button
+              stays reachable -- see `blockReason` above for why. */}
+          {blockReason && <p className="mb-2 text-sm text-amber-700">{blockReason}</p>}
+          <div className="flex items-center gap-3">
+            {quote?.available && (
+              <span className="shrink-0 text-lg font-bold tabular-nums text-belize-navy sm:hidden">
+                {shippingMoney(quote.totalMinor)}
+              </span>
+            )}
+            {/* Never "Book" — booking now takes the money, and the button should
+                say so before it is pressed. */}
+            {/* `canBook` already folds in `!booking`, so this is redundant today --
+                it is here so the button staying disabled through the request
+                cannot silently regress if `canBook`'s own definition ever drops
+                that clause; the ref (submitInFlight, above) is what actually
+                keeps a double-submit safe either way. */}
+            <Button onClick={book} disabled={!canBook || booking} className="min-h-[48px] w-full text-base">
+              {booking
+                ? 'Paying…'
+                : quote?.available
+                  ? `Pay ${shippingMoney(quote.totalMinor)} & book shipment`
+                  : 'Pay & book shipment'}
+            </Button>
+          </div>
         </div>
       </StickyActionBar>
     </div>

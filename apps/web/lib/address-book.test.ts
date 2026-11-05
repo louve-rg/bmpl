@@ -3,6 +3,7 @@ import type { SavedAddress } from './address';
 import {
   EMPTY_ADDRESS_BOOK_FORM,
   addressBookProblem,
+  addressBookProblemField,
   buildAddressBookPayload,
   formFromRow,
 } from './address-book';
@@ -91,5 +92,29 @@ describe('addressBookProblem (the shared schema, in words)', () => {
 
   it('refuses a blank name for the address', () => {
     expect(addressBookProblem({ ...valid, label: '' })).toBe('Give this address a name, such as Home or Work.');
+  });
+});
+
+describe('addressBookProblemField (MDF-559: which field to focus, not what to say)', () => {
+  const valid = buildAddressBookPayload({
+    ...EMPTY_ADDRESS_BOOK_FORM,
+    label: 'Home',
+    fullName: 'Rae Test',
+    phone: '+501 600 0000',
+    addressLine1: '12 Front St',
+    city: 'Belize City',
+    district: 'BELIZE',
+  });
+
+  it('is null for a complete address', () => {
+    expect(addressBookProblemField(valid)).toBeNull();
+  });
+
+  it('names fullName when it is the one field left blank', () => {
+    expect(addressBookProblemField({ ...valid, fullName: '' })).toBe('fullName');
+  });
+
+  it('names city when it is the one field left blank', () => {
+    expect(addressBookProblemField({ ...valid, city: '' })).toBe('city');
   });
 });
