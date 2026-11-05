@@ -16,7 +16,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let admin: string[];
@@ -227,6 +227,51 @@ describe('mutual consent', () => {
     expect((await post(admin, `passenger/driver/affiliations/${invite.body.id}/accept`)).status).toBe(403);
     expect((await post(admin, `passenger/provider/affiliations/${invite.body.id}/approve`)).status).toBe(403);
     expect(await pointerOf(drv.driverProfileId)).toBeNull();
+  });
+
+  it('admin can see every affiliation — who, which side asked, and its current state — but still cannot act for a party (MDF-553 gap 1)', async () => {
+    const op = await makeProvider('Test Oversight Lines');
+    const otherOp = await makeProvider('Test Oversight Bystander');
+    const drv = await makeDriver();
+
+    const invite = await post(op.cookies, 'passenger/provider/affiliations/invite', { driverProfileId: drv.driverProfileId, message: 'Join us.' });
+    expect(invite.status).toBe(201);
+
+    const reader = await seedLimitedAdmin(ctx.prisma, `af_admr_${uniq()}@example.bz`, ['passengers.read']);
+    const rc = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: reader.email, password: reader.password }));
+
+    // Before this gap closed, the only admin-visible trace of this PENDING
+    // ask was nothing — getDriver shows CURRENT membership, and this ask
+    // has not been answered yet, so there is no membership to show.
+    const pending = await get(rc, `admin/passengers/affiliations?driverProfileId=${drv.driverProfileId}`);
+    expect(pending.status).toBe(200);
+    expect(pending.body).toHaveLength(1);
+    expect(pending.body[0]).toMatchObject({
+      id: invite.body.id,
+      status: 'PENDING',
+      initiatedBy: 'PROVIDER',
+      message: 'Join us.',
+      driver: { id: drv.driverProfileId },
+      provider: { id: op.profileId, businessName: 'Test Oversight Lines' },
+    });
+
+    // No permission, no view — passengers.read gates this the same as its siblings.
+    const noPerm = await seedLimitedAdmin(ctx.prisma, `af_admnp_${uniq()}@example.bz`, ['passengers.moderate']);
+    const npc = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: noPerm.email, password: noPerm.password }));
+    expect((await get(npc, 'admin/passengers/affiliations')).status).toBe(403);
+
+    // Filters narrow correctly: the bystander operator's id finds nothing.
+    expect((await get(rc, `admin/passengers/affiliations?providerProfileId=${otherOp.profileId}`)).body).toHaveLength(0);
+
+    // The driver answers (admin cannot — proven generally above, this read
+    // view gives it nothing to act through anyway). The SAME row updates in
+    // place: admin sees the history, not a second entry.
+    expect((await post(drv.cookies, `passenger/driver/affiliations/${invite.body.id}/accept`)).status).toBe(201);
+    const accepted = await get(rc, `admin/passengers/affiliations?driverProfileId=${drv.driverProfileId}`);
+    expect(accepted.body).toHaveLength(1);
+    expect(accepted.body[0]).toMatchObject({ id: invite.body.id, status: 'ACCEPTED' });
+    expect(accepted.body[0].acceptedAt).toBeTruthy();
+    expect((await post(drv.cookies, `passenger/driver/affiliations/${invite.body.id}/accept`)).status).toBe(400); // already settled
   });
 
   it('two half-consents never stitch into one affiliation', async () => {

@@ -629,6 +629,41 @@ describe('oversight and suspension', () => {
     expect(cancelled.body.cancelledBy).toBe('ADMIN');
   });
 
+  it('pages past the old 300-row cap instead of silently dropping anything beyond it (MDF-553 gap 2)', async () => {
+    const op = await makeProvider('Test Pagination Lines');
+    const rider = await registerUser(`pb_pg_${uniq()}@example.com`);
+    // Three separate trips (the one-booking-per-rider-per-trip rule forbids
+    // three bookings on one trip for the same rider) so three distinct rows
+    // exist to page across.
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const { tripId } = await makeDeparture(op, 2000 + i);
+      const b = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 1 });
+      expect(b.status).toBe(201);
+      ids.push(b.body.id);
+    }
+
+    const defaultPage = await get(admin, 'admin/passengers/bookings');
+    expect(defaultPage.status).toBe(200);
+    expect(defaultPage.body.total).toBeGreaterThanOrEqual(3);
+    expect(Array.isArray(defaultPage.body.rows)).toBe(true);
+    expect(ids.every((id) => defaultPage.body.rows.some((r: { id: string }) => r.id === id))).toBe(true);
+
+    // A page smaller than the result set: page 1 and page 2 are disjoint,
+    // and together they account for every id without repeats.
+    const page1 = await get(admin, `admin/passengers/bookings?page=1&pageSize=2`);
+    const page2 = await get(admin, `admin/passengers/bookings?page=2&pageSize=2`);
+    expect(page1.status).toBe(200);
+    expect(page2.status).toBe(200);
+    expect(page1.body.rows).toHaveLength(2);
+    expect(page1.body.total).toBe(page2.body.total);
+    const page1Ids = page1.body.rows.map((r: { id: string }) => r.id);
+    const page2Ids = page2.body.rows.map((r: { id: string }) => r.id);
+    expect(page1Ids.some((id: string) => page2Ids.includes(id))).toBe(false);
+    const seen = new Set([...page1Ids, ...page2Ids]);
+    expect(ids.every((id) => seen.has(id))).toBe(true);
+  });
+
   it('a suspended operator takes no bookings and staffs nothing', async () => {
     const op = await makeProvider('Test Suspended Lines');
     const { tripId } = await makeDeparture(op, 2000);
@@ -1050,7 +1085,7 @@ describe('pickup/dropoff pins on a flag-stop booking', () => {
 
     const list = await get(admin, 'admin/passengers/bookings');
     expect(list.status).toBe(200);
-    const row = list.body.find((x: { id: string }) => x.id === b.body.id);
+    const row = list.body.rows.find((x: { id: string }) => x.id === b.body.id);
     expect(row.pickup).toMatchObject(PICKUP);
     expect(row.dropoff).toMatchObject(DROPOFF);
 
