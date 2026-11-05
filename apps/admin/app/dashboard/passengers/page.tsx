@@ -68,6 +68,28 @@ interface ProviderRow {
   driverCount: number;
 }
 
+/**
+ * MDF-554 gap: read off Pam's branch (`passenger-affiliation.service.ts`
+ * `listForAdmin()`), not hand-declared from prose. Admin sees EITHER party's
+ * row -- unlike the driver's/operator's own-side lists, which nest only the
+ * counterparty -- so both `driver` and `provider` are always present here.
+ */
+interface AffiliationRow {
+  id: string;
+  providerProfileId: string;
+  driverProfileId: string;
+  initiatedBy: 'DRIVER' | 'PROVIDER';
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'WITHDRAWN' | 'ENDED';
+  message: string | null;
+  isTest: boolean;
+  acceptedAt: string | null;
+  endedAt: string | null;
+  endedBy: 'DRIVER' | 'PROVIDER' | null;
+  createdAt: string;
+  driver: { id: string; displayName: string; homeDistrict: string | null; availability: string; isActive: boolean };
+  provider: { id: string; businessName: string; district: string | null; isActive: boolean };
+}
+
 interface RouteStop {
   id: string;
   sequence: number;
@@ -116,6 +138,18 @@ interface BookingRow {
   createdAt: string;
 }
 
+/**
+ * MDF-554: `GET /admin/passengers/bookings` now returns this envelope
+ * instead of a bare array (Pam's branch, MDF-553 gap 2) -- `total` is what
+ * makes real pagination possible instead of a silent cap at the page size.
+ */
+interface BookingsEnvelope {
+  rows: BookingRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 interface TripRow {
   id: string;
   reference: string;
@@ -154,10 +188,11 @@ const EXPIRY_TONE: Record<string, 'success' | 'warning' | 'error'> = {
 const when = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
-type Tab = 'drivers' | 'providers' | 'routes' | 'departures' | 'bookings';
+type Tab = 'drivers' | 'providers' | 'affiliations' | 'routes' | 'departures' | 'bookings';
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'drivers', label: 'Drivers' },
   { key: 'providers', label: 'Providers' },
+  { key: 'affiliations', label: 'Affiliations' },
   { key: 'routes', label: 'Routes' },
   { key: 'departures', label: 'Departures' },
   { key: 'bookings', label: 'Bookings' },
@@ -207,6 +242,7 @@ export default function PassengersPage() {
 
       {tab === 'drivers' && <DriversTab />}
       {tab === 'providers' && <ProvidersTab canModerate={canModerate} />}
+      {tab === 'affiliations' && <AffiliationsTab />}
       {tab === 'routes' && <RoutesTab />}
       {tab === 'departures' && <DeparturesTab canModerate={canModerate} />}
       {tab === 'bookings' && <BookingsTab canModerate={canModerate} />}
@@ -431,6 +467,104 @@ function ProvidersTab({ canModerate }: { canModerate: boolean }) {
                   </Button>
                 )}
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- affiliations */
+
+const AFFILIATION_STATUSES = ['PENDING', 'ACCEPTED', 'DECLINED', 'WITHDRAWN', 'ENDED'];
+
+const AFFILIATION_TONE: Record<AffiliationRow['status'], 'info' | 'success' | 'neutral' | 'warning'> = {
+  PENDING: 'info',
+  ACCEPTED: 'success',
+  DECLINED: 'neutral',
+  WITHDRAWN: 'neutral',
+  ENDED: 'neutral',
+};
+
+/**
+ * MDF-554: who is affiliated with whom, visible at all -- before this, an
+ * admin could only INFER current fleet membership from a driver's own
+ * `providerProfileId` pointer, with no way to see a pending ask, who sent
+ * it, or the history of a declined/withdrawn/ended one.
+ *
+ * Read only, by design: `passenger-affiliation.service.ts`'s own doc comment
+ * says moderation can SEE affiliations but no one, admin included, consents
+ * on a party's behalf. So this renders state and history and nothing else --
+ * no accept/decline/end controls, regardless of canModerate.
+ */
+function AffiliationsTab() {
+  const [rows, setRows] = useState<AffiliationRow[]>([]);
+  const [status, setStatus] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .get<AffiliationRow[]>(`/admin/passengers/affiliations${status ? `?status=${status}` : ''}`)
+      .then((list) => {
+        if (!cancelled) {
+          setRows(list);
+          setErr(null);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setErr((e as ApiError).message ?? 'Could not load affiliations.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
+  return (
+    <div>
+      <div className="mb-4 max-w-xs">
+        <Field label="Status">
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="">All</option>
+            {AFFILIATION_STATUSES.map((s) => (
+              <option key={s} value={s}>{s.replace(/_/g, ' ').toLowerCase()}</option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+      {err && <Alert tone="warning" className="mb-4">{err}</Alert>}
+      {loading ? (
+        <Loading />
+      ) : rows.length === 0 && !err ? (
+        <EmptyState
+          title="No affiliations"
+          description="No fleet affiliation matches. A driver joins a fleet only by mutual consent -- an invitation accepted or a request approved."
+        />
+      ) : (
+        <div className="space-y-3">
+          {rows.map((a) => (
+            <div key={a.id} className="rounded-bmpl-xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-belize-navy">{a.driver.displayName}</span>
+                <span className="text-slate-400">↔</span>
+                <span className="font-medium text-belize-navy">{a.provider.businessName}</span>
+                <Badge tone={AFFILIATION_TONE[a.status]}>{a.status.replace(/_/g, ' ').toLowerCase()}</Badge>
+                {a.isTest && <Badge tone="neutral">Simulation</Badge>}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Initiated by {a.initiatedBy === 'DRIVER' ? 'the driver' : 'the operator'} · asked {when(a.createdAt)}
+                {a.acceptedAt ? ` · accepted ${when(a.acceptedAt)}` : ''}
+                {a.endedAt
+                  ? ` · ended ${when(a.endedAt)}${a.endedBy ? ` by ${a.endedBy === 'DRIVER' ? 'the driver' : 'the operator'}` : ''}`
+                  : ''}
+              </p>
+              {a.message && <p className="mt-1 text-xs text-slate-600">&ldquo;{a.message}&rdquo;</p>}
             </div>
           ))}
         </div>
@@ -805,9 +939,13 @@ const BOOKING_TONE: Record<BookingRow['status'], 'info' | 'success' | 'neutral' 
   EXPIRED: 'neutral',
 };
 
+const BOOKINGS_PAGE_SIZE = 20;
+
 function BookingsTab({ canModerate }: { canModerate: boolean }) {
   const [rows, setRows] = useState<BookingRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [status, setStatus] = useState('');
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -816,14 +954,26 @@ function BookingsTab({ canModerate }: { canModerate: boolean }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setRows(await api.get<BookingRow[]>(`/admin/passengers/bookings${status ? `?status=${status}` : ''}`));
+      const params = new URLSearchParams({ page: String(page), pageSize: String(BOOKINGS_PAGE_SIZE) });
+      if (status) params.set('status', status);
+      // Read tolerantly (bare array OR the envelope): API (Railway) and admin
+      // (Vercel) deploy from the same merge commit but not atomically, so
+      // there's a window where this bundle talks to the pre-envelope API.
+      const data = await api.get<BookingRow[] | BookingsEnvelope>(`/admin/passengers/bookings?${params}`);
+      if (Array.isArray(data)) {
+        setRows(data);
+        setTotal(data.length);
+      } else {
+        setRows(data.rows);
+        setTotal(data.total);
+      }
       setErr(null);
     } catch (e) {
       setErr((e as ApiError).message ?? 'Could not load bookings.');
     } finally {
       setLoading(false);
     }
-  }, [status]);
+  }, [status, page]);
 
   useEffect(() => {
     void load();
@@ -856,7 +1006,13 @@ function BookingsTab({ canModerate }: { canModerate: boolean }) {
     <div>
       <div className="mb-4 max-w-xs">
         <Field label="Status">
-          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+          <Select
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setPage(1);
+            }}
+          >
             <option value="">All</option>
             {BOOKING_STATUSES.map((s) => (
               <option key={s} value={s}>{s.replace(/_/g, ' ').toLowerCase()}</option>
@@ -924,6 +1080,21 @@ function BookingsTab({ canModerate }: { canModerate: boolean }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {!loading && total > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+          <span>
+            Showing {(page - 1) * BOOKINGS_PAGE_SIZE + 1}–{Math.min(page * BOOKINGS_PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <Button size="sm" variant="outline" disabled={page * BOOKINGS_PAGE_SIZE >= total} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
+          </div>
         </div>
       )}
     </div>
