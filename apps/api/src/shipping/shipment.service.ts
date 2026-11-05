@@ -295,6 +295,7 @@ const RETURN_SHIPMENT_SELECT = {
   originLatitude: true,
   originLongitude: true,
   originInstructions: true,
+  originLandmark: true,
   destinationHubId: true,
   destinationName: true,
   destinationPhone: true,
@@ -307,6 +308,7 @@ const RETURN_SHIPMENT_SELECT = {
   destinationLatitude: true,
   destinationLongitude: true,
   destinationInstructions: true,
+  destinationLandmark: true,
   returnShipment: { select: { id: true, reference: true } },
 } satisfies Prisma.ShipmentSelect;
 
@@ -349,6 +351,7 @@ const REROUTE_SHIPMENT_SELECT = {
   destinationLatitude: true,
   destinationLongitude: true,
   destinationInstructions: true,
+  destinationLandmark: true,
   returnShipment: { select: { id: true, reference: true } },
   rerouteShipment: { select: { id: true, reference: true } },
 } satisfies Prisma.ShipmentSelect;
@@ -947,6 +950,7 @@ export class ShipmentService {
           originLatitude: input.origin.latitude ?? null,
           originLongitude: input.origin.longitude ?? null,
           originInstructions: input.origin.instructions ?? null,
+          originLandmark: input.origin.landmark ?? null,
           destinationName: input.destination.name ?? null,
           destinationPhone: input.destination.phone ?? null,
           destinationEmail: input.destination.email ?? null,
@@ -958,6 +962,7 @@ export class ShipmentService {
           destinationLatitude: input.destination.latitude ?? null,
           destinationLongitude: input.destination.longitude ?? null,
           destinationInstructions: input.destination.instructions ?? null,
+          destinationLandmark: input.destination.landmark ?? null,
           preferredMode: input.preferredMode ?? null,
           quotedTotalMinor: BigInt(plan.totalMinor),
           quotedMinutes: plan.totalMinutes,
@@ -2473,6 +2478,7 @@ export class ShipmentService {
         latitude: shipment.destinationLatitude ?? undefined,
         longitude: shipment.destinationLongitude ?? undefined,
         instructions: shipment.destinationInstructions ?? undefined,
+        landmark: shipment.destinationLandmark ?? undefined,
       },
       destination: {
         hubId: shipment.originHubId ?? undefined,
@@ -2487,6 +2493,7 @@ export class ShipmentService {
         latitude: shipment.originLatitude ?? undefined,
         longitude: shipment.originLongitude ?? undefined,
         instructions: shipment.originInstructions ?? undefined,
+        landmark: shipment.originLandmark ?? undefined,
       },
       preferredMode: shipment.preferredMode ?? undefined,
       weightGrams: shipment.weightGrams ?? undefined,
@@ -2759,6 +2766,7 @@ export class ShipmentService {
         latitude: shipment.destinationLatitude ?? undefined,
         longitude: shipment.destinationLongitude ?? undefined,
         instructions: shipment.destinationInstructions ?? undefined,
+        landmark: shipment.destinationLandmark ?? undefined,
       },
       destination: {
         hubId: destination.hubId ?? undefined,
@@ -2773,6 +2781,7 @@ export class ShipmentService {
         latitude: destination.latitude ?? undefined,
         longitude: destination.longitude ?? undefined,
         instructions: destination.instructions ?? undefined,
+        landmark: destination.landmark ?? undefined,
       },
       preferredMode: shipment.preferredMode ?? undefined,
       weightGrams: shipment.weightGrams ?? undefined,
@@ -4032,6 +4041,7 @@ export class ShipmentService {
         latitude: s.originLatitude,
         longitude: s.originLongitude,
         instructions: s.originInstructions,
+        landmark: s.originLandmark,
       },
       destination: {
         name: s.destinationName,
@@ -4042,6 +4052,7 @@ export class ShipmentService {
         latitude: s.destinationLatitude,
         longitude: s.destinationLongitude,
         instructions: s.destinationInstructions,
+        landmark: s.destinationLandmark,
       },
       currentLegSequence: current?.sequence ?? null,
       // BMPL-340: the journey's own ETA, same confidence/reason shape each

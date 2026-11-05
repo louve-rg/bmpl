@@ -2744,6 +2744,12 @@ model OrderAddress {
   city         String
   district     District
   country      String           @default("BZ")
+  /// A wayfinding reference ("behind the blue gate"), distinct from delivery
+  /// instructions — which live on OrderDelivery.instructions, not here — and
+  /// copied in at checkout from the saved address the customer picked
+  /// (MDF-485/MDF-533). A later edit to that saved address must never change
+  /// this snapshot, same as every other field on this row.
+  landmark     String?
   latitude     Float?
   longitude    Float?
   createdAt    DateTime         @default(now())
@@ -5080,6 +5086,11 @@ model Shipment {
   originLatitude     Float?
   originLongitude    Float?
   originInstructions String?
+  /// A wayfinding reference, distinct from originInstructions, copied in from
+  /// the saved address the customer picked (MDF-485/MDF-533 — same reasoning
+  /// as OrderAddress.landmark; a shipment booked DOOR-side from a saved
+  /// address has the identical gap a marketplace order did).
+  originLandmark     String?
 
   // ---- Destination (snapshot) ----
   destinationHubId        String?
@@ -5095,6 +5106,8 @@ model Shipment {
   destinationLatitude     Float?
   destinationLongitude    Float?
   destinationInstructions String?
+  /// See originLandmark.
+  destinationLandmark     String?
 
   // ---- The plan ----
   preferredMode    TransportMode?

@@ -235,6 +235,12 @@ describe('orderAddressSchema — an address is written OR pinned (M10)', () => {
     const { district: _omitted, ...noDistrict } = base;
     expect(orderAddressSchema.safeParse({ ...noDistrict, ...BELIZE_CITY }).success).toBe(false);
   });
+
+  it('carries a landmark through (MDF-533)', () => {
+    const r = orderAddressSchema.safeParse({ ...base, ...BELIZE_CITY, landmark: 'Behind the blue gate' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.landmark).toBe('Behind the blue gate');
+  });
 });
 
 /**

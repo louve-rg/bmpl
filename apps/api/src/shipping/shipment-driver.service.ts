@@ -69,9 +69,9 @@ const LEG_INCLUDE = {
       weightGrams: true,
       customerUserId: true,
       originName: true, originPhone: true, originAddress: true, originCity: true, originDistrict: true,
-      originLatitude: true, originLongitude: true, originInstructions: true,
+      originLatitude: true, originLongitude: true, originInstructions: true, originLandmark: true,
       destinationName: true, destinationPhone: true, destinationAddress: true, destinationCity: true, destinationDistrict: true,
-      destinationLatitude: true, destinationLongitude: true, destinationInstructions: true,
+      destinationLatitude: true, destinationLongitude: true, destinationInstructions: true, destinationLandmark: true,
       // Every leg of the WHOLE shipment, hubs included — not just this driver's
       // own leg — so the map can show the real sender->hub->hub->recipient
       // journey (BMPL-190), not only the two ends of the one leg this driver
@@ -547,8 +547,8 @@ export class ShipmentDriverService {
     //   FIRST_MILE  sender's door  -> terminal
     //   LAST_MILE   terminal       -> recipient's door
     //   DIRECT      sender's door  -> recipient's door   (no terminal at all)
-    const senderEnd = { name: s.originName, phone: s.originPhone, address: s.originAddress, city: s.originCity, district: s.originDistrict, latitude: s.originLatitude, longitude: s.originLongitude, instructions: s.originInstructions };
-    const recipientEnd = { name: s.destinationName, phone: s.destinationPhone, address: s.destinationAddress, city: s.destinationCity, district: s.destinationDistrict, latitude: s.destinationLatitude, longitude: s.destinationLongitude, instructions: s.destinationInstructions };
+    const senderEnd = { name: s.originName, phone: s.originPhone, address: s.originAddress, city: s.originCity, district: s.originDistrict, latitude: s.originLatitude, longitude: s.originLongitude, instructions: s.originInstructions, landmark: s.originLandmark };
+    const recipientEnd = { name: s.destinationName, phone: s.destinationPhone, address: s.destinationAddress, city: s.destinationCity, district: s.destinationDistrict, latitude: s.destinationLatitude, longitude: s.destinationLongitude, instructions: s.destinationInstructions, landmark: s.destinationLandmark };
     const collectsFromDoor = kind === 'FIRST_MILE' || kind === 'DIRECT';
     const doorEnd = collectsFromDoor ? senderEnd : recipientEnd;
     const hubEnd = kind === 'DIRECT' ? null : kind === 'FIRST_MILE' ? leg.destinationHub : leg.originHub;
@@ -568,6 +568,7 @@ export class ShipmentDriverService {
       address: revealed ? end.address : null,
       area: [end.city, end.district?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
       instructions: revealed ? end.instructions : null,
+      landmark: revealed ? end.landmark : null,
       pinnedLocation: revealed && end.latitude != null && end.longitude != null
         ? { latitude: end.latitude, longitude: end.longitude }
         : null,

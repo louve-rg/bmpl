@@ -190,6 +190,9 @@ const endpointSchema = withPinRules(
     address2: z.string().trim().max(200).optional(),
     city: z.string().trim().max(80).optional(),
     district: districtSchema.optional(),
+    // A wayfinding reference, distinct from instructions — MDF-485/MDF-533,
+    // same reasoning as orderAddressSchema's landmark.
+    landmark: z.string().trim().max(200).optional(),
     instructions: z.string().trim().max(1000).optional(),
     ...coordinates,
   }),

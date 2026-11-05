@@ -77,15 +77,15 @@ async function seedNetwork() {
 
 const SHIPMENT_ADDRESS_FIELDS = {
   originName: true, originPhone: true, originEmail: true, originCompany: true, originAddress: true, originAddress2: true,
-  originCity: true, originDistrict: true, originLatitude: true, originLongitude: true, originInstructions: true,
+  originCity: true, originDistrict: true, originLatitude: true, originLongitude: true, originInstructions: true, originLandmark: true,
   destinationName: true, destinationPhone: true, destinationEmail: true, destinationCompany: true, destinationAddress: true,
   destinationAddress2: true, destinationCity: true, destinationDistrict: true, destinationLatitude: true, destinationLongitude: true,
-  destinationInstructions: true,
+  destinationInstructions: true, destinationLandmark: true,
 } as const;
 
 const ORDER_ADDRESS_FIELDS = {
   fullName: true, phone: true, addressLine1: true, addressLine2: true, city: true, district: true, country: true,
-  latitude: true, longitude: true,
+  latitude: true, longitude: true, landmark: true,
 } as const;
 
 /** Delivery instructions live on the order delivery, not on the address row. */
@@ -113,10 +113,10 @@ describe('editing or deleting a saved address leaves recorded shipment and order
     const customer = await registerCustomer(`sas_c${uniq()}@example.bz`);
 
     // The customer saves an address, then books using its values, as the forms do.
-    const saved = await post(customer.cookies, 'addresses', { label: 'Home', fullName: 'Original Name', phone: '501-600-1234', addressLine1: '12 Queen Street', city: 'Belize City', district: 'BELIZE' });
+    const saved = await post(customer.cookies, 'addresses', { label: 'Home', fullName: 'Original Name', phone: '501-600-1234', addressLine1: '12 Queen Street', city: 'Belize City', district: 'BELIZE', landmark: 'Behind the blue gate' });
     expect(saved.status).toBe(201);
     const addressId = saved.body.id as string;
-    const destination = { name: 'Original Name', phone: '501-600-1234', address: '12 Queen Street', city: 'Belize City', district: 'BELIZE' };
+    const destination = { name: 'Original Name', phone: '501-600-1234', address: '12 Queen Street', city: 'Belize City', district: 'BELIZE', landmark: 'Behind the blue gate' };
 
     const ship = await post(customer.cookies, 'shipping', {
       service: 'DOOR_TO_DOOR',
@@ -133,7 +133,7 @@ describe('editing or deleting a saved address leaves recorded shipment and order
     await post(customer.cookies, 'cart/items', { productId: vendor.productId, quantity: 1 }).expect(201);
     const order = await post(customer.cookies, 'checkout', {
       vendors: [{ vendorProfileId: vendor.vendorProfileId, deliveryMethod: 'DELIVERY', deliveryInstructions: 'Ring the bell at the gate' }],
-      deliveryAddress: { fullName: destination.name, phone: destination.phone, addressLine1: destination.address, city: destination.city, district: destination.district },
+      deliveryAddress: { fullName: destination.name, phone: destination.phone, addressLine1: destination.address, city: destination.city, district: destination.district, landmark: destination.landmark },
       payWithWallet: false,
     });
     expect(order.status).toBe(201);
@@ -152,12 +152,17 @@ describe('editing or deleting a saved address leaves recorded shipment and order
     expect(shipBefore).toContain('12 Queen Street');
     expect(orderBefore).toContain('12 Queen Street');
     expect(orderBefore).toContain('Ring the bell at the gate'); // control: the instructions were recorded before the edit
+    // MDF-533: a landmark set on the saved address reaches both snapshots too,
+    // not just the street/city/pin fields.
+    expect(shipBefore).toContain('Behind the blue gate');
+    expect(orderBefore).toContain('Behind the blue gate');
 
-    // EDIT the saved address.
-    const edited = await patch(customer.cookies, `addresses/${addressId}`, { addressLine1: '99 Changed Road', city: 'Changed Town', fullName: 'Changed Name' });
+    // EDIT the saved address, landmark included.
+    const edited = await patch(customer.cookies, `addresses/${addressId}`, { addressLine1: '99 Changed Road', city: 'Changed Town', fullName: 'Changed Name', landmark: 'Behind the red gate' });
     expect(edited.status).toBe(200);
     const readBack = await get(customer.cookies, 'addresses');
     expect(readBack.body.find((a: { id: string }) => a.id === addressId).addressLine1).toBe('99 Changed Road'); // control: the edit really happened
+    expect(readBack.body.find((a: { id: string }) => a.id === addressId).landmark).toBe('Behind the red gate'); // control: the landmark edit really happened
     expect(await shipmentSnapshot()).toBe(shipBefore);
     expect(await orderSnapshot()).toBe(orderBefore);
 

@@ -438,6 +438,7 @@ export class OrdersService {
             addressLine2: dto.deliveryAddress.addressLine2 ?? null,
             city: dto.deliveryAddress.city,
             district: dto.deliveryAddress.district,
+            landmark: dto.deliveryAddress.landmark ?? null,
             latitude: dto.deliveryAddress.latitude ?? null,
             longitude: dto.deliveryAddress.longitude ?? null,
           },
@@ -1004,6 +1005,7 @@ export class OrdersService {
             city: address.city,
             district: address.district,
             country: address.country,
+            landmark: address.landmark,
           }
         : null,
       vendorOrders,
@@ -1031,6 +1033,7 @@ export class OrdersService {
                       city: address.city,
                       district: address.district,
                       country: address.country,
+                      landmark: address.landmark,
                     }
                   : null,
             }

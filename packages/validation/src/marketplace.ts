@@ -549,6 +549,9 @@ export const orderAddressSchema = z
     // recognises on arrival and what the delivery quote is priced against.
     city: z.string().trim().min(1, 'City is required.').max(120),
     district: z.enum(DISTRICTS),
+    // A wayfinding reference, distinct from delivery instructions (which live
+    // on OrderDelivery, not here) — MDF-485/MDF-533.
+    landmark: z.string().trim().max(200).optional(),
     latitude: z.coerce.number().min(-90).max(90).optional(),
     longitude: z.coerce.number().min(-180).max(180).optional(),
   })
