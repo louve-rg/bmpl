@@ -227,3 +227,29 @@ describe('BookingForm (MDF-549): pickup/dropoff are optional, off by default', (
     });
   });
 });
+
+describe('BookingForm (MDF-554): the fare is restated where the rider commits', () => {
+  it('shows the identical "Fare BZ$..." figure inside the request panel, next to the submit control', async () => {
+    mount();
+    openForm();
+
+    const fareLines = Array.from(container!.querySelectorAll('p')).filter((p) => p.textContent === 'Fare BZ$10.00');
+    // One on the card (browse time), one inside the now-open panel (commit time).
+    expect(fareLines.length).toBe(2);
+  });
+
+  it('never multiplies by seats, never shows a total, however many seats are requested', async () => {
+    mount();
+    openForm();
+
+    const seatsInput = container!.querySelector('input[type="number"]') as HTMLInputElement;
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    act(() => {
+      nativeInputValueSetter.call(seatsInput, '4');
+      seatsInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(container!.textContent).toContain('Fare BZ$10.00');
+    expect(container!.textContent).not.toMatch(/BZ\$40\.00|per seat|per booking|[Tt]otal/);
+  });
+});

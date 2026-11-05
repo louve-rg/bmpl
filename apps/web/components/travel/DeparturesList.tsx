@@ -19,7 +19,9 @@ import { riderAccessView, seatsLeft, toBookingLocation, type Departure } from '.
  * A configured fare renders verbatim (minor units as returned) labelled just
  * "Fare": whether that figure is per seat or per booking is commercial policy
  * nobody has set, so no unit and no multiplication appears anywhere, however
- * many seats are asked for.
+ * many seats are asked for. Restated identically inside the request panel
+ * itself (MDF-554) so the rider sees it at the moment they actually commit,
+ * not only at browse time on the card above.
  *
  * Booking honesty: a request RESERVES NOTHING — seats are held only when the
  * operator confirms. The form says so before submission and the success
@@ -157,6 +159,8 @@ export function DepartureCard({
       {bookingOpen && (
         <BookingForm
           tripId={d.id}
+          fareConfigured={d.fareConfigured}
+          baseFareMinor={d.baseFareMinor}
           onClose={() => setBookingOpen(false)}
           onDone={async () => {
             setBookingOpen(false);
@@ -190,8 +194,29 @@ export function DepartureCard({
  *
  * `contact="NONE"`: the rider's name and phone are already on their
  * account, and MDF-549 is explicit that this adds no new personal field.
+ *
+ * MDF-554: the fare only ever appeared on the departure card above this
+ * panel, invisible once that card scrolls off — restated here, next to the
+ * submit control, with the IDENTICAL label and `formatBzd()` the card uses,
+ * gated on the same `fareConfigured` flag. Deliberately not multiplied by
+ * seats, not labelled "per seat"/"per booking", and never a total: whether
+ * `baseFareMinor` is per-seat or per-booking is undecided commercial policy
+ * (owner decision, escalated separately) -- a total would be this app
+ * inventing a pricing rule the server itself refuses to state.
  */
-function BookingForm({ tripId, onClose, onDone }: { tripId: string; onClose: () => void; onDone: () => Promise<void> }) {
+function BookingForm({
+  tripId,
+  fareConfigured,
+  baseFareMinor,
+  onClose,
+  onDone,
+}: {
+  tripId: string;
+  fareConfigured: boolean;
+  baseFareMinor: number | null;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
   const [seats, setSeats] = useState('1');
   const [pickupEnabled, setPickupEnabled] = useState(false);
   const [dropoffEnabled, setDropoffEnabled] = useState(false);
@@ -289,6 +314,7 @@ function BookingForm({ tripId, onClose, onDone }: { tripId: string; onClose: () 
         This sends a request to the operator. <b>Your seats are only held once the operator confirms</b> — until then,
         nothing is reserved.
       </p>
+      {fareConfigured && baseFareMinor != null && <p className="text-sm text-slate-700">Fare {formatBzd(baseFareMinor)}</p>}
       <div className="flex gap-2">
         <Button size="sm" disabled={busy || !seats || !!pickupGap || !!dropoffGap}>
           Send request
