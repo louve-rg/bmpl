@@ -901,18 +901,26 @@ function BookingsTab({ canModerate }: { canModerate: boolean }) {
                     </p>
                   )}
                 </div>
-                {canModerate && (b.status === 'REQUESTED' || b.status === 'CONFIRMED') && (
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    {b.status === 'REQUESTED' && (
-                      <Button size="sm" variant="primary" disabled={busy === b.id} onClick={() => void act(b, 'confirm')}>
-                        Confirm
+                <div className="flex shrink-0 flex-wrap items-start gap-2">
+                  {/* MDF-549: pickup/drop-off, landmarks and instructions have
+                      room on the detail page, not here -- the row itself is
+                      otherwise unchanged. */}
+                  <Link href={`/dashboard/passengers/bookings/${b.id}`} className="text-sm font-semibold text-belize-blue hover:underline">
+                    View →
+                  </Link>
+                  {canModerate && (b.status === 'REQUESTED' || b.status === 'CONFIRMED') && (
+                    <>
+                      {b.status === 'REQUESTED' && (
+                        <Button size="sm" variant="primary" disabled={busy === b.id} onClick={() => void act(b, 'confirm')}>
+                          Confirm
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" disabled={busy === b.id} onClick={() => void act(b, 'cancel')}>
+                        Cancel booking
                       </Button>
-                    )}
-                    <Button size="sm" variant="outline" disabled={busy === b.id} onClick={() => void act(b, 'cancel')}>
-                      Cancel booking
-                    </Button>
-                  </div>
-                )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           ))}

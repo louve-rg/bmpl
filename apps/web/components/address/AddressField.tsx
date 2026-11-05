@@ -517,7 +517,11 @@ export function AddressField({
 
         {movedFromSaved && (
           <Alert tone="info" className="mt-2">
-            You have moved the pin for this delivery. Your saved address is unchanged.
+            {/* MDF-549: was "...for this delivery", which read oddly for a
+                passenger pickup/drop-off -- not every caller is a delivery.
+                Dropping the noun is meaning-preserving for every existing
+                caller too (checkout, shipments, store pickup). */}
+            You have moved the pin. Your saved address is unchanged.
           </Alert>
         )}
       </div>

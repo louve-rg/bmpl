@@ -8,6 +8,41 @@
  * no seat is held yet, and nothing may imply otherwise.
  */
 
+import type { AddressValue } from './address';
+import type { TripBookingLocation } from './passenger-driver';
+
+/**
+ * One end of a booking's pickup/drop-off (MDF-549), in the shape
+ * `POST /passenger/bookings` takes for its optional `pickup`/`dropoff`
+ * objects. Town and district are always required once a location is given at
+ * all -- the same `isLocatable` rule settled in MDF-485 for order and shipment
+ * addresses, reused rather than reinvented (god, MDF-549: "that is not a new
+ * decision and is not open"). A street address is optional; the pin may also
+ * be absent if the rider typed a street instead of dropping one.
+ */
+export interface BookingLocationInput {
+  latitude: number | null;
+  longitude: number | null;
+  district: string;
+  city: string;
+  address?: string;
+  landmark?: string;
+  instructions?: string;
+}
+
+/** Maps an `AddressField`'s current value onto the booking payload shape above. */
+export function toBookingLocation(v: AddressValue): BookingLocationInput {
+  return {
+    latitude: v.latitude,
+    longitude: v.longitude,
+    district: v.district,
+    city: v.city.trim(),
+    address: v.addressLine1.trim() || undefined,
+    landmark: v.landmark.trim() || undefined,
+    instructions: v.instructions.trim() || undefined,
+  };
+}
+
 /** One row of `GET /passenger/departures`. */
 export interface Departure {
   id: string;
@@ -122,6 +157,16 @@ export interface RiderBooking {
   cancelledBy?: string | null;
   cancellationReason?: string | null;
   createdAt: string;
+  /**
+   * The rider's own pickup/drop-off (MDF-549 gap B: the rider who places a
+   * pin could never see it again -- found live by Dwight, god read all 141
+   * lines of this file's pre-fix self and confirmed zero references to
+   * pickup/dropoff/landmark anywhere in it). Same nested, wholesale-null
+   * shape as the driver and admin payloads -- `TripBookingLocation`, reused
+   * rather than redeclared.
+   */
+  pickup: TripBookingLocation | null;
+  dropoff: TripBookingLocation | null;
 }
 
 /**
