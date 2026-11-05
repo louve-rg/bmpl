@@ -997,6 +997,11 @@ describe('pickup/dropoff pins on a flag-stop booking', () => {
     const row = seen.body.find((x: { id: string }) => x.id === b.body.id);
     expect(row.pickup).toMatchObject(PICKUP);
     expect(row.dropoff).toMatchObject(DROPOFF);
+    // MDF-551 ruling: location, landmark and instructions only — no rider
+    // name, no phone, nothing else personal, even though the SAME booking
+    // carries a name to the operator and to admin (see below).
+    expect(row.passengerName).toBeUndefined();
+    expect(row.phone).toBeUndefined();
 
     // A different driver, never assigned to this trip, gets nothing for it —
     // an empty list, not someone else's riders.
@@ -1004,6 +1009,36 @@ describe('pickup/dropoff pins on a flag-stop booking', () => {
     const otherView = await get(other.cookies, `passenger/driver/trips/${tripId}/bookings`);
     expect(otherView.status).toBe(200);
     expect(otherView.body).toEqual([]);
+  });
+
+  it('reaches the operator dispatching the vehicle, for their own bookings', async () => {
+    // MDF-551 ruling: the operator gets the same treatment MDF-485 gave
+    // vendors — they already see the rider's name unconditionally (existing
+    // listProviderBookings behaviour); a flag stop they cannot see is one
+    // they cannot serve. Cross-operator leakage is already proven by
+    // passenger-booking-scope.integration.spec.ts's "an operator's booking
+    // list carries their riders and nobody else's" — that test 404s/omits
+    // the row entirely for a foreign operator, which protects every field
+    // on it, these included, without needing to be re-proven here.
+    const op = await makeProvider('Test Operator Visible Lines');
+    const { tripId } = await makeDeparture(op, 2000);
+    const driver = await makeFleetDriver(op);
+    const vehicleId = await makeFleetVehicle(op, 12);
+    expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
+    const rider = await registerUser(`pbp_r9_${uniq()}@example.com`);
+    const b = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 1, pickup: PICKUP, dropoff: DROPOFF });
+    expect(b.status).toBe(201);
+
+    const list = await get(op.cookies, 'passenger/provider/bookings');
+    expect(list.status).toBe(200);
+    const row = list.body.find((x: { id: string }) => x.id === b.body.id);
+    expect(row.pickup).toMatchObject(PICKUP);
+    expect(row.dropoff).toMatchObject(DROPOFF);
+
+    const confirmed = await post(op.cookies, `passenger/provider/bookings/${b.body.id}/confirm`);
+    expect(confirmed.status).toBe(201);
+    expect(confirmed.body.pickup).toMatchObject(PICKUP);
+    expect(confirmed.body.dropoff).toMatchObject(DROPOFF);
   });
 
   it('reaches admins', async () => {

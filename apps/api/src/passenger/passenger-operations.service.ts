@@ -328,7 +328,7 @@ export class PassengerOperationsService {
         data: { bookingId: booking.id, tripId: trip.id },
       });
     }
-    return this.serializeBooking(booking, { includeLocations: true });
+    return this.serializeBooking(booking);
   }
 
   async listOwnBookings(userId: string) {
@@ -338,7 +338,7 @@ export class PassengerOperationsService {
       take: 100,
       include: { trip: { include: { route: { select: { name: true, originCity: true, destinationCity: true } } } } },
     });
-    return rows.map((b) => this.serializeBooking(b, { includeLocations: true }));
+    return rows.map((b) => this.serializeBooking(b));
   }
 
   async cancelOwnBooking(actor: Actor, bookingId: string, reason?: string) {
@@ -347,21 +347,33 @@ export class PassengerOperationsService {
       include: { trip: { select: { status: true } } },
     });
     if (!b || b.passengerUserId !== actor.userId) throw new NotFoundException('Booking not found.');
-    return this.cancelBooking(actor, b, 'PASSENGER', reason, { includeLocations: true });
+    return this.cancelBooking(actor, b, 'PASSENGER', reason);
   }
 
   /* ---------------------------------------------------- driver surface */
 
   /**
-   * The assigned driver's view of who is riding (MDF-548). Scoped to the
-   * driver's OWN trip the same way `listProviderBookings` scopes to the
-   * operator's own: resolve the caller's driver profile first, then filter
-   * bookings through `trip.driverProfileId`, never a bare tripId a driver
-   * could pass for someone else's departure.
+   * MDF-548/551: there was no driver-facing read of individual bookings at
+   * all before this — `listDriverTrips` is trip-level aggregates only and
+   * never touches `passengerBooking`. Scoped the same way
+   * `listProviderBookings` scopes to the operator's own: resolve the
+   * caller's driver profile first, then filter bookings through
+   * `trip.driverProfileId`, never a bare tripId a driver could pass for
+   * someone else's departure.
+   *
+   * ASSIGNMENT IS THE GATE — owner's ruling, no two-stage reveal like the
+   * shipment driver flow. That gate exists there because a courier sees a
+   * job BEFORE accepting it; a passenger driver is already assigned to the
+   * departure before this endpoint has anything to show them, so there is no
+   * "offered but not yet accepted" state to hide behind a second gate.
+   *
+   * `includePassengerName: false` — the owner's ruling is explicit: this
+   * payload is location, landmark and instructions, and nothing else
+   * personal. No rider name, no phone, no new field without asking first.
    */
   async listDriverTripBookings(userId: string, filter: { tripId?: string; status?: string } = {}) {
     const d = await this.driverProfileOf(userId);
-    return this.listBookings({ ...filter, driverProfileId: d.id, includeLocations: true });
+    return this.listBookings({ ...filter, driverProfileId: d.id, includePassengerName: false });
   }
 
   /* --------------------------------------------------- provider surface */
@@ -398,17 +410,17 @@ export class PassengerOperationsService {
   /* ------------------------------------------------------ admin surface */
 
   async listAllBookings(filter: { tripId?: string; status?: string } = {}) {
-    return this.listBookings({ ...filter, includeLocations: true });
+    return this.listBookings(filter);
   }
 
   async confirmBookingAsAdmin(actor: Actor, bookingId: string) {
     const b = await this.bookingOrThrow(bookingId);
-    return this.confirmBooking(actor, b, { includeLocations: true });
+    return this.confirmBooking(actor, b);
   }
 
   async cancelBookingAsAdmin(actor: Actor, bookingId: string, reason?: string) {
     const b = await this.bookingOrThrow(bookingId);
-    return this.cancelBooking(actor, b, 'ADMIN', reason, { includeLocations: true });
+    return this.cancelBooking(actor, b, 'ADMIN', reason);
   }
 
   async assignTripAsAdmin(actor: Actor, tripId: string, dto: PassengerTripAssignInput) {
@@ -637,11 +649,7 @@ export class PassengerOperationsService {
    * not enough seats left. The capacity check runs under a row lock on the
    * trip so concurrent confirmations serialize instead of overselling.
    */
-  private async confirmBooking(
-    actor: Actor,
-    b: PassengerBooking & { trip: { status: string } | null },
-    opts: { includeLocations?: boolean } = {},
-  ) {
+  private async confirmBooking(actor: Actor, b: PassengerBooking & { trip: { status: string } | null }) {
     if (b.status !== 'REQUESTED') throw new BadRequestException('Only a requested booking can be confirmed.');
     if (!b.tripId || !b.trip || !(BOOKABLE_TRIP_STATUSES as readonly string[]).includes(b.trip.status)) {
       throw new BadRequestException('This departure is no longer taking confirmations.');
@@ -695,7 +703,7 @@ export class PassengerOperationsService {
         data: { bookingId: b.id },
       });
     }
-    return this.serializeBooking(updated, opts);
+    return this.serializeBooking(updated);
   }
 
   private async cancelBooking(
@@ -703,7 +711,6 @@ export class PassengerOperationsService {
     b: PassengerBooking & { trip: { status: string } | null },
     party: PassengerCancellationParty,
     reason?: string,
-    opts: { includeLocations?: boolean } = {},
   ) {
     if (b.status !== 'REQUESTED' && b.status !== 'CONFIRMED') {
       throw new BadRequestException('This booking is already settled.');
@@ -775,7 +782,7 @@ export class PassengerOperationsService {
         });
       }
     }
-    return this.serializeBooking(updated, opts);
+    return this.serializeBooking(updated);
   }
 
   /**
@@ -892,7 +899,7 @@ export class PassengerOperationsService {
     driverProfileId?: string;
     tripId?: string;
     status?: string;
-    includeLocations?: boolean;
+    includePassengerName?: boolean;
   }) {
     const where: Prisma.PassengerBookingWhereInput = {};
     if (filter.tripId) where.tripId = filter.tripId;
@@ -910,9 +917,10 @@ export class PassengerOperationsService {
         passenger: { select: { firstName: true, lastName: true } },
       },
     });
+    const includePassengerName = filter.includePassengerName ?? true;
     return rows.map((b) => ({
-      ...this.serializeBooking(b, { includeLocations: filter.includeLocations }),
-      passengerName: b.passenger ? `${b.passenger.firstName} ${b.passenger.lastName}` : null,
+      ...this.serializeBooking(b),
+      ...(includePassengerName && { passengerName: b.passenger ? `${b.passenger.firstName} ${b.passenger.lastName}` : null }),
     }));
   }
 
@@ -932,15 +940,18 @@ export class PassengerOperationsService {
   }
 
   /**
-   * `includeLocations` (MDF-548): pickup/dropoff are the rider's own pin —
-   * shown back to the rider who set them, to the driver actually assigned to
-   * the trip, and to admins. NOT included by default, so a caller must opt
-   * in deliberately rather than a new field reaching an audience nobody
-   * reviewed it against — see the per-surface flags at each call site below.
+   * Pickup/dropoff (MDF-548/551): the owner's ruling is that every caller
+   * who reaches this function at all — the rider who set the pin, the
+   * operator dispatching the vehicle, admins, and (separately,
+   * `listDriverTripBookings`) the assigned driver — may see it. What must
+   * genuinely gate the data is WHICH ROWS a caller's query can reach
+   * (`providerProfileId`/`driverProfileId`/`tripId`/`passengerUserId` in
+   * `listBookings` and every by-id lookup above), not a field-level flag
+   * here — a flag that every real caller sets the same way is not an
+   * access control, it is a trap for whoever reads it next.
    */
   serializeBooking(
     b: PassengerBooking & { trip?: ({ reference: string; scheduledDepartureAt: Date | null; status: string; route?: { name: string; originCity: string; destinationCity: string } | null }) | null },
-    opts: { includeLocations?: boolean } = {},
   ) {
     return {
       id: b.id,
@@ -961,10 +972,8 @@ export class PassengerOperationsService {
       cancelledBy: b.cancelledBy,
       cancellationReason: b.cancellationReason,
       createdAt: b.createdAt,
-      ...(opts.includeLocations && {
-        pickup: this.serializeBookingStop(b, 'pickup'),
-        dropoff: this.serializeBookingStop(b, 'dropoff'),
-      }),
+      pickup: this.serializeBookingStop(b, 'pickup'),
+      dropoff: this.serializeBookingStop(b, 'dropoff'),
     };
   }
 
