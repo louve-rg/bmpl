@@ -175,6 +175,22 @@ describe('multi-vendor split + delivery', () => {
     expect(stored.addressLine1).toBeNull();
     expect(stored.city).toBe('Belize City');
     expect(stored.latitude).toBeCloseTo(17.4995, 4);
+
+    // MDF-540: the coordinate is not just stored, it comes back out. For a
+    // pin-only address it is the only location there is - an admin or the
+    // fulfilling vendor who cannot see it cannot draw a map at all.
+    const adminDetail = await request(ctx.server).get(`/api/admin/orders/${res.body.id}`).set('Cookie', adminCookies).expect(200);
+    expect(adminDetail.body.deliveryAddress.latitude).toBeCloseTo(17.4995, 4);
+    expect(adminDetail.body.deliveryAddress.longitude).toBeCloseTo(-88.1976, 4);
+
+    const vendorOrderId = res.body.vendorOrders[0].id;
+    const vendorDetail = await request(ctx.server).get(`/api/vendor/orders/${vendorOrderId}`).set('Cookie', v.cookies).expect(200);
+    expect(vendorDetail.body.deliveryAddress.latitude).toBeCloseTo(17.4995, 4);
+    expect(vendorDetail.body.deliveryAddress.longitude).toBeCloseTo(-88.1976, 4);
+    // A different vendor cannot read this order at all, pin included - already
+    // proven generally by 'isolates orders across customers and vendor orders
+    // across vendors' below, which 404s a non-owning vendor on any vendor
+    // order id. Not re-proven here.
   });
 
   /**

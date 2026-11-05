@@ -1,6 +1,17 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { SavedAddressInput } from '@bmpl/validation';
+import { isLocatable, type SavedAddressInput } from '@bmpl/validation';
+import { UNLOCATABLE_ADDRESS_MESSAGE } from '@bmpl/shared';
 import { PrismaService } from '../prisma/prisma.service';
+
+/**
+ * `savedAddressUpdateSchema` normalises a blank or null value on any of these
+ * to `undefined` (MDF-533, owner ruling) so `isLocatable` reads addressLine1
+ * correctly — but Prisma's `update()` treats an explicit `undefined` field as
+ * "do not touch", not "clear it". Left to the input spread alone, a PATCH
+ * sent with a blank value on one of these (present key, normalised away)
+ * would silently fail to clear the stored one.
+ */
+const CLEARABLE_TEXT_FIELDS = ['addressLine1', 'addressLine2', 'landmark', 'instructions'] as const;
 
 /**
  * The customer's own address book.
@@ -34,6 +45,11 @@ export class AddressesService {
           // The first address a customer saves is their default, whether or not
           // they thought to say so.
           isDefault: input.isDefault || count === 0,
+          // There is no geocode-and-autofill write path for this field yet -
+          // coordinates only ever arrive here because the customer placed and
+          // confirmed a pin on the map. Never taken from the request itself
+          // (MDF-485), same rule as `isTest`.
+          pinConfirmedAt: input.latitude != null ? new Date() : null,
         },
       });
     });
@@ -41,6 +57,15 @@ export class AddressesService {
 
   async update(userId: string, id: string, input: Partial<SavedAddressInput>) {
     const existing = await this.ownedOrThrow(userId, id);
+
+    // A PATCH only carries the fields that changed, so `savedAddressUpdateSchema`
+    // cannot check locatability on its own — it has to be checked against what
+    // the row will actually look like once the patch lands.
+    const merged = { ...existing, ...input };
+    if (!isLocatable({ street: merged.addressLine1, latitude: merged.latitude, longitude: merged.longitude })) {
+      throw new BadRequestException(UNLOCATABLE_ADDRESS_MESSAGE);
+    }
+
     return this.prisma.$transaction(async (tx) => {
       if (input.isDefault) {
         await tx.savedAddress.updateMany({ where: { userId, isDefault: true }, data: { isDefault: false } });
@@ -52,7 +77,27 @@ export class AddressesService {
         if (!next) throw new BadRequestException('This is your only address, so it has to stay your default.');
         await tx.savedAddress.update({ where: { id: next.id }, data: { isDefault: true } });
       }
-      return tx.savedAddress.update({ where: { id }, data: input });
+      const data: Omit<Partial<SavedAddressInput>, (typeof CLEARABLE_TEXT_FIELDS)[number]> & {
+        addressLine1?: string | null;
+        addressLine2?: string | null;
+        landmark?: string | null;
+        instructions?: string | null;
+        pinConfirmedAt?: Date | null;
+      } = { ...input };
+      // A key that was genuinely never sent stays genuinely absent on `input`,
+      // so this only fires when the client actually touched the field.
+      for (const key of CLEARABLE_TEXT_FIELDS) {
+        if (key in input && input[key] === undefined) {
+          data[key] = null;
+        }
+      }
+      // Only touch provenance when the patch actually touches the pin -
+      // leaving it alone otherwise keeps an untouched, previously confirmed
+      // pin confirmed.
+      if ('latitude' in input || 'longitude' in input) {
+        data.pinConfirmedAt = merged.latitude != null ? new Date() : null;
+      }
+      return tx.savedAddress.update({ where: { id }, data });
     });
   }
 

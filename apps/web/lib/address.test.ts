@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { UNLOCATABLE_ADDRESS_MESSAGE } from '@bmpl/shared';
-import { addressGap, emptyAddress, switchMethod, toSavedAddressPayload, type AddressValue } from './address';
+import { addressGap, emptyAddress, savedAddressLine, switchMethod, toSavedAddressPayload, type AddressValue } from './address';
 
 /**
  * The reported defect, as a test.
@@ -87,6 +87,13 @@ describe('switchMethod — changing your mind leaves no stale answer behind', ()
     expect([after.latitude, after.longitude]).toEqual([17.4995, -88.1976]);
   });
 
+  it('keeps the landmark through every switch, same as the pin (MDF-539)', () => {
+    // A landmark is equally true in all three modes -- it is not street
+    // detail, so switching method must not drop it the way addressLine1/2 do.
+    const after = switchMethod(typed({ landmark: 'Behind the blue gate' }), 'PIN');
+    expect(after.landmark).toBe('Behind the blue gate');
+  });
+
   it('stops claiming a saved address once you have switched away from it', () => {
     const saved = { ...typed(), method: 'SAVED' as const, savedAddressId: 'addr_1' };
     expect(switchMethod(saved, 'PIN').savedAddressId).toBeNull();
@@ -113,16 +120,47 @@ describe('toSavedAddressPayload — what the star affordance sends the address b
   });
 
   it('turns a blank optional field into null rather than an empty string', () => {
-    const payload = toSavedAddressPayload(typed({ email: '', company: '', addressLine2: '', instructions: '' }), 'Home');
+    const payload = toSavedAddressPayload(typed({ email: '', company: '', addressLine2: '', landmark: '', instructions: '' }), 'Home');
     expect(payload.email).toBeNull();
     expect(payload.company).toBeNull();
     expect(payload.addressLine2).toBeNull();
+    expect(payload.landmark).toBeNull();
     expect(payload.instructions).toBeNull();
+  });
+
+  it('trims and sends the landmark, distinct from instructions (MDF-539)', () => {
+    const payload = toSavedAddressPayload(typed({ landmark: '  Behind the blue gate  ', instructions: 'Ring the bell' }), 'Home');
+    expect(payload.landmark).toBe('Behind the blue gate');
+    expect(payload.instructions).toBe('Ring the bell');
   });
 
   it('carries the pin through untouched', () => {
     const payload = toSavedAddressPayload(pinned(), 'Home');
     expect(payload.latitude).toBe(17.4995);
     expect(payload.longitude).toBe(-88.1976);
+  });
+});
+
+describe('savedAddressLine — the ONE fallback the list row and the saved-address dropdown both call (MDF-534/539)', () => {
+  const row = { addressLine1: '', addressLine2: null, landmark: null, latitude: null, longitude: null };
+
+  it('reads the street (plus line 2) when there is one', () => {
+    expect(savedAddressLine({ ...row, addressLine1: '12 Front St', addressLine2: 'Apt 2' })).toBe('12 Front St, Apt 2');
+  });
+
+  it('falls back to the landmark when there is no street', () => {
+    expect(savedAddressLine({ ...row, landmark: 'Behind the blue gate' })).toBe('Behind the blue gate');
+  });
+
+  it('falls back to "Pinned location" when there is neither a street nor a landmark, but there is a pin', () => {
+    expect(savedAddressLine({ ...row, latitude: 17.5, longitude: -88.2 })).toBe('Pinned location');
+  });
+
+  it('falls back to "No street or pin yet" when there is nothing at all, rather than a bare leading comma', () => {
+    expect(savedAddressLine(row)).toBe('No street or pin yet');
+  });
+
+  it('prefers the street over the landmark when both are present', () => {
+    expect(savedAddressLine({ ...row, addressLine1: '12 Front St', landmark: 'Behind the blue gate' })).toBe('12 Front St');
   });
 });

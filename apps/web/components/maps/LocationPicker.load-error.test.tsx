@@ -118,8 +118,10 @@ describe('LocationPicker when the map itself fails to load', () => {
   it('disables the controls that only work through a live map, rather than letting them silently do nothing', async () => {
     mount();
     const onChange = vi.fn();
+    // `address` given: the AddressField-embedded configuration this repo
+    // actually ships today, with its "Show my address" button.
     act(() => {
-      root!.render(<LocationPicker value={null} onChange={onChange} />);
+      root!.render(<LocationPicker value={null} onChange={onChange} address="12 Front St" />);
     });
     await flush();
 
@@ -135,5 +137,20 @@ describe('LocationPicker when the map itself fails to load', () => {
     act(() => current.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await flush();
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  // MDF-485 M1/M2: the standalone search box (no `address` prop) is a
+  // different control than "Show my address" and needs the same guarantee.
+  it('disables the standalone search box the same way, when no address prop is given', async () => {
+    mount();
+    act(() => {
+      root!.render(<LocationPicker value={null} onChange={() => {}} />);
+    });
+    await flush();
+
+    const search = container!.querySelector('input[aria-label*="Search for an address"]') as HTMLInputElement;
+    const searchButton = findButton(container!, 'Search for this on the map');
+    expect(search.disabled).toBe(true);
+    expect(searchButton.disabled).toBe(true);
   });
 });
