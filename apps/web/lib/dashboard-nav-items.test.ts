@@ -94,6 +94,7 @@ describe('passenger-driver navigation', () => {
     expect(PASSENGER_DRIVER_NAV.map((i) => i.href)).toEqual([
       '/dashboard/passenger-driver',
       '/dashboard/passenger-driver/trips',
+      '/dashboard/passenger-driver/trips/history',
       '/dashboard/passenger-driver/profile',
       '/dashboard/passenger-driver/vehicles',
     ]);

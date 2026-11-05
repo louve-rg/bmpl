@@ -74,23 +74,50 @@ const BOOKING = {
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
+const AFFILIATION = {
+  id: 'aff_1',
+  providerProfileId: 'prov_1',
+  driverProfileId: 'driver_1',
+  initiatedBy: 'PROVIDER' as const,
+  status: 'ACCEPTED' as const,
+  message: null,
+  isTest: false,
+  acceptedAt: new Date().toISOString(),
+  endedAt: null,
+  endedBy: null,
+  createdAt: new Date().toISOString(),
+  driver: { id: 'driver_1', displayName: 'Alex Fleet', homeDistrict: 'CAYO', availability: 'ONLINE', isActive: true },
+  provider: { id: 'prov_1', businessName: 'Cayo Shuttle Co', district: 'CAYO', isActive: true },
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function stubFetch(adminPermissions: string[]) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
-      if (url.includes('/api/admin/passengers/drivers')) return jsonResponse(200, []);
-      if (url.includes('/api/admin/passengers/providers')) return jsonResponse(200, [PROVIDER]);
-      if (url.includes('/api/admin/passengers/trips')) return jsonResponse(200, [TRIP]);
-      if (url.includes('/api/admin/passengers/bookings')) return jsonResponse(200, [BOOKING]);
-      return jsonResponse(404, { message: 'not mocked: ' + url });
-    }),
-  );
+/**
+ * MDF-554: the bookings fixture is the real envelope
+ * (`{rows, total, page, pageSize}`) now, not the bare array the API sent
+ * before Pam's MDF-553 pagination change -- a fixture that still blesses the
+ * old shape is worse than no fixture (god's ruling, same lesson as the
+ * admin booking-detail defect this same inventory already surfaced once).
+ */
+function stubFetch(adminPermissions: string[], bookingsTotal = 1) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
+    if (url.includes('/api/admin/passengers/drivers')) return jsonResponse(200, []);
+    if (url.includes('/api/admin/passengers/providers')) return jsonResponse(200, [PROVIDER]);
+    if (url.includes('/api/admin/passengers/affiliations')) return jsonResponse(200, [AFFILIATION]);
+    if (url.includes('/api/admin/passengers/trips')) return jsonResponse(200, [TRIP]);
+    if (url.includes('/api/admin/passengers/bookings')) {
+      const params = new URL(url, 'http://localhost').searchParams;
+      const page = Number(params.get('page') ?? '1');
+      return jsonResponse(200, { rows: page === 1 ? [BOOKING] : [], total: bookingsTotal, page, pageSize: 20 });
+    }
+    return jsonResponse(404, { message: 'not mocked: ' + url });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
 }
 
 async function mountOnTab(label: string) {
@@ -146,7 +173,13 @@ describe('PassengersPage — write affordances gated on passengers.moderate (BMP
     await mountOnTab('Bookings');
     texts = buttonTexts();
     expect(texts.some((t) => t === 'Confirm' || t === 'Cancel booking')).toBe(false);
-    expect(document.body.querySelectorAll('button[disabled]').length).toBe(0);
+    // Previous/Next are legitimately disabled here (one page of one row) --
+    // that's pagination state (MDF-554), not a permission leak. The
+    // invariant this asserts is about WRITE affordances only.
+    const disabledNonNav = Array.from(document.body.querySelectorAll('button[disabled]')).filter(
+      (b) => !['Previous', 'Next'].includes(b.textContent?.trim() ?? ''),
+    );
+    expect(disabledNonNav.length).toBe(0);
     expect(document.body.textContent).toMatch(/BK-2001/);
   });
 
@@ -176,5 +209,60 @@ describe('PassengersPage — Bookings tab links to the booking detail route (MDF
     );
     expect(link).not.toBeUndefined();
     expect(link!.textContent?.trim()).toBe('View →');
+  });
+});
+
+describe('PassengersPage — Bookings tab reads the paginated envelope (MDF-554)', () => {
+  it('shows the total and fetches the next page on "Next"', async () => {
+    const fetchMock = stubFetch(['passengers.read'], 25);
+    await mountOnTab('Bookings');
+
+    expect(document.body.textContent).toMatch(/Showing 1–20 of 25/);
+    const next = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Next');
+    const prev = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Previous');
+    expect(next).not.toBeUndefined();
+    expect(next!.hasAttribute('disabled')).toBe(false);
+    expect(prev!.hasAttribute('disabled')).toBe(true);
+
+    await act(async () => {
+      next!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('page=2'))).toBe(true);
+  });
+
+  it('reads tolerantly when the API still returns a bare array (deploy-window: API and admin do not deploy atomically)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['passengers.read'] });
+        if (url.includes('/api/admin/passengers/drivers')) return jsonResponse(200, []);
+        if (url.includes('/api/admin/passengers/providers')) return jsonResponse(200, []);
+        if (url.includes('/api/admin/passengers/trips')) return jsonResponse(200, []);
+        if (url.includes('/api/admin/passengers/bookings')) return jsonResponse(200, [BOOKING]);
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mountOnTab('Bookings');
+
+    expect(document.body.textContent).toMatch(/BK-2001/);
+    expect(document.body.textContent).toMatch(/Showing 1–1 of 1/);
+  });
+});
+
+describe('PassengersPage — Affiliations tab (MDF-554)', () => {
+  it('shows who is affiliated with whom, with no accept/decline/end control even for a moderator', async () => {
+    stubFetch(['passengers.moderate']);
+    await mountOnTab('Affiliations');
+
+    expect(document.body.textContent).toMatch(/Alex Fleet/);
+    expect(document.body.textContent).toMatch(/Cayo Shuttle Co/);
+    expect(document.body.textContent).toMatch(/accepted/i);
+    const texts = buttonTexts();
+    expect(texts.some((t) => ['Accept', 'Approve', 'Decline', 'Withdraw invitation', 'Remove', 'End'].includes(t))).toBe(false);
   });
 });

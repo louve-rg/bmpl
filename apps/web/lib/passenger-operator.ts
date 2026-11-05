@@ -6,6 +6,8 @@
  * shown verbatim wherever these mappings are out of date.
  */
 
+import type { TripBookingLocation } from './passenger-driver';
+
 export interface OperatorProfile {
   id: string;
   businessName: string;
@@ -80,6 +82,17 @@ export interface OperatorBooking {
   passengerName?: string | null;
   cancellationReason?: string | null;
   createdAt: string;
+  /**
+   * MDF-554 gap A: `serializeBooking()` was already sending these — the
+   * operator-side type simply never declared them, so the data arrived and
+   * was thrown away. Same nested, wholesale-null shape as the driver and
+   * rider payloads -- `TripBookingLocation`, reused rather than redeclared a
+   * fourth time (god's structural note: a hand-declared copy that nothing
+   * checks against the server is exactly how this kind of gap keeps
+   * happening).
+   */
+  pickup: TripBookingLocation | null;
+  dropoff: TripBookingLocation | null;
 }
 
 /**

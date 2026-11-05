@@ -62,17 +62,33 @@ export interface PassengerEligibility {
   reasons: string[];
 }
 
-/** One row of `GET /passenger/driver/trips` — only ASSIGNED and IN_PROGRESS come back. */
+/**
+ * One row of `GET /passenger/driver/trips`. With no `status` query param,
+ * only ASSIGNED and IN_PROGRESS come back, as a bare array (today's My
+ * Departures shape, unchanged). Passing `status` (e.g. `COMPLETED` for trip
+ * history, MDF-554) switches the same endpoint to a different, explicit,
+ * paginated query -- see `DriverTripHistory` below. `completedAt` is null on
+ * an active trip, set once `complete` is called.
+ */
 export interface PassengerTrip {
   id: string;
   reference: string;
   status: string;
   scheduledDepartureAt: string;
+  completedAt: string | null;
   routeName: string | null;
   from: string | null;
   to: string | null;
   operator: string | null;
   seatCapacity: number | null;
+}
+
+/** The paginated shape `GET /passenger/driver/trips?status=...` returns -- real pagination, not a raised cap, since history grows without bound. */
+export interface DriverTripHistory {
+  rows: PassengerTrip[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 /**
