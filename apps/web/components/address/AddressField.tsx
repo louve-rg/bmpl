@@ -222,6 +222,15 @@ export function AddressField({
     coords != null &&
     (savedRow.latitude !== coords.latitude || savedRow.longitude !== coords.longitude);
 
+  // MDF-554 (owner-reported): "Save to my addresses" used to go disabled with
+  // no visible reason once the address itself was incomplete — a customer who
+  // typed a label and clicked got literally nothing, the same silent-failure
+  // shape as a swallowed error, just produced by a disabled control instead
+  // of a catch block. `addressGap` already computes the exact missing piece
+  // for the submit path below; reusing it here means this is the same
+  // sentence the rest of the form already uses, never a second, invented one.
+  const saveGap = !value.savedAddressId ? addressGap(value, { contact }) : null;
+
   return (
     <FormCard legend={heading} disabled={disabled}>
       {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
@@ -556,12 +565,21 @@ export function AddressField({
               <button
                 type="button"
                 onClick={saveToAddressBook}
-                disabled={savingAddress || !labelDraft.trim() || addressGap(value, { contact }) != null}
+                disabled={savingAddress || !labelDraft.trim() || saveGap != null}
                 className="text-sm font-semibold text-belize-blue hover:underline disabled:cursor-not-allowed disabled:text-[color:var(--bmpl-text-muted-strong)]"
               >
                 {savingAddress ? 'Saving…' : 'Save to my addresses'}
               </button>
             </div>
+          )}
+          {/* The button above goes disabled the instant the address is
+              incomplete, same as the booking/checkout submit it feeds into —
+              but unlike that submit, nothing else on this star affordance
+              ever says why. Shown only once there is a label to save,
+              so an address that is merely untouched does not nag before the
+              customer has shown any intent to save it. */}
+          {!value.savedAddressId && !savingAddress && labelDraft.trim() && saveGap && (
+            <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">{saveGap}</p>
           )}
           {saveError && (
             <Alert tone="warning" className="mt-2">
