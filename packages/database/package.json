@@ -21,6 +21,7 @@
     "seed": "dotenv -e ../../.env -- tsx prisma/seed.ts",
     "seed:uat": "dotenv -e ../../.env -- tsx prisma/seed-uat-logistics.ts",
     "seed:uat-roles": "dotenv -e ../../.env -- tsx prisma/seed-uat-roles.ts",
+    "seed:uat-location-e2e": "dotenv -e ../../.env -- tsx prisma/seed-uat-location-e2e.ts",
     "bootstrap": "tsx prisma/bootstrap.ts",
     "studio": "dotenv -e ../../.env -- prisma studio",
     "typecheck": "tsc -p tsconfig.json --noEmit",

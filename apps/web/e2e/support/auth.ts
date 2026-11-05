@@ -45,6 +45,35 @@ export const UAT_PASSENGER_DRIVER_EMAIL = 'uat-passenger-driver@bzemarketplace.c
 export const UAT_PASSENGER_PROVIDER_EMAIL = 'uat-passenger-provider@bzemarketplace.com';
 
 /**
+ * MDF-535: the location/address/map E2E harness. Two fixtures neither
+ * ROLE_FIXTURES nor any seed-uat-*.ts script had before this (confirmed by
+ * grep across seed.ts/seed-uat-roles.ts/seed-uat-logistics.ts before adding
+ * these) — see packages/database/prisma/seed-uat-location-e2e.ts for how
+ * both are provisioned, through the real role-application + admin-approve
+ * flow for the carrier, never a direct database write.
+ *
+ * A SECOND customer — check #13 ("a user cannot access or modify another
+ * customer's saved addresses") needs an "another customer" to exist at all;
+ * CUSTOMER above is one account, and one account cannot test isolation
+ * against itself. NOT added as a ROLE_FIXTURES entry: that map is keyed by
+ * RoleCode, one fixture per role, and CUSTOMER already has an entry — a
+ * second same-role account needs its own name, same reasoning EMPLOYER's
+ * two distinct accounts (WITH_PROFILE / NO_PROFILE) already use above.
+ */
+export const UAT_CUSTOMER_2_EMAIL = 'uat-customer-2@bzemarketplace.com';
+export const UAT_CUSTOMER_2_PASSWORD = process.env.UAT_SEED_PASSWORD ?? 'UatWalkthrough!123';
+
+/**
+ * The carrier (SHIPPING_PROVIDER) fixture — the exact gap the last phase's
+ * carrier-loop E2E coverage could never close (no ROLE_FIXTURES entry, no
+ * reproducible account). Both the role AND the carrier's organization are
+ * approved — two independent lifecycles (D1/D1b, MDF-500) — so this account
+ * is immediately usable for real work, not stuck PENDING on either gate.
+ */
+export const UAT_CARRIER_EMAIL = 'uat-carrier@bzemarketplace.com';
+export const UAT_CARRIER_PASSWORD = process.env.UAT_SEED_PASSWORD ?? 'UatWalkthrough!123';
+
+/**
  * Logs in through the real login form and reports whether it landed on
  * /dashboard. A failure here is treated as "this environment cannot run the
  * journey" rather than a test failure — it means either no live API is
@@ -91,6 +120,10 @@ export const ROLE_FIXTURES = {
   PASSENGER_DRIVER: { email: UAT_PASSENGER_DRIVER_EMAIL, password: UAT_FIXTURE_PASSWORD },
   PASSENGER_PROVIDER: { email: UAT_PASSENGER_PROVIDER_EMAIL, password: UAT_FIXTURE_PASSWORD },
   EMPLOYER: { email: EMPLOYER_WITH_PROFILE_EMAIL, password: FIXTURE_PASSWORD },
+  // MDF-535: approved role AND approved organization (two independent
+  // lifecycles, D1/D1b) — see seed-uat-location-e2e.ts. This is the entry
+  // the last phase's carrier-loop E2E gap report named as missing.
+  SHIPPING_PROVIDER: { email: UAT_CARRIER_EMAIL, password: UAT_CARRIER_PASSWORD },
   SUPER_ADMIN: { email: SUPER_ADMIN_EMAIL, password: SUPER_ADMIN_PASSWORD },
 } as const satisfies Record<string, { email: string; password: string | undefined }>;
 
