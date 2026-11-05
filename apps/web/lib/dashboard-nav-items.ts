@@ -88,6 +88,11 @@ export const DRIVER_NAV: NavItem[] = [
 export const PASSENGER_DRIVER_NAV: NavItem[] = [
   { label: 'Passenger Dashboard', href: '/dashboard/passenger-driver', icon: HOME_ICON },
   { label: 'My Departures', href: '/dashboard/passenger-driver/trips', icon: 'M4 5h16v10H4V5Zm0 4h16M7 15v3M17 15v3M7.5 12h.01M16.5 12h.01' },
+  // MDF-554: a completed trip used to vanish entirely -- the API excluded it
+  // from the only read the driver had (Jim's finding: "it finishes on the
+  // server; it does not finish for the user"). This is the one place to find
+  // it again.
+  { label: 'Trip History', href: '/dashboard/passenger-driver/trips/history', icon: DOC_ICON },
   { label: 'Passenger Profile', href: '/dashboard/passenger-driver/profile', icon: PERSON_ICON },
   { label: 'My Vehicles', href: '/dashboard/passenger-driver/vehicles', icon: 'M5 16h14M5 16a2 2 0 1 0 4 0M15 16a2 2 0 1 0 4 0M4 16v-4l2-5h9l3 5h2v4' },
 ];

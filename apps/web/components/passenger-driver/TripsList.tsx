@@ -4,33 +4,55 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Button, Card as UiCard, EmptyState, Spinner, StatusBadge } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
-import { tripAction, type PassengerTrip } from '../../lib/passenger-driver';
+import { tripAction, type DriverTripHistory, type PassengerTrip } from '../../lib/passenger-driver';
 import { TripBookings } from './TripBookings';
 
+const HISTORY_PAGE_SIZE = 20;
+
 /**
- * The driver's assigned departures — the movement surface. The list endpoint
- * requires an APPROVED PASSENGER_DRIVER role (moving people is gated harder
- * than editing a profile), so a 403 here is rendered as the approval
- * requirement it is, not as a broken page. Start/complete are offered from
- * the trip's status; the server enforces the transitions and its refusals
- * are shown verbatim.
+ * The driver's departures — the movement surface. With no `status` (the
+ * default, My Departures), this is unchanged from before: a bare array,
+ * ASSIGNED/IN_PROGRESS only, no pagination. Passing `status="COMPLETED"`
+ * (MDF-554, trip history) switches the same endpoint to a different, real
+ * paginated query, reused here rather than a second list component — a
+ * completed trip finishes on the server (`completeTrip`) but had nowhere in
+ * the driver's own navigation to be read back; Jim found this live, the one
+ * blocker across the whole product.
+ *
+ * The list endpoint requires an APPROVED PASSENGER_DRIVER role (moving
+ * people is gated harder than editing a profile) on either path, so a 403
+ * here is rendered as the approval requirement it is, not as a broken page.
+ * Start/complete are offered from the trip's status; `tripAction` already
+ * returns nothing for COMPLETED, so the history view never offers them.
  */
-export function TripsList() {
+export function TripsList({ status }: { status?: string } = {}) {
   const [trips, setTrips] = useState<PassengerTrip[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [notApproved, setNotApproved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
-      setTrips(await api.get<PassengerTrip[]>('/passenger/driver/trips'));
+      const path = status
+        ? `/passenger/driver/trips?status=${status}&page=${page}&pageSize=${HISTORY_PAGE_SIZE}`
+        : '/passenger/driver/trips';
+      const data = await api.get<PassengerTrip[] | DriverTripHistory>(path);
+      if (Array.isArray(data)) {
+        setTrips(data);
+        setTotal(data.length);
+      } else {
+        setTrips(data.rows);
+        setTotal(data.total);
+      }
       setNotApproved(false);
       setErr(null);
     } catch (e) {
       if ((e as ApiError).status === 403) setNotApproved(true);
       else setErr(errMessage(e));
     }
-  }, []);
+  }, [status, page]);
 
   useEffect(() => {
     void reload().finally(() => setLoading(false));
@@ -56,7 +78,9 @@ export function TripsList() {
   }
   if (err) return <Alert tone="error">{err}</Alert>;
   if (!trips || trips.length === 0) {
-    return (
+    return status ? (
+      <EmptyState title="No completed trips yet" description="Departures you complete appear here, with when you finished them." />
+    ) : (
       <EmptyState
         title="No departures assigned"
         description="When an operator or administrator assigns you a departure, it appears here with its route and scheduled time."
@@ -65,11 +89,28 @@ export function TripsList() {
   }
 
   return (
-    <ul className="space-y-3">
-      {trips.map((t) => (
-        <TripRow key={t.id} trip={t} onChanged={reload} />
-      ))}
-    </ul>
+    <>
+      <ul className="space-y-3">
+        {trips.map((t) => (
+          <TripRow key={t.id} trip={t} onChanged={reload} />
+        ))}
+      </ul>
+      {status && total > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+          <span>
+            Showing {(page - 1) * HISTORY_PAGE_SIZE + 1}–{Math.min(page * HISTORY_PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <Button size="sm" variant="outline" disabled={page * HISTORY_PAGE_SIZE >= total} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -109,6 +150,9 @@ function TripRow({ trip, onChanged }: { trip: PassengerTrip; onChanged: () => Pr
               {trip.seatCapacity != null && <> · {trip.seatCapacity} seats</>}
             </p>
             {trip.operator && <p className="mt-1 text-xs text-slate-500">Operator: {trip.operator}</p>}
+            {trip.completedAt && (
+              <p className="mt-1 text-xs text-slate-500">Completed {new Date(trip.completedAt).toLocaleString()}</p>
+            )}
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" onClick={() => setShowBookings((v) => !v)}>
