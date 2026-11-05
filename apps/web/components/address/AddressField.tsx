@@ -13,7 +13,7 @@ import {
   type ContactLevel,
   type SavedAddress,
 } from '../../lib/address';
-import { api, type ApiError } from '../../lib/api';
+import { api, errorMessage } from '../../lib/api';
 import { Alert, FormCard, Spinner } from '../ui';
 
 // The map is client-only and heavy. It must not be in the first paint of a form
@@ -135,11 +135,6 @@ export function AddressField({
     setEditError(null);
   }
 
-  function apiErrorMessage(e: unknown, fallback: string): string {
-    const err = e as ApiError;
-    return err.errors?.[0]?.message ?? err.message ?? fallback;
-  }
-
   // Re-fetches the whole list from the server after any mutation, rather than
   // patching it locally, so the dropdown never shows a partial book (e.g. only
   // the row just created) if the customer had not opened it yet this session.
@@ -171,7 +166,7 @@ export function AddressField({
       setEditLabel(created.label);
       setLabelDraft('');
     } catch (e) {
-      setSaveError(apiErrorMessage(e, 'Could not save this address just now.'));
+      setSaveError(errorMessage(e, 'Could not save this address just now.'));
     } finally {
       setSavingAddress(false);
     }
@@ -190,7 +185,7 @@ export function AddressField({
       await api.patch<SavedAddress>(`/addresses/${value.savedAddressId}`, toSavedAddressPayload(value, editLabel));
       await refreshSaved();
     } catch (e) {
-      setEditError(apiErrorMessage(e, 'Could not update this address just now.'));
+      setEditError(errorMessage(e, 'Could not update this address just now.'));
     } finally {
       setEditingAddress(false);
     }
@@ -207,7 +202,7 @@ export function AddressField({
       set({ savedAddressId: null });
       await refreshSaved();
     } catch (e) {
-      setEditError(apiErrorMessage(e, 'Could not remove this address just now.'));
+      setEditError(errorMessage(e, 'Could not remove this address just now.'));
     } finally {
       setEditingAddress(false);
     }
@@ -221,6 +216,15 @@ export function AddressField({
     savedRow != null &&
     coords != null &&
     (savedRow.latitude !== coords.latitude || savedRow.longitude !== coords.longitude);
+
+  // MDF-554 (owner-reported): "Save to my addresses" used to go disabled with
+  // no visible reason once the address itself was incomplete — a customer who
+  // typed a label and clicked got literally nothing, the same silent-failure
+  // shape as a swallowed error, just produced by a disabled control instead
+  // of a catch block. `addressGap` already computes the exact missing piece
+  // for the submit path below; reusing it here means this is the same
+  // sentence the rest of the form already uses, never a second, invented one.
+  const saveGap = !value.savedAddressId ? addressGap(value, { contact }) : null;
 
   return (
     <FormCard legend={heading} disabled={disabled}>
@@ -556,12 +560,21 @@ export function AddressField({
               <button
                 type="button"
                 onClick={saveToAddressBook}
-                disabled={savingAddress || !labelDraft.trim() || addressGap(value, { contact }) != null}
+                disabled={savingAddress || !labelDraft.trim() || saveGap != null}
                 className="text-sm font-semibold text-belize-blue hover:underline disabled:cursor-not-allowed disabled:text-[color:var(--bmpl-text-muted-strong)]"
               >
                 {savingAddress ? 'Saving…' : 'Save to my addresses'}
               </button>
             </div>
+          )}
+          {/* The button above goes disabled the instant the address is
+              incomplete, same as the booking/checkout submit it feeds into —
+              but unlike that submit, nothing else on this star affordance
+              ever says why. Shown only once there is a label to save,
+              so an address that is merely untouched does not nag before the
+              customer has shown any intent to save it. */}
+          {!value.savedAddressId && !savingAddress && labelDraft.trim() && saveGap && (
+            <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted-strong)]">{saveGap}</p>
           )}
           {saveError && (
             <Alert tone="warning" className="mt-2">
