@@ -723,16 +723,17 @@ test.describe('[LOCAL ONLY, skips in CI] TOUCH pin-drag — the one gesture Osca
 });
 
 /* ========================================================================
- * I — FORWARD-LOOKING: FullScreenMapModal confirm/cancel semantics
- *     (owner check #2, refined — "confirm" only becomes a distinct action
- *     once this lands, per god's MDF-535 follow-up). NOT YET SHIPPED:
- *     today the modal's ✕/Escape/confirm all call the same onClose, so this
- *     is EXPECTED TO FAIL until Oscar's change lands — written now so the
- *     check exists the moment it's needed, same discipline as this
- *     engagement's other pre-written verification contracts.
+ * I — FullScreenMapModal confirm/cancel semantics (owner check #2, refined —
+ *     "confirm" became a distinct action once Oscar shipped the staged-draft
+ *     modal, feat/location-web-map-picker commit eebfb5c2: the full-screen
+ *     map now stages a draft reseeded from the live value on open; "Use this
+ *     location" commits it via onChange, closing any other way (✕, Escape)
+ *     discards the draft untouched. Written BEFORE that shipped (was marked
+ *     EXPECTED TO FAIL); now genuinely passes against the real component —
+ *     left unchanged otherwise, since it already asserted the right thing.
  * ======================================================================== */
 
-test.describe('[LOCAL ONLY, skips in CI, EXPECTED TO FAIL until Oscar ships FullScreenMapModal confirm/cancel] #2 refined — cancel reverts to the opening value, confirm keeps the moved pin', () => {
+test.describe('[LOCAL ONLY, skips in CI] #2 refined — cancel reverts to the opening value, confirm keeps the moved pin', () => {
   test('dragging the pin inside the full-screen modal then Cancel restores the value the modal opened with', async ({ browser }) => {
     skipIfNoCustomer();
     const context = await browser.newContext({ storageState: CUSTOMER_STORAGE });
@@ -763,14 +764,19 @@ test.describe('[LOCAL ONLY, skips in CI, EXPECTED TO FAIL until Oscar ships Full
 });
 
 /* ========================================================================
- * J — FORWARD-LOOKING: search box must not breach Nominatim rate policy
- *     (Oscar's gap-table finding #2). NOT YET SHIPPED: LocationPicker has no
- *     search input at all today (confirmed by grep before writing this) —
- *     this test SKIPS cleanly until one exists, rather than erroring on a
- *     missing element, and documents the exact assertion to run once it does.
+ * J — search box must not breach Nominatim rate policy (Oscar's gap-table
+ *     finding #2). PARTIALLY SHIPPED, correctly still skips: LocationPicker
+ *     now grows its own search box in "standalone" mode when no `address`
+ *     prop is supplied (feat/location-web-map-picker eebfb5c2), but every
+ *     real caller today (checkout's AddressField, /dashboard/addresses,
+ *     /dashboard/store) still passes `address`, so standalone mode is not
+ *     reachable from any live page yet — confirmed by reading every real
+ *     <LocationPicker> render site, not assumed. This test SKIPS cleanly
+ *     until some M3 surface wires standalone mode up, rather than erroring
+ *     on a missing element, and documents the exact assertion to run then.
  * ======================================================================== */
 
-test.describe('[LOCAL ONLY, skips in CI, PENDING Oscar\'s LocationPicker search input] typing a search query never sends one geocode request per keystroke', () => {
+test.describe('[LOCAL ONLY, skips in CI, PENDING a real caller using LocationPicker\'s standalone search mode] typing a search query never sends one geocode request per keystroke', () => {
   test('a rapid multi-character query produces far fewer real /geocode requests than characters typed', async ({ browser }) => {
     skipIfNoCustomer();
     const context = await browser.newContext({ storageState: CUSTOMER_STORAGE });
@@ -803,5 +809,69 @@ test.describe('[LOCAL ONLY, skips in CI, PENDING Oscar\'s LocationPicker search 
       geocodeRequests,
       `typed ${query.length} characters and observed ${geocodeRequests} /geocode requests — one per keystroke is exactly the Nominatim rate-policy breach god ruled out`,
     ).toBeLessThan(query.length);
+  });
+});
+
+/* ========================================================================
+ * K — the dropdown is wired to the SAME fallback function as the list row
+ *     (god's follow-up, MDF-535): Oscar extracted savedAddressLine()
+ *     (apps/web/lib/address.ts) so the address-book list row and
+ *     AddressField's saved-address dropdown share one answer for "what to
+ *     show when a saved address has no street" instead of growing a second,
+ *     silently different one. He unit-tested the function directly (five
+ *     cases) but deliberately did NOT add a full AddressField mount test,
+ *     since that component mounts Leaflet through next/dynamic and the
+ *     existing checkout tests already document that path as slow and
+ *     flaky — a reasoning god accepted. That leaves the WIRING untested: a
+ *     unit test proves the function is correct in isolation, not that the
+ *     dropdown actually calls it rather than its own copy-pasted, possibly
+ *     stale version of the same logic. Cheap to check here because this
+ *     harness already pays Leaflet's mount cost for every other check.
+ * ======================================================================== */
+
+test.describe('[LOCAL ONLY, skips in CI] saved-address dropdown is wired to the shared savedAddressLine fallback, not a second copy', () => {
+  test('a pin-only saved address never reads as a bare leading comma in the checkout dropdown', async ({ browser }) => {
+    skipIfNoCustomer();
+    const { page, close } = await authedPage(browser, CUSTOMER_STORAGE);
+    await deleteAllSavedAddresses(page);
+
+    // Deliberately NO addressLine1 and NO landmark — only a pin. Before
+    // Oscar's extraction, AddressField's dropdown rendered
+    // `{s.addressLine1}, {s.city}` unguarded, which on exactly this row
+    // would read "Label — , Belize City" (god's own "bare leading comma"
+    // framing): a dash, a comma with nothing between it and the dash, and
+    // no indication a pin exists at all.
+    const label = uniqueLabel('Pin Only Wiring');
+    const created = await page.request.post('/api/addresses', {
+      data: {
+        label, fullName: 'MDF-535 Wiring Customer', phone: '501-600-9009',
+        city: 'Belize City', district: 'BELIZE',
+        latitude: 17.4995, longitude: -88.1976, isDefault: true,
+      },
+    });
+    expect(created.ok(), `creating a pin-only saved address failed: ${await created.text()}`).toBe(true);
+
+    skipIfNoLocationProduct();
+    await page.request.delete('/api/cart');
+    await page.request.post('/api/cart/items', { data: { productId: locationProductId!, quantity: 1 } });
+
+    await page.goto('/checkout');
+    await page.locator('label', { hasText: 'Delivery' }).filter({ has: page.locator('input[type=radio]') }).first().click();
+    const methodSelect = page.locator('select').filter({ has: page.locator('option', { hasText: 'Use a saved address' }) }).first();
+    await methodSelect.selectOption('SAVED');
+
+    const option = page.locator('option', { hasText: label });
+    await expect(option).toBeAttached();
+    const optionText = (await option.textContent()) ?? '';
+    await close();
+
+    // The exact defect shape: a comma with nothing (or only whitespace)
+    // between it and the preceding dash.
+    expect(optionText, `dropdown option text was "${optionText}"`).not.toMatch(/—\s*,/);
+    // The positive case: savedAddressLine()'s real fallback for a pin with
+    // no street and no landmark, proving the dropdown calls the SAME
+    // function the list row does, not a second copy that happens to also
+    // avoid the comma but says something different (or nothing).
+    expect(optionText).toContain('Pinned location');
   });
 });

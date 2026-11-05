@@ -151,23 +151,24 @@ export async function touchDragPinBy(page: Page, deltaX: number, deltaY: number,
 
 /**
  * Read back the coordinate LocationPicker itself reports for the current
- * pin, from its own "Coordinates" disclosure (`value.latitude.toFixed(6)},
- * ${value.longitude.toFixed(6)}`, LocationPicker.tsx:719-721) — the same
- * number the component will submit, not a value this harness computed
- * independently. Opens the `<details>` first; Playwright can read text
- * inside a closed `<details>` via `textContent()`, but asserting
- * `toBeVisible()` elsewhere in a spec needs it open, so callers that only
- * need the number can skip the click and just read `.textContent()`
- * directly on the locator this returns.
+ * pin — the same number the component will submit, not a value this harness
+ * computed independently.
+ *
+ * As of MDF-485 M1/M2 (owner behaviour 9, god overruled "not a gap"), this is
+ * no longer behind a `<details>` disclosure: the coordinate is now always
+ * visible the instant a pin exists, immediately under the "✓ Location
+ * selected" line, in both the embedded and full-screen bodies
+ * (LocationPicker.tsx:706, inside the same `aria-live="polite"` status
+ * block as the "selected" line). Scoped to that status block rather than a
+ * bare `p.font-mono` match, since other font-mono text exists elsewhere on
+ * the page (e.g. the address-search results list).
  */
 export function pinCoordinatesLocator(page: Page): Locator {
-  return page.locator('details', { has: page.locator('summary', { hasText: 'Coordinates' }) }).locator('p.font-mono');
+  return page.locator('[aria-live="polite"]', { hasText: '✓ Location selected' }).locator('p.font-mono');
 }
 
 export async function readPinCoordinates(page: Page): Promise<{ latitude: number; longitude: number }> {
   const loc = pinCoordinatesLocator(page);
-  // The <p> is present even while its parent <details> is closed; Playwright
-  // reads textContent regardless of the native disclosure's open state.
   const text = await loc.textContent();
   const match = /(-?\d+\.\d+),\s*(-?\d+\.\d+)/.exec(text ?? '');
   if (!match) throw new Error(`Could not parse coordinates from "${text}" — has the "✓ Location selected" state actually been reached?`);
