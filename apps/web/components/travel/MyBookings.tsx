@@ -5,6 +5,7 @@ import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Button, Card as UiCard, EmptyState, Field, Input, Spinner } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
 import { riderAccessView, riderBookingView, type RiderBooking } from '../../lib/passenger-travel';
+import { tripBookingEndLine } from '../../lib/passenger-driver';
 
 /**
  * The rider's own bookings. Each row's words come from riderBookingView,
@@ -106,6 +107,22 @@ function BookingRow({ booking: b, onChanged }: { booking: RiderBooking; onChange
               <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">Departs {new Date(b.scheduledDepartureAt).toLocaleString()}</p>
             )}
             {view.detail && <p className="mt-1 text-xs text-slate-600">{view.detail}</p>}
+            {/* MDF-549 gap B: the rider who places a pin could never see it
+                again -- a booking with neither stays silent, same as the
+                admin and driver views, since absent pins are the normal
+                case on a scheduled route, not a gap to explain here. */}
+            {b.pickup && (
+              <p className="mt-1 text-xs text-slate-600">
+                Pickup: {tripBookingEndLine(b.pickup)}
+                {b.pickup.instructions && ` — ${b.pickup.instructions}`}
+              </p>
+            )}
+            {b.dropoff && (
+              <p className="mt-1 text-xs text-slate-600">
+                Drop-off: {tripBookingEndLine(b.dropoff)}
+                {b.dropoff.instructions && ` — ${b.dropoff.instructions}`}
+              </p>
+            )}
             {b.cancellationReason && <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">Cancelled: {b.cancellationReason}</p>}
           </div>
           {view.cancellable && !cancelOpen && (

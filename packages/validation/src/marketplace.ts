@@ -13,7 +13,7 @@ import {
   VENDOR_APPROVAL_STATUSES,
   isWithinBelize,
 } from '@bmpl/shared';
-import { isLocatable, timeOfDaySchema } from './common';
+import { isLocatable, optionalTrimmedText, timeOfDaySchema } from './common';
 
 /**
  * Phase 2 marketplace validation building blocks.
@@ -699,16 +699,11 @@ export type WalletTopUpInput = z.infer<typeof walletTopUpSchema>;
  * save work, not just a pin-only field omission — that distinction is the
  * entire fix. The same shape on the other three is the same reasoning, kept
  * consistent rather than leaving one field normalised and three not.
+ *
+ * `optionalTrimmedText` itself lives in `./common` — passenger booking pins
+ * (MDF-548) need the identical blank-to-absent behaviour on their own
+ * landmark/instructions fields, and a second copy is how the two drift.
  */
-const optionalTrimmedText = (max: number) =>
-  z
-    .string()
-    .trim()
-    .max(max)
-    .optional()
-    .nullable()
-    .transform((v) => (v ? v : undefined));
-
 export const savedAddressFieldsSchema = z.object({
   label: z.string().trim().min(1).max(60),
   fullName: z.string().trim().min(1).max(120),

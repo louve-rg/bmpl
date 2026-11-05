@@ -72,3 +72,21 @@ export type Pagination = z.infer<typeof paginationSchema>;
 export function isLocatable(v: { street?: string | null; latitude?: number | null; longitude?: number | null }): boolean {
   return !!v.street?.trim() || (v.latitude != null && v.longitude != null);
 }
+
+/**
+ * A free-text field that normalises blank to absent (MDF-485/MDF-533, owner
+ * ruling): a browser form that trims-then-sends can produce `''` for a field
+ * the user never filled in, which is a different wire value from the field
+ * being omitted — but at every API boundary that cares whether the value is
+ * "there", blank and omitted must mean the same thing. Collapsing a blank or
+ * whitespace-only string to `undefined` here, once, is what makes that true
+ * for every caller, rather than leaving each schema to get it right on its own.
+ */
+export const optionalTrimmedText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v : undefined));

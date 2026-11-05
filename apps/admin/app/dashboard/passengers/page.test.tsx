@@ -165,3 +165,16 @@ describe('PassengersPage — write affordances gated on passengers.moderate (BMP
     expect(texts).toContain('Cancel booking');
   });
 });
+
+describe('PassengersPage — Bookings tab links to the booking detail route (MDF-549)', () => {
+  it('every row links to /dashboard/passengers/bookings/:id, unconditionally of moderation rights', async () => {
+    stubFetch(['passengers.read']);
+    await mountOnTab('Bookings');
+
+    const link = Array.from(document.body.querySelectorAll('a')).find(
+      (a) => a.getAttribute('href') === '/dashboard/passengers/bookings/book_1',
+    );
+    expect(link).not.toBeUndefined();
+    expect(link!.textContent?.trim()).toBe('View →');
+  });
+});

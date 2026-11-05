@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DRIVER_SETTABLE_AVAILABILITY } from '@bmpl/shared';
-import { PASSENGER_AVAILABILITY_OPTIONS, availabilityTone, tripAction } from './passenger-driver';
+import { PASSENGER_AVAILABILITY_OPTIONS, availabilityTone, tripAction, tripBookingEndLine, type TripBookingLocation } from './passenger-driver';
 
 describe('passenger availability options', () => {
   it('offers exactly the server-settable states — SUSPENDED is never a button', () => {
@@ -34,5 +34,34 @@ describe('availabilityTone', () => {
     expect(availabilityTone('UNAVAILABLE')).toBe('warning');
     expect(availabilityTone('SUSPENDED')).toBe('error');
     expect(availabilityTone('OFFLINE')).toBe('neutral');
+  });
+});
+
+describe('tripBookingEndLine (MDF-549)', () => {
+  const end = (overrides: Partial<TripBookingLocation>): TripBookingLocation => ({
+    district: null,
+    city: null,
+    address: null,
+    landmark: null,
+    instructions: null,
+    latitude: null,
+    longitude: null,
+    ...overrides,
+  });
+
+  it('reads null as the normal "no pin" case, not missing data', () => {
+    expect(tripBookingEndLine(null)).toBe('Not specified — travelling to/from the route’s own stop');
+  });
+
+  it('prefers the street address when given', () => {
+    expect(tripBookingEndLine(end({ address: '5 Burns Ave', city: 'San Ignacio', district: 'CAYO' }))).toBe('5 Burns Ave, San Ignacio, CAYO');
+  });
+
+  it('falls back to the landmark when there is no street', () => {
+    expect(tripBookingEndLine(end({ landmark: 'Near the market', city: 'Belize City', district: 'BELIZE' }))).toBe('Near the market, Belize City, BELIZE');
+  });
+
+  it('falls back to town/district when neither street nor landmark is given', () => {
+    expect(tripBookingEndLine(end({ city: 'Belmopan', district: 'CAYO' }))).toBe('Belmopan, CAYO');
   });
 });

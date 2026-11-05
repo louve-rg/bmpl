@@ -290,6 +290,31 @@ export class PassengerOperationsService {
           seats: dto.seats,
           status: 'REQUESTED',
           // fareQuotedMinor deliberately untouched: no pricing policy exists.
+          // Pickup/dropoff (MDF-548): by value, no FK to anything — the same
+          // snapshot pattern as OrderAddress and the shipment endpoints, so
+          // nothing booked here can ever change retroactively. dto.pickup and
+          // dto.dropoff are two separately-validated objects (the schema
+          // additionally refuses them being the same place); copied field by
+          // field rather than spread so a future field added to one input
+          // shape can never silently land on both.
+          ...(dto.pickup && {
+            pickupDistrict: dto.pickup.district,
+            pickupCity: dto.pickup.city,
+            pickupAddress: dto.pickup.address ?? null,
+            pickupLandmark: dto.pickup.landmark ?? null,
+            pickupInstructions: dto.pickup.instructions ?? null,
+            pickupLatitude: dto.pickup.latitude ?? null,
+            pickupLongitude: dto.pickup.longitude ?? null,
+          }),
+          ...(dto.dropoff && {
+            dropoffDistrict: dto.dropoff.district,
+            dropoffCity: dto.dropoff.city,
+            dropoffAddress: dto.dropoff.address ?? null,
+            dropoffLandmark: dto.dropoff.landmark ?? null,
+            dropoffInstructions: dto.dropoff.instructions ?? null,
+            dropoffLatitude: dto.dropoff.latitude ?? null,
+            dropoffLongitude: dto.dropoff.longitude ?? null,
+          }),
         },
       });
     });
@@ -323,6 +348,32 @@ export class PassengerOperationsService {
     });
     if (!b || b.passengerUserId !== actor.userId) throw new NotFoundException('Booking not found.');
     return this.cancelBooking(actor, b, 'PASSENGER', reason);
+  }
+
+  /* ---------------------------------------------------- driver surface */
+
+  /**
+   * MDF-548/551: there was no driver-facing read of individual bookings at
+   * all before this — `listDriverTrips` is trip-level aggregates only and
+   * never touches `passengerBooking`. Scoped the same way
+   * `listProviderBookings` scopes to the operator's own: resolve the
+   * caller's driver profile first, then filter bookings through
+   * `trip.driverProfileId`, never a bare tripId a driver could pass for
+   * someone else's departure.
+   *
+   * ASSIGNMENT IS THE GATE — owner's ruling, no two-stage reveal like the
+   * shipment driver flow. That gate exists there because a courier sees a
+   * job BEFORE accepting it; a passenger driver is already assigned to the
+   * departure before this endpoint has anything to show them, so there is no
+   * "offered but not yet accepted" state to hide behind a second gate.
+   *
+   * `includePassengerName: false` — the owner's ruling is explicit: this
+   * payload is location, landmark and instructions, and nothing else
+   * personal. No rider name, no phone, no new field without asking first.
+   */
+  async listDriverTripBookings(userId: string, filter: { tripId?: string; status?: string } = {}) {
+    const d = await this.driverProfileOf(userId);
+    return this.listBookings({ ...filter, driverProfileId: d.id, includePassengerName: false });
   }
 
   /* --------------------------------------------------- provider surface */
@@ -360,6 +411,27 @@ export class PassengerOperationsService {
 
   async listAllBookings(filter: { tripId?: string; status?: string } = {}) {
     return this.listBookings(filter);
+  }
+
+  /**
+   * Single-booking admin read. Did not exist before (BMPL-548 follow-up): the
+   * admin detail page fetched the list and found the row client-side, which
+   * only works while the booking is among the 300 most recent — row 301
+   * silently read as "not found" for a booking that exists. Admin has no
+   * ownership scope to fail closed on, so the only failure mode is a plain
+   * not-found for an id that does not resolve, matching the body
+   * `bookingOnProviderTrip` already gives a foreign operator's booking id.
+   */
+  async getBookingAdmin(bookingId: string) {
+    const b = await this.prisma.passengerBooking.findUnique({
+      where: { id: bookingId },
+      include: {
+        trip: { include: { route: { select: { name: true, originCity: true, destinationCity: true } } } },
+        passenger: { select: { firstName: true, lastName: true } },
+      },
+    });
+    if (!b) throw new NotFoundException('Booking not found.');
+    return { ...this.serializeBooking(b), passengerName: b.passenger ? `${b.passenger.firstName} ${b.passenger.lastName}` : null };
   }
 
   async confirmBookingAsAdmin(actor: Actor, bookingId: string) {
@@ -843,10 +915,19 @@ export class PassengerOperationsService {
     return updated;
   }
 
-  private async listBookings(filter: { providerProfileId?: string; tripId?: string; status?: string }) {
+  private async listBookings(filter: {
+    providerProfileId?: string;
+    driverProfileId?: string;
+    tripId?: string;
+    status?: string;
+    includePassengerName?: boolean;
+  }) {
     const where: Prisma.PassengerBookingWhereInput = {};
     if (filter.tripId) where.tripId = filter.tripId;
-    if (filter.providerProfileId) where.trip = { providerProfileId: filter.providerProfileId };
+    const tripWhere: Prisma.PassengerTripWhereInput = {};
+    if (filter.providerProfileId) tripWhere.providerProfileId = filter.providerProfileId;
+    if (filter.driverProfileId) tripWhere.driverProfileId = filter.driverProfileId;
+    if (Object.keys(tripWhere).length > 0) where.trip = tripWhere;
     if (filter.status && filter.status in PassengerBookingStatus) where.status = filter.status as PassengerBookingStatus;
     const rows = await this.prisma.passengerBooking.findMany({
       where,
@@ -857,9 +938,10 @@ export class PassengerOperationsService {
         passenger: { select: { firstName: true, lastName: true } },
       },
     });
+    const includePassengerName = filter.includePassengerName ?? true;
     return rows.map((b) => ({
       ...this.serializeBooking(b),
-      passengerName: b.passenger ? `${b.passenger.firstName} ${b.passenger.lastName}` : null,
+      ...(includePassengerName && { passengerName: b.passenger ? `${b.passenger.firstName} ${b.passenger.lastName}` : null }),
     }));
   }
 
@@ -878,6 +960,17 @@ export class PassengerOperationsService {
     throw new BadRequestException('Could not allocate a booking reference. Please try again.');
   }
 
+  /**
+   * Pickup/dropoff (MDF-548/551): the owner's ruling is that every caller
+   * who reaches this function at all — the rider who set the pin, the
+   * operator dispatching the vehicle, admins, and (separately,
+   * `listDriverTripBookings`) the assigned driver — may see it. What must
+   * genuinely gate the data is WHICH ROWS a caller's query can reach
+   * (`providerProfileId`/`driverProfileId`/`tripId`/`passengerUserId` in
+   * `listBookings` and every by-id lookup above), not a field-level flag
+   * here — a flag that every real caller sets the same way is not an
+   * access control, it is a trap for whoever reads it next.
+   */
   serializeBooking(
     b: PassengerBooking & { trip?: ({ reference: string; scheduledDepartureAt: Date | null; status: string; route?: { name: string; originCity: string; destinationCity: string } | null }) | null },
   ) {
@@ -900,6 +993,25 @@ export class PassengerOperationsService {
       cancelledBy: b.cancelledBy,
       cancellationReason: b.cancellationReason,
       createdAt: b.createdAt,
+      pickup: this.serializeBookingStop(b, 'pickup'),
+      dropoff: this.serializeBookingStop(b, 'dropoff'),
+    };
+  }
+
+  private serializeBookingStop(
+    b: Pick<PassengerBooking, 'pickupDistrict' | 'pickupCity' | 'pickupAddress' | 'pickupLandmark' | 'pickupInstructions' | 'pickupLatitude' | 'pickupLongitude' | 'dropoffDistrict' | 'dropoffCity' | 'dropoffAddress' | 'dropoffLandmark' | 'dropoffInstructions' | 'dropoffLatitude' | 'dropoffLongitude'>,
+    end: 'pickup' | 'dropoff',
+  ) {
+    const district = end === 'pickup' ? b.pickupDistrict : b.dropoffDistrict;
+    if (!district) return null; // this booking was not pinned on this end
+    return {
+      district,
+      city: end === 'pickup' ? b.pickupCity : b.dropoffCity,
+      address: end === 'pickup' ? b.pickupAddress : b.dropoffAddress,
+      landmark: end === 'pickup' ? b.pickupLandmark : b.dropoffLandmark,
+      instructions: end === 'pickup' ? b.pickupInstructions : b.dropoffInstructions,
+      latitude: end === 'pickup' ? b.pickupLatitude : b.dropoffLatitude,
+      longitude: end === 'pickup' ? b.pickupLongitude : b.dropoffLongitude,
     };
   }
 }

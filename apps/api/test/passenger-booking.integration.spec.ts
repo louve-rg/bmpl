@@ -815,3 +815,277 @@ describe('the admin assignable-vehicles picker asks the authority', () => {
     expect((await assignable(tripId, modCookies)).status).toBe(200);
   });
 });
+
+/**
+ * Flag-stop pickup/dropoff pins (MDF-548). "Pick me up along the route here" —
+ * not a taxi-style trip the two pins define; that is a separate, larger build
+ * the owner has been asked about separately. The columns already existed
+ * (PassengerBooking's pickup and dropoff snapshot fields); this suite proves
+ * the contract that reaches them: validation reusing `isLocatable` (MDF-485's
+ * rule, not a second one), the by-value snapshot, the same-place refusal, and
+ * that the two ends land in the right columns rather than getting swapped.
+ */
+describe('pickup/dropoff pins on a flag-stop booking', () => {
+  // Belize City and Punta Gorda — real, distinct, and far enough apart that a
+  // pickup/dropoff swap in the mapping would be obvious, not a coincidence.
+  const PICKUP = {
+    district: 'BELIZE' as const,
+    city: 'Belize City',
+    address: '5 Front Street',
+    landmark: 'Behind the blue gate',
+    instructions: 'Call on arrival.',
+    latitude: 17.4995,
+    longitude: -88.1976,
+  };
+  const DROPOFF = {
+    district: 'TOLEDO' as const,
+    city: 'Punta Gorda',
+    address: '2 Main Street',
+    landmark: 'Next to the market',
+    instructions: 'Leave with the stall owner.',
+    latitude: 16.103,
+    longitude: -88.8004,
+  };
+
+  it('stores both pins by value and returns them to the rider who set them', async () => {
+    const op = await makeProvider('Test Pinned Lines');
+    const { tripId } = await makeDeparture(op, 2000);
+    const rider = await registerUser(`pbp_r1_${uniq()}@example.com`);
+
+    const r = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 1, pickup: PICKUP, dropoff: DROPOFF });
+    expect(r.status).toBe(201);
+    expect(r.body.pickup).toMatchObject(PICKUP);
+    expect(r.body.dropoff).toMatchObject(DROPOFF);
+
+    // Not reversed, not collapsed: each end's fields land in ITS OWN columns.
+    const row = await ctx.prisma.passengerBooking.findUniqueOrThrow({ where: { id: r.body.id } });
+    expect(row.pickupDistrict).toBe(PICKUP.district);
+    expect(row.pickupCity).toBe(PICKUP.city);
+    expect(row.pickupAddress).toBe(PICKUP.address);
+    expect(row.pickupLandmark).toBe(PICKUP.landmark);
+    expect(row.pickupInstructions).toBe(PICKUP.instructions);
+    expect(row.pickupLatitude).toBeCloseTo(PICKUP.latitude, 4);
+    expect(row.pickupLongitude).toBeCloseTo(PICKUP.longitude, 4);
+    expect(row.dropoffDistrict).toBe(DROPOFF.district);
+    expect(row.dropoffCity).toBe(DROPOFF.city);
+    expect(row.dropoffAddress).toBe(DROPOFF.address);
+    expect(row.dropoffLandmark).toBe(DROPOFF.landmark);
+    expect(row.dropoffInstructions).toBe(DROPOFF.instructions);
+    expect(row.dropoffLatitude).toBeCloseTo(DROPOFF.latitude, 4);
+    expect(row.dropoffLongitude).toBeCloseTo(DROPOFF.longitude, 4);
+
+    // The rider's own list carries the same pins back.
+    const list = await get(rider.cookies, 'passenger/bookings');
+    const entry = list.body.find((b: { id: string }) => b.id === r.body.id);
+    expect(entry.pickup).toMatchObject(PICKUP);
+    expect(entry.dropoff).toMatchObject(DROPOFF);
+  });
+
+  it('is entirely optional — an unpinned booking behaves exactly as before', async () => {
+    const op = await makeProvider('Test Unpinned Lines');
+    const { tripId } = await makeDeparture(op, 2000);
+    const rider = await registerUser(`pbp_r2_${uniq()}@example.com`);
+    const r = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 1 });
+    expect(r.status).toBe(201);
+    expect(r.body.pickup).toBeNull();
+    expect(r.body.dropoff).toBeNull();
+  });
+
+  it('reuses the written-OR-pinned rule: a street alone is complete, and so is a pin alone', async () => {
+    // A rider may hold only one open booking per departure (pre-existing
+    // rule, unrelated to pins) — so these two cases need two trips, not one.
+    const op = await makeProvider('Test Either Way Lines');
+    const streetTrip = await makeDeparture(op, 2000);
+    const pinTrip = await makeDeparture(op, 2000);
+    const rider = await registerUser(`pbp_r3_${uniq()}@example.com`);
+
+    const streetOnly = await post(rider.cookies, 'passenger/bookings', {
+      tripId: streetTrip.tripId,
+      seats: 1,
+      pickup: { district: 'BELIZE', city: 'Belize City', address: '9 Albert Street' },
+    });
+    expect(streetOnly.status).toBe(201);
+    expect(streetOnly.body.pickup).toMatchObject({ district: 'BELIZE', city: 'Belize City', address: '9 Albert Street', latitude: null, longitude: null });
+
+    const pinOnly = await post(rider.cookies, 'passenger/bookings', {
+      tripId: pinTrip.tripId,
+      seats: 1,
+      dropoff: { district: 'TOLEDO', city: 'Punta Gorda', latitude: 16.103, longitude: -88.8004 },
+    });
+    expect(pinOnly.status).toBe(201);
+    expect(pinOnly.body.dropoff).toMatchObject({ address: null, latitude: 16.103, longitude: -88.8004 });
+  });
+
+  /**
+   * Message content for each refusal is a unit-test concern
+   * (packages/validation/src/passenger.test.ts) — Zod errors surface through
+   * `ZodBody` as a generic `{ message: 'Validation failed', errors: [...] }`
+   * (apps/api/src/common/zod-validation.pipe.ts), and every other integration
+   * spec in this codebase checks only the status code for that reason.
+   */
+  it('refuses a pin that is neither written nor pinned, and refuses one outside Belize', async () => {
+    const op = await makeProvider('Test Refused Pin Lines');
+    const { tripId } = await makeDeparture(op, 2000);
+    const rider = await registerUser(`pbp_r4_${uniq()}@example.com`);
+
+    const neither = await post(rider.cookies, 'passenger/bookings', {
+      tripId,
+      seats: 1,
+      pickup: { district: 'BELIZE', city: 'Belize City' },
+    });
+    expect(neither.status).toBe(400);
+
+    const outside = await post(rider.cookies, 'passenger/bookings', {
+      tripId,
+      seats: 1,
+      pickup: { district: 'BELIZE', city: 'Belize City', latitude: 40.7, longitude: -74 },
+    });
+    expect(outside.status).toBe(400);
+
+    const halfPin = await post(rider.cookies, 'passenger/bookings', {
+      tripId,
+      seats: 1,
+      pickup: { district: 'BELIZE', city: 'Belize City', latitude: 17.4995 },
+    });
+    expect(halfPin.status).toBe(400);
+  });
+
+  it('refuses a pickup and dropoff that name the same place, pinned or written', async () => {
+    const op = await makeProvider('Test Same Place Lines');
+    const { tripId } = await makeDeparture(op, 2000);
+    const rider = await registerUser(`pbp_r5_${uniq()}@example.com`);
+
+    const samePin = await post(rider.cookies, 'passenger/bookings', {
+      tripId,
+      seats: 1,
+      pickup: { district: 'BELIZE', city: 'Belize City', latitude: 17.4995, longitude: -88.1976 },
+      dropoff: { district: 'BELIZE', city: 'Belize City', latitude: 17.4995, longitude: -88.1976 },
+    });
+    expect(samePin.status).toBe(400);
+
+    const sameStreet = await post(rider.cookies, 'passenger/bookings', {
+      tripId,
+      seats: 1,
+      pickup: { district: 'BELIZE', city: 'Belize City', address: '5 Front Street' },
+      dropoff: { district: 'BELIZE', city: 'Belize City', address: '5 FRONT STREET' },
+    });
+    expect(sameStreet.status).toBe(400);
+
+    // Different towns, same coordinates mismatch aside: a genuinely different
+    // dropoff is accepted.
+    const different = await post(rider.cookies, 'passenger/bookings', {
+      tripId,
+      seats: 1,
+      pickup: { district: 'BELIZE', city: 'Belize City', latitude: 17.4995, longitude: -88.1976 },
+      dropoff: { district: 'TOLEDO', city: 'Punta Gorda', latitude: 16.103, longitude: -88.8004 },
+    });
+    expect(different.status).toBe(201);
+  });
+
+  it('reaches the driver assigned to the trip, and no other driver', async () => {
+    const op = await makeProvider('Test Driver Visible Lines');
+    const { tripId } = await makeDeparture(op, 2000);
+    const driver = await makeFleetDriver(op);
+    const vehicleId = await makeFleetVehicle(op, 12);
+    expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
+    const rider = await registerUser(`pbp_r6_${uniq()}@example.com`);
+    const b = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 1, pickup: PICKUP, dropoff: DROPOFF });
+    expect(b.status).toBe(201);
+
+    const seen = await get(driver.cookies, `passenger/driver/trips/${tripId}/bookings`);
+    expect(seen.status).toBe(200);
+    const row = seen.body.find((x: { id: string }) => x.id === b.body.id);
+    expect(row.pickup).toMatchObject(PICKUP);
+    expect(row.dropoff).toMatchObject(DROPOFF);
+    // MDF-551 ruling: location, landmark and instructions only — no rider
+    // name, no phone, nothing else personal, even though the SAME booking
+    // carries a name to the operator and to admin (see below).
+    expect(row.passengerName).toBeUndefined();
+    expect(row.phone).toBeUndefined();
+
+    // A different driver, never assigned to this trip, gets nothing for it —
+    // an empty list, not someone else's riders.
+    const other = await makeFleetDriver(op);
+    const otherView = await get(other.cookies, `passenger/driver/trips/${tripId}/bookings`);
+    expect(otherView.status).toBe(200);
+    expect(otherView.body).toEqual([]);
+  });
+
+  it('reaches the operator dispatching the vehicle, for their own bookings', async () => {
+    // MDF-551 ruling: the operator gets the same treatment MDF-485 gave
+    // vendors — they already see the rider's name unconditionally (existing
+    // listProviderBookings behaviour); a flag stop they cannot see is one
+    // they cannot serve. Cross-operator leakage is already proven by
+    // passenger-booking-scope.integration.spec.ts's "an operator's booking
+    // list carries their riders and nobody else's" — that test 404s/omits
+    // the row entirely for a foreign operator, which protects every field
+    // on it, these included, without needing to be re-proven here.
+    const op = await makeProvider('Test Operator Visible Lines');
+    const { tripId } = await makeDeparture(op, 2000);
+    const driver = await makeFleetDriver(op);
+    const vehicleId = await makeFleetVehicle(op, 12);
+    expect((await post(op.cookies, `passenger/provider/trips/${tripId}/assign`, { driverProfileId: driver.driverProfileId, vehicleId })).status).toBe(201);
+    const rider = await registerUser(`pbp_r9_${uniq()}@example.com`);
+    const b = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 1, pickup: PICKUP, dropoff: DROPOFF });
+    expect(b.status).toBe(201);
+
+    const list = await get(op.cookies, 'passenger/provider/bookings');
+    expect(list.status).toBe(200);
+    const row = list.body.find((x: { id: string }) => x.id === b.body.id);
+    expect(row.pickup).toMatchObject(PICKUP);
+    expect(row.dropoff).toMatchObject(DROPOFF);
+
+    const confirmed = await post(op.cookies, `passenger/provider/bookings/${b.body.id}/confirm`);
+    expect(confirmed.status).toBe(201);
+    expect(confirmed.body.pickup).toMatchObject(PICKUP);
+    expect(confirmed.body.dropoff).toMatchObject(DROPOFF);
+  });
+
+  it('reaches admins, through the list and the single-booking read, which 404s identically to a foreign/missing confirm', async () => {
+    const op = await makeProvider('Test Admin Visible Lines');
+    const { tripId } = await makeDeparture(op, 2000);
+    const rider = await registerUser(`pbp_r7_${uniq()}@example.com`);
+    const b = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 1, pickup: PICKUP, dropoff: DROPOFF });
+    expect(b.status).toBe(201);
+
+    const list = await get(admin, 'admin/passengers/bookings');
+    expect(list.status).toBe(200);
+    const row = list.body.find((x: { id: string }) => x.id === b.body.id);
+    expect(row.pickup).toMatchObject(PICKUP);
+    expect(row.dropoff).toMatchObject(DROPOFF);
+
+    // The single-booking read (BMPL-548 follow-up): the same allowlist, same
+    // fields, and — unlike the rider/driver reads — a passenger name, so the
+    // admin detail page is not a downgrade from the list.
+    const single = await get(admin, `admin/passengers/bookings/${b.body.id}`);
+    expect(single.status).toBe(200);
+    expect(single.body.pickup).toMatchObject(PICKUP);
+    expect(single.body.dropoff).toMatchObject(DROPOFF);
+    expect(single.body.passengerName).toBeTruthy();
+
+    // A booking id that does not exist must read identically to one the
+    // caller is not entitled to see — the property already proven for the
+    // foreign-operator confirm/cancel path (passenger-booking-scope.spec).
+    // Admin has no ownership scope to fail closed on, so the only comparable
+    // case is "does not resolve at all" — proven against the admin confirm
+    // door reading the same way.
+    const missingGet = await get(admin, 'admin/passengers/bookings/nonexistent00000000000000');
+    const missingConfirm = await post(admin, 'admin/passengers/bookings/nonexistent00000000000000/confirm');
+    expect(missingGet.status).toBe(404);
+    expect(missingConfirm.status).toBe(404);
+    expect(missingGet.body).toEqual(missingConfirm.body);
+  });
+
+  it('editing or cancelling the booking never touches the snapshot', async () => {
+    const op = await makeProvider('Test Snapshot Lines');
+    const { tripId } = await makeDeparture(op, 2000);
+    const rider = await registerUser(`pbp_r8_${uniq()}@example.com`);
+    const b = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 1, pickup: PICKUP, dropoff: DROPOFF });
+    expect(b.status).toBe(201);
+
+    const cancelled = await post(rider.cookies, `passenger/bookings/${b.body.id}/cancel`, { reason: 'Changed plans.' });
+    expect(cancelled.status).toBe(201);
+    expect(cancelled.body.pickup).toMatchObject(PICKUP);
+    expect(cancelled.body.dropoff).toMatchObject(DROPOFF);
+  });
+});

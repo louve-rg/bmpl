@@ -1,5 +1,14 @@
 import { z } from 'zod';
-import { DISTRICTS, DRIVER_SETTABLE_AVAILABILITY, MAX_PASSENGER_SEATS, PASSENGER_VEHICLE_TYPES } from '@bmpl/shared';
+import {
+  DISTRICTS,
+  DRIVER_SETTABLE_AVAILABILITY,
+  MAX_PASSENGER_SEATS,
+  OUT_OF_BOUNDS_MESSAGE,
+  PASSENGER_VEHICLE_TYPES,
+  UNLOCATABLE_ADDRESS_MESSAGE,
+  isWithinBelize,
+} from '@bmpl/shared';
+import { isLocatable, optionalTrimmedText } from './common';
 
 /**
  * Passenger transportation — supply side (S1).
@@ -181,11 +190,68 @@ export type PassengerTripCancelInput = z.infer<typeof passengerTripCancelSchema>
  * product questions are unanswered).
  */
 
-/** Book seats on a published SCHEDULED departure. */
-export const passengerBookingCreateSchema = z.object({
-  tripId: z.string().trim().min(1),
-  seats: z.coerce.number().int().min(1, 'At least one seat.').max(MAX_PASSENGER_SEATS),
+/**
+ * A pickup or dropoff pin on a flag-stop booking (MDF-548) — "pick me up
+ * along the route here", not a taxi-style trip the two pins define.
+ *
+ * Reuses the exact "written down OR pinned" rule MDF-485 settled
+ * (`isLocatable`, `packages/validation/src/common.ts`) rather than a second
+ * locatability rule: either a street/landmark description or a complete pin
+ * is a complete answer. Town and district are required regardless — a pin
+ * never implies them, and the trip planner already depends on both.
+ */
+const passengerBookingStopFieldsSchema = z.object({
+  district,
+  city: z.string().trim().min(1, 'Every pickup or dropoff names its town.').max(120),
+  address: optionalTrimmedText(200),
+  landmark: optionalTrimmedText(200),
+  instructions: optionalTrimmedText(500),
+  latitude: z.number().min(-90).max(90).optional().nullable(),
+  longitude: z.number().min(-180).max(180).optional().nullable(),
 });
+
+const stopPinPairComplete = (v: { latitude?: number | null; longitude?: number | null }) =>
+  (v.latitude == null) === (v.longitude == null);
+const stopPinWithinBelize = (v: { latitude?: number | null; longitude?: number | null }) =>
+  v.latitude == null || isWithinBelize(v.latitude, v.longitude);
+
+export const passengerBookingStopSchema = passengerBookingStopFieldsSchema
+  .refine(stopPinPairComplete, { message: 'A pinned location needs both a latitude and a longitude.', path: ['latitude'] })
+  .refine(stopPinWithinBelize, { message: OUT_OF_BOUNDS_MESSAGE, path: ['latitude'] })
+  .refine((v) => isLocatable({ street: v.address, latitude: v.latitude, longitude: v.longitude }), {
+    message: UNLOCATABLE_ADDRESS_MESSAGE,
+    path: ['address'],
+  });
+export type PassengerBookingStopInput = z.infer<typeof passengerBookingStopSchema>;
+
+/** Two stops naming the same place — same coordinates, or no pin on either
+ *  side and the same district/city/address. A flag stop that starts and ends
+ *  at the same place is not a trip, exactly as `createRouteSchema` already
+ *  refuses a route from a hub to itself. */
+function sameStop(
+  a: { district: string; city: string; address?: string; latitude?: number | null; longitude?: number | null },
+  b: { district: string; city: string; address?: string; latitude?: number | null; longitude?: number | null },
+): boolean {
+  if (a.latitude != null && b.latitude != null) {
+    return a.latitude === b.latitude && a.longitude === b.longitude;
+  }
+  if (a.latitude != null || b.latitude != null) return false; // one pinned, one not: not provably the same place
+  return a.district === b.district && a.city.trim().toLowerCase() === b.city.trim().toLowerCase() && (a.address ?? '').trim().toLowerCase() === (b.address ?? '').trim().toLowerCase();
+}
+
+/** Book seats on a published SCHEDULED departure, optionally pinning a
+ *  flag-stop pickup and/or dropoff along that route. */
+export const passengerBookingCreateSchema = z
+  .object({
+    tripId: z.string().trim().min(1),
+    seats: z.coerce.number().int().min(1, 'At least one seat.').max(MAX_PASSENGER_SEATS),
+    pickup: passengerBookingStopSchema.optional(),
+    dropoff: passengerBookingStopSchema.optional(),
+  })
+  .refine((v) => !v.pickup || !v.dropoff || !sameStop(v.pickup, v.dropoff), {
+    message: 'Pickup and dropoff cannot be the same place.',
+    path: ['dropoff'],
+  });
 export type PassengerBookingCreateInput = z.infer<typeof passengerBookingCreateSchema>;
 
 export const passengerBookingCancelSchema = z.object({

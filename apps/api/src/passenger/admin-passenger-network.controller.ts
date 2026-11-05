@@ -114,6 +114,12 @@ export class AdminPassengerNetworkController {
     return this.ops.listAllBookings({ tripId, status });
   }
 
+  @Get('bookings/:id')
+  @RequirePermission('passengers.read')
+  getBooking(@Param('id') id: string) {
+    return this.ops.getBookingAdmin(id);
+  }
+
   /**
    * What may staff THIS trip — the assign endpoint's own acceptance set, so
    * the console's vehicle picker asks the authority instead of guessing

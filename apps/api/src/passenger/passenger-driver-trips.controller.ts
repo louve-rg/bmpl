@@ -25,6 +25,17 @@ export class PassengerDriverTripsController {
     return this.ops.listDriverTrips(u.userId);
   }
 
+  /**
+   * Who is riding, and where to find them (MDF-548). Scoped to a trip the
+   * caller is actually assigned to — `listDriverTripBookings` resolves the
+   * driver profile from the token and filters through it, never trusting a
+   * bare tripId for someone else's departure.
+   */
+  @Get(':id/bookings')
+  listBookings(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.ops.listDriverTripBookings(u.userId, { tripId: id });
+  }
+
   @Post(':id/start')
   start(@CurrentUser() u: AuthContext, @Req() req: Request, @Param('id') id: string) {
     return this.ops.startTrip(this.actor(u, req), id);
