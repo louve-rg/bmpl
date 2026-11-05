@@ -123,7 +123,17 @@ function BookingRow({ booking: b, onChanged }: { booking: RiderBooking; onChange
                 {b.dropoff.instructions && ` — ${b.dropoff.instructions}`}
               </p>
             )}
-            {b.cancellationReason && <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">Cancelled: {b.cancellationReason}</p>}
+            {b.cancellationReason ? (
+              <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">Cancelled: {b.cancellationReason}</p>
+            ) : (
+              // MDF-554: a Cancelled booking could render with no explanation
+              // at all, the only status that could go bare. Neutral fallback
+              // only -- it states that no reason was recorded, nothing about
+              // who acted. No stored reason does not tell us who cancelled.
+              b.status === 'CANCELLED' && (
+                <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">No reason was recorded for this cancellation.</p>
+              )
+            )}
           </div>
           {view.cancellable && !cancelOpen && (
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setCancelOpen(true)}>

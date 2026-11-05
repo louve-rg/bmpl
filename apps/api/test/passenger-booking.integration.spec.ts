@@ -393,6 +393,27 @@ describe('movement', () => {
     expect((await ctx.prisma.passengerTripAssignment.findFirstOrThrow({ where: { tripId } })).status).toBe('COMPLETED');
     expect((await ctx.prisma.passengerDriverProfile.findUniqueOrThrow({ where: { id: driver.driverProfileId } })).completedTrips).toBe(1);
 
+    // MDF-553 gap 3: a completed trip used to be unreachable through this
+    // endpoint at all — the default call hardcodes ASSIGNED/IN_PROGRESS, so
+    // the driver's own finished work had nowhere to be read back.
+    const activeList = await get(driver.cookies, 'passenger/driver/trips');
+    expect(activeList.status).toBe(200);
+    expect(Array.isArray(activeList.body)).toBe(true);
+    expect(activeList.body.find((t: { id: string }) => t.id === tripId)).toBeUndefined();
+
+    const history = await get(driver.cookies, 'passenger/driver/trips?status=COMPLETED');
+    expect(history.status).toBe(200);
+    expect(history.body.total).toBe(1);
+    expect(history.body.page).toBe(1);
+    const historyRow = history.body.rows.find((t: { id: string }) => t.id === tripId);
+    expect(historyRow).toBeDefined();
+    expect(historyRow.status).toBe('COMPLETED');
+    expect(historyRow.completedAt).not.toBeNull();
+
+    // A driver's history is still their own — not the fleet's.
+    const otherHistory = await get(other.cookies, 'passenger/driver/trips?status=COMPLETED');
+    expect(otherHistory.body.rows.find((t: { id: string }) => t.id === tripId)).toBeUndefined();
+
     // …but the rider is never trapped with it (QA finding F1): withdrawing
     // your own unanswered request works even AFTER the departure completed —
     // the state that previously had no exit at all. This decides nothing
@@ -627,6 +648,41 @@ describe('oversight and suspension', () => {
     const cancelled = await post(admin, `admin/passengers/bookings/${b.body.id}/cancel`, { reason: 'Operator request via support.' });
     expect(cancelled.status).toBe(201);
     expect(cancelled.body.cancelledBy).toBe('ADMIN');
+  });
+
+  it('pages past the old 300-row cap instead of silently dropping anything beyond it (MDF-553 gap 2)', async () => {
+    const op = await makeProvider('Test Pagination Lines');
+    const rider = await registerUser(`pb_pg_${uniq()}@example.com`);
+    // Three separate trips (the one-booking-per-rider-per-trip rule forbids
+    // three bookings on one trip for the same rider) so three distinct rows
+    // exist to page across.
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const { tripId } = await makeDeparture(op, 2000 + i);
+      const b = await post(rider.cookies, 'passenger/bookings', { tripId, seats: 1 });
+      expect(b.status).toBe(201);
+      ids.push(b.body.id);
+    }
+
+    const defaultPage = await get(admin, 'admin/passengers/bookings');
+    expect(defaultPage.status).toBe(200);
+    expect(defaultPage.body.total).toBeGreaterThanOrEqual(3);
+    expect(Array.isArray(defaultPage.body.rows)).toBe(true);
+    expect(ids.every((id) => defaultPage.body.rows.some((r: { id: string }) => r.id === id))).toBe(true);
+
+    // A page smaller than the result set: page 1 and page 2 are disjoint,
+    // and together they account for every id without repeats.
+    const page1 = await get(admin, `admin/passengers/bookings?page=1&pageSize=2`);
+    const page2 = await get(admin, `admin/passengers/bookings?page=2&pageSize=2`);
+    expect(page1.status).toBe(200);
+    expect(page2.status).toBe(200);
+    expect(page1.body.rows).toHaveLength(2);
+    expect(page1.body.total).toBe(page2.body.total);
+    const page1Ids = page1.body.rows.map((r: { id: string }) => r.id);
+    const page2Ids = page2.body.rows.map((r: { id: string }) => r.id);
+    expect(page1Ids.some((id: string) => page2Ids.includes(id))).toBe(false);
+    const seen = new Set([...page1Ids, ...page2Ids]);
+    expect(ids.every((id) => seen.has(id))).toBe(true);
   });
 
   it('a suspended operator takes no bookings and staffs nothing', async () => {
@@ -1050,7 +1106,7 @@ describe('pickup/dropoff pins on a flag-stop booking', () => {
 
     const list = await get(admin, 'admin/passengers/bookings');
     expect(list.status).toBe(200);
-    const row = list.body.find((x: { id: string }) => x.id === b.body.id);
+    const row = list.body.rows.find((x: { id: string }) => x.id === b.body.id);
     expect(row.pickup).toMatchObject(PICKUP);
     expect(row.dropoff).toMatchObject(DROPOFF);
 

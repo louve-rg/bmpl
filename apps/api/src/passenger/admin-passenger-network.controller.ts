@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req } from '@nes
 import type { Request } from 'express';
 import {
   adminPassengerRouteSchema,
+  paginationSchema,
   passengerBookingCancelSchema,
   passengerRouteStopsSchema,
   passengerRouteUpdateSchema,
@@ -9,6 +10,7 @@ import {
   passengerTripCancelSchema,
   passengerTripCreateSchema,
   type AdminPassengerRouteInput,
+  type Pagination,
   type PassengerBookingCancelInput,
   type PassengerRouteStopsInput,
   type PassengerRouteUpdateInput,
@@ -108,10 +110,20 @@ export class AdminPassengerNetworkController {
 
   // ---- movement oversight (S3) ----
 
+  /**
+   * Paginated (MDF-553 gap 2): the booking list used to hand-cap at 300 rows
+   * with no way to see or reach anything past it. `page`/`pageSize` reuse
+   * the site's existing pagination shape; `total` tells the console there
+   * IS a next page instead of a result that silently looks complete.
+   */
   @Get('bookings')
   @RequirePermission('passengers.read')
-  listBookings(@Query('tripId') tripId?: string, @Query('status') status?: string) {
-    return this.ops.listAllBookings({ tripId, status });
+  listBookings(
+    @Query('tripId') tripId: string | undefined,
+    @Query('status') status: string | undefined,
+    @Query(ZodBody(paginationSchema)) pagination: Pagination,
+  ) {
+    return this.ops.listAllBookings({ tripId, status, page: pagination.page, pageSize: pagination.pageSize });
   }
 
   @Get('bookings/:id')

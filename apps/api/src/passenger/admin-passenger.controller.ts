@@ -5,6 +5,7 @@ import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, RequirePermission } from '../common/decorators';
 import type { AuthContext } from '../common/auth-context';
 import { AdminPassengerService } from './admin-passenger.service';
+import { PassengerAffiliationService } from './passenger-affiliation.service';
 
 /**
  * Admin passenger-supply management (read + vehicle moderation + the
@@ -15,7 +16,10 @@ import { AdminPassengerService } from './admin-passenger.service';
  */
 @Controller('admin/passengers')
 export class AdminPassengerController {
-  constructor(private readonly admin: AdminPassengerService) {}
+  constructor(
+    private readonly admin: AdminPassengerService,
+    private readonly affiliations: PassengerAffiliationService,
+  ) {}
 
   private actor(user: AuthContext, req: Request) {
     return { userId: user.userId, ipAddress: req.ip, sessionId: user.sessionId };
@@ -41,6 +45,21 @@ export class AdminPassengerController {
   @RequirePermission('passengers.read')
   listProviders() {
     return this.admin.listProviders();
+  }
+
+  /**
+   * MDF-553 gap 1: which driver is affiliated with which operator, PENDING
+   * asks included, who initiated, and when it changed — not derivable from
+   * `listDrivers`' current-membership pointer alone.
+   */
+  @Get('affiliations')
+  @RequirePermission('passengers.read')
+  listAffiliations(
+    @Query('providerProfileId') providerProfileId?: string,
+    @Query('driverProfileId') driverProfileId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.affiliations.listForAdmin({ providerProfileId, driverProfileId, status });
   }
 
   @Patch('drivers/:id/test-mode')

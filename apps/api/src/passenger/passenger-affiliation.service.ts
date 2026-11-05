@@ -81,6 +81,49 @@ export class PassengerAffiliationService {
     }));
   }
 
+  /**
+   * Admin oversight (MDF-553 gap 1): before this, an admin could only INFER
+   * current fleet membership from `PassengerDriverProfile.providerProfileId`
+   * on the drivers list — no view showed a PENDING ask awaiting an answer,
+   * who initiated it, or the history of a DECLINED/WITHDRAWN/ENDED one. This
+   * is a read only, mirroring the own-side lists' shape but for EITHER party,
+   * since admin is not scoped to one side — consistent with the service's own
+   * doc comment above: "moderation can see affiliations ... but no one, admin
+   * included, can consent on someone else's behalf." This adds the seeing,
+   * not a new way to act.
+   */
+  async listForAdmin(filter: { providerProfileId?: string; driverProfileId?: string; status?: string } = {}) {
+    const rows = await this.prisma.passengerFleetAffiliation.findMany({
+      where: {
+        ...(filter.providerProfileId ? { providerProfileId: filter.providerProfileId } : {}),
+        ...(filter.driverProfileId ? { driverProfileId: filter.driverProfileId } : {}),
+        ...(filter.status ? { status: filter.status as never } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 300, // matches listDrivers/listProviders' existing admin-list convention
+      include: {
+        driverProfile: { select: { id: true, displayName: true, homeDistrict: true, availability: true, isActive: true } },
+        providerProfile: { select: { id: true, businessName: true, district: true, isActive: true } },
+      },
+    });
+    return rows.map((a) => ({
+      ...this.serialize(a),
+      driver: {
+        id: a.driverProfile.id,
+        displayName: a.driverProfile.displayName,
+        homeDistrict: a.driverProfile.homeDistrict,
+        availability: a.driverProfile.availability,
+        isActive: a.driverProfile.isActive,
+      },
+      provider: {
+        id: a.providerProfile.id,
+        businessName: a.providerProfile.businessName,
+        district: a.providerProfile.district,
+        isActive: a.providerProfile.isActive,
+      },
+    }));
+  }
+
   async listForDriver(userId: string, status?: string) {
     const p = await this.ownDriverOrThrow(userId);
     const rows = await this.prisma.passengerFleetAffiliation.findMany({

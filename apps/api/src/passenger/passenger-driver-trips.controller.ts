@@ -1,6 +1,9 @@
-import { Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
+import { paginationSchema } from '@bmpl/validation';
+import type { Pagination } from '@bmpl/validation';
 import { CurrentUser, Roles } from '../common/decorators';
+import { ZodBody } from '../common/zod-validation.pipe';
 import type { AuthContext } from '../common/auth-context';
 import { PassengerOperationsService } from './passenger-operations.service';
 
@@ -21,8 +24,12 @@ export class PassengerDriverTripsController {
   }
 
   @Get()
-  listMine(@CurrentUser() u: AuthContext) {
-    return this.ops.listDriverTrips(u.userId);
+  listMine(
+    @CurrentUser() u: AuthContext,
+    @Query('status') status: string | undefined,
+    @Query(ZodBody(paginationSchema)) pagination: Pagination,
+  ) {
+    return this.ops.listDriverTrips(u.userId, { status, page: pagination.page, pageSize: pagination.pageSize });
   }
 
   /**

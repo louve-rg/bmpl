@@ -7,6 +7,7 @@ import { errMessage } from '../driver/dashboard-data';
 import { isFareConfigured, tripCancellable, type OperatorRoute, type OperatorTrip } from '../../lib/passenger-operator';
 import { affiliationView, type ProviderAffiliationRow } from '../../lib/passenger-fleet';
 import type { PassengerVehicle } from '../../lib/passenger-driver';
+import { TripBookings } from '../passenger-driver/TripBookings';
 import { ApprovalRequired } from './data';
 
 /**
@@ -17,6 +18,12 @@ import { ApprovalRequired } from './data';
  * check — is the server's, and its refusals are shown verbatim. With nobody
  * in the roster the control does not render at all: the row says why instead,
  * because a picker with nobody eligible is a control that cannot succeed.
+ *
+ * "View passengers" (MDF-554 gap B) reuses the driver's own `TripBookings` —
+ * same component, same map, pointed at the operator's own
+ * `GET /passenger/provider/bookings?tripId=` instead of the driver's path.
+ * Before this, an operator who staffed a departure had no way to see where
+ * any of its riders needed collecting, anywhere in the product.
  */
 export function DeparturesManager() {
   const [trips, setTrips] = useState<OperatorTrip[] | null>(null);
@@ -110,6 +117,7 @@ function TripCard({
   const [busy, setBusy] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [showBookings, setShowBookings] = useState(false);
   const [reason, setReason] = useState('');
   const [err, setErr] = useState<string | null>(null);
 
@@ -176,6 +184,9 @@ function TripCard({
           {t.cancellationReason && <p className="mt-1 text-xs text-slate-500">Cancelled: {t.cancellationReason}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" size="sm" variant="outline" onClick={() => setShowBookings((v) => !v)}>
+            {showBookings ? 'Hide passengers' : 'View passengers'}
+          </Button>
           {t.status === 'SCHEDULED' && fleetDrivers.length > 0 && vehicles.length > 0 && !assignOpen && (
             <Button type="button" size="sm" onClick={() => setAssignOpen(true)}>
               Assign driver
@@ -222,6 +233,7 @@ function TripCard({
           {err}
         </Alert>
       )}
+      {showBookings && <TripBookings tripId={t.id} endpoint={`/passenger/provider/bookings?tripId=${t.id}`} />}
     </UiCard>
   );
 }

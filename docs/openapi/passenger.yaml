@@ -542,15 +542,30 @@ paths:
   /passenger/driver/trips:
     get:
       tags: [DriverTrips]
-      summary: The driver's own ASSIGNED and IN_PROGRESS departures, soonest first
+      summary: The driver's own departures — active by default, or any status, paginated (MDF-553)
+      description: >-
+        No `status` — unchanged: the driver's own ASSIGNED and IN_PROGRESS
+        departures, soonest first, as a bare array of up to 100. Passing
+        `status` (e.g. `COMPLETED`) opts into a different, explicit query —
+        a completed trip was otherwise unreachable through this endpoint at
+        all — and switches the response to a paginated `DriverTripsPage`,
+        reusing the sitewide pagination shape, because work history grows
+        without bound and a second silent cap would recreate the truncation
+        already fixed on the admin booking list.
+      parameters:
+        - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/TripStatus" } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
         "200":
-          description: Up to 100 trips
+          description: Up to 100 active trips (no status), or a paginated page (status given)
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: "#/components/schemas/DriverTrip" }
+                oneOf:
+                  - type: array
+                    items: { $ref: "#/components/schemas/DriverTrip" }
+                  - $ref: "#/components/schemas/DriverTripsPage"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1156,6 +1171,31 @@ paths:
                 items: { $ref: "#/components/schemas/AdminProviderRow" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/passengers/affiliations:
+    get:
+      tags: [AdminPassengers]
+      summary: Who is affiliated with whom, and the history of asking (passengers.read)
+      description: >-
+        Before this (MDF-553), an admin could only INFER current fleet
+        membership from a driver row's `providerProfileId` — no view showed a
+        PENDING ask awaiting an answer, who initiated it, or a
+        DECLINED/WITHDRAWN/ENDED history. Read only: no endpoint lets admin
+        consent on a party's behalf, here or anywhere else — this adds the
+        seeing, not a new way to act (`PassengerAffiliationService.listForAdmin`).
+      parameters:
+        - { name: providerProfileId, in: query, required: false, schema: { type: string } }
+        - { name: driverProfileId, in: query, required: false, schema: { type: string } }
+        - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/AffiliationStatus" } }
+      responses:
+        "200":
+          description: Affiliation rows (up to 300), each carrying both the driver and the provider identity
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminAffiliation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /admin/passengers/drivers/{id}/test-mode:
     patch:
       tags: [AdminPassengers]
@@ -1490,19 +1530,41 @@ paths:
     get:
       tags: [AdminPassengers]
       summary: Seat-level booking oversight across all operators (passengers.read)
+      description: >-
+        Paginated (MDF-553) — this used to be a bare array hand-capped at 300
+        rows, with no way to reach or even discover anything past it (a
+        client-side admin detail page that found its row in this list read a
+        real booking as "not found" past the cutoff). `page`/`pageSize` reuse
+        the sitewide pagination shape; `total` says how many rows the filter
+        matches, so a next page is discoverable instead of a result that
+        silently looks complete right at the old cutoff.
       parameters:
         - { name: tripId, in: query, required: false, schema: { type: string } }
         - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/BookingStatus" } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
         "200":
-          description: Bookings with trip context and passenger name (up to 300)
+          description: Bookings with trip context and passenger name, paged
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/StaffBooking" }
+              schema: { $ref: "#/components/schemas/StaffBookingsPage" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/passengers/bookings/{id}:
+    get:
+      tags: [AdminPassengers]
+      summary: One booking, by id, with trip context and passenger name (passengers.read)
+      parameters: [ { $ref: "#/components/parameters/bookingId" } ]
+      responses:
+        "200":
+          description: The booking
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StaffBooking" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /admin/passengers/bookings/{id}/confirm:
     post:
       tags: [AdminPassengers]
@@ -1839,11 +1901,27 @@ components:
         reference: { type: string }
         status: { $ref: "#/components/schemas/TripStatus" }
         scheduledDepartureAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time, description: "Set once the trip is COMPLETED (MDF-553) — a completed trip with no timestamp is not history." }
         routeName: { type: [string, "null"] }
         from: { type: [string, "null"] }
         to: { type: [string, "null"] }
         operator: { type: [string, "null"] }
         seatCapacity: { type: [integer, "null"] }
+    DriverTripsPage:
+      type: object
+      description: >-
+        Real pagination (MDF-553) for the driver's own trip history, modelled
+        on StaffBookingsPage — the admin booking list's own fix for the same
+        failure mode (a hand-capped bare array silently losing rows past the
+        cap). Returned only when `status` is passed; the default call keeps
+        its unpaginated bare array.
+      properties:
+        total: { type: integer, description: Rows matching the filter, independent of page/pageSize }
+        page: { type: integer }
+        pageSize: { type: integer }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/DriverTrip" }
     TripTransitionResult:
       type: object
       description: start returns startedAt; complete returns completedAt
@@ -2048,11 +2126,49 @@ components:
             district:
               oneOf: [ { $ref: "#/components/schemas/District" }, { type: "null" } ]
             isActive: { type: boolean }
+    AdminAffiliation:
+      allOf: [ { $ref: "#/components/schemas/Affiliation" } ]
+      description: >-
+        Admin oversight (MDF-553): the same row either party's own list
+        returns, but carrying BOTH identities since admin is not scoped to one
+        side. Read only — this view adds no new way to act on someone's
+        behalf.
+      properties:
+        driver:
+          type: object
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+            homeDistrict:
+              oneOf: [ { $ref: "#/components/schemas/District" }, { type: "null" } ]
+            availability: { $ref: "#/components/schemas/Availability" }
+            isActive: { type: boolean }
+        provider:
+          type: object
+          properties:
+            id: { type: string }
+            businessName: { type: string }
+            district:
+              oneOf: [ { $ref: "#/components/schemas/District" }, { type: "null" } ]
+            isActive: { type: boolean }
     StaffBooking:
       allOf: [ { $ref: "#/components/schemas/RiderBooking" } ]
       description: A rider booking plus the passenger's name, for operator and admin lists
       properties:
         passengerName: { type: [string, "null"] }
+    StaffBookingsPage:
+      type: object
+      description: >-
+        Real pagination (MDF-553), not a raised cap — replaces the admin
+        booking list's previous bare array, which hand-capped at 300 rows with
+        no way to reach anything past it.
+      properties:
+        total: { type: integer, description: Rows matching the filter, independent of page/pageSize }
+        page: { type: integer }
+        pageSize: { type: integer }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/StaffBooking" }
     TestModeInput:
       type: object
       required: [isTest]

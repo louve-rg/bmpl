@@ -108,3 +108,29 @@ describe('MyBookings (MDF-549 gap B): the rider sees their own pins', () => {
     expect(container!.textContent).not.toContain('Drop-off:');
   });
 });
+
+describe('MyBookings (MDF-554): a Cancelled booking never renders with no explanation at all', () => {
+  it('shows the stored reason verbatim when one exists -- unchanged path', async () => {
+    apiGet.mockResolvedValue([baseBooking({ status: 'CANCELLED', cancellationReason: 'The departure was cancelled.' })]);
+    await mount();
+
+    expect(container!.textContent).toContain('Cancelled: The departure was cancelled.');
+    expect(container!.textContent).not.toContain('No reason was recorded');
+  });
+
+  it('falls back to a neutral line -- stating no reason was recorded, naming no actor -- when none was stored', async () => {
+    apiGet.mockResolvedValue([baseBooking({ status: 'CANCELLED', cancellationReason: null })]);
+    await mount();
+
+    expect(container!.textContent).toContain('No reason was recorded for this cancellation.');
+    expect(container!.textContent).not.toMatch(/you (withdrew|cancelled)|operator cancelled/i);
+  });
+
+  it('never shows the fallback for a non-Cancelled booking with no reason -- the normal case', async () => {
+    apiGet.mockResolvedValue([baseBooking({ status: 'CONFIRMED', cancellationReason: null })]);
+    await mount();
+
+    expect(container!.textContent).not.toContain('No reason was recorded');
+    expect(container!.textContent).not.toContain('Cancelled:');
+  });
+});

@@ -5,6 +5,7 @@ import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Button, Card as UiCard, EmptyState, Field, Input, Spinner, StatusBadge } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
 import { bookingActions, type OperatorBooking } from '../../lib/passenger-operator';
+import { tripBookingEndLine } from '../../lib/passenger-driver';
 import { ApprovalRequired } from './data';
 
 /**
@@ -99,6 +100,22 @@ function BookingRow({ booking: b, onChanged }: { booking: OperatorBooking; onCha
             </p>
             {b.scheduledDepartureAt && (
               <p className="mt-1 text-sm text-slate-500">Departs {new Date(b.scheduledDepartureAt).toLocaleString()}</p>
+            )}
+            {/* MDF-554 gap A: the server was already sending these on this
+                endpoint -- only the type declaring the response threw them
+                away. Silent when an end was never pinned, same as every
+                other consumer of this shape. */}
+            {b.pickup && (
+              <p className="mt-1 text-xs text-slate-600">
+                Pickup: {tripBookingEndLine(b.pickup)}
+                {b.pickup.instructions && ` — ${b.pickup.instructions}`}
+              </p>
+            )}
+            {b.dropoff && (
+              <p className="mt-1 text-xs text-slate-600">
+                Drop-off: {tripBookingEndLine(b.dropoff)}
+                {b.dropoff.instructions && ` — ${b.dropoff.instructions}`}
+              </p>
             )}
             {b.cancellationReason && <p className="mt-1 text-xs text-slate-500">Cancelled: {b.cancellationReason}</p>}
           </div>
