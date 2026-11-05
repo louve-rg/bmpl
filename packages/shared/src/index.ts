@@ -16,6 +16,7 @@ export * from './reviews';
 export * from './driver';
 export * from './passenger';
 export * from './dispatch';
+export * from './shipping-provider-status';
 export * from './shipping';
 export * from './service-schedule';
 export * from './belize-time';

@@ -1526,6 +1526,12 @@ export class ShipmentService {
       ...(input.service ? { service: input.service } : {}),
       // Test shipments are hidden by default so the board reflects real work.
       ...(input.includeTest ? {} : { isTest: false }),
+      // MDF-500: admin discovery of a carrier's shipments — required so a
+      // SUSPENDED/REVOKED org's existing work stays administratively
+      // visible and reassignable/recoverable, not merely findable one leg
+      // at a time. `some`, not `every`: a multi-leg shipment with only ONE
+      // leg on this carrier still needs to be found by it.
+      ...(input.operatedByProviderId ? { legs: { some: { operatedByProviderId: input.operatedByProviderId } } } : {}),
     };
     const [rows, total] = await Promise.all([
       this.prisma.shipment.findMany({
@@ -1544,6 +1550,11 @@ export class ShipmentService {
               destinationHub: { select: { code: true, name: true } },
               assignedDriver: { select: { displayName: true } },
               carrierName: true,
+              // MDF-500: the admin console needs the carrier ORG id, not just
+              // its display name, to know which leg to reassign off a
+              // suspended/revoked carrier — `operator` below is a human
+              // label and cannot be posted back to `setLegOperator`.
+              operatedByProviderId: true,
             },
           },
         },
@@ -1582,6 +1593,7 @@ export class ShipmentService {
           from: l.originHub?.name ?? 'Door',
           to: l.destinationHub?.name ?? 'Door',
           operator: l.assignedDriver?.displayName ?? l.carrierName ?? null,
+          operatedByProviderId: l.operatedByProviderId,
           needsDriver: l.dispatchExhaustedAt != null,
         })),
       })),
@@ -1704,6 +1716,18 @@ export class ShipmentService {
    * the unconfigured network. Both the staff desk and the carrier's own
    * surface (ShippingProviderService.depart) call this same method, so the
    * gate applies identically to each.
+   *
+   * EXEMPT once the leg is ACCEPTED (`operatorAcceptedAt` set, MDF-COURIER
+   * D3) — MDF-528, the owner's in-transit ruling (2026-11-04): "Accepted
+   * legs must stay operable through depart/arrive regardless. A closed day
+   * must never block completion of work already accepted." A schedule write
+   * made AFTER acceptance (whether a carrier's own self-service close or an
+   * admin one) must be allow-and-surfaced (see
+   * LogisticsNetworkService.affectedAcceptedLegs), never let this gate strand
+   * the exact commitment that ruling protects. The gate still applies in
+   * full to every OTHER leg on this route — unassigned, or assigned but not
+   * yet accepted — this is a scoped exemption for an existing commitment,
+   * not a repeal of BMPL-196.
    */
   async departLeg(legId: string, input: LegDepartInput, actor: { userId: string; label?: string }) {
     return this.transition(legId, actor, async (tx, leg, shipment) => {
@@ -1723,19 +1747,21 @@ export class ShipmentService {
       if (!leg.routeId) {
         throw new BadRequestException('This transport leg has no route on record, so its schedule cannot be checked. Contact operations.');
       }
-      const [days, exceptions] = await Promise.all([
-        tx.routeOperatingDay.findMany({ where: { routeId: leg.routeId } }),
-        tx.routeScheduleException.findMany({ where: { routeId: leg.routeId } }),
-      ]);
-      const resolution = resolveScheduleStatus(
-        this.travelDate(),
-        days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note })),
-        exceptions.map((e) => ({ date: e.date, status: e.status, reason: e.reason })),
-      );
-      if (resolution.status === 'NOT_OPERATING') {
-        throw new BadRequestException(
-          `This route is configured as not operating today${resolution.note ? ` (${resolution.note})` : ''}. Update the schedule before recording a departure, or contact operations.`,
+      if (!leg.operatorAcceptedAt) {
+        const [days, exceptions] = await Promise.all([
+          tx.routeOperatingDay.findMany({ where: { routeId: leg.routeId } }),
+          tx.routeScheduleException.findMany({ where: { routeId: leg.routeId } }),
+        ]);
+        const resolution = resolveScheduleStatus(
+          this.travelDate(),
+          days.map((d) => ({ dayOfWeek: d.dayOfWeek, status: d.status, note: d.note })),
+          exceptions.map((e) => ({ date: e.date, status: e.status, reason: e.reason })),
         );
+        if (resolution.status === 'NOT_OPERATING') {
+          throw new BadRequestException(
+            `This route is configured as not operating today${resolution.note ? ` (${resolution.note})` : ''}. Update the schedule before recording a departure, or contact operations.`,
+          );
+        }
       }
       await tx.shipmentLeg.update({
         where: { id: leg.id },

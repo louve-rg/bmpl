@@ -5,6 +5,7 @@ import {
   DRIVER_NAV,
   PASSENGER_DRIVER_NAV,
   PASSENGER_OPERATOR_NAV,
+  SHIPPING_PROVIDER_NAV,
   ROLE_GROUPS,
   allNavHrefs,
   isNavItemActive,
@@ -142,6 +143,35 @@ describe('passenger-operator navigation', () => {
       ]).map((g) => g.heading),
     ).toEqual(['Passenger Operator']);
     expect(visibleRoleGroups(ROLE_GROUPS, [{ roleCode: 'PASSENGER_PROVIDER', status: 'PENDING' }])).toEqual([]);
+  });
+});
+
+describe('carrier navigation (MDF-526)', () => {
+  it('is its own group, gated on the SHIPPING_PROVIDER role alone', () => {
+    const group = ROLE_GROUPS.find((g) => g.heading === 'Carrier');
+    expect(group?.requires).toEqual(['SHIPPING_PROVIDER']);
+    expect(group?.items).toBe(SHIPPING_PROVIDER_NAV);
+    expect(DRIVER_NAV.some((i) => i.href.startsWith('/dashboard/shipping-provider'))).toBe(false);
+    expect(PASSENGER_OPERATOR_NAV.some((i) => i.href.startsWith('/dashboard/shipping-provider'))).toBe(false);
+  });
+
+  it('points each destination at a real carrier route', () => {
+    expect(SHIPPING_PROVIDER_NAV.map((i) => i.href)).toEqual([
+      '/dashboard/shipping-provider',
+      '/dashboard/shipping-provider/legs',
+      '/dashboard/shipping-provider/routes',
+      '/dashboard/shipping-provider/profile',
+    ]);
+  });
+
+  it('is shown to an approved carrier and to nobody else', () => {
+    expect(
+      visibleRoleGroups(ROLE_GROUPS, [
+        { roleCode: 'CUSTOMER', status: 'APPROVED' },
+        { roleCode: 'SHIPPING_PROVIDER', status: 'APPROVED' },
+      ]).map((g) => g.heading),
+    ).toEqual(['Carrier']);
+    expect(visibleRoleGroups(ROLE_GROUPS, [{ roleCode: 'SHIPPING_PROVIDER', status: 'PENDING' }])).toEqual([]);
   });
 });
 

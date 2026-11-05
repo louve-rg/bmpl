@@ -107,6 +107,20 @@ export const PASSENGER_OPERATOR_NAV: NavItem[] = [
   { label: 'Business Profile', href: '/dashboard/passenger-operator/profile', icon: BUILDING_ICON },
 ];
 
+/**
+ * Carrier tools (MDF-526) — the self-service surface for a SHIPPING_PROVIDER
+ * organization: own profile, own legs (accept/reject/depart/arrive/schedule)
+ * and own routes (claim/release/schedule). Separate group from DRIVER_NAV
+ * and PASSENGER_OPERATOR_NAV: shipping a parcel on a transport leg is a
+ * different job from driving one or running a passenger service.
+ */
+export const SHIPPING_PROVIDER_NAV: NavItem[] = [
+  { label: 'Carrier Dashboard', href: '/dashboard/shipping-provider', icon: HOME_ICON },
+  { label: 'My Legs', href: '/dashboard/shipping-provider/legs', icon: TRUCK_ICON },
+  { label: 'My Routes', href: '/dashboard/shipping-provider/routes', icon: 'M6 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm12-12a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM6 16V9a3 3 0 0 1 3-3h6M18 8v7a3 3 0 0 1-3 3H9' },
+  { label: 'Organization Profile', href: '/dashboard/shipping-provider/profile', icon: BUILDING_ICON },
+];
+
 const VENDOR_NAV: NavItem[] = [
   { label: 'My Store', href: '/dashboard/store', icon: 'M4 8h16l-1 3H5L4 8Zm1 3v9h14v-9M9 20v-5h6v5' },
   { label: 'My Products', href: '/dashboard/products', icon: 'M4 7l8-4 8 4-8 4-8-4Zm0 0v10l8 4 8-4V7' },
@@ -178,6 +192,7 @@ export const ROLE_GROUPS: ReadonlyArray<RoleGatedGroup<NavItem>> = [
   { heading: 'Driver', items: DRIVER_NAV, requires: ['DELIVERY_DRIVER'] },
   { heading: 'Passenger Driver', items: PASSENGER_DRIVER_NAV, requires: ['PASSENGER_DRIVER'] },
   { heading: 'Passenger Operator', items: PASSENGER_OPERATOR_NAV, requires: ['PASSENGER_PROVIDER'] },
+  { heading: 'Carrier', items: SHIPPING_PROVIDER_NAV, requires: ['SHIPPING_PROVIDER'] },
   { heading: 'Vendor', items: VENDOR_NAV, requires: ['VENDOR'] },
   { heading: 'Employer', items: EMPLOYER_NAV, requires: ['EMPLOYER'] },
   { heading: 'Property Owner', items: PROPERTY_OWNER_NAV, requires: ['PROPERTY_OWNER'] },

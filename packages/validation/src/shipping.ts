@@ -657,6 +657,51 @@ export const addProviderMemberSchema = z.object({
 export type AddProviderMemberInput = z.infer<typeof addProviderMemberSchema>;
 
 /**
+ * MDF-COURIER D5. Every provider-status endpoint is a separate route named
+ * for its action (mirrors admin.service.ts's approve/reject/suspendRole/
+ * restoreRole/revokeRole — a generic `{ to }` body would let a caller name
+ * any target status and push the "is this edge legal" check entirely into
+ * the service, same reason those role endpoints are already split this
+ * way). REJECT/SUSPEND/REVOKE carry the reason the CARRIER will see on
+ * their own profile (D5's carrier-visible-reason rule) so it is required,
+ * not optional, on exactly those three.
+ */
+export const providerStatusOptionalNoteSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+export type ProviderStatusOptionalNoteInput = z.infer<typeof providerStatusOptionalNoteSchema>;
+
+export const providerStatusRequiredReasonSchema = z.object({
+  reason: z.string().trim().min(1, 'A reason is required.').max(500),
+});
+export type ProviderStatusRequiredReasonInput = z.infer<typeof providerStatusRequiredReasonSchema>;
+
+/** D3: the carrier rejects an assigned LINE_HAUL leg. Required — this leg
+ *  returns to unassigned and the reason is what operations sees on the
+ *  resulting exception. */
+export const legOperatorRejectSchema = z.object({
+  reason: z.string().trim().min(1, 'A reason is required.').max(500),
+});
+export type LegOperatorRejectInput = z.infer<typeof legOperatorRejectSchema>;
+
+/**
+ * Self-service route claim/release. `providerProfileId` is optional: almost
+ * every carrier belongs to exactly one organization (born as its OWNER),
+ * so the common case needs no id at all — the service resolves "my org" and
+ * only asks for one when the caller genuinely belongs to more than one.
+ * Never a route to CREATE a route or set its price — those stay
+ * admin-entered business configuration; this only claims or releases one
+ * that already exists and is currently unassigned. (Schedule is separate:
+ * the weekly-schedule/exception routes ARE carrier self-service and DO
+ * reach a real customer quote — see the MDF-528 migration comment in
+ * `packages/database`.)
+ */
+export const claimRouteOperatorSchema = z.object({
+  providerProfileId: cuidSchema.optional(),
+});
+export type ClaimRouteOperatorInput = z.infer<typeof claimRouteOperatorSchema>;
+
+/**
  * Admin assigns a driver (+ one of their approved vehicles) to a courier leg by
  * hand — the production path while automatic dispatch is off. Same shape as the
  * delivery console's assign, deliberately: one vocabulary for one job.
@@ -698,6 +743,16 @@ export const shipmentListSchema = z.object({
   status: z.string().trim().max(40).optional(),
   service: z.enum(SHIPPING_SERVICES).optional(),
   includeTest: queryBoolean.optional(),
+  // MDF-500: the owner's ruling requires a SUSPENDED/REVOKED carrier's
+  // existing shipments to remain visible to administrators and support
+  // safe completion, reassignment or controlled recovery — this is the
+  // discovery filter that makes that possible. Matches any shipment with
+  // at least one leg operated by this carrier org (see `listForOps`).
+  // Named for the underlying leg column it matches, not `providerProfileId`
+  // — the admin console (Oscar, MDF-524) was already built against this
+  // name before the two sides reconciled, and the name is arbitrary either
+  // way, so this side matched his rather than making him rework it.
+  operatedByProviderId: cuidSchema.optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });

@@ -42,7 +42,15 @@ async function approveProviderRole(userId: string) {
   });
 }
 
-/** An org: approved owner + self-service profile (births the OWNER membership). */
+/** MDF-COURIER D1: self-registration now lands PENDING with zero operational
+ *  privilege — a fixture stand-in for the admin APPROVE transition, same
+ *  convention as approveProviderRole directly upserting UserRole above. */
+async function approveProviderStatus(profileId: string) {
+  await ctx.prisma.shippingProviderProfile.update({ where: { id: profileId }, data: { status: 'APPROVED', statusChangedAt: new Date() } });
+}
+
+/** An org: approved owner + self-service profile (births the OWNER membership),
+ *  with the org's own D1 status also approved so it is actually operable. */
 async function makeCarrier(name: string) {
   const owner = await registerUser(`sown_${uniq()}@example.com`);
   await approveProviderRole(owner.userId);
@@ -51,6 +59,7 @@ async function makeCarrier(name: string) {
     contactEmail: `sops_${uniq()}@example.com`,
   });
   expect(created.status).toBe(200);
+  await approveProviderStatus(created.body.id);
   return { ...owner, profileId: created.body.id as string };
 }
 

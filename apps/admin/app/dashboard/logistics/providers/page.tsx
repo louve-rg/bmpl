@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
 import { Alert, Badge, Card, EmptyState, PageHeader, Spinner } from '../../../../components/ui';
@@ -8,16 +9,14 @@ import { Alert, Badge, Card, EmptyState, PageHeader, Spinner } from '../../../..
 /**
  * The carrier directory (BMPL-137, surfaced MDF-500).
  *
- * Read-only, on purpose, this round: `GET /admin/logistics/providers` is the
- * one carrier read that exists today (`logistics.read`) — a list with a
- * member COUNT, not the members themselves. There is no
- * `GET .../providers/:id` or a members list anywhere in the API yet, so a
- * "manage this carrier's staff" control here would have to work from a
- * typed user id with no lookup and no confirmation — the exact free-text,
- * no-confirm shape the wallet console was corrected away from
- * (ADMIN-WALLET-LOOKUP). Reported as a gap rather than built blind; see the
- * handoff note for this card. Approving/rejecting/suspending a carrier's
- * own APPLICATION already works today through the existing, generic
+ * Each name links to `/dashboard/logistics/providers/:id` (MDF-524) for the
+ * suspend/revoke, membership and in-flight-shipment controls -- still a
+ * list with a member COUNT here, not the members themselves; that detail
+ * page is where "manage this carrier's staff" actually lives, built against
+ * Pam's carrier-lifecycle contract (see that page's own header comment for
+ * exactly which parts of it are confirmed real vs. assumed ahead of her
+ * branch landing). Reviewing/approving/rejecting a carrier's own
+ * APPLICATION already works today through the existing, generic
  * Applications queue (`/dashboard/applications`) — nothing new needed there.
  */
 
@@ -84,7 +83,12 @@ export default function CarrierProvidersPage() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="break-words text-sm font-semibold text-[color:var(--bmpl-text)]">{p.businessName}</span>
+                    <Link
+                      href={`/dashboard/logistics/providers/${p.id}`}
+                      className="break-words text-sm font-semibold text-belize-blue hover:underline"
+                    >
+                      {p.businessName}
+                    </Link>
                     <Badge tone={p.isActive ? 'success' : 'neutral'}>{p.isActive ? 'Active' : 'Deactivated'}</Badge>
                     {p.isTest && <Badge tone="neutral">Simulation</Badge>}
                   </div>

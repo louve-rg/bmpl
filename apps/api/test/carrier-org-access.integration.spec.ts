@@ -47,7 +47,20 @@ async function approveProviderRole(userId: string) {
   });
 }
 
-/** An org: approved owner + self-service profile (which births the OWNER row). */
+/**
+ * MDF-COURIER D1: self-registration lands PENDING with zero operational
+ * privilege now — a fixture helper standing in for the admin's APPROVE
+ * transition, same convention as `approveProviderRole` directly upserting
+ * UserRole above rather than going through the real endpoint.
+ */
+async function approveProviderStatus(profileId: string) {
+  await ctx.prisma.shippingProviderProfile.update({ where: { id: profileId }, data: { status: 'APPROVED', statusChangedAt: new Date() } });
+}
+
+/** An org: approved owner + self-service profile (which births the OWNER row),
+ *  with the org's own D1 status also approved — this helper exists to make a
+ *  carrier OPERABLE for fixture setup, not to exercise the approval flow itself
+ *  (see carrier-provider-status.integration.spec.ts for that). */
 async function makeCarrier(name: string) {
   const owner = await registerUser(`xown_${uniq()}@example.com`);
   await approveProviderRole(owner.userId);
@@ -56,6 +69,7 @@ async function makeCarrier(name: string) {
     contactEmail: `ops_${uniq()}@example.com`,
   });
   expect(created.status).toBe(200);
+  await approveProviderStatus(created.body.id);
   return { ...owner, profileId: created.body.id as string };
 }
 
@@ -122,11 +136,17 @@ async function pinOf(legId: string) {
   return leg.handoffPin!;
 }
 
-/** Booked on `mode`, its single line-haul assigned to the org. */
-async function bookedFor(profileId: string, mode: 'SEA' | 'AIR' = 'SEA') {
+/** Booked on `mode`, its single line-haul assigned to the org AND accepted —
+ *  MDF-COURIER D3: setOperator only PROPOSES now, so every caller of this
+ *  helper that goes on to depart/arrive/schedule needs the org to have
+ *  already consented, exactly as a real carrier would before executing. */
+async function bookedFor(profileId: string, mode: 'SEA' | 'AIR' = 'SEA', ownerCookies?: string[]) {
   const s = await bookHubToHub(mode);
   const [leg] = await legsOf(s.id);
   expect((await setOperator(leg!.id, profileId)).status).toBe(201);
+  if (ownerCookies) {
+    expect((await post(ownerCookies, `shipping/provider/legs/${leg!.id}/accept`, {})).status).toBe(201);
+  }
   return { shipment: s, leg: leg! };
 }
 
@@ -393,7 +413,7 @@ describe('the carrier surface', () => {
   it("staff see the org's legs, and the payload is an allowlist", async () => {
     const carrier = await makeCarrier('Reef Runner Ltd');
     const staff = await makeStaff(carrier.profileId);
-    const { leg } = await bookedFor(carrier.profileId);
+    const { leg } = await bookedFor(carrier.profileId, 'SEA', carrier.cookies);
 
     const list = await get(staff.cookies, 'shipping/provider/legs');
     expect(list.status).toBe(200);
@@ -433,7 +453,7 @@ describe('the carrier surface', () => {
   it('departs and arrives through the real state machine — on the water and in the air', async () => {
     const carrier = await makeCarrier('Reef Runner Ltd');
     for (const mode of ['SEA', 'AIR'] as const) {
-      const { shipment, leg } = await bookedFor(carrier.profileId, mode);
+      const { shipment, leg } = await bookedFor(carrier.profileId, mode, carrier.cookies);
       const departed = await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, { carrierBookingRef: `${mode}-42` });
       expect(departed.status).toBe(201);
       expect(departed.body.departedAt).toBeTruthy();
@@ -457,7 +477,7 @@ describe('the carrier surface', () => {
   it("records the org's own scheduled departure/arrival, and a cross-org probe reads like a missing leg (BMPL-346)", async () => {
     const carrierA = await makeCarrier('Reef Runner Ltd');
     const carrierB = await makeCarrier('Cave Branch Bus Co');
-    const { leg } = await bookedFor(carrierA.profileId);
+    const { leg } = await bookedFor(carrierA.profileId, 'SEA', carrierA.cookies);
     const departureAt = new Date(Date.now() + 3600_000);
 
     const foreign = await post(carrierB.cookies, `shipping/provider/legs/${leg.id}/schedule`, {
@@ -483,7 +503,7 @@ describe('the carrier surface', () => {
   it('an ended membership cuts access on the very next request; the org keeps working', async () => {
     const carrier = await makeCarrier('Reef Runner Ltd');
     const staff = await makeStaff(carrier.profileId);
-    const { leg } = await bookedFor(carrier.profileId);
+    const { leg } = await bookedFor(carrier.profileId, 'SEA', carrier.cookies);
     expect((await get(staff.cookies, 'shipping/provider/legs')).status).toBe(200);
 
     expect((await post(admin, `admin/logistics/providers/${carrier.profileId}/members/${staff.userId}/end`)).status).toBe(201);

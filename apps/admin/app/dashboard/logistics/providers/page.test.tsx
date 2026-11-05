@@ -109,4 +109,12 @@ describe('CarrierProvidersPage (MDF-500)', () => {
 
     expect(container!.textContent).toContain('logistics.read');
   });
+
+  it('links each carrier name to its own detail page (MDF-524)', async () => {
+    stubFetch(200, [PROVIDER_ACTIVE]);
+    await mount();
+
+    const link = Array.from(container!.querySelectorAll('a')).find((a) => a.textContent === 'Tropic Air');
+    expect(link?.getAttribute('href')).toBe('/dashboard/logistics/providers/prov_1');
+  });
 });
