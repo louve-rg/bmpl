@@ -148,7 +148,7 @@ describe('BookingForm (MDF-549): pickup/dropoff are optional, off by default', (
     openForm();
 
     act(() => {
-      checkbox('Add a pickup location').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      checkbox('Pick me up somewhere other than the route’s stop').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flush();
     await waitForNoPulse(container!);
@@ -164,8 +164,8 @@ describe('BookingForm (MDF-549): pickup/dropoff are optional, off by default', (
     openForm();
 
     act(() => {
-      checkbox('Add a pickup location').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      checkbox('Add a destination').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      checkbox('Pick me up somewhere other than the route’s stop').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      checkbox('Drop me off somewhere other than the route’s stop').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flush();
     await waitForNoPulse(container!);
@@ -179,7 +179,7 @@ describe('BookingForm (MDF-549): pickup/dropoff are optional, off by default', (
     openForm();
 
     act(() => {
-      checkbox('Add a pickup location').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      checkbox('Pick me up somewhere other than the route’s stop').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flush();
     await waitForNoPulse(container!);
