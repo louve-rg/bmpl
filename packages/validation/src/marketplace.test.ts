@@ -268,6 +268,38 @@ describe('savedAddressSchema — pin-first Belize addresses (MDF-485)', () => {
     expect(savedAddressSchema.safeParse({ ...base, latitude: 40.7, longitude: -74 }).success).toBe(false);
   });
 
+  /**
+   * MDF-533 (Jim's finding): `toSavedAddressPayload` (apps/web/lib/address.ts)
+   * sends `addressLine1` raw-trimmed on both create and edit, with no
+   * undefined conversion — a pin-only address posts `""`, never an omitted
+   * key. The omitted-field case above is NOT the one production sends; this
+   * is. An `.optional()` field does not accept `""` on its own, because an
+   * empty string is still a string and still fails a `.min(1)`.
+   */
+  it('a blank street (not an omitted one) is treated the same as no street at all', () => {
+    const r = savedAddressSchema.safeParse({ ...base, addressLine1: '', ...BELIZE_CITY });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.addressLine1).toBeUndefined();
+  });
+
+  it('a whitespace-only street is treated the same way', () => {
+    const r = savedAddressSchema.safeParse({ ...base, addressLine1: '   ', ...BELIZE_CITY });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.addressLine1).toBeUndefined();
+  });
+
+  it('a blank street with no pin is still rejected as unlocatable, not accepted as "blank is fine"', () => {
+    const r = savedAddressSchema.safeParse({ ...base, addressLine1: '' });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0]!.message).toBe(UNLOCATABLE_ADDRESS_MESSAGE);
+  });
+
+  it('the update schema normalises a blank street the same way', () => {
+    const r = savedAddressUpdateSchema.safeParse({ addressLine1: '', ...BELIZE_CITY });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.addressLine1).toBeUndefined();
+  });
+
   it('accepts a landmark distinct from instructions', () => {
     const r = savedAddressSchema.safeParse({ ...base, ...BELIZE_CITY, landmark: 'Behind the blue gate', instructions: 'Ring twice' });
     expect(r.success).toBe(true);

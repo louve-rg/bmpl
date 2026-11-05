@@ -67,7 +67,20 @@ export class AddressesService {
         if (!next) throw new BadRequestException('This is your only address, so it has to stay your default.');
         await tx.savedAddress.update({ where: { id: next.id }, data: { isDefault: true } });
       }
-      const data: Partial<SavedAddressInput> & { pinConfirmedAt?: Date | null } = { ...input };
+      const data: Omit<Partial<SavedAddressInput>, 'addressLine1'> & { addressLine1?: string | null; pinConfirmedAt?: Date | null } = {
+        ...input,
+      };
+      // `savedAddressUpdateSchema` normalises a blank or null addressLine1 to
+      // `undefined` (MDF-533) so `isLocatable` above reads it correctly - but
+      // Prisma's `update()` treats an explicit `undefined` field as "do not
+      // touch", not "clear it". Left alone, a patch that was SENT with a
+      // blank street (present key, normalised value) would silently fail to
+      // clear the stored one, same bug Jim found in reverse. A key that was
+      // genuinely never sent stays genuinely absent here, so this only fires
+      // when the client actually touched the field.
+      if ('addressLine1' in input && input.addressLine1 === undefined) {
+        data.addressLine1 = null;
+      }
       // Only touch provenance when the patch actually touches the pin -
       // leaving it alone otherwise keeps an untouched, previously confirmed
       // pin confirmed.

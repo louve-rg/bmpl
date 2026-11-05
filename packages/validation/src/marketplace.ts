@@ -683,6 +683,15 @@ export type WalletTopUpInput = z.infer<typeof walletTopUpSchema>;
  * service from whether coordinates are present, never taken from the body
  * (same rule as `isTest`: a client-controlled field for something the server
  * must assert on its own).
+ *
+ * `addressLine1` normalises a blank string to absent (MDF-485/MDF-533):
+ * `toSavedAddressPayload` (apps/web/lib/address.ts) sends it raw-trimmed on
+ * both the create and the edit path, with no undefined conversion — a
+ * pin-only address posts `""`, not a missing key. `.optional()` alone does
+ * not help here: an empty string is still a string, and it would fail a
+ * `.min(1)` exactly as a required field would. Collapsing it to `undefined`
+ * before `isLocatable` runs is what actually makes a pin-only save work,
+ * not just a pin-only field omission — that distinction is the entire fix.
  */
 export const savedAddressFieldsSchema = z.object({
   label: z.string().trim().min(1).max(60),
@@ -690,7 +699,13 @@ export const savedAddressFieldsSchema = z.object({
   phone: z.string().trim().min(5).max(40),
   email: z.string().trim().email().max(160).optional().nullable(),
   company: z.string().trim().max(120).optional().nullable(),
-  addressLine1: z.string().trim().min(1).max(200).optional().nullable(),
+  addressLine1: z
+    .string()
+    .trim()
+    .max(200)
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v : undefined)),
   addressLine2: z.string().trim().max(200).optional().nullable(),
   city: z.string().trim().min(1).max(120),
   district: z.enum(DISTRICTS),

@@ -263,4 +263,32 @@ describe('saved addresses — pin-first (MDF-485)', () => {
     expect(res.status).toBe(200);
     expect(res.body.pinConfirmedAt).toBe(created.pinConfirmedAt);
   });
+
+  /**
+   * MDF-533 (Jim's finding): this is the actual wire shape the "Save to my
+   * addresses" star sends, not the omitted-field case above.
+   * `toSavedAddressPayload` (apps/web/lib/address.ts) posts `addressLine1`
+   * raw-trimmed on BOTH create and edit — a pin-only address sends `""`,
+   * never a missing key. Before the schema normalised it, the star button
+   * was enabled (the client's own `addressGap` check passed) and then the
+   * API 400'd anyway.
+   */
+  it('create: a blank addressLine1 (not an omitted one) alongside coordinates still saves and confirms the pin', async () => {
+    const cust = await makeCustomer();
+    const res = await post(cust, 'addresses', { ...addressBody({ label: 'Home' }), addressLine1: '', ...BELIZE_CITY });
+    expect(res.status).toBe(201);
+    expect(res.body.addressLine1).toBeFalsy();
+    expect(res.body.pinConfirmedAt).toBeTruthy();
+  });
+
+  it('update: a blank addressLine1 (not an omitted one) alongside coordinates still saves, same as create', async () => {
+    const cust = await makeCustomer();
+    const created = (await post(cust, 'addresses', addressBody({ label: 'Home' }))).body;
+
+    // Mirrors toSavedAddressPayload exactly: every field resent, blank street.
+    const res = await patch(cust, `addresses/${created.id}`, { ...addressBody({ label: 'Home' }), addressLine1: '', ...BELIZE_CITY });
+    expect(res.status).toBe(200);
+    expect(res.body.addressLine1).toBeFalsy();
+    expect(res.body.pinConfirmedAt).toBeTruthy();
+  });
 });
