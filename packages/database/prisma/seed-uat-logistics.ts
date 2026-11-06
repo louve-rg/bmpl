@@ -196,6 +196,17 @@ const HUB_B = {
   type: 'WAREHOUSE',
   district: 'CAYO',
   city: 'Belmopan',
+  // Owner ruling (god, conv-452925/CLOSE-3): this row is `isTest: true` and
+  // was never a real depot, so a coordinate on it is controlled test data,
+  // not the "do not guess, do not invent geography" real-operational-record
+  // case. It is the town's own published coordinate, not a guessed or
+  // invented doorstep — every other identifying field (addressLine1,
+  // instructions, contactName/Phone) stays null on purpose, so nothing here
+  // reads as a real facility with a real door. This makes the UAT route
+  // RENDERABLE for sequencing/marker-kind/label verification; it does not
+  // establish a real Belmopan facility — never phrase a label as if it did.
+  latitude: 17.25,
+  longitude: -88.7667,
   modes: ['LAND'],
   isTest: true,
 };
@@ -365,15 +376,32 @@ async function main(): Promise<void> {
   const opsFull = new Client('ops (full)');
   await opsFull.login(USERS.opsFull.email, PASSWORD);
 
-  type HubRow = { id: string; code: string; courierFeeMinor: number; isActive: boolean; isTest: boolean };
+  type HubRow = {
+    id: string;
+    code: string;
+    courierFeeMinor: number;
+    isActive: boolean;
+    isTest: boolean;
+    latitude: number | null;
+    longitude: number | null;
+  };
   const hubs = await opsFull.get<HubRow[]>('/admin/logistics/hubs');
-  async function ensureHub(spec: typeof HUB_A): Promise<string> {
+  async function ensureHub(spec: typeof HUB_A | typeof HUB_B): Promise<string> {
     const existing = hubs.find((h) => h.code === spec.code);
     if (existing) {
       console.info(`  • hub ${spec.code} already exists`);
       if (!existing.isTest) {
         await opsFull.patch(`/admin/logistics/hubs/${existing.id}`, { isTest: true });
         console.info(`  ✓ hub ${spec.code} flagged isTest via PATCH (#19)`);
+      }
+      // CLOSE-3: a hub created by an earlier run of this same fixture, before
+      // this script carried coordinates, has them permanently null until
+      // something patches them in — ensureHub already reconciles isTest the
+      // same way, for the same reason (idempotent against a fixture whose
+      // own shape changed since the row was first created).
+      if ('latitude' in spec && existing.latitude == null) {
+        await opsFull.patch(`/admin/logistics/hubs/${existing.id}`, { latitude: spec.latitude, longitude: spec.longitude });
+        console.info(`  ✓ hub ${spec.code} given coordinates via PATCH (CLOSE-3)`);
       }
       return existing.id;
     }
