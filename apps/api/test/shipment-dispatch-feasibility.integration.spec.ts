@@ -307,6 +307,59 @@ describe('CLOSE-20: dispatchUnavailableAt — a persistent marker, mirroring dis
   });
 });
 
+describe('CLOSE-21: the needsDriver filter on the ops board', () => {
+  it('filters to shipments with an exhausted OR unavailable leg; omitting it shows everything; pagination stays correct under the filter', async () => {
+    // Baseline, delta-scoped: other tests in this file also create
+    // unavailable/exhausted legs before this one runs.
+    const baseline = await get(admin, 'admin/logistics/shipments?needsDriver=true&pageSize=1');
+    expect(baseline.status).toBe(200);
+    const totalBefore = baseline.body.total;
+
+    // A shipment that will NOT need a driver — CAYO already has an online
+    // driver from the booking-time describe above.
+    const fineCustomer = await registerCustomer(`needsdriverfilter_fine_${uniq()}@example.com`);
+    await fund(fineCustomer.userId, 10_000);
+    const fine = await post(fineCustomer.cookies, 'shipping', { ...parcel('CAYO', 'San Ignacio'), payWithWallet: true });
+    expect(fine.status).toBe(201);
+
+    // Three separate stranded shipments (zero-coverage-but-configured
+    // district), so pagination with pageSize=1 has three real pages to walk.
+    const strandedIds: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const c = await registerCustomer(`needsdriverfilter_stranded_${uniq()}@example.com`);
+      await fund(c.userId, 10_000);
+      const r = await post(c.cookies, 'shipping', { ...parcel('STANN_CREEK', 'Dangriga'), payWithWallet: true });
+      expect(r.status).toBe(201);
+      strandedIds.push(r.body.id);
+    }
+
+    // Omitting the filter: both the fine shipment and the three stranded
+    // ones are findable — it restricts nothing.
+    const unfiltered = await get(admin, 'admin/logistics/shipments?pageSize=100');
+    const unfilteredIds = new Set(unfiltered.body.rows.map((row: { id: string }) => row.id));
+    expect(unfilteredIds.has(fine.body.id)).toBe(true);
+    for (const id of strandedIds) expect(unfilteredIds.has(id)).toBe(true);
+
+    // Filtered on, one page at a time: total grows by exactly 3, the fine
+    // shipment never appears, and walking every page (pageSize=1) returns
+    // each of the three stranded shipments exactly once — no duplicate, no
+    // omission, proving the filter is applied consistently across pages,
+    // not just to the first one.
+    const page1 = await get(admin, 'admin/logistics/shipments?needsDriver=true&pageSize=1&page=1');
+    expect(page1.body.total).toBe(totalBefore + 3);
+    const seen = new Set<string>();
+    for (let page = 1; page <= 3; page++) {
+      const r = await get(admin, `admin/logistics/shipments?needsDriver=true&pageSize=1&page=${page}`);
+      expect(r.status).toBe(200);
+      expect(r.body.rows).toHaveLength(1);
+      expect(r.body.rows[0].id).not.toBe(fine.body.id);
+      seen.add(r.body.rows[0].id);
+    }
+    expect(seen.size).toBe(3);
+    for (const id of strandedIds) expect(seen.has(id)).toBe(true);
+  });
+});
+
 describe('a blocked leg is still safely cancellable and refundable', () => {
   it('cancels a TEMPORARILY_UNAVAILABLE shipment before it moves and refunds in full', async () => {
     const customer = await registerCustomer(`cancel_${uniq()}@example.com`);

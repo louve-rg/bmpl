@@ -1556,10 +1556,21 @@ export class ShipmentService {
   /**
    * The operations board.
    *
-   * Ordered by "needs a human first": exceptions, then anything stalled waiting
-   * for a driver nobody could find, then everything else newest-first. An
-   * operations list sorted purely by date makes the one shipment in trouble as
-   * hard to find as the ninety that are fine.
+   * Ordered by "needs a human first": exceptions, then everything else
+   * newest-first. That is the WHOLE ordering — CLOSE-21: an earlier version
+   * of this comment also claimed a stranded-shipment (needsDriver) sort
+   * belonged here, but no such ordering was ever implemented, and Prisma
+   * cannot express "order by whether some related leg matches a filter" —
+   * only a plain column. Rather than denormalize a shipment-level mirror of
+   * the two leg-level causes (drifts the moment a leg mutation site forgets
+   * to recompute it, and a shipment can hold several legs) or hand-write the
+   * ordering in raw SQL (turns this endpoint's pagination from
+   * Prisma-guaranteed into hand-proven, for a problem not biting anyone at
+   * today's volume), `needsDriver` below is a FILTER: every stranded
+   * shipment lands on one page, which is strictly better against "an
+   * operator can find what needs attention" than a blended sort, which only
+   * pushes one nearer the top of a list that can still paginate it away
+   * under enough exceptions.
    */
   async listForOps(input: ShipmentListInput) {
     const where: Prisma.ShipmentWhereInput = {
@@ -1567,12 +1578,36 @@ export class ShipmentService {
       ...(input.service ? { service: input.service } : {}),
       // Test shipments are hidden by default so the board reflects real work.
       ...(input.includeTest ? {} : { isTest: false }),
-      // MDF-500: admin discovery of a carrier's shipments — required so a
-      // SUSPENDED/REVOKED org's existing work stays administratively
-      // visible and reassignable/recoverable, not merely findable one leg
-      // at a time. `some`, not `every`: a multi-leg shipment with only ONE
-      // leg on this carrier still needs to be found by it.
-      ...(input.operatedByProviderId ? { legs: { some: { operatedByProviderId: input.operatedByProviderId } } } : {}),
+      // Two independent existential leg-filters below, both possibly active
+      // at once (e.g. "this carrier's shipments that also need a driver") —
+      // AND, not two `legs` keys in the same object literal: a shipment
+      // satisfies each on its OWN leg, not necessarily the same one, and a
+      // second `legs:` spread would otherwise silently overwrite the first
+      // rather than combine with it.
+      AND: [
+        // MDF-500: admin discovery of a carrier's shipments — required so a
+        // SUSPENDED/REVOKED org's existing work stays administratively
+        // visible and reassignable/recoverable, not merely findable one leg
+        // at a time. `some`, not `every`: a multi-leg shipment with only ONE
+        // leg on this carrier still needs to be found by it.
+        ...(input.operatedByProviderId
+          ? [{ legs: { some: { operatedByProviderId: input.operatedByProviderId } } }]
+          : []),
+        // CLOSE-21: both causes needsDriver already collapses on the
+        // response — a leg that ran out of drivers to try (EXHAUSTED) and
+        // one that never had any to ask (UNAVAILABLE) are different reasons
+        // for the SAME operator action, so a filter that only matched one
+        // would leave half of "needs a driver" findable and half not.
+        ...(input.needsDriver
+          ? [
+              {
+                legs: {
+                  some: { OR: [{ dispatchExhaustedAt: { not: null } }, { dispatchUnavailableAt: { not: null } }] },
+                },
+              },
+            ]
+          : []),
+      ],
     };
     const [rows, total] = await Promise.all([
       this.prisma.shipment.findMany({
