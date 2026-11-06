@@ -266,14 +266,21 @@ describe('DriverShippingJobPage — name/phone gate uses contactUnlocked, not ad
 });
 
 /**
- * SHIP-B Bug 1: the route-map caption used to key off `addressUnlocked`,
- * which meant "some stop is still area-only" only because every door end was
- * gated alike. Now this driver's own two ends are always unlocked, so the
- * caption must check the actual OTHER-leg stop instead, or it would go
- * silently stale (claim a stop is hidden when it is actually shown, or stay
- * silent about one that genuinely still is).
+ * SHIP-B Bug 1 / SHIP-H: the route-map caption used to key off
+ * `addressUnlocked`, which meant "some stop is still area-only" only because
+ * every door end was gated alike. Now this driver's own two ends are always
+ * unlocked, so the caption must check the actual OTHER-leg stop instead, or
+ * it would go silently stale (claim a stop is hidden when it is actually
+ * shown, or stay silent about one that genuinely still is).
+ *
+ * SHIP-H (owner QA, conv-24e312) also caught that the caption's wording — not
+ * just its gate — was stale: "until you accept" implied this driver's own
+ * acceptance would eventually reveal the other leg's door. On current main
+ * it never does; `mine` in the api's `addressPlace` is structural (which leg
+ * this is), not acceptance-based, so a different leg's door stays area-only
+ * regardless of what this driver does. The caption now says that instead.
  */
-describe('DriverShippingJobPage — route map "other end" caption tracks the actual stop, not addressUnlocked (SHIP-B Bug 1)', () => {
+describe('DriverShippingJobPage — route map "other end" caption tracks the actual stop, not addressUnlocked (SHIP-B Bug 1 / SHIP-H)', () => {
   it('shows the caption when an other-leg stop is still area-only, even though addressUnlocked is true', async () => {
     // A genuinely hidden stop has neither a pin nor an address — same as
     // today's real server shape for a door end this driver has no claim to.
@@ -289,7 +296,9 @@ describe('DriverShippingJobPage — route map "other end" caption tracks the act
       }),
     );
     const el = await mount();
-    expect(el.textContent).toMatch(/The other end shows its area above until you accept\./);
+    expect(el.textContent).toMatch(/The other end belongs to a different leg — only its area is ever shown here\./);
+    // Must not revert to promising a reveal this driver's own acceptance can never cause.
+    expect(el.textContent).not.toMatch(/until you accept/);
   });
 
   it('hides the caption once every route stop has a real address, even if addressUnlocked were false and a stop has no pin', async () => {
@@ -305,7 +314,7 @@ describe('DriverShippingJobPage — route map "other end" caption tracks the act
       }),
     );
     const el = await mount();
-    expect(el.textContent).not.toMatch(/shows its area above/);
+    expect(el.textContent).not.toMatch(/belongs to a different leg/);
   });
 });
 
