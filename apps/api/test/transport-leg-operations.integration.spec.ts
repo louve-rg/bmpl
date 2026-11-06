@@ -286,6 +286,70 @@ describe('what depart and arrive refuse', () => {
   });
 });
 
+/**
+ * MDF-560 (owner-escalated): Oscar found departLeg does not gate on a formal
+ * operator assignment and pulled a false "cannot move until a carrier is
+ * assigned" sentence rather than ship it. The owner's own ruling: a formal
+ * assignment first is correctly NOT required — an admin confirming a
+ * departure arranged with a carrier by phone is ordinary operational work —
+ * but a leg must never depart with genuinely nobody on record as carrying
+ * it. These pin that line exactly: refused only when operator, leg-level
+ * carrier name AND the route's own carrier label are all absent at once;
+ * accepted the moment any one of the three names someone.
+ */
+describe('a transport leg must name a carrier somewhere before it can depart (MDF-560)', () => {
+  it('refuses when nobody is on record anywhere — no operator, no carrier name on the leg or the route', async () => {
+    const driver = await makeDriver();
+    const { lineHaul } = await bookedWithFirstMileDone(driver);
+    // Blank the route's own "Carrier" field — reachable through the real
+    // admin form today (it is optional there), unlike the structurally-
+    // unreachable no-routeId state pinned elsewhere in this suite.
+    await ctx.prisma.logisticsRoute.update({ where: { id: lineHaul.routeId! }, data: { carrierName: null } });
+    const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {});
+    expect(r.status).toBe(400);
+    expect(r.body.message).toMatch(/no carrier is identified/i);
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(after.status).toBe('READY');
+    expect(after.departedAt).toBeNull();
+  });
+
+  it('accepts a carrier name typed at departure — the phone-arranged case the owner wants kept open', async () => {
+    const driver = await makeDriver();
+    const { lineHaul } = await bookedWithFirstMileDone(driver);
+    await ctx.prisma.logisticsRoute.update({ where: { id: lineHaul.routeId! }, data: { carrierName: null } });
+    const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, { carrierName: 'Arranged by phone — Coastal Carriers' });
+    expect(r.status).toBe(201);
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: lineHaul.id } });
+    expect(after.status).toBe('IN_PROGRESS');
+    expect(after.carrierName).toBe('Arranged by phone — Coastal Carriers');
+  });
+
+  it('accepts a formally assigned operator even with no carrier name anywhere else', async () => {
+    const driver = await makeDriver();
+    const { lineHaul } = await bookedWithFirstMileDone(driver);
+    await ctx.prisma.logisticsRoute.update({ where: { id: lineHaul.routeId! }, data: { carrierName: null } });
+    // The real assignment flow (setLegOperator + the carrier's own accept) is
+    // already covered end-to-end in carrier-provider-lifecycle.integration.spec.ts;
+    // this only needs departLeg to trust operatedByProviderId once it is set,
+    // not re-prove how it gets there.
+    const op = await registerUser(`tro_operator_${uniq()}@example.com`);
+    const provider = await ctx.prisma.shippingProviderProfile.create({
+      data: { userId: op.userId, businessName: 'Synthetic Test Carrier Org', contactEmail: `tro_operator_${uniq()}@example.com` },
+    });
+    await ctx.prisma.shipmentLeg.update({ where: { id: lineHaul.id }, data: { operatedByProviderId: provider.id } });
+    const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {});
+    expect(r.status).toBe(201);
+  });
+
+  it('still departs normally when the route names its own carrier — unchanged from before this check', async () => {
+    const driver = await makeDriver();
+    const { lineHaul } = await bookedWithFirstMileDone(driver);
+    // seedWaterTaxiNetwork() already names 'UAT Water Taxi' on this route.
+    const r = await post(admin, `admin/logistics/legs/${lineHaul.id}/depart`, {});
+    expect(r.status).toBe(201);
+  });
+});
+
 describe('recording a transport leg\'s scheduled departure/arrival (BMPL-346)', () => {
   it('demands logistics.operate — logistics.read alone is refused', async () => {
     const s = await book();
