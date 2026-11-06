@@ -769,6 +769,15 @@ export const shipmentListSchema = z.object({
   // name before the two sides reconciled, and the name is arbitrary either
   // way, so this side matched his rather than making him rework it.
   operatedByProviderId: cuidSchema.optional(),
+  /**
+   * CLOSE-21: a leg of this shipment is EXHAUSTED or UNAVAILABLE (the same
+   * two causes `needsDriver` on the response already collapses). A separate
+   * filter rather than a sort — Prisma cannot order by "some related leg
+   * matches a filter," only by a plain column, and a blended sort would only
+   * push a stranded shipment nearer the top of a paginated list, not
+   * guarantee it is findable at all. This puts every one on one page.
+   */
+  needsDriver: queryBoolean.optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
