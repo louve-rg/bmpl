@@ -175,6 +175,85 @@ const EXHAUSTED_ROW = {
   ],
 };
 
+/**
+ * CLOSE-21 (owner, via MDF-560/Michael): a FILTER, not a sort, is what makes
+ * every stranded shipment findable on one page. Captures the request URL so
+ * the test can see exactly which query param the control does or doesn't
+ * send — the thing a sort-vs-filter mixup would get wrong silently.
+ */
+function stubFetchRowsCapturing(adminPermissions: string[], rowsByNeedsDriver: { filtered: unknown[]; unfiltered: unknown[] }) {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
+      if (url.includes('/api/admin/logistics/shipments')) {
+        const isFiltered = /needsDriver=true/.test(url);
+        const rows = isFiltered ? rowsByNeedsDriver.filtered : rowsByNeedsDriver.unfiltered;
+        return jsonResponse(200, { rows, total: rows.length });
+      }
+      return jsonResponse(404, { message: 'not mocked: ' + url });
+    }),
+  );
+  return urls;
+}
+
+describe('LogisticsOpsPage — the "needs a driver" control is a filter, not a sort (CLOSE-21)', () => {
+  it('sends no needsDriver param by default — unfiltered, today\'s behavior', async () => {
+    const urls = stubFetchRowsCapturing(['logistics.read'], { filtered: [EXHAUSTED_ROW], unfiltered: [ROW, EXHAUSTED_ROW] });
+    await mount();
+
+    expect(document.body.textContent).toContain('SHP-2001');
+    expect(urls.some((u) => u.includes('/admin/logistics/shipments') && /needsDriver=/.test(u))).toBe(false);
+  });
+
+  it('checking the control adds needsDriver=true and the board narrows to only those rows', async () => {
+    stubFetchRowsCapturing(['logistics.read'], { filtered: [EXHAUSTED_ROW], unfiltered: [ROW, EXHAUSTED_ROW] });
+    await mount();
+
+    const checkbox = Array.from(document.body.querySelectorAll('input[type="checkbox"]')).find(
+      (el) => el.closest('label')?.textContent?.includes('Only shipments needing a driver'),
+    ) as HTMLInputElement;
+    expect(checkbox).toBeTruthy();
+
+    await act(async () => {
+      checkbox.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(document.body.textContent).not.toContain('SHP-2001');
+    expect(document.body.textContent).toContain('BML-TEST0004');
+  });
+
+  it('shows a reassuring, non-alarming empty state when the filter is on and nothing is stranded', async () => {
+    stubFetchRowsCapturing(['logistics.read'], { filtered: [], unfiltered: [ROW] });
+    await mount();
+    const checkbox = Array.from(document.body.querySelectorAll('input[type="checkbox"]')).find(
+      (el) => el.closest('label')?.textContent?.includes('Only shipments needing a driver'),
+    ) as HTMLInputElement;
+
+    await act(async () => {
+      checkbox.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(document.body.textContent).toContain('Nothing needs a driver right now');
+    // The control itself must never claim the rest of the board is ranked —
+    // it says what it shows, not where the shown items rank. (Not testing
+    // for the bare word "first" here — "First mile" is a real status option
+    // in the Status dropdown and would be a false positive.)
+    expect(document.body.textContent).not.toMatch(/sorted|ranked|needs a human first/i);
+  });
+});
+
 describe('LogisticsOpsPage — unavailable vs exhausted drivers read as different claims (CLOSE-20)', () => {
   it('an UNAVAILABLE leg gets its own badge and a "may resolve on its own" message, not the exhaustion wording', async () => {
     stubFetchRows(['logistics.read'], [UNAVAILABLE_ROW]);
