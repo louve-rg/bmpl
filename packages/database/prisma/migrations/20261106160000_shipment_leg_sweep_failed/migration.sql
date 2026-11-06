@@ -1,0 +1,35 @@
+-- CLOSE-17: one more AuditAction value, for one more sweep-visibility episode.
+--
+-- What was wrong: ShipmentDispatchService.sweepExpiredOffers / sweepUndispatched /
+-- sweepExhaustedRecovery each loop over a batch of courier legs and call back into
+-- dispatchLeg (or rankFor) for every one of them, with no per-leg isolation. An
+-- unhandled exception thrown processing ANY leg in that batch aborted the whole
+-- loop, so every OTHER leg queued behind the bad one in that tick's query order
+-- silently never got its turn — not just that tick, but EVERY tick forever,
+-- because the same bad row sorts to the same position and throws again each
+-- time. This is the "legs must not silently strand" failure the owner's original
+-- CLOSE-1 ruling forbade, one level up: the leg itself might be perfectly healthy
+-- and still never get processed, purely because of its position in a batch behind
+-- a different, broken one.
+--
+-- The fix (in apps/api, not this migration) is per-leg try/catch inside each of
+-- the three sweep loops: catch, skip, continue to the next leg — never retry the
+-- failing leg in place, which would be the unreliable workaround the owner also
+-- forbade. The failure still needs to be VISIBLE to an admin with the leg id, the
+-- same way SHIPMENT_LEG_DISPATCH_EXHAUSTED/UNAVAILABLE/DEFERRED already are. Those
+-- three reuse one mechanism: write an AuditAction row on the TRANSITION into the
+-- state, then skip writing again as long as the most recent event for that leg is
+-- still the same one — otherwise a single poisoned row would alert an admin again
+-- every 20 seconds, forever, for a human who was already told once.
+--
+-- SHIPMENT_LEG_SWEEP_FAILED is that transition marker for THIS failure mode. It
+-- did not fit any existing value: none of them mean "a sweep threw processing
+-- this leg" — they all describe states the LEG itself is correctly in (exhausted,
+-- deferred, nobody online), not an engineering fault in the sweep that was
+-- supposed to be examining it.
+--
+-- Additive only, as usual for an enum value: nothing existing changes meaning,
+-- nothing is removed, and a database that never writes this value behaves
+-- exactly as before. ADD VALUE IF NOT EXISTS makes a re-run of this migration
+-- safe.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_LEG_SWEEP_FAILED';

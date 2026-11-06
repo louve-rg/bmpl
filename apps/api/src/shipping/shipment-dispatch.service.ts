@@ -690,22 +690,33 @@ export class ShipmentDispatchService {
    * offer between the scan and the write. If they got there first the row no
    * longer matches and the sweep backs off, rather than expiring a job somebody
    * is already driving to.
+   *
+   * CLOSE-17: each leg is isolated in its own try/catch. Before this, one leg
+   * throwing aborted the loop, so every OTHER leg in the same batch — healthy
+   * or not — silently never got its turn, this tick or any later one, because
+   * the same bad row always sorts to the same position and throws again. See
+   * recordSweepFailureIfNew for how the failure is made visible without
+   * re-alerting on every tick.
    */
   async sweepExpiredOffers(now: Date = new Date()): Promise<{ expired: number; reoffered: number }> {
     const lapsed = await this.prisma.shipmentLeg.findMany({
       where: { courierStatus: 'ASSIGNED', acceptedAt: null, offerExpiresAt: { lt: now } },
-      select: { id: true, assignedDriverProfileId: true },
+      select: { id: true, assignedDriverProfileId: true, shipment: { select: { id: true, reference: true } } },
       take: 50,
     });
 
     let expired = 0;
     let reoffered = 0;
     for (const leg of lapsed) {
-      const released = await this.expireOffer(leg.id, leg.assignedDriverProfileId);
-      if (!released) continue;
-      expired += 1;
-      const out = await this.dispatchLeg(leg.id);
-      if (out.result === 'OFFERED') reoffered += 1;
+      try {
+        const released = await this.expireOffer(leg.id, leg.assignedDriverProfileId);
+        if (!released) continue;
+        expired += 1;
+        const out = await this.dispatchLeg(leg.id);
+        if (out.result === 'OFFERED') reoffered += 1;
+      } catch (err) {
+        await this.recordSweepFailureIfNew(leg.id, leg.shipment.id, leg.shipment.reference, 'sweepExpiredOffers', err);
+      }
     }
     return { expired, reoffered };
   }
@@ -727,16 +738,24 @@ export class ShipmentDispatchService {
     };
   }
 
-  /** Courier legs whose turn has come but which nobody has been offered yet. */
+  /**
+   * Courier legs whose turn has come but which nobody has been offered yet.
+   *
+   * CLOSE-17: isolated per leg — see sweepExpiredOffers's comment for why.
+   */
   async sweepUndispatched(): Promise<number> {
     const waiting = await this.prisma.shipmentLeg.findMany({
       where: this.waitingLegsWhere(),
-      select: { id: true },
+      select: { id: true, shipment: { select: { id: true, reference: true } } },
       take: 50,
     });
     let offered = 0;
     for (const leg of waiting) {
-      if ((await this.dispatchLeg(leg.id)).result === 'OFFERED') offered += 1;
+      try {
+        if ((await this.dispatchLeg(leg.id)).result === 'OFFERED') offered += 1;
+      } catch (err) {
+        await this.recordSweepFailureIfNew(leg.id, leg.shipment.id, leg.shipment.reference, 'sweepUndispatched', err);
+      }
     }
     return offered;
   }
@@ -786,41 +805,58 @@ export class ShipmentDispatchService {
         id: true,
         kind: true,
         originHub: { select: { district: true, city: true } },
-        shipment: { select: { isTest: true, customerUserId: true, originDistrict: true, originCity: true } },
+        shipment: { select: { id: true, reference: true, isTest: true, customerUserId: true, originDistrict: true, originCity: true } },
       },
       take: 50,
     });
 
     let recovered = 0;
     for (const leg of exhausted) {
-      // Same district/city rule dispatchLeg itself uses.
-      const district =
-        leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originDistrict : leg.originHub?.district;
-      if (!district) continue;
-      const city =
-        (leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originCity : leg.originHub?.city) ?? null;
+      try {
+        // Same district/city rule dispatchLeg itself uses.
+        const district =
+          leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originDistrict : leg.originHub?.district;
+        if (!district) continue;
+        const city =
+          (leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originCity : leg.originHub?.city) ?? null;
 
-      const { ranked } = await this.rankFor(
-        leg.id,
-        district,
-        city,
-        cfg.maxConcurrentPerDriver,
-        leg.shipment.isTest,
-        leg.shipment.customerUserId,
-      );
-      if (ranked.length === 0) continue; // still nobody new — correctly stays exhausted
+        const { ranked } = await this.rankFor(
+          leg.id,
+          district,
+          city,
+          cfg.maxConcurrentPerDriver,
+          leg.shipment.isTest,
+          leg.shipment.customerUserId,
+        );
+        if (ranked.length === 0) continue; // still nobody new — correctly stays exhausted
 
-      // Conditional: an administrator may have assigned this leg by hand
-      // between the read above and here, which already clears
-      // dispatchExhaustedAt itself (assignManual) — in that case this no-ops
-      // rather than reopening a leg a human just closed.
-      const cleared = await this.prisma.shipmentLeg.updateMany({
-        where: { id: leg.id, dispatchExhaustedAt: { not: null } },
-        data: { dispatchExhaustedAt: null },
-      });
-      if (cleared.count === 0) continue;
-      const out = await this.dispatchLeg(leg.id);
-      if (out.result === 'OFFERED') recovered += 1;
+        // Conditional: an administrator may have assigned this leg by hand
+        // between the read above and here, which already clears
+        // dispatchExhaustedAt itself (assignManual) — in that case this no-ops
+        // rather than reopening a leg a human just closed.
+        const cleared = await this.prisma.shipmentLeg.updateMany({
+          where: { id: leg.id, dispatchExhaustedAt: { not: null } },
+          data: { dispatchExhaustedAt: null },
+        });
+        if (cleared.count === 0) continue;
+        const out = await this.dispatchLeg(leg.id);
+        if (out.result === 'OFFERED') recovered += 1;
+      } catch (err) {
+        // CLOSE-17: this leg is one of up to 50 in the SAME backlog. Before
+        // this isolation existed, a throw here — for ANY one of them — aborted
+        // every leg still waiting behind it in this exact query order, this
+        // tick and every tick after, because the same bad row always sorts to
+        // the same position. That is exactly how a 28-leg exhausted backlog
+        // (discovered live, CLOSE-1 PR #602 follow-up) made recovery look dead
+        // for a leg at the END of the list while the leg's own logic was fine.
+        await this.recordSweepFailureIfNew(
+          leg.id,
+          leg.shipment.id,
+          leg.shipment.reference,
+          'sweepExhaustedRecovery',
+          err,
+        );
+      }
     }
     return recovered;
   }
@@ -1024,6 +1060,68 @@ export class ShipmentDispatchService {
         data: { shipmentId: leg.shipment.id, reference: leg.shipment.reference },
       });
     }
+  }
+
+  /**
+   * CLOSE-17: make a sweep throwing on ONE leg visible, without letting that
+   * one leg abort every other leg queued behind it in the same batch — see
+   * the try/catch around each call site in sweepExpiredOffers,
+   * sweepUndispatched and sweepExhaustedRecovery.
+   *
+   * Deliberately NOT a retry: this records the failure and the caller moves
+   * on to the next leg in the SAME pass. It does not re-attempt this leg
+   * again right now — that would be the "unreliable workaround" / unbounded
+   * retry loop the owner forbade in the original CLOSE-1 ruling. The next
+   * sweep tick will naturally pick this leg up again on its own, exactly the
+   * same idempotent-and-safe-to-repeat contract every other sweep target
+   * already has (see dispatchLeg's own docstring) — nothing new is added for
+   * that, because nothing new is needed.
+   *
+   * Same transition-only dedup as recordDeferralIfNew/recordUnavailableIfNew/
+   * markExhausted above: read the most recent OFFERED/SWEEP_FAILED row for
+   * this leg, skip the alert if it already says SWEEP_FAILED. A leg that
+   * fails the same way every tick gets exactly one admin alert for the
+   * episode, not one every 20 seconds forever. SHIPMENT_LEG_OFFERED is the
+   * "resolved" signal here too, same as everywhere else this pattern is
+   * used — the moment this leg actually dispatches, the next failure (if
+   * the underlying fault recurs later) reads as a new episode rather than
+   * staying silent because of an alert from months ago.
+   *
+   * shipmentId/reference are nullable because the leg object that failed may
+   * itself be the thing malformed — logging the legId alone must never
+   * depend on the very data that might be broken.
+   */
+  private async recordSweepFailureIfNew(
+    legId: string,
+    shipmentId: string | null,
+    reference: string | null,
+    sweep: string,
+    err: unknown,
+  ): Promise<void> {
+    const message = err instanceof Error ? err.message : String(err);
+    this.logger.error(`${sweep} threw processing leg ${legId} — skipping it this tick: ${message}`);
+    const latest = await this.prisma.auditLog.findFirst({
+      where: {
+        action: { in: ['SHIPMENT_LEG_OFFERED', 'SHIPMENT_LEG_SWEEP_FAILED'] },
+        newValue: { path: ['legId'], equals: legId },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { action: true },
+    });
+    if (latest?.action === 'SHIPMENT_LEG_SWEEP_FAILED') return;
+    await this.audit.record({
+      action: 'SHIPMENT_LEG_SWEEP_FAILED',
+      newValue: { legId, shipmentId, reference, sweep, error: message },
+      reason: `${sweep} threw an unexpected error processing this leg; it was skipped so other legs in the same sweep could still be processed.`,
+    });
+    await this.notifications.notifyAdmins('logistics.read', {
+      type: 'SECURITY',
+      category: 'ADMIN_ALERT',
+      event: 'SHIPMENT_LEG_SWEEP_FAILED',
+      title: reference ? `Shipment ${reference} needs attention` : `A shipment leg needs attention`,
+      body: 'Automatic dispatch hit an unexpected error on this leg and skipped it this tick. It will keep being retried automatically, but investigate or assign it by hand if it keeps failing.',
+      data: { legId, reference, sweep },
+    });
   }
 
   /**
