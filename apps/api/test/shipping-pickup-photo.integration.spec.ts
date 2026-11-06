@@ -306,6 +306,26 @@ describe('shipment pickup photo (BMPL-178)', () => {
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup-photo/confirm`, { photoKeys: [key] })).status).toBe(201);
   });
 
+  it('4b · a driver who was only OFFERED the leg — never accepted — cannot attach a pickup photo (SHIP-M)', async () => {
+    // ownedLeg alone is not enough here: assignedDriverProfileId is set at
+    // OFFER time, so an offered-but-uncommitted driver IS the assignee and
+    // passes ownedLeg. Only the acceptance check added for SHIP-M stops them.
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const firstMile = await firstMileOf(shipment.id);
+    await dispatch.dispatchLeg(firstMile.id); // offered, never accepted
+
+    const key = await uploadPickupPhoto(courier, firstMile.id);
+    const confirm = await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup-photo/confirm`, { photoKeys: [key] });
+    expect(confirm.status).toBe(400);
+    expect((await legRow(firstMile.id)).handoffPhotoKeys).toEqual([]);
+
+    // Accepting is what unlocks it — same leg, same driver, same key.
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/pickup-photo/confirm`, { photoKeys: [key] })).status).toBe(201);
+  });
+
   it('5 · a storage key uploaded under a DIFFERENT driver\'s namespace is refused even on the courier\'s own leg', async () => {
     const sender = await fundedSender();
     const courier = await makeCourier('STANN_CREEK');
