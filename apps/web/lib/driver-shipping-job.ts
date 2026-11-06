@@ -14,8 +14,14 @@ export type PickupPhotoSection = 'hidden' | 'existing' | 'addable';
  * replaces the stored keys wholesale and the read side never returns the
  * underlying keys back) can't drift between JSX branches.
  *
- * `job.addressUnlocked` is the same gate the address reveal already uses —
- * there is nothing to photograph at a door you have not committed to yet.
+ * Gated on acceptance, not `addressUnlocked`: since SHIP-B, `addressUnlocked`
+ * is structurally always true for a leg's own door from offer time on, so it
+ * no longer tracks "has this driver committed to the job" the way it did
+ * when this function was written. `contactUnlocked` is the field that still
+ * does — it stays acceptance-gated — with `addressUnlocked` as the fallback
+ * for an api deploy older than SHIP-B, where `contactUnlocked` is absent and
+ * `addressUnlocked` is still the real pre/post-accept gate. There is nothing
+ * to photograph at a door you have not committed to yet.
  * `canAct` is whether the leg still has a next action (false once
  * COMPLETED/CANCELLED/EXCEPTION), matching the API's own refusal window on
  * `confirmPickupPhoto`. `pickupPhotoUrls` absent is treated exactly like
@@ -24,10 +30,10 @@ export type PickupPhotoSection = 'hidden' | 'existing' | 'addable';
  * (BMPL-349).
  */
 export function pickupPhotoSection(
-  job: { addressUnlocked: boolean; pickupPhotoUrls?: string[] },
+  job: { addressUnlocked: boolean; contactUnlocked?: boolean; pickupPhotoUrls?: string[] },
   canAct: boolean,
 ): PickupPhotoSection {
-  if (!job.addressUnlocked) return 'hidden';
+  if (!(job.contactUnlocked ?? job.addressUnlocked)) return 'hidden';
   if (job.pickupPhotoUrls && job.pickupPhotoUrls.length > 0) return 'existing';
   return canAct ? 'addable' : 'hidden';
 }
