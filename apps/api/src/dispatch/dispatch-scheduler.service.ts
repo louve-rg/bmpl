@@ -78,7 +78,7 @@ export class DispatchSchedulerService implements OnApplicationBootstrap, OnModul
   /** Cross-instance lock. Returns false when another instance holds it or Redis is down. */
   private async acquire(): Promise<boolean> {
     try {
-      const res = await this.redis.client.set(LOCK_KEY, '1', 'EX', LOCK_TTL_SECONDS, 'NX');
+      const res = await this.redis.client.set(this.redis.lockKey(LOCK_KEY), '1', 'EX', LOCK_TTL_SECONDS, 'NX');
       return res === 'OK';
     } catch (err) {
       this.logger.warn(`dispatch sweep skipped — could not reach Redis: ${String(err)}`);

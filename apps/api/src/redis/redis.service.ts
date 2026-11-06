@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import Redis from 'ioredis';
 import { ENV } from '../config/config.module';
-import type { Env } from '../config/env';
+import { isProd, type Env } from '../config/env';
 
 /**
  * Thin Redis client wrapper. Phase 1 uses Redis only for the readiness probe
@@ -57,5 +57,35 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Namespaces a scheduler lock key with `REDIS_LOCK_NAMESPACE` when set
+   * (dev-only — see env.ts). Every scheduler lock key should be built
+   * through this, not a raw string, so one worktree's API can never
+   * silently win another's sweep (CLOSE-18).
+   *
+   * STRUCTURALLY ignored in production, not just unset-by-convention: if
+   * `REDIS_LOCK_NAMESPACE` were ever set in production (a copied .env, a
+   * mistyped Railway variable, someone debugging), two replicas would get
+   * DIFFERENT lock keys and both would sweep at once — duplicate
+   * assignments and conflicting offers, the exact thing a single shared
+   * lock exists to prevent. "Nobody sets it" is a convention; this makes
+   * "setting it cannot do that" structural. Logs loudly rather than silently
+   * swallowing the mistake, so a stray production variable is found instead
+   * of hidden.
+   */
+  lockKey(key: string): string {
+    if (isProd(this.env)) {
+      if (this.env.REDIS_LOCK_NAMESPACE) {
+        this.logger.error(
+          `REDIS_LOCK_NAMESPACE is set in production ("${this.env.REDIS_LOCK_NAMESPACE}") and is being IGNORED. ` +
+            'This variable must never be set outside local development — two replicas with different ' +
+            'namespaces would stop sharing their scheduler lock. Remove it from this environment.',
+        );
+      }
+      return key;
+    }
+    return this.env.REDIS_LOCK_NAMESPACE ? `${this.env.REDIS_LOCK_NAMESPACE}:${key}` : key;
   }
 }
