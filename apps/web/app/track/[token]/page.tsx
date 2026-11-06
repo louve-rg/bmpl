@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { BrandLockup } from '../../../components/Logo';
 import { RecipientTracking } from '../../../components/shipping/RecipientTracking';
+import { UnlinkedDeliveryCode } from '../../../components/shipping/UnlinkedDeliveryCode';
 import { Alert, Button, Spinner } from '../../../components/ui';
 import type { ApiError } from '../../../lib/api';
 import { shippingApi, type RecipientTrackingView } from '../../../lib/shipping';
@@ -111,6 +112,8 @@ export default function RecipientTrackingPage() {
         {!loading && view && (
           <div className="mt-4">
             <RecipientTracking view={view} />
+
+            <UnlinkedDeliveryCode token={token} />
 
             <div className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
               {claimState === 'claimed' ? (

@@ -313,6 +313,24 @@ export interface RecipientAvailabilityWindows {
   windows?: Array<{ startTime: string; endTime: string }>;
 }
 
+/**
+ * CLOSE-2: a recipient's own delivery (handoff) code — what the driver asks
+ * for to confirm it's really you before handing the parcel over. Deliberately
+ * its own tiny shape, same reasoning as RecipientAvailabilityWindows above:
+ * an authenticated-only (or token-authenticated-only) field travels through
+ * its own endpoint rather than widening the shared tracking view.
+ *
+ * `deliveryCode: null` is a normal, expected value here — never treat it as
+ * a failure. The API returns null once the shipment is delivered or
+ * cancelled, and for a service that ends at a hub (the recipient collects in
+ * person) there was never a handoff code to begin with. This type cannot
+ * tell those cases apart and does not try to.
+ */
+export interface DeliveryCodeView {
+  reference: string;
+  deliveryCode: string | null;
+}
+
 export interface QuoteLeg {
   sequence: number;
   kind: string;
@@ -468,6 +486,34 @@ export const shippingApi = {
     api.put<RecipientAvailabilityWindows>(`/shipping/incoming/${encodeURIComponent(reference)}/availability-window`, {
       windows: windows.map((w) => ({ ...w, role: 'RECIPIENT' as const })),
     }),
+  /**
+   * CLOSE-2, linked-recipient path: this account's own delivery code for a
+   * shipment it has already claimed. A reference this account never claimed
+   * answers the same 404 as `incomingOne`.
+   */
+  incomingDeliveryCode: (reference: string) =>
+    api.get<DeliveryCodeView>(`/shipping/incoming/${encodeURIComponent(reference)}/delivery-code`),
+  /**
+   * CLOSE-2, unlinked-recipient path, step 1 of 2: ask the API to email a
+   * short-lived reveal code to the shipment's own on-file address. Returns
+   * `{ requested: true }` IDENTICALLY whether or not an email was actually on
+   * file, or the request landed inside the 5-minute per-shipment cooldown —
+   * deliberate anti-oracle behaviour (owner ruling). Callers must show the
+   * same message for every success, and must never try to infer "no email on
+   * file" from this response.
+   */
+  requestDeliveryCodeEmail: (token: string) =>
+    api.post<{ requested: true }>(`/shipping/track/${encodeURIComponent(token)}/delivery-code/request`),
+  /**
+   * CLOSE-2, unlinked-recipient path, step 2 of 2: redeem the emailed reveal
+   * code for the actual delivery code. A 400 means the code was wrong,
+   * expired, or already used — the server's own message already says so and
+   * invites a fresh request; this never distinguishes those three cases
+   * itself. `deliveryCode: null` in a 2xx response is the same legitimate
+   * "nothing to show" state `incomingDeliveryCode` can return.
+   */
+  revealDeliveryCode: (token: string, revealToken: string) =>
+    api.post<DeliveryCodeView>(`/shipping/track/${encodeURIComponent(token)}/delivery-code/reveal`, { revealToken }),
 };
 
 /**
