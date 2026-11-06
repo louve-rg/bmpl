@@ -124,6 +124,33 @@ const listJobs = (driver: { cookies: string[] }) => get(driver.cookies, 'driver/
 const setWindows = (shipmentId: string, windows: Array<{ role: 'SENDER' | 'RECIPIENT'; startTime: string; endTime: string }>) =>
   put(customer, `shipping/${shipmentId}/availability-windows`, { windows });
 
+async function pinOf(legId: string) {
+  const leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { handoffPin: true } });
+  return leg.handoffPin!;
+}
+
+async function pickupPinFor(legId: string) {
+  return (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { pickupPin: true } })).pickupPin!;
+}
+
+/** A driver takes a courier leg from offer through to a verified handoff. Verbatim from shipping-driver.integration.spec.ts. */
+async function driveCourierLeg(driver: { cookies: string[] }, legId: string) {
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/accept`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/pickup`, { pin: await pickupPinFor(legId) })).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/in-transit`)).status).toBe(201);
+  expect((await post(driver.cookies, `driver/shipping-jobs/${legId}/arriving`)).status).toBe(201);
+  expect(
+    (await post(driver.cookies, `driver/shipping-jobs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Receiver' })).status,
+  ).toBe(201);
+}
+
+/** A carrier flies a LINE_HAUL leg hub to hub. Verbatim from shipping-driver.integration.spec.ts. */
+async function flyLineHaul(legId: string) {
+  expect((await post(admin, `admin/logistics/legs/${legId}/depart`, {})).status).toBe(201);
+  expect((await post(admin, `admin/logistics/legs/${legId}/arrive`, {})).status).toBe(201);
+  expect((await post(admin, `admin/logistics/legs/${legId}/handoff`, { pin: await pinOf(legId), receivedByName: 'Counter staff' })).status).toBe(201);
+}
+
 beforeAll(async () => {
   ctx = await bootApp();
   await resetDb(ctx.prisma);
@@ -164,7 +191,10 @@ describe('SHIP-B: a shipment availability window reaches the driver, filtered to
       { role: 'SENDER', startTime: '09:00', endTime: '12:00' },
       { role: 'RECIPIENT', startTime: '14:00', endTime: '18:00' },
     ]);
-    expect(win.status).toBe(201);
+    // PUT is a replace, not a create — the endpoint correctly returns 200, not
+    // 201. (Caught by Michael's CI run against PR #588: the feature was right,
+    // this expectation was wrong.)
+    expect(win.status).toBe(200);
 
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     expect((await assign(first.id, driver)).status).toBe(201);
@@ -181,7 +211,16 @@ describe('SHIP-B: a shipment availability window reaches the driver, filtered to
       { role: 'SENDER', startTime: '09:00', endTime: '12:00' },
       { role: 'RECIPIENT', startTime: '14:00', endTime: '18:00' },
     ]);
-    expect(win.status).toBe(201);
+    // Same PUT-is-200-not-201 correction as above.
+    expect(win.status).toBe(200);
+
+    // Same dispatch invariant as the list-labelling test below: a LAST_MILE
+    // leg cannot be assigned until the parcel has actually travelled there.
+    const rows = await legs(s.id);
+    const first = rows.find((l) => l.kind === 'FIRST_MILE')!;
+    expect((await assign(first.id, driver)).status).toBe(201);
+    await driveCourierLeg(driver, first.id);
+    for (const lh of rows.filter((l) => l.kind === 'LINE_HAUL')) await flyLineHaul(lh.id);
 
     const last = (await legs(s.id)).find((l) => l.kind === 'LAST_MILE')!;
     expect((await assign(last.id, driver)).status).toBe(201);
@@ -194,7 +233,7 @@ describe('SHIP-B: a shipment availability window reaches the driver, filtered to
   it('is visible to the driver before acceptance, on an offer the driver has not yet taken', async () => {
     const driver = await makeDriver();
     const s = await book();
-    expect((await setWindows(s.id, [{ role: 'SENDER', startTime: '09:00', endTime: '12:00' }])).status).toBe(201);
+    expect((await setWindows(s.id, [{ role: 'SENDER', startTime: '09:00', endTime: '12:00' }])).status).toBe(200);
 
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     expect((await assign(first.id, driver)).status).toBe(201);
@@ -224,7 +263,7 @@ describe('SHIP-B: a shipment availability window reaches the driver, filtered to
     expect((await setWindows(s.id, [
       { role: 'SENDER', startTime: '09:00', endTime: '12:00' },
       { role: 'RECIPIENT', startTime: '14:00', endTime: '18:00' },
-    ])).status).toBe(201);
+    ])).status).toBe(200);
 
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     expect((await assign(first.id, driver)).status).toBe(201);
@@ -254,6 +293,18 @@ describe('SHIP-B: the job list honestly labels which end is a public terminal vs
   it('a LAST_MILE job: pickup is the terminal (HUB), dropoff is the recipient\'s door (ADDRESS)', async () => {
     const driver = await makeDriver();
     const s = await book();
+    const rows = await legs(s.id);
+    const first = rows.find((l) => l.kind === 'FIRST_MILE')!;
+    // THE dispatch invariant (shipment-dispatch.service.ts assignManual):
+    // "no driver is sent where the parcel is not" — admin assign refuses a
+    // LAST_MILE leg outright (400, isLegActionable) until the parcel has
+    // actually travelled there. The earlier version of this test skipped
+    // straight to assigning LAST_MILE and was refused for exactly that
+    // reason; this is the invariant working correctly, not a feature gap.
+    expect((await assign(first.id, driver)).status).toBe(201);
+    await driveCourierLeg(driver, first.id);
+    for (const lh of rows.filter((l) => l.kind === 'LINE_HAUL')) await flyLineHaul(lh.id);
+
     const last = (await legs(s.id)).find((l) => l.kind === 'LAST_MILE')!;
     expect((await assign(last.id, driver)).status).toBe(201);
 
