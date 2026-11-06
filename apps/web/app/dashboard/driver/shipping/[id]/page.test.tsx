@@ -57,7 +57,7 @@ vi.mock('../../../../../lib/api', () => ({
 
 const { default: DriverShippingJobPage } = await import('./page');
 
-function place(over: Partial<{ pinnedLocation: { latitude: number; longitude: number } | null }> = {}) {
+function place(over: Partial<{ address: string | null; pinnedLocation: { latitude: number; longitude: number } | null }> = {}) {
   return {
     kind: 'ADDRESS' as const,
     name: 'Sender',
@@ -132,6 +132,31 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
     expect(el.textContent).toContain('BML-ABCD2345');
   });
 
+  it('SHIP-C: labels a stop by matching this leg\'s own pickup/dropoff pin, not by its position in the whole-shipment route', async () => {
+    // An extra hub ahead of this leg's own two points, belonging to a
+    // different leg of the same shipment — must read as "Via", never as
+    // this driver's own "Collect", even though it sits first in the array.
+    const otherLegHub = place({ pinnedLocation: { latitude: 16.0, longitude: -89.0 } });
+    apiGet.mockResolvedValue(
+      shippingJob({
+        routeStops: [
+          otherLegHub,
+          place({ pinnedLocation: { latitude: 17.5, longitude: -88.2 } }),
+          place({ pinnedLocation: { latitude: 17.6, longitude: -88.3 } }),
+        ],
+      }),
+    );
+    const el = await mount();
+    // The legend only renders once the map is revealed (lazy by default).
+    const showMap = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Show map');
+    await act(async () => {
+      showMap!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(el.textContent).toMatch(/Via: Sender/);
+    expect(el.textContent).toMatch(/Collect: Sender/);
+    expect(el.textContent).toMatch(/Deliver: Sender/);
+  });
+
   it('does not crash when routeStops is missing from the wire entirely', async () => {
     const raw = JSON.parse(JSON.stringify(shippingJob())) as Record<string, unknown>;
     delete raw.routeStops;
@@ -145,6 +170,142 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
     }
     expect(threw).toBe(false);
     expect(container!.textContent).toContain('BML-ABCD2345');
+  });
+});
+
+/**
+ * SHIP-B/SHIP-C: availabilityWindows is "HH:MM" Belize-local wall-clock
+ * strings, never a timestamp — must render as given, never through `Date`.
+ * An overnight window (endTime < startTime) is legal and must read clearly,
+ * not as an invalid or empty range. The server already scopes the array to
+ * the role(s) that govern THIS leg, so the page only needs to split
+ * SENDER -> pickup block / RECIPIENT -> dropoff block.
+ */
+describe('DriverShippingJobPage — availability windows (SHIP-C)', () => {
+  it('shows the pickup window beside Collect from, scoped to SENDER', async () => {
+    apiGet.mockResolvedValue(
+      shippingJob({ availabilityWindows: [{ role: 'SENDER', startTime: '08:00', endTime: '12:00' }] }),
+    );
+    const el = await mount();
+    expect(el.textContent).toMatch(/Available 8:00 AM–12:00 PM/);
+  });
+
+  it('shows an overnight window clearly rather than as an invalid range', async () => {
+    apiGet.mockResolvedValue(
+      shippingJob({ availabilityWindows: [{ role: 'SENDER', startTime: '22:00', endTime: '02:00' }] }),
+    );
+    const el = await mount();
+    expect(el.textContent).toMatch(/Available 10:00 PM–2:00 AM \(overnight\)/);
+  });
+
+  it('a RECIPIENT window appears beside Deliver to, never beside Collect from', async () => {
+    apiGet.mockResolvedValue(
+      shippingJob({ availabilityWindows: [{ role: 'RECIPIENT', startTime: '09:00', endTime: '17:00' }] }),
+    );
+    const el = await mount();
+    const text = el.textContent ?? '';
+    const collectIndex = text.indexOf('Collect from');
+    const deliverIndex = text.indexOf('Deliver to');
+    const availableIndex = text.indexOf('Available 9:00 AM–5:00 PM');
+    expect(availableIndex).toBeGreaterThan(deliverIndex);
+    expect(availableIndex).toBeGreaterThan(collectIndex);
+    // Nothing "Available"-shaped sits between the two blocks (i.e. on pickup).
+    expect(text.slice(collectIndex, deliverIndex)).not.toMatch(/Available/);
+  });
+
+  it('renders nothing extra when no window was set — "attempt at any time" stays silent, not an empty line', async () => {
+    apiGet.mockResolvedValue(shippingJob());
+    const el = await mount();
+    expect(el.textContent).not.toMatch(/Available \d/);
+  });
+
+  it('does not crash when availabilityWindows is missing from the wire entirely', async () => {
+    const raw = JSON.parse(JSON.stringify(shippingJob())) as Record<string, unknown>;
+    delete raw.availabilityWindows;
+    apiGet.mockResolvedValue(raw);
+
+    let threw = false;
+    try {
+      await mount();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    expect(container!.textContent).toContain('BML-ABCD2345');
+  });
+});
+
+/**
+ * SHIP-B Bug 1 (owner ruling, conv-7ffab9): address/pin are no longer
+ * withheld pre-acceptance on this leg's own door end — only name/phone stay
+ * gated, tracked by the new `contactUnlocked`. `addressUnlocked` stays true
+ * for this leg's own ends but is still the only signal an OLDER api deploy
+ * sends, so the page must fall back to it when `contactUnlocked` is absent.
+ */
+describe('DriverShippingJobPage — name/phone gate uses contactUnlocked, not addressUnlocked (SHIP-B Bug 1)', () => {
+  it('shows the name/phone caption when contactUnlocked is false, even though addressUnlocked is true', async () => {
+    apiGet.mockResolvedValue(shippingJob({ addressUnlocked: true, contactUnlocked: false }));
+    const el = await mount();
+    expect(el.textContent).toMatch(/The name and phone number appear once you accept\./);
+    expect(el.textContent).not.toMatch(/address and phone number/);
+  });
+
+  it('hides the caption once contactUnlocked is true', async () => {
+    apiGet.mockResolvedValue(shippingJob({ addressUnlocked: true, contactUnlocked: true }));
+    const el = await mount();
+    expect(el.textContent).not.toMatch(/appear once you accept/);
+  });
+
+  it('falls back to addressUnlocked when contactUnlocked is absent from the wire (pre-fix API)', async () => {
+    const raw = JSON.parse(JSON.stringify(shippingJob({ addressUnlocked: false }))) as Record<string, unknown>;
+    delete raw.contactUnlocked;
+    apiGet.mockResolvedValue(raw);
+    const el = await mount();
+    expect(el.textContent).toMatch(/appear once you accept/);
+  });
+});
+
+/**
+ * SHIP-B Bug 1: the route-map caption used to key off `addressUnlocked`,
+ * which meant "some stop is still area-only" only because every door end was
+ * gated alike. Now this driver's own two ends are always unlocked, so the
+ * caption must check the actual OTHER-leg stop instead, or it would go
+ * silently stale (claim a stop is hidden when it is actually shown, or stay
+ * silent about one that genuinely still is).
+ */
+describe('DriverShippingJobPage — route map "other end" caption tracks the actual stop, not addressUnlocked (SHIP-B Bug 1)', () => {
+  it('shows the caption when an other-leg stop is still area-only, even though addressUnlocked is true', async () => {
+    // A genuinely hidden stop has neither a pin nor an address — same as
+    // today's real server shape for a door end this driver has no claim to.
+    const hiddenOtherLegDoor = place({ address: null, pinnedLocation: null });
+    apiGet.mockResolvedValue(
+      shippingJob({
+        addressUnlocked: true,
+        routeStops: [
+          hiddenOtherLegDoor,
+          place({ pinnedLocation: { latitude: 17.5, longitude: -88.2 } }),
+          place({ pinnedLocation: { latitude: 17.6, longitude: -88.3 } }),
+        ],
+      }),
+    );
+    const el = await mount();
+    expect(el.textContent).toMatch(/The other end shows its area above until you accept\./);
+  });
+
+  it('hides the caption once every route stop has a real address, even if addressUnlocked were false and a stop has no pin', async () => {
+    // A stop with no pin is dropped from the map's visible points (so
+    // points.length < routeStops.length is true, same shape as a genuinely
+    // hidden stop) — but its address IS present, so this is not a hidden
+    // stop, and the caption must stay silent rather than keying off the pin.
+    const unpinnedButRevealed = place({ pinnedLocation: null });
+    apiGet.mockResolvedValue(
+      shippingJob({
+        addressUnlocked: false,
+        routeStops: [unpinnedButRevealed, place({ pinnedLocation: { latitude: 17.5, longitude: -88.2 } })],
+      }),
+    );
+    const el = await mount();
+    expect(el.textContent).not.toMatch(/shows its area above/);
   });
 });
 

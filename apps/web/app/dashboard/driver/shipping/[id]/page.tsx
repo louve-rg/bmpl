@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../../lib/api';
 import { tripMapPoints } from '../../../../../lib/trip-map';
+import { formatWindow } from '../../../../../lib/availability-window';
 import { uploadFile } from '../../../../../lib/uploads';
 import { isExceptionBlocked, pickupPhotoSection, reportIssueState } from '../../../../../lib/driver-shipping-job';
 import { Alert, Badge, Button, Card, Label, PageHeader, Spinner, StatusBadge, StickyActionBar } from '../../../../../components/ui';
@@ -68,7 +69,12 @@ interface Place {
   area: string | null;
   instructions: string | null;
   navigationUrl: string | null;
-  /** Sent for a terminal end always, for a door end only after acceptance. */
+  /**
+   * SHIP-B Bug 1 (owner ruling, conv-7ffab9): a terminal end is always
+   * pinned; a door end belonging to THIS driver's own leg is now pinned from
+   * offer time too — only a door end belonging to a DIFFERENT leg stays
+   * area-only (null) regardless of this driver's own acceptance state.
+   */
   pinnedLocation?: { latitude: number; longitude: number } | null;
 }
 
@@ -80,7 +86,23 @@ interface ShippingJob {
   statusLabel: string;
   nextActionLabel: string | null;
   modeLabel: string;
+  /**
+   * SHIP-B Bug 1 (owner ruling, conv-7ffab9): now always true for this leg's
+   * own pickup/dropoff — the owner overruled withholding address until
+   * acceptance, so there is nothing left to unlock there. Kept rather than
+   * removed, since `routeStops`'s OTHER-leg door end still needs a true
+   * acceptance-era "address withheld" signal and older API deploys still
+   * send this field with its old meaning.
+   */
   addressUnlocked: boolean;
+  /**
+   * SHIP-B Bug 1: the narrower, still-acceptance-gated signal for just name
+   * and phone on this leg's own pickup/dropoff. Optional/additive — absent
+   * on an API deploy that predates this change, where `addressUnlocked`
+   * itself still carried this meaning; fall back to it in that case (see
+   * the caption below), rather than assuming contact is unlocked.
+   */
+  contactUnlocked?: boolean;
   pickup: Place | null;
   dropoff: Place | null;
   /**
@@ -122,6 +144,18 @@ interface ShippingJob {
    * today's no-code behaviour.
    */
   requiresPickupPin?: boolean;
+  /**
+   * SHIP-B/SHIP-C: when someone will actually be there for pickup/delivery
+   * — already filtered server-side to the role(s) this leg is governed by
+   * (SENDER for FIRST_MILE/DIRECT pickup, RECIPIENT for LAST_MILE/DIRECT
+   * dropoff), so every entry here applies to THIS leg's own action point.
+   * startTime/endTime are bare "HH:MM" Belize-local wall-clock strings, not
+   * timestamps — see lib/availability-window.ts for why that must never go
+   * through `Date`. Optional/additive, same cross-deploy reasoning as
+   * routeStops/requiresPickupPin above; absent or empty means no window was
+   * set, i.e. today's "attempt at any time" behaviour.
+   */
+  availabilityWindows?: Array<{ role: 'SENDER' | 'RECIPIENT'; startTime: string; endTime: string }>;
 }
 
 const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
@@ -157,7 +191,22 @@ function actionFor(
   }
 }
 
-function PlaceBlock({ step, label, place, locked }: { step: number; label: string; place: Place | null; locked: boolean }) {
+function PlaceBlock({
+  step,
+  label,
+  place,
+  locked,
+  windows = [],
+}: {
+  step: number;
+  label: string;
+  place: Place | null;
+  locked: boolean;
+  /** SHIP-C: this leg's own governing-role windows, already scoped to this
+   *  action point by the caller (pickup gets SENDER's, dropoff gets
+   *  RECIPIENT's) — empty when none apply (a hub end, or none set). */
+  windows?: Array<{ startTime: string; endTime: string }>;
+}) {
   if (!place) return null;
   return (
     <Card className="p-4 sm:p-5">
@@ -168,14 +217,24 @@ function PlaceBlock({ step, label, place, locked }: { step: number; label: strin
       {place.address && <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">{place.address}</p>}
       {place.area && place.name && <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">{place.area}</p>}
 
+      {windows.length > 0 && (
+        <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text-muted)]">
+          Available {windows.map(formatWindow).join(', ')}
+        </p>
+      )}
+
       {place.instructions && (
         <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">{place.instructions}</p>
       )}
 
       {locked && place.kind === 'ADDRESS' && (
         // Said plainly rather than shown as an error. The driver has not done
-        // anything wrong; they simply have not taken the job yet.
-        <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted)]">The full address and phone number appear once you accept.</p>
+        // anything wrong; they simply have not taken the job yet. SHIP-B Bug
+        // 1: address is no longer withheld pre-acceptance (the owner
+        // overruled that), so this caption is now about name/phone only —
+        // saying "address" here would be a lie the moment `place.address`
+        // itself is already showing above.
+        <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted)]">The name and phone number appear once you accept.</p>
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -353,8 +412,20 @@ export default function DriverShippingJobPage() {
           </div>
 
           <div className="mt-4 space-y-3">
-            <PlaceBlock step={1} label="Collect from" place={job.pickup} locked={!job.addressUnlocked} />
-            <PlaceBlock step={2} label="Deliver to" place={job.dropoff} locked={!job.addressUnlocked} />
+            <PlaceBlock
+              step={1}
+              label="Collect from"
+              place={job.pickup}
+              locked={!(job.contactUnlocked ?? job.addressUnlocked)}
+              windows={(job.availabilityWindows ?? []).filter((w) => w.role === 'SENDER')}
+            />
+            <PlaceBlock
+              step={2}
+              label="Deliver to"
+              place={job.dropoff}
+              locked={!(job.contactUnlocked ?? job.addressUnlocked)}
+              windows={(job.availabilityWindows ?? []).filter((w) => w.role === 'RECIPIENT')}
+            />
 
             {/* The map draws only the pins the server sent: a terminal is a
                 public place and arrives pinned before acceptance; a door end
@@ -368,12 +439,25 @@ export default function DriverShippingJobPage() {
                 never load for a driver on data who just wants the words. */}
             {(() => {
               const routeStops = job.routeStops ?? [];
-              const points = tripMapPoints(routeStops);
+              // SHIP-C: role by pin match against THIS leg's own two action
+              // points, not by array position — see tripMapPoints' own
+              // comment. Without this, a multi-hop shipment could label an
+              // earlier or later leg's hub as this driver's own Collect/
+              // Deliver point, implying work that is not theirs.
+              const points = tripMapPoints(routeStops, { pickup: job.pickup, dropoff: job.dropoff });
               if (points.length === 0) return null;
+              // SHIP-B Bug 1: `addressUnlocked` used to track exactly this —
+              // "some stop is still area-only" — because it gated every door
+              // end alike. Now it's always true for this leg's own two ends,
+              // so it no longer says anything about the OTHER leg's door,
+              // which is unaffected by the owner's ruling and still genuinely
+              // area-only until accepted. Check the actual stop instead of
+              // the stale flag.
+              const otherEndStillHidden = routeStops.some((s) => s.kind === 'ADDRESS' && s.address == null);
               return (
                 <Card className="p-4 sm:p-5">
                   <ExpandableRouteMap points={points} title={`${job.reference} · route`} />
-                  {points.length < routeStops.length && !job.addressUnlocked && (
+                  {points.length < routeStops.length && otherEndStillHidden && (
                     <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">The other end shows its area above until you accept.</p>
                   )}
                 </Card>

@@ -13,11 +13,14 @@ export interface MapPoint {
   latitude: number;
   longitude: number;
   label: string;
+  /** ADDRESS (a door) vs HUB (a terminal) — lets the map draw them differently. Absent on an older/non-shipment caller. */
+  kind?: 'ADDRESS' | 'HUB';
 }
 
 interface PlaceLike {
   name: string | null;
   area: string | null;
+  kind?: 'ADDRESS' | 'HUB';
   pinnedLocation?: { latitude: number; longitude: number } | null;
 }
 
@@ -27,23 +30,39 @@ function pinOf(place: PlaceLike | null | undefined): { latitude: number; longitu
   return pin;
 }
 
+/** Same pin (both come from the same server-sent record — exact equality, no epsilon needed). */
+function samePin(
+  a: { latitude: number; longitude: number } | null,
+  b: { latitude: number; longitude: number } | null,
+): boolean {
+  return a != null && b != null && a.latitude === b.latitude && a.longitude === b.longitude;
+}
+
 /**
- * The pins the payload actually contains, labelled with the job's own words —
- * in whatever order the stops arrive: first is the collection, last is the
- * delivery, and anything in between (BMPL-190: a real hub the shipment
- * actually routes through, never invented) is "Via". A two-stop leg — the
- * original BMPL-136 shape — is just the no-middle case of this, not a
- * different function.
+ * The pins the payload actually contains, labelled with the job's own words.
  *
- * The role word is assigned by position among the stops that are actually
- * VISIBLE (carry a pin), never by original array position (BMPL-198): a
- * door end withheld pre-acceptance still occupies its array slot, and
- * labelling by that slot handed its neighbour "Via" instead of "Collect" (or
- * "Deliver") the moment the real first or last stop was the one filtered
- * out. This changes only which word sits beside a stop already being shown —
- * it does not reveal anything a hidden stop wasn't already hiding.
+ * SHIP-C: `myEnds`, when given, names the leg's OWN pickup and dropoff place
+ * — exactly `job.pickup`/`job.dropoff`, the two points this driver is
+ * actually responsible for. A stop is "Collect" or "Deliver" only when its
+ * pin matches one of those two; everything else is "Via", regardless of
+ * where it sits in the array. Without `myEnds` (the two-stop marketplace
+ * caller, which has no other-leg stops to confuse this with), role falls
+ * back to position: first visible is Collect, last is Deliver, anything
+ * between is Via — the original BMPL-136/190/198 behaviour, unchanged.
+ *
+ * Why position alone is wrong for a multi-leg shipment route: `routeStops`
+ * spans the WHOLE shipment, sender door to recipient door, across every leg
+ * — not just this driver's own. A LAST_MILE driver's own pickup is THEIR
+ * origin hub, which can be the second or third hub in that full chain, not
+ * the first one a position-based "first visible stop" would grab; the
+ * mirror mistake hits a FIRST_MILE driver's "Deliver". Matching by pin
+ * against this driver's own two points is immune to how many other legs'
+ * hubs sit before or after them.
  */
-export function tripMapPoints(stops: Array<PlaceLike | null | undefined>): MapPoint[] {
+export function tripMapPoints(
+  stops: Array<PlaceLike | null | undefined>,
+  myEnds?: { pickup?: PlaceLike | null; dropoff?: PlaceLike | null },
+): MapPoint[] {
   const visible = stops
     .map((place) => {
       const pin = pinOf(place);
@@ -51,10 +70,28 @@ export function tripMapPoints(stops: Array<PlaceLike | null | undefined>): MapPo
     })
     .filter((v): v is { place: PlaceLike | null | undefined; pin: { latitude: number; longitude: number } } => v !== null);
 
+  const pickupPin = myEnds ? pinOf(myEnds.pickup) : null;
+  const dropoffPin = myEnds ? pinOf(myEnds.dropoff) : null;
+
   return visible.map(({ place, pin }, i) => {
-    const role = i === 0 ? 'Collect' : i === visible.length - 1 ? 'Deliver' : 'Via';
+    const role = myEnds
+      ? samePin(pin, pickupPin)
+        ? 'Collect'
+        : samePin(pin, dropoffPin)
+          ? 'Deliver'
+          : 'Via'
+      : i === 0
+        ? 'Collect'
+        : i === visible.length - 1
+          ? 'Deliver'
+          : 'Via';
     const where = place?.name ?? place?.area;
-    return { latitude: pin.latitude, longitude: pin.longitude, label: where ? `${role}: ${where}` : role };
+    return {
+      latitude: pin.latitude,
+      longitude: pin.longitude,
+      label: where ? `${role}: ${where}` : role,
+      kind: place?.kind,
+    };
   });
 }
 
