@@ -54,6 +54,9 @@ const LEG_ROWS = {
       description: true,
       originCity: true, originDistrict: true, originLatitude: true, originLongitude: true,
       destinationCity: true, destinationDistrict: true, destinationLatitude: true, destinationLongitude: true,
+      // SHIP-B: the sender/recipient windows this leg is governed by — see
+      // fromLeg's own comment for which role applies to which leg kind.
+      availabilityWindows: { select: { role: true, startTime: true, endTime: true } },
     },
   },
 } satisfies Prisma.ShipmentLegInclude;
@@ -277,10 +280,12 @@ export class DriverJobFeedService {
       status,
       statusLabel: DELIVERY_STATUS_LABELS[status],
       reference: d.vendorOrder.order.orderNumber,
-      pickup: { name: d.vendorOrder.vendorProfile.businessName, area: area(pickup) },
+      pickup: { name: d.vendorOrder.vendorProfile.businessName, area: area(pickup), kind: 'ADDRESS' },
       // The far end stays an AREA until the driver accepts — same rule the
       // delivery feed already applies, carried over rather than re-decided.
-      dropoff: { name: null, area: area(dropoff) },
+      // A marketplace job never touches a logistics hub, so both ends are
+      // always ADDRESS — a vendor's own place of business, not a terminal.
+      dropoff: { name: null, area: area(dropoff), kind: 'ADDRESS' },
       load: `${d.vendorOrder.itemCount} ${d.vendorOrder.itemCount === 1 ? 'item' : 'items'}`,
       feeMinor: Number(d.feeMinor),
       assignedAt: d.assignedAt,
@@ -312,14 +317,28 @@ export class DriverJobFeedService {
 
     // First mile: sender's door to a terminal. Last mile: the mirror image.
     // Direct: sender's door straight to the recipient's door, no terminal.
-    const senderArea = { name: null, area: area({ city: s.originCity, district: s.originDistrict }) };
-    const recipientArea = { name: null, area: area({ city: s.destinationCity, district: s.destinationDistrict }) };
+    const senderArea = { name: null, area: area({ city: s.originCity, district: s.originDistrict }), kind: 'ADDRESS' as const };
+    const recipientArea = { name: null, area: area({ city: s.destinationCity, district: s.destinationDistrict }), kind: 'ADDRESS' as const };
     const door = kind === 'LAST_MILE' ? recipientArea : senderArea;
     const hub = kind === 'FIRST_MILE'
-      ? { name: l.destinationHub?.name ?? null, area: area(l.destinationHub) }
-      : { name: l.originHub?.name ?? null, area: area(l.originHub) };
+      ? { name: l.destinationHub?.name ?? null, area: area(l.destinationHub), kind: 'HUB' as const }
+      : { name: l.originHub?.name ?? null, area: area(l.originHub), kind: 'HUB' as const };
 
     const pieces = s.pieces ?? 1;
+    // SHIP-B: only the role(s) this specific leg is actually governed by —
+    // same rule apps/web's AvailabilityWindows.tsx governingLeg() already
+    // applies: a FIRST_MILE/DIRECT leg collects, so only SENDER matters to
+    // it; a LAST_MILE/DIRECT leg delivers, so only RECIPIENT does. Shown
+    // from offer time, not gated on acceptance — a time window is not
+    // personally identifying, and a driver deciding whether to take the job
+    // needs to know whether they can make it before committing.
+    const governingRoles: Array<'SENDER' | 'RECIPIENT'> = [
+      ...(kind === 'FIRST_MILE' || kind === 'DIRECT' ? (['SENDER'] as const) : []),
+      ...(kind === 'LAST_MILE' || kind === 'DIRECT' ? (['RECIPIENT'] as const) : []),
+    ];
+    const availabilityWindows = s.availabilityWindows
+      .filter((w) => governingRoles.includes(w.role))
+      .map((w) => ({ role: w.role, startTime: w.startTime, endTime: w.endTime }));
     return {
       id: l.id,
       kind,
@@ -338,6 +357,7 @@ export class DriverJobFeedService {
       offerExpiresAt: l.offerExpiresAt,
       queuePosition: l.driverQueuePosition,
       isTest: s.isTest,
+      availabilityWindows,
     };
   }
 

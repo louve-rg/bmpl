@@ -80,6 +80,9 @@ const LEG_INCLUDE = {
         orderBy: { sequence: 'asc' },
         select: { sequence: true, kind: true, mode: true, status: true, originHub: { select: HUB_SELECT }, destinationHub: { select: HUB_SELECT } },
       },
+      // SHIP-B: the sender/recipient windows this leg is governed by — see
+      // serialize()'s own comment for which role applies to which leg kind.
+      availabilityWindows: { select: { role: true, startTime: true, endTime: true } },
     },
   },
 } satisfies Prisma.ShipmentLegInclude;
@@ -674,6 +677,17 @@ export class ShipmentDriverService {
         leg.pickupVerificationStatus === 'PENDING' &&
         !leg.pickupPinGrandfathered,
       pickupPhotoUrls,
+      // SHIP-B: only the role(s) THIS leg's own task is governed by — a
+      // FIRST_MILE/DIRECT leg collects, so only SENDER matters to it; a
+      // LAST_MILE/DIRECT leg delivers, so only RECIPIENT does. Same rule
+      // apps/web's AvailabilityWindows.tsx governingLeg() already applies,
+      // not a new one. Shown from offer time, not gated on `committed` —
+      // a time window is not personally identifying, and a driver deciding
+      // whether to take the job needs to know whether they can make it
+      // before committing to it.
+      availabilityWindows: s.availabilityWindows
+        .filter((w) => (senderIsMine && w.role === 'SENDER') || (recipientIsMine && w.role === 'RECIPIENT'))
+        .map((w) => ({ role: w.role, startTime: w.startTime, endTime: w.endTime })),
     };
   }
 

@@ -57,6 +57,14 @@ export interface DriverJobPlace {
   name: string | null;
   /** Always safe to show: the town/district, never the street. */
   area: string | null;
+  /**
+   * SHIP-B: whether this stop is a public terminal (always nameable, never
+   * gated) or a private address (name/street withheld pre-acceptance — see
+   * the detail view at /driver/shipping-jobs/:id for the full, acceptance-
+   * gated shape). Lets the list say "this end is a terminal" honestly
+   * without exposing anything new; area/name here are unchanged.
+   */
+  kind: 'ADDRESS' | 'HUB';
 }
 
 /**
@@ -85,6 +93,16 @@ export interface DriverJobSummary {
   offerExpiresAt: Date | string | null;
   queuePosition: number | null;
   isTest: boolean;
+  /**
+   * SHIP-B: the sender/recipient window(s) that govern this job, filtered to
+   * whichever role this specific leg's own task is — a FIRST_MILE/DIRECT
+   * leg cares about SENDER only, LAST_MILE/DIRECT about RECIPIENT. Absent
+   * (undefined) on a MARKETPLACE job, which has no such concept; an empty
+   * array on a shipment leg means no restriction was set — attempt any
+   * time, same meaning the customer's own form gives it. Not gated on
+   * acceptance: a time window is not personally identifying.
+   */
+  availabilityWindows?: Array<{ role: 'SENDER' | 'RECIPIENT'; startTime: string; endTime: string }>;
 }
 
 /** Kept structural rather than importing, to avoid a cycle with driver-queue. */
