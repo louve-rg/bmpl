@@ -174,6 +174,68 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
 });
 
 /**
+ * SHIP-B/SHIP-C: availabilityWindows is "HH:MM" Belize-local wall-clock
+ * strings, never a timestamp — must render as given, never through `Date`.
+ * An overnight window (endTime < startTime) is legal and must read clearly,
+ * not as an invalid or empty range. The server already scopes the array to
+ * the role(s) that govern THIS leg, so the page only needs to split
+ * SENDER -> pickup block / RECIPIENT -> dropoff block.
+ */
+describe('DriverShippingJobPage — availability windows (SHIP-C)', () => {
+  it('shows the pickup window beside Collect from, scoped to SENDER', async () => {
+    apiGet.mockResolvedValue(
+      shippingJob({ availabilityWindows: [{ role: 'SENDER', startTime: '08:00', endTime: '12:00' }] }),
+    );
+    const el = await mount();
+    expect(el.textContent).toMatch(/Available 8:00 AM–12:00 PM/);
+  });
+
+  it('shows an overnight window clearly rather than as an invalid range', async () => {
+    apiGet.mockResolvedValue(
+      shippingJob({ availabilityWindows: [{ role: 'SENDER', startTime: '22:00', endTime: '02:00' }] }),
+    );
+    const el = await mount();
+    expect(el.textContent).toMatch(/Available 10:00 PM–2:00 AM \(overnight\)/);
+  });
+
+  it('a RECIPIENT window appears beside Deliver to, never beside Collect from', async () => {
+    apiGet.mockResolvedValue(
+      shippingJob({ availabilityWindows: [{ role: 'RECIPIENT', startTime: '09:00', endTime: '17:00' }] }),
+    );
+    const el = await mount();
+    const text = el.textContent ?? '';
+    const collectIndex = text.indexOf('Collect from');
+    const deliverIndex = text.indexOf('Deliver to');
+    const availableIndex = text.indexOf('Available 9:00 AM–5:00 PM');
+    expect(availableIndex).toBeGreaterThan(deliverIndex);
+    expect(availableIndex).toBeGreaterThan(collectIndex);
+    // Nothing "Available"-shaped sits between the two blocks (i.e. on pickup).
+    expect(text.slice(collectIndex, deliverIndex)).not.toMatch(/Available/);
+  });
+
+  it('renders nothing extra when no window was set — "attempt at any time" stays silent, not an empty line', async () => {
+    apiGet.mockResolvedValue(shippingJob());
+    const el = await mount();
+    expect(el.textContent).not.toMatch(/Available \d/);
+  });
+
+  it('does not crash when availabilityWindows is missing from the wire entirely', async () => {
+    const raw = JSON.parse(JSON.stringify(shippingJob())) as Record<string, unknown>;
+    delete raw.availabilityWindows;
+    apiGet.mockResolvedValue(raw);
+
+    let threw = false;
+    try {
+      await mount();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    expect(container!.textContent).toContain('BML-ABCD2345');
+  });
+});
+
+/**
  * MDF-560: the API requires a collection code (`requiresPickupPin`) on a
  * leg that genuinely starts at a door, but the screen only ever rendered a
  * code field for handoff — a driver confirming pickup on such a leg had no

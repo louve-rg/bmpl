@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { shippingApi, type ShipmentLegView, type ShipmentView } from '../../lib/shipping';
+import { formatWindow } from '../../lib/availability-window';
 import { Alert, Button } from '../ui';
 import type { ApiError } from '../../lib/api';
 
@@ -37,23 +38,6 @@ function windowsFor(shipment: ShipmentView, role: Role): Row[] {
   return (shipment.availabilityWindows ?? [])
     .filter((w) => w.role === role)
     .map((w) => ({ startTime: w.startTime, endTime: w.endTime }));
-}
-
-function formatClock(hhmm: string): string {
-  const parts = hhmm.split(':');
-  const h = Number(parts[0] ?? 0);
-  const m = Number(parts[1] ?? 0);
-  const period = h >= 12 ? 'PM' : 'AM';
-  const hour12 = h % 12 === 0 ? 12 : h % 12;
-  return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
-}
-
-/** Overnight (22:00-02:00) is a legitimate, deliberately-supported shape —
- *  dispatch handles the wraparound; this only ever describes it, never
- *  refuses it. */
-function formatWindow(w: Row): string {
-  const overnight = w.endTime < w.startTime;
-  return `${formatClock(w.startTime)}–${formatClock(w.endTime)}${overnight ? ' (overnight)' : ''}`;
 }
 
 function RoleEditor({ label, rows, onChange }: { label: string; rows: Row[]; onChange: (rows: Row[]) => void }) {

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api, type ApiError } from '../../../../../lib/api';
 import { tripMapPoints } from '../../../../../lib/trip-map';
+import { formatWindow } from '../../../../../lib/availability-window';
 import { uploadFile } from '../../../../../lib/uploads';
 import { isExceptionBlocked, pickupPhotoSection, reportIssueState } from '../../../../../lib/driver-shipping-job';
 import { Alert, Badge, Button, Card, Label, PageHeader, Spinner, StatusBadge, StickyActionBar } from '../../../../../components/ui';
@@ -122,6 +123,18 @@ interface ShippingJob {
    * today's no-code behaviour.
    */
   requiresPickupPin?: boolean;
+  /**
+   * SHIP-B/SHIP-C: when someone will actually be there for pickup/delivery
+   * — already filtered server-side to the role(s) this leg is governed by
+   * (SENDER for FIRST_MILE/DIRECT pickup, RECIPIENT for LAST_MILE/DIRECT
+   * dropoff), so every entry here applies to THIS leg's own action point.
+   * startTime/endTime are bare "HH:MM" Belize-local wall-clock strings, not
+   * timestamps — see lib/availability-window.ts for why that must never go
+   * through `Date`. Optional/additive, same cross-deploy reasoning as
+   * routeStops/requiresPickupPin above; absent or empty means no window was
+   * set, i.e. today's "attempt at any time" behaviour.
+   */
+  availabilityWindows?: Array<{ role: 'SENDER' | 'RECIPIENT'; startTime: string; endTime: string }>;
 }
 
 const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
@@ -157,7 +170,22 @@ function actionFor(
   }
 }
 
-function PlaceBlock({ step, label, place, locked }: { step: number; label: string; place: Place | null; locked: boolean }) {
+function PlaceBlock({
+  step,
+  label,
+  place,
+  locked,
+  windows = [],
+}: {
+  step: number;
+  label: string;
+  place: Place | null;
+  locked: boolean;
+  /** SHIP-C: this leg's own governing-role windows, already scoped to this
+   *  action point by the caller (pickup gets SENDER's, dropoff gets
+   *  RECIPIENT's) — empty when none apply (a hub end, or none set). */
+  windows?: Array<{ startTime: string; endTime: string }>;
+}) {
   if (!place) return null;
   return (
     <Card className="p-4 sm:p-5">
@@ -167,6 +195,12 @@ function PlaceBlock({ step, label, place, locked }: { step: number; label: strin
       <p className="mt-1 break-words text-base font-semibold text-[color:var(--bmpl-text)]">{place.name ?? place.area ?? '—'}</p>
       {place.address && <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">{place.address}</p>}
       {place.area && place.name && <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">{place.area}</p>}
+
+      {windows.length > 0 && (
+        <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text-muted)]">
+          Available {windows.map(formatWindow).join(', ')}
+        </p>
+      )}
 
       {place.instructions && (
         <p className="mt-2 rounded-bmpl-md bg-amber-50 px-3 py-2 text-sm text-amber-900">{place.instructions}</p>
@@ -353,8 +387,20 @@ export default function DriverShippingJobPage() {
           </div>
 
           <div className="mt-4 space-y-3">
-            <PlaceBlock step={1} label="Collect from" place={job.pickup} locked={!job.addressUnlocked} />
-            <PlaceBlock step={2} label="Deliver to" place={job.dropoff} locked={!job.addressUnlocked} />
+            <PlaceBlock
+              step={1}
+              label="Collect from"
+              place={job.pickup}
+              locked={!job.addressUnlocked}
+              windows={(job.availabilityWindows ?? []).filter((w) => w.role === 'SENDER')}
+            />
+            <PlaceBlock
+              step={2}
+              label="Deliver to"
+              place={job.dropoff}
+              locked={!job.addressUnlocked}
+              windows={(job.availabilityWindows ?? []).filter((w) => w.role === 'RECIPIENT')}
+            />
 
             {/* The map draws only the pins the server sent: a terminal is a
                 public place and arrives pinned before acceptance; a door end
