@@ -109,3 +109,45 @@ describe('DriverJobsPage — list carries kind and availability windows (SHIP-B)
     expect(container.textContent).not.toMatch(/Available \d/);
   });
 });
+
+/**
+ * SHIP-B Bug 1 (list): mirrors PlaceBlock's own rule on the detail page —
+ * name ?? area as the primary line, an address line when the server sends
+ * one, and area again underneath only when BOTH a name and an area exist
+ * (never shown twice, never shown alone when there's nothing to pair it
+ * with). The server is the sole gate on whether `address` is populated at
+ * all (offer-time for this job's own door end, still gated for name/phone)
+ * — the page does not add a second acceptance check of its own.
+ */
+describe('DriverJobsPage — list shows a door end\'s real address (SHIP-B Bug 1)', () => {
+  it('shows the address beneath the name, and the area beneath that', async () => {
+    const { container } = await renderPage([job({ pickup: { name: 'Jane Doe', area: 'Belize City', kind: 'ADDRESS', address: '12 Albert St' } })]);
+    const text = container.textContent ?? '';
+    const nameAt = text.indexOf('Collect Jane Doe');
+    const addressAt = text.indexOf('12 Albert St', nameAt);
+    const areaAt = text.indexOf('Belize City', addressAt);
+    expect(nameAt).toBeGreaterThan(-1);
+    expect(addressAt).toBeGreaterThan(nameAt);
+    expect(areaAt).toBeGreaterThan(addressAt);
+  });
+
+  it('renders exactly as before when address is absent from the wire — name/area only, no crash', async () => {
+    const raw = JSON.parse(JSON.stringify(job())) as Record<string, unknown>;
+    const el = await renderPage([raw]);
+    expect(el.container.textContent).toMatch(/Collect Jane Doe/);
+    expect(el.container.textContent).not.toMatch(/12 Albert St/);
+  });
+
+  it('does not repeat the area on its own line when there is no name to pair it with', async () => {
+    // A HUB end always has a name, so this exercises an ADDRESS end with no
+    // name yet (not accepted) but an area — the one-line case.
+    const { container } = await renderPage([
+      job({ dropoff: { name: null, area: 'Dangriga', kind: 'ADDRESS', address: null } }),
+    ]);
+    const text = container.textContent ?? '';
+    expect(text).toMatch(/Deliver Dangriga/);
+    // Exactly one occurrence of "Dangriga" — the primary line's fallback,
+    // not a second, redundant area line underneath it.
+    expect(text.split('Dangriga').length - 1).toBe(1);
+  });
+});

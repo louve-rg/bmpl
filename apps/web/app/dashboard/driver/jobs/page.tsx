@@ -49,8 +49,26 @@ interface JobSummary {
   // kind/availabilityWindows are additive (SHIP-B): optional so a frontend
   // deployed ahead of the API still renders, just without the Terminal tag
   // or the window text.
-  pickup: { name: string | null; area: string | null; kind?: 'ADDRESS' | 'HUB' };
-  dropoff: { name: string | null; area: string | null; kind?: 'ADDRESS' | 'HUB' };
+  //
+  // SHIP-B Bug 1 (list): address/phone/pinnedLocation/navigationUrl are the
+  // same fields PlaceBlock already renders on the detail page — this list
+  // is scoped to one driver's own offered/assigned work (never a shared
+  // board), so a shipment leg's own door end reveals address/coordinates
+  // from offer time; only name/phone wait for acceptance. Optional/additive,
+  // same cross-deploy reasoning as kind above — absent means render exactly
+  // as before this field existed (name/area only).
+  pickup: {
+    name: string | null;
+    area: string | null;
+    kind?: 'ADDRESS' | 'HUB';
+    address?: string | null;
+  };
+  dropoff: {
+    name: string | null;
+    area: string | null;
+    kind?: 'ADDRESS' | 'HUB';
+    address?: string | null;
+  };
   availabilityWindows?: Array<{ role: 'SENDER' | 'RECIPIENT'; startTime: string; endTime: string }>;
   load: string;
   status: string;
@@ -288,11 +306,19 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
 
             {/* Both ends on their own lines. On a 320px screen a single
                 "A → B" line wraps in the middle of an address and reads as one
-                place; two labelled lines never do. */}
+                place; two labelled lines never do.
+                SHIP-B Bug 1: name ?? area as the primary line, an address
+                line when present, and area again underneath only when BOTH
+                a name and an area exist (so area is never shown twice) —
+                the exact rule PlaceBlock already uses on the detail page. */}
             <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text-muted)]">
               <span className="text-[color:var(--bmpl-text-faint)]">Collect</span> {from ?? '—'}
               {job.pickup.kind === 'HUB' && <span className="text-[color:var(--bmpl-text-faint)]"> · Terminal</span>}
             </p>
+            {job.pickup.address && <p className="break-words text-xs text-[color:var(--bmpl-text-faint)]">{job.pickup.address}</p>}
+            {job.pickup.area && job.pickup.name && (
+              <p className="break-words text-xs text-[color:var(--bmpl-text-faint)]">{job.pickup.area}</p>
+            )}
             {pickupWindows.length > 0 && (
               <p className="break-words text-xs text-[color:var(--bmpl-text-faint)]">
                 Available {pickupWindows.map(formatWindow).join(', ')}
@@ -302,6 +328,10 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
               <span className="text-[color:var(--bmpl-text-faint)]">Deliver</span> {to ?? '—'}
               {job.dropoff.kind === 'HUB' && <span className="text-[color:var(--bmpl-text-faint)]"> · Terminal</span>}
             </p>
+            {job.dropoff.address && <p className="break-words text-xs text-[color:var(--bmpl-text-faint)]">{job.dropoff.address}</p>}
+            {job.dropoff.area && job.dropoff.name && (
+              <p className="break-words text-xs text-[color:var(--bmpl-text-faint)]">{job.dropoff.area}</p>
+            )}
             {dropoffWindows.length > 0 && (
               <p className="break-words text-xs text-[color:var(--bmpl-text-faint)]">
                 Available {dropoffWindows.map(formatWindow).join(', ')}
