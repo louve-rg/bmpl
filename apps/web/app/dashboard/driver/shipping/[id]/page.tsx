@@ -69,7 +69,12 @@ interface Place {
   area: string | null;
   instructions: string | null;
   navigationUrl: string | null;
-  /** Sent for a terminal end always, for a door end only after acceptance. */
+  /**
+   * SHIP-B Bug 1 (owner ruling, conv-7ffab9): a terminal end is always
+   * pinned; a door end belonging to THIS driver's own leg is now pinned from
+   * offer time too — only a door end belonging to a DIFFERENT leg stays
+   * area-only (null) regardless of this driver's own acceptance state.
+   */
   pinnedLocation?: { latitude: number; longitude: number } | null;
 }
 
@@ -81,7 +86,23 @@ interface ShippingJob {
   statusLabel: string;
   nextActionLabel: string | null;
   modeLabel: string;
+  /**
+   * SHIP-B Bug 1 (owner ruling, conv-7ffab9): now always true for this leg's
+   * own pickup/dropoff — the owner overruled withholding address until
+   * acceptance, so there is nothing left to unlock there. Kept rather than
+   * removed, since `routeStops`'s OTHER-leg door end still needs a true
+   * acceptance-era "address withheld" signal and older API deploys still
+   * send this field with its old meaning.
+   */
   addressUnlocked: boolean;
+  /**
+   * SHIP-B Bug 1: the narrower, still-acceptance-gated signal for just name
+   * and phone on this leg's own pickup/dropoff. Optional/additive — absent
+   * on an API deploy that predates this change, where `addressUnlocked`
+   * itself still carried this meaning; fall back to it in that case (see
+   * the caption below), rather than assuming contact is unlocked.
+   */
+  contactUnlocked?: boolean;
   pickup: Place | null;
   dropoff: Place | null;
   /**
@@ -208,8 +229,12 @@ function PlaceBlock({
 
       {locked && place.kind === 'ADDRESS' && (
         // Said plainly rather than shown as an error. The driver has not done
-        // anything wrong; they simply have not taken the job yet.
-        <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted)]">The full address and phone number appear once you accept.</p>
+        // anything wrong; they simply have not taken the job yet. SHIP-B Bug
+        // 1: address is no longer withheld pre-acceptance (the owner
+        // overruled that), so this caption is now about name/phone only —
+        // saying "address" here would be a lie the moment `place.address`
+        // itself is already showing above.
+        <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted)]">The name and phone number appear once you accept.</p>
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -391,14 +416,14 @@ export default function DriverShippingJobPage() {
               step={1}
               label="Collect from"
               place={job.pickup}
-              locked={!job.addressUnlocked}
+              locked={!(job.contactUnlocked ?? job.addressUnlocked)}
               windows={(job.availabilityWindows ?? []).filter((w) => w.role === 'SENDER')}
             />
             <PlaceBlock
               step={2}
               label="Deliver to"
               place={job.dropoff}
-              locked={!job.addressUnlocked}
+              locked={!(job.contactUnlocked ?? job.addressUnlocked)}
               windows={(job.availabilityWindows ?? []).filter((w) => w.role === 'RECIPIENT')}
             />
 
@@ -421,10 +446,18 @@ export default function DriverShippingJobPage() {
               // Deliver point, implying work that is not theirs.
               const points = tripMapPoints(routeStops, { pickup: job.pickup, dropoff: job.dropoff });
               if (points.length === 0) return null;
+              // SHIP-B Bug 1: `addressUnlocked` used to track exactly this —
+              // "some stop is still area-only" — because it gated every door
+              // end alike. Now it's always true for this leg's own two ends,
+              // so it no longer says anything about the OTHER leg's door,
+              // which is unaffected by the owner's ruling and still genuinely
+              // area-only until accepted. Check the actual stop instead of
+              // the stale flag.
+              const otherEndStillHidden = routeStops.some((s) => s.kind === 'ADDRESS' && s.address == null);
               return (
                 <Card className="p-4 sm:p-5">
                   <ExpandableRouteMap points={points} title={`${job.reference} · route`} />
-                  {points.length < routeStops.length && !job.addressUnlocked && (
+                  {points.length < routeStops.length && otherEndStillHidden && (
                     <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">The other end shows its area above until you accept.</p>
                   )}
                 </Card>
