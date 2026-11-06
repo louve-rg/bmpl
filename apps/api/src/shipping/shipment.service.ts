@@ -1768,6 +1768,25 @@ export class ShipmentService {
           );
         }
       }
+      // MDF-560 (owner-escalated): a formal operator assignment is correctly
+      // NOT required here — an admin recording a departure arranged with a
+      // carrier by phone is ordinary operational work, and the carrier's own
+      // portal (ShippingProviderService.depart) already enforces the formal
+      // link where it matters, before a carrier ever reaches this code path.
+      // What must never be true is NOBODY on record: no operator, no carrier
+      // name on the leg or supplied here, and no carrier named on the route
+      // either. That combination means the leg departs with genuinely no one
+      // identified as carrying it — the actual integrity gap, not the
+      // informal-assignment case this check leaves alone.
+      const carrierName = input.carrierName ?? leg.carrierName;
+      if (!leg.operatedByProviderId && !carrierName) {
+        const route = await tx.logisticsRoute.findUnique({ where: { id: leg.routeId }, select: { carrierName: true } });
+        if (!route?.carrierName) {
+          throw new BadRequestException(
+            'No carrier is identified for this leg — assign an operator, or record a carrier name, before confirming departure.',
+          );
+        }
+      }
       await tx.shipmentLeg.update({
         where: { id: leg.id },
         data: {
