@@ -110,24 +110,48 @@ interface ShippingJob {
    * `isExceptionBlocked` in lib/driver-shipping-job.ts.
    */
   legStatus?: string | null;
+  /**
+   * MDF-560: true only on a leg that genuinely enforces the sender's
+   * collection code at pickup (FIRST_MILE/DIRECT, a service that needs a
+   * first mile) and has not already satisfied it — mirrors
+   * ShipmentDriverService#serialize's own `requiresPickupPin`, which this
+   * screen was not reading at all, so a driver confirming pickup on an
+   * enforcing leg had no field to put the code in and the server refused
+   * the click with 400 "Enter the collection code." Optional/additive,
+   * same reasoning as `legStatus` above; absent reads as false, i.e.
+   * today's no-code behaviour.
+   */
+  requiresPickupPin?: boolean;
 }
 
 const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
 const errMessage = (e: unknown) => (e as ApiError)?.message ?? 'Something went wrong.';
 
-/** Which endpoint the primary button posts to, given where the job is. */
-function actionFor(status: string): { path: string; needsCode?: boolean } | null {
+/**
+ * Which endpoint the primary button posts to, given where the job is.
+ *
+ * MDF-560: pickup's code requirement is conditional (`requiresPickupPin`,
+ * read off the job — a leg can legitimately have none), unlike handoff's,
+ * which is unconditional (every leg has a receiving end). `needsReceivedBy`
+ * mirrors that: only handoff's schema (`legHandoffSchema`) has a
+ * `receivedByName` field at all — pickup's (`legPickupSchema`) is pin-only,
+ * so a pickup confirmation must never send that field.
+ */
+function actionFor(
+  status: string,
+  requiresPickupPin: boolean,
+): { path: string; needsCode?: boolean; needsReceivedBy?: boolean } | null {
   switch (status) {
     case 'ASSIGNED':
       return { path: 'accept' };
     case 'DRIVER_ACCEPTED':
-      return { path: 'pickup' };
+      return { path: 'pickup', needsCode: requiresPickupPin };
     case 'PICKUP_CONFIRMED':
       return { path: 'in-transit' };
     case 'IN_TRANSIT':
       return { path: 'arriving' };
     case 'ARRIVING':
-      return { path: 'handoff', needsCode: true };
+      return { path: 'handoff', needsCode: true, needsReceivedBy: true };
     default:
       return null;
   }
@@ -210,7 +234,7 @@ export default function DriverShippingJobPage() {
   }, [load]);
 
   const blocked = job ? isExceptionBlocked(job) : false;
-  const action = job && !blocked ? actionFor(job.status) : null;
+  const action = job && !blocked ? actionFor(job.status, job.requiresPickupPin ?? false) : null;
   const photoSection = job ? pickupPhotoSection(job, action !== null) : 'hidden';
   const reportState = job ? reportIssueState(job.status, reportedReason !== null) : 'unavailable';
 
@@ -219,7 +243,9 @@ export default function DriverShippingJobPage() {
     setBusy(true);
     setErr(null);
     try {
-      const body = action.needsCode ? { pin: code.trim(), receivedByName: receivedBy.trim() } : {};
+      const body = action.needsCode
+        ? { pin: code.trim(), ...(action.needsReceivedBy ? { receivedByName: receivedBy.trim() } : {}) }
+        : {};
       await api.post(`/driver/shipping-jobs/${job.id}/${action.path}`, body);
       setCode('');
       await load();
@@ -411,16 +437,26 @@ export default function DriverShippingJobPage() {
             )}
           </div>
 
-          {/* The handoff code. Told up front, not at the counter — the driver
-              needs to know who to ask before they arrive. */}
+          {/* The code: handover (from whoever is receiving) or collection
+              (from the sender, at pickup — MDF-560). Told up front, not at
+              the counter/door — the driver needs to know who to ask before
+              they arrive. pinAttemptsRemaining is specifically the
+              handoff-code counter (ShipmentDriverService#serialize); pickup
+              has its own, separate counter the job payload does not expose,
+              so that line is shown only for handoff rather than reporting a
+              number that belongs to the other code. */}
           {action?.needsCode && (
             <Card className="mt-3 p-4 sm:p-5">
-              <p className="text-sm font-semibold text-[color:var(--bmpl-text)]">Finish the handover</p>
+              <p className="text-sm font-semibold text-[color:var(--bmpl-text)]">
+                {action.needsReceivedBy ? 'Finish the handover' : 'Confirm the collection code'}
+              </p>
               <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
-                Ask {job.handoffCodeHeldBy} for the code and enter it here.
+                {action.needsReceivedBy
+                  ? `Ask ${job.handoffCodeHeldBy} for the code and enter it here.`
+                  : 'Ask the sender for the collection code and enter it here.'}
               </p>
               <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="code">
-                Handover code
+                {action.needsReceivedBy ? 'Handover code' : 'Collection code'}
               </label>
               <input
                 id="code"
@@ -431,21 +467,25 @@ export default function DriverShippingJobPage() {
                 className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-lg tracking-[0.3em] text-slate-900"
                 placeholder="0000"
               />
-              <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="who">
-                Who took it
-              </label>
-              <input
-                id="who"
-                value={receivedBy}
-                onChange={(e) => setReceivedBy(e.target.value)}
-                className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-base text-slate-900"
-                placeholder="Name of the person receiving it"
-              />
-              {job.pinAttemptsRemaining < 5 && (
-                <p className="mt-2 text-xs text-amber-700">
-                  {job.pinAttemptsRemaining} {job.pinAttemptsRemaining === 1 ? 'try' : 'tries'} left before this needs an
-                  administrator.
-                </p>
+              {action.needsReceivedBy && (
+                <>
+                  <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="who">
+                    Who took it
+                  </label>
+                  <input
+                    id="who"
+                    value={receivedBy}
+                    onChange={(e) => setReceivedBy(e.target.value)}
+                    className="mt-1 w-full rounded-bmpl-md border border-slate-300 px-3 py-3 text-base text-slate-900"
+                    placeholder="Name of the person receiving it"
+                  />
+                  {job.pinAttemptsRemaining < 5 && (
+                    <p className="mt-2 text-xs text-amber-700">
+                      {job.pinAttemptsRemaining} {job.pinAttemptsRemaining === 1 ? 'try' : 'tries'} left before this needs an
+                      administrator.
+                    </p>
+                  )}
+                </>
               )}
             </Card>
           )}
