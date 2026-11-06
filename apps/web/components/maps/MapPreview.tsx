@@ -9,23 +9,43 @@ import 'leaflet/dist/leaflet.css';
 /** A point the map draws, optionally carrying its route-stop letter (BMPL-182: A, B, C…). */
 export type MapPreviewPoint = MapPoint & { letter?: string };
 
-/** A letter badge if the stop has one, else the plain BMPL-136 pin. */
-function markerIcon(L: typeof import('leaflet'), letter: string | undefined) {
+/**
+ * SHIP-C: a HUB (terminal — a public place) must read as visually distinct
+ * from an ADDRESS (a customer door) on sight, not only by its text label —
+ * a rounded-square badge in the darker, already-used `--bmpl-primary` blue
+ * (#1e40af, see packages/ui/src/glass.css) versus the existing circular
+ * badge in the lighter accent blue (#0ea5e9). Same letter, same white
+ * border/shadow treatment either way — only the shape and shade change.
+ */
+function markerIcon(L: typeof import('leaflet'), letter: string | undefined, kind: 'ADDRESS' | 'HUB' | undefined) {
+  const isHub = kind === 'HUB';
+  const color = isHub ? '#1e40af' : '#0ea5e9';
   if (letter) {
+    const radius = isHub ? '8px' : '9999px';
     return L.divIcon({
       className: '',
       html:
-        `<div style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9999px;` +
-        `background:#0ea5e9;color:#ffffff;font:700 13px system-ui,sans-serif;border:2px solid #ffffff;` +
+        `<div style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:${radius};` +
+        `background:${color};color:#ffffff;font:700 13px system-ui,sans-serif;border:2px solid #ffffff;` +
         `box-shadow:0 1px 3px rgba(0,0,0,0.35);">${letter}</div>`,
       iconSize: [30, 30],
       iconAnchor: [15, 15],
     });
   }
+  if (isHub) {
+    return L.divIcon({
+      className: '',
+      html:
+        `<div style="width:26px;height:26px;border-radius:8px;background:${color};` +
+        'border:2px solid #ffffff;box-shadow:0 1px 3px rgba(0,0,0,0.35);"></div>',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+    });
+  }
   return L.divIcon({
     className: '',
     html:
-      '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 24 24" fill="#0ea5e9" stroke="#ffffff" stroke-width="1.6">' +
+      `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 24 24" fill="${color}" stroke="#ffffff" stroke-width="1.6">` +
       '<path d="M12 22s7-6.2 7-12A7 7 0 0 0 5 10c0 5.8 7 12 7 12Z"/><circle cx="12" cy="10" r="2.6" fill="#ffffff" stroke="none"/></svg>',
     iconSize: [34, 34],
     iconAnchor: [17, 32],
@@ -85,7 +105,7 @@ export function MapPreview({
   // and rebuilding the map each time would flicker it away under the reader.
   // But a caller whose points genuinely change (or resolve late, after
   // mount) must get a rebuilt map, not a silently blank one.
-  const pointsKey = points.map((p) => `${p.latitude},${p.longitude},${p.label},${p.letter ?? ''}`).join('|');
+  const pointsKey = points.map((p) => `${p.latitude},${p.longitude},${p.label},${p.letter ?? ''},${p.kind ?? ''}`).join('|');
 
   useEffect(() => {
     if (points.length === 0) return;
@@ -127,7 +147,7 @@ export function MapPreview({
         }).addTo(map);
 
         const markers = points.map((p, i) => {
-          const marker = L.marker([p.latitude, p.longitude], { icon: markerIcon(L, p.letter) })
+          const marker = L.marker([p.latitude, p.longitude], { icon: markerIcon(L, p.letter, p.kind) })
             .addTo(map)
             .bindPopup(p.label);
           marker.on('click', () => onSelectRef.current?.(i));

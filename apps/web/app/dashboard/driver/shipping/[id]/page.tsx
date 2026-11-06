@@ -368,7 +368,12 @@ export default function DriverShippingJobPage() {
                 never load for a driver on data who just wants the words. */}
             {(() => {
               const routeStops = job.routeStops ?? [];
-              const points = tripMapPoints(routeStops);
+              // SHIP-C: role by pin match against THIS leg's own two action
+              // points, not by array position — see tripMapPoints' own
+              // comment. Without this, a multi-hop shipment could label an
+              // earlier or later leg's hub as this driver's own Collect/
+              // Deliver point, implying work that is not theirs.
+              const points = tripMapPoints(routeStops, { pickup: job.pickup, dropoff: job.dropoff });
               if (points.length === 0) return null;
               return (
                 <Card className="p-4 sm:p-5">

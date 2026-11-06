@@ -84,6 +84,48 @@ describe('tripMapPoints', () => {
     ]);
   });
 
+  it('SHIP-C: carries ADDRESS/HUB kind through so the map can draw them differently', () => {
+    expect(tripMapPoints([hub, { ...lockedDoor, pinnedLocation: { latitude: 1, longitude: 1 }, kind: 'ADDRESS' as const }, { ...hub, kind: 'HUB' as const }])).toEqual([
+      { latitude: 17.9139, longitude: -87.9711, label: 'Collect: San Pedro Airstrip' },
+      { latitude: 1, longitude: 1, label: 'Via: Belize City, BELIZE', kind: 'ADDRESS' },
+      { latitude: 17.9139, longitude: -87.9711, label: 'Deliver: San Pedro Airstrip', kind: 'HUB' },
+    ]);
+  });
+
+  it('SHIP-C: with myEnds, role matches this leg\'s own pickup/dropoff pin, not position — a LAST_MILE driver\'s own origin hub is "Collect" even when an earlier leg\'s hub sits before it in the shipment-wide route', () => {
+    // Whole-shipment route: sender door (not this driver's, hidden), hub1
+    // (an earlier FIRST_MILE leg's own drop-off — NOT this driver's stop),
+    // hub2 (THIS LAST_MILE driver's own origin hub), recipient door (this
+    // driver's own drop-off).
+    const hub1 = { name: 'Belize City Terminal', area: null, pinnedLocation: { latitude: 17.49, longitude: -88.19 } };
+    const hub2 = { name: 'San Pedro Airstrip', area: null, pinnedLocation: { latitude: 17.9139, longitude: -87.9711 } };
+    const recipient = { name: 'Recipient', area: null, pinnedLocation: { latitude: 17.92, longitude: -87.96 } };
+    const myEnds = { pickup: hub2, dropoff: recipient };
+    expect(tripMapPoints([hub1, hub2, recipient], myEnds).map((p) => p.label)).toEqual([
+      'Via: Belize City Terminal',
+      'Collect: San Pedro Airstrip',
+      'Deliver: Recipient',
+    ]);
+    // Position-based (no myEnds) gets this wrong — exactly the bug myEnds fixes.
+    expect(tripMapPoints([hub1, hub2, recipient]).map((p) => p.label)).toEqual([
+      'Collect: Belize City Terminal',
+      'Via: San Pedro Airstrip',
+      'Deliver: Recipient',
+    ]);
+  });
+
+  it('SHIP-C: mirror case — a FIRST_MILE driver\'s own destination hub is "Deliver" even when a later leg\'s hub sits after it', () => {
+    const sender = { name: 'Sender', area: null, pinnedLocation: { latitude: 17.5, longitude: -88.2 } };
+    const myHub = { name: 'Belize City Terminal', area: null, pinnedLocation: { latitude: 17.49, longitude: -88.19 } };
+    const laterHub = { name: 'San Pedro Airstrip', area: null, pinnedLocation: { latitude: 17.9139, longitude: -87.9711 } };
+    const myEnds = { pickup: sender, dropoff: myHub };
+    expect(tripMapPoints([sender, myHub, laterHub], myEnds).map((p) => p.label)).toEqual([
+      'Collect: Sender',
+      'Deliver: Belize City Terminal',
+      'Via: San Pedro Airstrip',
+    ]);
+  });
+
   it('BMPL-198: a hidden LAST stop does not leave the final visible stop stuck on Via', () => {
     // Mirror case: the recipient's door has no pin yet — it drops out. The
     // last stop that actually has a pin, a hub, must read as Deliver.

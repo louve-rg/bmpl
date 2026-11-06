@@ -143,13 +143,25 @@ function RouteLegend({
               selected === i ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'
             }`}
           >
+            {/* Hex matches MapPreview's markerIcon exactly (#1e40af hub /
+                #0ea5e9 address) — inline, not a Tailwind bg-belize-* class,
+                because `belize-accent` is defined twice in the shared
+                preset (a solid color AND a backgroundImage gradient under
+                the same name) and this dot must not silently become the
+                gradient reserved for other UI. */}
             <span
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-belize-blue text-[11px] font-bold text-white"
+              className={`flex h-5 w-5 shrink-0 items-center justify-center text-[11px] font-bold text-white ${
+                s.kind === 'HUB' ? 'rounded-[6px]' : 'rounded-full'
+              }`}
+              style={{ background: s.kind === 'HUB' ? '#1e40af' : '#0ea5e9' }}
               aria-hidden
             >
               {s.letter}
             </span>
-            <span className="truncate">{s.label}</span>
+            <span className="truncate">
+              {s.label}
+              {s.kind === 'HUB' && <span className="ml-1 text-[color:var(--bmpl-text-faint)]">· Terminal</span>}
+            </span>
           </button>
         </li>
       ))}
