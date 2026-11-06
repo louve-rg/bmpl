@@ -510,3 +510,114 @@ describe('the matching signal — an authenticated claim needs more than the lin
     expect(row.recipientClaimAttempts).toBe(0);
   });
 });
+
+/**
+ * CLOSE-2: secure recipient access to the delivery (handoff) code, without
+ * exposing it publicly — the gap left open on purpose by `recipientView()`
+ * (see that method's own header). Two paths: a linked account reads it off
+ * `shipping/incoming/:reference/delivery-code`; an unlinked recipient
+ * exchanges an emailed, short-lived, single-use token via
+ * `shipping/track/:token/delivery-code/{request,reveal}`. Neither path is
+ * reachable from the token alone without the second, separately-delivered
+ * secret, and the code itself is read straight from the row, never from a
+ * response the public link could produce on its own.
+ */
+describe('the delivery code (CLOSE-2)', () => {
+  const myDeliveryCode = (c: string[], reference: string) => get(c, `shipping/incoming/${reference}/delivery-code`);
+  const requestCode = (token: string) => request(ctx.server).post(`/api/shipping/track/${token}/delivery-code/request`).send({});
+  const revealCode = (token: string, revealToken: string) =>
+    request(ctx.server).post(`/api/shipping/track/${token}/delivery-code/reveal`).send({ revealToken });
+
+  async function handoffPinOf(shipmentId: string): Promise<string> {
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({
+      where: { shipmentId, kind: { in: ['LAST_MILE', 'DIRECT'] }, status: { not: 'CANCELLED' } },
+      select: { handoffPin: true },
+    });
+    return leg.handoffPin!;
+  }
+
+  it('a genuinely linked recipient reads their own delivery code', async () => {
+    const s = await book();
+    const recipient = await registerMatchingRecipient(`dccode_${uniq()}@example.com`);
+    expect((await claim(recipient.cookies, s.recipientTrackingToken)).status).toBe(201);
+
+    const res = await myDeliveryCode(recipient.cookies, s.reference);
+    expect(res.status).toBe(200);
+    expect(res.body.deliveryCode).toBe(await handoffPinOf(s.id));
+  });
+
+  it('(wrong state) an account that never claimed this shipment is denied the reveal — 404, never the code', async () => {
+    const s = await book();
+    const stranger = await registerUser(`dcstranger_${uniq()}@example.com`);
+
+    const res = await myDeliveryCode(stranger.cookies, s.reference);
+    expect(res.status).toBe(404);
+    expect(JSON.stringify(res.body)).not.toContain(await handoffPinOf(s.id));
+  });
+
+  it('an unlinked recipient requests the code by email and reveals it with the emailed token', async () => {
+    const email = `dcunlinked_${uniq()}@example.bz`;
+    const s = await book(customer, { email });
+
+    const requested = await requestCode(s.recipientTrackingToken);
+    expect(requested.status).toBe(201); // POST defaults to 201 (same convention as `claim` above)
+    // The request response itself never carries the reveal token or the
+    // code — only the (simulated) email does (`toEqual` above already pins
+    // the full, minimal shape). The test reads the row directly to stand in
+    // for "received the email," the same way other specs read
+    // handoffPin/pickupPin straight off the row rather than intercepting an
+    // SMS.
+    expect(requested.body).toEqual({ requested: true });
+
+    const row = await ctx.prisma.shipment.findUniqueOrThrow({
+      where: { id: s.id },
+      select: { deliveryCodeRevealToken: true, deliveryCodeRevealTokenExpiresAt: true },
+    });
+    expect(row.deliveryCodeRevealToken).toBeTruthy();
+    expect(row.deliveryCodeRevealTokenExpiresAt!.getTime()).toBeGreaterThan(Date.now());
+
+    const revealed = await revealCode(s.recipientTrackingToken, row.deliveryCodeRevealToken!);
+    expect(revealed.status).toBe(201);
+    expect(revealed.body.deliveryCode).toBe(await handoffPinOf(s.id));
+
+    // Single-use: the same token cannot be replayed.
+    const replay = await revealCode(s.recipientTrackingToken, row.deliveryCodeRevealToken!);
+    expect(replay.status).toBe(400);
+  });
+
+  it('(wrong state) an incorrect reveal token is rejected, and never reveals the code', async () => {
+    const email = `dcwrongtoken_${uniq()}@example.bz`;
+    const s = await book(customer, { email });
+    expect((await requestCode(s.recipientTrackingToken)).status).toBe(201);
+
+    const attempt = await revealCode(s.recipientTrackingToken, 'NOTTHEREALTOKEN1');
+    expect(attempt.status).toBe(400);
+    expect(JSON.stringify(attempt.body)).not.toContain(await handoffPinOf(s.id));
+
+    // The real token (from the genuine request above) is UNCHANGED by the
+    // wrong guess and still works — no lockout on a guess against a
+    // high-entropy token that was never typed by a human.
+    const row = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { deliveryCodeRevealToken: true } });
+    const real = await revealCode(s.recipientTrackingToken, row.deliveryCodeRevealToken!);
+    expect(real.status).toBe(201);
+  });
+
+  it('requesting against a shipment with no destination email on file is a safe no-op, with the same response shape', async () => {
+    const s = await book(); // RECIPIENT fixture carries no `email` override
+    const res = await requestCode(s.recipientTrackingToken);
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ requested: true });
+
+    const row = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { deliveryCodeRevealToken: true } });
+    expect(row.deliveryCodeRevealToken).toBeNull();
+  });
+
+  it('a wrong or expired link token behaves exactly like a miss on both delivery-code routes', async () => {
+    const s = await book(customer, { email: `dcmiss_${uniq()}@example.bz` });
+    const near = s.recipientTrackingToken as string;
+    const flipped = (near[0] === 'A' ? 'B' : 'A') + near.slice(1);
+
+    expect((await requestCode(flipped)).status).toBe(404);
+    expect((await revealCode(flipped, 'WHATEVER12')).status).toBe(404);
+  });
+});
