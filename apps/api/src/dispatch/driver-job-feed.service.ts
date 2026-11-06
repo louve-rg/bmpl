@@ -12,6 +12,7 @@ import {
   queueStopKind,
   recommendRoute,
   reorderBlockedReason,
+  mapsDirectionsUrl,
   ROUTE_ESTIMATE_DISCLOSURE,
   type DeliveryStatus,
   type DriverDeliveryView,
@@ -52,7 +53,9 @@ const LEG_ROWS = {
       isTest: true,
       pieces: true,
       description: true,
+      originName: true, originPhone: true, originAddress: true,
       originCity: true, originDistrict: true, originLatitude: true, originLongitude: true,
+      destinationName: true, destinationPhone: true, destinationAddress: true,
       destinationCity: true, destinationDistrict: true, destinationLatitude: true, destinationLongitude: true,
       // SHIP-B: the sender/recipient windows this leg is governed by — see
       // fromLeg's own comment for which role applies to which leg kind.
@@ -280,12 +283,17 @@ export class DriverJobFeedService {
       status,
       statusLabel: DELIVERY_STATUS_LABELS[status],
       reference: d.vendorOrder.order.orderNumber,
-      pickup: { name: d.vendorOrder.vendorProfile.businessName, area: area(pickup), kind: 'ADDRESS' },
       // The far end stays an AREA until the driver accepts — same rule the
       // delivery feed already applies, carried over rather than re-decided.
       // A marketplace job never touches a logistics hub, so both ends are
       // always ADDRESS — a vendor's own place of business, not a terminal.
-      dropoff: { name: null, area: area(dropoff), kind: 'ADDRESS' },
+      // SHIP-B's location-at-offer-time ruling (conv-e85d37) was scoped to
+      // the shipment leg door end specifically, never measured or raised for
+      // marketplace — address/phone/pinnedLocation/navigationUrl are not
+      // fetched at this layer for a marketplace job, so they are null here,
+      // same as they always were before this field existed.
+      pickup: { name: d.vendorOrder.vendorProfile.businessName, area: area(pickup), kind: 'ADDRESS', address: null, phone: null, pinnedLocation: null, navigationUrl: null },
+      dropoff: { name: null, area: area(dropoff), kind: 'ADDRESS', address: null, phone: null, pinnedLocation: null, navigationUrl: null },
       load: `${d.vendorOrder.itemCount} ${d.vendorOrder.itemCount === 1 ? 'item' : 'items'}`,
       feeMinor: Number(d.feeMinor),
       assignedAt: d.assignedAt,
@@ -315,14 +323,46 @@ export class DriverJobFeedService {
     const status = (l.courierStatus ?? 'PENDING_ASSIGNMENT') as DeliveryStatus;
     const s = l.shipment;
 
+    // SHIP-B (owner ruling, conv-e85d37): this list is scoped to one
+    // driver's own offered/assigned work (every query above filters on
+    // `assignedDriverProfileId: profileId`), never a shared board — so
+    // there is no wider audience the address protects against by staying
+    // hidden here. `pickup`/`dropoff` are always THIS leg's own two action
+    // points, never another leg's, so the door end's LOCATION (address,
+    // coordinates, navigation) is visible unconditionally, from offer time
+    // — a driver cannot judge or reach a job they cannot locate. IDENTITY
+    // (name, phone) still waits for acceptance; that was the real privacy
+    // interest, not the street. The previous version hardcoded name to
+    // null even after acceptance — a straight bug, fixed in the same pass.
+    const accepted = l.acceptedAt != null;
+    const doorPlace = (
+      name: string | null, phone: string | null, address: string | null,
+      cityDistrict: { city: string | null; district: string | null }, lat: number | null, lng: number | null,
+    ) => ({
+      kind: 'ADDRESS' as const,
+      name: accepted ? name : null,
+      phone: accepted ? phone : null,
+      area: area(cityDistrict),
+      address,
+      pinnedLocation: lat != null && lng != null ? { latitude: lat, longitude: lng } : null,
+      navigationUrl: lat != null && lng != null ? mapsDirectionsUrl({ latitude: lat, longitude: lng }) : null,
+    });
     // First mile: sender's door to a terminal. Last mile: the mirror image.
     // Direct: sender's door straight to the recipient's door, no terminal.
-    const senderArea = { name: null, area: area({ city: s.originCity, district: s.originDistrict }), kind: 'ADDRESS' as const };
-    const recipientArea = { name: null, area: area({ city: s.destinationCity, district: s.destinationDistrict }), kind: 'ADDRESS' as const };
+    const senderArea = doorPlace(s.originName, s.originPhone, s.originAddress, { city: s.originCity, district: s.originDistrict }, s.originLatitude, s.originLongitude);
+    const recipientArea = doorPlace(s.destinationName, s.destinationPhone, s.destinationAddress, { city: s.destinationCity, district: s.destinationDistrict }, s.destinationLatitude, s.destinationLongitude);
     const door = kind === 'LAST_MILE' ? recipientArea : senderArea;
-    const hub = kind === 'FIRST_MILE'
-      ? { name: l.destinationHub?.name ?? null, area: area(l.destinationHub), kind: 'HUB' as const }
-      : { name: l.originHub?.name ?? null, area: area(l.originHub), kind: 'HUB' as const };
+    // A hub is a public place — never gated, acceptance or not — unchanged.
+    const hubPlace = (h: { name: string | null; city: string | null; district: string | null; latitude: number | null; longitude: number | null } | null) => ({
+      kind: 'HUB' as const,
+      name: h?.name ?? null,
+      phone: null,
+      area: area(h),
+      address: null,
+      pinnedLocation: h?.latitude != null && h?.longitude != null ? { latitude: h.latitude, longitude: h.longitude } : null,
+      navigationUrl: h?.latitude != null && h?.longitude != null ? mapsDirectionsUrl({ latitude: h.latitude, longitude: h.longitude }) : null,
+    });
+    const hub = kind === 'FIRST_MILE' ? hubPlace(l.destinationHub) : hubPlace(l.originHub);
 
     const pieces = s.pieces ?? 1;
     // SHIP-B: only the role(s) this specific leg is actually governed by —

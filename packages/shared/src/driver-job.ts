@@ -53,25 +53,54 @@ export const isShipmentJob = (kind: DriverJobKind): boolean => kind !== 'MARKETP
 
 /** One end of a job, as a driver needs to see it before they have accepted. */
 export interface DriverJobPlace {
-  /** "Sunrise Grocery", "Placencia Airstrip", or null for a private address. */
+  /**
+   * "Sunrise Grocery", "Placencia Airstrip", or null for a private
+   * individual's name — gated on acceptance for an ADDRESS end, same as
+   * `phone` below. Always present for a HUB (a terminal is a public place).
+   */
   name: string | null;
   /** Always safe to show: the town/district, never the street. */
   area: string | null;
   /**
    * SHIP-B: whether this stop is a public terminal (always nameable, never
-   * gated) or a private address (name/street withheld pre-acceptance — see
+   * gated) or a private address (name/phone withheld pre-acceptance — see
    * the detail view at /driver/shipping-jobs/:id for the full, acceptance-
    * gated shape). Lets the list say "this end is a terminal" honestly
    * without exposing anything new; area/name here are unchanged.
    */
   kind: 'ADDRESS' | 'HUB';
+  /**
+   * SHIP-B (owner ruling, conv-e85d37): the real street address. For an
+   * ADDRESS end this is always THIS job's own door — the list is scoped to
+   * one driver's own offered/assigned work, never a shared board, so there
+   * is no wider audience location-gating would protect against. Visible
+   * from offer time, unlike `name`/`phone`: a driver cannot judge or reach a
+   * job they cannot locate. `null` for a marketplace job, where this field
+   * is not yet populated at the list layer.
+   */
+  address: string | null;
+  /** Gated on acceptance for an ADDRESS end — a stranger's phone number is
+   * the privacy interest, not their street. Always present for a HUB. */
+  phone: string | null;
+  /** Same visibility as `address` — present from offer time for this job's
+   * own door end, and always for a HUB. */
+  pinnedLocation: { latitude: number; longitude: number } | null;
+  /** A maps link built from `pinnedLocation`; null exactly when that is. */
+  navigationUrl: string | null;
 }
 
 /**
- * A job in a list. Carries nothing that identifies a private individual — a
- * driver browsing offers has not accepted anything yet, so the far end is an
- * AREA until they do. The detail view, behind the ownership check, is where the
- * street address and the phone number live.
+ * A job in a list.
+ *
+ * SHIP-B / owner ruling (conv-e85d37): this list is scoped to one driver's
+ * own offered/assigned work — every query behind it filters on that
+ * driver's own profile id — so it is never a shared board another driver
+ * could browse. Withholding location here while revealing it on the detail
+ * view protected nothing, because the two screens hold the same jobs for
+ * the same person. Location (address, coordinates, navigation) is visible
+ * from offer time, same gate as the detail view. Identity (name, phone)
+ * stays gated until acceptance — that, not the address, is the actual
+ * privacy interest.
  */
 export interface DriverJobSummary {
   id: string;
