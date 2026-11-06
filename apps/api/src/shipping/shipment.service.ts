@@ -1587,6 +1587,7 @@ export class ShipmentService {
             select: {
               id: true, sequence: true, kind: true, mode: true, status: true, courierStatus: true,
               dispatchExhaustedAt: true,
+              dispatchUnavailableAt: true,
               originHub: { select: { code: true, name: true } },
               destinationHub: { select: { code: true, name: true } },
               assignedDriver: { select: { displayName: true } },
@@ -1622,7 +1623,11 @@ export class ShipmentService {
         exceptionReason: s.exceptionReason,
         // The two things an operator scans for.
         needsAttention: s.status === 'EXCEPTION',
-        needsDriver: s.legs.some((l) => l.dispatchExhaustedAt != null),
+        // CLOSE-20: EXHAUSTED (tried and nobody took it) and UNAVAILABLE
+        // (nobody was ever eligible to ask) are different causes but the
+        // SAME operator action — assign one by hand — so they collapse into
+        // one boolean here rather than exposing two markers for one leg.
+        needsDriver: s.legs.some((l) => l.dispatchExhaustedAt != null || l.dispatchUnavailableAt != null),
         createdAt: s.createdAt,
         legs: s.legs.map((l) => ({
           id: l.id,
@@ -1635,7 +1640,7 @@ export class ShipmentService {
           to: l.destinationHub?.name ?? 'Door',
           operator: l.assignedDriver?.displayName ?? l.carrierName ?? null,
           operatedByProviderId: l.operatedByProviderId,
-          needsDriver: l.dispatchExhaustedAt != null,
+          needsDriver: l.dispatchExhaustedAt != null || l.dispatchUnavailableAt != null,
         })),
       })),
     };

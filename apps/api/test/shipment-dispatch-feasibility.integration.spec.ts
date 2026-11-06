@@ -226,6 +226,64 @@ describe('dispatch-time escalation (ShipmentDispatchService#recordUnavailableIfN
   });
 });
 
+describe('CLOSE-20: dispatchUnavailableAt — a persistent marker, mirroring dispatchExhaustedAt', () => {
+  it('is set the first time a leg has zero eligible drivers, distinct from (and alongside) dispatchExhaustedAt', async () => {
+    const customer = await registerCustomer(`unavailset_${uniq()}@example.com`);
+    await fund(customer.userId, 10_000);
+    // STANN_CREEK: covered only by the baseline (permanently OFFLINE) courier
+    // — same zero-eligible-pool condition the escalation describe above uses.
+    const r = await post(customer.cookies, 'shipping', { ...parcel('STANN_CREEK', 'Dangriga'), payWithWallet: true });
+    expect(r.status).toBe(201);
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+
+    const row = await ctx.prisma.shipmentLeg.findUniqueOrThrow({
+      where: { id: leg.id },
+      select: { dispatchUnavailableAt: true, dispatchExhaustedAt: true },
+    });
+    // Unavailable (nobody was ever eligible to ask) is not exhausted (everyone
+    // eligible already declined) — the two columns record different causes,
+    // and only the first should be set here.
+    expect(row.dispatchUnavailableAt).not.toBeNull();
+    expect(row.dispatchExhaustedAt).toBeNull();
+
+    // A second tick on the same still-unavailable leg does not move the
+    // timestamp — same conditional-update contract as markExhausted's own
+    // dispatchExhaustedAt, so an admin can trust it as "when this episode
+    // started," not "when a sweep last looked at it."
+    const first = row.dispatchUnavailableAt!;
+    await dispatch.dispatchLeg(leg.id);
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id }, select: { dispatchUnavailableAt: true } });
+    expect(after.dispatchUnavailableAt).toEqual(first);
+  });
+
+  it('clears the moment an offer is actually created for the leg — the half that matters', async () => {
+    const customer = await registerCustomer(`unavailclear_${uniq()}@example.com`);
+    await fund(customer.userId, 10_000);
+    // A fresh district-context (COROZAL, baseline-only coverage) so this is
+    // independent of the other COROZAL/STANN_CREEK/ORANGE_WALK tests above.
+    const r = await post(customer.cookies, 'shipping', { ...parcel('COROZAL', 'Corozal Town'), payWithWallet: true });
+    expect(r.status).toBe(201);
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+    expect(
+      (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id }, select: { dispatchUnavailableAt: true } }))
+        .dispatchUnavailableAt,
+    ).not.toBeNull();
+
+    // A genuinely new, untried driver comes online in the same district —
+    // dispatchLeg must both offer the leg AND clear the stale marker in the
+    // same write, not leave it to a separate cleanup pass.
+    await onlineDriverFor('COROZAL');
+    const outcome = await dispatch.dispatchLeg(leg.id);
+    expect(outcome.result).toBe('OFFERED');
+
+    const cleared = await ctx.prisma.shipmentLeg.findUniqueOrThrow({
+      where: { id: leg.id },
+      select: { dispatchUnavailableAt: true },
+    });
+    expect(cleared.dispatchUnavailableAt).toBeNull();
+  });
+});
+
 describe('a blocked leg is still safely cancellable and refundable', () => {
   it('cancels a TEMPORARILY_UNAVAILABLE shipment before it moves and refunds in full', async () => {
     const customer = await registerCustomer(`cancel_${uniq()}@example.com`);

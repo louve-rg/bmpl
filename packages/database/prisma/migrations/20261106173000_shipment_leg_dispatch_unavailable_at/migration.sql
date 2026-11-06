@@ -1,0 +1,44 @@
+-- CLOSE-20: give the "no eligible driver online" state a persistent marker,
+-- the same way dispatch exhaustion already has one.
+--
+-- WHAT WAS MISSING. When a sweep finds an eligible pool of exactly zero
+-- drivers for a leg, ShipmentDispatchService.recordUnavailableIfNew already
+-- writes a SHIPMENT_LEG_DISPATCH_UNAVAILABLE audit row and a dismissible
+-- admin notification — but sets no column on the leg itself. The ops board
+-- (ShipmentService.listForOps) reads dispatchExhaustedAt into needsDriver;
+-- it has nothing to read for this state, so a leg stuck here looks
+-- identical to one simply waiting its turn, and the marker does not
+-- survive past the one notification.
+--
+-- THE FIX. dispatchUnavailableAt, same shape as dispatchExhaustedAt: set
+-- once per episode (ShipmentDispatchService.recordUnavailableIfNew, only
+-- when currently null — mirrors markExhausted's own conditional update),
+-- read into the SAME needsDriver boolean the board already exposes
+-- (dispatchExhaustedAt != null OR dispatchUnavailableAt != null), so this
+-- surfaces through the existing admin UI with no new screen, no new
+-- notification category.
+--
+-- CLEARING, the half that actually matters: cleared the moment an offer is
+-- created for the leg (ShipmentDispatchService.dispatchLeg's own offer
+-- transaction — the one place every automatic path funnels through,
+-- whether from sweepUndispatched, sweepExpiredOffers's re-offer, or
+-- sweepExhaustedRecovery) and the moment the leg is assigned by hand
+-- (assignManual/reassign, alongside the existing dispatchExhaustedAt clear).
+-- Never on a timer, never retried in place — a leg left here is retried by
+-- the existing sweep cadence exactly as before; only the recording changed.
+--
+-- A leg can carry both dispatchExhaustedAt and dispatchUnavailableAt set at
+-- once (unavailable first, exhausted on a later tick once a pool exists but
+-- everyone in it has already been tried) — needsDriver collapses both into
+-- one boolean on purpose, so the board never has to show two markers for
+-- one leg.
+--
+-- No AuditAction value needed: SHIPMENT_LEG_DISPATCH_UNAVAILABLE already
+-- exists (20261104290000_shipment_leg_dispatch_unavailable) and already
+-- fires at exactly the point this column is now set.
+--
+-- ROLLBACK (verified against a scratch database):
+--   ALTER TABLE "shipment_legs" DROP COLUMN "dispatchUnavailableAt";
+
+-- AlterTable
+ALTER TABLE "shipment_legs" ADD COLUMN "dispatchUnavailableAt" TIMESTAMP(3);

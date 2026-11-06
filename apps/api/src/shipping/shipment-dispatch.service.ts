@@ -322,6 +322,14 @@ export class ShipmentDispatchService {
           offerCount: { increment: 1 },
           declinedAt: null,
           declineReason: null,
+          // CLOSE-20: an offer is being created for this leg right now, so
+          // whatever "no eligible driver" episode set this is over — the
+          // one clearing trigger named for the automatic path. Every
+          // automatic route (sweepUndispatched, sweepExpiredOffers's
+          // re-offer, sweepExhaustedRecovery) funnels through this exact
+          // transaction, so clearing it here covers all three with no
+          // second mechanism.
+          dispatchUnavailableAt: null,
         },
       });
       if (claimed.count === 0) return false;
@@ -597,6 +605,10 @@ export class ShipmentDispatchService {
           // Human intervention answers the exhausted alarm; clearing it lets
           // decline → automatic re-offer resume if dispatch is ever re-enabled.
           dispatchExhaustedAt: null,
+          // CLOSE-20: the second named clearing trigger — a human assigning
+          // this leg by hand answers "no eligible driver" exactly as it
+          // answers EXHAUSTED above.
+          dispatchUnavailableAt: null,
           acceptedAt: null,
           declinedAt: null,
           declineReason: null,
@@ -1027,6 +1039,14 @@ export class ShipmentDispatchService {
     leg: { id: string; shipment: { id: string; reference: string; customerUserId: string | null } },
     district: string,
   ): Promise<void> {
+    // CLOSE-20: the durable marker, set once per episode exactly like
+    // markExhausted sets dispatchExhaustedAt — the conditional `where`
+    // means a leg stuck here for hours gets one timestamp marking when the
+    // episode started, not one that creeps forward on every sweep tick.
+    await this.prisma.shipmentLeg.updateMany({
+      where: { id: leg.id, dispatchUnavailableAt: null },
+      data: { dispatchUnavailableAt: new Date() },
+    });
     const latest = await this.prisma.auditLog.findFirst({
       where: {
         action: { in: ['SHIPMENT_LEG_OFFERED', 'SHIPMENT_LEG_DISPATCH_UNAVAILABLE'] },

@@ -5329,6 +5329,14 @@ model ShipmentLeg {
   offerExpiresAt          DateTime?
   offerCount              Int             @default(0)
   dispatchExhaustedAt     DateTime?
+  /// CLOSE-20: the durable counterpart to SHIPMENT_LEG_DISPATCH_UNAVAILABLE
+  /// — set the first time a sweep finds zero eligible drivers online for
+  /// this leg (business dependency, not exhaustion: nobody has declined,
+  /// nobody has even been asked), same shape as dispatchExhaustedAt above
+  /// so the ops board reads both through the one needsDriver path. Cleared
+  /// the moment an offer is actually created for this leg, or the leg is
+  /// assigned by hand — never on a timer, and never retried in place.
+  dispatchUnavailableAt   DateTime?
   /// The driver's own ordering preference across all their work.
   driverQueuePosition     Int?
 
