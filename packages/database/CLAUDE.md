@@ -66,6 +66,19 @@ ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'COURIER_LANE_CREATED';
 renames data. This is why `BMPL_HUB` keeps its name even though the product is
 branded BML.
 
+**A new `AuditAction` value needs a SECOND edit, in a different package, or it
+fails misleadingly.** `AuditService.record()` (`apps/api/src/audit/audit.service.ts`)
+types its `action` parameter from `@bmpl/shared`, and
+`packages/shared/src/audit.ts` hand-maintains its own literal-string array
+(`AUDIT_ACTIONS`) mirroring this enum — deliberately, since `shared` has no
+Prisma dependency and cannot import the generated enum. Adding the value only
+here compiles cleanly in isolation and fails only at the actual `record()` call
+site, as a 200-plus-item union "not assignable to itself" — which reads exactly
+like a corrupted generated client, not a missing string in an unrelated
+package. If you hit that error, check `packages/shared/src/audit.ts` before
+regenerating anything. A new action's string must be added to **both**
+`AUDIT_ACTIONS` here and the migration above, in the same change.
+
 ### Where a rule belongs
 
 Prefer enforcing a business rule in `packages/validation`, where it can explain
