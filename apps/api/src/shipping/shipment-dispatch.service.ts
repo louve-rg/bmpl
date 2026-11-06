@@ -7,6 +7,7 @@ import {
   rankDrivers,
   type DriverCandidate,
   type LegView,
+  type RankedDriver,
 } from '@bmpl/shared';
 import type { AssignShipmentLegInput, ReassignShipmentLegInput } from '@bmpl/validation';
 import type { Prisma } from '@bmpl/database';
@@ -235,11 +236,6 @@ export class ShipmentDispatchService {
       }
     }
 
-    if (leg.offerCount >= cfg.maxOffers) {
-      await this.markExhausted(leg.id, leg.shipment.reference, leg.offerCount);
-      return { result: 'EXHAUSTED' };
-    }
-
     // Where the driver has to BE to start: a first mile and a door-to-door run
     // both collect from the sender's district; a last mile collects from the
     // arrival terminal. BMPL-194: the city that goes with whichever of those
@@ -250,7 +246,7 @@ export class ShipmentDispatchService {
     const city =
       (leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originCity : leg.originHub?.city) ?? null;
 
-    const ranked = await this.rankFor(
+    const { ranked, eligiblePoolSize } = await this.rankFor(
       leg.id,
       district,
       city,
@@ -259,15 +255,33 @@ export class ShipmentDispatchService {
       leg.shipment.customerUserId,
     );
     if (ranked.length === 0) {
-      // Not exhausted — nobody is online right now. The sweeper will try again.
-      // Previously this was silent forever: offerCount never increments
-      // without an offer, so a leg stuck here could never even reach
-      // EXHAUSTED's own alert. recordUnavailableIfNew is what closes that —
-      // same transition-only dedup as recordDeferralIfNew above, so a
-      // district stuck empty for hours gets exactly one alert, not one every
-      // 20-second sweep.
-      await this.recordUnavailableIfNew(leg, district);
-      return { result: 'SKIPPED', reason: 'no eligible driver is available' };
+      if (eligiblePoolSize === 0) {
+        // Not exhausted — nobody is online right now. The sweeper will try
+        // again. Previously this was silent forever: offerCount never
+        // incremented without an offer, so a leg stuck here could never even
+        // reach EXHAUSTED's own alert. recordUnavailableIfNew is what closes
+        // that — same transition-only dedup as recordDeferralIfNew above, so
+        // a district stuck empty for hours gets exactly one alert, not one
+        // every 20-second sweep. A business dependency (no driver onboarded
+        // or online here), not an engineering defect — root CLAUDE.md §5's
+        // own classification.
+        await this.recordUnavailableIfNew(leg, district);
+        return { result: 'SKIPPED', reason: 'no eligible driver is available' };
+      }
+      // CLOSE-1 (dispatch exhaustion recovery): the pool was non-empty before
+      // exclusion, so at least one driver WAS eligible — every one of them has
+      // already been offered this exact leg (declined or let the offer
+      // expire) and `rankFor` excludes a driver this leg has already asked,
+      // on purpose, so they are never auto-offered it twice. That is a real
+      // "ran through everyone, nobody took it" state, not an arbitrary
+      // attempt count — the thing that genuinely needs a human. It does not
+      // mean forever: sweepExhaustedRecovery (below) re-runs exactly this
+      // same pool computation on the existing sweep cadence and clears
+      // dispatchExhaustedAt the moment a driver who has NEVER been offered
+      // this leg becomes eligible, so "needs a human" self-corrects the same
+      // way a BMPL-273 hub-hours deferral already does.
+      await this.markExhausted(leg.id, leg.shipment.reference, leg.offerCount);
+      return { result: 'EXHAUSTED' };
     }
 
     const chosen = ranked[0]!;
@@ -338,6 +352,19 @@ export class ShipmentDispatchService {
    * workload count, which has to span BOTH tables: a driver already holding
    * three marketplace deliveries is not free to take a shipment leg as well, and
    * counting only one table would quietly hand them a fourth job.
+   *
+   * CLOSE-1 (dispatch exhaustion recovery): a driver already holding a
+   * `ShipmentLegOffer` row for THIS leg is EXCLUDED here, not merely sorted
+   * last — once automatic dispatch has asked them and they declined or let
+   * the offer lapse, they are never auto-offered the same leg again (an
+   * admin can still choose them by hand via `assignManual`, which does not
+   * go through this method at all). `eligiblePoolSize` is the count BEFORE
+   * that exclusion, so a caller can tell "nobody eligible is online" (pool
+   * itself is 0 — a business dependency) apart from "every eligible driver
+   * has already been tried" (pool is non-empty, but everyone in it is
+   * excluded — a real EXHAUSTED state, the one that needs a human). Returning
+   * both from one query, rather than two call sites each deriving their own
+   * notion of "eligible," is what keeps those two states from drifting apart.
    */
   private async rankFor(
     legId: string,
@@ -346,9 +373,9 @@ export class ShipmentDispatchService {
     maxConcurrent: number,
     isTest: boolean,
     requesterUserId?: string | null,
-  ) {
+  ): Promise<{ ranked: RankedDriver[]; eligiblePoolSize: number }> {
     const pool = await this.drivers.eligibleDriversForDistrict(district, { isTest, excludeUserId: requesterUserId, city });
-    if (pool.length === 0) return [];
+    if (pool.length === 0) return { ranked: [], eligiblePoolSize: 0 };
     const ids = pool.map((d) => d.driverProfileId);
 
     const [deliveryLoad, legLoad, lastAssignments, priorOffers] = await Promise.all([
@@ -375,8 +402,8 @@ export class ShipmentDispatchService {
         where: { driverProfileId: { in: ids } },
         _max: { assignedAt: true },
       }),
-      // Drivers who have already seen THIS leg rank last rather than being
-      // dropped, so a leg everyone passed on can still find someone.
+      // Drivers who have already seen THIS leg — excluded below (CLOSE-1),
+      // not merely deprioritized.
       this.prisma.shipmentLegOffer.findMany({
         where: { shipmentLegId: legId, driverProfileId: { in: ids } },
         select: { driverProfileId: true },
@@ -403,7 +430,7 @@ export class ShipmentDispatchService {
     }
     const offered = new Set(priorOffers.map((o) => o.driverProfileId));
 
-    const candidates: DriverCandidate[] = pool
+    const eligible: DriverCandidate[] = pool
       .map((d) => ({
         driverProfileId: d.driverProfileId,
         activeDeliveries: load.get(d.driverProfileId) ?? 0,
@@ -411,11 +438,14 @@ export class ShipmentDispatchService {
         ratingAverage: d.ratingAverage,
         completedDeliveries: d.completedDeliveries,
         isLocal: d.homeDistrict === district,
-        previouslyOffered: offered.has(d.driverProfileId),
+        // Never true here — a driver this leg has already offered to is
+        // excluded just below, not ranked last (CLOSE-1).
+        previouslyOffered: false,
       }))
       .filter((c) => c.activeDeliveries < maxConcurrent);
 
-    return rankDrivers(candidates, new Date());
+    const untried = eligible.filter((c) => !offered.has(c.driverProfileId));
+    return { ranked: rankDrivers(untried, new Date()), eligiblePoolSize: eligible.length };
   }
 
   private async pickVehicle(driverProfileId: string, district: string, city: string | null, isTest: boolean): Promise<string | null> {
@@ -720,6 +750,81 @@ export class ShipmentDispatchService {
     return this.prisma.shipmentLeg.count({ where: this.waitingLegsWhere() });
   }
 
+  /**
+   * CLOSE-1 (dispatch exhaustion recovery): `waitingLegsWhere` excludes an
+   * exhausted leg on purpose — re-offering it to the exact same tried-and-
+   * declined drivers every 20 seconds would be the "unreliable workaround"
+   * the owner explicitly ruled out, not a fix. This is the other half of
+   * that contract: a leg stuck here is not stuck FOREVER, only until a
+   * driver who has never been offered THIS leg becomes eligible.
+   *
+   * Deliberately read-only until a real candidate is confirmed. `rankFor`
+   * (the exact function `dispatchLeg` itself uses, so there is one place
+   * this decision is made, not two) is called BEFORE touching
+   * `dispatchExhaustedAt` at all — clearing the flag speculatively on every
+   * tick and letting `dispatchLeg` flip it straight back would churn the
+   * timestamp an admin relies on to see how long a leg has really been
+   * stuck, for no behavioural gain. Only once `rankFor` itself confirms a
+   * genuinely untried driver exists does this clear the flag and hand off to
+   * `dispatchLeg` — which is safe to call at that point for the same reason
+   * it is safe everywhere else: idempotent, and the actual assignment is a
+   * conditional claim only one caller can win. No new audit action is
+   * needed for the recovery itself — if it succeeds, the `SHIPMENT_LEG_OFFERED`
+   * row `dispatchLeg` already writes IS the "recovered" event in the trail,
+   * exactly as BMPL-275 already reasons for a cleared hub-hours deferral.
+   */
+  async sweepExhaustedRecovery(): Promise<number> {
+    const cfg = await this.engine.settings();
+    const exhausted = await this.prisma.shipmentLeg.findMany({
+      where: {
+        kind: { in: ['DIRECT', 'FIRST_MILE', 'LAST_MILE'] },
+        status: 'READY',
+        assignedDriverProfileId: null,
+        dispatchExhaustedAt: { not: null },
+      },
+      select: {
+        id: true,
+        kind: true,
+        originHub: { select: { district: true, city: true } },
+        shipment: { select: { isTest: true, customerUserId: true, originDistrict: true, originCity: true } },
+      },
+      take: 50,
+    });
+
+    let recovered = 0;
+    for (const leg of exhausted) {
+      // Same district/city rule dispatchLeg itself uses.
+      const district =
+        leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originDistrict : leg.originHub?.district;
+      if (!district) continue;
+      const city =
+        (leg.kind === 'FIRST_MILE' || leg.kind === 'DIRECT' ? leg.shipment.originCity : leg.originHub?.city) ?? null;
+
+      const { ranked } = await this.rankFor(
+        leg.id,
+        district,
+        city,
+        cfg.maxConcurrentPerDriver,
+        leg.shipment.isTest,
+        leg.shipment.customerUserId,
+      );
+      if (ranked.length === 0) continue; // still nobody new — correctly stays exhausted
+
+      // Conditional: an administrator may have assigned this leg by hand
+      // between the read above and here, which already clears
+      // dispatchExhaustedAt itself (assignManual) — in that case this no-ops
+      // rather than reopening a leg a human just closed.
+      const cleared = await this.prisma.shipmentLeg.updateMany({
+        where: { id: leg.id, dispatchExhaustedAt: { not: null } },
+        data: { dispatchExhaustedAt: null },
+      });
+      if (cleared.count === 0) continue;
+      const out = await this.dispatchLeg(leg.id);
+      if (out.result === 'OFFERED') recovered += 1;
+    }
+    return recovered;
+  }
+
   private async expireOffer(legId: string, driverProfileId: string | null): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
       const cleared = await tx.shipmentLeg.updateMany({
@@ -751,6 +856,16 @@ export class ShipmentDispatchService {
    * Out of retries. The leg stays where it is and an administrator is told — this
    * is the one case a human genuinely has to intervene, so it must not be
    * indistinguishable from "still looking".
+   *
+   * CLOSE-1: now reachable a second time for the SAME episode in one rare
+   * race — `sweepExhaustedRecovery` clears `dispatchExhaustedAt` only after
+   * confirming a genuinely untried driver exists, but that driver can in
+   * principle go offline again in the gap before `dispatchLeg`'s own
+   * (separate) ranking call runs. Same transition-only dedup as
+   * `recordDeferralIfNew`/`recordUnavailableIfNew` above: skip the alert if
+   * the most recent event for this leg already says EXHAUSTED, so a flicker
+   * through recovery and straight back does not re-notify an admin who was
+   * already told once and has not been given anything new to act on.
    */
   private async markExhausted(legId: string, reference: string, offerCount: number): Promise<void> {
     const marked = await this.prisma.shipmentLeg.updateMany({
@@ -758,6 +873,15 @@ export class ShipmentDispatchService {
       data: { dispatchExhaustedAt: new Date(), offerExpiresAt: null },
     });
     if (marked.count === 0) return;
+    const latest = await this.prisma.auditLog.findFirst({
+      where: {
+        action: { in: ['SHIPMENT_LEG_OFFERED', 'SHIPMENT_LEG_DISPATCH_EXHAUSTED'] },
+        newValue: { path: ['legId'], equals: legId },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { action: true },
+    });
+    if (latest?.action === 'SHIPMENT_LEG_DISPATCH_EXHAUSTED') return;
     await this.audit.record({ action: 'SHIPMENT_LEG_DISPATCH_EXHAUSTED', newValue: { legId, reference, offerCount } });
     await this.notifications.notifyAdmins('logistics.read', {
       type: 'SECURITY',
@@ -850,11 +974,12 @@ export class ShipmentDispatchService {
 
   /**
    * Make "nobody eligible is online" visible to ops AND the customer who
-   * paid for it — distinct from EXHAUSTED (`markExhausted`), which fires
-   * only once a real offer has been made and declined/expired `maxOffers`
-   * times. A leg with zero candidates is never offered at all, so
-   * `offerCount` never increments and EXHAUSTED can never trigger — before
-   * this, the leg sat here forever, re-checked every 20s, telling nobody.
+   * paid for it — distinct from EXHAUSTED (`markExhausted`), which fires only
+   * once the eligible pool is non-empty but every driver in it has already
+   * been offered this exact leg (CLOSE-1: `rankFor`'s `eligiblePoolSize` vs
+   * its returned `ranked` list). A leg with zero candidates is never offered
+   * at all, so it can never reach EXHAUSTED this way — before this method
+   * existed, the leg sat here forever, re-checked every 20s, telling nobody.
    *
    * Same transition-only dedup as recordDeferralIfNew just above: read the
    * most recent OFFERED/UNAVAILABLE row for this leg, skip if it already
