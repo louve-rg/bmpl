@@ -65,6 +65,12 @@ function stubFetch(email: unknown, adminPermissions: string[] = ['ops.read']) {
         return jsonResponse(200, email);
       }
       if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
+      // MDF-560: DriverCoverage also mounts on this page and queries this
+      // endpoint once per district. Answered with one driver everywhere so
+      // it renders no alert of its own — this file is about the email
+      // diagnostics alert, which the tests below locate by being the only
+      // [role="alert"] on the page.
+      if (url.includes('/api/admin/drivers')) return jsonResponse(200, [{ id: 'drv_1' }]);
       return jsonResponse(404, { message: 'not mocked: ' + url });
     }),
   );
