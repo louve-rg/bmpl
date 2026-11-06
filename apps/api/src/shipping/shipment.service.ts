@@ -264,7 +264,34 @@ type ShipmentWithGraph = Prisma.ShipmentGetPayload<{ include: typeof SHIPMENT_IN
  * shape for the one view, so the allowlist cannot drift between callers.
  */
 const RECIPIENT_VIEW_INCLUDE = {
-  legs: { orderBy: { sequence: 'asc' } },
+  // CLOSE-2 hardening (Jim's finding): a bare `legs: { orderBy }` include
+  // pulls every column of ShipmentLeg into memory, handoffPin and pickupPin
+  // included, even though `recipientView()` never emits them. That made the
+  // guarantee "this serializer does not return the code" rather than "the
+  // code never arrives here" — one careless future spread away from a leak.
+  // This explicit `select` is the exact, and ONLY, field set `recipientView`,
+  // `attachPickupPhotos` and `toEtaLegInputs`/`recipientEtaSummary` read from
+  // a leg; `RecipientViewGraph`'s own type (derived from this same object)
+  // means any of those functions reaching for a field outside this list
+  // fails typecheck immediately, rather than silently returning undefined.
+  legs: {
+    orderBy: { sequence: 'asc' },
+    select: {
+      id: true,
+      sequence: true,
+      kind: true,
+      mode: true,
+      status: true,
+      description: true,
+      completedAt: true,
+      handoffPhotoKeys: true,
+      durationMinutes: true,
+      destinationHubId: true,
+      startedAt: true,
+      scheduledDepartureAt: true,
+      scheduledArrivalAt: true,
+    },
+  },
   destinationHub: { select: { name: true, city: true, addressLine1: true, instructions: true } },
   // BMPL-340: availability windows are role/time-of-day only (no PII), and
   // computing an honest ETA for the recipient's own view needs them the
