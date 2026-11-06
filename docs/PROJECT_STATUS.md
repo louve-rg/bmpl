@@ -30,13 +30,18 @@ stripped from every request and the update 400'd — an operator who tried to
 price a terminal **could not have succeeded**. That was a code defect,
 unreachable through the product until PR #19 fixed it (which also made the
 `isTest` practice network buildable through the console). The distinction
-itself still holds and still matters: production has NO shipping network
-configured — no hubs, no routes, no courier fees (`/api/shipping/hubs` →
-`[]`, `/api/shipping/modes` → `[]`, `courier_lanes` empty) — and entering
-carriers, rates and lanes is operations' work the code cannot do for them
-(§12, "Business configuration, not defects"). But "the configuration is
-missing" and "the configuration could be entered" are separate claims, and
-this document now verifies the second before asserting the first.
+itself still holds and still matters: production has no *road* shipping
+network configured. **Updated 2026-11-06, re-verified by unauthenticated
+public read:** production now has two real terminals (`/api/shipping/hubs`
+→ MZBE Belize City Municipal, SPR San Pedro Airstrip), but both are AIR-only
+and `/api/shipping/modes` → `["AIR"]` — no LAND mode, no route, no courier
+lane and no approved carrier exist for any road link. Entering a road link,
+rates and a carrier is operations' work the code cannot do for them — see
+§6, "Administrator setup — same-town door-to-door shipping" and "Cross-town
+shipping — awaiting configuration", and §12, "Business configuration, not
+defects". But "the configuration is missing" and "the configuration could
+be entered" are separate claims, and this document now verifies the second
+before asserting the first.
 
 When this document and the code disagree, **the code wins** — and then this
 document is wrong and should be fixed in the same change.
@@ -443,6 +448,116 @@ label operations write, and the leg state machine
 departed/arrived/ready-for-collection without a rewrite when a real integration
 arrives. **Do not claim live tracking.**
 
+### Administrator setup — same-town door-to-door shipping
+
+Added 2026-11-06 (MDF-560), source-verified, not derived. Two configuration
+items, both with an admin screen that already exists — no code, schema or
+API change needed:
+
+1. **Local courier rate.** `/dashboard/ops` → "Local courier pricing" card →
+   the **"Production rate (BZ$)"** field. `PATCH /admin/ops/settings` with
+   `localCourierFeeMinor`, typed as decimal BZ$, stored as integer BZD-cent
+   minor units. Requires `ops.manage`. **When unset, the page says so in
+   words**, directly under the field: "Currently unset — local journeys are
+   quoted as 'price not configured'." A same-town journey cannot be priced
+   until this is a nonzero value. The rate itself is the owner's decision —
+   this document names the field, not a number.
+
+   **The trap on the same card:** immediately next to it sits a second
+   field, **"Simulation rate (BZ$)"** (`localCourierFeeTestMinor`), same
+   endpoint, same screen. It prices *test-account bookings only* and is
+   never charged to a real customer. Setting the simulation rate instead of
+   the production rate leaves every real customer's local journey
+   unpriceable, while looking — at a glance — like the job is done.
+
+2. **One approved driver who has declared coverage for the district.** This
+   is the one item no admin screen can create, and it is two separate
+   actions by two separate people:
+   - **Admin approves the role.** A `DELIVERY_DRIVER` role application is
+     reviewed and approved at `/dashboard/applications` — the same staff
+     review screen every role application goes through.
+   - **Only the driver declares where they serve.** After approval, the
+     driver — never an admin — adds a district on their own `Service Areas`
+     screen (`/dashboard/driver/service-areas`). There is no admin write
+     path for this: the admin-side driver API (`GET /admin/drivers`,
+     `GET /admin/drivers/:id`, `PATCH /admin/drivers/:id/test-mode`, plus the
+     vehicle-approval endpoints) only ever *reads* a driver's declared
+     service areas — there is no endpoint to set one. An admin who needs
+     coverage in a district can approve an applicant and ask them to declare
+     it; an admin cannot declare it on their behalf.
+
+   District matching is exact-code equality against six fixed values
+   (`BELIZE`, `CAYO`, `COROZAL`, `ORANGE_WALK`, `STANN_CREEK`, `TOLEDO`) — a
+   plain code match, not geometry or free text, so there is no near-miss or
+   spelling risk. The only way this item goes unmet is the ordinary one: no
+   approved driver has declared that district yet.
+
+Nothing else is required for same-town: no terminal, no planner route, no
+courier lane, no carrier account. (A funded customer wallet is also required
+before a booking completes, but that is the customer's own wallet, not an
+administrator setup step.)
+
+### Cross-town shipping — awaiting configuration
+
+Added 2026-11-06 (MDF-560). **Status: neither broken nor done — correct and
+awaiting business configuration.** The code path is proven working end to
+end on simulation data: a real three-leg door-to-door journey (first-mile
+courier → line-haul → last-mile courier) was quoted, booked to a real
+reference, and confirmed visible with full per-leg detail on both the
+customer shipment page and the admin logistics board — booking, multi-leg
+admin rendering and per-leg status all work as built.
+
+It is unavailable in production for one reason: **production has no road
+network.** Re-verified by unauthenticated public read, 2026-11-06T00:18:01Z:
+`/api/shipping/hubs` lists exactly two terminals, both AIR-only (MZBE Belize
+City Municipal, SPR San Pedro Airstrip); `/api/shipping/modes` returns
+`["AIR"]` only. There is no LAND mode and no approved carrier for a road
+link anywhere in production today.
+
+Three additional items are needed, beyond the two same-town items above,
+before a cross-town journey can be both booked and actually moved:
+
+1. **A road link between the two towns — one of two paths; pick one per
+   link, not both.**
+   - *Path A — terminals plus a route.* A terminal in each town at
+     `/dashboard/logistics/hubs` (`POST /admin/logistics/hubs`), each with
+     its own courier fee; then a planner route between them at
+     `/dashboard/logistics/routes` (`POST /admin/logistics/routes`).
+     **Zero terminals and zero routes render as an empty list with no
+     message at all** on these two screens — on those, emptiness itself is
+     the signal, not a sentence.
+   - *Path B — a single courier lane, no terminal at all.*
+     `/dashboard/logistics/courier-lanes`: from-district/from-town,
+     to-district/to-town, a rate, and an unchecked "Simulation lane" box
+     (leave unchecked for a real lane). Substantially less setup than
+     Path A — one form, nothing else to create. A lane saved with no rate is
+     accepted and listed but will not be quoted until a rate is added; zero
+     lanes configured shows "No courier lanes configured."
+2. **An approved driver covering the far-end district too**, not only the
+   origin's. The coverage requirement above applies separately to every
+   leg's district — a cross-town journey has an origin district and a
+   destination district, each needing its own approved,
+   coverage-declaring driver. The same two-actor split applies: admin
+   approves the role, only the driver declares the district.
+3. **An approved carrier to run the road link itself** — a *fulfilment*
+   dependency, not a *booking* one. A line-haul leg is created `pending`,
+   with no operator, and the journey can still book to a real reference
+   before any carrier is assigned; it cannot move until one is. A
+   `SHIPPING_PROVIDER` organization applies and is approved at
+   `/dashboard/logistics/providers` (`POST
+   /admin/logistics/providers/:id/approve`); only after approval does it
+   appear in the "Assign Carrier" control on that leg's own detail page.
+   **Zero approved carriers shows "No carriers yet — a carrier appears here
+   once a SHIPPING_PROVIDER application is approved."** An admin screen that
+   invented a carrier — like one that invented a driver — would be
+   fabricating a qualification; no such form exists, and none is proposed
+   here.
+
+A production journey booked before item 3 is satisfied must be read as
+**awaiting fulfilment**, not stalled or broken: the admin logistics board
+marks an unassigned road leg with its own "No carrier assigned" warning,
+distinct from an ordinary queued leg (PR #582).
+
 ---
 
 ## 7. Marketplace delivery vs shipping
@@ -704,11 +819,16 @@ corrected 2026-09-26 against `cfc4d7a`:
 
 ### Business configuration, not defects
 
-- **Production has no transport network.** Re-checked after the deploy:
-  `/api/shipping/hubs` → `[]`, `/api/shipping/modes` → `[]` (modes derive from
-  active routes), and `courier_lanes` is deployed **empty**. Production Shipping
-  can therefore quote a same-town direct courier and nothing else. That is the
-  expected state and it should stay that way until real providers are onboarded.
+- **Production has two real terminals, both AIR-only, and no road network.**
+  Re-verified by unauthenticated public read, 2026-11-06T00:18:01Z:
+  `/api/shipping/hubs` → MZBE Belize City Municipal, SPR San Pedro Airstrip
+  (both AIRSTRIP, modes `[AIR]`); `/api/shipping/modes` → `["AIR"]`; no LAND
+  mode, no route, no courier lane and no approved carrier for any road link.
+  Production Shipping can therefore quote a same-town direct courier and
+  nothing cross-town yet. That is the expected state, not a defect — see §6,
+  "Administrator setup — same-town door-to-door shipping" and "Cross-town
+  shipping — awaiting configuration" for the exact fields, screens and the
+  items still missing.
 - **No Belize City ↔ Ladyville lane exists, and no rate has been chosen.** The
   model supports it; the price is a business decision. Do not invent one to make
   a demo work. Create it at admin → Logistics → Courier lanes when there is a
