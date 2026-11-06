@@ -371,6 +371,15 @@ enum AuditAction {
   /// before writing), never once per 20s sweeper tick — see
   /// ShipmentDispatchService.recordDeferralIfNew.
   SHIPMENT_LEG_DISPATCH_DEFERRED
+  /// CLOSE-17: a sweep (sweepExpiredOffers / sweepUndispatched /
+  /// sweepExhaustedRecovery) threw an unhandled error processing this one
+  /// leg. The leg is skipped for that tick so every OTHER leg in the same
+  /// batch still gets its turn — before this, one bad row aborted the whole
+  /// sweep, silently stranding every leg behind it, forever. Written on the
+  /// TRANSITION into this state only (same dedup as SHIPMENT_LEG_DISPATCH_DEFERRED
+  /// above — see ShipmentDispatchService.recordSweepFailureIfNew), so a leg
+  /// that keeps failing the same way does not re-alert an admin every 20s.
+  SHIPMENT_LEG_SWEEP_FAILED
   SHIPMENT_LEG_ACCEPTED
   SHIPMENT_LEG_DECLINED
   SHIPMENT_LEG_PICKED_UP

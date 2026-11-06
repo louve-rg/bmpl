@@ -14,7 +14,7 @@
  * lifecycle that legitimately fires several times cannot be mistaken for a
  * duplicate, and a duplicate cannot hide behind an earlier event.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
 
@@ -591,6 +591,80 @@ describe('operations are told when a human is needed', () => {
     expect(after.dispatchExhaustedAt).not.toBeNull();
     expect(after.assignedDriverProfileId).toBeNull();
     expect(await ctx.prisma.shipmentLegOffer.count({ where: { shipmentLegId: first.id } })).toBe(1);
+  });
+});
+
+describe('CLOSE-17: sweep isolation', () => {
+  it('one leg throwing during the sweep does not strand every other leg queued behind it', async () => {
+    await enableDispatch(false);
+    const poisoned = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
+    const healthy = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
+    await enableDispatch(true);
+    const poisonedLeg = (await legsOf(poisoned.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const healthyLeg = (await legsOf(healthy.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    // Both legs are genuinely waiting — dispatch was off at booking time, so
+    // neither was auto-offered.
+    expect(poisonedLeg.courierStatus).toBeNull();
+    expect(healthyLeg.courierStatus).toBeNull();
+
+    await makeDriver();
+
+    const { ShipmentDispatchService } = await import('../src/shipping/shipment-dispatch.service');
+    const dispatch = ctx.app.get(ShipmentDispatchService);
+    const real = dispatch.dispatchLeg.bind(dispatch);
+    const spy = vi.spyOn(dispatch, 'dispatchLeg').mockImplementation(async (legId: string, now?: Date) => {
+      if (legId === poisonedLeg.id) throw new Error('CLOSE-17 test: simulated throw processing this leg');
+      return real(legId, now);
+    });
+
+    const fired = await capture(() => dispatch.sweepUndispatched());
+    spy.mockRestore();
+
+    // The healthy leg is not stranded behind the one that threw.
+    expect(
+      (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: healthyLeg.id } })).courierStatus,
+    ).toBe('ASSIGNED');
+
+    // The poisoned leg is untouched, not phantom-assigned, and the failure
+    // is visible to an administrator, with the leg id, exactly once.
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: poisonedLeg.id } });
+    expect(after.courierStatus).toBeNull();
+    expect(after.assignedDriverProfileId).toBeNull();
+
+    const alerts = fired.filter((n) => n.event === 'SHIPMENT_LEG_SWEEP_FAILED');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.userId).toBe(adminUserId);
+    expect(alerts[0]!.category).toBe('ADMIN_ALERT');
+    expect(alerts[0]!.data.legId).toBe(poisonedLeg.id);
+
+    const entries = await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_SWEEP_FAILED' } });
+    const entry = entries.find((e) => (e.newValue as { legId?: string }).legId === poisonedLeg.id);
+    expect(entry).toBeTruthy();
+    expect((entry!.newValue as { sweep?: string }).sweep).toBe('sweepUndispatched');
+  });
+
+  it('(wrong-state) a leg that keeps failing the same way does not re-alert on every tick', async () => {
+    await enableDispatch(false);
+    const poisoned = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
+    await enableDispatch(true);
+    const poisonedLeg = (await legsOf(poisoned.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await makeDriver();
+
+    const { ShipmentDispatchService } = await import('../src/shipping/shipment-dispatch.service');
+    const dispatch = ctx.app.get(ShipmentDispatchService);
+    const spy = vi.spyOn(dispatch, 'dispatchLeg').mockImplementation(async () => {
+      throw new Error('CLOSE-17 test: simulated throw processing this leg, every time');
+    });
+
+    // Same poisoned leg fails on every tick — the WRONG state a flaky
+    // isolation fix would most plausibly get wrong: re-alerting every time.
+    await dispatch.sweepUndispatched();
+    const fired = await capture(() => dispatch.sweepUndispatched());
+    spy.mockRestore();
+
+    expect(fired.filter((n) => n.event === 'SHIPMENT_LEG_SWEEP_FAILED')).toHaveLength(0);
+    const entries = await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_SWEEP_FAILED' } });
+    expect(entries.filter((e) => (e.newValue as { legId?: string }).legId === poisonedLeg.id)).toHaveLength(1);
   });
 });
 
