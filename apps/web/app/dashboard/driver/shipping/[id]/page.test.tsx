@@ -132,6 +132,31 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
     expect(el.textContent).toContain('BML-ABCD2345');
   });
 
+  it('SHIP-C: labels a stop by matching this leg\'s own pickup/dropoff pin, not by its position in the whole-shipment route', async () => {
+    // An extra hub ahead of this leg's own two points, belonging to a
+    // different leg of the same shipment — must read as "Via", never as
+    // this driver's own "Collect", even though it sits first in the array.
+    const otherLegHub = place({ pinnedLocation: { latitude: 16.0, longitude: -89.0 } });
+    apiGet.mockResolvedValue(
+      shippingJob({
+        routeStops: [
+          otherLegHub,
+          place({ pinnedLocation: { latitude: 17.5, longitude: -88.2 } }),
+          place({ pinnedLocation: { latitude: 17.6, longitude: -88.3 } }),
+        ],
+      }),
+    );
+    const el = await mount();
+    // The legend only renders once the map is revealed (lazy by default).
+    const showMap = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Show map');
+    await act(async () => {
+      showMap!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(el.textContent).toMatch(/Via: Sender/);
+    expect(el.textContent).toMatch(/Collect: Sender/);
+    expect(el.textContent).toMatch(/Deliver: Sender/);
+  });
+
   it('does not crash when routeStops is missing from the wire entirely', async () => {
     const raw = JSON.parse(JSON.stringify(shippingJob())) as Record<string, unknown>;
     delete raw.routeStops;
