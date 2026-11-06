@@ -11,6 +11,7 @@ import {
   type DriverJobKind,
 } from '@bmpl/shared';
 import { api, type ApiError } from '../../../../lib/api';
+import { formatWindow } from '../../../../lib/availability-window';
 import { Alert, Card, EmptyState, PageHeader, Spinner, StatusBadge } from '../../../../components/ui';
 import { DeliveryQueue } from '../../../../components/driver/DeliveryQueue';
 import { DriverBreadcrumb } from '../../../../components/driver/DriverBreadcrumb';
@@ -45,8 +46,12 @@ interface JobSummary {
   kind: DriverJobKind;
   kindLabel: string;
   reference: string;
-  pickup: { name: string | null; area: string | null };
-  dropoff: { name: string | null; area: string | null };
+  // kind/availabilityWindows are additive (SHIP-B): optional so a frontend
+  // deployed ahead of the API still renders, just without the Terminal tag
+  // or the window text.
+  pickup: { name: string | null; area: string | null; kind?: 'ADDRESS' | 'HUB' };
+  dropoff: { name: string | null; area: string | null; kind?: 'ADDRESS' | 'HUB' };
+  availabilityWindows?: Array<{ role: 'SENDER' | 'RECIPIENT'; startTime: string; endTime: string }>;
   load: string;
   status: string;
   statusLabel: string;
@@ -252,6 +257,8 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
   // A parcel leg names both ends; a marketplace job names the store and an area.
   const from = job.pickup.name ?? job.pickup.area;
   const to = job.dropoff.name ?? job.dropoff.area;
+  const pickupWindows = (job.availabilityWindows ?? []).filter((w) => w.role === 'SENDER');
+  const dropoffWindows = (job.availabilityWindows ?? []).filter((w) => w.role === 'RECIPIENT');
   return (
     <Link href={jobHref(job)} className="block">
       <Card
@@ -284,10 +291,22 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
                 place; two labelled lines never do. */}
             <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text-muted)]">
               <span className="text-[color:var(--bmpl-text-faint)]">Collect</span> {from ?? '—'}
+              {job.pickup.kind === 'HUB' && <span className="text-[color:var(--bmpl-text-faint)]"> · Terminal</span>}
             </p>
+            {pickupWindows.length > 0 && (
+              <p className="break-words text-xs text-[color:var(--bmpl-text-faint)]">
+                Available {pickupWindows.map(formatWindow).join(', ')}
+              </p>
+            )}
             <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
               <span className="text-[color:var(--bmpl-text-faint)]">Deliver</span> {to ?? '—'}
+              {job.dropoff.kind === 'HUB' && <span className="text-[color:var(--bmpl-text-faint)]"> · Terminal</span>}
             </p>
+            {dropoffWindows.length > 0 && (
+              <p className="break-words text-xs text-[color:var(--bmpl-text-faint)]">
+                Available {dropoffWindows.map(formatWindow).join(', ')}
+              </p>
+            )}
             <p className="mt-0.5 break-words text-xs text-[color:var(--bmpl-text-muted)]">{job.load}</p>
 
             <p className="mt-1 text-xs text-[color:var(--bmpl-text-faint)]">
