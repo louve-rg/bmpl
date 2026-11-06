@@ -70,6 +70,7 @@ import { StorageService } from '../storage/storage.service';
 import { AVATAR_SELECT, publicAvatarUrl } from '../common/avatar-url';
 import { ENV } from '../config/config.module';
 import type { Env } from '../config/env';
+import { EmailService } from '../email/email.service';
 
 /** Minor units go out as numbers; see the note in logistics-network.service.ts. */
 const money = (v: bigint) => Number(v);
@@ -155,6 +156,13 @@ const MID_CARRY_RETURN_MESSAGE =
  */
 const MID_CARRY_REROUTE_MESSAGE =
   'This leg is still mid-journey, not at a delivery attempt — redirecting it from wherever the parcel currently sits is a different movement than a shipment-level reroute quote, so pricing it needs a human decision, not a guess.';
+
+/** CLOSE-2: how long an emailed delivery-code reveal token stays live. */
+const DELIVERY_CODE_REVEAL_TTL_MINUTES = 15;
+/** CLOSE-2: the minimum gap between two reveal-email requests for the same
+ *  shipment, so a rotating-IP caller cannot email-bomb the recipient's own
+ *  inbox by repeating the request past whatever per-IP throttle exists. */
+const DELIVERY_CODE_REVEAL_COOLDOWN_MINUTES = 5;
 
 /** Case/whitespace only — an account's own email is not typed twice. */
 function normalizeEmail(email: string | null | undefined): string | null {
@@ -391,6 +399,7 @@ export class ShipmentService {
     private readonly settlement: SettlementService,
     private readonly storage: StorageService,
     private readonly drivers: DriverService,
+    private readonly email: EmailService,
     @Inject(ENV) private readonly env: Env,
   ) {}
 
@@ -3827,6 +3836,167 @@ export class ShipmentService {
       select: { startTime: true, endTime: true },
     });
     return { reference, windows };
+  }
+
+  /**
+   * CLOSE-2: a genuinely linked recipient's own copy of their delivery
+   * (handoff) code — the gap `recipientView()`'s own deliberate exclusion
+   * leaves open. That exclusion is correct and untouched: its header says
+   * "the two-party handoff survives a leaked link only if the link cannot
+   * complete one," which is about the ANONYMOUS token view. A recipient who
+   * has been through the audited `claimAsRecipient` step is a materially
+   * stronger authorization than merely holding the link, so this is its own
+   * narrow method — deliberately NOT folded into `recipientView()` or
+   * `trackAsRecipient()`, exactly as `setAvailabilityWindows`'s own recipient
+   * ack already is not (that method's own comment: "an authenticated-only
+   * field like this one would break that parity rather than extend it").
+   * Same genuinely-linked gate (`recipientUserId`) every other recipient-
+   * account method in this file uses.
+   *
+   * Reuses `pinFor`'s exact reveal rule — hidden once the leg is
+   * COMPLETED/CANCELLED, never shown for a hub-ending leg — so a recipient
+   * is never shown anything the sender's own `serialize()` view would not
+   * also show them. Every read is audited, same standard the existing staff
+   * `revealHandoffPin` already holds itself to.
+   */
+  async recipientDeliveryCode(reference: string, userId: string) {
+    const s = await this.prisma.shipment.findUnique({
+      where: { reference },
+      select: {
+        id: true,
+        recipientUserId: true,
+        service: true,
+        legs: { select: { kind: true, status: true, handoffPin: true } },
+      },
+    });
+    if (!s || s.recipientUserId !== userId) throw new NotFoundException('No shipment with that reference.');
+
+    const endsAtHub = !needsLastMile(s.service);
+    const leg = s.legs.find((l) => (l.kind === 'LAST_MILE' || l.kind === 'DIRECT') && l.status !== 'CANCELLED') ?? null;
+    const deliveryCode = leg ? this.pinFor(leg, 'CUSTOMER', endsAtHub) : null;
+
+    await this.audit.record({
+      action: 'SHIPMENT_HANDOFF_PIN_REVEALED',
+      actorId: userId,
+      newValue: { shipmentId: s.id, reference, revealedTo: 'RECIPIENT' },
+    });
+    return { reference, deliveryCode };
+  }
+
+  /**
+   * CLOSE-2, unlinked-recipient path, step 1 of 2: email a fresh, short-lived,
+   * single-use reveal token to the shipment's ON-FILE `destinationEmail` —
+   * never a client-supplied address, the same non-oracle discipline
+   * `claimAsRecipient` already uses for its own matching signal. Holding the
+   * public `recipientToken` (Ruling 12: proves possession of the link,
+   * never identity) is enough to trigger this, because the response is the
+   * SAME neutral shape whatever is actually on file: a leaked link can
+   * cause at most one email to the LEGITIMATE recipient's own already-known
+   * inbox, never a direct reveal — only `revealDeliveryCode` below, gated on
+   * a second, separately-delivered token, can do that.
+   *
+   * No paid SMS exists in this system and none is added here (owner ruling)
+   * — a recipient with no account and no email on file has no automatic
+   * path through this endpoint at all. That is a known, reported boundary,
+   * not silently papered over with an invented channel.
+   */
+  async requestDeliveryCodeEmail(token: string): Promise<{ requested: true }> {
+    const s = await this.prisma.shipment.findUnique({
+      where: { recipientToken: token },
+      select: { id: true, reference: true, destinationEmail: true, deliveryCodeRevealRequestedAt: true },
+    });
+    if (!s) throw new NotFoundException('No shipment for that link.');
+
+    const cooldownUntil = s.deliveryCodeRevealRequestedAt
+      ? new Date(s.deliveryCodeRevealRequestedAt.getTime() + DELIVERY_CODE_REVEAL_COOLDOWN_MINUTES * 60_000)
+      : null;
+    // Same neutral response during the cooldown as a genuine send — telling
+    // the caller "you already asked" would be a timing oracle on top of the
+    // one `recipientToken` already necessarily carries.
+    if (cooldownUntil && cooldownUntil > new Date()) return { requested: true };
+
+    if (s.destinationEmail) {
+      const revealToken = this.generateDeliveryCodeRevealToken();
+      const expiresAt = new Date(Date.now() + DELIVERY_CODE_REVEAL_TTL_MINUTES * 60_000);
+      await this.prisma.shipment.update({
+        where: { id: s.id },
+        data: {
+          deliveryCodeRevealToken: revealToken,
+          deliveryCodeRevealTokenExpiresAt: expiresAt,
+          deliveryCodeRevealRequestedAt: new Date(),
+        },
+      });
+      await this.email.send({
+        to: s.destinationEmail,
+        subject: `Your delivery code for shipment ${s.reference}`,
+        body: `Use this code to confirm it's you when your driver arrives: ${revealToken}\n\nThis code expires in ${DELIVERY_CODE_REVEAL_TTL_MINUTES} minutes and can only be used once. If you did not request this, you can ignore this email.`,
+      });
+      await this.audit.record({
+        action: 'SHIPMENT_DELIVERY_CODE_EMAIL_REQUESTED',
+        newValue: { shipmentId: s.id, reference: s.reference },
+      });
+    } else {
+      // Still record the cooldown timestamp so a repeated request against a
+      // shipment with no email on file cannot be used to distinguish that
+      // case by timing either — same neutral response, same side effect
+      // shape, whether or not there was anything to send.
+      await this.prisma.shipment.update({ where: { id: s.id }, data: { deliveryCodeRevealRequestedAt: new Date() } });
+    }
+    return { requested: true };
+  }
+
+  /**
+   * CLOSE-2, unlinked-recipient path, step 2 of 2: exchange the emailed
+   * reveal token for the actual code. Single-use — cleared the instant it is
+   * spent, so a replayed request cannot read the code a second time — and
+   * time-boxed. Deliberately no attempts counter: unlike `handoffPin` or
+   * `recipientClaimAttempts`, which gate a short, human-guessable secret,
+   * this token carries its own entropy (10 chars, the same 32-symbol
+   * alphabet `recipientToken` uses) and was never typed by a human choosing
+   * it — a lockout here would protect against a threat that is not the real
+   * one, and would only give a legitimate recipient a way to lock themselves
+   * out.
+   */
+  async revealDeliveryCode(token: string, revealToken: string) {
+    const s = await this.prisma.shipment.findUnique({
+      where: { recipientToken: token },
+      select: {
+        id: true,
+        reference: true,
+        service: true,
+        deliveryCodeRevealToken: true,
+        deliveryCodeRevealTokenExpiresAt: true,
+        legs: { select: { kind: true, status: true, handoffPin: true } },
+      },
+    });
+    if (!s) throw new NotFoundException('No shipment for that link.');
+    const valid =
+      s.deliveryCodeRevealToken != null &&
+      s.deliveryCodeRevealToken === revealToken &&
+      s.deliveryCodeRevealTokenExpiresAt != null &&
+      s.deliveryCodeRevealTokenExpiresAt > new Date();
+    if (!valid) throw new BadRequestException('That code is invalid or has expired. Request a new one.');
+
+    await this.prisma.shipment.update({
+      where: { id: s.id },
+      data: { deliveryCodeRevealToken: null, deliveryCodeRevealTokenExpiresAt: null },
+    });
+
+    const endsAtHub = !needsLastMile(s.service);
+    const leg = s.legs.find((l) => (l.kind === 'LAST_MILE' || l.kind === 'DIRECT') && l.status !== 'CANCELLED') ?? null;
+    const deliveryCode = leg ? this.pinFor(leg, 'CUSTOMER', endsAtHub) : null;
+
+    await this.audit.record({
+      action: 'SHIPMENT_HANDOFF_PIN_REVEALED',
+      actorId: null,
+      newValue: { shipmentId: s.id, reference: s.reference, revealedTo: 'RECIPIENT_UNLINKED' },
+    });
+    return { reference: s.reference, deliveryCode };
+  }
+
+  private generateDeliveryCodeRevealToken(): string {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1 — same alphabet recipientToken uses
+    return Array.from({ length: 10 }, () => alphabet[randomInt(0, alphabet.length)]).join('');
   }
 
   /* ------------------------------------------------------------- reading */

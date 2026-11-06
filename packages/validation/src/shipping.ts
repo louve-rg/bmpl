@@ -346,6 +346,19 @@ export const setAvailabilityWindowsSchema = z.object({
 });
 export type SetAvailabilityWindowsInput = z.infer<typeof setAvailabilityWindowsSchema>;
 
+/**
+ * CLOSE-2: the emailed, short-lived, single-use reveal token an unlinked
+ * recipient exchanges for their delivery code. 10 characters, the same
+ * 32-symbol alphabet `recipientToken` uses (packages/api's
+ * ShipmentService#generateDeliveryCodeRevealToken) — bounded length only,
+ * never a format assumption that could reject a value the service itself
+ * would have generated.
+ */
+export const revealDeliveryCodeSchema = z.object({
+  revealToken: z.string().trim().min(1).max(32),
+});
+export type RevealDeliveryCodeInput = z.infer<typeof revealDeliveryCodeSchema>;
+
 /* ------------------------------------------------------- operating a leg */
 
 /** Confirming a line-haul departed. */

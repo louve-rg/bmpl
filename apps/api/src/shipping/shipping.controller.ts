@@ -24,6 +24,7 @@ import {
   rerouteSchema,
   resolveLegExceptionSchema,
   returnToSenderSchema,
+  revealDeliveryCodeSchema,
   setAvailabilityWindowsSchema,
   setHubWeeklyHoursSchema,
   setLegOperatorSchema,
@@ -58,6 +59,7 @@ import {
   type RerouteInput,
   type ResolveLegExceptionInput,
   type ReturnToSenderInput,
+  type RevealDeliveryCodeInput,
   type SetAvailabilityWindowsInput,
   type SetHubWeeklyHoursInput,
   type SetLegOperatorInput,
@@ -165,6 +167,35 @@ export class ShippingClaimController {
 }
 
 /**
+ * CLOSE-2, unlinked-recipient path: the delivery code, without a BML
+ * account. A SEPARATE controller from `ShippingTrackController` /
+ * `ShippingClaimController` above, on the same `shipping/track` prefix, for
+ * the identical reason those two are already split — holding the token
+ * proves possession of the link (Ruling 12), never identity, so it may
+ * trigger an email to the shipment's OWN on-file address but must never
+ * itself reveal the code. See ShipmentService.requestDeliveryCodeEmail /
+ * revealDeliveryCode for the full two-step reasoning and the no-oracle
+ * response shape.
+ */
+@Public()
+@Controller('shipping/track')
+export class ShippingDeliveryCodeController {
+  constructor(private readonly shipments: ShipmentService) {}
+
+  @StrictThrottle()
+  @Post(':token/delivery-code/request')
+  request(@Param('token') token: string) {
+    return this.shipments.requestDeliveryCodeEmail(token);
+  }
+
+  @StrictThrottle()
+  @Post(':token/delivery-code/reveal')
+  reveal(@Param('token') token: string, @Body(ZodBody(revealDeliveryCodeSchema)) dto: RevealDeliveryCodeInput) {
+    return this.shipments.revealDeliveryCode(token, dto.revealToken);
+  }
+}
+
+/**
  * The recipient's own account view of an incoming shipment (recipient
  * account linking).
  *
@@ -201,6 +232,17 @@ export class ShipmentRecipientController {
   @Get(':reference/availability-window')
   myWindow(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
     return this.shipments.recipientAvailabilityWindow(reference, u.userId);
+  }
+
+  /**
+   * CLOSE-2: a genuinely linked recipient's own delivery (handoff) code —
+   * see ShipmentService.recipientDeliveryCode for the full authorization and
+   * reveal-rule reasoning. Never reached by token alone; `@CurrentUser()`
+   * requires a real signed-in session already scoped to `recipientUserId`.
+   */
+  @Get(':reference/delivery-code')
+  myDeliveryCode(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
+    return this.shipments.recipientDeliveryCode(reference, u.userId);
   }
 
   /**

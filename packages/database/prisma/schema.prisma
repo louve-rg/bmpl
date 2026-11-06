@@ -348,6 +348,12 @@ enum AuditAction {
   /// ShipmentLeg.scheduledDepartureAt/scheduledArrivalAt.
   SHIPMENT_LEG_SCHEDULED
   SHIPMENT_HANDOFF_PIN_REVEALED
+  /// CLOSE-2: an unlinked recipient asked for the handoff-code reveal email.
+  /// Distinct from SHIPMENT_HANDOFF_PIN_REVEALED, which fires once the code
+  /// is actually read (by a linked recipient's own account, staff, or this
+  /// same unlinked path's second step) — this fires on the request alone,
+  /// whether or not an email was actually on file to send it to.
+  SHIPMENT_DELIVERY_CODE_EMAIL_REQUESTED
   SHIPMENT_LEG_OFFERED
   SHIPMENT_LEG_OFFER_EXPIRED
   SHIPMENT_LEG_DISPATCH_EXHAUSTED
@@ -5066,6 +5072,24 @@ model Shipment {
   /// `claimAsRecipient`'s own comment for what counts as a match and why a
   /// failure is rate-limited at all.
   recipientClaimAttempts Int @default(0)
+
+  /// CLOSE-2: the unlinked recipient's path to the handoff code. A linked
+  /// recipient (recipientUserId set) reads it straight off their own account
+  /// — no token involved. An unlinked one proves nothing by holding
+  /// recipientToken alone (Ruling 12), so a SEPARATE, short-lived, single-use
+  /// token is emailed to destinationEmail on request and exchanged here —
+  /// never derived from recipientToken, never guessable from it, and never
+  /// itself revealed anywhere the public link could read. Null whenever no
+  /// reveal is in flight, which is every pre-existing row and most of the
+  /// time for every other one too. ShipmentService.requestDeliveryCodeEmail /
+  /// revealDeliveryCode own the full read/write contract.
+  deliveryCodeRevealToken String? @unique
+  deliveryCodeRevealTokenExpiresAt DateTime?
+  /// When the LAST request was made, regardless of outcome — a per-shipment
+  /// (not per-account, not per-IP) cooldown so a rotating-IP caller cannot
+  /// email-bomb the recipient's own inbox by repeating the request, the same
+  /// reasoning recipientClaimAttempts already applies to a different probe.
+  deliveryCodeRevealRequestedAt DateTime?
 
   /// Set when the shipment fulfils a marketplace order. Null for a standalone
   /// courier booking, which is why it is optional rather than the parent.
