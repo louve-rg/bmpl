@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
-import { Alert, Badge, Card, EmptyState, PageHeader, Spinner } from '../../../../components/ui';
+import { Alert, Badge, Card, EmptyState, LoadingRow, PageHeader } from '../../../../components/ui';
 
 /**
  * The carrier directory (BMPL-137, surfaced MDF-500).
@@ -69,9 +69,7 @@ export default function CarrierProvidersPage() {
       {err && <Alert tone="warning" className="mt-4">{err}</Alert>}
 
       {loading ? (
-        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading…
-        </div>
+        <LoadingRow className="mt-6" />
       ) : providers.length === 0 ? (
         <div className="mt-6">
           <EmptyState title="No carriers yet" description="A carrier appears here once a SHIPPING_PROVIDER application is approved." />

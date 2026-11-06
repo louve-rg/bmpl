@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { shippingApi, type RecipientAvailabilityWindows } from '../../lib/shipping';
-import { Alert, Button, Spinner } from '../ui';
+import { Alert, Button, LoadingRow } from '../ui';
 import type { ApiError } from '../../lib/api';
 
 interface Row {
@@ -72,11 +72,7 @@ export function RecipientAvailabilityWindow({ reference }: { reference: string }
   }, [reference]);
 
   if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
-        <Spinner className="h-4 w-4" /> Loading…
-      </div>
-    );
+    return <LoadingRow />;
   }
   if (stored === null) return null;
 

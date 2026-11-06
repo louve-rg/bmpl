@@ -292,10 +292,35 @@ export function Skeleton({ className = '' }: { className?: string }) {
 
 export function Spinner({ className = 'h-5 w-5' }: { className?: string }) {
   return (
-    <svg className={`animate-spin text-belize-blue ${className}`} viewBox="0 0 24 24" fill="none" role="status" aria-label="Loading">
+    // --bmpl-link, not the hardcoded text-belize-blue this replaced: a
+    // Spinner is routinely rendered directly on the dashboard's glass-scoped
+    // background (every ad hoc "Loading..." row did this platform-wide), and
+    // belize-blue (#1e40af) on that dark mural measures ~2.1:1 -- below even
+    // the 3:1 icon floor. --bmpl-link already carries the adaptive glass
+    // counterpart (#7dd3fc, 10.97:1) for exactly this "plain icon/link that
+    // hardcoded belize-blue" shape (MDF-376), so this reuses it rather than
+    // inventing a new token.
+    <svg className={`animate-spin text-[color:var(--bmpl-link)] ${className}`} viewBox="0 0 24 24" fill="none" role="status" aria-label="Loading">
       <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path className="opacity-90" d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
     </svg>
+  );
+}
+
+/**
+ * The spinner + "Loading..." row duplicated ad hoc across dozens of page
+ * files (each one hardcoding `text-slate-500`, correct on a light page,
+ * ~3.8:1 and failing AA the moment the same markup renders directly on the
+ * glass dashboard background with no card underneath -- which many of them
+ * do). One correct implementation, adopted at shipping/vendor/courier call
+ * sites as part of this readability remediation, rather than patching each
+ * screen's copy of the same string.
+ */
+export function LoadingRow({ label = 'Loading…', className = '' }: { label?: string; className?: string }) {
+  return (
+    <div className={`flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted-strong)] ${className}`}>
+      <Spinner className="h-4 w-4" /> {label}
+    </div>
   );
 }
 

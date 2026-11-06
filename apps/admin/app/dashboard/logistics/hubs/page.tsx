@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
 import { hubEditFormValid, hubEditPatch, hubToForm, type EditableHub, type HubEditForm } from '../../../../lib/hub-edit';
-import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, Spinner } from '../../../../components/ui';
+import { Alert, Badge, Button, Card, Field, Input, LoadingRow, PageHeader, Select } from '../../../../components/ui';
 import { HubHoursEditor } from './hours-editor';
 
 /**
@@ -256,9 +256,7 @@ export default function HubsPage() {
       )}
 
       {loading ? (
-        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading…
-        </div>
+        <LoadingRow className="mt-6" />
       ) : (
         <div className="mt-6 space-y-3">
           {hubs.map((h) => (

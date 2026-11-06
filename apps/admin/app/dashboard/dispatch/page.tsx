@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../lib/api';
 import { StatusBadge } from '../../../components/StatusBadge';
-import { Alert, Badge, Card, EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
+import { Alert, Badge, Card, EmptyState, Field, LoadingRow, PageHeader, Select } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 import { manualDispatchNotice, parseDispatchList, rowAction } from '../../../lib/dispatch';
 
@@ -197,9 +197,7 @@ export default function DispatchPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading…
-        </div>
+        <LoadingRow />
       ) : error ? (
         <p className="rounded-bmpl-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
       ) : rows.length === 0 ? (

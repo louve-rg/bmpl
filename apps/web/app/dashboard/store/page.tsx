@@ -28,7 +28,7 @@ import {
   Badge,
   StatusBadge,
   Alert,
-  Spinner,
+  LoadingRow,
 } from '../../../components/ui';
 
 const DISTRICTS = ['BELIZE', 'CAYO', 'COROZAL', 'ORANGE_WALK', 'STANN_CREEK', 'TOLEDO'];
@@ -87,11 +87,7 @@ export default function StorePage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
-        <Spinner className="h-4 w-4" /> Loading…
-      </div>
-    );
+    return <LoadingRow />;
   }
 
   return (

@@ -8,7 +8,7 @@ import { ShipmentJourney } from '../../../../components/shipping/ShipmentJourney
 import { ShareTrackingLink } from '../../../../components/shipping/ShareTrackingLink';
 import { AvailabilityWindows } from '../../../../components/shipping/AvailabilityWindows';
 import { RoutingProposalConfirm } from '../../../../components/shipping/RoutingProposalConfirm';
-import { Alert, Button, Spinner } from '../../../../components/ui';
+import { Alert, Button, LoadingRow } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
 
 /**
@@ -73,15 +73,11 @@ export default function TrackShipmentPage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <Link href="/dashboard/shipments" className="text-sm text-belize-blue hover:underline">
+      <Link href="/dashboard/shipments" className="text-sm text-[color:var(--bmpl-link)] hover:underline">
         ← All shipments
       </Link>
 
-      {loading && (
-        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading…
-        </div>
-      )}
+      {loading && <LoadingRow className="mt-6" />}
       {err && (
         <Alert tone="warning" className="mt-6">
           {err}

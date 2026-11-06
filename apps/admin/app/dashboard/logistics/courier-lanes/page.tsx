@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
-import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Select, Spinner } from '../../../../components/ui';
+import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageHeader, Select } from '../../../../components/ui';
 
 /**
  * Courier lanes: two towns one courier can drive between.
@@ -265,9 +265,7 @@ export default function CourierLanesPage() {
       )}
 
       {loading ? (
-        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading…
-        </div>
+        <LoadingRow className="mt-6" />
       ) : lanes.length === 0 ? (
         <div className="mt-6">
           <EmptyState

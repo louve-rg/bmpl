@@ -120,6 +120,13 @@ export function ServiceTypeField({
             aria-labelledby="service-help-title"
             tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
+            // data-theme="light" resets the adaptive-token scope for this
+            // dialog: it's a literal, always-opaque bg-white sheet, but
+            // without this reset the close button's --bmpl-text-muted-strong
+            // token (below) would still resolve the glass value on this
+            // white background whenever the field is rendered under the
+            // dashboard's glass scope (e.g. /dashboard/shipments/new).
+            data-theme="light"
             className="max-h-[85vh] w-full overflow-y-auto rounded-t-bmpl-xl bg-white p-5 shadow-bmpl-lg sm:max-w-lg sm:rounded-bmpl-xl"
           >
             <div className="flex items-start justify-between gap-3">

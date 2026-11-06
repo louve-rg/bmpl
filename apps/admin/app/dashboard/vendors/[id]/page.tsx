@@ -44,7 +44,7 @@ export default async function VendorDetailPage({ params }: { params: { id: strin
   return (
     <div className="mx-auto max-w-4xl">
       <Breadcrumbs items={adminCrumbs(['Vendors', '/dashboard/vendors'], v.businessName)} className="mb-3" />
-      <Link href="/dashboard/vendors" className="text-sm font-medium text-belize-blue hover:underline">
+      <Link href="/dashboard/vendors" className="text-sm font-medium text-[color:var(--bmpl-link)] hover:underline">
         ← Vendors
       </Link>
 
