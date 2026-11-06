@@ -41,9 +41,11 @@ const envSchema = z.object({
   REDIS_TLS: boolFromString(false),
   // Dev-only. Every scheduler lock key is prefixed with this when set, so two API
   // processes on different worktrees pointed at the same shared Redis (common on
-  // a local dev host) stop contending for each other's lock. Left unset everywhere
-  // that matters for production, so production behaviour — including two replicas
-  // correctly sharing one lock — never changes (CLOSE-18).
+  // a local dev host) stop contending for each other's lock. RedisService#lockKey
+  // IGNORES this structurally when NODE_ENV is production (and logs loudly if set
+  // anyway) — a value set here by accident must not be able to split production
+  // replicas onto different lock keys, which would let two of them sweep at once
+  // (CLOSE-18).
   REDIS_LOCK_NAMESPACE: z.string().optional(),
 
   JWT_ACCESS_SECRET: z.string().min(16),

@@ -49,17 +49,17 @@
  *      this is what catches a non-listening-right-now `nest --watch`
  *      supervisor that can respawn into the picture mid-test. Non-listening
  *      API processes on no requested worktree's identity are ALSO a floor
- *      problem, reported as "latent" rather than "live".
+ *      problem, reported as "armed" rather than "live".
  *
  * VERDICT: prints one line per API server/process found, with worktree,
  * port (if listening), commit, and ancestor result. If more than one
- * LISTENING API server answers, OR any latent (non-listening) apps/api
+ * LISTENING API server answers, OR any armed (non-listening) apps/api
  * process is found anywhere, the floor is NOT clean — exit code 1. Exactly
- * one listening, feature-ancestor-confirmed server and zero latent
+ * one listening, feature-ancestor-confirmed server and zero armed
  * processes is the only clean-floor result — exit code 0.
  *
  * `--kill-others` kills every API-shaped process found OTHER than the one
- * matching `process.cwd()`'s own worktree (both listening and latent),
+ * matching `process.cwd()`'s own worktree (both listening and armed),
  * using the whole process family (parent cmd.exe/nest.js wrapper + child
  * dist/main, matched by command line, not by the single PID a port lookup
  * would give you) — this is what actually stops a `nest --watch`
@@ -215,7 +215,7 @@ async function main() {
   // pattern too -- that is the wrapper, not a second process, and the real
   // child already appears in the listening set. Exclude wrapper rows so a
   // manually-backgrounded single server does not report itself twice.
-  const latent = allApiShaped.filter((r) => !listeningPids.has(String(r.Pid)) && !/nohup|^"?[^"]*\\(bash|cmd)\.exe"?\s+-c/i.test(r.CommandLine ?? ''));
+  const armed = allApiShaped.filter((r) => !listeningPids.has(String(r.Pid)) && !/nohup|^"?[^"]*\\(bash|cmd)\.exe"?\s+-c/i.test(r.CommandLine ?? ''));
 
   console.log('--- LISTENING API servers ---');
   if (apiListeners.length === 0) console.log('  (none)');
@@ -224,30 +224,30 @@ async function main() {
     console.log(`  port ${r.port}  pid ${r.pid}  worktree ${r.worktree ?? '(unknown)'}  commit ${r.commit ?? '(none reported)'}  ancestor-check: ${r.ancestor}  ${mine ? '[MINE]' : ''}`);
   }
 
-  console.log('\n--- LATENT (not listening, but alive -- can respawn) ---');
-  if (latent.length === 0) console.log('  (none)');
-  for (const r of latent) {
+  console.log('\n--- ARMED (not listening now, but can respawn a child and re-bind at any moment) ---');
+  if (armed.length === 0) console.log('  (none)');
+  for (const r of armed) {
     const worktree = worktreeFromCommandLine(r.CommandLine);
     const mine = worktree && MY_ROOT && worktree.toLowerCase() === MY_ROOT.toLowerCase();
     console.log(`  pid ${r.Pid}  worktree ${worktree ?? '(unknown)'}  ${mine ? '[MINE]' : ''}  cmd: ${r.CommandLine}`);
   }
 
   const othersListening = apiListeners.filter((r) => !(r.worktree && MY_ROOT && r.worktree.toLowerCase() === MY_ROOT.toLowerCase()));
-  const othersLatent = latent.filter((r) => {
+  const othersArmed = armed.filter((r) => {
     const worktree = worktreeFromCommandLine(r.CommandLine);
     return !(worktree && MY_ROOT && worktree.toLowerCase() === MY_ROOT.toLowerCase());
   });
 
   if (killOthers) {
     console.log('\n--kill-others: stopping every API-shaped process not in my own worktree...');
-    for (const r of [...othersListening, ...othersLatent]) {
+    for (const r of [...othersListening, ...othersArmed]) {
       const pid = r.pid ?? r.Pid;
       console.log(`  killing pid ${pid}...`);
       killFamily(pid, r.commandLine ?? r.CommandLine);
     }
   }
 
-  const clean = othersListening.length === 0 && othersLatent.length === 0;
+  const clean = othersListening.length === 0 && othersArmed.length === 0;
   console.log(`\nFLOOR IS ${clean ? 'CLEAN' : 'NOT CLEAN'}${killOthers && !clean ? ' (ran --kill-others above -- re-run to confirm)' : ''}`);
   process.exitCode = clean ? 0 : 1;
 }
