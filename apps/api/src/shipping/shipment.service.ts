@@ -1641,6 +1641,13 @@ export class ShipmentService {
           operator: l.assignedDriver?.displayName ?? l.carrierName ?? null,
           operatedByProviderId: l.operatedByProviderId,
           needsDriver: l.dispatchExhaustedAt != null || l.dispatchUnavailableAt != null,
+          // CLOSE-20: the discriminant the frontend badge needs. `needsDriver`
+          // above stays a plain boolean (unchanged shape for anything that
+          // only cares whether a driver is needed at all); this says WHICH
+          // cause, with EXHAUSTED checked first so it is never shadowed by a
+          // later unavailable episode on the same leg — the one precedence
+          // rule, expressed once here rather than re-derived on each client.
+          needsDriverReason: l.dispatchExhaustedAt != null ? ('EXHAUSTED' as const) : l.dispatchUnavailableAt != null ? ('UNAVAILABLE' as const) : null,
         })),
       })),
     };

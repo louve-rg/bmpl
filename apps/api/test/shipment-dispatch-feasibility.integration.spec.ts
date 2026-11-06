@@ -282,6 +282,29 @@ describe('CLOSE-20: dispatchUnavailableAt — a persistent marker, mirroring dis
     });
     expect(cleared.dispatchUnavailableAt).toBeNull();
   });
+
+  it('surfaces as needsDriverReason on the admin ops board, with EXHAUSTED taking precedence when both are set', async () => {
+    const customer = await registerCustomer(`unavailreason_${uniq()}@example.com`);
+    await fund(customer.userId, 10_000);
+    const r = await post(customer.cookies, 'shipping', { ...parcel('STANN_CREEK', 'Dangriga'), payWithWallet: true });
+    expect(r.status).toBe(201);
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+
+    const rowOf = async () => {
+      const list = await get(admin, 'admin/logistics/shipments?pageSize=100');
+      expect(list.status).toBe(200);
+      const shipment = list.body.rows.find((s: { id: string }) => s.id === r.body.id);
+      return shipment.legs.find((l: { id: string }) => l.id === leg.id);
+    };
+
+    expect((await rowOf()).needsDriverReason).toBe('UNAVAILABLE');
+
+    // Simulate the leg later also reaching EXHAUSTED (both columns now set) —
+    // the read-side precedence must resolve to EXHAUSTED, not UNAVAILABLE,
+    // so the board never shows the wrong one of the two markers.
+    await ctx.prisma.shipmentLeg.update({ where: { id: leg.id }, data: { dispatchExhaustedAt: new Date() } });
+    expect((await rowOf()).needsDriverReason).toBe('EXHAUSTED');
+  });
 });
 
 describe('a blocked leg is still safely cancellable and refundable', () => {
