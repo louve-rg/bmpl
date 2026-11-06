@@ -159,6 +159,12 @@ export const NOTIFICATION_EVENTS = [
   // (that one means a driver existed and declined the offer N times; this one
   // means nobody was ever offered it because nobody eligible was online).
   'SHIPMENT_COURIER_UNAVAILABLE',
+  // CLOSE-17: a sweep (sweepExpiredOffers/sweepUndispatched/
+  // sweepExhaustedRecovery) threw processing this leg and skipped it rather
+  // than aborting the rest of the batch — distinct from both EXHAUSTED and
+  // UNAVAILABLE above, which describe the LEG's own state; this one is an
+  // engineering fault in the sweep itself.
+  'SHIPMENT_LEG_SWEEP_FAILED',
   // Carrier self-service (MDF-526/MDF-528/MDF-530) — emitted by the provider
   // lifecycle and route-schedule paths since those landed; the catalog never
   // caught up.
