@@ -6,6 +6,7 @@ import { api, type ApiError } from '../../../lib/api';
 import { Alert, Badge, Button, Card, Field, PageHeader, Select, Spinner, Textarea } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 import { CourierPricing } from '../../../components/CourierPricing';
+import { DriverCoverage } from '../../../components/DriverCoverage';
 
 /* --------------------------------------------------------------- types */
 
@@ -155,6 +156,9 @@ export default function OpsPage() {
               productionMinor={overview.settings.localCourierFeeMinor ?? 0}
               simulationMinor={overview.settings.localCourierFeeTestMinor ?? 0}
             />
+          </div>
+          <div className="mt-6">
+            <DriverCoverage />
           </div>
           <div className="mt-6">
             <DiagnosticsSection />
