@@ -454,16 +454,34 @@ describe('the driver sees one queue', () => {
     expect(counts.body.available).toBe(1);
   });
 
-  it('names both ends of a shipping pickup without naming the sender', async () => {
+  it("shows the sender's real address and pin on the list, but not their name, until accepted (owner ruling, SHIP-B)", async () => {
     const driver = await makeDriver();
-    await book();
+    const s = await book();
     const list = await get(driver.cookies, 'driver/jobs?scope=available');
     const job = list.body.find((j: { kind: string }) => j.kind === 'FIRST_MILE');
-    // A terminal is a public place, so it is named. The sender is not, until the
-    // driver has actually taken the job.
+    // A terminal is a public place: named and pinned unconditionally. The
+    // sender's identity is not, until the driver has actually taken the job —
+    // but this list is scoped to this driver's own offered work, never a
+    // shared board, so the sender's LOCATION (unlike their name) is visible
+    // from offer time, same gate the detail view uses.
     expect(job.dropoff.name).toBe('Placencia Airstrip');
+    expect(job.dropoff.pinnedLocation).not.toBeNull();
     expect(job.pickup.name).toBeNull();
+    expect(job.pickup.phone).toBeNull();
     expect(job.pickup.area).toContain('Placencia');
+    expect(job.pickup.address).toBe('1 Sidewalk');
+    expect(job.pickup.pinnedLocation).toEqual({ latitude: 16.5122, longitude: -88.3661 });
+    expect(job.pickup.navigationUrl).toContain('16.5122');
+
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
+    const after = await get(driver.cookies, 'driver/jobs?scope=assigned');
+    const taken = after.body.find((j: { id: string }) => j.id === first.id);
+    // The previously-hardcoded-null name is the straight bug the owner
+    // flagged: once accepted, the door end carries the name like any other
+    // field, same as the detail view already did.
+    expect(taken.pickup.name).toBe('Sender');
+    expect(taken.pickup.phone).toBe('501-2223333');
   });
 
   it("puts the job in the driver's route recommendation once accepted", async () => {
