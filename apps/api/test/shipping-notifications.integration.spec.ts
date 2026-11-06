@@ -666,6 +666,68 @@ describe('CLOSE-17: sweep isolation', () => {
     const entries = await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_SWEEP_FAILED' } });
     expect(entries.filter((e) => (e.newValue as { legId?: string }).legId === poisonedLeg.id)).toHaveLength(1);
   });
+
+  it('a leg that fails, then recovers, then fails AGAIN gets a SECOND alert — the dedup is not one-way', async () => {
+    await enableDispatch(false);
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
+    await enableDispatch(true);
+    const leg = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const driver = await makeDriver();
+
+    const { ShipmentDispatchService } = await import('../src/shipping/shipment-dispatch.service');
+    const dispatch = ctx.app.get(ShipmentDispatchService);
+    const real = dispatch.dispatchLeg.bind(dispatch);
+
+    // Episode 1: the sweep throws on this leg. One alert.
+    const throwOnce = vi.spyOn(dispatch, 'dispatchLeg').mockImplementationOnce(async () => {
+      throw new Error('CLOSE-17 test: episode 1');
+    });
+    const firstEpisode = await capture(() => dispatch.sweepUndispatched());
+    throwOnce.mockRestore();
+    expect(firstEpisode.filter((n) => n.event === 'SHIPMENT_LEG_SWEEP_FAILED')).toHaveLength(1);
+
+    // The leg RECOVERS — a real dispatch now succeeds and writes
+    // SHIPMENT_LEG_OFFERED, which is the dedup's reset signal (mirroring
+    // markExhausted exactly — Dwight's real-system run proved this same
+    // read/reset shape correct for SHIPMENT_LEG_DISPATCH_EXHAUSTED: two
+    // distinct alerts for one leg, 15:25:21Z then 15:53:19Z, because OFFERED
+    // sat between them).
+    const offered = await real(leg.id);
+    expect(offered.result).toBe('OFFERED');
+
+    // The driver declines, so the leg is genuinely waiting again — not a
+    // fabricated state, the same transition sweepExpiredOffers itself makes.
+    await ctx.prisma.shipmentLegOffer.updateMany({
+      where: { shipmentLegId: leg.id, driverProfileId: driver.driverProfileId },
+      data: { status: 'DECLINED', declineReason: 'test setup', endedAt: new Date() },
+    });
+    await ctx.prisma.shipmentLeg.update({
+      where: { id: leg.id },
+      data: { assignedDriverProfileId: null, assignedVehicleId: null, courierStatus: 'DRIVER_DECLINED' },
+    });
+
+    // Episode 2: the sweep throws on this SAME leg again. If the dedup read
+    // "has this leg EVER had a SWEEP_FAILED row" instead of "what is the
+    // MOST RECENT thing that happened to it", this alert would wrongly be
+    // suppressed — the leg would become permanently unalertable, which is
+    // the silent-stranding failure CLOSE-17 exists to remove.
+    const throwAgain = vi.spyOn(dispatch, 'dispatchLeg').mockImplementationOnce(async () => {
+      throw new Error('CLOSE-17 test: episode 2');
+    });
+    const secondEpisode = await capture(() => dispatch.sweepUndispatched());
+    throwAgain.mockRestore();
+
+    const secondAlerts = secondEpisode.filter((n) => n.event === 'SHIPMENT_LEG_SWEEP_FAILED');
+    expect(secondAlerts).toHaveLength(1);
+    expect(secondAlerts[0]!.data.legId).toBe(leg.id);
+
+    const entries = await ctx.prisma.auditLog.findMany({
+      where: { action: 'SHIPMENT_LEG_SWEEP_FAILED' },
+      orderBy: { createdAt: 'asc' },
+    });
+    const forThisLeg = entries.filter((e) => (e.newValue as { legId?: string }).legId === leg.id);
+    expect(forThisLeg).toHaveLength(2);
+  });
 });
 
 describe('nothing crosses between real and rehearsal', () => {
