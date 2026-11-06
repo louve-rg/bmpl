@@ -535,10 +535,15 @@ export class ShipmentDriverService {
   /**
    * The driver's view of one leg.
    *
-   * Customer contact details are gated on acceptance, exactly as they are for a
-   * delivery: a driver who was merely OFFERED the job sees the area, and nothing
-   * that identifies the person at the other end. Only once they have committed
-   * does the street address and phone number appear.
+   * SHIP-B / owner ruling (conv-7ffab9): a driver who was merely OFFERED the
+   * job — not yet accepted — sees the FULL street address, coordinates,
+   * access instructions and a working navigation link for this leg's own
+   * door end. A driver cannot judge or reach a job they cannot locate.
+   * Customer NAME and PHONE stay gated until acceptance — identity is the
+   * privacy interest here, not the address. A door end belonging to a
+   * DIFFERENT leg (someone else's job, or not yet assigned to anyone) is
+   * never revealed to this driver at all, regardless of acceptance state —
+   * only this driver's own leg gets the pre-acceptance location reveal.
    */
   async serialize(leg: LegWithGraph) {
     const s = leg.shipment;
@@ -556,27 +561,43 @@ export class ShipmentDriverService {
     const doorEnd = collectsFromDoor ? senderEnd : recipientEnd;
     const hubEnd = kind === 'DIRECT' ? null : kind === 'FIRST_MILE' ? leg.destinationHub : leg.originHub;
 
-    // Contact details stay sealed until the door end is REVEALED — which, for
-    // this leg's own door, means this driver has committed to it. A door end
-    // belonging to a DIFFERENT leg (the far end of the whole shipment, worked
-    // by a different driver or not yet assigned to anyone) is never this
-    // driver's to accept, so it is never revealed to them at all — always the
-    // same safe area-only representation, independent of that other leg's own
-    // status. This is the residential-privacy boundary from BMPL-136/BMPL-182,
-    // extended to the additional stops below rather than relaxed for them.
-    const addressPlace = (end: typeof senderEnd, revealed: boolean) => ({
-      kind: 'ADDRESS' as const,
-      name: revealed ? end.name : null,
-      phone: revealed ? end.phone : null,
-      address: revealed ? end.address : null,
-      area: [end.city, end.district?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
-      instructions: revealed ? end.instructions : null,
-      landmark: revealed ? end.landmark : null,
-      pinnedLocation: revealed && end.latitude != null && end.longitude != null
-        ? { latitude: end.latitude, longitude: end.longitude }
-        : null,
-      navigationUrl: revealed ? navUrl(end.latitude, end.longitude, end.address) : null,
-    });
+    // SHIP-B / owner ruling (conv-7ffab9): the pre-acceptance gate used to seal
+    // the WHOLE address block — location and identity together — on the
+    // theory that "committed to it" was the only safe line. The owner
+    // overruled that for a door end that is this driver's OWN leg to work:
+    // "do not hide what is needed to evaluate and perform the job" (location)
+    // while "identity is the privacy interest" (name/phone) stays exactly as
+    // sealed as before. So the two halves split: `mine` alone unlocks address,
+    // instructions, landmark, coordinates and the navigation link — a driver
+    // cannot judge or reach a job they cannot locate, offered or not. `mine &&
+    // committed` still gates name and phone — nothing here makes a stranger's
+    // identity visible to a driver who has only been offered the job, same
+    // boundary as before.
+    //
+    // A door end belonging to a DIFFERENT leg (the far end of the whole
+    // shipment, worked by a different driver or not yet assigned to anyone)
+    // is never this driver's to accept, so `mine` is false for it and NOTHING
+    // changes there — area-only, independent of that other leg's own status.
+    // This is the residential-privacy boundary from BMPL-136/BMPL-182,
+    // narrowed by the owner to cover identity alone for one's own leg, and
+    // left completely intact for every other leg's stop.
+    const addressPlace = (end: typeof senderEnd, mine: boolean, committed: boolean) => {
+      const locationRevealed = mine;
+      const contactRevealed = mine && committed;
+      return {
+        kind: 'ADDRESS' as const,
+        name: contactRevealed ? end.name : null,
+        phone: contactRevealed ? end.phone : null,
+        address: locationRevealed ? end.address : null,
+        area: [end.city, end.district?.replace(/_/g, ' ')].filter(Boolean).join(', ') || null,
+        instructions: locationRevealed ? end.instructions : null,
+        landmark: locationRevealed ? end.landmark : null,
+        pinnedLocation: locationRevealed && end.latitude != null && end.longitude != null
+          ? { latitude: end.latitude, longitude: end.longitude }
+          : null,
+        navigationUrl: locationRevealed ? navUrl(end.latitude, end.longitude, end.address) : null,
+      };
+    };
     // A terminal is a public place — there is nothing to protect, and a driver
     // comparing offers (or just seeing the whole trip) needs to know how far
     // it is. Every hub end, on any leg of the shipment, uses this unconditionally.
@@ -590,7 +611,7 @@ export class ShipmentDriverService {
       pinnedLocation: hub.latitude != null && hub.longitude != null ? { latitude: hub.latitude, longitude: hub.longitude } : null,
       navigationUrl: navUrl(hub.latitude, hub.longitude, hub.name),
     });
-    const doorPlace = addressPlace(doorEnd, committed);
+    const doorPlace = addressPlace(doorEnd, true, committed);
     const hubEndPlace = hubEnd ? hubPlace(hubEnd) : null;
 
     // The real journey (BMPL-190): every stop the system actually knows about,
@@ -606,7 +627,7 @@ export class ShipmentDriverService {
     const senderIsMine = kind === 'FIRST_MILE' || kind === 'DIRECT';
     const recipientIsMine = kind === 'LAST_MILE' || kind === 'DIRECT';
     const routeStops: Array<ReturnType<typeof addressPlace> | ReturnType<typeof hubPlace>> = [];
-    routeStops.push(addressPlace(senderEnd, senderIsMine && committed));
+    routeStops.push(addressPlace(senderEnd, senderIsMine, committed));
     let lastHubId: string | null = null;
     for (const l of s.legs) {
       if (l.originHub && l.originHub.id !== lastHubId) {
@@ -618,7 +639,7 @@ export class ShipmentDriverService {
         lastHubId = l.destinationHub.id;
       }
     }
-    routeStops.push(addressPlace(recipientEnd, recipientIsMine && committed));
+    routeStops.push(addressPlace(recipientEnd, recipientIsMine, committed));
 
     const pickupPhotoUrls = await this.photoUrls(leg.handoffPhotoKeys);
 
@@ -643,9 +664,19 @@ export class ShipmentDriverService {
       legStatus: leg.status,
       mode: leg.mode,
       modeLabel: TRANSPORT_MODE_LABELS[leg.mode],
-      addressUnlocked: committed,
+      // `pickup`/`dropoff` are always THIS leg's own two action points, never
+      // another leg's — so `mine` is always true for whichever of them is an
+      // ADDRESS (a HUB end has no gate at all). Location is therefore always
+      // unlocked here now; kept (rather than removed) for the existing
+      // frontend, which reads it to decide whether to show its "appears once
+      // you accept" hint — now correctly never, since there is nothing left
+      // to unlock on this driver's own leg. `contactUnlocked` is the new,
+      // narrower signal for name/phone specifically — still gated on
+      // acceptance, unchanged from the old behaviour.
+      addressUnlocked: true,
+      contactUnlocked: committed,
       pickup: kind === 'LAST_MILE' ? hubEndPlace : doorPlace,
-      dropoff: kind === 'DIRECT' ? addressPlace(recipientEnd, committed) : kind === 'FIRST_MILE' ? hubEndPlace : doorPlace,
+      dropoff: kind === 'DIRECT' ? addressPlace(recipientEnd, true, committed) : kind === 'FIRST_MILE' ? hubEndPlace : doorPlace,
       // The full known journey, sender door to recipient door, for the map
       // (BMPL-190) — separate from pickup/dropoff above, which stay exactly
       // this leg's own two action points for the driver's task text.

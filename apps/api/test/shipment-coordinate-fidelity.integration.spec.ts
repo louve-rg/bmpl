@@ -188,7 +188,7 @@ describe('a driver sees the exact coordinates the customer selected (SHIPPING-E2
     expect(r.body.destination.longitude).toBe(DESTINATION.longitude);
   });
 
-  it('2 · the first-mile driver sees the sender\'s exact pin only after accepting — never a rounded one, never early', async () => {
+  it('2 · the first-mile driver sees the sender\'s exact pin from the moment the job is offered — never rounded, never withheld (owner ruling, SHIP-B)', async () => {
     const sender = await fundedSender();
     const courier = await makeCourier('STANN_CREEK');
     const shipment = await book(sender.cookies);
@@ -199,21 +199,26 @@ describe('a driver sees the exact coordinates the customer selected (SHIPPING-E2
       courier.driverProfileId,
     );
 
-    // Not yet accepted — BMPL-136's reveal gate, not a precision bug, should
-    // be what's hiding the pin. Confirms this spec isn't testing around it.
+    // Not yet accepted. A driver cannot judge or reach a job they cannot
+    // locate, so the pin is already exact here — only identity (contactUnlocked)
+    // stays gated until acceptance. Confirms this spec isn't testing around a
+    // precision bug hiding behind the old reveal gate.
     const before = await get(courier.cookies, `driver/shipping-jobs/${firstMile.id}`);
     expect(before.status).toBe(200);
-    expect(before.body.addressUnlocked).toBe(false);
-    expect(before.body.pickup.pinnedLocation).toBeNull();
+    expect(before.body.addressUnlocked).toBe(true);
+    expect(before.body.contactUnlocked).toBe(false);
+    expect(before.body.pickup.pinnedLocation.latitude).toBe(ORIGIN.latitude);
+    expect(before.body.pickup.pinnedLocation.longitude).toBe(ORIGIN.longitude);
 
     expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/accept`)).status).toBe(201);
 
     const after = await get(courier.cookies, `driver/shipping-jobs/${firstMile.id}`);
     expect(after.status).toBe(200);
-    expect(after.body.addressUnlocked).toBe(true);
-    // The exact value the customer typed — not the sender's own read re-read,
-    // which is the claim bmpl-web's structural trace could not settle on its
-    // own: did the DB or Prisma round it on the way through?
+    expect(after.body.contactUnlocked).toBe(true);
+    // The exact value the customer typed, unchanged by acceptance — not the
+    // sender's own re-read, which is the claim bmpl-web's structural trace
+    // could not settle on its own: did the DB or Prisma round it on the way
+    // through?
     expect(after.body.pickup.pinnedLocation.latitude).toBe(ORIGIN.latitude);
     expect(after.body.pickup.pinnedLocation.longitude).toBe(ORIGIN.longitude);
   });
@@ -231,7 +236,8 @@ describe('a driver sees the exact coordinates the customer selected (SHIPPING-E2
     );
 
     const before = await get(courier.cookies, `driver/shipping-jobs/${lastMile.id}`);
-    expect(before.body.dropoff.pinnedLocation).toBeNull();
+    expect(before.body.dropoff.pinnedLocation.latitude).toBe(DESTINATION.latitude);
+    expect(before.body.dropoff.pinnedLocation.longitude).toBe(DESTINATION.longitude);
 
     expect((await post(courier.cookies, `driver/shipping-jobs/${lastMile.id}/accept`)).status).toBe(201);
 

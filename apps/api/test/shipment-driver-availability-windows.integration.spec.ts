@@ -238,11 +238,15 @@ describe('SHIP-B: a shipment availability window reaches the driver, filtered to
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
     expect((await assign(first.id, driver)).status).toBe(201);
 
-    // Not accepted yet — still ASSIGNED, addressUnlocked should be false — but
-    // the window is not personally identifying, so it must already be visible.
+    // Not accepted yet — still ASSIGNED. addressUnlocked is structurally
+    // always true for a leg's own door (owner ruling, SHIP-B: there is
+    // nothing left to lock pre-acceptance) — contactUnlocked is the gate
+    // that's still false here. Either way, the window is not personally
+    // identifying, so it must already be visible.
     const job = await getJob(driver, first.id);
     expect(job.status).toBe(200);
-    expect(job.body.addressUnlocked).toBe(false);
+    expect(job.body.addressUnlocked).toBe(true);
+    expect(job.body.contactUnlocked).toBe(false);
     expect(job.body.availabilityWindows).toEqual([{ role: 'SENDER', startTime: '09:00', endTime: '12:00' }]);
   });
 
