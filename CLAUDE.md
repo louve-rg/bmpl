@@ -419,6 +419,58 @@ not verified until this suite has been run.** Unit tests do not cover the same
 ground. If you genuinely cannot run it, say so explicitly rather than omitting
 it.
 
+### Running the API dev server across worktrees — the shared-lock trap (CLOSE-18)
+
+Every worktree on a dev host shares the SAME local Redis and Postgres by
+default. The dispatch, shipping-dispatch, and payments-reconciliation
+schedulers each guard their tick with a Redis `SET key EX ttl NX` lock whose
+key is a plain constant — so **two API processes from two different
+worktrees silently fight over each other's lock**, and the loser just looks
+like "the sweep ran and found nothing." This cost real debugging time on
+CLOSE-12 (dispatch-exhaustion recovery looked broken for six minutes; it
+wasn't — four unrelated stray processes across the host were winning ticks
+instead of the one under test).
+
+**Before trusting that your API process owns the only scheduler on the
+floor:**
+
+```bash
+node scripts/dispatch-floor-check.mjs --needs <commit-you're-testing>
+```
+
+This joins every listening port to its owning process's full command line,
+probes `/api/health` on anything that looks like a real API build (not a
+Next.js `/api/*` proxy, which faithfully echoes the backend's health JSON
+without running a second scheduler), and separately scans the WHOLE host for
+non-listening-but-alive `nest --watch` supervisors or stray `dist/main`
+processes that can still respawn into the picture mid-test. `--kill-others`
+stops every API-shaped process outside your own worktree.
+
+**Isolating your own worktree's lock (optional, dev-only):** set
+`REDIS_LOCK_NAMESPACE` in your worktree's `.env` to something unique (see
+`.env.example`) and every scheduler's lock key is prefixed with it
+automatically — production leaves this unset, so two production replicas
+correctly sharing one lock is unaffected.
+
+**How to actually stop the API dev server — read this before you `taskkill`
+a port owner and move on.** `nest start --watch` runs its real HTTP listener
+as a SEPARATE `dist/main` CHILD process. Killing that child does **not**
+kill the `nest` watch SUPERVISOR — the supervisor just rebuilds and respawns
+a fresh child later, on whatever it last compiled, silently re-entering the
+shared lock on a stale commit while you're looking elsewhere. One session
+accumulated ten of these orphaned supervisors this way. Either:
+- Match the whole family by command line before killing (`Get-CimInstance
+  Win32_Process | Where-Object CommandLine -match 'nest.*start.*--watch'`,
+  then `taskkill /PID <id> /F /T` each one), or
+- Start a controlled single process directly — `node apps/api/dist/main`
+  (use the **full path**, not a relative one, so tooling like
+  `dispatch-floor-check.mjs` can identify which worktree it belongs to) —
+  with no watch supervisor in the picture at all, so there is nothing left
+  to respawn.
+
+Either way, re-run `dispatch-floor-check.mjs` after stopping anything — a
+port going quiet is not the same as the process actually being gone.
+
 ---
 
 ## 11. Git and verification workflow

@@ -49,7 +49,7 @@ export class PaymentsReconciliationScheduler implements OnApplicationBootstrap, 
   private async tick(): Promise<void> {
     let locked = false;
     try {
-      const res = await this.redis.client.set(LOCK_KEY, '1', 'EX', LOCK_TTL_SECONDS, 'NX');
+      const res = await this.redis.client.set(this.redis.lockKey(LOCK_KEY), '1', 'EX', LOCK_TTL_SECONDS, 'NX');
       locked = res === 'OK';
     } catch {
       return; // Redis unreachable: skip rather than sweep unguarded.

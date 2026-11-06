@@ -89,7 +89,7 @@ export class ShipmentDispatchScheduler implements OnApplicationBootstrap, OnModu
   private async acquire(): Promise<string | null> {
     const token = randomUUID();
     try {
-      const res = await this.redis.client.set(LOCK_KEY, token, 'EX', LOCK_TTL_SECONDS, 'NX');
+      const res = await this.redis.client.set(this.redis.lockKey(LOCK_KEY), token, 'EX', LOCK_TTL_SECONDS, 'NX');
       return res === 'OK' ? token : null;
     } catch (err) {
       this.logger.warn(`shipping dispatch sweep skipped — could not reach Redis: ${String(err)}`);
@@ -108,10 +108,15 @@ export class ShipmentDispatchScheduler implements OnApplicationBootstrap, OnModu
    */
   private async release(token: string): Promise<void> {
     try {
+      // MUST be the same namespaced key acquire() used — a release that
+      // deletes the raw constant while acquire set the namespaced one would
+      // never actually clear the lock it holds, leaving it stuck until the
+      // TTL expires (the exact CLOSE-16 bug, reintroduced by this key not
+      // matching rather than by either change on its own).
       await this.redis.client.eval(
         "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
         1,
-        LOCK_KEY,
+        this.redis.lockKey(LOCK_KEY),
         token,
       );
     } catch (err) {

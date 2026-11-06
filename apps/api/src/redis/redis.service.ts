@@ -58,4 +58,15 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
   }
+
+  /**
+   * Namespaces a scheduler lock key with `REDIS_LOCK_NAMESPACE` when set
+   * (dev-only — see env.ts). Unset in production, so this is a no-op there;
+   * two production replicas sharing one lock stays correct and unchanged.
+   * Every scheduler lock key should be built through this, not a raw string,
+   * so one worktree's API can never silently win another's sweep (CLOSE-18).
+   */
+  lockKey(key: string): string {
+    return this.env.REDIS_LOCK_NAMESPACE ? `${this.env.REDIS_LOCK_NAMESPACE}:${key}` : key;
+  }
 }
