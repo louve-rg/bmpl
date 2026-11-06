@@ -149,6 +149,86 @@ describe('DriverShippingJobPage — route map (BMPL-349/350)', () => {
 });
 
 /**
+ * MDF-560: the API requires a collection code (`requiresPickupPin`) on a
+ * leg that genuinely starts at a door, but the screen only ever rendered a
+ * code field for handoff — a driver confirming pickup on such a leg had no
+ * field to put the code in, so the click was stuck (server 400 "Enter the
+ * collection code."). `requiresPickupPin` is additive/optional on the wire,
+ * same reasoning as `legStatus`/`routeStops` above.
+ */
+describe('DriverShippingJobPage — pickup needs its own collection code (MDF-560)', () => {
+  it('renders a collection-code field for pickup when requiresPickupPin is true, with no "who took it" field', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'DRIVER_ACCEPTED', requiresPickupPin: true }));
+    const el = await mount();
+
+    expect(el.textContent).toContain('Collection code');
+    expect(el.textContent).toContain('Ask the sender for the collection code');
+    expect(el.textContent).not.toContain('Who took it');
+    expect(el.querySelector('#code')).not.toBeNull();
+    expect(el.querySelector('#who')).toBeNull();
+  });
+
+  it('posts only the pin for a pickup confirmation, never receivedByName', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'DRIVER_ACCEPTED', requiresPickupPin: true }));
+    apiPost.mockResolvedValue(undefined);
+    const el = await mount();
+
+    const input = el.querySelector('#code') as HTMLInputElement;
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeInputValueSetter.call(input, '1234');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Confirm pickup')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiPost).toHaveBeenCalledWith('/driver/shipping-jobs/job1/pickup', { pin: '1234' });
+  });
+
+  it('shows no code field for pickup when requiresPickupPin is false — the click completes with an empty body, as before', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'DRIVER_ACCEPTED', requiresPickupPin: false }));
+    apiPost.mockResolvedValue(undefined);
+    const el = await mount();
+
+    expect(el.textContent).not.toContain('Collection code');
+    expect(el.querySelector('#code')).toBeNull();
+
+    const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Confirm pickup')!;
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiPost).toHaveBeenCalledWith('/driver/shipping-jobs/job1/pickup', {});
+  });
+
+  it('shows no code field for pickup when requiresPickupPin is absent from the wire (older/degraded response)', async () => {
+    const raw = JSON.parse(JSON.stringify(shippingJob({ status: 'DRIVER_ACCEPTED' }))) as Record<string, unknown>;
+    delete raw.requiresPickupPin;
+    apiGet.mockResolvedValue(raw);
+    const el = await mount();
+
+    expect(el.textContent).not.toContain('Collection code');
+    expect(el.querySelector('#code')).toBeNull();
+  });
+
+  it('still asks for both the code and who took it at handoff, unchanged', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'ARRIVING', nextActionLabel: 'Confirm handoff' }));
+    const el = await mount();
+
+    expect(el.textContent).toContain('Finish the handover');
+    expect(el.textContent).toContain('Handover code');
+    expect(el.textContent).toContain('Who took it');
+    expect(el.querySelector('#who')).not.toBeNull();
+  });
+});
+
+/**
  * MDF-96 / Edward req 10 — the courier-facing screen for an endpoint
  * (POST /driver/shipping-jobs/:id/report-issue) that already existed, worked
  * and was correctly restricted server-side, but had zero references anywhere
