@@ -361,6 +361,65 @@ paths:
                   conversationId: { type: [string, "null"] }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [ShipmentRecipient]
+      summary: A linked recipient opens their own conversation with the courier on the current last-mile leg (BMPL-359)
+      description: >-
+        Takes no token and no body. The caller is the signed-in session user,
+        and the request is refused unless that user is the shipment's linked
+        `recipientUserId`. A tracking link alone never grants this: possession
+        of a link is not a recipient, and this route accepts no token parameter
+        at all. A non-linked caller gets the same 404 as an unknown reference,
+        so the response does not reveal whether the reference exists.
+
+        The conversation is the existing per-leg CUSTOMER_DRIVER thread for the
+        shipment's current LAST_MILE or DIRECT leg (the legs that end by
+        delivering to the recipient). It is not created here: the thread is
+        opened when a driver accepts the leg. Until then this route refuses
+        with 400. On success the caller is upserted into that thread as a
+        RECIPIENT participant with sending enabled (a previously left
+        participant is re-activated), the current driver is reconciled the
+        same way, and the conversation is returned.
+      parameters:
+        - { name: reference, in: path, required: true, schema: { type: string }, description: Shipment reference }
+      responses:
+        "201":
+          description: The conversation for the current last-mile leg, with its messages (INTERNAL_NOTE messages are excluded for non-support viewers)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  contextType: { type: string, example: SHIPMENT_LEG }
+                  contextId: { type: string, description: The shipment leg id }
+                  pairing: { type: string, example: CUSTOMER_DRIVER }
+                  subject: { type: string, nullable: true }
+                  contextLabel: { type: string }
+                  status: { type: string }
+                  viewerRole: { type: string, description: The caller's role in this thread, e.g. RECIPIENT }
+                  canSend: { type: boolean }
+                  participants:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        userId: { type: string }
+                        role: { type: string }
+                        name: { type: string }
+                        initials: { type: string }
+                        avatarUrl: { type: string, nullable: true }
+                        canSend: { type: boolean }
+                  messages:
+                    type: array
+                    items: { type: object }
+        "400":
+          description: No courier conversation is open for this shipment yet (no driver has accepted the current last-mile or direct leg)
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /shipping/incoming/{reference}/availability-window:
     get:
       tags: [ShipmentRecipient]
@@ -443,66 +502,6 @@ paths:
                         startTime: { type: string }
                         endTime: { type: string }
         "400": { $ref: "#/components/responses/ValidationError" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "404": { $ref: "#/components/responses/NotFound" }
-  /shipping/incoming/{reference}/courier-conversation:
-    post:
-      tags: [ShipmentRecipient]
-      summary: A linked recipient opens their own conversation with the courier on the current last-mile leg (BMPL-359)
-      description: >-
-        Takes no token and no body. The caller is the signed-in session user,
-        and the request is refused unless that user is the shipment's linked
-        `recipientUserId`. A tracking link alone never grants this: possession
-        of a link is not a recipient, and this route accepts no token parameter
-        at all. A non-linked caller gets the same 404 as an unknown reference,
-        so the response does not reveal whether the reference exists.
-
-        The conversation is the existing per-leg CUSTOMER_DRIVER thread for the
-        shipment's current LAST_MILE or DIRECT leg (the legs that end by
-        delivering to the recipient). It is not created here: the thread is
-        opened when a driver accepts the leg. Until then this route refuses
-        with 400. On success the caller is upserted into that thread as a
-        RECIPIENT participant with sending enabled (a previously left
-        participant is re-activated), the current driver is reconciled the
-        same way, and the conversation is returned.
-      parameters:
-        - { name: reference, in: path, required: true, schema: { type: string }, description: Shipment reference }
-      responses:
-        "201":
-          description: The conversation for the current last-mile leg, with its messages (INTERNAL_NOTE messages are excluded for non-support viewers)
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  id: { type: string }
-                  contextType: { type: string, example: SHIPMENT_LEG }
-                  contextId: { type: string, description: The shipment leg id }
-                  pairing: { type: string, example: CUSTOMER_DRIVER }
-                  subject: { type: string, nullable: true }
-                  contextLabel: { type: string }
-                  status: { type: string }
-                  viewerRole: { type: string, description: The caller's role in this thread, e.g. RECIPIENT }
-                  canSend: { type: boolean }
-                  participants:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        userId: { type: string }
-                        role: { type: string }
-                        name: { type: string }
-                        initials: { type: string }
-                        avatarUrl: { type: string, nullable: true }
-                        canSend: { type: boolean }
-                  messages:
-                    type: array
-                    items: { type: object }
-        "400":
-          description: No courier conversation is open for this shipment yet (no driver has accepted the current last-mile or direct leg)
-          content:
-            application/json:
-              schema: { type: object }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
   /shipping/{reference}:
@@ -2787,6 +2786,27 @@ components:
             a different leg's door are unaffected by it.
         pickup: { $ref: "#/components/schemas/JobPlace" }
         dropoff: { $ref: "#/components/schemas/JobPlace" }
+        routeStops:
+          type: array
+          description: >-
+            The real journey (BMPL-190; Edward requirement 2) — every stop
+            the system actually knows about, sender door to recipient door,
+            for the WHOLE shipment, not just this leg's own two ends. Built
+            by walking every leg (not only this driver's), collapsing a hub
+            that borders two legs (e.g. a first mile's destination and the
+            next leg's origin) into the single stop it is. A leg with no hub
+            (DIRECT) contributes none, and a shipment with only a DIRECT leg
+            stays a genuine two-stop A/B journey, never padded out. Separate
+            from `pickup`/`dropoff` above, which stay exactly this leg's own
+            two action points for the driver's task text. A stop here that IS
+            this leg's own door is the same object as `pickup`/`dropoff` and
+            follows the identical `addressUnlocked`/`contactUnlocked` rule
+            above. A stop that is NOT this leg's own door (the far end of the
+            whole shipment, worked by a different driver or unassigned)
+            always keeps the same area-only representation instead,
+            independent of that other leg's own status — neither half of
+            the gate above ever extends to a stop that isn't this driver's.
+          items: { $ref: "#/components/schemas/JobPlace" }
         parcel:
           type: object
           properties:
