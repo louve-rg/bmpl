@@ -451,14 +451,23 @@ export default function DriverShippingJobPage() {
               // end alike. Now it's always true for this leg's own two ends,
               // so it no longer says anything about the OTHER leg's door,
               // which is unaffected by the owner's ruling and still genuinely
-              // area-only until accepted. Check the actual stop instead of
-              // the stale flag.
-              const otherEndStillHidden = routeStops.some((s) => s.kind === 'ADDRESS' && s.address == null);
+              // area-only. Check the actual stop instead of the stale flag.
+              //
+              // SHIP-H (owner QA, conv-24e312): the caption used to say "until
+              // you accept" — true of the OLD, single shared gate, but not of
+              // this one. The api's own `addressPlace` reveals an end's
+              // location purely on whether it is THIS leg's own door (`mine`),
+              // never on acceptance, and a different leg's door end is never
+              // `mine` no matter what this driver does. Accepting this leg
+              // does not and will not reveal it — it is a different leg's
+              // privacy boundary, not a timer. Say that instead of promising
+              // a reveal that can never happen.
+              const otherLegDoorAreaOnly = routeStops.some((s) => s.kind === 'ADDRESS' && s.address == null);
               return (
                 <Card className="p-4 sm:p-5">
                   <ExpandableRouteMap points={points} title={`${job.reference} · route`} />
-                  {points.length < routeStops.length && otherEndStillHidden && (
-                    <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">The other end shows its area above until you accept.</p>
+                  {points.length < routeStops.length && otherLegDoorAreaOnly && (
+                    <p className="mt-2 text-xs text-[color:var(--bmpl-text-muted)]">The other end belongs to a different leg — only its area is ever shown here.</p>
                   )}
                 </Card>
               );

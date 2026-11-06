@@ -20,12 +20,20 @@ export type MapPreviewPoint = MapPoint & { letter?: string };
 function markerIcon(L: typeof import('leaflet'), letter: string | undefined, kind: 'ADDRESS' | 'HUB' | undefined) {
   const isHub = kind === 'HUB';
   const color = isHub ? '#1e40af' : '#0ea5e9';
+  // Test affordance (Edward issue 2 verification): a stable, counted,
+  // kind-identifiable hook on every marker's root element. `data-kind`
+  // mirrors the same ADDRESS/HUB fallback the visual treatment above
+  // already applies when `kind` is absent (an api deploy predating this
+  // field) — never a third, untested value. `data-letter` carries the
+  // route-order label (A, B, C…) so a test can match a marker back to a
+  // specific stop, not just count markers of a kind.
+  const testAttrs = `data-testid="route-map-marker" data-kind="${isHub ? 'HUB' : 'ADDRESS'}" data-letter="${letter ?? ''}"`;
   if (letter) {
     const radius = isHub ? '8px' : '9999px';
     return L.divIcon({
       className: '',
       html:
-        `<div style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:${radius};` +
+        `<div ${testAttrs} style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:${radius};` +
         `background:${color};color:#ffffff;font:700 13px system-ui,sans-serif;border:2px solid #ffffff;` +
         `box-shadow:0 1px 3px rgba(0,0,0,0.35);">${letter}</div>`,
       iconSize: [30, 30],
@@ -36,7 +44,7 @@ function markerIcon(L: typeof import('leaflet'), letter: string | undefined, kin
     return L.divIcon({
       className: '',
       html:
-        `<div style="width:26px;height:26px;border-radius:8px;background:${color};` +
+        `<div ${testAttrs} style="width:26px;height:26px;border-radius:8px;background:${color};` +
         'border:2px solid #ffffff;box-shadow:0 1px 3px rgba(0,0,0,0.35);"></div>',
       iconSize: [26, 26],
       iconAnchor: [13, 13],
@@ -45,8 +53,8 @@ function markerIcon(L: typeof import('leaflet'), letter: string | undefined, kin
   return L.divIcon({
     className: '',
     html:
-      `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 24 24" fill="${color}" stroke="#ffffff" stroke-width="1.6">` +
-      '<path d="M12 22s7-6.2 7-12A7 7 0 0 0 5 10c0 5.8 7 12 7 12Z"/><circle cx="12" cy="10" r="2.6" fill="#ffffff" stroke="none"/></svg>',
+      `<div ${testAttrs}><svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 24 24" fill="${color}" stroke="#ffffff" stroke-width="1.6">` +
+      '<path d="M12 22s7-6.2 7-12A7 7 0 0 0 5 10c0 5.8 7 12 7 12Z"/><circle cx="12" cy="10" r="2.6" fill="#ffffff" stroke="none"/></svg></div>',
     iconSize: [34, 34],
     iconAnchor: [17, 32],
   });
