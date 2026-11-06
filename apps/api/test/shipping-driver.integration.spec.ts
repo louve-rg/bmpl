@@ -677,8 +677,10 @@ describe('the route map shows the real journey (BMPL-190)', () => {
     expect(stops.map((p: { kind: string }) => p.kind)).toEqual(['ADDRESS', 'HUB', 'HUB', 'HUB', 'ADDRESS']);
     // The sender's door belongs to a leg this driver never touches — always area-only.
     expect(stops[0].pinnedLocation).toBeNull();
-    // The recipient's door is THIS driver's own — but they have not accepted yet.
-    expect(stops[4].pinnedLocation).toBeNull();
+    // The recipient's door is THIS driver's own — the pin was already visible
+    // on the offer (owner ruling, SHIP-B); only identity stays sealed.
+    expect(stops[4].pinnedLocation).not.toBeNull();
+    expect(stops[4].name).toBeNull();
 
     await post(driver.cookies, `driver/shipping-jobs/${last.id}/accept`);
     const taken = await get(driver.cookies, `driver/shipping-jobs/${last.id}`);
