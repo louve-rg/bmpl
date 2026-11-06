@@ -6,7 +6,7 @@ import { api, type ApiError } from '../../../lib/api';
 import { adminCrumbs } from '../../../lib/admin-nav';
 import { legAssignMode } from '../../../lib/leg-assign';
 import { LegAssignModal } from '../../../components/logistics/LegAssignModal';
-import { Alert, Badge, Button, Card, EmptyState, Field, PageHeader, Select, Spinner } from '../../../components/ui';
+import { Alert, Badge, Button, Card, EmptyState, Field, LoadingRow, PageHeader, Select } from '../../../components/ui';
 
 /**
  * The logistics operations board.
@@ -170,11 +170,7 @@ export default function LogisticsOpsPage() {
         </div>
       </Card>
 
-      {loading && (
-        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading…
-        </div>
-      )}
+      {loading && <LoadingRow className="mt-6" />}
       {err && <Alert tone="warning" className="mt-4">{err}</Alert>}
       {!loading && !err && rows.length === 0 && (
         <div className="mt-6">
@@ -205,17 +201,17 @@ export default function LogisticsOpsPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Link href={`/dashboard/logistics/${encodeURIComponent(s.reference)}`} className="font-mono text-sm font-semibold text-belize-blue hover:underline">
+                  <Link href={`/dashboard/logistics/${encodeURIComponent(s.reference)}`} className="font-mono text-sm font-semibold text-[color:var(--bmpl-link)] hover:underline">
                     {s.reference}
                   </Link>
                   <Badge tone={s.needsAttention ? 'warning' : 'info'}>{s.statusLabel}</Badge>
                   <Badge tone="neutral">{s.serviceLabel}</Badge>
                   {s.isTest && <Badge tone="neutral">Simulation</Badge>}
                 </div>
-                <p className="mt-1 break-words text-sm text-slate-600">
+                <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text-muted-strong)]">
                   {[s.origin, s.destination].filter(Boolean).join(' → ') || '—'}
                 </p>
-                {s.customer && <p className="mt-0.5 text-xs text-slate-500">{s.customer}</p>}
+                {s.customer && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted)]">{s.customer}</p>}
                 {s.exceptionReason && (
                   <p className="mt-1 break-words text-sm font-medium text-amber-800">{s.exceptionReason}</p>
                 )}

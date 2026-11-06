@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { RecipientTracking } from '../../../../components/shipping/RecipientTracking';
 import { RecipientAvailabilityWindow } from '../../../../components/shipping/RecipientAvailabilityWindow';
 import { RecipientCourierMessage } from '../../../../components/shipping/RecipientCourierMessage';
-import { Alert, Spinner } from '../../../../components/ui';
+import { Alert, LoadingRow } from '../../../../components/ui';
 import type { ApiError } from '../../../../lib/api';
 import { shippingApi, type LinkedRecipientTrackingView } from '../../../../lib/shipping';
 
@@ -50,11 +50,7 @@ export default function IncomingShipmentPage() {
   }, [reference, router]);
 
   if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-slate-500">
-        <Spinner className="h-4 w-4" /> Loading…
-      </div>
-    );
+    return <LoadingRow />;
   }
 
   if (notFound || !view) {

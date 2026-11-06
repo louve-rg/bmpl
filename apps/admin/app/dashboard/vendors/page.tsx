@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { api } from '../../../lib/api';
 import { loadErrorMessage } from '../../../lib/load-error';
 import { StatusBadge } from '../../../components/StatusBadge';
-import { Alert, PageHeader, Spinner } from '../../../components/ui';
+import { Alert, PageHeader, LoadingRow } from '../../../components/ui';
 import { adminCrumbs } from '../../../lib/admin-nav';
 
 interface VendorRow {
@@ -81,9 +81,7 @@ export default function VendorsPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading…
-        </div>
+        <LoadingRow />
       ) : (
         // data-theme="light" resets the adaptive-token scope for this card.
         // It's a literal bg-white surface inside AdminShell's data-theme="glass"

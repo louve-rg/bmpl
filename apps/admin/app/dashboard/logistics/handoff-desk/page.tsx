@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
-import { Alert, Badge, Button, ButtonLink, Card, EmptyState, Field, PageHeader, Select, Spinner } from '../../../../components/ui';
+import { Alert, Badge, Button, ButtonLink, Card, EmptyState, Field, LoadingRow, PageHeader, Select } from '../../../../components/ui';
 
 /**
  * The handoff desk: what a terminal should be expecting.
@@ -173,20 +173,14 @@ export default function HandoffDeskPage() {
             </div>
           </Card>
 
-          {!hubs && (
-            <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-              <Spinner className="h-4 w-4" /> Loading terminals…
-            </div>
-          )}
+          {!hubs && <LoadingRow className="mt-6" label="Loading terminals…" />}
 
           {hubs && hubs.length > 0 && !hubId && (
             <p className="mt-6 text-sm text-[color:var(--bmpl-text-muted)]">Choose a terminal to see what it is expecting.</p>
           )}
 
           {loading && (
-            <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-              <Spinner className="h-4 w-4" /> Loading…
-            </div>
+            <LoadingRow className="mt-6" />
           )}
 
           {!loading && hub && rows && rows.length === 0 && (
@@ -207,7 +201,7 @@ export default function HandoffDeskPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <Link
                           href={`/dashboard/logistics/${encodeURIComponent(r.reference)}`}
-                          className="font-mono text-sm font-semibold text-belize-blue hover:underline"
+                          className="font-mono text-sm font-semibold text-[color:var(--bmpl-link)] hover:underline"
                         >
                           {r.reference}
                         </Link>
@@ -215,12 +209,12 @@ export default function HandoffDeskPage() {
                         <Badge tone="neutral">{r.kind.replace(/_/g, ' ').toLowerCase()}</Badge>
                       </div>
                       <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text-secondary)]">{r.parcel}</p>
-                      <p className="mt-0.5 break-words text-sm text-slate-600">From {r.from} · brought by {r.broughtBy}</p>
+                      <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted-strong)]">From {r.from} · brought by {r.broughtBy}</p>
                       {r.forRecipient && (
-                        <p className="mt-0.5 text-xs text-slate-500">For {r.forRecipient}</p>
+                        <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted)]">For {r.forRecipient}</p>
                       )}
                     </div>
-                    <div className="shrink-0 text-right text-xs text-slate-500">
+                    <div className="shrink-0 text-right text-xs text-[color:var(--bmpl-text-muted)]">
                       {when(r.departedAt) && <p>Departed {when(r.departedAt)}</p>}
                       {when(r.arrivedAt) && <p>Arrived {when(r.arrivedAt)}</p>}
                     </div>
@@ -233,12 +227,12 @@ export default function HandoffDeskPage() {
                     <div className="mt-3 border-t border-slate-100 pt-2">
                       {pins[r.legId] ? (
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                          <span className="text-slate-600">Handoff code</span>
+                          <span className="text-[color:var(--bmpl-text-muted-strong)]">Handoff code</span>
                           <span className="font-mono text-base font-bold tracking-widest text-[color:var(--bmpl-text)]">
                             {pins[r.legId]?.handoffPin ?? '—'}
                           </span>
                           {pins[r.legId]?.handoffVerificationStatus && (
-                            <span className="text-xs text-slate-500">
+                            <span className="text-xs text-[color:var(--bmpl-text-muted)]">
                               {pins[r.legId]?.handoffVerificationStatus?.toLowerCase()}
                             </span>
                           )}
@@ -250,7 +244,7 @@ export default function HandoffDeskPage() {
                           <button
                             type="button"
                             onClick={() => hidePin(r.legId)}
-                            className="text-xs font-medium text-slate-500 hover:underline"
+                            className="text-xs font-medium text-[color:var(--bmpl-text-muted)] hover:underline"
                           >
                             Hide
                           </button>
@@ -260,7 +254,7 @@ export default function HandoffDeskPage() {
                           type="button"
                           onClick={() => void revealPin(r.legId)}
                           disabled={pinBusy === r.legId}
-                          className="text-xs font-medium text-belize-blue hover:underline disabled:opacity-50"
+                          className="text-xs font-medium text-[color:var(--bmpl-link)] hover:underline disabled:opacity-50"
                         >
                           {pinBusy === r.legId ? 'Revealing…' : 'Reveal handoff code'}
                         </button>

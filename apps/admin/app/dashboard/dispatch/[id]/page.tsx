@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { api, type ApiError } from '../../../../lib/api';
 import { StatusBadge } from '../../../../components/StatusBadge';
-import { Alert, Badge, Button, Field, PageHeader, Select, Spinner, Textarea } from '../../../../components/ui';
+import { Alert, Badge, Button, Field, LoadingRow, PageHeader, Select, Textarea } from '../../../../components/ui';
 import { adminCrumbs } from '../../../../lib/admin-nav';
 import {
   addressLines,
@@ -171,11 +171,7 @@ export default function DispatchDetailPage() {
         ← Dispatch
       </Link>
 
-      {loading && (
-        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading…
-        </div>
-      )}
+      {loading && <LoadingRow className="mt-6" />}
 
       {!loading && error && (
         <p className="mt-6 rounded-bmpl-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
@@ -480,9 +476,7 @@ function AssignModal({
       {loadErr ? (
         <p className="rounded-bmpl-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadErr}</p>
       ) : drivers === null ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading eligible drivers…
-        </div>
+        <LoadingRow label="Loading eligible drivers…" />
       ) : drivers.length === 0 ? (
         <p className="text-sm text-slate-500">No eligible drivers available for this delivery.</p>
       ) : (

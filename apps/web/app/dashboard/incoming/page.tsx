@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { destinationLine, recipientHeadline } from '../../../lib/recipient-tracking';
 import { etaLine, shippingApi, showsEta, type LinkedRecipientTrackingView } from '../../../lib/shipping';
 import type { ApiError } from '../../../lib/api';
-import { PageHeader, Alert, Badge, EmptyState, Spinner, type Tone } from '../../../components/ui';
+import { PageHeader, Alert, Badge, EmptyState, LoadingRow, type Tone } from '../../../components/ui';
 
 /**
  * Shipments this account has CLAIMED as recipient (BMPL-179).
@@ -58,11 +58,7 @@ export default function IncomingShipmentsPage() {
         description="Parcels you've saved to your account from a tracking link. The sender's own view has more detail — this is what a recipient sees."
       />
 
-      {!rows && !err && (
-        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading…
-        </div>
-      )}
+      {!rows && !err && <LoadingRow className="mt-6" />}
       {err && (
         <Alert tone="warning" className="mt-6">
           {err}

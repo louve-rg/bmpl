@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { headlineFor, shippingApi, shippingMoney, type ShipmentView } from '../../../lib/shipping';
-import { PageHeader, Alert, ButtonLink, EmptyState, Spinner, Badge, type Tone } from '../../../components/ui';
+import { PageHeader, Alert, ButtonLink, EmptyState, LoadingRow, Badge, type Tone } from '../../../components/ui';
 
 /**
  * The customer's shipments.
@@ -79,11 +79,7 @@ export default function ShipmentsPage() {
         </ButtonLink>
       </div>
 
-      {loading && (
-        <div className="mt-6 flex items-center gap-2 text-sm text-slate-500">
-          <Spinner className="h-4 w-4" /> Loading…
-        </div>
-      )}
+      {loading && <LoadingRow className="mt-6" />}
       {err && (
         <Alert tone="warning" className="mt-6">
           {err}
@@ -107,7 +103,7 @@ export default function ShipmentsPage() {
             <h2 className="text-sm font-semibold text-[color:var(--bmpl-text)]">
               {group.title} <span className="font-normal text-[color:var(--bmpl-text-muted-strong)]">({rows_.length})</span>
             </h2>
-            {group.hint && <p className="mt-0.5 text-xs text-slate-500">{group.hint}</p>}
+            {group.hint && <p className="mt-0.5 text-xs text-[color:var(--bmpl-text-muted-strong)]">{group.hint}</p>}
             <ul className="mt-2 space-y-3">
               {rows_.map((s) => (
                 <li key={s.id}>
