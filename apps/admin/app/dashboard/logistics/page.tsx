@@ -11,10 +11,16 @@ import { Alert, Badge, Button, Card, EmptyState, Field, LoadingRow, PageHeader, 
 /**
  * The logistics operations board.
  *
- * Sorted by "needs a human first" rather than by date — an operations list
- * ordered purely by time makes the one shipment in trouble exactly as hard to
- * find as the ninety that are fine. Exceptions come first, then anything whose
- * courier leg ran out of drivers, then the rest.
+ * CLOSE-21: this comment used to claim the list was "sorted by needs a human
+ * first... exceptions come first, then anything whose courier leg ran out of
+ * drivers, then the rest". It was wrong — `listForOps`'s own `orderBy` is
+ * exactly `[{ exceptionAt: desc nulls last }, { createdAt: desc }]`; there is
+ * no ordering on `dispatchExhaustedAt`/`dispatchUnavailableAt`/`needsDriver`
+ * at all. A sort only pushes a stranded shipment nearer the top of a list
+ * that can still paginate it away under enough exceptions — against the
+ * actual requirement (an administrator can clearly identify what needs
+ * attention), the "Needs a driver" filter below is what does that: it puts
+ * every stranded shipment on one page instead of merely ranking it higher.
  */
 
 interface OpsLeg {
@@ -102,6 +108,12 @@ export default function LogisticsOpsPage() {
   const [rows, setRows] = useState<OpsRow[]>([]);
   const [status, setStatus] = useState('');
   const [includeTest, setIncludeTest] = useState(false);
+  // CLOSE-21: a FILTER, not a sort — ticking this restricts the board to
+  // shipments with at least one EXHAUSTED-or-UNAVAILABLE leg, same `AND`
+  // alongside status/includeTest the backend already combines its filters
+  // with. Unchecked (the default) is today's fully unfiltered behavior —
+  // the param is additive and simply omitted, same pattern as includeTest.
+  const [needsDriverOnly, setNeedsDriverOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<{ leg: OpsLeg; mode: 'assign' | 'reassign' } | null>(null);
@@ -126,13 +138,14 @@ export default function LogisticsOpsPage() {
       const qs = new URLSearchParams();
       if (status) qs.set('status', status);
       if (includeTest) qs.set('includeTest', 'true');
+      if (needsDriverOnly) qs.set('needsDriver', 'true');
       const res = await api.get<{ rows: OpsRow[]; total: number }>(`/admin/logistics/shipments?${qs}`);
       setRows(res.rows);
       setErr(null);
       // An empty board with the simulation filter on can be hiding the very
       // shipment somebody is walking through UAT with. One cheap count answers
       // "is there really nothing?" honestly instead of leaving it ambiguous.
-      if (res.rows.length === 0 && !includeTest) {
+      if (res.rows.length === 0 && !includeTest && !needsDriverOnly) {
         const withTest = await api.get<{ total: number }>(
           `/admin/logistics/shipments?${new URLSearchParams({ ...(status ? { status } : {}), includeTest: 'true', pageSize: '1' })}`,
         );
@@ -145,7 +158,7 @@ export default function LogisticsOpsPage() {
     } finally {
       setLoading(false);
     }
-  }, [status, includeTest]);
+  }, [status, includeTest, needsDriverOnly]);
 
   useEffect(() => {
     void load();
@@ -195,6 +208,12 @@ export default function LogisticsOpsPage() {
             {/* Off by default so the board reflects real work. */}
             Include simulation shipments
           </label>
+          <label className="flex min-h-[40px] items-center gap-2 text-sm text-[color:var(--bmpl-text-muted-strong)]">
+            <input type="checkbox" checked={needsDriverOnly} onChange={(e) => setNeedsDriverOnly(e.target.checked)} />
+            {/* A VIEW, not a ranking — this selects which shipments show up,
+                it does not claim the rest of the board is ordered by urgency. */}
+            Only shipments needing a driver
+          </label>
           <Button onClick={() => void load()} variant="outline">
             Refresh
           </Button>
@@ -206,14 +225,16 @@ export default function LogisticsOpsPage() {
       {!loading && !err && rows.length === 0 && (
         <div className="mt-6">
           <EmptyState
-            title="No shipments"
+            title={needsDriverOnly ? 'Nothing needs a driver right now' : 'No shipments'}
             description={
-              hiddenSimulation > 0
-                ? `Nothing matches those filters — but ${hiddenSimulation} simulation shipment${hiddenSimulation === 1 ? ' is' : 's are'} hidden by "Include simulation shipments".`
-                : 'Nothing matches those filters.'
+              needsDriverOnly
+                ? 'No shipment currently has a leg that ran out of drivers or has none available.'
+                : hiddenSimulation > 0
+                  ? `Nothing matches those filters — but ${hiddenSimulation} simulation shipment${hiddenSimulation === 1 ? ' is' : 's are'} hidden by "Include simulation shipments".`
+                  : 'Nothing matches those filters.'
             }
             action={
-              hiddenSimulation > 0 ? (
+              needsDriverOnly ? undefined : hiddenSimulation > 0 ? (
                 <Button variant="outline" onClick={() => setIncludeTest(true)}>
                   Show simulation shipments
                 </Button>
