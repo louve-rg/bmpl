@@ -514,8 +514,12 @@ export default function ShipmentOpsPage() {
                     {leg.kind === 'LINE_HAUL' && leg.status !== 'COMPLETED' && leg.status !== 'CANCELLED' && (
                       <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
                         <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">Carrier</p>
+                        {/* MDF-560 (owner): "booked but no carrier" must read as
+                            awaiting fulfilment, not as a routine, low-priority
+                            detail -- the muted tone this used to carry said the
+                            opposite of what it meant. */}
                         <p className="mt-1 text-sm text-[color:var(--bmpl-text)]">
-                          {leg.operatorName ?? <span className="text-[color:var(--bmpl-text-muted)]">Not assigned</span>}
+                          {leg.operatorName ?? <span className="font-medium text-[color:var(--bmpl-warning)]">Not assigned</span>}
                         </p>
                         {canOperate && (
                           <div className="mt-2 flex flex-wrap items-end gap-2">

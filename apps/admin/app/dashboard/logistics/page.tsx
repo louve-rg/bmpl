@@ -56,12 +56,26 @@ const STATUSES = [
 
 const money = (n: number) => `$${(n / 100).toFixed(2)}`;
 
+/**
+ * MDF-560 (owner): "booked but no carrier to move it" must read as awaiting
+ * fulfilment, not as ordinary progress. A LINE_HAUL leg is never dispatched
+ * to a driver — `leg-assign.ts`'s own `legAssignMode` refuses it outright —
+ * so `needsDriver` (dispatch exhaustion) can never fire for one, and without
+ * this check an unassigned transport leg fell through to the same neutral
+ * "Waiting" every ordinarily-queued leg gets. Checked ahead of the generic
+ * fallback, same position `needsDriver` already holds for the courier case.
+ */
+function legNeedsCarrier(leg: OpsLeg): boolean {
+  return leg.kind === 'LINE_HAUL' && !leg.operator && leg.status !== 'COMPLETED' && leg.status !== 'CANCELLED' && leg.status !== 'EXCEPTION';
+}
+
 /** The leg's own state, in the vocabulary the operator uses out loud. */
 function legState(leg: OpsLeg): { label: string; tone: 'neutral' | 'info' | 'success' | 'warning' } {
   if (leg.status === 'COMPLETED') return { label: 'Done', tone: 'success' };
   if (leg.status === 'EXCEPTION') return { label: 'Problem', tone: 'warning' };
   if (leg.status === 'CANCELLED') return { label: 'Cancelled', tone: 'neutral' };
   if (leg.needsDriver) return { label: 'No driver found', tone: 'warning' };
+  if (legNeedsCarrier(leg)) return { label: 'No carrier assigned', tone: 'warning' };
   if (leg.status === 'IN_PROGRESS') return { label: 'Moving', tone: 'info' };
   if (leg.status === 'READY') return { label: 'Ready', tone: 'info' };
   return { label: 'Waiting', tone: 'neutral' };
@@ -197,10 +211,12 @@ export default function LogisticsOpsPage() {
       )}
 
       <div className="mt-4 space-y-3">
-        {rows.map((s) => (
+        {rows.map((s) => {
+        const needsCarrier = s.legs.some(legNeedsCarrier);
+        return (
           <Card
             key={s.id}
-            className={`p-4 ${s.needsAttention ? 'border-amber-300 bg-amber-50/40' : s.needsDriver ? 'border-amber-200' : ''}`}
+            className={`p-4 ${s.needsAttention ? 'border-amber-300 bg-amber-50/40' : s.needsDriver || needsCarrier ? 'border-amber-200' : ''}`}
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
@@ -222,6 +238,11 @@ export default function LogisticsOpsPage() {
                 {s.needsDriver && !s.needsAttention && (
                   <p className="mt-1 text-sm font-medium text-amber-800">
                     A courier leg ran out of drivers — it needs assigning by hand.
+                  </p>
+                )}
+                {needsCarrier && !s.needsAttention && (
+                  <p className="mt-1 text-sm font-medium text-amber-800">
+                    A transport leg has no carrier assigned yet — it needs assigning by hand.
                   </p>
                 )}
               </div>
@@ -257,7 +278,8 @@ export default function LogisticsOpsPage() {
               })}
             </ol>
           </Card>
-        ))}
+        );
+        })}
       </div>
 
       {assigning && (
