@@ -556,10 +556,21 @@ paths:
       tags: [DriverShippingJobs]
       summary: One courier-leg job, as the assigned driver sees it
       description: >-
-        Own assignment only; anything else is 404. Contact details, exact
-        address, pin and navigation link stay sealed until the driver accepts
-        (`addressUnlocked`); before that only the area is shown
-        (`ShipmentDriverService.getJob`).
+        Own assignment only; anything else is 404. The gate is split in two
+        (SHIP-B, owner ruling conv-7ffab9): LOCATION for this leg's own door
+        (address, instructions, landmark, coordinates, navigation link) is
+        shown from OFFER time — a driver cannot judge or reach a job they
+        cannot locate — and `addressUnlocked` is therefore structurally
+        always `true` here; it survives only for an older client that still
+        reads it as a loading gate. CONTACT (name, phone) is the actual
+        privacy interest and still stays sealed until the driver accepts —
+        that is what `contactUnlocked` reports. A door end belonging to a
+        DIFFERENT leg (the far end of the whole shipment) is never this
+        driver's to accept, so neither half unlocks for it — always the
+        same area-only representation, independent of that other leg's own
+        status. `availabilityWindows` (added by #588) is shown from offer
+        time too — a time window is not personally identifying.
+        (`ShipmentDriverService.getJob`/`serialize`).
       parameters: [ { $ref: "#/components/parameters/legId" } ]
       responses:
         "200":
@@ -576,7 +587,10 @@ paths:
       description: >-
         Conditional write racing the sweeper — the database is the arbiter.
         Idempotent when already accepted. Accepting opens the message thread
-        and unlocks the door address.
+        and unlocks the door's CONTACT details (name, phone) —
+        `contactUnlocked` flips to `true`. Location (address, instructions,
+        landmark, coordinates, navigation) was already visible from offer
+        time and does not change here.
       parameters: [ { $ref: "#/components/parameters/legId" } ]
       responses:
         "201":
@@ -2732,9 +2746,14 @@ components:
       type: object
       description: >-
         A courier leg as the driver's job (`ShipmentDriverService.serialize`).
-        Contact details, exact address, pin location and navigation link are
-        null until the driver accepts (`addressUnlocked`); a terminal end is
-        always shown in full — it is a public place.
+        The acceptance gate is split in two (SHIP-B, owner ruling
+        conv-7ffab9): LOCATION (address, instructions, landmark,
+        coordinates, navigation link) for `pickup`/`dropoff` — always this
+        leg's own door — is shown from OFFER time, before acceptance; a
+        driver cannot judge or reach a job they cannot locate. CONTACT
+        (name, phone) is the actual privacy interest and stays null until
+        the driver accepts. A terminal end is always shown in full — it is
+        a public place, nothing to protect either way.
       properties:
         id: { type: string }
         jobKind: { $ref: "#/components/schemas/LegKind" }
@@ -2749,7 +2768,23 @@ components:
         nextActionLabel: { type: [string, "null"] }
         mode: { $ref: "#/components/schemas/TransportMode" }
         modeLabel: { type: string }
-        addressUnlocked: { type: boolean }
+        addressUnlocked:
+          type: boolean
+          description: >-
+            Historical name, narrowed meaning. `pickup`/`dropoff` are always
+            THIS leg's own door, and location on it is unconditional from
+            offer time (see above) — so for this endpoint `addressUnlocked`
+            is now structurally always `true`. Kept for an older client that
+            still reads it as a loading hint; a new client should read
+            `contactUnlocked` instead for the thing that actually changes on
+            acceptance.
+        contactUnlocked:
+          type: boolean
+          description: >-
+            `true` once the driver has accepted this leg (`acceptedAt` is
+            set) — the gate that now actually matters. Governs `name` and
+            `phone` on `pickup`/`dropoff` only; a terminal (`kind: HUB`) and
+            a different leg's door are unaffected by it.
         pickup: { $ref: "#/components/schemas/JobPlace" }
         dropoff: { $ref: "#/components/schemas/JobPlace" }
         parcel:
@@ -2767,6 +2802,35 @@ components:
         completedAt: { type: [string, "null"], format: date-time }
         queuePosition: { type: [integer, "null"] }
         pinAttemptsRemaining: { type: integer }
+        availabilityWindows:
+          type: array
+          description: >-
+            Added by #588. Only the role(s) THIS leg's own task is governed
+            by — a FIRST_MILE/DIRECT leg collects, so only a SENDER window
+            appears; a LAST_MILE/DIRECT leg delivers, so only RECIPIENT
+            does. Shown from offer time, same as location above — a time
+            window is not personally identifying, and a driver deciding
+            whether to take the job needs to know whether they can make it
+            before committing.
+          items:
+            type: object
+            properties:
+              role: { type: string, enum: [SENDER, RECIPIENT] }
+              startTime:
+                type: string
+                example: "22:00"
+                description: >-
+                  `"HH:MM"` wall-clock, Belize local time — NOT an instant
+                  and not UTC.
+              endTime:
+                type: string
+                example: "02:00"
+                description: >-
+                  `"HH:MM"` wall-clock, Belize local time. An overnight
+                  window where `endTime < startTime` (e.g. 22:00-02:00) is
+                  legal and storable — a consumer must not assume
+                  `startTime < endTime`. Only a zero-duration window
+                  (`startTime === endTime`) is rejected at write time.
     JobPlace:
       type: [object, "null"]
       properties:
