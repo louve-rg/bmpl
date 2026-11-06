@@ -492,24 +492,31 @@ describe('the driver sees one queue', () => {
 });
 
 describe('what the driver is shown', () => {
-  it("withholds the sender's name, phone and street until the job is accepted", async () => {
+  it("shows the sender's street and location on an offered job, but withholds name and phone until accepted (owner ruling, SHIP-B)", async () => {
     const driver = await makeDriver();
     const s = await book();
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
 
     const offered = await get(driver.cookies, `driver/shipping-jobs/${first.id}`);
-    expect(offered.body.addressUnlocked).toBe(false);
+    // A driver cannot judge or reach a job they cannot locate — the address,
+    // coordinates and navigation for THIS driver's own leg are never gated on
+    // acceptance. Only identity (name, phone) is.
+    expect(offered.body.addressUnlocked).toBe(true);
+    expect(offered.body.contactUnlocked).toBe(false);
     expect(offered.body.pickup.name).toBeNull();
     expect(offered.body.pickup.phone).toBeNull();
-    expect(offered.body.pickup.address).toBeNull();
-    expect(offered.body.pickup.navigationUrl).toBeNull();
+    expect(offered.body.pickup.address).toBe('1 Sidewalk');
+    expect(offered.body.pickup.navigationUrl).toContain('16.5122');
+    expect(offered.body.pickup.pinnedLocation).toEqual({ latitude: 16.5122, longitude: -88.3661 });
     // The area is safe, and the driver needs it to judge the trip.
     expect(offered.body.pickup.area).toContain('Placencia');
 
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
     const taken = await get(driver.cookies, `driver/shipping-jobs/${first.id}`);
     expect(taken.body.addressUnlocked).toBe(true);
+    expect(taken.body.contactUnlocked).toBe(true);
     expect(taken.body.pickup.name).toBe('Sender');
+    expect(taken.body.pickup.phone).toBe('501-2223333');
     expect(taken.body.pickup.address).toBe('1 Sidewalk');
     expect(taken.body.pickup.navigationUrl).toContain('16.5122');
   });
@@ -541,6 +548,25 @@ describe('what the driver is shown', () => {
     expect(job.body.handoffCodeHeldBy).toBe('the person receiving it');
   });
 
+  it("shows the last-mile driver the recipient's exact address and pin on the offer too, not just after accepting (owner ruling, SHIP-B)", async () => {
+    const driver = await makeDriver();
+    const s = await book();
+    const rows = await legs(s.id);
+    await driveCourierLeg(driver, rows.find((l) => l.kind === 'FIRST_MILE')!.id);
+    for (const lh of rows.filter((l) => l.kind === 'LINE_HAUL')) await flyLineHaul(lh.id);
+
+    const last = (await legs(s.id)).find((l) => l.kind === 'LAST_MILE')!;
+    const offered = await get(driver.cookies, `driver/shipping-jobs/${last.id}`);
+    expect(offered.body.addressUnlocked).toBe(true);
+    expect(offered.body.contactUnlocked).toBe(false);
+    expect(offered.body.dropoff.kind).toBe('ADDRESS');
+    expect(offered.body.dropoff.name).toBeNull();
+    expect(offered.body.dropoff.phone).toBeNull();
+    expect(offered.body.dropoff.address).not.toBeNull();
+    expect(offered.body.dropoff.pinnedLocation).not.toBeNull();
+    expect(offered.body.dropoff.navigationUrl).not.toBeNull();
+  });
+
   it('never returns the handoff code to the driver who has to produce it', async () => {
     const driver = await makeDriver();
     const s = await book();
@@ -567,8 +593,11 @@ describe('what the driver is shown', () => {
  * journey — every leg of the WHOLE shipment, not just this driver's own —
  * so the frontend has more than two points to letter when the network
  * actually routes through more than one hub. The residential-privacy
- * boundary (BMPL-136/182) must survive unchanged: a door end reveals only
- * when it is THIS driver's own leg's own door, and only once accepted.
+ * boundary (BMPL-136/182) must survive, narrowed by the owner (SHIP-B,
+ * conv-7ffab9): a door end's LOCATION reveals once it is THIS driver's own
+ * leg's own door, offer or acceptance — identity (name/phone) still waits
+ * for acceptance. A door end belonging to a different leg never reveals
+ * either, acceptance or not.
  */
 describe('the route map shows the real journey (BMPL-190)', () => {
   it('a DIRECT leg has no hub at all — routeStops stays a genuine two-stop A/B journey, and building it never throws', async () => {
@@ -610,8 +639,10 @@ describe('the route map shows the real journey (BMPL-190)', () => {
     expect(stops.map((p: { name: string | null }) => p.name)).toEqual([
       null, 'Placencia Airstrip', 'Belize City Municipal Airstrip', 'San Pedro Airstrip', null,
     ]);
-    // Sender is this driver's own door — locked until they accept.
-    expect(stops[0].pinnedLocation).toBeNull();
+    // Sender is this driver's own door — the pin unlocks even before
+    // acceptance now (owner ruling, SHIP-B); only identity stays sealed.
+    expect(stops[0].pinnedLocation).not.toBeNull();
+    expect(stops[0].name).toBeNull();
     // Every hub is a public place regardless of anyone's acceptance.
     expect(stops[1].pinnedLocation).not.toBeNull();
     expect(stops[2].pinnedLocation).not.toBeNull();
@@ -622,7 +653,8 @@ describe('the route map shows the real journey (BMPL-190)', () => {
     await post(driver.cookies, `driver/shipping-jobs/${first.id}/accept`);
     const taken = await get(driver.cookies, `driver/shipping-jobs/${first.id}`);
     const takenStops = taken.body.routeStops;
-    // Now this driver's OWN door — the sender's — unlocks.
+    // Accepting reveals this driver's OWN door's identity — the pin was
+    // already visible on the offer.
     expect(takenStops[0].pinnedLocation).not.toBeNull();
     expect(takenStops[0].name).toBe('Sender');
     // But the recipient's door — a different leg, a different driver, maybe
