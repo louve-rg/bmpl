@@ -19,11 +19,25 @@ const messageBody = z
   .transform((s) => s.replace(CONTROL_CHARS, '').trim())
   .pipe(z.string().min(1, 'Message cannot be empty.').max(MAX_MESSAGE_BODY_LENGTH));
 
+// Same cleanup/length cap as messageBody, but does not require non-empty text on
+// its own — a message carrying at least one attachment is a complete message
+// with no caption. sendMessageSchema's own refinement below is what actually
+// requires text, and only once there is no attachment to carry the message instead.
+const sendableBody = z
+  .string()
+  .transform((s) => s.replace(CONTROL_CHARS, '').trim())
+  .pipe(z.string().max(MAX_MESSAGE_BODY_LENGTH));
+
 /** Send a message into an existing conversation. Attachments are pre-uploaded keys. */
-export const sendMessageSchema = z.object({
-  body: messageBody,
-  attachmentKeys: z.array(storageKey).max(MAX_MESSAGE_ATTACHMENTS).optional(),
-});
+export const sendMessageSchema = z
+  .object({
+    body: sendableBody,
+    attachmentKeys: z.array(storageKey).max(MAX_MESSAGE_ATTACHMENTS).optional(),
+  })
+  .refine((v) => v.body.length > 0 || (v.attachmentKeys?.length ?? 0) > 0, {
+    message: 'Message cannot be empty.',
+    path: ['body'],
+  });
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;
 
 /** Open / create a support conversation, optionally linked to an order or delivery. */

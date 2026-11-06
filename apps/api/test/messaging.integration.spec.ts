@@ -339,6 +339,24 @@ describe('attachments + security invariants', () => {
     expect((await post(vendor.vendorCookies, `conversations/${conv.id}/messages`, { body: 'x', attachmentKeys: [presign.body.key] })).status).toBe(400);
   });
 
+  it('a photo with no caption is a complete message; an empty body with no attachment is still rejected', async () => {
+    const vendor = await makeVendor();
+    const order = await makeDeliveryOrder(vendor);
+    const conv = (await post(order.customerCookies, `conversations/vendor-order/${order.vendorOrderId}`)).body;
+    const presign = await post(order.customerCookies, 'conversations/attachments/presign', { fileName: 'issue.jpg', contentType: 'image/jpeg', sizeBytes: 4 });
+    expect(await putToPresigned(presign.body.uploadUrl, Buffer.from([0xff, 0xd8, 0xff, 0xd9]), 'image/jpeg')).toBe(200);
+    // Web's Composer deliberately allows this (no typed text, a file attached) —
+    // the server must not disagree with its own client and bounce it.
+    const sent = await post(order.customerCookies, `conversations/${conv.id}/messages`, { body: '', attachmentKeys: [presign.body.key] });
+    expect(sent.status).toBe(201);
+    const withAtt = sent.body.messages.find((m: { attachments: unknown[] }) => m.attachments.length > 0);
+    expect(withAtt.body).toBe('');
+    expect(withAtt.attachments[0].url).toBeTruthy();
+    // No text AND no attachment is still refused, same message as before.
+    const empty = await post(order.customerCookies, `conversations/${conv.id}/messages`, { body: '' });
+    expect(empty.status).toBe(400);
+  });
+
   it('suspended user cannot send; messaging changes no delivery/wallet state', async () => {
     const ledgerBefore = await ctx.prisma.walletLedgerEntry.count();
     const vendor = await makeVendor();
