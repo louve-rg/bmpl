@@ -17,9 +17,10 @@
  * the real destinationEmail/destinationPhone on a failed match; and that it
  * changes nothing about what the anonymous link itself returns.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { EmailService } from '../src/email/email.service';
 
 let ctx: TestContext;
 let admin: string[];
@@ -583,6 +584,38 @@ describe('the delivery code (CLOSE-2)', () => {
     // Single-use: the same token cannot be replayed.
     const replay = await revealCode(s.recipientTrackingToken, row.deliveryCodeRevealToken!);
     expect(replay.status).toBe(400);
+
+    // CLOSE-19: the audit row records the actual send outcome, not just that
+    // a request happened. The test environment's default EMAIL_PROVIDER is
+    // `console`, so a genuine send here is `delivered: true, outcome: 'simulated'`.
+    const audit = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'SHIPMENT_DELIVERY_CODE_EMAIL_REQUESTED', newValue: { path: ['shipmentId'], equals: s.id } },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(audit?.newValue).toMatchObject({ delivered: true, outcome: 'simulated' });
+  });
+
+  it('CLOSE-19: a delivery-code email that fails to send is recorded as failed, not as a bare request', async () => {
+    const email = `dcfailed_${uniq()}@example.bz`;
+    const s = await book(customer, { email });
+
+    const emailService = ctx.app.get(EmailService);
+    const spy = vi
+      .spyOn(emailService, 'sendDetailed')
+      .mockResolvedValueOnce({ delivered: false, outcome: 'provider_error' });
+
+    // Same neutral response as a genuine send — a failed send must not leak
+    // through the response shape either (see the cooldown case above).
+    const res = await requestCode(s.recipientTrackingToken);
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ requested: true });
+    spy.mockRestore();
+
+    const audit = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'SHIPMENT_DELIVERY_CODE_EMAIL_REQUESTED', newValue: { path: ['shipmentId'], equals: s.id } },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(audit?.newValue).toMatchObject({ delivered: false, outcome: 'provider_error' });
   });
 
   it('(wrong state) an incorrect reveal token is rejected, and never reveals the code', async () => {

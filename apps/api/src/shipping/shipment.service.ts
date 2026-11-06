@@ -3926,6 +3926,14 @@ export class ShipmentService {
    * — a recipient with no account and no email on file has no automatic
    * path through this endpoint at all. That is a known, reported boundary,
    * not silently papered over with an invented channel.
+   *
+   * CLOSE-19: the audit row records the send OUTCOME (`delivered`/`outcome`
+   * from `EmailService.sendDetailed()`), not just that a request happened.
+   * Before this, the row fired unconditionally regardless of whether the
+   * email was ever accepted by the provider — a recipient whose mail
+   * silently failed had no code and nobody, not an admin, not the sender,
+   * could tell the difference from a request nobody had made. No retry: one
+   * request is still exactly one send attempt, recorded honestly.
    */
   async requestDeliveryCodeEmail(token: string): Promise<{ requested: true }> {
     const s = await this.prisma.shipment.findUnique({
@@ -3953,14 +3961,23 @@ export class ShipmentService {
           deliveryCodeRevealRequestedAt: new Date(),
         },
       });
-      await this.email.send({
+      // CLOSE-19: sendDetailed(), not send() — the plain boolean told nobody
+      // apart from the Nest logger whether this actually reached Resend. The
+      // outcome is recorded below in the SAME audit row rather than a new
+      // action or a retry: a failed send is still exactly one send attempt.
+      const sendResult = await this.email.sendDetailed({
         to: s.destinationEmail,
         subject: `Your delivery code for shipment ${s.reference}`,
         body: `Use this code to confirm it's you when your driver arrives: ${revealToken}\n\nThis code expires in ${DELIVERY_CODE_REVEAL_TTL_MINUTES} minutes and can only be used once. If you did not request this, you can ignore this email.`,
       });
       await this.audit.record({
         action: 'SHIPMENT_DELIVERY_CODE_EMAIL_REQUESTED',
-        newValue: { shipmentId: s.id, reference: s.reference },
+        newValue: {
+          shipmentId: s.id,
+          reference: s.reference,
+          delivered: sendResult.delivered,
+          outcome: sendResult.outcome,
+        },
       });
     } else {
       // Still record the cooldown timestamp so a repeated request against a
