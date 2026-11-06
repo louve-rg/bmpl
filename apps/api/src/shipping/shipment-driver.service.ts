@@ -350,6 +350,20 @@ export class ShipmentDriverService {
     if (leg.status === 'COMPLETED' || leg.status === 'CANCELLED') {
       throw new BadRequestException('This leg is already finished.');
     }
+    // SHIP-M: `ownedLeg` only proves this driver is the ASSIGNEE, and
+    // assignment happens at OFFER time, before acceptance — an offered,
+    // uncommitted driver is still the assignee. Every other driver-side
+    // mutation on this leg (accept/confirmPickup/simpleTransition/
+    // completeHandoff) is gated by `assertAction`'s positive courierStatus
+    // allow-list, which structurally excludes ASSIGNED for everything except
+    // ACCEPT/DECLINE themselves. This endpoint had no such check at all, so
+    // an offered driver could attach custody-evidence photos to a leg they
+    // never committed to carrying — and since offers rotate (expiry,
+    // decline), a later driver can end up holding a leg whose pickup photo
+    // was taken by someone who was never its courier (BML-FW9J6WXH).
+    if (leg.acceptedAt == null) {
+      throw new BadRequestException('Accept the job before attaching a pickup photo.');
+    }
     const alreadyRecorded = leg.pickedUpAt !== null || leg.handoffPhotoKeys.length > 0;
     const keys = await this.resolvePickupPhotoKeys(actor.userId, dto.photoKeys);
     await this.prisma.shipmentLeg.update({ where: { id: legId }, data: { handoffPhotoKeys: keys } });
