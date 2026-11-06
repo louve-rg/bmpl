@@ -51,9 +51,10 @@ export class ShipmentDispatchScheduler implements OnApplicationBootstrap, OnModu
       if (!(await this.acquire())) return;
       const offers = await this.dispatch.sweepExpiredOffers();
       const picked = await this.dispatch.sweepUndispatched();
-      if (offers.expired > 0 || offers.reoffered > 0 || picked > 0) {
+      const recovered = await this.dispatch.sweepExhaustedRecovery();
+      if (offers.expired > 0 || offers.reoffered > 0 || picked > 0 || recovered > 0) {
         this.logger.log(
-          `shipping sweep: ${offers.expired} offer(s) expired, ${offers.reoffered} re-offered, ${picked} newly offered`,
+          `shipping sweep: ${offers.expired} offer(s) expired, ${offers.reoffered} re-offered, ${picked} newly offered, ${recovered} exhausted leg(s) recovered`,
         );
       }
     } catch (err) {

@@ -493,9 +493,19 @@ describe('operations are told when a human is needed', () => {
     const driver = await makeDriver();
     const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
     const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    // CLOSE-1: exhaustion is no longer a bare attempt count — it is "every
+    // eligible driver has already been offered THIS leg". The only driver in
+    // this district is already auto-offered this leg at booking (automatic
+    // dispatch is on for this suite); decline that SAME offer row rather
+    // than adding a second one, or the pool-vs-offered accounting below
+    // would no longer match what dispatchLeg itself sees.
+    await ctx.prisma.shipmentLegOffer.updateMany({
+      where: { shipmentLegId: first.id, driverProfileId: driver.driverProfileId },
+      data: { status: 'DECLINED', declineReason: 'test setup', endedAt: new Date() },
+    });
     await ctx.prisma.shipmentLeg.update({
       where: { id: first.id },
-      data: { offerCount: 3, assignedDriverProfileId: null, courierStatus: 'DRIVER_DECLINED' },
+      data: { offerCount: 1, assignedDriverProfileId: null, courierStatus: 'DRIVER_DECLINED' },
     });
 
     const { ShipmentDispatchService } = await import('../src/shipping/shipment-dispatch.service');
@@ -509,6 +519,78 @@ describe('operations are told when a human is needed', () => {
     // like an ordinary progress update.
     expect(alerts[0]!.category).toBe('ADMIN_ALERT');
     expect(to(fired, driver.userId)).toHaveLength(0);
+  });
+
+  it('CLOSE-1: recovers an exhausted leg the moment a never-offered driver becomes eligible', async () => {
+    const triedDriver = await makeDriver();
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    // Automatic dispatch already offered this leg to triedDriver at booking
+    // — decline that same row rather than adding a second one.
+    await ctx.prisma.shipmentLegOffer.updateMany({
+      where: { shipmentLegId: first.id, driverProfileId: triedDriver.driverProfileId },
+      data: { status: 'DECLINED', declineReason: 'test setup', endedAt: new Date() },
+    });
+    await ctx.prisma.shipmentLeg.update({
+      where: { id: first.id },
+      data: { offerCount: 1, assignedDriverProfileId: null, courierStatus: 'DRIVER_DECLINED' },
+    });
+
+    const { ShipmentDispatchService } = await import('../src/shipping/shipment-dispatch.service');
+    const dispatch = ctx.app.get(ShipmentDispatchService);
+    // Confirm it genuinely reaches EXHAUSTED first — the state recovery is
+    // meant to find, not an assumption about it.
+    expect((await dispatch.dispatchLeg(first.id)).result).toBe('EXHAUSTED');
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).dispatchExhaustedAt).not.toBeNull();
+
+    // A second driver comes online who has never seen this leg.
+    const freshDriver = await makeDriver();
+
+    const recovered = await dispatch.sweepExhaustedRecovery();
+    expect(recovered).toBe(1);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(after.dispatchExhaustedAt).toBeNull();
+    expect(after.assignedDriverProfileId).toBe(freshDriver.driverProfileId);
+    expect(after.courierStatus).toBe('ASSIGNED');
+
+    // Not double-assigned, and not re-offered to the driver who already said no.
+    const offers = await ctx.prisma.shipmentLegOffer.findMany({ where: { shipmentLegId: first.id } });
+    expect(offers).toHaveLength(2);
+    expect(offers.find((o) => o.driverProfileId === triedDriver.driverProfileId)!.status).toBe('DECLINED');
+    expect(offers.find((o) => o.driverProfileId === freshDriver.driverProfileId)!.status).toBe('ACTIVE');
+  });
+
+  it('CLOSE-1 (wrong-state): an exhausted leg with no new driver stays exhausted — no duplicate alert, no phantom assignment', async () => {
+    const driver = await makeDriver();
+    const s = (await post(customer, 'shipping', { ...doorToDoor(), payWithWallet: true })).body;
+    const first = (await legsOf(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    // Automatic dispatch already offered this leg to driver at booking —
+    // decline that same row rather than adding a second one.
+    await ctx.prisma.shipmentLegOffer.updateMany({
+      where: { shipmentLegId: first.id, driverProfileId: driver.driverProfileId },
+      data: { status: 'DECLINED', declineReason: 'test setup', endedAt: new Date() },
+    });
+    await ctx.prisma.shipmentLeg.update({
+      where: { id: first.id },
+      data: { offerCount: 1, assignedDriverProfileId: null, courierStatus: 'DRIVER_DECLINED' },
+    });
+
+    const { ShipmentDispatchService } = await import('../src/shipping/shipment-dispatch.service');
+    const dispatch = ctx.app.get(ShipmentDispatchService);
+    expect((await dispatch.dispatchLeg(first.id)).result).toBe('EXHAUSTED');
+
+    // Nobody new ever shows up. Sweep it twice — the WRONG state a flaky
+    // recovery mechanism would most plausibly get wrong: re-alerting or
+    // re-assigning a leg that has not actually changed.
+    expect(await dispatch.sweepExhaustedRecovery()).toBe(0);
+    const fired = await capture(() => dispatch.sweepExhaustedRecovery());
+    expect(fired.filter((n) => n.event === 'SHIPMENT_LEG_DISPATCH_EXHAUSTED')).toHaveLength(0);
+
+    const after = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } });
+    expect(after.dispatchExhaustedAt).not.toBeNull();
+    expect(after.assignedDriverProfileId).toBeNull();
+    expect(await ctx.prisma.shipmentLegOffer.count({ where: { shipmentLegId: first.id } })).toBe(1);
   });
 });
 
