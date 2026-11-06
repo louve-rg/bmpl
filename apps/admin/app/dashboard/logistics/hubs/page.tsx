@@ -322,7 +322,7 @@ export default function HubsPage() {
 
               {editingId === h.id && edit && (
                 <div className="mt-4 border-t border-slate-100 pt-4">
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-[color:var(--bmpl-text-muted)]">
                     {/* Code, district and town drive planning and identity —
                         the planner attaches doors by town — so changing them is
                         a network decision, not a correction (BMPL-139 ruling). */}
