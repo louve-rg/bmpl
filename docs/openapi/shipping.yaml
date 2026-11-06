@@ -2798,12 +2798,14 @@ components:
             (DIRECT) contributes none, and a shipment with only a DIRECT leg
             stays a genuine two-stop A/B journey, never padded out. Separate
             from `pickup`/`dropoff` above, which stay exactly this leg's own
-            two action points for the driver's task text — a stop here that
-            is NOT this leg's own door (the far end of the whole shipment,
-            worked by a different driver or unassigned) always keeps the
-            same area-only representation, independent of that other leg's
-            own status; whatever this driver's own acceptance unlocks on
-            `pickup`/`dropoff` does not extend to a stop that isn't theirs.
+            two action points for the driver's task text. A stop here that IS
+            this leg's own door is the same object as `pickup`/`dropoff` and
+            follows the identical `addressUnlocked`/`contactUnlocked` rule
+            above. A stop that is NOT this leg's own door (the far end of the
+            whole shipment, worked by a different driver or unassigned)
+            always keeps the same area-only representation instead,
+            independent of that other leg's own status — neither half of
+            the gate above ever extends to a stop that isn't this driver's.
           items: { $ref: "#/components/schemas/JobPlace" }
         parcel:
           type: object
