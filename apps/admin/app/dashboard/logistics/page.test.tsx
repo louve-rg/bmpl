@@ -148,6 +148,65 @@ describe('LogisticsOpsPage — an unassigned LINE_HAUL leg reads as awaiting ful
   });
 });
 
+/**
+ * CLOSE-20 (owner, via MDF-560): UNAVAILABLE ("nobody was ever eligible to
+ * ask") is a different claim from EXHAUSTED ("we asked everyone and nobody
+ * took it") and must read as such — a leg that can resolve itself the
+ * moment a driver comes online must not say "needs assigning by hand", the
+ * sentence that is only true of exhaustion.
+ */
+const UNAVAILABLE_ROW = {
+  ...ROW,
+  id: 'ship_3',
+  reference: 'BML-TEST0003',
+  needsDriver: true,
+  legs: [
+    { id: 'leg_u', sequence: 1, kind: 'FIRST_MILE', mode: 'LAND', status: 'PENDING', courierStatus: null, from: 'Sender', to: 'Belize City Hub', operator: null, needsDriver: true, needsDriverReason: 'UNAVAILABLE' as const },
+  ],
+};
+
+const EXHAUSTED_ROW = {
+  ...ROW,
+  id: 'ship_4',
+  reference: 'BML-TEST0004',
+  needsDriver: true,
+  legs: [
+    { id: 'leg_e', sequence: 1, kind: 'FIRST_MILE', mode: 'LAND', status: 'PENDING', courierStatus: null, from: 'Sender', to: 'Belize City Hub', operator: null, needsDriver: true, needsDriverReason: 'EXHAUSTED' as const },
+  ],
+};
+
+describe('LogisticsOpsPage — unavailable vs exhausted drivers read as different claims (CLOSE-20)', () => {
+  it('an UNAVAILABLE leg gets its own badge and a "may resolve on its own" message, not the exhaustion wording', async () => {
+    stubFetchRows(['logistics.read'], [UNAVAILABLE_ROW]);
+    await mount();
+
+    expect(document.body.textContent).toContain('No driver online');
+    expect(document.body.textContent).toContain('may resolve on its own');
+    expect(document.body.textContent).not.toContain('No driver found');
+    expect(document.body.textContent).not.toContain('ran out of drivers');
+    expect(document.body.textContent).not.toContain('needs assigning by hand');
+  });
+
+  it('an EXHAUSTED leg keeps the original "No driver found" / "ran out of drivers" wording', async () => {
+    stubFetchRows(['logistics.read'], [EXHAUSTED_ROW]);
+    await mount();
+
+    expect(document.body.textContent).toContain('No driver found');
+    expect(document.body.textContent).toContain('ran out of drivers');
+    expect(document.body.textContent).not.toContain('No driver online');
+    expect(document.body.textContent).not.toContain('may resolve on its own');
+  });
+
+  it('falls back to the pre-CLOSE-20 exhaustion wording when needsDriverReason is absent entirely (older deploy)', async () => {
+    const legacyRow = { ...ROW, id: 'ship_5', reference: 'BML-TEST0005', needsDriver: true, legs: [{ ...ROW.legs[0], needsDriver: true }] };
+    stubFetchRows(['logistics.read'], [legacyRow]);
+    await mount();
+
+    expect(document.body.textContent).toContain('No driver found');
+    expect(document.body.textContent).toContain('ran out of drivers');
+  });
+});
+
 describe('LogisticsOpsPage — the LegAssignModal trigger is gated on logistics.operate (BMPL-280)', () => {
   it('a logistics.read-only reader sees no assign/reassign trigger, and the leg still reports its state as text', async () => {
     stubFetch(['logistics.read']);

@@ -28,6 +28,15 @@ interface OpsLeg {
   to: string;
   operator: string | null;
   needsDriver: boolean;
+  /**
+   * CLOSE-20: the discriminant behind the flat `needsDriver` boolean above.
+   * Optional and possibly absent even when present in the type — this field
+   * is new on an already-live response shape, so a deploy where the backend
+   * branch adding it hasn't landed yet simply omits the key. Every read of
+   * it below falls through to the unchanged `needsDriver`-only behavior when
+   * it's missing, so this board renders correctly either way.
+   */
+  needsDriverReason?: 'EXHAUSTED' | 'UNAVAILABLE' | null;
 }
 
 interface OpsRow {
@@ -74,6 +83,14 @@ function legState(leg: OpsLeg): { label: string; tone: 'neutral' | 'info' | 'suc
   if (leg.status === 'COMPLETED') return { label: 'Done', tone: 'success' };
   if (leg.status === 'EXCEPTION') return { label: 'Problem', tone: 'warning' };
   if (leg.status === 'CANCELLED') return { label: 'Cancelled', tone: 'neutral' };
+  // CLOSE-20: UNAVAILABLE ("nobody was ever eligible to ask") is a different
+  // claim from EXHAUSTED ("we asked everyone and nobody took it") and can
+  // resolve on its own the moment a driver comes online, which exhaustion
+  // cannot — so it gets its own badge, in a tone that doesn't read as the
+  // same hand-assign alarm. The backend already resolves EXHAUSTED first
+  // whenever a leg could claim both (see needsDriverReason's own precedence
+  // comment), so checking this branch first never shadows an exhausted leg.
+  if (leg.needsDriverReason === 'UNAVAILABLE') return { label: 'No driver online', tone: 'info' };
   if (leg.needsDriver) return { label: 'No driver found', tone: 'warning' };
   if (legNeedsCarrier(leg)) return { label: 'No carrier assigned', tone: 'warning' };
   if (leg.status === 'IN_PROGRESS') return { label: 'Moving', tone: 'info' };
@@ -209,10 +226,29 @@ export default function LogisticsOpsPage() {
       <div className="mt-4 space-y-3">
         {rows.map((s) => {
         const needsCarrier = s.legs.some(legNeedsCarrier);
+        // CLOSE-20: the shipment-level `needsDriver` boolean is still an
+        // aggregate across legs with no reason of its own (Pam's contract —
+        // a reason is a per-leg concept), but every leg that set it DOES
+        // carry a reason once this field exists, so whether EXHAUSTED is
+        // among them is still derivable here with no new data path. Where
+        // the field is absent entirely (old deploy), `driverReasons` is
+        // empty and this falls back to treating `needsDriver` as exhaustion,
+        // exactly the card's pre-CLOSE-20 behavior.
+        const driverReasons = s.legs.map((l) => l.needsDriverReason).filter((r): r is 'EXHAUSTED' | 'UNAVAILABLE' => !!r);
+        const hasExhausted = driverReasons.includes('EXHAUSTED') || (s.needsDriver && driverReasons.length === 0);
+        const hasUnavailableOnly = s.needsDriver && !hasExhausted;
         return (
           <Card
             key={s.id}
-            className={`p-4 ${s.needsAttention ? 'border-amber-300 bg-amber-50/40' : s.needsDriver || needsCarrier ? 'border-amber-200' : ''}`}
+            className={`p-4 ${
+              s.needsAttention
+                ? 'border-amber-300 bg-amber-50/40'
+                : hasExhausted || needsCarrier
+                  ? 'border-amber-200'
+                  : hasUnavailableOnly
+                    ? 'border-sky-200'
+                    : ''
+            }`}
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
@@ -231,9 +267,14 @@ export default function LogisticsOpsPage() {
                 {s.exceptionReason && (
                   <p className="mt-1 break-words text-sm font-medium text-amber-800">{s.exceptionReason}</p>
                 )}
-                {s.needsDriver && !s.needsAttention && (
+                {hasExhausted && !s.needsAttention && (
                   <p className="mt-1 text-sm font-medium text-amber-800">
                     A courier leg ran out of drivers — it needs assigning by hand.
+                  </p>
+                )}
+                {hasUnavailableOnly && !s.needsAttention && (
+                  <p className="mt-1 text-sm font-medium text-sky-800">
+                    No driver is currently online for a courier leg. It may resolve on its own, or you can assign one by hand.
                   </p>
                 )}
                 {needsCarrier && !s.needsAttention && (
