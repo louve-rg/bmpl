@@ -360,6 +360,115 @@ describe('CLOSE-21: the needsDriver filter on the ops board', () => {
   });
 });
 
+describe('CLOSE-22: a CANCELLED leg stops counting toward needsDriver — read-time, markers never cleared', () => {
+  it('cancelling a leg with dispatchUnavailableAt or dispatchExhaustedAt set flips needsDriver/needsDriverReason to false/null everywhere, without erasing the stored timestamp', async () => {
+    // Leg 1: naturally goes UNAVAILABLE (STANN_CREEK, baseline-only coverage).
+    const unavailCustomer = await registerCustomer(`close22_unavail_${uniq()}@example.com`);
+    await fund(unavailCustomer.userId, 10_000);
+    const unavailShip = await post(unavailCustomer.cookies, 'shipping', { ...parcel('STANN_CREEK', 'Dangriga'), payWithWallet: true });
+    expect(unavailShip.status).toBe(201);
+    const unavailLeg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: unavailShip.body.id } });
+    expect(
+      (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: unavailLeg.id }, select: { dispatchUnavailableAt: true } }))
+        .dispatchUnavailableAt,
+    ).not.toBeNull();
+
+    // Leg 2: EXHAUSTED, forced directly the same way the CLOSE-20 precedence
+    // test above does — CAYO already has an online driver so this is purely
+    // a simulated marker, independent of real dispatch state.
+    const exhaustedCustomer = await registerCustomer(`close22_exhausted_${uniq()}@example.com`);
+    await fund(exhaustedCustomer.userId, 10_000);
+    const exhaustedShip = await post(exhaustedCustomer.cookies, 'shipping', { ...parcel('CAYO', 'San Ignacio'), payWithWallet: true });
+    expect(exhaustedShip.status).toBe(201);
+    const exhaustedLeg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: exhaustedShip.body.id } });
+    await ctx.prisma.shipmentLeg.update({ where: { id: exhaustedLeg.id }, data: { dispatchExhaustedAt: new Date() } });
+
+    // Both cancelled before they move — the exact path Oscar's live fixture hit.
+    expect((await post(unavailCustomer.cookies, `shipping/${unavailShip.body.id}/cancel`, { reason: 'test' })).status).toBe(201);
+    expect((await post(exhaustedCustomer.cookies, `shipping/${exhaustedShip.body.id}/cancel`, { reason: 'test' })).status).toBe(201);
+
+    // THE BOUNDARY: cancellation must NOT clear or null the stored marker —
+    // it is audit history of what dispatch actually did (CLOSE-20), not a
+    // live status. This fix is read-time only.
+    const unavailAfter = await ctx.prisma.shipmentLeg.findUniqueOrThrow({
+      where: { id: unavailLeg.id },
+      select: { dispatchUnavailableAt: true, status: true },
+    });
+    expect(unavailAfter.status).toBe('CANCELLED');
+    expect(unavailAfter.dispatchUnavailableAt).not.toBeNull();
+    const exhaustedAfter = await ctx.prisma.shipmentLeg.findUniqueOrThrow({
+      where: { id: exhaustedLeg.id },
+      select: { dispatchExhaustedAt: true, status: true },
+    });
+    expect(exhaustedAfter.status).toBe('CANCELLED');
+    expect(exhaustedAfter.dispatchExhaustedAt).not.toBeNull();
+
+    // But the read side — the boolean AND the reason, at both the shipment
+    // level and the leg level — must no longer report either as needing a
+    // driver, since the leg is no longer open.
+    const board = await get(admin, 'admin/logistics/shipments?pageSize=100');
+    expect(board.status).toBe(200);
+    const unavailRow = board.body.rows.find((s: { id: string }) => s.id === unavailShip.body.id);
+    const exhaustedRow = board.body.rows.find((s: { id: string }) => s.id === exhaustedShip.body.id);
+    expect(unavailRow.needsDriver).toBe(false);
+    const unavailLegRow = unavailRow.legs.find((l: { id: string }) => l.id === unavailLeg.id);
+    expect(unavailLegRow.needsDriver).toBe(false);
+    expect(unavailLegRow.needsDriverReason).toBeNull();
+    expect(exhaustedRow.needsDriver).toBe(false);
+    const exhaustedLegRow = exhaustedRow.legs.find((l: { id: string }) => l.id === exhaustedLeg.id);
+    expect(exhaustedLegRow.needsDriver).toBe(false);
+    expect(exhaustedLegRow.needsDriverReason).toBeNull();
+
+    // And the needsDriver filter — the other path that reads the same
+    // columns — must exclude both. CLOSE-21's own near-miss was exactly one
+    // path silently keeping a condition the other lost; this is that same
+    // check for CLOSE-22's fix.
+    const filtered = await get(admin, 'admin/logistics/shipments?needsDriver=true&pageSize=100');
+    expect(filtered.status).toBe(200);
+    const filteredIds = new Set(filtered.body.rows.map((s: { id: string }) => s.id));
+    expect(filteredIds.has(unavailShip.body.id)).toBe(false);
+    expect(filteredIds.has(exhaustedShip.body.id)).toBe(false);
+  });
+
+  it('the needsDriver filter still composes with the carrier (operatedByProviderId) filter after this fix', async () => {
+    const customer = await registerCustomer(`close22_compose_${uniq()}@example.com`);
+    await fund(customer.userId, 10_000);
+    const ship = await post(customer.cookies, 'shipping', { ...parcel('STANN_CREEK', 'Dangriga'), payWithWallet: true });
+    expect(ship.status).toBe(201);
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: ship.body.id } });
+    expect(
+      (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id }, select: { dispatchUnavailableAt: true } }))
+        .dispatchUnavailableAt,
+    ).not.toBeNull();
+
+    const op = await registerCustomer(`close22_carrier_${uniq()}@example.com`);
+    const provider = await ctx.prisma.shippingProviderProfile.create({
+      data: { userId: op.userId, businessName: 'CLOSE-22 Synthetic Carrier', contactEmail: `close22_carrier_${uniq()}@example.com` },
+    });
+    await ctx.prisma.shipmentLeg.update({ where: { id: leg.id }, data: { operatedByProviderId: provider.id } });
+
+    // Both filters at once, same shipment: still open AND on this carrier.
+    const both = await get(admin, `admin/logistics/shipments?needsDriver=true&operatedByProviderId=${provider.id}&pageSize=100`);
+    expect(both.status).toBe(200);
+    expect(both.body.rows.map((s: { id: string }) => s.id)).toContain(ship.body.id);
+
+    // A different carrier id: the carrier half of the AND fails, so it drops out.
+    const otherOp = await registerCustomer(`close22_othercarrier_${uniq()}@example.com`);
+    const otherProvider = await ctx.prisma.shippingProviderProfile.create({
+      data: { userId: otherOp.userId, businessName: 'CLOSE-22 Other Carrier', contactEmail: `close22_othercarrier_${uniq()}@example.com` },
+    });
+    const mismatched = await get(admin, `admin/logistics/shipments?needsDriver=true&operatedByProviderId=${otherProvider.id}&pageSize=100`);
+    expect(mismatched.body.rows.map((s: { id: string }) => s.id)).not.toContain(ship.body.id);
+
+    // Cancel it: needsDriver now excludes it even though the carrier filter alone would still find it.
+    expect((await post(customer.cookies, `shipping/${ship.body.id}/cancel`, { reason: 'test' })).status).toBe(201);
+    const afterCancel = await get(admin, `admin/logistics/shipments?needsDriver=true&operatedByProviderId=${provider.id}&pageSize=100`);
+    expect(afterCancel.body.rows.map((s: { id: string }) => s.id)).not.toContain(ship.body.id);
+    const carrierOnly = await get(admin, `admin/logistics/shipments?operatedByProviderId=${provider.id}&pageSize=100`);
+    expect(carrierOnly.body.rows.map((s: { id: string }) => s.id)).toContain(ship.body.id);
+  });
+});
+
 describe('a blocked leg is still safely cancellable and refundable', () => {
   it('cancels a TEMPORARILY_UNAVAILABLE shipment before it moves and refunds in full', async () => {
     const customer = await registerCustomer(`cancel_${uniq()}@example.com`);
