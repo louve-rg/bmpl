@@ -83,8 +83,8 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const issued = await this.auth.register(body, requestMeta(req));
-    return this.deliver(res, issued);
+    const { verificationEmailSent, ...issued } = await this.auth.register(body, requestMeta(req));
+    return { ...this.deliver(res, issued), verificationEmailSent };
   }
 
   @Public()
