@@ -360,8 +360,8 @@ describe('CLOSE-21: the needsDriver filter on the ops board', () => {
   });
 });
 
-describe('CLOSE-22: a CANCELLED leg stops counting toward needsDriver — both halves', () => {
-  it('cancelling a leg with dispatchUnavailableAt or dispatchExhaustedAt set nulls both columns (root-cause fix) and needsDriver/needsDriverReason read false/null everywhere', async () => {
+describe('CLOSE-22: a CANCELLED leg stops counting toward needsDriver — read-time, markers never cleared', () => {
+  it('cancelling a leg with dispatchUnavailableAt or dispatchExhaustedAt set flips needsDriver/needsDriverReason to false/null everywhere, without erasing the stored timestamp', async () => {
     // Leg 1: naturally goes UNAVAILABLE (STANN_CREEK, baseline-only coverage).
     const unavailCustomer = await registerCustomer(`close22_unavail_${uniq()}@example.com`);
     await fund(unavailCustomer.userId, 10_000);
@@ -387,22 +387,21 @@ describe('CLOSE-22: a CANCELLED leg stops counting toward needsDriver — both h
     expect((await post(unavailCustomer.cookies, `shipping/${unavailShip.body.id}/cancel`, { reason: 'test' })).status).toBe(201);
     expect((await post(exhaustedCustomer.cookies, `shipping/${exhaustedShip.body.id}/cancel`, { reason: 'test' })).status).toBe(201);
 
-    // ROOT CAUSE FIX: cancel() now nulls both columns for every leg it
-    // cancels, the same way it already nulled assignedDriverProfileId etc. —
-    // it simply predated these two. A NEW cancellation must not leave either
-    // marker behind to pollute the board going forward.
+    // THE BOUNDARY: cancellation must NOT clear or null the stored marker —
+    // it is audit history of what dispatch actually did (CLOSE-20), not a
+    // live status. This fix is read-time only.
     const unavailAfter = await ctx.prisma.shipmentLeg.findUniqueOrThrow({
       where: { id: unavailLeg.id },
       select: { dispatchUnavailableAt: true, status: true },
     });
     expect(unavailAfter.status).toBe('CANCELLED');
-    expect(unavailAfter.dispatchUnavailableAt).toBeNull();
+    expect(unavailAfter.dispatchUnavailableAt).not.toBeNull();
     const exhaustedAfter = await ctx.prisma.shipmentLeg.findUniqueOrThrow({
       where: { id: exhaustedLeg.id },
       select: { dispatchExhaustedAt: true, status: true },
     });
     expect(exhaustedAfter.status).toBe('CANCELLED');
-    expect(exhaustedAfter.dispatchExhaustedAt).toBeNull();
+    expect(exhaustedAfter.dispatchExhaustedAt).not.toBeNull();
 
     // But the read side — the boolean AND the reason, at both the shipment
     // level and the leg level — must no longer report either as needing a
@@ -467,43 +466,6 @@ describe('CLOSE-22: a CANCELLED leg stops counting toward needsDriver — both h
     expect(afterCancel.body.rows.map((s: { id: string }) => s.id)).not.toContain(ship.body.id);
     const carrierOnly = await get(admin, `admin/logistics/shipments?operatedByProviderId=${provider.id}&pageSize=100`);
     expect(carrierOnly.body.rows.map((s: { id: string }) => s.id)).toContain(ship.body.id);
-  });
-
-  it('a leg already CANCELLED the OLD way — marker still set, exactly like the dozen-plus legacy rows this fix cannot backfill — still drops out of the boolean, the reason and the filter', async () => {
-    // Simulates every row cancelled before this fix existed: bypass
-    // ShipmentService#cancel entirely and write the leg straight to
-    // CANCELLED by hand, leaving the marker behind on purpose — exactly the
-    // polluted state god's live evidence (BML-CZ7PT8D4) showed. The
-    // root-cause fix in cancel() can never touch rows like this one; only
-    // the read-time predicate (half b) can, and that is the one thing this
-    // test exists to prove.
-    const customer = await registerCustomer(`close22_legacy_${uniq()}@example.com`);
-    await fund(customer.userId, 10_000);
-    const ship = await post(customer.cookies, 'shipping', { ...parcel('STANN_CREEK', 'Dangriga'), payWithWallet: true });
-    expect(ship.status).toBe(201);
-    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: ship.body.id } });
-    expect(
-      (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id }, select: { dispatchUnavailableAt: true } }))
-        .dispatchUnavailableAt,
-    ).not.toBeNull();
-
-    await ctx.prisma.shipmentLeg.update({ where: { id: leg.id }, data: { status: 'CANCELLED', cancelledAt: new Date() } });
-    const polluted = await ctx.prisma.shipmentLeg.findUniqueOrThrow({
-      where: { id: leg.id },
-      select: { status: true, dispatchUnavailableAt: true },
-    });
-    expect(polluted.status).toBe('CANCELLED');
-    expect(polluted.dispatchUnavailableAt).not.toBeNull(); // the pollution is real, same as the legacy rows.
-
-    const board = await get(admin, 'admin/logistics/shipments?pageSize=100');
-    const row = board.body.rows.find((s: { id: string }) => s.id === ship.body.id);
-    expect(row.needsDriver).toBe(false);
-    const legRow = row.legs.find((l: { id: string }) => l.id === leg.id);
-    expect(legRow.needsDriver).toBe(false);
-    expect(legRow.needsDriverReason).toBeNull();
-
-    const filtered = await get(admin, 'admin/logistics/shipments?needsDriver=true&pageSize=100');
-    expect(filtered.body.rows.map((s: { id: string }) => s.id)).not.toContain(ship.body.id);
   });
 });
 

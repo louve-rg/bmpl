@@ -415,20 +415,16 @@ type RerouteableShipment = Prisma.ShipmentGetPayload<{ select: typeof REROUTE_SH
 export const SCHEDULABLE_LEG_STATUSES: LegStatus[] = ['PENDING', 'READY', 'IN_PROGRESS', 'EXCEPTION'];
 
 /**
- * CLOSE-22: `cancel()` now nulls both columns for every leg it cancels (the
- * root-cause fix — it simply predated them, the same way its existing
- * `assignedDriverProfileId`/`offerExpiresAt` nulling predates nothing). But
- * that only stops NEW pollution; there is no backfill (none authorized) for
- * the legacy rows already cancelled/completed with a stale marker before
- * this fix existed, and a future caller could still miss it the way `cancel`
- * did. "Needs a driver" is therefore ALSO a READ-TIME predicate on leg
- * status, independent of whether the marker was actually cleared — belt and
- * suspenders, not a restatement of the same fact twice. Deliberately a
- * separate list from `SCHEDULABLE_LEG_STATUSES` above even though both
- * exclude the same two statuses today — that list answers an unrelated
- * question (can a carrier-scheduled time still be corrected) and coupling
- * this to it would silently change "needs a driver" eligibility if that list
- * is ever edited for its own reason.
+ * CLOSE-22: `dispatchExhaustedAt`/`dispatchUnavailableAt` are never cleared on
+ * cancellation or completion — by design, per CLOSE-20: they are audit
+ * history of what dispatch actually did, not a live status, so they outlive
+ * the leg they describe. "Needs a driver" is therefore a READ-TIME predicate
+ * on leg status, not the raw presence of a marker. Deliberately a separate
+ * list from `SCHEDULABLE_LEG_STATUSES` above even though both exclude the
+ * same two statuses today — that list answers an unrelated question (can a
+ * carrier-scheduled time still be corrected) and coupling this to it would
+ * silently change "needs a driver" eligibility if that list is ever edited
+ * for its own reason.
  */
 const LEG_NEVER_NEEDS_DRIVER_STATUSES: LegStatus[] = ['CANCELLED', 'COMPLETED'];
 
@@ -3708,20 +3704,7 @@ export class ShipmentService {
 
       await tx.shipmentLeg.updateMany({
         where: { shipmentId: id, status: { in: ['PENDING', 'READY', 'IN_PROGRESS', 'EXCEPTION'] } },
-        data: {
-          status: 'CANCELLED',
-          cancelledAt: new Date(),
-          // CLOSE-22 root cause: this list already nulls the courier-assignment
-          // half above for a leg that reached one — but a leg that never did
-          // (UNAVAILABLE/EXHAUSTED: no driver was ever eligible, or none
-          // accepted) skips that block's `OR` entirely and lands only here.
-          // Clearing both here, unconditionally, on every leg this cancel
-          // transitions to CANCELLED, closes that gap at its root — the
-          // codebase was never treating these two columns as immutable
-          // history in this path; it simply predated them.
-          dispatchUnavailableAt: null,
-          dispatchExhaustedAt: null,
-        },
+        data: { status: 'CANCELLED', cancelledAt: new Date() },
       });
 
       // History closes with the leg, as the delivery side already does for its
