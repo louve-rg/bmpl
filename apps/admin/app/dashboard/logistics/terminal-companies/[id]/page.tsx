@@ -7,19 +7,21 @@ import { adminCrumbs } from '../../../../../lib/admin-nav';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageHeader, Select, Spinner } from '../../../../../components/ui';
 
 /**
- * TERM-4 — terminal company detail. Contract read from
+ * TERM-4, closed out by TERM-6-UI. Contract read from
  * apps/api/src/terminal/{terminal.controller.ts,terminal.service.ts} and
- * packages/validation/src/terminal.ts on origin/main (a80adf43), not
- * re-derived. The 8 admin operations below are the WHOLE surface — see
- * the list page's header comment for the 3 that do not exist yet (edit
- * company, reactivate a membership, grant/remove one member's location
- * after invite acceptance — Michael's ruling there also explains why the
- * first blocks reporting slice 1 complete and the other two don't) and
- * are therefore not offered here. No dead controls: every spot that
- * would need one of the three states the path that DOES work instead —
- * profile card (no edit button, a note), each ACTIVE member's row (no
- * edit-locations button, "end and re-invite"), each ENDED member's row
- * (no reactivate button, "a new invite restores it").
+ * packages/validation/src/terminal.ts on origin/main plus Pam's TERM-6 PR
+ * #629 diff (bb112650), not re-derived. TERM-6 closed all three gaps TERM-4
+ * named: editing a company's own details (PATCH companies/:id), directly
+ * reactivating an ended member (POST members/:userId/reactivate), and
+ * granting/revoking ONE location for an already-ACTIVE member (POST/DELETE
+ * members/:userId/locations(/:locationId)) — slice 1 is complete.
+ *
+ * Still deliberately absent, and still a "no dead controls" case rather
+ * than an oversight: an ACTIVE member's own ROLE cannot be changed in
+ * place — reactivateMember and grantMemberLocation both touch only status/
+ * endedAt or one location grant, never memberRole, so a role change still
+ * has exactly one working path, end-and-reinvite, and the ACTIVE member
+ * row says so rather than offering a role control that doesn't exist.
  *
  * Two backend facts this page must never contradict (terminal.service.ts):
  *   - No implicit whole-company grant, not even for MANAGER — a member with
@@ -179,7 +181,7 @@ export default function TerminalCompanyDetailPage() {
         description={company.contactEmail}
       />
 
-      <ProfileCard company={company} />
+      <ProfileCard company={company} canManage={canManage} onChanged={load} />
       <LocationsCard company={company} canManage={canManage} onChanged={load} />
       <MembersCard company={company} activeLocationIds={activeLocationIds} canManage={canManage} onChanged={load} />
       <InvitesCard company={company} activeLocationIds={activeLocationIds} canManage={canManage} onChanged={load} />
@@ -187,23 +189,93 @@ export default function TerminalCompanyDetailPage() {
   );
 }
 
-function ProfileCard({ company: c }: { company: CompanyDetail }) {
+/**
+ * TERM-6: `isTest` is never offered here, editable or not — it's excluded
+ * from `updateTerminalCompanySchema` entirely (the simulation boundary is
+ * fixed at creation, see that schema's own comment), not just unchecked by
+ * this form.
+ */
+function ProfileCard({ company: c, canManage, onChanged }: { company: CompanyDetail; canManage: boolean; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [businessName, setBusinessName] = useState(c.businessName);
+  const [contactEmail, setContactEmail] = useState(c.contactEmail);
+  const [contactPhone, setContactPhone] = useState(c.contactPhone ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function startEdit() {
+    setBusinessName(c.businessName);
+    setContactEmail(c.contactEmail);
+    setContactPhone(c.contactPhone ?? '');
+    setErr(null);
+    setEditing(true);
+  }
+
+  async function save() {
+    if (!businessName.trim() || !contactEmail.trim()) {
+      setErr('A business name and contact email are required.');
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.patch(`/admin/terminal/companies/${c.id}`, {
+        businessName: businessName.trim(),
+        contactEmail: contactEmail.trim(),
+        contactPhone: contactPhone.trim() || undefined,
+      });
+      setEditing(false);
+      onChanged();
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Could not update this company.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Profile</h3>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Badge tone={c.isActive ? 'success' : 'neutral'}>{c.isActive ? 'Active' : 'Deactivated'}</Badge>
           {c.isTest && <Badge tone="neutral">Simulation</Badge>}
+          {canManage && !editing && (
+            <Button type="button" variant="ghost" size="sm" onClick={startEdit}>
+              Edit
+            </Button>
+          )}
         </div>
       </div>
-      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-        <Row label="Contact" value={`${c.contactEmail}${c.contactPhone ? ` · ${c.contactPhone}` : ''}`} />
-        <Row label="Created" value={when(c.createdAt) ?? '—'} />
-      </dl>
-      <p className="mt-3 text-xs text-[color:var(--bmpl-text-muted)]">
-        Editing a company&apos;s own details is not available yet — there is no update endpoint for this on the current backend.
-      </p>
+
+      {err && <Alert tone="warning" className="mt-2">{err}</Alert>}
+
+      {editing ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <Field label="Business name" htmlFor="tc-edit-name">
+            <Input id="tc-edit-name" value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
+          </Field>
+          <Field label="Contact email" htmlFor="tc-edit-email">
+            <Input id="tc-edit-email" type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
+          </Field>
+          <Field label="Contact phone (optional)" htmlFor="tc-edit-phone">
+            <Input id="tc-edit-phone" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
+          </Field>
+          <div className="flex gap-2 sm:col-span-3">
+            <Button type="button" disabled={busy} onClick={() => void save()}>
+              {busy ? 'Saving…' : 'Save'}
+            </Button>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+          <Row label="Contact" value={`${c.contactEmail}${c.contactPhone ? ` · ${c.contactPhone}` : ''}`} />
+          <Row label="Created" value={when(c.createdAt) ?? '—'} />
+        </dl>
+      )}
     </Card>
   );
 }
@@ -369,6 +441,10 @@ function MembersCard({
   const [pickedLocations, setPickedLocations] = useState<Set<string>>(new Set());
   const [inviteBusy, setInviteBusy] = useState(false);
   const [endBusy, setEndBusy] = useState<string | null>(null);
+  const [reactivateBusy, setReactivateBusy] = useState<string | null>(null);
+  // Keyed `${userId}:${locationId}` for a revoke, `${userId}:grant` for a grant.
+  const [locationActionBusy, setLocationActionBusy] = useState<string | null>(null);
+  const [grantPick, setGrantPick] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
 
   const activeLocations = company.locations.filter((l) => l.isActive);
@@ -427,6 +503,58 @@ function MembersCard({
     }
   }
 
+  /**
+   * TERM-6: the direct door for an ended member. Touches only status/
+   * endedAt on the backend — never memberRole, never location grants (the
+   * member's old grants were never deleted by ending them, so nothing here
+   * needs to re-grant anything).
+   */
+  async function reactivateMember(userId: string) {
+    setReactivateBusy(userId);
+    setErr(null);
+    try {
+      await api.post(`/admin/terminal/companies/${company.id}/members/${userId}/reactivate`, {});
+      onChanged();
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Could not reactivate that membership.');
+    } finally {
+      setReactivateBusy(null);
+    }
+  }
+
+  /** TERM-6: scoped to an ACTIVE member only — the backend 404s otherwise. */
+  async function grantLocation(userId: string) {
+    const locationId = grantPick[userId];
+    if (!locationId) return;
+    setLocationActionBusy(`${userId}:grant`);
+    setErr(null);
+    try {
+      await api.post(`/admin/terminal/companies/${company.id}/members/${userId}/locations`, { locationId });
+      setGrantPick((prev) => {
+        const { [userId]: _drop, ...rest } = prev;
+        return rest;
+      });
+      onChanged();
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Could not grant that location.');
+    } finally {
+      setLocationActionBusy(null);
+    }
+  }
+
+  async function revokeLocation(userId: string, locationId: string) {
+    setLocationActionBusy(`${userId}:${locationId}`);
+    setErr(null);
+    try {
+      await api.del(`/admin/terminal/companies/${company.id}/members/${userId}/locations/${locationId}`);
+      onChanged();
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Could not revoke that location.');
+    } finally {
+      setLocationActionBusy(null);
+    }
+  }
+
   return (
     <Card className="p-4">
       <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Members</h3>
@@ -438,6 +566,10 @@ function MembersCard({
         <ul className="mt-3 divide-y divide-slate-200 rounded-bmpl-md border border-slate-200 bg-white">
           {company.members.map((m) => {
             const currentlyActiveGrants = m.locations.filter((l) => activeLocationIds.has(l.id));
+            // grantMemberLocation 404s on anything but an ACTIVE member, so
+            // this control only ever appears there -- not offered on an
+            // ENDED row, where it would always fail.
+            const grantableLocations = company.locations.filter((l) => l.isActive && !currentlyActiveGrants.some((g) => g.id === l.id));
             return (
               <li key={m.id} className="px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -452,6 +584,11 @@ function MembersCard({
                       {endBusy === m.userId ? 'Ending…' : 'End membership'}
                     </Button>
                   )}
+                  {canManage && m.status === 'ENDED' && (
+                    <Button variant="outline" size="sm" disabled={reactivateBusy === m.userId} onClick={() => void reactivateMember(m.userId)}>
+                      {reactivateBusy === m.userId ? 'Reactivating…' : 'Reactivate'}
+                    </Button>
+                  )}
                 </div>
                 <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
                   {currentlyActiveGrants.length === 0
@@ -463,20 +600,68 @@ function MembersCard({
                   {m.locations.length > currentlyActiveGrants.length &&
                     ` (${m.locations.length - currentlyActiveGrants.length} granted location${m.locations.length - currentlyActiveGrants.length === 1 ? '' : 's'} since deactivated)`}
                 </p>
+                {m.status === 'ACTIVE' && canManage && currentlyActiveGrants.length > 0 && (
+                  <ul className="mt-1 flex flex-wrap gap-1">
+                    {currentlyActiveGrants.map((l) => (
+                      <li
+                        key={l.id}
+                        className="inline-flex items-center gap-1 rounded-bmpl-sm border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-[color:var(--bmpl-text-secondary)]"
+                      >
+                        {l.hub.name}
+                        <button
+                          type="button"
+                          disabled={locationActionBusy === `${m.userId}:${l.id}`}
+                          onClick={() => void revokeLocation(m.userId, l.id)}
+                          aria-label={`Revoke ${l.hub.name} from ${m.name}`}
+                          className="font-semibold text-[color:var(--bmpl-text-muted)] hover:text-amber-800 disabled:opacity-50"
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {m.status === 'ACTIVE' && canManage && grantableLocations.length > 0 && (
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <Select
+                      aria-label={`Grant ${m.name} a location`}
+                      value={grantPick[m.userId] ?? ''}
+                      onChange={(e) => setGrantPick((prev) => ({ ...prev, [m.userId]: e.target.value }))}
+                      className="h-7 py-0 text-xs"
+                    >
+                      <option value="">+ grant a location…</option>
+                      {grantableLocations.map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.hub.name} ({l.hub.code})
+                        </option>
+                      ))}
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={!grantPick[m.userId] || locationActionBusy === `${m.userId}:grant`}
+                      onClick={() => void grantLocation(m.userId)}
+                    >
+                      {locationActionBusy === `${m.userId}:grant` ? 'Granting…' : 'Grant'}
+                    </Button>
+                  </div>
+                )}
                 {m.status === 'ACTIVE' && (
-                  // No dead control here -- there is no edit action for an
-                  // existing member's own locations (see the file header's
-                  // 3rd gap), so this states the path that DOES work rather
-                  // than offering a button that would 404 or need a guessed
-                  // endpoint shape.
+                  // No dead control here -- there is no way to change this
+                  // member's ROLE in place (reactivateMember and
+                  // grantMemberLocation both deliberately never touch
+                  // memberRole), so this states the one path that works for
+                  // THAT, rather than offering a role control that doesn't
+                  // exist. Locations, above, no longer need this note.
                   <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
-                    To change {m.name}&apos;s locations or role, end this membership and send a new invite.
+                    To change {m.name}&apos;s role, end this membership and send a new invite.
                   </p>
                 )}
                 {m.status === 'ENDED' && (
                   <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
-                    Ended {when(m.endedAt)}. There is no direct reactivate action yet — sending a new invite to {m.email} restores the
-                    membership (the backend's own accept flow reactivates an ended member).
+                    Ended {when(m.endedAt)}. Reactivating restores the original location grants exactly as they were —
+                    it does not re-ask for locations, the way a fresh invite would.
                   </p>
                 )}
               </li>
