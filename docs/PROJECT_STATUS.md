@@ -715,7 +715,7 @@ The abbreviation is **BML**, never BMPL, in anything a person reads. Enforced by
 | Never fabricate | Use instead |
 | --- | --- |
 | Production terminals, carriers, routes, schedules, commercial rates | `isTest` rows, clearly marked, configured through the admin console — or, for a carrier's own routes and schedules, through their org-scoped self-service surface (§1, BMPL-137/186) |
-| Driver accounts | Onboard a real driver, or use a designated test account |
+| Driver accounts | Onboard a real driver, or use a designated test account — see [`docs/TEST-ACCOUNTS.md`](TEST-ACCOUNTS.md) for every reusable role fixture and what seeds it |
 | Wallet balances | The ledger, via the self-service or admin test-credit path |
 
 `isTest` exists on users, vendors, drivers, orders, shipments, hubs, routes,
