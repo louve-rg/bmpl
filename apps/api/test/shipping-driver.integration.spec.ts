@@ -1035,20 +1035,26 @@ describe('handoff PIN access', () => {
     return { id: seeded.id, cookies: cookiesOf(login) };
   };
 
-  it('reveals a FIRST_MILE PIN to logistics.verify, and audits WHO asked', async () => {
+  it('reveals a LINE_HAUL PIN to logistics.verify, and audits WHO asked', async () => {
     await makeDriver();
     const s = await book();
-    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    // LINE_HAUL, not FIRST_MILE (TERM-5 narrowed the staff reveal to LINE_HAUL
+    // only — a line-haul handoff has no assigned courier at all, so staff
+    // remain the only legitimate reader; see revealHandoffPin's own doc
+    // comment). This is a PERMISSION-SCOPE test, unrelated to which leg kind
+    // carries it, so re-pointing it here keeps testing exactly what it always
+    // tested.
+    const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
     const verifier = await limitedAdmin(['logistics.verify']);
 
-    const r = await get(verifier.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
+    const r = await get(verifier.cookies, `admin/logistics/legs/${lineHaul.id}/handoff-pin`);
     expect(r.status).toBe(200);
-    expect(r.body.handoffPin).toBe(await pinOf(first.id));
+    expect(r.body.handoffPin).toBe(await pinOf(lineHaul.id));
     expect(r.body.handoffVerificationStatus).toBe('PENDING');
 
     const reveals = (
       await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_HANDOFF_PIN_REVEALED' } })
-    ).filter((row) => (row.newValue as { legId?: string }).legId === first.id);
+    ).filter((row) => (row.newValue as { legId?: string }).legId === lineHaul.id);
     expect(reveals).toHaveLength(1);
     // The trail records exactly who asked — never the code itself.
     expect(reveals[0]!.actorId).toBe(verifier.id);
@@ -1059,37 +1065,57 @@ describe('handoff PIN access', () => {
   it('refuses the reveal to logistics.operate alone — completing a handoff and revealing its code stay two different powers', async () => {
     await makeDriver();
     const s = await book();
-    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
     // This caller can work every leg operation, including consuming the code at
     // the desk. They still cannot READ the code: somebody with logistics.verify
     // has to choose to give it to them. The pair with the test above pins the
     // permission split — a super-admin caller would pass either way and prove
     // nothing.
     const operator = await limitedAdmin(['logistics.operate']);
-    const r = await get(operator.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
+    const r = await get(operator.cookies, `admin/logistics/legs/${lineHaul.id}/handoff-pin`);
     expect(r.status).toBe(403);
   });
 
   it('refuses the reveal to a customer and to a driver', async () => {
     const driver = await makeDriver();
     const s = await book();
-    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
-    expect((await get(customer, `admin/logistics/legs/${first.id}/handoff-pin`)).status).toBe(403);
-    expect((await get(driver.cookies, `admin/logistics/legs/${first.id}/handoff-pin`)).status).toBe(403);
+    const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
+    expect((await get(customer, `admin/logistics/legs/${lineHaul.id}/handoff-pin`)).status).toBe(403);
+    expect((await get(driver.cookies, `admin/logistics/legs/${lineHaul.id}/handoff-pin`)).status).toBe(403);
   });
 
-  it('refuses to reveal a leg to its own assigned driver, whatever else they hold', async () => {
+  it("refuses a FIRST_MILE courier's own self-reveal code to any OTHER driver, whatever else they hold", async () => {
+    // The dual-status self-delivery-style invariant, migrated onto the surface
+    // that now actually holds a FIRST_MILE code (revealCourierCode via
+    // driver/shipping-jobs/:id/code — the old staff reveal is refused for
+    // EVERY caller on this kind now, see the 400 test below, so there is
+    // nothing left to self-deal through there). The wrong party must still
+    // never obtain the code, matched on the user id, even after being handed
+    // admin permissions — exactly like the self-delivery invariant.
+    const driver = await makeDriver();
+    // Confined to BELIZE only, so dispatch cannot possibly offer this
+    // STANN_CREEK-origin FIRST_MILE leg to them — "driver" above is the only
+    // one eligible, making the assignment below deterministic.
+    const other = await makeDriver({ districts: ['BELIZE'] });
+    const s = await book();
+    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId).toBe(driver.driverProfileId);
+    await ctx.prisma.adminPermissionGrant.create({ data: { userId: other.userId, permission: 'logistics.verify' } });
+    const r = await get(other.cookies, `driver/shipping-jobs/${first.id}/code`);
+    expect(r.status).toBe(404);
+  });
+
+  it('refuses the staff reveal for a FIRST_MILE leg outright — that code is read only through the courier\'s own self-reveal now', async () => {
     const driver = await makeDriver();
     const s = await book();
     const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
-    // Dispatch offered the first mile to the only driver online — this driver.
-    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: first.id } })).assignedDriverProfileId).toBe(driver.driverProfileId);
-    // Now give that same human staff powers: the dual-status case. The reveal
-    // must still refuse — the person who must PRODUCE the code never obtains it,
-    // matched on the user, exactly like the self-delivery invariant.
-    await ctx.prisma.adminPermissionGrant.create({ data: { userId: driver.userId, permission: 'logistics.verify' } });
-    const r = await get(driver.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
-    expect(r.status).toBe(403);
+    const verifier = await limitedAdmin(['logistics.verify']);
+    const staffAttempt = await get(verifier.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
+    expect(staffAttempt.status).toBe(400);
+
+    const selfReveal = await get(driver.cookies, `driver/shipping-jobs/${first.id}/code`);
+    expect(selfReveal.status).toBe(200);
+    expect(selfReveal.body.code).toBe(await pinOf(first.id));
   });
 
   it('refuses to reveal a door-ending leg — that code belongs to the recipient', async () => {
@@ -1107,10 +1133,16 @@ describe('handoff PIN access', () => {
   it('refuses to reveal a completed leg — a dead code stays dead', async () => {
     const driver = await makeDriver();
     const s = await book();
-    const first = (await legs(s.id)).find((l) => l.kind === 'FIRST_MILE')!;
-    await driveCourierLeg(driver, first.id);
+    const rows = await legs(s.id);
+    // LINE_HAUL, not FIRST_MILE — a STALENESS test, independent of leg kind,
+    // re-pointed at the kind the staff reveal still reaches (TERM-5). The
+    // FIRST_MILE handoff has to happen first: a LINE_HAUL leg sits PENDING,
+    // not READY to depart, until it does (Edward's journey shape, above).
+    await driveCourierLeg(driver, rows.find((l) => l.kind === 'FIRST_MILE')!.id);
+    const lineHaul = (await legs(s.id)).find((l) => l.kind === 'LINE_HAUL')!;
+    await flyLineHaul(lineHaul.id);
     const verifier = await limitedAdmin(['logistics.verify']);
-    const r = await get(verifier.cookies, `admin/logistics/legs/${first.id}/handoff-pin`);
+    const r = await get(verifier.cookies, `admin/logistics/legs/${lineHaul.id}/handoff-pin`);
     expect(r.status).toBe(400);
     expect(r.body.message).toMatch(/no longer valid/i);
   });

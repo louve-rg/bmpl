@@ -666,10 +666,16 @@ describe('the complete chain, sender to recipient, every handoff proven (Edward 
     expect(ownJob.status).toBe(200);
     expect(findPinLeak(ownJob.body, firstMilePin)).toBeNull();
 
-    // The one legitimate way anyone reads it: staff deliberately reveal it.
-    const revealed = await request(ctx.server).get(`/api/admin/logistics/legs/${firstMile.id}/handoff-pin`).set('Cookie', admin);
+    // Staff can no longer read a FIRST_MILE code at all (TERM-5 narrowed the
+    // staff reveal to LINE_HAUL only — staff relaying it verbally made the
+    // handoff "proof" circular). The one legitimate way anyone reads it now:
+    // the assigned courier's own self-reveal.
+    const staffReveal = await request(ctx.server).get(`/api/admin/logistics/legs/${firstMile.id}/handoff-pin`).set('Cookie', admin);
+    expect(staffReveal.status).toBe(400);
+
+    const revealed = await request(ctx.server).get(`/api/driver/shipping-jobs/${firstMile.id}/code`).set('Cookie', driver1.cookies);
     expect(revealed.status).toBe(200);
-    expect(revealed.body.handoffPin).toBe(firstMilePin);
+    expect(revealed.body.code).toBe(firstMilePin);
 
     // (b) A wrong code: refused, and counted.
     expect(
