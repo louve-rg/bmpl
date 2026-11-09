@@ -19,6 +19,10 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml .npmrc turbo.json tsconfig.
 # Workspace sources (package manifests + code).
 COPY packages ./packages
 COPY apps ./apps
+# Root-level helper scripts (e.g. apps/api's prebuild Prisma-freshness guard,
+# FLOOR-5/#620) are not under packages/ or apps/ — never copied before, which
+# broke the production build the instant apps/api started depending on one.
+COPY scripts ./scripts
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @bmpl/database generate \
  && pnpm -r --filter "./packages/*" build \
