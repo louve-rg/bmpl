@@ -597,3 +597,66 @@ describe('a terminal company\'s own staff submitting at their own location (TERM
     expect(r.status).toBe(403);
   });
 });
+
+describe('a LINE_HAUL leg cannot be handed off before it arrives (TERM-10)', () => {
+  it('14 · departed but not yet arrived: the real code is still refused, and arriving first lets it succeed', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile, lineHauls } = await journey(shipment.id);
+    await driveFirstMileToInProgress(courier, firstMile.id);
+    const firstMilePin = (await legRow(firstMile.id)).handoffPin!;
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: firstMilePin, receivedByName: 'Terminal desk' })).status).toBe(201);
+
+    const haul = lineHauls[0]!;
+    expect((await post(admin, `admin/logistics/legs/${haul.id}/depart`, {})).status).toBe(201);
+    const departed = await legRow(haul.id);
+    expect(departed.status).toBe('IN_PROGRESS');
+    expect(departed.arrivedAt).toBeNull();
+
+    const realPin = departed.handoffPin!;
+    const refused = await post(admin, `admin/logistics/legs/${haul.id}/handoff`, { pin: realPin, receivedByName: 'Receiving desk' });
+    expect(refused.status).toBe(400);
+    const stillOpen = await legRow(haul.id);
+    expect(stillOpen.status).toBe('IN_PROGRESS');
+    expect(stillOpen.arrivedAt).toBeNull();
+    // Refused before the code was ever checked — the real code's own attempt
+    // counter did not move, same discipline as 6c/8c above.
+    expect(stillOpen.handoffPinAttempts).toBe(0);
+
+    expect((await post(admin, `admin/logistics/legs/${haul.id}/arrive`, {})).status).toBe(201);
+    const arrived = await legRow(haul.id);
+    expect(arrived.arrivedAt).not.toBeNull();
+    const allowed = await post(admin, `admin/logistics/legs/${haul.id}/handoff`, { pin: realPin, receivedByName: 'Receiving desk' });
+    expect(allowed.status).toBe(201);
+    expect((await legRow(haul.id)).status).toBe('COMPLETED');
+  });
+});
+
+describe('the staff-audience payload never carries a pin, for any leg (SEC-1)', () => {
+  it('15 · logistics.read sees every leg field except handoffPin/pickupPin, which are null even while the real codes are live in the database', async () => {
+    const sender = await fundedSender();
+    const shipment = await book(sender.cookies);
+    const { firstMile, lastMile } = await journey(shipment.id);
+
+    // Still fresh off booking: every pin column is a real, live, non-null
+    // value in the database — nothing has been completed or cancelled yet.
+    const firstMileRow = await legRow(firstMile.id);
+    const lastMileRow = await legRow(lastMile.id);
+    expect(firstMileRow.pickupPin).not.toBeNull();
+    expect(lastMileRow.handoffPin).not.toBeNull();
+
+    const ops = await makeOperator(['logistics.read']);
+    const r = await get(ops.cookies, `admin/logistics/shipments/${shipment.reference}`);
+    expect(r.status).toBe(200);
+    for (const leg of r.body.legs) {
+      expect(leg.handoffPin).toBeNull();
+      expect(leg.pickupPin).toBeNull();
+    }
+    // Not merely absent-by-coincidence: the real, live secret strings do not
+    // appear anywhere in the response body, by any field name.
+    const body = JSON.stringify(r.body);
+    expect(body).not.toContain(firstMileRow.pickupPin!);
+    expect(body).not.toContain(lastMileRow.handoffPin!);
+  });
+});

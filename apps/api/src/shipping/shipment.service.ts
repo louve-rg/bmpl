@@ -2115,6 +2115,20 @@ export class ShipmentService {
     await this.verifyLegPinOrThrow(legId, 'handoff', input.pin, actor, presentedCourierUserId);
 
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
+      // TERM-10: a LINE_HAUL handoff presupposes arrival. `arriveLeg`'s own
+      // doc describes the state in between as "reached the far terminal but
+      // has not been handed over yet" — a deliberate two-step sequence. But
+      // `isLegActionable` (the only other gate completeLeg runs through)
+      // checks EARLIER legs' status, never this leg's own travel state, and
+      // a LINE_HAUL leg's handoff code exists from booking time, before it
+      // ever departs. Without this, a never-departed (or departed but not
+      // yet arrived) LINE_HAUL could be handed off at a hub it never
+      // reached, given the right code — exactly the gap the new terminal
+      // queue (TERM-8) already hides from an operator by requiring
+      // `arrivedAt` before listing it; the write itself had no matching gate.
+      if (leg.kind === 'LINE_HAUL' && leg.arrivedAt === null) {
+        throw new BadRequestException('This line-haul leg has not arrived at its destination terminal yet.');
+      }
       // Conditional write, NOT an unconditional update by id. `leg.status` is
       // a read taken moments earlier in this same transaction (transition()'s
       // own findUnique) — a concurrent flagException() on this exact leg can
@@ -2130,7 +2144,9 @@ export class ShipmentService {
         data: {
           status: 'COMPLETED',
           completedAt: new Date(),
-          arrivedAt: leg.arrivedAt ?? (leg.kind === 'LINE_HAUL' ? new Date() : null),
+          // Guaranteed non-null for LINE_HAUL by the guard above; every other
+          // kind never had an arrive step, so this is just a no-op passthrough.
+          arrivedAt: leg.arrivedAt,
           handoffVerifiedAt: new Date(),
           handoffVerificationStatus: 'VERIFIED',
           handoffReceivedByName: input.receivedByName,
