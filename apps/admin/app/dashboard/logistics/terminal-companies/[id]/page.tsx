@@ -11,9 +11,15 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageH
  * apps/api/src/terminal/{terminal.controller.ts,terminal.service.ts} and
  * packages/validation/src/terminal.ts on origin/main (a80adf43), not
  * re-derived. The 8 admin operations below are the WHOLE surface — see
- * the list page's header comment for the 3 that do not exist yet
- * (edit company, reactivate a membership, grant/remove one member's
- * location after invite acceptance) and are therefore not offered here.
+ * the list page's header comment for the 3 that do not exist yet (edit
+ * company, reactivate a membership, grant/remove one member's location
+ * after invite acceptance — Michael's ruling there also explains why the
+ * first blocks reporting slice 1 complete and the other two don't) and
+ * are therefore not offered here. No dead controls: every spot that
+ * would need one of the three states the path that DOES work instead —
+ * profile card (no edit button, a note), each ACTIVE member's row (no
+ * edit-locations button, "end and re-invite"), each ENDED member's row
+ * (no reactivate button, "a new invite restores it").
  *
  * Two backend facts this page must never contradict (terminal.service.ts):
  *   - No implicit whole-company grant, not even for MANAGER — a member with
@@ -457,6 +463,16 @@ function MembersCard({
                   {m.locations.length > currentlyActiveGrants.length &&
                     ` (${m.locations.length - currentlyActiveGrants.length} granted location${m.locations.length - currentlyActiveGrants.length === 1 ? '' : 's'} since deactivated)`}
                 </p>
+                {m.status === 'ACTIVE' && (
+                  // No dead control here -- there is no edit action for an
+                  // existing member's own locations (see the file header's
+                  // 3rd gap), so this states the path that DOES work rather
+                  // than offering a button that would 404 or need a guessed
+                  // endpoint shape.
+                  <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
+                    To change {m.name}&apos;s locations or role, end this membership and send a new invite.
+                  </p>
+                )}
                 {m.status === 'ENDED' && (
                   <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
                     Ended {when(m.endedAt)}. There is no direct reactivate action yet — sending a new invite to {m.email} restores the

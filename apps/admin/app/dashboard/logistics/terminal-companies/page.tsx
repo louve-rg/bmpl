@@ -19,15 +19,22 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageH
  *
  * NOT YET BUILDABLE — no backend endpoint exists for these, confirmed by
  * reading apps/api/src/terminal/terminal.{controller,service}.ts and
- * packages/validation/src/terminal.ts end to end (flagged to Michael,
- * TERM-4 contract-gap message, awaiting his call on whether this blocks
- * slice 1):
- *   - editing a company's own fields once created
- *   - reactivating an ENDED membership directly (today only a fresh invite
- *     to the same email can restore one, via acceptInvite's own upsert)
- *   - granting or removing an individual location for an EXISTING member
- *     (today a member's locations are fixed at invite-acceptance time)
- * None of those are in this console. Don't infer they exist from this file.
+ * packages/validation/src/terminal.ts end to end. Michael's ruling
+ * (2026-11-09, TERM-4): these three are not equal.
+ *   - Editing a company's own fields once created — no PATCH, no DELETE.
+ *     THIS is the one that blocks reporting slice 1 complete: a company
+ *     created with a wrong name or wrong isTest is permanently
+ *     uncorrectable through the product. TERM-6 (Pam, queued behind
+ *     TERM-5) adds it; this console is wired to it in a follow-up once
+ *     that merges — no placeholder for it now.
+ *   - Reactivating an ENDED membership, and changing an existing member's
+ *     locations — "clunk, not blockage": ending a membership and sending
+ *     a fresh invite genuinely does both today, with no DB access, at
+ *     the cost of the operator's access until they re-accept. Does not
+ *     block this card; also lands with TERM-6.
+ * RULE FOR THIS CARD: no dead controls. Where a capability doesn't exist,
+ * state the path that DOES work — never a disabled button with a tooltip.
+ * Don't infer any of the three exist from this file.
  */
 
 interface Company {

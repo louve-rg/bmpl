@@ -208,6 +208,22 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
     expect(container!.textContent).toContain('1 granted location since deactivated');
   });
 
+  it("tells the admin to end-and-reinvite an ACTIVE member instead of offering an edit-locations control that doesn't exist", async () => {
+    stubFetch({
+      company: {
+        ...BASE_COMPANY,
+        locations: [ACTIVE_LOCATION],
+        members: [
+          { id: 'm1', userId: 'u1', name: 'Jane Doe', email: 'jane@bts.bz', memberRole: 'OPERATOR', status: 'ACTIVE', createdAt: new Date().toISOString(), endedAt: null, locations: [ACTIVE_LOCATION] },
+        ],
+      },
+    });
+    await mount();
+
+    expect(container!.textContent).toContain("To change Jane Doe's locations or role, end this membership and send a new invite.");
+    expect(Array.from(container!.querySelectorAll('button')).some((b) => /edit/i.test(b.textContent ?? ''))).toBe(false);
+  });
+
   it('shows an ended member with the reactivate-via-new-invite note, no reactivate button', async () => {
     stubFetch({
       company: {
