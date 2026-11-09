@@ -6,15 +6,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /**
- * TERM-4: the terminal-company detail page. Contract read from
+ * TERM-4, closed out by TERM-6-UI. Contract read from
  * apps/api/src/terminal/{terminal.controller.ts,terminal.service.ts} on
- * origin/main (a80adf43) -- see the page's own header comment for the
- * exact citations. Covers: profile, the absent/broken-locations
- * distinction, the no-implicit-whole-company-grant messaging (a member
- * with zero currently-active locations reads as having no access
- * regardless of role), cross-referencing a member's location grants
- * against the company's own isActive flag rather than trusting a cached
- * list, invite/revoke, and end-membership.
+ * origin/main plus Pam's TERM-6 PR #629 diff (bb112650) -- see the page's
+ * own header comment for the exact citations. Covers: profile (now
+ * editable), the absent/broken-locations distinction, the
+ * no-implicit-whole-company-grant messaging (a member with zero
+ * currently-active locations reads as having no access regardless of
+ * role), cross-referencing a member's location grants against the
+ * company's own isActive flag rather than trusting a cached list,
+ * invite/revoke, end-membership, direct reactivate, and per-member
+ * location grant/revoke (still no in-place role change -- that's the one
+ * gap TERM-6 left, and the page still says so).
  */
 
 vi.mock('next/navigation', () => ({
@@ -67,8 +70,23 @@ function stubFetch(opts: StubOpts = {}) {
       const method = init?.method ?? 'GET';
       if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: permissions });
       if (url.includes('/api/admin/logistics/hubs')) return jsonResponse(200, opts.hubs ?? [HUB_1, HUB_3]);
+      if (url.includes('/api/admin/terminal/companies/tc_1') && method === 'PATCH') {
+        posts.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
+        return jsonResponse(200, { ...(company as object), ...(init?.body ? JSON.parse(String(init.body)) : {}) });
+      }
       if (url.includes('/api/admin/terminal/companies/tc_1') && method === 'GET' && !url.includes('/locations') && !url.includes('/members') && !url.includes('/invites')) {
         return jsonResponse(opts.companyStatus ?? 200, opts.companyStatus && opts.companyStatus !== 200 ? company : company);
+      }
+      // TERM-6 member-location and reactivate endpoints both contain
+      // "/members", so they're matched BEFORE the generic end-membership
+      // DELETE check below, not instead of it.
+      if (url.includes('/members') && url.includes('/reactivate') && method === 'POST') {
+        posts.push({ url, method, body: null });
+        return jsonResponse(200, {});
+      }
+      if (url.includes('/members') && url.includes('/locations') && (method === 'POST' || method === 'DELETE')) {
+        posts.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
+        return jsonResponse(200, {});
       }
       if (url.includes('/api/admin/terminal/companies/tc_1/locations') && (method === 'POST' || method === 'DELETE')) {
         posts.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
@@ -117,13 +135,37 @@ afterEach(() => {
 });
 
 describe('TerminalCompanyDetailPage (TERM-4)', () => {
-  it('renders the company profile and notes that editing it is not available', async () => {
+  it('renders the company profile with an edit control', async () => {
     stubFetch({ company: BASE_COMPANY });
     await mount();
 
     expect(container!.textContent).toContain('Belize Terminal Services');
     expect(container!.textContent).toContain('ops@bts.bz');
-    expect(container!.textContent).toContain('no update endpoint');
+    expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Edit')).toBe(true);
+  });
+
+  it("edits a company's profile, sending only the editable fields -- never isTest", async () => {
+    const posts = stubFetch({ company: BASE_COMPANY });
+    await mount();
+
+    const editButton = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Edit')!;
+    await act(async () => {
+      editButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const nameInput = container!.querySelector<HTMLInputElement>('#tc-edit-name')!;
+    await act(async () => {
+      setValue(nameInput, 'Belize Terminal Services Ltd');
+    });
+    const saveButton = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Save')!;
+    await act(async () => {
+      saveButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const patchCall = posts.find((p) => p.method === 'PATCH' && p.url.includes('/companies/tc_1'));
+    expect(patchCall?.body).toEqual({ businessName: 'Belize Terminal Services Ltd', contactEmail: 'ops@bts.bz', contactPhone: '+501-610-0000' });
+    expect(patchCall?.body).not.toHaveProperty('isTest');
   });
 
   it('shows "no locations yet" (absent), not the all-deactivated warning, when the company has never had one', async () => {
@@ -208,7 +250,7 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
     expect(container!.textContent).toContain('1 granted location since deactivated');
   });
 
-  it("tells the admin to end-and-reinvite an ACTIVE member instead of offering an edit-locations control that doesn't exist", async () => {
+  it("tells the admin to end-and-reinvite an ACTIVE member only for a ROLE change -- locations have their own control now", async () => {
     stubFetch({
       company: {
         ...BASE_COMPANY,
@@ -220,11 +262,15 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
     });
     await mount();
 
-    expect(container!.textContent).toContain("To change Jane Doe's locations or role, end this membership and send a new invite.");
-    expect(Array.from(container!.querySelectorAll('button')).some((b) => /edit/i.test(b.textContent ?? ''))).toBe(false);
+    expect(container!.textContent).toContain("To change Jane Doe's role, end this membership and send a new invite.");
+    expect(container!.textContent).not.toContain("locations or role");
+    // Scoped to the member's own row -- the page's unrelated company-level
+    // "Edit" button (ProfileCard) also matches /edit/i and must not count.
+    const memberRow = Array.from(container!.querySelectorAll('li')).find((li) => li.textContent?.includes('Jane Doe'))!;
+    expect(Array.from(memberRow.querySelectorAll('button')).some((b) => /edit/i.test(b.textContent ?? ''))).toBe(false);
   });
 
-  it('shows an ended member with the reactivate-via-new-invite note, no reactivate button', async () => {
+  it('shows an ended member with a working Reactivate button, no stale "no direct reactivate" note', async () => {
     stubFetch({
       company: {
         ...BASE_COMPANY,
@@ -237,8 +283,94 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
     await mount();
 
     expect(container!.textContent).toContain('ENDED');
-    expect(container!.textContent).toContain('no direct reactivate action yet');
-    expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent?.includes('Reactivate'))).toBe(false);
+    expect(container!.textContent).not.toContain('no direct reactivate action yet');
+    expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Reactivate')).toBe(true);
+  });
+
+  it('reactivates an ended member', async () => {
+    const posts = stubFetch({
+      company: {
+        ...BASE_COMPANY,
+        locations: [ACTIVE_LOCATION],
+        members: [
+          { id: 'm1', userId: 'u1', name: 'Jane Doe', email: 'jane@bts.bz', memberRole: 'OPERATOR', status: 'ENDED', createdAt: new Date().toISOString(), endedAt: new Date().toISOString(), locations: [] },
+        ],
+      },
+    });
+    await mount();
+
+    const reactivateButton = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Reactivate')!;
+    await act(async () => {
+      reactivateButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(posts.some((p) => p.method === 'POST' && p.url.includes('/members/u1/reactivate'))).toBe(true);
+  });
+
+  it('grants an ACTIVE member a second location without ending their membership', async () => {
+    const hubBLocation = { id: 'loc_3', isActive: true, hub: { id: 'hub_3', code: 'SPR', name: 'San Pedro Hub', city: 'San Pedro' } };
+    const posts = stubFetch({
+      company: {
+        ...BASE_COMPANY,
+        locations: [ACTIVE_LOCATION, hubBLocation],
+        members: [
+          { id: 'm1', userId: 'u1', name: 'Jane Doe', email: 'jane@bts.bz', memberRole: 'OPERATOR', status: 'ACTIVE', createdAt: new Date().toISOString(), endedAt: null, locations: [ACTIVE_LOCATION] },
+        ],
+      },
+    });
+    await mount();
+
+    const grantSelect = container!.querySelector<HTMLSelectElement>('select[aria-label="Grant Jane Doe a location"]')!;
+    await act(async () => {
+      grantSelect.value = hubBLocation.id;
+      grantSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const grantButton = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Grant')!;
+    await act(async () => {
+      grantButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const grantCall = posts.find((p) => p.method === 'POST' && p.url.includes('/members/u1/locations'));
+    expect(grantCall?.body).toEqual({ locationId: hubBLocation.id });
+  });
+
+  it("revokes one of an ACTIVE member's locations without ending their membership", async () => {
+    const hubBLocation = { id: 'loc_3', isActive: true, hub: { id: 'hub_3', code: 'SPR', name: 'San Pedro Hub', city: 'San Pedro' } };
+    const posts = stubFetch({
+      company: {
+        ...BASE_COMPANY,
+        locations: [ACTIVE_LOCATION, hubBLocation],
+        members: [
+          { id: 'm1', userId: 'u1', name: 'Jane Doe', email: 'jane@bts.bz', memberRole: 'OPERATOR', status: 'ACTIVE', createdAt: new Date().toISOString(), endedAt: null, locations: [ACTIVE_LOCATION, hubBLocation] },
+        ],
+      },
+    });
+    await mount();
+
+    const revokeButton = container!.querySelector<HTMLButtonElement>(`button[aria-label="Revoke ${ACTIVE_LOCATION.hub.name} from Jane Doe"]`)!;
+    await act(async () => {
+      revokeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(posts.some((p) => p.method === 'DELETE' && p.url.includes(`/members/u1/locations/${ACTIVE_LOCATION.id}`))).toBe(true);
+  });
+
+  it('offers no grant control for an ACTIVE member already holding every active location', async () => {
+    stubFetch({
+      company: {
+        ...BASE_COMPANY,
+        locations: [ACTIVE_LOCATION],
+        members: [
+          { id: 'm1', userId: 'u1', name: 'Jane Doe', email: 'jane@bts.bz', memberRole: 'OPERATOR', status: 'ACTIVE', createdAt: new Date().toISOString(), endedAt: null, locations: [ACTIVE_LOCATION] },
+        ],
+      },
+    });
+    await mount();
+
+    expect(container!.querySelector('select[aria-label="Grant Jane Doe a location"]')).toBeNull();
   });
 
   it('ends an active membership', async () => {
@@ -361,12 +493,23 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
   it('hides every write control from an admin without terminals.manage', async () => {
     stubFetch({
       adminPermissions: ['terminals.read'],
-      company: { ...BASE_COMPANY, locations: [ACTIVE_LOCATION], pendingInvites: [{ id: 'inv_1', email: 'new@bts.bz', memberRole: 'OPERATOR', expiresAt: new Date().toISOString(), createdAt: new Date().toISOString(), locationCount: 1 }] },
+      company: {
+        ...BASE_COMPANY,
+        locations: [ACTIVE_LOCATION],
+        members: [
+          { id: 'm1', userId: 'u1', name: 'Jane Doe', email: 'jane@bts.bz', memberRole: 'OPERATOR', status: 'ENDED', createdAt: new Date().toISOString(), endedAt: new Date().toISOString(), locations: [] },
+        ],
+        pendingInvites: [{ id: 'inv_1', email: 'new@bts.bz', memberRole: 'OPERATOR', expiresAt: new Date().toISOString(), createdAt: new Date().toISOString(), locationCount: 1 }],
+      },
     });
     await mount();
 
     expect(container!.textContent).not.toContain('Attach');
     expect(container!.textContent).not.toContain('Send invite');
-    expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Revoke')).toBe(false);
+    const buttonText = Array.from(container!.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttonText).not.toContain('Revoke');
+    expect(buttonText).not.toContain('Edit');
+    expect(buttonText).not.toContain('Reactivate');
+    expect(buttonText).not.toContain('Grant');
   });
 });
