@@ -66,7 +66,7 @@ function AcceptInviteForm() {
           message={
             createdAccount
               ? 'Your account has been created and you have been added to the team. Sign in to continue.'
-              : 'You have been added to the team. Sign in to continue.'
+              : 'You already had a BML account, so it has been added to the team as-is. Sign in with your existing password, not the one you just entered — it was not used.'
           }
         />
         <ButtonLink href="/login" size="lg" className="w-full">

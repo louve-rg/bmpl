@@ -87,7 +87,7 @@ describe('AcceptInvitePage (TERM-9)', () => {
     await mount();
     await fillAndSubmit();
 
-    expect(container!.textContent).toContain('You have been added to the team');
+    expect(container!.textContent).toContain('Sign in with your existing password');
     expect(container!.textContent).not.toContain('Your account has been created');
   });
 
