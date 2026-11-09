@@ -770,10 +770,15 @@ describe('ShipmentOpsPage — map preview makes a text/pin mismatch visible (MDF
 /**
  * MDF-624 (DISPATCH-3): the DETAIL half of the stuck-manual-assignment pair
  * -- the board (list) is where it must be NOTICED without opening anything;
- * this screen is where an admin CONFIRMS before reassigning. Same raw
- * fields (courierStatus/assignedAt/acceptedAt) the board's own
- * manualAssignmentPendingSince is built from, read directly here. Acting
- * goes through the EXISTING LegAssignModal/reassign endpoint -- no new one.
+ * this screen is where an admin CONFIRMS before reassigning. Reads
+ * `leg.manualAssignmentPendingSince` directly -- the SAME field, computed
+ * by the SAME expression in `serialize()`, that the board already reads
+ * from `listForOps`. Deliberately NOT re-derived client-side: an earlier
+ * version of this screen derived it from courierStatus/acceptedAt alone
+ * (no offerExpiresAt on this payload to make the test three clauses), which
+ * silently matched a healthy, self-healing AUTOMATIC offer too -- see the
+ * dedicated test for that case below. Acting goes through the EXISTING
+ * LegAssignModal/reassign endpoint -- no new one.
  */
 describe('ShipmentOpsPage — confirming and acting on a stuck manual assignment (MDF-624)', () => {
   const STUCK_LEG = {
@@ -782,8 +787,8 @@ describe('ShipmentOpsPage — confirming and acting on a stuck manual assignment
     kind: 'FIRST_MILE' as const,
     status: 'READY',
     courierStatus: 'ASSIGNED',
-    assignedAt: new Date(Date.now() - 50 * 60 * 60 * 1000).toISOString(), // ~2d ago
     acceptedAt: null as string | null,
+    manualAssignmentPendingSince: new Date(Date.now() - 50 * 60 * 60 * 1000).toISOString() as string | null, // ~2d ago
     courier: { displayName: 'Jordan Reyes' },
   };
 
@@ -810,20 +815,26 @@ describe('ShipmentOpsPage — confirming and acting on a stuck manual assignment
     expect(buttonTexts()).not.toContain('Reassign driver');
   });
 
-  it('says nothing once the driver has accepted, even though they were assigned long ago', async () => {
+  it('does NOT show the notice when manualAssignmentPendingSince is null -- covers both the driver-already-accepted case and the healthy-automatic-offer case (courierStatus ASSIGNED, acceptedAt null, but no offerExpiresAt on this payload to tell the two apart client-side)', async () => {
+    // This is the exact shape an earlier, re-derived version of this screen
+    // got wrong: ASSIGNED + acceptedAt null alone matched a self-healing
+    // AUTOMATIC offer too. Trusting the server's own field -- one
+    // computation, shared with the board -- means there is nothing left
+    // here to derive, and nothing left to get wrong the same way again.
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
         if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
-          return jsonResponse(200, stuckShipment({ acceptedAt: new Date().toISOString() }));
+          return jsonResponse(200, stuckShipment({ manualAssignmentPendingSince: null }));
         }
         return jsonResponse(404, { message: 'not mocked: ' + url });
       }),
     );
     await mount();
 
+    expect(document.body.textContent).not.toContain('Manually assigned to');
     expect(document.body.textContent).not.toContain('still waiting for them to accept');
     expect(buttonTexts()).not.toContain('Reassign driver');
   });

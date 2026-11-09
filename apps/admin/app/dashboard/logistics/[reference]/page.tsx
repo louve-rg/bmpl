@@ -67,15 +67,17 @@ interface Leg {
   operatedByProviderId?: string | null;
   operatorName?: string | null;
   /**
-   * MDF-624: the same two staff-only raw fields the ops board's own
-   * `manualAssignmentPendingSince` is derived from (DISPATCH-2) — read here
-   * directly rather than trusting a second derived field, so this screen
-   * cannot disagree with the board about whether a leg is still "stuck".
+   * MDF-624/DISPATCH-2: the SAME field the ops board reads, one computation
+   * in `serialize()` shared by both — null for an automatic offer (self-
+   * healing, has its own offerExpiresAt) as well as for every accepted,
+   * unassigned or closed leg; set only for a manual assignment still
+   * waiting on the driver. Deliberately NOT re-derived client-side from
+   * courierStatus/assignedAt/acceptedAt: an earlier version of this screen
+   * did that with a two-clause test (no offerExpiresAt on this payload to
+   * make it three), which silently matched a healthy automatic offer too.
    * Optional for the same cross-deploy reason as pickupPhotoUrls above.
    */
-  courierStatus?: string | null;
-  assignedAt?: string | null;
-  acceptedAt?: string | null;
+  manualAssignmentPendingSince?: string | null;
   courier?: { displayName: string | null } | null;
 }
 
@@ -142,18 +144,6 @@ function controlsFor(leg: Leg): { depart: boolean; arrive: boolean; handoff: boo
  */
 const SCHEDULABLE_LEG_STATUSES = new Set(['PENDING', 'READY', 'IN_PROGRESS', 'EXCEPTION']);
 const canScheduleLeg = (leg: Leg) => leg.kind === 'LINE_HAUL' && SCHEDULABLE_LEG_STATUSES.has(leg.status);
-
-/**
- * MDF-624: this is the DETAIL half of the "stuck manual assignment" pair —
- * the ops board (list) is where it must be NOTICED without opening
- * anything; this is where an admin CONFIRMS before reassigning. Same raw
- * fields, same meaning: assigned, never expires on its own, not yet
- * accepted. Returns the raw instant, not a stale/not-stale verdict — the
- * UI (here, and on the board) decides what "too long" means, not the API.
- */
-function manualAssignmentPendingSince(leg: Leg): string | null {
-  return leg.courierStatus === 'ASSIGNED' && leg.acceptedAt == null ? leg.assignedAt ?? null : null;
-}
 
 /**
  * D4 (owner): "when a provider or lane cannot take a line-haul the screen
@@ -462,11 +452,11 @@ export default function ShipmentOpsPage() {
                       </Badge>
                     </div>
 
-                    {manualAssignmentPendingSince(leg) && (
+                    {leg.manualAssignmentPendingSince && (
                       <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
                         <p className="text-sm font-medium text-amber-800">
                           Manually assigned to {leg.courier?.displayName ?? 'a driver'}, still waiting for them to accept —
-                          assigned {relativeTime(manualAssignmentPendingSince(leg)!)}.
+                          assigned {relativeTime(leg.manualAssignmentPendingSince)}.
                         </p>
                         {canOperate && (
                           <Button
