@@ -6,6 +6,7 @@ import { api, type ApiError } from '../../../lib/api';
 import { adminCrumbs } from '../../../lib/admin-nav';
 import { legAssignMode } from '../../../lib/leg-assign';
 import { LegAssignModal } from '../../../components/logistics/LegAssignModal';
+import { relativeTime } from '../../../lib/notifications';
 import { Alert, Badge, Button, Card, EmptyState, Field, LoadingRow, PageHeader, Select } from '../../../components/ui';
 
 /**
@@ -43,6 +44,18 @@ interface OpsLeg {
    * it's missing, so this board renders correctly either way.
    */
   needsDriverReason?: 'EXHAUSTED' | 'UNAVAILABLE' | null;
+  /**
+   * DISPATCH-2/MDF-624: the raw instant this leg was manually assigned and
+   * is still waiting for the driver to accept — null for every other state
+   * (automatic offer, already accepted, never assigned, or any closed leg).
+   * A human assignment deliberately never expires on its own (`assignManual`
+   * sets `offerExpiresAt: null` on purpose), which is exactly why a 3-day-
+   * silent one looks identical to a 1-minute-old one without this. The API
+   * gives a timestamp, not an `isStale` flag, on purpose — "too long" is a
+   * UI judgement (see MANUAL_ASSIGNMENT_STALE_HOURS below), not a backend
+   * truth. Optional for the same cross-deploy reason as needsDriverReason.
+   */
+  manualAssignmentPendingSince?: string | null;
 }
 
 interface OpsRow {
@@ -82,6 +95,22 @@ const money = (n: number) => `$${(n / 100).toFixed(2)}`;
  */
 function legNeedsCarrier(leg: OpsLeg): boolean {
   return leg.kind === 'LINE_HAUL' && !leg.operator && leg.status !== 'COMPLETED' && leg.status !== 'CANCELLED' && leg.status !== 'EXCEPTION';
+}
+
+/**
+ * MDF-624: the line god drew explicitly — the API hands over a raw instant,
+ * never an "is this stale" verdict, so the threshold for "too long" has to
+ * live here, where an operator can read it in the source and argue with it,
+ * rather than inside a backend field nobody reading this screen can see.
+ * 24 hours is a judgement call, not a derived fact: a manual assignment is
+ * always shown with its real age regardless of this number — this only
+ * decides when the badge switches from informational to a warning.
+ */
+const MANUAL_ASSIGNMENT_STALE_HOURS = 24;
+
+function manualAssignmentIsStale(iso: string): boolean {
+  const hours = (Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60);
+  return hours >= MANUAL_ASSIGNMENT_STALE_HOURS;
 }
 
 /** The leg's own state, in the vocabulary the operator uses out loud. */
@@ -261,13 +290,19 @@ export default function LogisticsOpsPage() {
         const driverReasons = s.legs.map((l) => l.needsDriverReason).filter((r): r is 'EXHAUSTED' | 'UNAVAILABLE' => !!r);
         const hasExhausted = driverReasons.includes('EXHAUSTED') || (s.needsDriver && driverReasons.length === 0);
         const hasUnavailableOnly = s.needsDriver && !hasExhausted;
+        // MDF-624: a stale manual assignment is its own condition, distinct
+        // from needsDriver/needsDriverReason — the dispatch engine is not
+        // short a driver here, a human already assigned one and is simply
+        // still waiting to hear back.
+        const pendingManualLegs = s.legs.filter((l): l is OpsLeg & { manualAssignmentPendingSince: string } => !!l.manualAssignmentPendingSince);
+        const hasStaleManual = pendingManualLegs.some((l) => manualAssignmentIsStale(l.manualAssignmentPendingSince));
         return (
           <Card
             key={s.id}
             className={`p-4 ${
               s.needsAttention
                 ? 'border-amber-300 bg-amber-50/40'
-                : hasExhausted || needsCarrier
+                : hasExhausted || needsCarrier || hasStaleManual
                   ? 'border-amber-200'
                   : hasUnavailableOnly
                     ? 'border-sky-200'
@@ -306,6 +341,11 @@ export default function LogisticsOpsPage() {
                     A transport leg has no carrier assigned yet — it needs assigning by hand.
                   </p>
                 )}
+                {hasStaleManual && !s.needsAttention && (
+                  <p className="mt-1 text-sm font-medium text-amber-800">
+                    A manually assigned leg has gone {MANUAL_ASSIGNMENT_STALE_HOURS}+ hours without the driver accepting — see below.
+                  </p>
+                )}
               </div>
               <p className="shrink-0 text-sm font-semibold tabular-nums text-[color:var(--bmpl-text)]">{money(s.totalMinor)}</p>
             </div>
@@ -325,6 +365,11 @@ export default function LogisticsOpsPage() {
                       {state.label}
                     </Badge>
                     {leg.operator && <span className="ml-1.5 text-slate-500">{leg.operator}</span>}
+                    {leg.manualAssignmentPendingSince && (
+                      <Badge tone={manualAssignmentIsStale(leg.manualAssignmentPendingSince) ? 'warning' : 'info'} className="ml-1.5">
+                        Awaiting driver · assigned {relativeTime(leg.manualAssignmentPendingSince)}
+                      </Badge>
+                    )}
                     {canOperate && mode && (
                       <button
                         type="button"

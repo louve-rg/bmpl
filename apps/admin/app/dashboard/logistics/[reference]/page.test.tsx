@@ -766,3 +766,91 @@ describe('ShipmentOpsPage — map preview makes a text/pin mismatch visible (MDF
     expect(dialog!.textContent).toContain(`${SHIPMENT.reference} · route`);
   });
 });
+
+/**
+ * MDF-624 (DISPATCH-3): the DETAIL half of the stuck-manual-assignment pair
+ * -- the board (list) is where it must be NOTICED without opening anything;
+ * this screen is where an admin CONFIRMS before reassigning. Same raw
+ * fields (courierStatus/assignedAt/acceptedAt) the board's own
+ * manualAssignmentPendingSince is built from, read directly here. Acting
+ * goes through the EXISTING LegAssignModal/reassign endpoint -- no new one.
+ */
+describe('ShipmentOpsPage — confirming and acting on a stuck manual assignment (MDF-624)', () => {
+  const STUCK_LEG = {
+    ...SHIPMENT.legs[0],
+    id: 'leg_fm',
+    kind: 'FIRST_MILE' as const,
+    status: 'READY',
+    courierStatus: 'ASSIGNED',
+    assignedAt: new Date(Date.now() - 50 * 60 * 60 * 1000).toISOString(), // ~2d ago
+    acceptedAt: null as string | null,
+    courier: { displayName: 'Jordan Reyes' },
+  };
+
+  function stuckShipment(overrides: Partial<typeof STUCK_LEG> = {}) {
+    return { ...SHIPMENT, legs: [{ ...STUCK_LEG, ...overrides }] };
+  }
+
+  it('shows the stuck-assignment notice with the driver name and real age, to a read-only viewer too', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.read'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, stuckShipment());
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).toContain('Manually assigned to Jordan Reyes');
+    expect(document.body.textContent).toContain('still waiting for them to accept');
+    expect(document.body.textContent).toContain('2d ago');
+    // Notice is informational for everyone; the ACTION is what's gated.
+    expect(buttonTexts()).not.toContain('Reassign driver');
+  });
+
+  it('says nothing once the driver has accepted, even though they were assigned long ago', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          return jsonResponse(200, stuckShipment({ acceptedAt: new Date().toISOString() }));
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).not.toContain('still waiting for them to accept');
+    expect(buttonTexts()).not.toContain('Reassign driver');
+  });
+
+  it('an operator gets a Reassign driver trigger that opens the existing LegAssignModal against this same leg', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, stuckShipment());
+        if (url.includes('/api/admin/logistics/legs/leg_fm/eligible-drivers')) return jsonResponse(200, []);
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    const trigger = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Reassign driver')!;
+    expect(trigger).not.toBeUndefined();
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog!.getAttribute('aria-label')).toBe('Reassign driver');
+    expect(dialog!.textContent).toContain('Jordan Reyes');
+  });
+});
