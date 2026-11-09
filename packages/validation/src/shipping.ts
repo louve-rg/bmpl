@@ -410,12 +410,12 @@ export const legHandoffSchema = z.object({
    * ShipmentService.verifyLegPinOrThrow falls back to the actor's own
    * identity, exactly as before this field existed).
    *
-   * TERM-7: `ShipmentService.completeLeg` no longer trusts this value for a
-   * staff submission — it only ever triggers deriving the real identity
-   * from the leg's own assignment (`presentedByAssignedCourier` below does
-   * the same, without needing a courier's user id at all). Kept, optional,
-   * for a possible future case where the presenter is NOT the assignee;
-   * no current flow reads it for that purpose.
+   * TERM-7: when supplied, `ShipmentService.completeLeg` leaves this value
+   * exactly as given and checks it against the leg's own assignment —
+   * never overwrites it with the derived identity, so a wrong claim is
+   * refused rather than silently ignored. `presentedByAssignedCourier`
+   * below exists for the OTHER case: no identity known at all, so the
+   * server derives and fills one in.
    */
   presentedCourierUserId: cuidSchema.optional(),
   /**
@@ -460,13 +460,12 @@ export type LegPickupInput = z.infer<typeof legPickupSchema>;
  * closing the gap where `confirmPickup` (the courier's own self-submit path)
  * takes no code at all for this leg kind.
  *
- * TERM-7: `presentedCourierUserId` is now optional and, like
- * `legHandoffSchema`'s own field, no longer read by
- * `ShipmentService.staffReleaseToCourier` — that method always derives the
- * presenting courier from the leg's own assignment (this route only ever
- * exists for a leg that already has one; there is no self-submit fallback
- * to need a client-supplied identity for). Kept, optional, for a possible
- * future presenter-is-not-the-assignee case.
+ * TERM-7: `presentedCourierUserId` is now optional. When omitted,
+ * `ShipmentService.staffReleaseToCourier` derives the presenting courier
+ * from the leg's own assignment (this route only ever exists for a leg
+ * that already has one). When supplied, it is left as given and checked
+ * against that same assignment — like `legHandoffSchema`'s own field, a
+ * wrong claim is refused, not silently overwritten.
  */
 export const legReleaseToCourierSchema = z.object({
   pin: z

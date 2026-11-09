@@ -804,9 +804,12 @@ export class AdminLogisticsController {
    * never had, closing the "a courier collects from a terminal and nothing
    * verifies it" gap.
    *
-   * TERM-7: `dto.presentedCourierUserId` is no longer read — this route is
-   * always a staff submission, so ShipmentService.staffReleaseToCourier
-   * always derives the presenting courier from the leg's own assignment.
+   * TERM-7: when `dto.presentedCourierUserId` is omitted,
+   * ShipmentService.staffReleaseToCourier derives the presenting courier
+   * from the leg's own assignment — this route is always a staff
+   * submission, so there is no self-submit fallback to omit it for. When
+   * it IS supplied, it is left as given and checked against the live
+   * assignment exactly like `handoff` above.
    */
   @RequirePermission('logistics.operate')
   @StrictThrottle()

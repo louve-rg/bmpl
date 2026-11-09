@@ -2058,21 +2058,24 @@ export class ShipmentService {
     let released = false;
     let presentedCourierUserId = input.presentedCourierUserId;
     if (presentedCourierUserId || input.presentedByAssignedCourier) {
-      // TERM-7: a staff submission derives the presenting courier from the
-      // leg's own assignment — never from whatever the client asserted.
-      // `presentedCourierUserId` was already checked against
-      // `assignedDriverProfileId` below, so the only value that could ever
-      // validly pass was the leg's own assignee's id; trusting the client
-      // for that added no security and forced a UI that would otherwise
-      // need to learn and display a courier's user id just to fill in a
-      // field the server already has the answer to (see
-      // `expectedAtHub`'s own comment on withholding driver identity,
-      // BMPL-247). A courier-kind leg (FIRST_MILE/LAST_MILE/DIRECT) with no
+      // TERM-7: a courier-kind leg (FIRST_MILE/LAST_MILE/DIRECT) with no
       // assigned courier at all has nobody who could have presented
       // anything, so a staff submission is refused outright rather than
       // falling through to the LINE_HAUL no-op below. LINE_HAUL itself has
       // no assignee by construction and stays exactly the code-only check
       // it always was.
+      //
+      // When the client named no one (`presentedByAssignedCourier` only —
+      // Oscar's handoff-desk UI, which never learns a driver's user id,
+      // BMPL-247), the identity is DERIVED from the leg's own assignment
+      // and filled in below. When the client DID name someone, that claim
+      // is left exactly as given — never overwritten — so
+      // `verifyLegPinOrThrow`'s own `isAssignedCourier` comparison against
+      // the true assignee catches a wrong claim through the same failure
+      // path as everything else (attempt counter, audit `wrongCourier`,
+      // lockout). Silently discarding a wrong claim and substituting the
+      // right answer would be a worse outcome than refusing it: the next
+      // reader of the schema would see the field and assume it's honoured.
       const leg = await this.prisma.shipmentLeg.findUnique({ where: { id: legId }, select: { kind: true, assignedDriverProfileId: true } });
       if (!leg) throw new NotFoundException('Leg not found.');
       if (leg.assignedDriverProfileId == null) {
@@ -2080,7 +2083,7 @@ export class ShipmentService {
           throw new BadRequestException('No courier is assigned to this leg; there is no code to present.');
         }
         presentedCourierUserId = undefined;
-      } else {
+      } else if (presentedCourierUserId == null) {
         const profile = await this.prisma.driverProfile.findUniqueOrThrow({ where: { id: leg.assignedDriverProfileId }, select: { userId: true } });
         presentedCourierUserId = profile.userId;
       }
@@ -2227,13 +2230,13 @@ export class ShipmentService {
    * instead of the submitting actor's, is what makes that submission
    * meaningful rather than just "staff knows a code."
    *
-   * TERM-7: the two staff callers now compute `presentedCourierUserId`
-   * themselves, server-side, from the leg's own `assignedDriverProfileId` —
-   * never from a client-supplied value. This method's own check is
-   * unchanged (it still compares whatever identity it is handed against
-   * the live assignment); what changed is only where that identity comes
-   * from. See `completeLeg`'s own comment for why a client-asserted value
-   * here was never meaningfully different from this derivation.
+   * TERM-7: the two staff callers now derive `presentedCourierUserId`
+   * themselves, server-side, from the leg's own `assignedDriverProfileId`
+   * — but only to FILL IN an absent value (Oscar's handoff-desk UI, which
+   * never learns a driver's user id). A client-supplied value is left
+   * exactly as given and still flows through unchanged into this method's
+   * own comparison below, so a wrong claim is refused here exactly as it
+   * always was — the derivation adds a case, it doesn't remove the check.
    */
   private async verifyLegPinOrThrow(
     legId: string,
@@ -4782,12 +4785,12 @@ export class ShipmentService {
    * release. Staff's own part is recorded on the audit row below instead.
    *
    * TERM-7: the presenting courier is derived from `assignedDriverProfileId`
-   * below, never taken from `input.presentedCourierUserId` — this route is
-   * ALWAYS a staff submission (no self-submit fallback exists for it), so
-   * there is no case where trusting the client's claim over the leg's own
-   * assignment would ever be correct. See `completeLeg`'s own comment for
-   * why a client-asserted identity here never carried information the
-   * server didn't already have.
+   * below and used whenever the client names no one. When the client DOES
+   * name someone, that claim is left exactly as given rather than
+   * overwritten, so a wrong claim is caught by `verifyLegPinOrThrow`'s own
+   * `isAssignedCourier` comparison — refused through the same failure path
+   * as everything else — instead of being silently ignored. See
+   * `completeLeg`'s own comment for the full reasoning.
    */
   async staffReleaseToCourier(legId: string, input: { pin: string; presentedCourierUserId?: string }, actor: { userId: string }) {
     const leg = await this.prisma.shipmentLeg.findUnique({
@@ -4805,7 +4808,7 @@ export class ShipmentService {
       throw new BadRequestException('This leg is not ready to be released to its courier.');
     }
 
-    const presentedCourierUserId = (
+    const presentedCourierUserId = input.presentedCourierUserId ?? (
       await this.prisma.driverProfile.findUniqueOrThrow({ where: { id: leg.assignedDriverProfileId }, select: { userId: true } })
     ).userId;
 

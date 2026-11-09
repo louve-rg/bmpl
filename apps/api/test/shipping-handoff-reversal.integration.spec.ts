@@ -321,7 +321,7 @@ describe('staff submit the presented courier\'s code (TERM-5)', () => {
     expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
   });
 
-  it('6 · TERM-7: the presenting courier is now derived server-side, so a WRONG client-claimed identity no longer matters — the real courier\'s own code still completes the handoff', async () => {
+  it('6 · the right code but the WRONG presented courier still fails — a presented identity is really checked, not just a correct code', async () => {
     const sender = await fundedSender();
     const courierA = await makeCourier('STANN_CREEK');
     const courierB = await makeCourier('STANN_CREEK');
@@ -331,19 +331,24 @@ describe('staff submit the presented courier\'s code (TERM-5)', () => {
 
     const ops = await makeOperator(['logistics.operate']);
     const code = (await get(courierA.cookies, `driver/shipping-jobs/${firstMile.id}/code`)).body.code;
-    // Before TERM-7 this claimed identity (courierB, not the real assignee)
-    // made an otherwise-correct submission fail — the server trusted
-    // whatever the client typed here. TERM-7 derives the presenting
-    // courier from the leg's own assignment instead, so this field is no
-    // longer read for that purpose: the correct code for the correctly
-    // assigned courier now succeeds regardless of what identity is claimed.
+    // TERM-7: a wrong claimed identity (courierB, not the real assignee) is
+    // left exactly as given — never silently overwritten with the real
+    // assignee — so it is refused by the same isAssignedCourier comparison
+    // this always ran, not bypassed by the new derivation.
     const r = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
       pin: code,
       receivedByName: 'Terminal desk',
       presentedCourierUserId: courierB.userId,
     });
-    expect(r.status).toBe(201);
-    expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
+    expect(r.status).toBe(400);
+    const after = await legRow(firstMile.id);
+    expect(after.status).toBe('IN_PROGRESS');
+    expect(after.handoffPinAttempts).toBe(1);
+    const failure = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'SHIPMENT_LEG_HANDOFF_PIN_FAILED', actorId: ops.userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect((failure!.newValue as { wrongCourier: boolean }).wrongCourier).toBe(true);
   });
 
   it('6b · TERM-7: presentedByAssignedCourier succeeds with no courier identity sent at all', async () => {
@@ -418,7 +423,7 @@ describe('releasing a LAST_MILE leg to its courier at a terminal (TERM-5)', () =
     expect(custody?.actorUserId).toBe(lastCourier.userId);
   });
 
-  it('8 · TERM-7: presentedCourierUserId is no longer read here either — a wrong claimed identity with the RIGHT code still succeeds, attributed to the real courier regardless', async () => {
+  it('8 · a courier presenting a code for a leg that is not theirs is refused, and the attempt counts (lockout engaging)', async () => {
     const sender = await fundedSender();
     const firstCourier = await makeCourier('STANN_CREEK');
     const lastCourier = await makeCourier('BELIZE');
@@ -428,16 +433,33 @@ describe('releasing a LAST_MILE leg to its courier at a terminal (TERM-5)', () =
 
     const code = (await get(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/code`)).body.code;
     const ops = await makeOperator(['logistics.operate']);
-    const r = await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, {
+
+    // TERM-7: staffReleaseToCourier now honours an explicit presented
+    // identity exactly like completeLeg — left as given, never silently
+    // overwritten — so the impostor's claim is refused by the same
+    // isAssignedCourier comparison, not ignored.
+    for (let i = 1; i <= 5; i += 1) {
+      const r = await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, {
+        pin: code,
+        presentedCourierUserId: impostor.userId,
+      });
+      expect(r.status).toBe(400);
+      const after = await legRow(lastMile.id);
+      expect(after.pickupPinAttempts).toBe(i);
+    }
+    // The fifth failure locks it into EXCEPTION — the same shared lockout
+    // completeLeg's own verifyLegPinOrThrow already enforces, now reachable
+    // from this leg kind for the first time.
+    const locked = await legRow(lastMile.id);
+    expect(locked.status).toBe('EXCEPTION');
+
+    // The real courier, with the real code, is now ALSO refused — the leg
+    // itself is locked, not just the impostor's own attempts.
+    const real = await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, {
       pin: code,
-      presentedCourierUserId: impostor.userId,
+      presentedCourierUserId: lastCourier.userId,
     });
-    expect(r.status).toBe(201);
-    const custody = await ctx.prisma.custodyEvent.findFirst({
-      where: { shipmentLegId: lastMile.id, toHolder: 'DRIVER' },
-      orderBy: { occurredAt: 'desc' },
-    });
-    expect(custody?.actorUserId).toBe(lastCourier.userId);
+    expect(real.status).toBe(403);
   });
 
   it('8b · a WRONG code still fails and locks out normally, this route\'s only remaining protection', async () => {
