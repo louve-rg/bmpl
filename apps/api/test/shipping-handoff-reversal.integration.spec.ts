@@ -15,25 +15,21 @@
  * engaging; and a courier-facing response proven not to contain a recipient
  * delivery code.
  *
- * NOT in this file: staff being refused a FIRST_MILE reveal. That narrowing
- * (`revealHandoffPin` to LINE_HAUL-only) ships on its own branch, atomically
- * with the handoff-desk UI change that replaces the admin console's call to
- * it (TERM-5-UI) — see `revealHandoffPin`'s own doc comment. Until then
- * staff can still reveal a FIRST_MILE code exactly as before this branch.
+ * This branch carries the FIRST_MILE reveal narrowing itself (test 4 below)
+ * — held off the base TERM-5 branch because the handoff-desk UI still called
+ * the old, permissive endpoint. It merges atomically with TERM-5-UI, the
+ * admin console change that replaces that call.
  *
- * TERM-7: the staff-submit tests below (6, 8) were rewritten, not just
- * extended — `presentedCourierUserId` stopped being a client-trusted claim
- * and became something `ShipmentService` derives itself from the leg's own
- * assignment (completeLeg's own comment explains why a client-asserted
- * value here never carried information the server didn't already have).
- * The tests that were proving "a wrong claimed identity is refused" no
- * longer describe a reachable failure — there is no longer a claim for an
- * adversary to get wrong — so they were replaced with tests proving the
- * actual remaining protections: the code itself, the lockout, and a new
- * one this card's own audit required — a courier-kind leg with NO assigned
- * courier at all refuses a staff submission outright (6c, 8c), instead of
- * silently falling through the `assignedDriverProfileId == null` check
- * that exists for LINE_HAUL's courier-less handoff.
+ * TERM-7: `presentedCourierUserId` is no longer a client-trusted claim on
+ * its own — `ShipmentService` derives it from the leg's own assignment
+ * whenever the client supplies none. But a SUPPLIED value is still left
+ * exactly as given and still checked against that same assignment (never
+ * silently overwritten), so tests 6 and 8 below keep their original
+ * assertions: a wrong claimed identity is still refused, through the same
+ * failure path as before (attempt counter, audit `wrongCourier`, lockout).
+ * 6b/6c/8b/8c cover the new cases this card added: deriving with no
+ * identity supplied at all, and refusing outright when a courier-kind leg
+ * has no assigned courier to have presented anything.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -294,12 +290,16 @@ describe('the courier self-reveal (TERM-5)', () => {
     expect(JSON.stringify(r.body)).not.toContain(row.handoffPin!);
   });
 
-  // Test 4 — "staff can no longer reveal a FIRST_MILE code" — moves to the
-  // narrowing's own branch (see revealHandoffPin's doc comment): that
-  // behavior change ships atomically with the handoff-desk UI replacement
-  // (TERM-5-UI), not here. Until then the pre-existing FIRST_MILE reveal
-  // stays exactly as it was — untouched by this branch, so it needs no new
-  // test on it.
+  it('4 · staff can no longer reveal a FIRST_MILE code — the reveal route is LINE_HAUL only now', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    await driveFirstMileToInProgress(courier, firstMile.id);
+
+    const r = await get(admin, `admin/logistics/legs/${firstMile.id}/handoff-pin`);
+    expect(r.status).toBe(400);
+  });
 });
 
 describe('staff submit the presented courier\'s code (TERM-5)', () => {
