@@ -5,6 +5,7 @@
     "dockerfilePath": "apps/api/Dockerfile",
     "watchPatterns": [
       "apps/api/**",
+      "scripts/**",
       "packages/shared/**",
       "packages/validation/**",
       "packages/database/**",
