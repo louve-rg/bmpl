@@ -23,7 +23,7 @@
  * baseline's coverage to get a genuinely zero-coverage district to test
  * against, without touching what every other spec relies on.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
@@ -466,6 +466,185 @@ describe('CLOSE-22: a CANCELLED leg stops counting toward needsDriver — read-t
     expect(afterCancel.body.rows.map((s: { id: string }) => s.id)).not.toContain(ship.body.id);
     const carrierOnly = await get(admin, `admin/logistics/shipments?operatedByProviderId=${provider.id}&pageSize=100`);
     expect(carrierOnly.body.rows.map((s: { id: string }) => s.id)).toContain(ship.body.id);
+  });
+});
+
+/**
+ * DISPATCH-2 (god's card): three defects in `shipment-dispatch.service.ts`,
+ * all verified against `origin/main` before carding, all fixed here.
+ */
+describe('DISPATCH-2: the undispatched sweep has no orderBy at all', () => {
+  async function setAutomatic(value: boolean) {
+    const row = await ctx.prisma.platformSetting.findFirstOrThrow();
+    await ctx.prisma.platformSetting.update({ where: { id: row.id }, data: { dispatchAutomatic: value } });
+  }
+
+  it('sweepUndispatched processes waiting legs oldest-first, not in whatever order the database happens to return them (DISPATCH-2)', async () => {
+    // Dispatch OFF for booking only: these four legs must land PENDING_ASSIGNMENT
+    // and stay there — CAYO already carries the baseline's (OFFLINE) coverage
+    // from beforeAll, so booking succeeds as TEMPORARILY_UNAVAILABLE and no
+    // auto-offer fires regardless, with automatic dispatch off as a second,
+    // belt-and-suspenders guarantee that nothing else moves these legs before
+    // the sweep under test gets to them.
+    await setAutomatic(false);
+    const legIds: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const customer = await registerCustomer(`fifo${i}_${uniq()}@example.com`);
+      await fund(customer.userId, 10_000);
+      const r = await post(customer.cookies, 'shipping', { ...parcel('CAYO', 'San Ignacio'), payWithWallet: true });
+      expect(r.status).toBe(201);
+      legIds.push((await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } })).id);
+    }
+    await setAutomatic(true);
+
+    // Backdate createdAt to the EXACT REVERSE of creation order — leg[0]
+    // (created first) gets the newest timestamp, leg[3] (created last) gets
+    // the oldest. If the fix merely happened to match natural row-insertion
+    // order this would catch it; the only way to pass is a real `orderBy`.
+    const base = Date.now() - 60 * 60 * 1000;
+    for (let i = 0; i < legIds.length; i++) {
+      await ctx.prisma.shipmentLeg.update({
+        where: { id: legIds[i] },
+        data: { createdAt: new Date(base + (legIds.length - 1 - i) * 60_000) },
+      });
+    }
+    const expectedOldestFirst = [...legIds].reverse(); // leg[3] is now oldest, leg[0] is now newest
+
+    const spy = vi.spyOn(dispatch, 'dispatchLeg');
+    spy.mockClear();
+    await dispatch.sweepUndispatched();
+
+    // The sweep also touches every OTHER waiting leg this file's earlier
+    // tests left behind — filter to just these four and check their
+    // RELATIVE order, which is all a shared `take: 50` scan can promise.
+    const calledOrder = spy.mock.calls.map((c) => c[0] as string).filter((id) => legIds.includes(id));
+    expect(calledOrder).toEqual(expectedOldestFirst);
+    spy.mockRestore();
+  });
+});
+
+describe('DISPATCH-2: the untried-driver re-arm is bounded on offerCount, not unbounded by every new driver signup', () => {
+  async function onlineDriverWithVehicle(district: string) {
+    const d = await onlineDriverFor(district);
+    const vehicle = await ctx.prisma.driverVehicle.findFirstOrThrow({ where: { driverProfileId: d.driverProfileId } });
+    return { ...d, vehicleId: vehicle.id };
+  }
+
+  it('an EXHAUSTED leg stays exhausted once offerCount reaches dispatchMaxOffers, even though a brand-new untried driver then appears (DISPATCH-2)', async () => {
+    // TOLEDO: beforeAll strips the baseline's coverage here specifically so
+    // this district starts with ZERO drivers — the three created below are
+    // the entire pool, with no residue from any earlier test in this file to
+    // confuse who gets offered what.
+    const drivers = [await onlineDriverWithVehicle('TOLEDO'), await onlineDriverWithVehicle('TOLEDO'), await onlineDriverWithVehicle('TOLEDO')];
+    const cookiesFor = (id: string) => drivers.find((d) => d.driverProfileId === id)!.cookies;
+
+    const customer = await registerCustomer(`maxoffers_${uniq()}@example.com`);
+    await fund(customer.userId, 10_000);
+    const r = await post(customer.cookies, 'shipping', { ...parcel('TOLEDO', 'Punta Gorda'), payWithWallet: true });
+    expect(r.status).toBe(201);
+    const legId = (await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } })).id;
+
+    // enableDispatch() (beforeAll) set dispatchMaxOffers: 3 — decline through
+    // all three known drivers, whichever order dispatchLeg offers them in.
+    for (let i = 0; i < 3; i++) {
+      const row = await ctx.prisma.shipmentLeg.findUniqueOrThrow({
+        where: { id: legId },
+        select: { assignedDriverProfileId: true, courierStatus: true },
+      });
+      expect(row.courierStatus).toBe('ASSIGNED');
+      const declined = await post(cookiesFor(row.assignedDriverProfileId!), `driver/shipping-jobs/${legId}/decline`, {
+        reason: 'DISPATCH-2 fixture decline',
+      });
+      expect(declined.status).toBe(201);
+    }
+
+    const afterThree = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(afterThree.offerCount).toBe(3);
+    expect(afterThree.dispatchExhaustedAt).not.toBeNull();
+    expect(afterThree.assignedDriverProfileId).toBeNull();
+
+    // Before this fix: `rankFor`'s untried filter is scoped to THIS leg's
+    // own offer history, so a never-before-seen driver always counts as
+    // "untried" for it — `sweepExhaustedRecovery` would clear
+    // `dispatchExhaustedAt` and `dispatchLeg` would offer them, pushing
+    // offerCount to 4 and past the configured budget. The fix excludes any
+    // leg already at `offerCount >= cfg.maxOffers` from recovery entirely.
+    await onlineDriverWithVehicle('TOLEDO');
+    await dispatch.sweepExhaustedRecovery();
+    const afterRecovery = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } });
+    expect(afterRecovery.dispatchExhaustedAt).not.toBeNull();
+    expect(afterRecovery.offerCount).toBe(3);
+    expect(afterRecovery.assignedDriverProfileId).toBeNull();
+
+    // Same bound at dispatchLeg's own call site, directly — not only via the
+    // sweeper that calls it.
+    const direct = await dispatch.dispatchLeg(legId);
+    expect(direct.result).toBe('EXHAUSTED');
+    expect((await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId } })).offerCount).toBe(3);
+  });
+});
+
+describe('DISPATCH-2: a human assignment\'s silent wait is made visible on the ops board, not auto-expired', () => {
+  async function onlineDriverWithVehicle(district: string) {
+    const d = await onlineDriverFor(district);
+    const vehicle = await ctx.prisma.driverVehicle.findFirstOrThrow({ where: { driverProfileId: d.driverProfileId } });
+    return { ...d, vehicleId: vehicle.id };
+  }
+  async function setAutomatic(value: boolean) {
+    const row = await ctx.prisma.platformSetting.findFirstOrThrow();
+    await ctx.prisma.platformSetting.update({ where: { id: row.id }, data: { dispatchAutomatic: value } });
+  }
+  async function legRowOnBoard(shipmentId: string, legId: string) {
+    const list = await get(admin, 'admin/logistics/shipments?pageSize=100');
+    expect(list.status).toBe(200);
+    const shipment = list.body.rows.find((s: { id: string }) => s.id === shipmentId);
+    return shipment.legs.find((l: { id: string }) => l.id === legId);
+  }
+
+  it('a manually-assigned leg shows manualAssignmentPendingSince (= its own assignedAt) until the driver accepts, then it clears (DISPATCH-2)', async () => {
+    // Dispatch OFF for booking only, so this leg lands PENDING_ASSIGNMENT —
+    // untouched by any automatic offer — before the manual assignment below.
+    await setAutomatic(false);
+    const customer = await registerCustomer(`manualpending_${uniq()}@example.com`);
+    await fund(customer.userId, 10_000);
+    const r = await post(customer.cookies, 'shipping', { ...parcel('CAYO', 'San Ignacio'), payWithWallet: true });
+    expect(r.status).toBe(201);
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+    await setAutomatic(true);
+    expect((await legRowOnBoard(r.body.id, leg.id)).manualAssignmentPendingSince).toBeNull();
+
+    const driver = await onlineDriverWithVehicle('CAYO');
+    const assigned = await post(admin, `admin/logistics/legs/${leg.id}/assign`, {
+      driverProfileId: driver.driverProfileId,
+      vehicleId: driver.vehicleId,
+    });
+    expect(assigned.status).toBe(201);
+
+    const row = await legRowOnBoard(r.body.id, leg.id);
+    expect(row.manualAssignmentPendingSince).not.toBeNull();
+    const dbLeg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id }, select: { assignedAt: true } });
+    expect(new Date(row.manualAssignmentPendingSince).getTime()).toBe(dbLeg.assignedAt!.getTime());
+
+    expect((await post(driver.cookies, `driver/shipping-jobs/${leg.id}/accept`)).status).toBe(201);
+    expect((await legRowOnBoard(r.body.id, leg.id)).manualAssignmentPendingSince).toBeNull();
+  });
+
+  it('an AUTOMATIC offer never shows as a pending manual assignment, even while unaccepted (DISPATCH-2)', async () => {
+    // COROZAL already carries an online driver from an earlier test in this
+    // file — dispatch stays ON (the file default) so booking auto-offers.
+    const customer = await registerCustomer(`autopending_${uniq()}@example.com`);
+    await fund(customer.userId, 10_000);
+    const r = await post(customer.cookies, 'shipping', { ...parcel('COROZAL', 'Corozal Town'), payWithWallet: true });
+    expect(r.status).toBe(201);
+    const leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: r.body.id } });
+    const dbLeg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({
+      where: { id: leg.id },
+      select: { courierStatus: true, offerExpiresAt: true },
+    });
+    expect(dbLeg.courierStatus).toBe('ASSIGNED');
+    expect(dbLeg.offerExpiresAt).not.toBeNull(); // the tell: a real offer always carries a timeout
+
+    expect((await legRowOnBoard(r.body.id, leg.id)).manualAssignmentPendingSince).toBeNull();
   });
 });
 
