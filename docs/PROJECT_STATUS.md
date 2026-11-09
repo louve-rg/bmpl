@@ -558,6 +558,129 @@ A production journey booked before item 3 is satisfied must be read as
 marks an unassigned road leg with its own "No carrier assigned" warning,
 distinct from an ordinary queued leg (PR #582).
 
+### Terminal operator companies and the handoff reversal (TERM-3/4/5, 2026-11-08)
+
+Three merges today (`a80adf43` backend, `ef88a565` admin console, `a1d73791`
+handoff reversal) added a domain with no prose anywhere before now.
+
+**A `TerminalCompanyProfile` is not a `LogisticsHub`.** A hub (above) is the
+*physical* terminal a route or a courier fee is configured against. A terminal
+company is the *organization* staffing one — distinct membership, distinct
+authorization, distinct admin pages. The admin nav carries both, deliberately
+named apart: **"Terminals"** opens `/dashboard/logistics/hubs`
+(`apps/admin/app/dashboard/logistics/page.tsx:178-179`, the physical-hub
+console already described above); **"Terminal companies"** opens
+`/dashboard/logistics/terminal-companies` (`page.tsx:181-182`), a company
+directory with its own list and detail pages
+(`apps/admin/app/dashboard/logistics/terminal-companies/page.tsx`,
+`.../terminal-companies/[id]/page.tsx`).
+
+A company has members (`MANAGER`|`OPERATOR`) and locations (which hubs it is
+authorized to work) — two separate axes
+(`apps/api/src/terminal/terminal.service.ts:20-44`, class doc comment). **No
+membership implies any location by default, not even `MANAGER`.** A location
+grant is set per invite
+(`inviteTerminalCompanyMemberSchema.locationIds.min(1)`,
+`packages/validation/src/terminal.ts:35`) and re-checked at every read against
+the location's own `isActive` flag, never cached from grant time
+(`terminal.service.ts:362-371` `assertStaffLocationAccess`, `:386-390`
+`myWorkspace`) — a location deactivated a moment ago stops authorizing
+immediately, with no cleanup pass needed.
+
+8 admin endpoints exist (`AdminTerminalController`,
+`apps/api/src/terminal/terminal.controller.ts:24-83`): create/list/get a
+company, add/remove a location, invite/revoke a member, end a membership.
+Invites are single-use, hashed at rest (`issueToken` at creation,
+`terminal.service.ts:178`; `hashToken` to look one up at acceptance, `:234`
+— the same primitives password-reset and email-verification tokens already
+use, per the raw token never being logged or persisted, `:190-192`), with a
+7-day expiry
+(`INVITE_TTL_MS`, `terminal.service.ts:18`). Acceptance is public and
+unauthenticated (`TerminalInviteController`, `terminal.controller.ts:151-161`)
+and either creates a new account or re-activates an ended membership on an
+existing one, by email (`terminal.service.ts:233-327`); the new account's
+`isTest` is derived from the inviting company, never from the invitee
+(`:269`).
+
+**The handoff reversal is the conceptually hard part.** Before today, staff
+revealed a `FIRST_MILE` leg's handoff code and told the assigned courier
+verbally, then the courier submitted it back — a circular "proof" that passed
+whoever staff told, correct courier or not
+(`shipment.service.ts:4543-4546`, doc comment on `revealHandoffPin`). The fix
+reverses who reveals and who submits: the courier now self-reveals their own
+code (`ShipmentService.revealCourierCode`, `shipment.service.ts:4640`, exposed
+to the driver app as `GET /driver/shipping-jobs/:id/code` via
+`ShipmentDriverService.revealOwnCode`,
+`shipment-driver.service.ts:513`/`driver-shipping.controller.ts:60-64`) and
+*presents* it verbally; staff *submit* it, never having learned it
+independently (`ShipmentService.completeLeg`'s new optional
+`presentedCourierUserId`, `shipment.service.ts:2057-2063`, and the new
+`staffReleaseToCourier`, `:4747-4788`, for a `LAST_MILE` hub pickup that
+`confirmPickup` never verified at all before this card).
+
+**Two different secrets, and a trap worth stating explicitly:** a courier MAY
+receive their OWN terminal handoff code — that is the entire point of
+`revealCourierCode`. The RECIPIENT's own delivery code must NEVER reach a
+driver. **The same `handoffPin` column holds both, depending on the leg:** the
+courier's own presented code on a `FIRST_MILE` leg, the recipient's delivery
+code on a `LAST_MILE`/`DIRECT` leg — the leg's `kind` decides whose secret it
+is, never the column name
+(`revealCourierCode`'s own kind-gate, `shipment.service.ts:4673-4686`, refuses
+every leg kind except `FIRST_MILE`/`LAST_MILE`, by construction never reaching
+a `LAST_MILE`/`DIRECT` `handoffPin` or a `FIRST_MILE`/`DIRECT` `pickupPin` —
+see the method's own doc comment, `:4632-4638`, for the full reasoning).
+`verifyLegPinOrThrow`'s new `presentedCourierUserId` parameter is what makes a
+staff submission mean something: it checks the *presented* identity against
+the leg's live `assignedDriverProfileId`, not the submitting staff member's
+own identity (`shipment.service.ts:2189-2200`, doc comment; `:2258-2262`, the
+check itself).
+
+Both staff-submit actions are reachable two ways: BML's own ops staff, via the
+existing `logistics.operate` routes (`POST admin/logistics/legs/:id/handoff`
+and `.../release-to-courier`, `apps/api/src/shipping/shipping.controller.ts:788-811`,
+unrestricted by location), and a terminal company's own staff, via new
+location-scoped routes (`POST terminal/legs/:id/handoff` and
+`/release-to-courier`, `apps/api/src/terminal/terminal.controller.ts:117-143`)
+gated by `TerminalService.assertStaffLocationAccess` against the specific hub
+the leg's handoff/pickup actually happens at — a company's own staff member
+authorized for one of their locations can never submit for a different one,
+even within their own company.
+
+**Gaps, stated as gaps, not papered over:**
+
+- **No edit-company and no delete-company endpoint.** A mistyped company name
+  is uncorrectable through the product today — there is no `PATCH`/`DELETE`
+  on `TerminalCompanyProfile`
+  (`apps/admin/.../terminal-companies/[id]/page.tsx:205`, the console's own
+  note: "there is no update endpoint for this on the current backend").
+- **No admin reactivate and no per-member location change.** Ending a
+  membership and sending a fresh invite to the same email does both — the
+  invite's own acceptance path reactivates an `ENDED` row and resets its
+  locations to whatever the new invite grants
+  (`terminal.service.ts:290-314`) — but there is no direct action for either.
+  The console states the working path explicitly rather than offering a dead
+  control: an `ACTIVE` member's row reads "To change \[name\]'s locations or
+  role, end this membership and send a new invite"
+  (`[id]/page.tsx:473`), an `ENDED` member's row reads "there is no direct
+  reactivate action yet — sending a new invite \[...\] restores the
+  membership" (`[id]/page.tsx:478-479`).
+- **The `FIRST_MILE` staff reveal is still open on `main`.** The secure path
+  (courier self-reveal, staff presented-identity submit) exists, but nothing
+  forces its use yet: `revealHandoffPin` still permits staff to reveal a
+  `FIRST_MILE` code directly, exactly as before this change
+  (`shipment.service.ts:4581`, `leg.kind !== 'FIRST_MILE' && leg.kind !==
+  'LINE_HAUL'` — the refusal, not a narrowing to `LINE_HAUL`-only). This is
+  deliberate, not an oversight: narrowing it would break a live staff screen
+  that still calls it for `FIRST_MILE`
+  (`apps/admin/app/dashboard/logistics/handoff-desk/page.tsx:226`,
+  `r.kind === 'FIRST_MILE' || r.kind === 'LINE_HAUL'`) with no replacement
+  path yet. The narrowing ships on its own branch (TERM-5-UI), merged
+  atomically with that screen's replacement — see the doc comment at
+  `shipment.service.ts:4535-4557` for the full reasoning. Until that merges,
+  the original leak this card exists to close — staff revealing a `FIRST_MILE`
+  code and relaying it verbally — remains structurally possible for that one
+  leg kind, even though the correct path now also exists alongside it.
+
 ---
 
 ## 7. Marketplace delivery vs shipping
