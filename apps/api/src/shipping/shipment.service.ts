@@ -4766,22 +4766,166 @@ export class ShipmentService {
   }
 
   /**
-   * TERM-5: which hub a leg's courier-code submission actually happens at —
-   * for the terminal module's own location-scoped authorization ONLY
+   * TERM-5/TERM-8: which hub a leg's terminal-scoped action actually happens
+   * at — for the terminal module's own location-scoped authorization ONLY
    * (TerminalLegsController, via TerminalService.assertStaffLocationAccess),
-   * never for a customer-facing or `logistics.operate` read. A FIRST_MILE or
-   * LINE_HAUL handoff happens at the RECEIVING hub (destinationHubId); a
-   * LAST_MILE release happens at the hub the courier is COLLECTING from
-   * (originHubId) — the two staff-submit actions this card adds. DIRECT has
-   * no hub at all and returns null, which the caller must refuse on.
+   * never for a customer-facing or `logistics.operate` read.
+   *
+   * HANDOFF: a FIRST_MILE or LINE_HAUL handoff happens at the RECEIVING hub
+   * (destinationHubId). RELEASE_TO_COURIER: a LAST_MILE release happens at
+   * the hub the courier is COLLECTING from (originHubId) — TERM-5's two
+   * staff-submit actions. DEPART (TERM-8): a line-haul leaves FROM its own
+   * origin terminal (originHubId) — the same hub `departLeg` itself writes
+   * the HUB->CARRIER custody row against. ARRIVE (TERM-8): symmetric with
+   * HANDOFF — the leg is confirmed at the hub it is arriving AT
+   * (destinationHubId). DIRECT has no hub at all and returns null for every
+   * action, which the caller must refuse on.
    */
-  async legHubForLocationCheck(legId: string): Promise<string | null> {
+  async legHubForLocationCheck(legId: string, action: 'HANDOFF' | 'RELEASE_TO_COURIER' | 'DEPART' | 'ARRIVE'): Promise<string | null> {
     const leg = await this.prisma.shipmentLeg.findUnique({
       where: { id: legId },
       select: { kind: true, originHubId: true, destinationHubId: true },
     });
     if (!leg) throw new NotFoundException('Leg not found.');
-    return leg.kind === 'LAST_MILE' ? leg.originHubId : leg.destinationHubId;
+    if (action === 'RELEASE_TO_COURIER' || action === 'DEPART') return leg.originHubId;
+    if (action === 'HANDOFF') return leg.kind === 'LAST_MILE' ? leg.originHubId : leg.destinationHubId;
+    return leg.destinationHubId;
+  }
+
+  /**
+   * TERM-8: which hub a SHIPMENT's own collection happens at — the same
+   * "final leg's destination hub" `recordCollection` itself resolves, so the
+   * authorization check and the write never disagree about which hub a
+   * given collection is scoped to.
+   */
+  async shipmentHubForLocationCheck(shipmentId: string): Promise<string | null> {
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      select: { legs: { select: { destinationHubId: true, sequence: true } } },
+    });
+    if (!shipment) throw new NotFoundException('Shipment not found.');
+    const finalLeg = [...shipment.legs].sort((a, b) => b.sequence - a.sequence)[0];
+    return finalLeg?.destinationHubId ?? null;
+  }
+
+  /**
+   * TERM-8: the terminal operator's own work queue — every leg or shipment
+   * waiting on a terminal action at one of the caller's granted ACTIVE
+   * locations. `hubIds` is TerminalService's own read of the caller's
+   * current grants (re-checked at call time, same discipline as
+   * `assertStaffLocationAccess`); this method never trusts a hub id it was
+   * not explicitly handed, and an empty list returns an empty queue rather
+   * than querying "every hub" by omission.
+   *
+   * Each predicate below mirrors the guard the matching write already
+   * enforces (`departLeg`, `arriveLeg`, `completeLeg`/handoff,
+   * `staffReleaseToCourier`, `recordCollection`), so a leg can appear here
+   * if and only if the matching action would actually succeed — never a
+   * preview of a write that would then refuse.
+   */
+  async terminalQueue(hubIds: string[]) {
+    if (hubIds.length === 0) return [];
+    const [departing, arriving, handoff, release, collecting] = await Promise.all([
+      this.prisma.shipmentLeg.findMany({
+        where: { kind: 'LINE_HAUL', originHubId: { in: hubIds }, departedAt: null, status: { in: ['READY', 'IN_PROGRESS'] } },
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+        include: { shipment: { select: { reference: true, description: true, pieces: true } }, destinationHub: { select: { name: true } } },
+      }),
+      this.prisma.shipmentLeg.findMany({
+        where: { kind: 'LINE_HAUL', destinationHubId: { in: hubIds }, status: 'IN_PROGRESS', arrivedAt: null },
+        orderBy: { departedAt: 'asc' },
+        take: 100,
+        include: { shipment: { select: { reference: true, description: true, pieces: true } }, originHub: { select: { name: true } } },
+      }),
+      this.prisma.shipmentLeg.findMany({
+        // FIRST_MILE has no separate arrive step — a courier walking in IS the
+        // arrival, so READY/IN_PROGRESS alone is enough. LINE_HAUL does have one
+        // (`arriveLeg`), and `completeLeg` itself has no guard tying handoff to
+        // having actually arrived — `isLegActionable` only checks EARLIER legs,
+        // never this leg's own travel state — so a never-departed LINE_HAUL leg
+        // would otherwise show up here as "ready to hand off" at a hub it has
+        // not reached. Requiring `arrivedAt` is this query's own fix for that;
+        // `completeLeg`'s write-side gap is unchanged and reported separately.
+        where: {
+          destinationHubId: { in: hubIds },
+          status: { in: ['READY', 'IN_PROGRESS'] },
+          OR: [{ kind: 'FIRST_MILE' }, { kind: 'LINE_HAUL', arrivedAt: { not: null } }],
+        },
+        orderBy: [{ arrivedAt: { sort: 'desc', nulls: 'last' } }, { sequence: 'asc' }],
+        take: 100,
+        include: {
+          shipment: { select: { reference: true, description: true, pieces: true } },
+          originHub: { select: { name: true } },
+          assignedDriver: { select: { displayName: true } },
+        },
+      }),
+      this.prisma.shipmentLeg.findMany({
+        where: { kind: 'LAST_MILE', originHubId: { in: hubIds }, courierStatus: 'DRIVER_ACCEPTED' },
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+        include: { shipment: { select: { reference: true, description: true, pieces: true } }, assignedDriver: { select: { displayName: true } } },
+      }),
+      // `destinationHubId` lives on the LEG, not the shipment. The `some`
+      // clause here is a cheap SUPERSET filter only (any leg touching one of
+      // my hubs, including one merely passed through) — `collectAtMyHubs`
+      // below re-derives the true FINAL leg (by sequence) and checks THAT
+      // one's destinationHubId, which `some`/`every` cannot express directly.
+      this.prisma.shipment.findMany({
+        where: { status: 'AWAITING_COLLECTION', collectedAt: null, legs: { some: { destinationHubId: { in: hubIds } } } },
+        select: { id: true, reference: true, description: true, pieces: true, legs: { select: { destinationHubId: true, sequence: true } } },
+        take: 200,
+      }),
+    ]);
+    const parcelLabel = (s: { description: string | null; pieces: number }) =>
+      s.description || `${s.pieces} ${s.pieces === 1 ? 'parcel' : 'parcels'}`;
+    const collectAtMyHubs = collecting.filter((s) => {
+      const finalLeg = [...s.legs].sort((a, b) => b.sequence - a.sequence)[0];
+      return finalLeg?.destinationHubId != null && hubIds.includes(finalLeg.destinationHubId);
+    });
+    return [
+      ...departing.map((l) => ({
+        action: 'DEPART' as const,
+        legId: l.id,
+        hubId: l.originHubId!,
+        reference: l.shipment.reference,
+        parcel: parcelLabel(l.shipment),
+        to: l.destinationHub?.name ?? 'Unknown',
+      })),
+      ...arriving.map((l) => ({
+        action: 'ARRIVE' as const,
+        legId: l.id,
+        hubId: l.destinationHubId!,
+        reference: l.shipment.reference,
+        parcel: parcelLabel(l.shipment),
+        from: l.originHub?.name ?? 'Unknown',
+      })),
+      ...handoff.map((l) => ({
+        action: 'HANDOFF' as const,
+        legId: l.id,
+        hubId: l.destinationHubId!,
+        reference: l.shipment.reference,
+        parcel: parcelLabel(l.shipment),
+        from: l.originHub?.name ?? 'Door collection',
+        broughtBy: l.assignedDriver?.displayName ?? l.carrierName ?? 'Carrier',
+        arrived: l.arrivedAt != null || l.courierStatus === 'ARRIVING',
+      })),
+      ...release.map((l) => ({
+        action: 'RELEASE_TO_COURIER' as const,
+        legId: l.id,
+        hubId: l.originHubId!,
+        reference: l.shipment.reference,
+        parcel: parcelLabel(l.shipment),
+        courier: l.assignedDriver?.displayName ?? null,
+      })),
+      ...collectAtMyHubs.map((s) => ({
+        action: 'COLLECT' as const,
+        shipmentId: s.id,
+        hubId: [...s.legs].sort((a, b) => b.sequence - a.sequence)[0]!.destinationHubId!,
+        reference: s.reference,
+        parcel: parcelLabel(s),
+      })),
+    ];
   }
 
   /**

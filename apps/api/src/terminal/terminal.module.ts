@@ -2,7 +2,13 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ShippingModule } from '../shipping/shipping.module';
 import { TerminalService } from './terminal.service';
-import { AdminTerminalController, TerminalController, TerminalInviteController, TerminalLegsController } from './terminal.controller';
+import {
+  AdminTerminalController,
+  TerminalController,
+  TerminalInviteController,
+  TerminalLegsController,
+  TerminalShipmentsController,
+} from './terminal.controller';
 
 /**
  * Terminal operations (TERM-1/TERM-3/TERM-5): terminal companies, their
@@ -16,7 +22,7 @@ import { AdminTerminalController, TerminalController, TerminalInviteController, 
  */
 @Module({
   imports: [PrismaModule, ShippingModule],
-  controllers: [AdminTerminalController, TerminalController, TerminalInviteController, TerminalLegsController],
+  controllers: [AdminTerminalController, TerminalController, TerminalInviteController, TerminalLegsController, TerminalShipmentsController],
   providers: [TerminalService],
   exports: [TerminalService],
 })
