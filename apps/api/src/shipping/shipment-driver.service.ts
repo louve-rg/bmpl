@@ -501,6 +501,20 @@ export class ShipmentDriverService {
     return { job: await this.getJob(actor.userId, legId), shipment };
   }
 
+  /**
+   * TERM-5: the courier's own copy of the code they must present at a hub
+   * counter — never the recipient's delivery code, and never available for
+   * a leg kind where no hub counter is involved (DIRECT, LINE_HAUL). See
+   * `ShipmentService.revealCourierCode` for the full reasoning; `ownedLeg`
+   * here is the same necessary-but-not-sufficient first gate every other
+   * driver-side read on this leg goes through (also a 404, not a 403, so a
+   * driver cannot probe for someone else's leg).
+   */
+  async revealOwnCode(actor: Actor, legId: string) {
+    await this.ownedLeg(actor.userId, legId);
+    return this.shipments.revealCourierCode(legId, actor);
+  }
+
   /** Offer whichever courier leg has just become workable, if any. */
   private async releaseFollowingCourierLeg(shipmentId: string) {
     const next = await this.prisma.shipmentLeg.findFirst({

@@ -33,10 +33,14 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — an admin-driven inv
  * "a terminal manager invites their own staff" endpoint) — deliberately not
  * built this card; see the TERM-3 report for why.
  *
- * `myWorkspace` is the one staff-facing read in this card, and it is READ
- * ONLY. No custody, handoff or PIN logic is touched here — TERM-1 confirmed
- * the handoff-direction reversal is real application logic to invert, not a
- * permission change, and it is deliberately its own, later slice.
+ * `myWorkspace` is the one staff-facing READ in this card. TERM-5 (the
+ * handoff-direction reversal, built later, in ShipmentService) added the one
+ * staff-facing WRITE axis this module needed: `assertStaffLocationAccess`,
+ * the location-scoped gate TerminalLegsController checks before delegating
+ * to ShipmentService's own completeLeg/staffReleaseToCourier. The custody,
+ * handoff and PIN logic itself still lives entirely in ShipmentService —
+ * this module only ever answers "does this person hold this ONE hub,"
+ * never "is this code right" or "what happens to the parcel."
  */
 @Injectable()
 export class TerminalService {
@@ -342,6 +346,29 @@ export class TerminalService {
   /* ---- staff: the one read this card proves scoping with ------------------
    * Deliberately READ ONLY. No custody, handoff or PIN endpoint lives here —
    * see the class doc comment. */
+
+  /**
+   * TERM-5: the gate TerminalLegsController checks before delegating a
+   * handoff/pickup submission to ShipmentService. Same ACTIVE-membership +
+   * ACTIVE-location discipline as `myWorkspace` (re-checked here, not cached
+   * from grant time, for the identical reason: a location or membership
+   * deactivated a moment ago must stop authorizing immediately). Checks ONE
+   * specific hub, not "does this person hold ANY location" — a terminal
+   * company's own staff member authorized for their San Pedro counter must
+   * never submit a code for a shipment moving through their company's
+   * Belize City counter instead, even though both belong to the same
+   * company and the same person.
+   */
+  async assertStaffLocationAccess(userId: string, hubId: string | null): Promise<void> {
+    if (!hubId) throw new ForbiddenException('This leg has no terminal location to authorize against.');
+    const grant = await this.prisma.terminalCompanyMemberLocation.findFirst({
+      where: {
+        location: { hubId, isActive: true, terminalCompany: { isActive: true } },
+        member: { userId, status: 'ACTIVE' },
+      },
+    });
+    if (!grant) throw new ForbiddenException('You do not hold this terminal location.');
+  }
 
   async myWorkspace(userId: string) {
     const member = await this.prisma.terminalCompanyMember.findFirst({

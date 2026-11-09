@@ -403,6 +403,16 @@ export const legHandoffSchema = z.object({
   receivedByName: z.string().trim().min(2).max(120),
   note: z.string().trim().max(500).optional(),
   ...coordinates,
+  /**
+   * TERM-5: who is physically presenting the code, asserted explicitly by
+   * the caller rather than inferred from who is signed in. Absent on the
+   * courier's own app call (the courier IS the actor there, so
+   * ShipmentService.verifyLegPinOrThrow falls back to the actor's own
+   * identity, exactly as before this field existed). Present only on the
+   * staff-submitted admin route, where the actor is staff, never the
+   * courier — see verifyLegPinOrThrow's `presentedCourierUserId` param.
+   */
+  presentedCourierUserId: cuidSchema.optional(),
 });
 export type LegHandoffInput = z.infer<typeof legHandoffSchema>;
 
@@ -427,6 +437,23 @@ export const legPickupSchema = z.object({
     .optional(),
 });
 export type LegPickupInput = z.infer<typeof legPickupSchema>;
+
+/**
+ * TERM-5: staff release a LAST_MILE leg to the courier presenting their own
+ * terminal code at a hub counter — the second half of the handoff reversal,
+ * closing the gap where `confirmPickup` (the courier's own self-submit path)
+ * takes no code at all for this leg kind. Unlike legHandoffSchema's optional
+ * field, `presentedCourierUserId` is required here: this route has no
+ * self-submit fallback, so there is no actor identity to fall back to.
+ */
+export const legReleaseToCourierSchema = z.object({
+  pin: z
+    .string()
+    .trim()
+    .regex(/^\d{4,8}$/, 'Enter the collection code.'),
+  presentedCourierUserId: cuidSchema,
+});
+export type LegReleaseToCourierInput = z.infer<typeof legReleaseToCourierSchema>;
 
 /** An operator recording that something went wrong on a leg. */
 export const legExceptionSchema = z.object({
