@@ -371,8 +371,13 @@ function ThreadPane({
         const d = await messagingApi.get(conversationId);
         setDetail(d);
         setError(null);
-        // Mark read (best-effort) once the thread is open.
-        messagingApi.markRead(conversationId).then(() => onReadRef.current()).catch(() => {});
+        // Mark read (best-effort) once the thread is open -- but only on the
+        // true first load. A background refresh re-marking an already-read
+        // conversation every 15s is a write for nothing: the unread count
+        // doesn't change, so it just doubles the request rate for no effect.
+        if (!opts.background) {
+          messagingApi.markRead(conversationId).then(() => onReadRef.current()).catch(() => {});
+        }
       } catch (e) {
         // A background refresh failing silently keeps the last-known-good
         // transcript on screen rather than replacing it with an error --
@@ -394,8 +399,13 @@ function ThreadPane({
   // whole request, which is the "existing messages stay visible during a
   // background refresh" requirement; only the true first load (above) shows
   // the spinner.
+  // Skip the tick entirely while the tab is hidden -- an open messages tab
+  // in a background window has no user watching it, so there is no reason
+  // to keep polling for as long as the browser lives.
   useEffect(() => {
-    const t = setInterval(() => void load({ background: true }), 15_000);
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') void load({ background: true });
+    }, 15_000);
     return () => clearInterval(t);
   }, [load]);
 
