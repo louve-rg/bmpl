@@ -74,12 +74,68 @@
  *                history (a rollback or branch build) — also not BEHIND,
  *                because "older than main" would be a guess.
  *
- * Exit codes remain the API's alone, UNCHANGED by BMPL-316 — this was a
- * deliberate design question, not an oversight carried forward. Web and
- * admin results are always reported now, but still never scored: this tool
- * answers "what is deployed", not "is the fleet healthy", and folding three
+ * Exit codes beyond this point remain the API's serve-state alone (the
+ * EXIT map below), UNCHANGED by BMPL-316 — this was a deliberate design
+ * question, not an oversight carried forward. Web and admin results are
+ * always reported now, but still never scored: this tool answers "what is
+ * deployed", not "is the fleet healthy", and folding three
  * independently-deploying services into one exit code would hide which one
- * needs attention behind a single bit.
+ * needs attention behind a single bit. FLOOR-7 (below) adds a SECOND,
+ * independent axis to the exit code — see that section for why serve-state
+ * alone cannot cover it.
+ *
+ * FLOOR-7 — GITHUB DEPLOYMENT STATUS (this script's actual defect, not an
+ * extension for its own sake): everything above asks "what commit does
+ * production currently SERVE". It cannot distinguish "no deploy is in
+ * flight, so merging is safe" from "a deploy ran and FAILED, production is
+ * still serving whatever it served before" — both look identical from the
+ * serving side, because a failed Railway deploy never replaces what is
+ * running. On 2026-11-09, two production deploys failed (commits `560dfece`
+ * 04:43->04:55 and `5ee782d0` 05:28->05:42) and this exact gap — reading
+ * this script's serve-state output alone and concluding "nothing in
+ * flight" — meant nobody was told for two hours.
+ *
+ * There is no Railway credential or Railway CLI on this floor, so GitHub's
+ * own Deployments API is the only source of DEPLOY-ATTEMPT ground truth
+ * (as opposed to serve-state, which API health already gives):
+ *   GET /repos/:owner/:repo/deployments?environment=<env>   (latest attempt)
+ *   GET /repos/:owner/:repo/deployments/:id/statuses        (its outcome)
+ * Both are fetched directly (no `gh` CLI dependency, so this still runs
+ * anywhere Node + network does); an `Authorization` header is added only
+ * when `GH_TOKEN`/`GITHUB_TOKEN` is already set in the environment — this
+ * never requires provisioning a new credential, and the public repo's
+ * generous unauthenticated rate limit (60/hr, 2 calls per run) is enough
+ * for how this tool is actually used (on demand, not polled).
+ *
+ * Verdicts (`result.githubDeployment.verdict`), judged from the LATEST
+ * deployment record for the production environment and that record's OWN
+ * latest status (deployments can carry several status updates over time;
+ * only the newest, by `created_at`, is the current truth):
+ *   SUCCESS     the latest deployment's latest status is `success`
+ *   FAILURE     `failure` or `error` — IMPOSSIBLE TO MISS, non-zero exit
+ *   IN_PROGRESS `in_progress`, `queued` or `pending` — a deploy is still
+ *               running RIGHT NOW; merging during this window is exactly
+ *               the ci.yml:13-31 #405/#406 shape (a later push can mark an
+ *               in-flight deployment INACTIVE without ever replacing it).
+ *               IMPOSSIBLE TO MISS, non-zero exit
+ *   INACTIVE    the latest deployment's latest status is `inactive` — by
+ *               construction this can only be the newest deployment
+ *               record if NO newer one was ever created to replace it
+ *               (a real new deployment would itself now be "latest"
+ *               instead). This is the #405/#406 bug's own fingerprint
+ *               read directly off the API, not inferred: non-zero exit.
+ *   UNKNOWN     the Deployments API itself could not be read (network
+ *               error, non-200, empty environment) — distinct from
+ *               FAILURE: an unanswerable question is not a negative answer.
+ * The report always also restates whether the commit production actually
+ * SERVES (the existing serve-state check above) equals origin/main's head
+ * — one combined answer, not two the reader has to reconcile by hand.
+ *
+ * NOT wired into any CI workflow or made a required/gating check by this
+ * change — that is a repo-settings decision, explicitly left to the owner,
+ * same boundary already drawn around `docker-build-api` (FLOOR-6). This is
+ * a reporting and exit-code change only; nothing here costs money, polls on
+ * a schedule, or notifies anyone — it answers only when asked.
  *
  * NOT a CI gate, on purpose, for all three: a just-merged commit legitimately
  * shows BEHIND until the platform finishes its own deploy, so wiring this to
@@ -110,6 +166,8 @@ const DEFAULTS = {
   webBase: 'https://www.bzemarketplace.com',
   adminBase: 'https://bmpl-admin.vercel.app',
   remote: 'https://github.com/louve-rg/bmpl.git',
+  ghRepo: 'louve-rg/bmpl',
+  ghEnvironment: 'carefree-achievement / production',
   timeoutMs: 10_000,
 };
 
@@ -139,6 +197,12 @@ const webRoute = normalizeRoute(flag('web-route'));
 /** Dry-run lever: judge history as if production reported this commit — for
  *  "what would the verdict be" questions and for testing the classifier. */
 const assumeProduction = flag('assume-production');
+const ghRepo = flag('gh-repo') ?? DEFAULTS.ghRepo;
+const ghEnvironment = flag('gh-environment') ?? DEFAULTS.ghEnvironment;
+/** Dry-run lever, same purpose as --assume-production: judge a SPECIFIC
+ *  deployment id instead of whatever is currently latest — for testing the
+ *  classifier against a known historical deployment on demand. */
+const assumeDeploymentId = flag('assume-deployment-id');
 const asJson = has('json');
 
 /** Read-only git; returns stdout or null (never throws). */
@@ -162,6 +226,119 @@ async function fetchJson(url) {
   } finally {
     clearTimeout(t);
   }
+}
+
+/**
+ * FLOOR-7: GitHub REST API, direct `fetch` (no `gh` CLI dependency). An
+ * `Authorization` header is added only when a token already exists in the
+ * environment (`GH_TOKEN`/`GITHUB_TOKEN`) — never a reason to provision a
+ * new credential; `louve-rg/bmpl` is public, so unauthenticated calls work
+ * fine at a lower rate limit (60/hr, and this tool makes 2 calls per run).
+ */
+async function fetchGithubApi(path) {
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), DEFAULTS.timeoutMs);
+  try {
+    const res = await fetch(`https://api.github.com${path}`, {
+      signal: ctl.signal,
+      redirect: 'follow',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) return { error: `HTTP ${res.status}` };
+    return { body: await res.json() };
+  } catch (e) {
+    return { error: e?.cause?.code ?? e?.name ?? String(e) };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** Most recent entry by `created_at` — the API's own documented ordering
+ *  matches this in practice, but re-sorting client-side costs nothing and
+ *  never trusts an undocumented default. */
+function newestByCreatedAt(items) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return [...items].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+}
+
+/**
+ * FLOOR-7: the latest deployment ATTEMPT for the production environment —
+ * deploy-attempt ground truth, distinct from serve-state (what `/api/health`
+ * reports is currently running). `repo` and `environment` are read from
+ * this script's own flags/DEFAULTS, never external input, so the
+ * encodeURIComponent below is a correctness step (the environment name has
+ * a literal space and slash), not a sanitisation boundary.
+ */
+async function latestDeployment(repo, environment) {
+  const { body, error } = await fetchGithubApi(`/repos/${repo}/deployments?per_page=10&environment=${encodeURIComponent(environment)}`);
+  if (error) return { error };
+  const latest = newestByCreatedAt(body);
+  if (!latest) return { error: `no deployments recorded for environment "${environment}"` };
+  return { deployment: latest };
+}
+
+/** Single deployment by id — used for --assume-deployment-id so a test run
+ *  against a specific historical id still gets the real sha/created_at,
+ *  not nulls, and so the cross-check line below is actually exercised. */
+async function deploymentById(repo, deploymentId) {
+  const { body, error } = await fetchGithubApi(`/repos/${repo}/deployments/${deploymentId}`);
+  if (error) return { error };
+  return { deployment: body };
+}
+
+async function latestDeploymentStatus(repo, deploymentId) {
+  const { body, error } = await fetchGithubApi(`/repos/${repo}/deployments/${deploymentId}/statuses?per_page=10`);
+  if (error) return { error };
+  const latest = newestByCreatedAt(body);
+  if (!latest) return { error: `deployment ${deploymentId} has no status updates` };
+  return { status: latest };
+}
+
+const GH_DEPLOY_EXIT = { SUCCESS: 0, FAILURE: 1, IN_PROGRESS: 1, INACTIVE: 1, UNKNOWN: 2 };
+
+/**
+ * FLOOR-7: judge the latest production deployment ATTEMPT (ground truth
+ * from GitHub, not inferred from what is served) and whether it is the
+ * kind of outcome that must not go unnoticed. See the header doc comment
+ * for the full verdict table and why INACTIVE-as-latest is itself the
+ * #405/#406 bug's fingerprint rather than a benign state.
+ */
+async function checkGithubDeployment(repo, environment, mainSha, overrideId) {
+  let deployment;
+  if (overrideId) {
+    const { deployment: d, error } = await deploymentById(repo, overrideId);
+    if (error) return { verdict: 'UNKNOWN', reason: `could not read deployment ${overrideId} (${error})` };
+    deployment = d;
+  } else {
+    const { deployment: d, error } = await latestDeployment(repo, environment);
+    if (error) return { verdict: 'UNKNOWN', reason: `could not read the latest deployment (${error})` };
+    deployment = d;
+  }
+  const { status, error: statusError } = await latestDeploymentStatus(repo, deployment.id);
+  if (statusError) {
+    return {
+      verdict: 'UNKNOWN',
+      reason: `could not read deployment ${deployment.id}'s status (${statusError})`,
+      deploymentId: deployment.id,
+      deploymentSha: deployment.sha,
+    };
+  }
+  const state = status.state;
+  const verdict = state === 'success' ? 'SUCCESS' : state === 'failure' || state === 'error' ? 'FAILURE' : state === 'in_progress' || state === 'queued' || state === 'pending' ? 'IN_PROGRESS' : state === 'inactive' ? 'INACTIVE' : 'UNKNOWN';
+  return {
+    verdict,
+    deploymentId: deployment.id,
+    deploymentSha: deployment.sha,
+    deploymentCreatedAt: deployment.created_at,
+    latestStatusState: state,
+    latestStatusCreatedAt: status.created_at,
+    matchesMainByDeploymentSha: mainSha && deployment.sha ? mainSha === deployment.sha : null,
+    ...(verdict === 'UNKNOWN' && state ? { reason: `unrecognised deployment status state "${state}"` } : {}),
+  };
 }
 
 /** origin/main's head, asked of the remote itself so a stale local fetch cannot lie. */
@@ -411,8 +588,35 @@ function printBuild(w) {
   for (const line of w.aheadUnrelated ?? []) console.log(`  ahead, unrelated: ${line}`);
 }
 
+/**
+ * FLOOR-7: prints plainly, and loudly, for FAILURE/IN_PROGRESS/INACTIVE —
+ * these must be impossible to miss, per the card this was written for.
+ * `apiResult` is the EXISTING serve-state answer (computed above, not
+ * re-derived here) so this restates "does production serve main's head"
+ * in the same report as "what did the last deploy attempt do", instead of
+ * leaving the reader to reconcile two separate answers by hand.
+ */
+function printGithubDeployment(g, apiResult) {
+  if (!g) return;
+  const shaLabel = g.deploymentSha ? g.deploymentSha.slice(0, 7) : g.deploymentId != null ? `id ${g.deploymentId}` : 'unknown';
+  if (g.verdict === 'SUCCESS') {
+    console.log(`GITHUB DEPLOYMENT (production, latest attempt) SUCCESS — ${shaLabel}, status "${g.latestStatusState}" at ${g.latestStatusCreatedAt}`);
+  } else if (g.verdict === 'FAILURE') {
+    console.log(`GITHUB DEPLOYMENT (production, latest attempt) *** FAILURE *** — ${shaLabel}, status "${g.latestStatusState}" at ${g.latestStatusCreatedAt} — a deploy ran and did not complete; production is still serving whatever it served before`);
+  } else if (g.verdict === 'IN_PROGRESS') {
+    console.log(`GITHUB DEPLOYMENT (production, latest attempt) *** IN PROGRESS *** — ${shaLabel}, status "${g.latestStatusState}" since ${g.deploymentCreatedAt} — do not merge anything that would not itself trigger a rebuild (ci.yml:13-31, the #405/#406 shape)`);
+  } else if (g.verdict === 'INACTIVE') {
+    console.log(`GITHUB DEPLOYMENT (production, latest attempt) *** INACTIVE, NEVER REPLACED *** — ${shaLabel} was superseded at ${g.latestStatusCreatedAt} but no newer deployment exists for this environment — this is the #405/#406 bug's own fingerprint: a later push marked it inactive without ever building a replacement`);
+  } else {
+    console.log(`GITHUB DEPLOYMENT (production, latest attempt) UNKNOWN — ${g.reason}`);
+  }
+  if (g.deploymentSha && apiResult?.production) {
+    console.log(`  cross-check: production currently SERVES ${apiResult.production.slice(0, 7)} (${apiResult.verdict}); the last deploy ATTEMPT targeted ${shaLabel}${g.matchesMainByDeploymentSha === false ? ' — the last attempt is already behind origin/main' : ''}`);
+  }
+}
+
 async function main() {
-  const result = { api: {}, web: null, webBuild: null, adminBuild: null };
+  const result = { api: {}, web: null, webBuild: null, adminBuild: null, githubDeployment: null };
 
   const health = assumeProduction
     ? { body: { commit: assumeProduction, assumed: true } }
@@ -455,6 +659,11 @@ async function main() {
   result.webBuild = await checkBuild('WEB', webBase, '@bmpl/web', mainSha);
   result.adminBuild = await checkBuild('ADMIN', adminBase, '@bmpl/admin', mainSha);
 
+  // FLOOR-7: also checked BY DEFAULT, same reasoning as BMPL-316 above —
+  // the whole point is that reading serve-state alone and concluding
+  // "nothing in flight" is exactly the mistake this closes.
+  result.githubDeployment = await checkGithubDeployment(ghRepo, ghEnvironment, mainSha, assumeDeploymentId);
+
   if (asJson) {
     console.log(JSON.stringify(result, null, 2));
   } else {
@@ -475,9 +684,16 @@ async function main() {
     if (result.web) console.log(`WEB ROUTE (probe) ${result.web.verdict} — ${result.web.route} on ${result.web.base}: ${result.web.detail}`);
     printBuild(result.webBuild);
     printBuild(result.adminBuild);
+    printGithubDeployment(result.githubDeployment, a);
   }
 
-  process.exitCode = EXIT[result.api.verdict] ?? EXIT.UNKNOWN;
+  const apiExit = EXIT[result.api.verdict] ?? EXIT.UNKNOWN;
+  const deployExit = GH_DEPLOY_EXIT[result.githubDeployment?.verdict] ?? EXIT.UNKNOWN;
+  // Worse of the two axes — either one being non-zero must make the whole
+  // run non-zero (FLOOR-7's actual requirement), and the two axes answer
+  // different questions (what is SERVED vs. what the last deploy ATTEMPT
+  // did), so there is no single ordering where one subsumes the other.
+  process.exitCode = Math.max(apiExit, deployExit);
 }
 
 main();
