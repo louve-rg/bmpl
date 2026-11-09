@@ -8,6 +8,7 @@ import { approvedRoles, visibleRoleGroupsWithOverrides } from '../../lib/dashboa
 import { BASE_NAV, ROLE_GROUPS, allNavHrefs, isNavItemActive, type NavItem } from '../../lib/dashboard-nav-items';
 import { badgeCount, unreadLabel } from '../../lib/badge';
 import { useCarrierApplicationStatus } from '../../lib/use-carrier-application-status';
+import { useTerminalMembership } from '../../lib/use-terminal-membership';
 import { navApplicationBadge } from '../../lib/shipping-provider';
 
 function groupHasActiveItem(items: NavItem[], pathname: string, hrefs: string[]): boolean {
@@ -57,7 +58,21 @@ export function DashboardNavList({
   const carrierStatus = useCarrierApplicationStatus();
   const carrierRoleApproved = useMemo(() => approvedRoles(me.roles).has('SHIPPING_PROVIDER'), [me.roles]);
   const carrierForcedVisible = carrierStatus !== null && !carrierRoleApproved;
-  const forceVisible = useMemo(() => (carrierForcedVisible ? new Set(['Carrier']) : new Set<string>()), [carrierForcedVisible]);
+
+  // TERM-11: terminal company staff hold no account role code at all, so
+  // "Terminal" can never earn its way into visibleRoleGroups through
+  // `requires` (deliberately empty, see dashboard-nav-items.ts) — this
+  // override is the ONLY way the group ever shows. Same unconditional-fetch,
+  // best-effort shape as useCarrierApplicationStatus above; independent of
+  // it otherwise.
+  const terminalForcedVisible = useTerminalMembership();
+
+  const forceVisible = useMemo(() => {
+    const s = new Set<string>();
+    if (carrierForcedVisible) s.add('Carrier');
+    if (terminalForcedVisible) s.add('Terminal');
+    return s;
+  }, [carrierForcedVisible, terminalForcedVisible]);
 
   const groups: Array<{ heading?: string; items: NavItem[] }> = useMemo(
     () => [{ items: BASE_NAV }, ...visibleRoleGroupsWithOverrides(ROLE_GROUPS, me.roles, forceVisible)],

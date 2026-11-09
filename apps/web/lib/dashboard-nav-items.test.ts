@@ -6,6 +6,7 @@ import {
   PASSENGER_DRIVER_NAV,
   PASSENGER_OPERATOR_NAV,
   SHIPPING_PROVIDER_NAV,
+  TERMINAL_NAV,
   ROLE_GROUPS,
   allNavHrefs,
   isNavItemActive,
@@ -173,6 +174,34 @@ describe('carrier navigation (MDF-526)', () => {
       ]).map((g) => g.heading),
     ).toEqual(['Carrier']);
     expect(visibleRoleGroups(ROLE_GROUPS, [{ roleCode: 'SHIPPING_PROVIDER', status: 'PENDING' }])).toEqual([]);
+  });
+});
+
+describe('terminal navigation (TERM-11)', () => {
+  it('points its one item at the real terminal workspace route', () => {
+    expect(TERMINAL_NAV.map((i) => i.href)).toEqual(['/dashboard/terminal']);
+  });
+
+  it('is declared with an empty requires -- terminal staff hold no account role code', () => {
+    const group = ROLE_GROUPS.find((g) => g.heading === 'Terminal');
+    expect(group?.requires).toEqual([]);
+    expect(group?.items).toBe(TERMINAL_NAV);
+  });
+
+  it('is never shown by visibleRoleGroups alone, no matter what roles are held -- only the forced-visible override can show it', () => {
+    const everyRoleApproved: HeldRole[] = [
+      { roleCode: 'CUSTOMER', status: 'APPROVED' },
+      { roleCode: 'DELIVERY_DRIVER', status: 'APPROVED' },
+      { roleCode: 'SHIPPING_PROVIDER', status: 'APPROVED' },
+      { roleCode: 'PASSENGER_DRIVER', status: 'APPROVED' },
+      { roleCode: 'PASSENGER_PROVIDER', status: 'APPROVED' },
+      { roleCode: 'VENDOR', status: 'APPROVED' },
+      { roleCode: 'EMPLOYER', status: 'APPROVED' },
+      { roleCode: 'PROPERTY_OWNER', status: 'APPROVED' },
+      { roleCode: 'REAL_ESTATE_AGENT', status: 'APPROVED' },
+      { roleCode: 'JOB_SEEKER', status: 'APPROVED' },
+    ];
+    expect(visibleRoleGroups(ROLE_GROUPS, everyRoleApproved).map((g) => g.heading)).not.toContain('Terminal');
   });
 });
 

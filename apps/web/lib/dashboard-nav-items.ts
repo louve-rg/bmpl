@@ -126,6 +126,16 @@ export const SHIPPING_PROVIDER_NAV: NavItem[] = [
   { label: 'Organization Profile', href: '/dashboard/shipping-provider/profile', icon: BUILDING_ICON },
 ];
 
+/**
+ * Terminal operator tools (TERM-11) — one item, deliberately: the queue at
+ * `/dashboard/terminal` already covers depart/arrive/handoff/release/collect
+ * across every location the member is granted, so there is nothing else to
+ * list here yet. Not gated by `requires` at all (see the Terminal entry in
+ * `ROLE_GROUPS` below) — terminal staff hold no account role code, so this
+ * group is forced visible by `useTerminalMembership` or not shown at all.
+ */
+export const TERMINAL_NAV: NavItem[] = [{ label: 'Terminal Workspace', href: '/dashboard/terminal', icon: TRUCK_ICON }];
+
 const VENDOR_NAV: NavItem[] = [
   { label: 'My Store', href: '/dashboard/store', icon: 'M4 8h16l-1 3H5L4 8Zm1 3v9h14v-9M9 20v-5h6v5' },
   { label: 'My Products', href: '/dashboard/products', icon: 'M4 7l8-4 8 4-8 4-8-4Zm0 0v10l8 4 8-4V7' },
@@ -190,6 +200,15 @@ const MARKETING_NAV: NavItem[] = [
  * - Real Estate → the seller-side real-estate roles. There is no seeker role, and
  *   the tools stay reachable by URL; this only keeps the nav to roles the user
  *   actually holds.
+ *
+ * Terminal is the one exception to "requires is never empty": terminal
+ * company staff hold no account role code at all (TERM-6's own membership
+ * model, independent of the 14 role codes this file otherwise gates on), so
+ * `requires: []` here is deliberate, not an oversight — `visibleRoleGroups`
+ * never shows it on its own, and it appears only through
+ * `visibleRoleGroupsWithOverrides`'s `forceVisible`, driven by
+ * `useTerminalMembership` (TERM-11), the same override shape MDF-526 built
+ * for Carrier.
  */
 export const ROLE_GROUPS: ReadonlyArray<RoleGatedGroup<NavItem>> = [
   { heading: 'Belize Connect', items: JOBS_NAV, requires: ['JOB_SEEKER'] },
@@ -198,6 +217,7 @@ export const ROLE_GROUPS: ReadonlyArray<RoleGatedGroup<NavItem>> = [
   { heading: 'Passenger Driver', items: PASSENGER_DRIVER_NAV, requires: ['PASSENGER_DRIVER'] },
   { heading: 'Passenger Operator', items: PASSENGER_OPERATOR_NAV, requires: ['PASSENGER_PROVIDER'] },
   { heading: 'Carrier', items: SHIPPING_PROVIDER_NAV, requires: ['SHIPPING_PROVIDER'] },
+  { heading: 'Terminal', items: TERMINAL_NAV, requires: [] },
   { heading: 'Vendor', items: VENDOR_NAV, requires: ['VENDOR'] },
   { heading: 'Employer', items: EMPLOYER_NAV, requires: ['EMPLOYER'] },
   { heading: 'Property Owner', items: PROPERTY_OWNER_NAV, requires: ['PROPERTY_OWNER'] },
