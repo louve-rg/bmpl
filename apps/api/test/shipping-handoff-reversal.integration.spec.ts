@@ -673,6 +673,20 @@ describe('a LINE_HAUL leg cannot be handed off before it arrives (TERM-10)', () 
     expect(allowed.status).toBe(201);
     expect((await legRow(haul.id)).status).toBe('COMPLETED');
   });
+
+  it('14e · a WRONG code against a not-arrived leg gets the arrival refusal, not the pin refusal — no correct-code oracle', async () => {
+    const { haul, pin } = await toLineHaul('DEPARTED_NOT_ARRIVED');
+    const wrongPin = pin === '000000' ? '111111' : '000000';
+    const refused = await post(admin, `admin/logistics/legs/${haul.id}/handoff`, { pin: wrongPin, receivedByName: 'Receiving desk' });
+    expect(refused.status).toBe(400);
+    // The distinguishing assertion: if the pin check ran first, a wrong code
+    // would increment this exactly as it does in test 8b/6c. It stays at 0
+    // only because the arrival pre-check refused before the pin was ever
+    // compared — the same answer a CORRECT code against this same leg gets
+    // in 14b, which is the whole point: a wrong and a correct-but-early code
+    // must be indistinguishable from outside.
+    expect((await legRow(haul.id)).handoffPinAttempts).toBe(0);
+  });
 });
 
 describe('the staff-audience payload never carries a pin, for any leg (SEC-1)', () => {
