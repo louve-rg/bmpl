@@ -4533,22 +4533,28 @@ export class ShipmentService {
   }
 
   /**
-   * The deliberate STAFF reveal the serializer's null promises — now LINE_HAUL
-   * only (TERM-5). A line-haul handoff has no assigned courier at all (no
-   * carrier user account exists in that flow), so staff are necessarily both
-   * the revealer and the eventual submitter — the one case where that is
-   * correct, not a leak, because there is no second party to separate it from.
+   * The deliberate STAFF reveal the serializer's null promises — still
+   * FIRST_MILE/LINE_HAUL for now. A line-haul handoff has no assigned courier
+   * at all (no carrier user account exists in that flow), so staff are
+   * necessarily both the revealer and the eventual submitter — the one case
+   * where that is correct, not a leak, because there is no second party to
+   * separate it from.
    *
-   * FIRST_MILE used to be revealed here too (finding 2 of the original
-   * delivery audit: those handoffs could not legitimately complete). That was
-   * the wrong direction: staff learning the code and telling the assigned
-   * courier verbally made the "proof" circular — whoever staff told would
-   * pass, correct courier or not. TERM-5 moved FIRST_MILE to the courier's
-   * OWN self-reveal (`revealCourierCode`) instead; staff now only ever SUBMIT
-   * a FIRST_MILE code (via `completeLeg`'s `presentedCourierUserId`), never
-   * learn it. A LAST_MILE or DIRECT leg's own handoff code was never staff's
-   * to read either way — it ends at the recipient's door, and the serializer
-   * already shows it to them.
+   * FIRST_MILE's reveal here IS the pre-existing leak (finding 2 of the
+   * original delivery audit): staff learning the code and telling the
+   * assigned courier verbally makes the handoff's "proof" circular — whoever
+   * staff told passes, correct courier or not. TERM-5 built the fix
+   * (`revealCourierCode`, the courier's own self-reveal, plus `completeLeg`'s
+   * `presentedCourierUserId` for staff to SUBMIT without ever learning the
+   * code) but narrowing this method to LINE_HAUL-only is deliberately held
+   * back off this branch — `apps/admin/.../handoff-desk/page.tsx:226` still
+   * calls this endpoint for FIRST_MILE and has no replacement path yet. The
+   * narrowing to `leg.kind !== 'LINE_HAUL'` ships on its own branch, merged
+   * atomically with the handoff-desk UI change that replaces that call
+   * (TERM-5-UI). Until then this stays permissive and the leak stays open —
+   * known, not fixed by omission. A LAST_MILE or DIRECT leg's own handoff
+   * code was never staff's to read either way — it ends at the recipient's
+   * door, and the serializer already shows it to them.
    *
    * Mirrors the delivery console's PIN reveal, with one deliberate difference:
    * EVERY reveal writes an audit row, because this module already audits
@@ -4572,7 +4578,7 @@ export class ShipmentService {
       },
     });
     if (!leg) throw new NotFoundException('Leg not found.');
-    if (leg.kind !== 'LINE_HAUL') {
+    if (leg.kind !== 'FIRST_MILE' && leg.kind !== 'LINE_HAUL') {
       throw new BadRequestException('This code is held by the courier or the recipient, never by staff, and cannot be revealed here.');
     }
     // A completed or cancelled leg's code is dead — the same rule pinFor
@@ -4580,10 +4586,13 @@ export class ShipmentService {
     if (leg.status === 'COMPLETED' || leg.status === 'CANCELLED') {
       throw new BadRequestException('This leg is finished; its handoff code is no longer valid.');
     }
-    // Dead code for LINE_HAUL today (assignedDriver is always null for this
-    // kind — no carrier user account exists in that flow), kept as a
-    // defensive backstop rather than removed: the self-delivery invariant
-    // must still hold if a future change ever gives LINE_HAUL an assignee.
+    // Live for FIRST_MILE (assignedDriver is the courier) — blocks the
+    // assigned courier from reading their own code through the STAFF route
+    // if they also happen to hold staff access. Dead code for LINE_HAUL
+    // today (assignedDriver is always null for this kind — no carrier user
+    // account exists in that flow), kept as a defensive backstop rather than
+    // removed: the self-delivery invariant must still hold if a future
+    // change ever gives LINE_HAUL an assignee.
     if (leg.assignedDriver && leg.assignedDriver.userId === actor.userId) {
       throw new ForbiddenException('You are the assigned driver for this leg; the receiving side holds the code.');
     }

@@ -14,6 +14,12 @@
  * staff submitting for a location they do not hold; the lockout actually
  * engaging; and a courier-facing response proven not to contain a recipient
  * delivery code.
+ *
+ * NOT in this file: staff being refused a FIRST_MILE reveal. That narrowing
+ * (`revealHandoffPin` to LINE_HAUL-only) ships on its own branch, atomically
+ * with the handoff-desk UI change that replaces the admin console's call to
+ * it (TERM-5-UI) — see `revealHandoffPin`'s own doc comment. Until then
+ * staff can still reveal a FIRST_MILE code exactly as before this branch.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -274,16 +280,12 @@ describe('the courier self-reveal (TERM-5)', () => {
     expect(JSON.stringify(r.body)).not.toContain(row.handoffPin!);
   });
 
-  it('4 · staff can no longer reveal a FIRST_MILE code — the reveal route is LINE_HAUL only now', async () => {
-    const sender = await fundedSender();
-    const courier = await makeCourier('STANN_CREEK');
-    const shipment = await book(sender.cookies);
-    const { firstMile } = await journey(shipment.id);
-    await driveFirstMileToInProgress(courier, firstMile.id);
-
-    const r = await get(admin, `admin/logistics/legs/${firstMile.id}/handoff-pin`);
-    expect(r.status).toBe(400);
-  });
+  // Test 4 — "staff can no longer reveal a FIRST_MILE code" — moves to the
+  // narrowing's own branch (see revealHandoffPin's doc comment): that
+  // behavior change ships atomically with the handoff-desk UI replacement
+  // (TERM-5-UI), not here. Until then the pre-existing FIRST_MILE reveal
+  // stays exactly as it was — untouched by this branch, so it needs no new
+  // test on it.
 });
 
 describe('staff submit the presented courier\'s code (TERM-5)', () => {
