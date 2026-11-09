@@ -755,6 +755,26 @@ jobs:
       - name: Gitleaks (filesystem scan)
         run: |
           VER=8.24.3
-          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" -o /tmp/gl.tgz
+          URL="https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz"
+          # CI-GITLEAKS: a plain `curl -sSL` with no `--fail` writes an HTTP
+          # error body (a GitHub error page, on a transient release-asset
+          # fault) to the file as if it were the real asset — the download
+          # "succeeds", and the failure only surfaces one step later as a
+          # broken `tar`, under a job named "Secret scan". That mislabels a
+          # network flake as a possible leak, and makes a real leak
+          # indistinguishable from a bad download. `--fail` plus a bounded
+          # retry catches the HTTP-error case; the gzip check below catches
+          # the remaining case where curl calls it a success but the body
+          # still isn't a real archive. Bounded on purpose — three attempts,
+          # then fail loudly as a download problem, never a silent retry
+          # loop that would hide a persistent outage.
+          if ! curl -sSL --fail --retry 3 --retry-all-errors "$URL" -o /tmp/gl.tgz; then
+            echo "DOWNLOAD FAILED: could not fetch gitleaks v${VER} after retries — a network/release problem, not a secret-scan result." >&2
+            exit 1
+          fi
+          if ! gzip -t /tmp/gl.tgz 2>/dev/null; then
+            echo "DOWNLOAD FAILED: the gitleaks v${VER} download is not a valid gzip archive — a network/release problem, not a secret-scan result." >&2
+            exit 1
+          fi
           tar -xzf /tmp/gl.tgz -C /tmp gitleaks
           /tmp/gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 2
