@@ -2077,6 +2077,34 @@ export class ShipmentService {
   async completeLeg(legId: string, input: LegHandoffInput, actor: { userId: string; label?: string }) {
     let released = false;
     let presentedCourierUserId = input.presentedCourierUserId;
+    // Fetched unconditionally (TERM-10 needs `arrivedAt` below regardless of
+    // whether a presented identity was supplied) rather than only inside the
+    // branch that used to hold this same read.
+    const leg = await this.prisma.shipmentLeg.findUnique({ where: { id: legId }, select: { kind: true, assignedDriverProfileId: true, arrivedAt: true } });
+    if (!leg) throw new NotFoundException('Leg not found.');
+
+    // TERM-10, cheap pre-check — NOT the authoritative one (that stays inside
+    // `transition` below). A LINE_HAUL handoff presupposes arrival:
+    // `arriveLeg`'s own doc describes the state in between as "reached the
+    // far terminal but has not been handed over yet", a deliberate two-step
+    // sequence, but `isLegActionable` (completeLeg's other gate) checks only
+    // EARLIER legs' status, never this leg's own travel state. Checking here,
+    // before the pin, matters for a reason beyond catching the never-departed
+    // case itself: without it, a WRONG code against a not-yet-arrived leg
+    // answers "that code is not right" while the CORRECT code would reach the
+    // in-transaction guard and answer "not arrived yet" — a correct-code
+    // oracle (same shape #389 removes) telling an attacker their guess was
+    // right hours before the parcel does arrive. `arrivedAt` only ever moves
+    // null -> non-null, so this read can only be stale in the FORBIDDING
+    // direction (refusing a leg that in fact arrived a moment ago) — never
+    // the permissive one — which is why it is safe to check outside the
+    // transaction. Do not delete the in-transaction copy as redundant: it is
+    // the race-safe, authoritative check; this one exists only so a wrong
+    // code and a correct-but-early code get the same answer.
+    if (leg.kind === 'LINE_HAUL' && leg.arrivedAt === null) {
+      throw new BadRequestException('This line-haul leg has not arrived at its destination terminal yet.');
+    }
+
     if (presentedCourierUserId || input.presentedByAssignedCourier) {
       // TERM-7: a courier-kind leg (FIRST_MILE/LAST_MILE/DIRECT) with no
       // assigned courier at all has nobody who could have presented
@@ -2096,8 +2124,6 @@ export class ShipmentService {
       // lockout). Silently discarding a wrong claim and substituting the
       // right answer would be a worse outcome than refusing it: the next
       // reader of the schema would see the field and assume it's honoured.
-      const leg = await this.prisma.shipmentLeg.findUnique({ where: { id: legId }, select: { kind: true, assignedDriverProfileId: true } });
-      if (!leg) throw new NotFoundException('Leg not found.');
       if (leg.assignedDriverProfileId == null) {
         if (leg.kind !== 'LINE_HAUL') {
           throw new BadRequestException('No courier is assigned to this leg; there is no code to present.');
@@ -2115,6 +2141,13 @@ export class ShipmentService {
     await this.verifyLegPinOrThrow(legId, 'handoff', input.pin, actor, presentedCourierUserId);
 
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
+      // TERM-10 authoritative guard — see the pre-check above this method's
+      // pin verification for why both exist; this is the one that is
+      // race-safe, re-reading `arrivedAt` inside the transaction rather than
+      // trusting the read taken before the pin check.
+      if (leg.kind === 'LINE_HAUL' && leg.arrivedAt === null) {
+        throw new BadRequestException('This line-haul leg has not arrived at its destination terminal yet.');
+      }
       // Conditional write, NOT an unconditional update by id. `leg.status` is
       // a read taken moments earlier in this same transaction (transition()'s
       // own findUnique) — a concurrent flagException() on this exact leg can
@@ -2130,7 +2163,9 @@ export class ShipmentService {
         data: {
           status: 'COMPLETED',
           completedAt: new Date(),
-          arrivedAt: leg.arrivedAt ?? (leg.kind === 'LINE_HAUL' ? new Date() : null),
+          // Guaranteed non-null for LINE_HAUL by the guard above; every other
+          // kind never had an arrive step, so this is just a no-op passthrough.
+          arrivedAt: leg.arrivedAt,
           handoffVerifiedAt: new Date(),
           handoffVerificationStatus: 'VERIFIED',
           handoffReceivedByName: input.receivedByName,
@@ -4358,6 +4393,17 @@ export class ShipmentService {
         // secret, just operational detail a customer has no use for.
         assignedAt: opts.audience === 'STAFF' ? l.assignedAt : null,
         acceptedAt: opts.audience === 'STAFF' ? l.acceptedAt : null,
+        // MDF-624: the exact expression `listForOps` emits (:1743-1744) for
+        // the same fact — not a re-derivation, because `offerExpiresAt`
+        // itself is never serialized here, so a two-clause approximation on
+        // the detail page silently dropped it and could call a healthy
+        // automatic offer (which has its own offerExpiresAt) a stale manual
+        // assignment. If these two expressions ever disagree, that is the
+        // bug this field exists to prevent — keep them identical.
+        manualAssignmentPendingSince:
+          opts.audience === 'STAFF' && l.courierStatus === 'ASSIGNED' && l.offerExpiresAt == null && l.acceptedAt == null
+            ? l.assignedAt
+            : null,
         // The carrier org operating this LINE_HAUL leg, staff-only — see the
         // batched resolution just above `legs` for why operatorName always
         // travels with the id rather than the admin console showing a bare one.

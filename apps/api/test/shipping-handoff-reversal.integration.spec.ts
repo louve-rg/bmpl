@@ -597,3 +597,122 @@ describe('a terminal company\'s own staff submitting at their own location (TERM
     expect(r.status).toBe(403);
   });
 });
+
+describe('a LINE_HAUL leg cannot be handed off before it arrives (TERM-10)', () => {
+  /** Books, drives the FIRST_MILE to handed-off, and hands back the first
+   *  LINE_HAUL leg — either never departed (status READY, both timestamps
+   *  null) or departed but not yet arrived (status IN_PROGRESS,
+   *  `arrivedAt` still null), the two rejected states this card names. */
+  async function toLineHaul(state: 'NEVER_DEPARTED' | 'DEPARTED_NOT_ARRIVED') {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile, lineHauls } = await journey(shipment.id);
+    await driveFirstMileToInProgress(courier, firstMile.id);
+    const firstMilePin = (await legRow(firstMile.id)).handoffPin!;
+    expect((await post(courier.cookies, `driver/shipping-jobs/${firstMile.id}/handoff`, { pin: firstMilePin, receivedByName: 'Terminal desk' })).status).toBe(201);
+
+    const haul = lineHauls[0]!;
+    if (state === 'DEPARTED_NOT_ARRIVED') {
+      expect((await post(admin, `admin/logistics/legs/${haul.id}/depart`, {})).status).toBe(201);
+    }
+    const row = await legRow(haul.id);
+    expect(row.status).toBe(state === 'NEVER_DEPARTED' ? 'READY' : 'IN_PROGRESS');
+    expect(row.arrivedAt).toBeNull();
+    return { haul, pin: row.handoffPin! };
+  }
+
+  it('14a · never departed (READY, no departedAt): the admin door still refuses the real code', async () => {
+    const { haul, pin } = await toLineHaul('NEVER_DEPARTED');
+    const refused = await post(admin, `admin/logistics/legs/${haul.id}/handoff`, { pin, receivedByName: 'Receiving desk' });
+    expect(refused.status).toBe(400);
+    const after = await legRow(haul.id);
+    expect(after.status).toBe('READY');
+    // Refused before the code was ever checked — same discipline as 6c/8c.
+    expect(after.handoffPinAttempts).toBe(0);
+  });
+
+  it('14b · departed but not yet arrived (IN_PROGRESS, no arrivedAt): the admin door refuses the real code, and arriving first lets it succeed', async () => {
+    const { haul, pin } = await toLineHaul('DEPARTED_NOT_ARRIVED');
+    const refused = await post(admin, `admin/logistics/legs/${haul.id}/handoff`, { pin, receivedByName: 'Receiving desk' });
+    expect(refused.status).toBe(400);
+    const stillOpen = await legRow(haul.id);
+    expect(stillOpen.status).toBe('IN_PROGRESS');
+    expect(stillOpen.arrivedAt).toBeNull();
+    expect(stillOpen.handoffPinAttempts).toBe(0);
+
+    expect((await post(admin, `admin/logistics/legs/${haul.id}/arrive`, {})).status).toBe(201);
+    expect((await legRow(haul.id)).arrivedAt).not.toBeNull();
+    const allowed = await post(admin, `admin/logistics/legs/${haul.id}/handoff`, { pin, receivedByName: 'Receiving desk' });
+    expect(allowed.status).toBe(201);
+    expect((await legRow(haul.id)).status).toBe('COMPLETED');
+  });
+
+  it('14c · never departed: the terminal door (granted the destination hub) refuses the real code too', async () => {
+    const { haul, pin } = await toLineHaul('NEVER_DEPARTED');
+    const staff = await makeTerminalStaff([haul.destinationHubId!]);
+    const refused = await post(staff.cookies, `terminal/legs/${haul.id}/handoff`, { pin, receivedByName: 'Receiving desk' });
+    expect(refused.status).toBe(400);
+    const after = await legRow(haul.id);
+    expect(after.status).toBe('READY');
+    expect(after.handoffPinAttempts).toBe(0);
+  });
+
+  it('14d · departed but not yet arrived: the terminal door refuses the real code, and arriving first lets the SAME staff member succeed', async () => {
+    const { haul, pin } = await toLineHaul('DEPARTED_NOT_ARRIVED');
+    const staff = await makeTerminalStaff([haul.destinationHubId!]);
+    const refused = await post(staff.cookies, `terminal/legs/${haul.id}/handoff`, { pin, receivedByName: 'Receiving desk' });
+    expect(refused.status).toBe(400);
+    const stillOpen = await legRow(haul.id);
+    expect(stillOpen.status).toBe('IN_PROGRESS');
+    expect(stillOpen.arrivedAt).toBeNull();
+    expect(stillOpen.handoffPinAttempts).toBe(0);
+
+    expect((await post(admin, `admin/logistics/legs/${haul.id}/arrive`, {})).status).toBe(201);
+    const allowed = await post(staff.cookies, `terminal/legs/${haul.id}/handoff`, { pin, receivedByName: 'Receiving desk' });
+    expect(allowed.status).toBe(201);
+    expect((await legRow(haul.id)).status).toBe('COMPLETED');
+  });
+
+  it('14e · a WRONG code against a not-arrived leg gets the arrival refusal, not the pin refusal — no correct-code oracle', async () => {
+    const { haul, pin } = await toLineHaul('DEPARTED_NOT_ARRIVED');
+    const wrongPin = pin === '000000' ? '111111' : '000000';
+    const refused = await post(admin, `admin/logistics/legs/${haul.id}/handoff`, { pin: wrongPin, receivedByName: 'Receiving desk' });
+    expect(refused.status).toBe(400);
+    // The distinguishing assertion: if the pin check ran first, a wrong code
+    // would increment this exactly as it does in test 8b/6c. It stays at 0
+    // only because the arrival pre-check refused before the pin was ever
+    // compared — the same answer a CORRECT code against this same leg gets
+    // in 14b, which is the whole point: a wrong and a correct-but-early code
+    // must be indistinguishable from outside.
+    expect((await legRow(haul.id)).handoffPinAttempts).toBe(0);
+  });
+});
+
+describe('the staff-audience payload never carries a pin, for any leg (SEC-1)', () => {
+  it('15 · logistics.read sees every leg field except handoffPin/pickupPin, which are null even while the real codes are live in the database', async () => {
+    const sender = await fundedSender();
+    const shipment = await book(sender.cookies);
+    const { firstMile, lastMile } = await journey(shipment.id);
+
+    // Still fresh off booking: every pin column is a real, live, non-null
+    // value in the database — nothing has been completed or cancelled yet.
+    const firstMileRow = await legRow(firstMile.id);
+    const lastMileRow = await legRow(lastMile.id);
+    expect(firstMileRow.pickupPin).not.toBeNull();
+    expect(lastMileRow.handoffPin).not.toBeNull();
+
+    const ops = await makeOperator(['logistics.read']);
+    const r = await get(ops.cookies, `admin/logistics/shipments/${shipment.reference}`);
+    expect(r.status).toBe(200);
+    for (const leg of r.body.legs) {
+      expect(leg.handoffPin).toBeNull();
+      expect(leg.pickupPin).toBeNull();
+    }
+    // Not merely absent-by-coincidence: the real, live secret strings do not
+    // appear anywhere in the response body, by any field name.
+    const body = JSON.stringify(r.body);
+    expect(body).not.toContain(firstMileRow.pickupPin!);
+    expect(body).not.toContain(lastMileRow.handoffPin!);
+  });
+});
