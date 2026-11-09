@@ -21,6 +21,7 @@ const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
 const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
 const del = (c: string[], p: string) => request(ctx.server).delete(`/api/${p}`).set('Cookie', c);
+const patch = (c: string[], p: string, b: object = {}) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
 
 async function registerCustomer(email: string) {
   const reg = await request(ctx.server)
@@ -57,6 +58,19 @@ async function readLastEmailLinkToken(toEmail: string): Promise<string> {
   const token = tokenFromBody(inbox.body.body);
   if (!token) throw new Error(`No token found in email to ${toEmail}: ${JSON.stringify(inbox.body)}`);
   return token;
+}
+
+/** Invite + accept, end to end, for tests that just need a seated member and
+ *  don't care about proving the invite flow itself (that's the describe
+ *  block above). Returns the member's own session cookies and userId. */
+async function inviteAndAccept(companyId: string, locationIds: string[], memberRole: 'MANAGER' | 'OPERATOR' = 'OPERATOR') {
+  const email = `member_${uniq()}@example.com`;
+  await post(admin, `admin/terminal/companies/${companyId}/invites`, { email, memberRole, locationIds });
+  const token = await readLastEmailLinkToken(email);
+  await request(ctx.server).post('/api/terminal/invites/accept').send({ token, password: 'MemberPass123', firstName: 'M', lastName: 'E' });
+  const user = await ctx.prisma.user.findUniqueOrThrow({ where: { email } });
+  const cookies = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email, password: 'MemberPass123' }));
+  return { email, userId: user.id, cookies };
 }
 
 beforeAll(async () => {
@@ -319,5 +333,183 @@ describe('TERM-3: scoped authorization — the thing this card was built to prov
     const cookies = await registerCustomer(`plain_customer_${uniq()}@example.com`);
     const res = await get(cookies, 'terminal/me');
     expect(res.status).toBe(403);
+  });
+});
+
+describe('TERM-6: slice 1 close-out — company edit, direct reactivate, per-member location change', () => {
+  it('a mistyped company name is correctable through the product', async () => {
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'Reef Terinals Ltd', contactEmail: `typo_${uniq()}@example.com` })).body;
+    const fixed = await patch(admin, `admin/terminal/companies/${company.id}`, { businessName: 'Reef Terminals Ltd' });
+    expect(fixed.status).toBe(200);
+    expect(fixed.body.businessName).toBe('Reef Terminals Ltd');
+    // contactEmail/contactPhone/isActive/isTest/id are all unchanged by a
+    // businessName-only patch — a partial update, not a full replace.
+    expect(fixed.body.contactEmail).toBe(company.contactEmail);
+    expect(fixed.body.isTest).toBe(company.isTest);
+
+    const reread = await get(admin, `admin/terminal/companies/${company.id}`);
+    expect(reread.body.businessName).toBe('Reef Terminals Ltd');
+  });
+
+  it('an empty patch body is refused rather than silently doing nothing', async () => {
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'Empty Patch Co', contactEmail: `empty_${uniq()}@example.com` })).body;
+    const res = await patch(admin, `admin/terminal/companies/${company.id}`, {});
+    expect(res.status).toBe(400);
+  });
+
+  it('isTest cannot be changed through the edit endpoint — the simulation boundary is fixed at creation', async () => {
+    const company = (
+      await post(admin, 'admin/terminal/companies', { businessName: 'Sim Edit Co', contactEmail: `simedit_${uniq()}@example.com`, isTest: true })
+    ).body;
+    const res = await patch(admin, `admin/terminal/companies/${company.id}`, { businessName: 'Sim Edit Co Renamed', isTest: false });
+    expect(res.status).toBe(200);
+    expect(res.body.isTest).toBe(true); // unchanged — isTest is not in the schema at all, so Zod strips it
+  });
+
+  it('reactivating an ended member restores workspace access without a new invite, and keeps the OLD location grant (not just a fresh one)', async () => {
+    const hub = await makeHub(`T6REACT-${uniq()}`);
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'Reactivate Co', contactEmail: `react_${uniq()}@example.com` })).body;
+    const loc = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hub.id })).body;
+    const { userId, cookies } = await inviteAndAccept(company.id, [loc.id]);
+
+    await del(admin, `admin/terminal/companies/${company.id}/members/${userId}`);
+    expect((await get(cookies, 'terminal/me')).status).toBe(403);
+
+    const reactivate = await post(admin, `admin/terminal/companies/${company.id}/members/${userId}/reactivate`, {});
+    expect(reactivate.status).toBe(201);
+
+    const me = await get(cookies, 'terminal/me');
+    expect(me.status).toBe(200);
+    // The ORIGINAL grant survived ending+reactivating — reactivation never
+    // touched TerminalCompanyMemberLocation rows, it only flipped status back.
+    expect(me.body.locations).toHaveLength(1);
+    expect(me.body.locations[0].locationId).toBe(loc.id);
+
+    const detail = await get(admin, `admin/terminal/companies/${company.id}`);
+    const member = detail.body.members.find((m: { userId: string }) => m.userId === userId);
+    expect(member.status).toBe('ACTIVE');
+    expect(member.endedAt).toBeNull();
+  });
+
+  it('reactivating a member who is already ACTIVE is refused — nothing to reactivate', async () => {
+    const hub = await makeHub(`T6REACTACTIVE-${uniq()}`);
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'Already Active Co', contactEmail: `alreadyactive_${uniq()}@example.com` })).body;
+    const loc = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hub.id })).body;
+    const { userId } = await inviteAndAccept(company.id, [loc.id]);
+
+    const res = await post(admin, `admin/terminal/companies/${company.id}/members/${userId}/reactivate`, {});
+    expect(res.status).toBe(404);
+  });
+
+  it('reactivating a userId with no membership at all in this company is refused the same way', async () => {
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'No Member Co', contactEmail: `nomember_${uniq()}@example.com` })).body;
+    const strangerEmail = `stranger_${uniq()}@example.com`;
+    await registerCustomer(strangerEmail);
+    const stranger = await ctx.prisma.user.findUniqueOrThrow({ where: { email: strangerEmail } });
+
+    const res = await post(admin, `admin/terminal/companies/${company.id}/members/${stranger.id}/reactivate`, {});
+    expect(res.status).toBe(404);
+  });
+
+  it('grants an ACTIVE member a second location without ending and re-inviting them', async () => {
+    const hubA = await makeHub(`T6GRANTA-${uniq()}`);
+    const hubB = await makeHub(`T6GRANTB-${uniq()}`);
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'Grant Co', contactEmail: `grant_${uniq()}@example.com` })).body;
+    const locA = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hubA.id })).body;
+    const locB = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hubB.id })).body;
+    const { userId, cookies } = await inviteAndAccept(company.id, [locA.id]);
+
+    expect((await get(cookies, 'terminal/me')).body.locations).toHaveLength(1);
+
+    const grant = await post(admin, `admin/terminal/companies/${company.id}/members/${userId}/locations`, { locationId: locB.id });
+    expect(grant.status).toBe(201);
+
+    const me = await get(cookies, 'terminal/me');
+    expect(me.body.locations).toHaveLength(2);
+    expect(me.body.locations.map((l: { locationId: string }) => l.locationId).sort()).toEqual([locA.id, locB.id].sort());
+  });
+
+  it('granting the same location twice is a no-op, not a duplicate grant', async () => {
+    const hub = await makeHub(`T6GRANTDUP-${uniq()}`);
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'Grant Dup Co', contactEmail: `grantdup_${uniq()}@example.com` })).body;
+    const loc = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hub.id })).body;
+    const { userId, cookies } = await inviteAndAccept(company.id, [loc.id]);
+
+    const grant = await post(admin, `admin/terminal/companies/${company.id}/members/${userId}/locations`, { locationId: loc.id });
+    expect(grant.status).toBe(201);
+    expect((await get(cookies, 'terminal/me')).body.locations).toHaveLength(1);
+  });
+
+  it('refuses granting a location that does not belong to this company, or one that has been deactivated', async () => {
+    const hubA = await makeHub(`T6GRANTBAD-A-${uniq()}`);
+    const hubB = await makeHub(`T6GRANTBAD-B-${uniq()}`);
+    const companyA = (await post(admin, 'admin/terminal/companies', { businessName: 'Grant Bad A', contactEmail: `grantbada_${uniq()}@example.com` })).body;
+    const companyB = (await post(admin, 'admin/terminal/companies', { businessName: 'Grant Bad B', contactEmail: `grantbadb_${uniq()}@example.com` })).body;
+    const locA = (await post(admin, `admin/terminal/companies/${companyA.id}/locations`, { hubId: hubA.id })).body;
+    const locB = (await post(admin, `admin/terminal/companies/${companyB.id}/locations`, { hubId: hubB.id })).body;
+    const { userId } = await inviteAndAccept(companyA.id, [locA.id]);
+
+    // locB belongs to companyB, not companyA.
+    const wrongCompany = await post(admin, `admin/terminal/companies/${companyA.id}/members/${userId}/locations`, { locationId: locB.id });
+    expect(wrongCompany.status).toBe(400);
+
+    await del(admin, `admin/terminal/companies/${companyA.id}/locations/${locA.id}`);
+    const deactivated = await post(admin, `admin/terminal/companies/${companyA.id}/members/${userId}/locations`, { locationId: locA.id });
+    expect(deactivated.status).toBe(400);
+  });
+
+  it('refuses granting a location to a member who is not ACTIVE (ended)', async () => {
+    const hub = await makeHub(`T6GRANTENDED-${uniq()}`);
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'Grant Ended Co', contactEmail: `grantended_${uniq()}@example.com` })).body;
+    const loc = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hub.id })).body;
+    const { userId } = await inviteAndAccept(company.id, [loc.id]);
+    await del(admin, `admin/terminal/companies/${company.id}/members/${userId}`);
+
+    const res = await post(admin, `admin/terminal/companies/${company.id}/members/${userId}/locations`, { locationId: loc.id });
+    expect(res.status).toBe(404);
+  });
+
+  it('revokes one location from an ACTIVE member, leaving their other grants untouched', async () => {
+    const hubA = await makeHub(`T6REVOKEA-${uniq()}`);
+    const hubB = await makeHub(`T6REVOKEB-${uniq()}`);
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'Revoke Co', contactEmail: `revokeco_${uniq()}@example.com` })).body;
+    const locA = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hubA.id })).body;
+    const locB = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hubB.id })).body;
+    const { userId, cookies } = await inviteAndAccept(company.id, [locA.id, locB.id]);
+    expect((await get(cookies, 'terminal/me')).body.locations).toHaveLength(2);
+
+    const revoke = await del(admin, `admin/terminal/companies/${company.id}/members/${userId}/locations/${locA.id}`);
+    expect(revoke.status).toBe(200);
+
+    const me = await get(cookies, 'terminal/me');
+    expect(me.body.locations).toHaveLength(1);
+    expect(me.body.locations[0].locationId).toBe(locB.id);
+  });
+
+  it('revoking a location a member never held, or a member that does not exist, is refused the same way', async () => {
+    const hubA = await makeHub(`T6REVOKENONE-A-${uniq()}`);
+    const hubB = await makeHub(`T6REVOKENONE-B-${uniq()}`);
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'Revoke None Co', contactEmail: `revokenone_${uniq()}@example.com` })).body;
+    const locA = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hubA.id })).body;
+    const locB = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hubB.id })).body;
+    const { userId } = await inviteAndAccept(company.id, [locA.id]);
+
+    const neverHeld = await del(admin, `admin/terminal/companies/${company.id}/members/${userId}/locations/${locB.id}`);
+    expect(neverHeld.status).toBe(404);
+
+    const noSuchMember = await del(admin, `admin/terminal/companies/${company.id}/members/clworeallynoexist000000/locations/${locA.id}`);
+    expect(noSuchMember.status).toBe(404);
+  });
+
+  it('a terminal-only account (no terminals.manage) is refused all three new endpoints', async () => {
+    const hub = await makeHub(`T6NOADMIN6-${uniq()}`);
+    const company = (await post(admin, 'admin/terminal/companies', { businessName: 'Term6 No Admin Co', contactEmail: `term6noadmin_${uniq()}@example.com` })).body;
+    const loc = (await post(admin, `admin/terminal/companies/${company.id}/locations`, { hubId: hub.id })).body;
+    const { userId, cookies } = await inviteAndAccept(company.id, [loc.id]);
+    await del(admin, `admin/terminal/companies/${company.id}/members/${userId}`);
+
+    expect((await patch(cookies, `admin/terminal/companies/${company.id}`, { businessName: 'Hijacked' })).status).toBe(403);
+    expect((await post(cookies, `admin/terminal/companies/${company.id}/members/${userId}/reactivate`, {})).status).toBe(403);
+    expect((await post(cookies, `admin/terminal/companies/${company.id}/members/${userId}/locations`, { locationId: loc.id })).status).toBe(403);
   });
 });
