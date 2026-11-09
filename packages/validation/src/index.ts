@@ -16,3 +16,4 @@ export * from './jobs';
 export * from './realestate';
 export * from './marketing';
 export * from './shipping';
+export * from './terminal';

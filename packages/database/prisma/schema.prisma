@@ -444,6 +444,14 @@ enum AuditAction {
   // customer's payment consent, so the audit trail must not conflate them.
   SHIPMENT_RETURN_PREPARED
   SHIPMENT_REROUTE_PREPARED
+  // ---- Terminal Operations (TERM-3) ----
+  TERMINAL_COMPANY_CREATED
+  TERMINAL_COMPANY_LOCATION_ADDED
+  TERMINAL_COMPANY_LOCATION_REMOVED
+  TERMINAL_COMPANY_MEMBER_INVITED
+  TERMINAL_COMPANY_INVITE_REVOKED
+  TERMINAL_COMPANY_INVITE_ACCEPTED
+  TERMINAL_COMPANY_MEMBER_ENDED
 }
 
 // ---- Reviews & Ratings (Phase 4 · M19) --------------------------------------
@@ -659,6 +667,9 @@ model User {
   routeScheduleExceptionsMade RouteScheduleException[] @relation("RouteScheduleExceptionCreatedBy")
   hubHoursExceptionsMade      HubHoursException[]      @relation("HubHoursExceptionCreatedBy")
   vendorHoursExceptionsMade   VendorHoursException[]   @relation("VendorHoursExceptionCreatedBy")
+  // Terminal operations (TERM-3)
+  terminalCompanyMemberships  TerminalCompanyMember[]
+  terminalInvitesSent         TerminalCompanyInvite[]  @relation("TerminalInviteSentBy")
 
   @@index([status])
   @@index([district])
@@ -4735,6 +4746,11 @@ model LogisticsHub {
   // LogisticsRoute.scheduleNote next to RouteOperatingDay/RouteScheduleException.
   openingDays     HubOpeningDay[]
   hoursExceptions HubHoursException[]
+  // TERM-3: which terminal companies are authorized to work custody at this
+  // hub. A hub with zero rows here simply has no terminal-company staff yet —
+  // existing BML-staff-operated handoff (logistics.operate/logistics.verify)
+  // is untouched and keeps working exactly as it does today.
+  terminalCompanyLocations TerminalCompanyLocation[]
 
   // Attaching a door to a terminal is always "active hubs in this district".
   @@index([district, isActive])
@@ -5776,6 +5792,166 @@ model ShippingProviderMember {
   @@unique([providerProfileId, userId])
   @@index([userId, status])
   @@map("shipping_provider_members")
+}
+
+// ---- Terminal Operations (TERM-1/TERM-3) ------------------------------------
+//
+// A terminal company gets its own dedicated, simplified workspace — it must
+// never gain marketplace/admin privilege. Deliberately a SEPARATE org type
+// from ShippingProviderProfile (a terminal operator is not a carrier) even
+// though the membership shape below is intentionally identical to
+// ShippingProviderMember's: TERM-1's recon found that shape is the right
+// precedent to extend, not a reason to merge the two concepts.
+//
+// What is reused, named explicitly so the next reader does not re-derive it:
+//  - The company-scoped membership shape (role enum + ACTIVE|ENDED status +
+//    unique-per-person-per-org + reactivate-not-duplicate), from
+//    ShippingProviderMember.
+//  - The single-use, short-lived, signed-token pattern (raw token delivered
+//    once, only its hash persisted), from EmailVerificationToken/
+//    PasswordResetToken and @bmpl/authentication's issueToken/hashToken.
+// What is genuinely new, because TERM-1 confirmed nothing in this schema
+// modelled it: the LOCATION axis. LogisticsHub carries no membership concept
+// of its own, so TerminalCompanyLocation and TerminalCompanyMemberLocation
+// below are net-new shape, not an extension of an existing one.
+
+/// A terminal operator organization. Admin-created directly — there is no
+/// self-registration step to approve, unlike ShippingProviderProfile, so
+/// there is no PENDING/APPROVED status lifecycle here: `isActive` is the
+/// whole admin on/off switch, exactly like LogisticsHub's own.
+model TerminalCompanyProfile {
+  id           String   @id @default(cuid())
+  /// Simulation boundary, same rule as every other logistics entity (root
+  /// CLAUDE.md §5/§6): admin-set at creation, never derived from a signed-in
+  /// account because there is no self-registering account to derive it from.
+  isTest       Boolean  @default(false)
+  businessName String
+  contactEmail String
+  contactPhone String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  locations TerminalCompanyLocation[]
+  members   TerminalCompanyMember[]
+  invites   TerminalCompanyInvite[]
+
+  @@index([isActive, isTest])
+  @@map("terminal_company_profiles")
+}
+
+/// Which hub(s) a terminal company is authorized to work. A company with no
+/// row here operates nowhere yet — not an error state, just not configured.
+model TerminalCompanyLocation {
+  id                String                 @id @default(cuid())
+  terminalCompanyId String
+  terminalCompany   TerminalCompanyProfile @relation(fields: [terminalCompanyId], references: [id], onDelete: Cascade)
+  hubId             String
+  /// Restrict, matching every other hub FK in this schema (LogisticsRoute's
+  /// origin/destination): a hub this company still has history at cannot be
+  /// hard-deleted out from under that history. Deactivate the hub instead.
+  hub               LogisticsHub           @relation(fields: [hubId], references: [id], onDelete: Restrict)
+  /// Removing a company's access to a hub deactivates the row rather than
+  /// deleting it — the same "history survives, access does not" rule
+  /// ShippingProviderMember.endedAt already follows.
+  isActive          Boolean                @default(true)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  memberGrants TerminalCompanyMemberLocation[]
+
+  // One row per (company, hub) — re-authorizing a hub reactivates rather than
+  // growing a second row for the same pair, same convention as the member
+  // uniqueness below.
+  @@unique([terminalCompanyId, hubId])
+  @@index([hubId])
+  @@map("terminal_company_locations")
+}
+
+enum TerminalCompanyMemberRole {
+  MANAGER
+  OPERATOR
+}
+
+enum TerminalCompanyMemberStatus {
+  ACTIVE
+  ENDED
+}
+
+/// Who may act for a terminal company, and at which of its locations.
+/// Deliberately mirrors ShippingProviderMember's shape (see the section
+/// comment above) with one addition: `locations` below, because a terminal
+/// company's staff are scoped to specific hubs, not the whole company by
+/// default — TERM-3's design ruling, since nothing upstream of membership
+/// (company-level) implies which locations a given person may work.
+model TerminalCompanyMember {
+  id                String                       @id @default(cuid())
+  terminalCompanyId String
+  terminalCompany   TerminalCompanyProfile       @relation(fields: [terminalCompanyId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memberRole        TerminalCompanyMemberRole    @default(OPERATOR)
+  status            TerminalCompanyMemberStatus  @default(ACTIVE)
+  endedAt           DateTime?
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+
+  locations TerminalCompanyMemberLocation[]
+
+  // One membership per person per org; re-inviting/re-adding reactivates the
+  // row rather than growing a second one for the same pair.
+  @@unique([terminalCompanyId, userId])
+  @@index([userId, status])
+  @@map("terminal_company_members")
+}
+
+/// The LOCATION axis: which of the company's authorized locations this ONE
+/// member may actually work. Absence of a row is absence of authorization —
+/// there is no implicit "whole company" grant for any role, MANAGER
+/// included, per TERM-3's explicit ruling.
+model TerminalCompanyMemberLocation {
+  id         String                  @id @default(cuid())
+  memberId   String
+  member     TerminalCompanyMember   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  locationId String
+  location   TerminalCompanyLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  createdAt  DateTime                @default(now())
+
+  @@unique([memberId, locationId])
+  @@index([locationId])
+  @@map("terminal_company_member_locations")
+}
+
+/// The real invite primitive TERM-1's recon found missing everywhere in this
+/// codebase: admin emails a link, the invitee sets their OWN password (or,
+/// if their email already has a BMPL account, simply attaches to it), and
+/// the membership + location grants are created atomically on acceptance.
+/// Token handling mirrors EmailVerificationToken/PasswordResetToken exactly:
+/// the raw token is emailed once and never stored; only its SHA-256 hash is.
+model TerminalCompanyInvite {
+  id                String                    @id @default(cuid())
+  terminalCompanyId String
+  terminalCompany   TerminalCompanyProfile    @relation(fields: [terminalCompanyId], references: [id], onDelete: Cascade)
+  email             String
+  memberRole        TerminalCompanyMemberRole @default(OPERATOR)
+  /// Snapshot of the TerminalCompanyLocation ids intended at invite time.
+  /// Read exactly once, at acceptance, to create the real
+  /// TerminalCompanyMemberLocation rows — not a live relation, so a location
+  /// deactivated between invite and acceptance is still caught there (the
+  /// acceptance path re-validates each id against the company's current,
+  /// active locations before granting anything).
+  locationIds       String[]
+  tokenHash         String                    @unique
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  revokedAt         DateTime?
+  invitedById       String
+  invitedBy         User                      @relation("TerminalInviteSentBy", fields: [invitedById], references: [id], onDelete: Restrict)
+  createdAt         DateTime                  @default(now())
+
+  @@index([terminalCompanyId])
+  @@index([email])
+  @@map("terminal_company_invites")
 }
 
 model PassengerDriverProfile {

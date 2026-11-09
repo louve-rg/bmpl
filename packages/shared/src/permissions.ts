@@ -106,6 +106,13 @@ export const PERMISSIONS = [
   // availability, test flags). Role approval reuses role_applications.review.
   'passengers.read', // view passenger driver/provider profiles, vehicles, routes + departures (read-only)
   'passengers.moderate', // approve/reject passenger vehicles; set driver/provider test mode; manage any operator's routes + departures
+  // ---- Terminal Operations (TERM-3) ----
+  // Deliberately separate from logistics.*: a terminal company's own staff
+  // are authorized through their scoped membership (TerminalCompanyMember),
+  // never through this admin-permission axis — these two permissions cover
+  // only the BML-ADMIN side (creating companies/locations, driving invites).
+  'terminals.read', // view terminal companies, their locations, members and invites (read-only)
+  'terminals.manage', // create/deactivate companies + locations; invite/revoke/end members
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -210,6 +217,9 @@ export const PERMISSION_BUNDLES: Record<string, Permission[]> = {
     // Passenger Transportation
     'passengers.read',
     'passengers.moderate',
+    // Terminal Operations
+    'terminals.read',
+    'terminals.manage',
   ],
   SUPER_ADMIN: [...PERMISSIONS],
 };
