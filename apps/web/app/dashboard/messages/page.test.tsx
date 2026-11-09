@@ -165,18 +165,49 @@ function messageWithAttachment(overrides: Record<string, unknown> = {}) {
 }
 
 /**
- * MSG-1, second mechanism: `presignDownload` mints a brand-new signature on
- * every call, so the API hands back a DIFFERENT `url` for the same unchanged
- * attachment on every 15s background poll. Replacing the whole message
- * object wholesale (the pre-existing behavior) changes the rendered <img>'s
- * `src`, which makes the browser re-fetch and visibly flash a photo that
- * never actually changed -- a blink the original MSG-1 fix (the request-loop
- * fix above) does not touch, because the request rate here is already
- * correct (one request per 15s); the bug is what the UI does with that
- * response, not how often it arrives.
+ * MSG-1, second mechanism. The API used to re-sign every attachment on
+ * every serialization -- a different `url` on every 15s poll for the same
+ * unchanged photo, which changed the rendered <img>'s `src` and made the
+ * browser re-fetch and visibly flash it, even though the request rate was
+ * already correct. The API now caches the signed URL per storage key for
+ * its TTL window and only rotates it before expiry -- so the UI's job is
+ * the opposite of "never change the URL": it must keep the SAME url stable
+ * when the server repeats it (no pointless reload), but ADOPT a url that
+ * genuinely rotates (never pin a signature past its expiry -- that is what
+ * broke right-click-save, mobile cache eviction, and any re-fetching
+ * remount). Pinning the first URL forever, which an earlier version of
+ * this fix did, traded the 15s flash for a silently-expiring link; this is
+ * the corrected contract.
  */
-describe('MSG-1: a background refresh does not flash an unchanged attachment', () => {
-  it('keeps the previous attachment URL when the message itself did not change', async () => {
+describe('MSG-1: a background refresh reuses a repeated attachment URL but adopts a rotated one', () => {
+  it('keeps the same attachment object when the server repeats the same URL', async () => {
+    vi.useFakeTimers();
+    try {
+      listConversations.mockResolvedValue([conversationSummary({ unreadCount: 0 })]);
+      markRead.mockResolvedValue(undefined);
+      getConversation.mockResolvedValueOnce(conversationDetail({ messages: [messageWithAttachment()] }));
+
+      const c = await mount();
+      const imgBefore = c.querySelector('img');
+      expect(imgBefore?.getAttribute('src')).toBe('https://storage.example/x?sig=v1');
+
+      // Same message, same attachment, same URL -- the server has nothing
+      // new to say; the DOM node itself should not even be touched.
+      getConversation.mockResolvedValueOnce(conversationDetail({ messages: [messageWithAttachment()] }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+
+      const imgAfter = c.querySelector('img');
+      expect(imgAfter?.getAttribute('src')).toBe('https://storage.example/x?sig=v1');
+      expect(imgAfter).toBe(imgBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('adopts a rotated attachment URL rather than pinning the stale one', async () => {
     vi.useFakeTimers();
     try {
       listConversations.mockResolvedValue([conversationSummary({ unreadCount: 0 })]);
@@ -186,8 +217,9 @@ describe('MSG-1: a background refresh does not flash an unchanged attachment', (
       const c = await mount();
       expect(c.querySelector('img')?.getAttribute('src')).toBe('https://storage.example/x?sig=v1');
 
-      // Same message, same attachment id -- only the signed URL differs,
-      // exactly what a re-presign on an unrelated poll produces.
+      // Same message, same attachment id -- the server genuinely rotated
+      // the cached URL ahead of its expiry. This must be adopted: the old
+      // signature is on its way to expiring, not merely cosmetic noise.
       getConversation.mockResolvedValueOnce(
         conversationDetail({
           messages: [
@@ -211,7 +243,7 @@ describe('MSG-1: a background refresh does not flash an unchanged attachment', (
         await vi.advanceTimersByTimeAsync(15_000);
       });
 
-      expect(c.querySelector('img')?.getAttribute('src')).toBe('https://storage.example/x?sig=v1');
+      expect(c.querySelector('img')?.getAttribute('src')).toBe('https://storage.example/x?sig=v2');
     } finally {
       vi.useRealTimers();
     }
