@@ -52,21 +52,24 @@ function absoluteTime(iso: string): string {
 }
 
 /**
- * MSG-1, the second mechanism: the API used to re-sign every attachment's
- * download URL on every serialization, so an unchanged photo got a
- * brand-new `url` on every 15s background poll -- a different `<img src>`,
- * which the browser re-fetches and visibly flashes. The API now caches the
- * signed URL per storage key for its TTL window and only rotates it before
- * expiry (see `apps/api` messaging serializer), so a `url` that DOES change
- * between polls is a real, deliberate rotation -- not noise -- and must be
- * adopted, never pinned: the signature a stale `url` carries expires, and a
- * client that keeps the old string anyway serves a dead link on download,
- * on cache eviction (most likely on mobile), or on any remount that
- * re-fetches rather than reusing an already-decoded bitmap. So URL is part
- * of the identity test below, same as body/deleted/editedAt: this still
- * reuses the previous message object (and avoids an unnecessary <img>
- * reload) exactly when the server has nothing new to say, including a
- * fresh URL that happens to be byte-identical to the one already on screen.
+ * MSG-1, the second mechanism: the API's signed attachment URL expires
+ * (`STORAGE_SIGNED_URL_TTL`, 300s by default) -- so `url` cannot be pinned
+ * forever without eventually serving a dead link, on download, on cache
+ * eviction (most likely on mobile), or on any remount that re-fetches
+ * rather than reusing an already-decoded bitmap. That is why URL is part
+ * of the identity test below, same as body/deleted/editedAt: a changed
+ * `url` must be adopted, never pinned.
+ *
+ * As of this writing the API (`apps/api` messaging serializer) still
+ * re-signs on every serialization, so today a `url` differs on every 15s
+ * poll regardless of whether the attachment itself changed -- this fix
+ * does not, by itself, stop that flash; see MSG-2. Once MSG-2 lands (the
+ * API caching the signed URL per storage key and rotating it only before
+ * expiry), a changed `url` here will mean a real, deliberate rotation, and
+ * adopting it will cost at most one reload per rotation instead of one per
+ * poll. Until then, this still reuses the previous message object (and
+ * avoids an unnecessary <img> reload) whenever the server happens to
+ * repeat the same URL unchanged.
  */
 function messageUnchanged(prev: Message, next: Message): boolean {
   return (
