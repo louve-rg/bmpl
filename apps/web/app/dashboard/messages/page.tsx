@@ -51,6 +51,40 @@ function absoluteTime(iso: string): string {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+/**
+ * MSG-1, the second mechanism: the API's `presignDownload` mints a fresh
+ * signature + expiry on every call (`apps/api/.../messaging.service.ts`'s
+ * serializer), so an attachment that never changed still gets a brand-new
+ * `url` string on every 15s background poll. An <img> whose `src` changes
+ * is a different resource to the browser -- it re-fetches and visibly
+ * flashes a photo nobody actually sent again. The original MSG-1 fix made
+ * the request itself well-behaved (one per 15s, visible tabs only); this
+ * stops that well-behaved response from still being visible on screen by
+ * reusing the previous message object -- URL and all -- whenever nothing
+ * about the message actually changed, so unaffected <img> elements never
+ * see a new `src`.
+ */
+function messageUnchanged(prev: Message, next: Message): boolean {
+  return (
+    prev.id === next.id &&
+    prev.body === next.body &&
+    prev.deleted === next.deleted &&
+    prev.editedAt === next.editedAt &&
+    prev.attachments.length === next.attachments.length &&
+    prev.attachments.every((a, i) => a.id === next.attachments[i]?.id && a.scanStatus === next.attachments[i]?.scanStatus)
+  );
+}
+
+function reconcileDetail(prev: ConversationDetail | null, next: ConversationDetail): ConversationDetail {
+  if (!prev) return next;
+  const prevById = new Map(prev.messages.map((m) => [m.id, m]));
+  const messages = next.messages.map((m) => {
+    const old = prevById.get(m.id);
+    return old && messageUnchanged(old, m) ? old : m;
+  });
+  return { ...next, messages };
+}
+
 /* =============================================================== page shell */
 
 export default function MessagesPage() {
@@ -369,7 +403,7 @@ function ThreadPane({
     async (opts: { background?: boolean } = {}) => {
       try {
         const d = await messagingApi.get(conversationId);
-        setDetail(d);
+        setDetail((prev) => reconcileDetail(prev, d));
         setError(null);
         // Mark read (best-effort) once the thread is open -- but only on the
         // true first load. A background refresh re-marking an already-read
@@ -415,7 +449,7 @@ function ThreadPane({
   }, [detail?.messages.length]);
 
   const applyUpdate = useCallback((d: ConversationDetail) => {
-    setDetail(d);
+    setDetail((prev) => reconcileDetail(prev, d));
     void onMutatedRef.current();
   }, []);
 
