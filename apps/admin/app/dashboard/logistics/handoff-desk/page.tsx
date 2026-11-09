@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
-import { Alert, Badge, Button, ButtonLink, Card, EmptyState, Field, LoadingRow, PageHeader, Select } from '../../../../components/ui';
+import { Alert, Badge, Button, ButtonLink, Card, EmptyState, Field, Input, LoadingRow, PageHeader, Select } from '../../../../components/ui';
 
 /**
  * The handoff desk: what a terminal should be expecting.
@@ -15,6 +15,31 @@ import { Alert, Badge, Button, ButtonLink, Card, EmptyState, Field, LoadingRow, 
  * terminal. It shows only what the API asserts: it does not know departure
  * timetables and it does not track vehicles live, so a parcel is either
  * "arrived" or "on its way", nothing more precise.
+ *
+ * TERM-5-UI, per leg kind:
+ *   - FIRST_MILE: no reveal — an ENTRY field. Staff used to reveal this leg's
+ *     own code and read it to the courier verbally, which made the handoff's
+ *     "proof" circular: whoever staff told would pass, correct courier or
+ *     not (ShipmentService.revealHandoffPin's own doc comment names this as
+ *     the original leak). The courier now self-reveals their own code on
+ *     their own device (ShipmentDriverService.revealOwnCode) and presents it
+ *     at the counter; staff type it in here and submit it through
+ *     `completeLeg` with `presentedByAssignedCourier: true` — never a courier
+ *     user id the browser looked up (expectedAtHub deliberately never
+ *     exposes one, BMPL-247's same minimum-identity line that already
+ *     withholds the courier's phone number below). The server derives who
+ *     "the assigned courier" is from the leg itself and refuses a code that
+ *     doesn't match, so staff learning a code and vouching for whoever
+ *     walked up is no longer sufficient — the courier has to have actually
+ *     held the device that revealed it.
+ *   - LINE_HAUL: unchanged. No courier exists in this flow (a carrier runs
+ *     it, not a BML driver), so staff being both revealer and submitter is
+ *     correct here, not a leak — there is no second party to separate it
+ *     from. Keeps the pre-existing GET handoff-pin reveal exactly as it was.
+ *   - LAST_MILE: a new release-to-courier entry. `confirmPickup` (the
+ *     courier's own self-submit path) never took a code for this leg kind at
+ *     all, so this closes a verification gap that previously had nothing on
+ *     either side of it, staff or courier.
  */
 
 interface HubOption {
@@ -66,6 +91,16 @@ export default function HandoffDeskPage() {
   const [pinErr, setPinErr] = useState<Record<string, string>>({});
   const [pinBusy, setPinBusy] = useState<string | null>(null);
 
+  // FIRST_MILE: the entry field the courier's presented code goes into.
+  const [handoffForms, setHandoffForms] = useState<Record<string, { pin: string; receivedByName: string }>>({});
+  const [handoffErr, setHandoffErr] = useState<Record<string, string>>({});
+  const [handoffBusy, setHandoffBusy] = useState<string | null>(null);
+
+  // LAST_MILE: the entry field for a courier collecting from this terminal.
+  const [releaseForms, setReleaseForms] = useState<Record<string, string>>({});
+  const [releaseErr, setReleaseErr] = useState<Record<string, string>>({});
+  const [releaseBusy, setReleaseBusy] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     api
@@ -88,9 +123,14 @@ export default function HandoffDeskPage() {
   const load = useCallback(async () => {
     if (!hubId) return;
     setLoading(true);
-    // Revealed codes never survive a reload or a change of terminal.
+    // Revealed codes, and anything mid-typed into an entry field, never
+    // survive a reload or a change of terminal.
     setPins({});
     setPinErr({});
+    setHandoffForms({});
+    setHandoffErr({});
+    setReleaseForms({});
+    setReleaseErr({});
     try {
       setRows(await api.get<ExpectedLeg[]>(`/admin/logistics/hubs/${hubId}/expected`));
       setErr(null);
@@ -124,6 +164,72 @@ export default function HandoffDeskPage() {
       const { [legId]: _drop, ...rest } = prev;
       return rest;
     });
+  }
+
+  /**
+   * FIRST_MILE: staff submit the code the courier presented, having read it
+   * off their own device. `presentedByAssignedCourier: true` tells the
+   * server to resolve who "the assigned courier" is from the leg itself —
+   * this screen never learns or sends a courier's user id.
+   */
+  async function submitHandoff(legId: string) {
+    const form = handoffForms[legId] ?? { pin: '', receivedByName: '' };
+    const pin = form.pin.trim();
+    const receivedByName = form.receivedByName.trim();
+    if (!pin || !receivedByName) {
+      setHandoffErr((prev) => ({ ...prev, [legId]: 'Enter the code the courier presented and who is receiving it.' }));
+      return;
+    }
+    setHandoffBusy(legId);
+    setHandoffErr((prev) => {
+      const { [legId]: _drop, ...rest } = prev;
+      return rest;
+    });
+    try {
+      await api.post(`/admin/logistics/legs/${legId}/handoff`, { pin, receivedByName, presentedByAssignedCourier: true });
+      setHandoffForms((prev) => {
+        const { [legId]: _drop, ...rest } = prev;
+        return rest;
+      });
+      await load();
+    } catch (e) {
+      // Includes the lockout and "no courier assigned" refusals — the
+      // server's own words, same as every other PIN failure on this screen.
+      setHandoffErr((prev) => ({ ...prev, [legId]: (e as ApiError).message ?? 'Could not record this handoff.' }));
+    } finally {
+      setHandoffBusy(null);
+    }
+  }
+
+  /**
+   * LAST_MILE: staff release a parcel to the courier presenting their own
+   * terminal code. No courier id to send at all — this route only ever
+   * exists for a leg that already has an assigned courier, so the server
+   * derives the presenter from the leg's own assignment unconditionally.
+   */
+  async function submitRelease(legId: string) {
+    const pin = (releaseForms[legId] ?? '').trim();
+    if (!pin) {
+      setReleaseErr((prev) => ({ ...prev, [legId]: 'Enter the code the courier presented.' }));
+      return;
+    }
+    setReleaseBusy(legId);
+    setReleaseErr((prev) => {
+      const { [legId]: _drop, ...rest } = prev;
+      return rest;
+    });
+    try {
+      await api.post(`/admin/logistics/legs/${legId}/release-to-courier`, { pin });
+      setReleaseForms((prev) => {
+        const { [legId]: _drop, ...rest } = prev;
+        return rest;
+      });
+      await load();
+    } catch (e) {
+      setReleaseErr((prev) => ({ ...prev, [legId]: (e as ApiError).message ?? 'Could not release this parcel.' }));
+    } finally {
+      setReleaseBusy(null);
+    }
   }
 
   useEffect(() => {
@@ -220,10 +326,10 @@ export default function HandoffDeskPage() {
                     </div>
                   </div>
 
-                  {/* The code a desk verifies is revealed one deliberate click at
-                      a time — every reveal is audited. A last-mile code belongs
-                      to the recipient, not the desk, so those rows offer none. */}
-                  {(r.kind === 'FIRST_MILE' || r.kind === 'LINE_HAUL') && (
+                  {/* LINE_HAUL only: no courier exists in this flow, so staff
+                      revealing and submitting the same code is correct, not a
+                      leak. Unchanged by TERM-5-UI. */}
+                  {r.kind === 'LINE_HAUL' && (
                     <div className="mt-3 border-t border-slate-100 pt-2">
                       {pins[r.legId] ? (
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
@@ -261,6 +367,80 @@ export default function HandoffDeskPage() {
                       )}
                       {pinErr[r.legId] && (
                         <p className="mt-1 break-words text-xs font-medium text-amber-800">{pinErr[r.legId]}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* FIRST_MILE: an entry field, not a reveal — the courier
+                      read this code off their own device and presents it
+                      here. Staff never learn it ahead of time. */}
+                  {r.kind === 'FIRST_MILE' && (
+                    <div className="mt-3 border-t border-slate-100 pt-2">
+                      <p className="text-xs text-[color:var(--bmpl-text-muted)]">
+                        Ask the courier for the code on their own device, and who at the counter is taking the parcel.
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-end gap-2">
+                        <Field label="Code presented" htmlFor={`handoff-pin-${r.legId}`}>
+                          <Input
+                            id={`handoff-pin-${r.legId}`}
+                            value={handoffForms[r.legId]?.pin ?? ''}
+                            onChange={(e) =>
+                              setHandoffForms((prev) => ({
+                                ...prev,
+                                [r.legId]: { ...(prev[r.legId] ?? { pin: '', receivedByName: '' }), pin: e.target.value },
+                              }))
+                            }
+                            className="w-28 font-mono"
+                            placeholder="1234"
+                          />
+                        </Field>
+                        <Field label="Received by" htmlFor={`handoff-who-${r.legId}`}>
+                          <Input
+                            id={`handoff-who-${r.legId}`}
+                            value={handoffForms[r.legId]?.receivedByName ?? ''}
+                            onChange={(e) =>
+                              setHandoffForms((prev) => ({
+                                ...prev,
+                                [r.legId]: { ...(prev[r.legId] ?? { pin: '', receivedByName: '' }), receivedByName: e.target.value },
+                              }))
+                            }
+                            placeholder="Counter staff name"
+                          />
+                        </Field>
+                        <Button onClick={() => void submitHandoff(r.legId)} disabled={handoffBusy === r.legId}>
+                          {handoffBusy === r.legId ? 'Recording…' : 'Record handoff'}
+                        </Button>
+                      </div>
+                      {handoffErr[r.legId] && (
+                        <p className="mt-1 break-words text-xs font-medium text-amber-800">{handoffErr[r.legId]}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* LAST_MILE: confirmPickup (the courier's own self-submit
+                      path) never took a code for this leg kind at all — this
+                      is its first verification, staff- or courier-side. */}
+                  {r.kind === 'LAST_MILE' && (
+                    <div className="mt-3 border-t border-slate-100 pt-2">
+                      <p className="text-xs text-[color:var(--bmpl-text-muted)]">
+                        Ask the courier collecting this parcel for the code on their own device.
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-end gap-2">
+                        <Field label="Code presented" htmlFor={`release-pin-${r.legId}`}>
+                          <Input
+                            id={`release-pin-${r.legId}`}
+                            value={releaseForms[r.legId] ?? ''}
+                            onChange={(e) => setReleaseForms((prev) => ({ ...prev, [r.legId]: e.target.value }))}
+                            className="w-28 font-mono"
+                            placeholder="1234"
+                          />
+                        </Field>
+                        <Button onClick={() => void submitRelease(r.legId)} disabled={releaseBusy === r.legId}>
+                          {releaseBusy === r.legId ? 'Releasing…' : 'Release to courier'}
+                        </Button>
+                      </div>
+                      {releaseErr[r.legId] && (
+                        <p className="mt-1 break-words text-xs font-medium text-amber-800">{releaseErr[r.legId]}</p>
                       )}
                     </div>
                   )}
