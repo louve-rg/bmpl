@@ -128,6 +128,31 @@ describe('audienceForRoles', () => {
   it('does not hijack a job-seeker application that happens to carry an applicationId', () => {
     expect(audienceForRoles(['CUSTOMER'], { category: 'JOB', data: { applicationId: 'a1' } })).toBe('CUSTOMER');
   });
+
+  it('resolves a courier-leg offer to the driver even with no deliveryId', () => {
+    // Dispatch's shipping-leg offer deliberately carries driverJobId, never
+    // deliveryId — a courier leg is not a marketplace OrderDelivery. This used
+    // to match no driver branch and fall through to CUSTOMER, sending the
+    // driver to the customer's own shipment tracker.
+    expect(
+      audienceForRoles(['CUSTOMER', 'DELIVERY_DRIVER'], {
+        category: 'DELIVERY',
+        data: { driverJobId: 'leg1', jobKind: 'FIRST_MILE', reference: 'BML-ABCD2345' },
+      }),
+    ).toBe('DRIVER');
+  });
+
+  it('still resolves a customer-audience shipping notification to CUSTOMER', () => {
+    // The same payload shape reaching an account that holds no driver role
+    // must keep going to the customer tracker — this branch is additive, not
+    // a wider CUSTOMER-to-DRIVER reassignment.
+    expect(
+      audienceForRoles(['CUSTOMER'], {
+        category: 'DELIVERY',
+        data: { driverJobId: 'leg1', jobKind: 'FIRST_MILE', reference: 'BML-ABCD2345' },
+      }),
+    ).toBe('CUSTOMER');
+  });
 });
 
 describe('multi-leg shipping', () => {

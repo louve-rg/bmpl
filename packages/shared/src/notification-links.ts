@@ -118,6 +118,10 @@ export function audienceForRoles(
   const isVendorRole = roleCodes.includes('VENDOR');
 
   if (isDriverRole && n.category === 'DELIVERY' && str(d.deliveryId)) return 'DRIVER';
+  // A shipping courier leg offer carries driverJobId, never deliveryId — it is
+  // not a marketplace OrderDelivery. Without this branch it fell through to
+  // CUSTOMER and sent the driver to the customer's own shipment tracker.
+  if (isDriverRole && n.category === 'DELIVERY' && str(d.driverJobId)) return 'DRIVER';
   if (isDriverRole && n.category === 'ACCOUNT' && str(d.vehicleId)) return 'DRIVER';
   // "Earning credited" is filed under DELIVERY and carries only an earningId, so
   // it fell through to CUSTOMER and opened nothing. Money a driver was paid is

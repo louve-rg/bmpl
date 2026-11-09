@@ -399,6 +399,15 @@ export default function DriverShippingJobPage() {
         </Alert>
       )}
 
+      {!loading && err && !job && (
+        <Link
+          href="/dashboard/driver/jobs"
+          className="mt-4 flex min-h-[44px] w-full items-center justify-center rounded-bmpl-md border border-slate-300 text-sm font-semibold text-slate-900 sm:w-auto sm:px-4"
+        >
+          Back to my deliveries
+        </Link>
+      )}
+
       {job && (
         <>
           <PageHeader

@@ -565,6 +565,30 @@ describe('DriverShippingJobPage — an open exception blocks progression (owner 
  * to hide, not an exception to it. Neither PR's own test set proved this
  * combined behaviour on its own.
  */
+/**
+ * A driver whose leg was reassigned, expired, or no longer belongs to them
+ * (404) was stranded: the Alert rendered, but the back link lived INSIDE the
+ * `{job && (...)}` block, which never renders when the job failed to load.
+ */
+describe('DriverShippingJobPage — a 404 never strands the driver (MDF-nav2)', () => {
+  it('shows a working link back to available jobs when the job is no longer theirs', async () => {
+    apiGet.mockRejectedValue({ status: 404, message: 'Not found' });
+    const el = await mount();
+
+    expect(el.textContent).toContain('This job is no longer yours.');
+    const link = Array.from(el.querySelectorAll('a')).find((a) => a.textContent === 'Back to my deliveries');
+    expect(link).toBeTruthy();
+    expect(link!.getAttribute('href')).toBe('/dashboard/driver/jobs');
+  });
+
+  it('does not show the stranded-state back link once the job loads normally', async () => {
+    apiGet.mockResolvedValue(shippingJob());
+    const el = await mount();
+
+    expect(el.textContent).not.toContain('This job is no longer yours.');
+  });
+});
+
 describe('DriverShippingJobPage — report-issue is itself blocked during an open exception', () => {
   it('hides "Report an issue" once legStatus is EXCEPTION, even while courierStatus is still reportable', async () => {
     apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'EXCEPTION' }));
