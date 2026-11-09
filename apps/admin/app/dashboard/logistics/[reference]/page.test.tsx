@@ -766,3 +766,102 @@ describe('ShipmentOpsPage — map preview makes a text/pin mismatch visible (MDF
     expect(dialog!.textContent).toContain(`${SHIPMENT.reference} · route`);
   });
 });
+
+/**
+ * MDF-624 (DISPATCH-3): the DETAIL half of the stuck-manual-assignment pair
+ * -- the board (list) is where it must be NOTICED without opening anything;
+ * this screen is where an admin CONFIRMS before reassigning. Reads
+ * `leg.manualAssignmentPendingSince` directly -- the SAME field, computed
+ * by the SAME expression in `serialize()`, that the board already reads
+ * from `listForOps`. Deliberately NOT re-derived client-side: an earlier
+ * version of this screen derived it from courierStatus/acceptedAt alone
+ * (no offerExpiresAt on this payload to make the test three clauses), which
+ * silently matched a healthy, self-healing AUTOMATIC offer too -- see the
+ * dedicated test for that case below. Acting goes through the EXISTING
+ * LegAssignModal/reassign endpoint -- no new one.
+ */
+describe('ShipmentOpsPage — confirming and acting on a stuck manual assignment (MDF-624)', () => {
+  const STUCK_LEG = {
+    ...SHIPMENT.legs[0],
+    id: 'leg_fm',
+    kind: 'FIRST_MILE' as const,
+    status: 'READY',
+    courierStatus: 'ASSIGNED',
+    acceptedAt: null as string | null,
+    manualAssignmentPendingSince: new Date(Date.now() - 50 * 60 * 60 * 1000).toISOString() as string | null, // ~2d ago
+    courier: { displayName: 'Jordan Reyes' },
+  };
+
+  function stuckShipment(overrides: Partial<typeof STUCK_LEG> = {}) {
+    return { ...SHIPMENT, legs: [{ ...STUCK_LEG, ...overrides }] };
+  }
+
+  it('shows the stuck-assignment notice with the driver name and real age, to a read-only viewer too', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.read'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, stuckShipment());
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).toContain('Manually assigned to Jordan Reyes');
+    expect(document.body.textContent).toContain('still waiting for them to accept');
+    expect(document.body.textContent).toContain('2d ago');
+    // Notice is informational for everyone; the ACTION is what's gated.
+    expect(buttonTexts()).not.toContain('Reassign driver');
+  });
+
+  it('does NOT show the notice when manualAssignmentPendingSince is null -- covers both the driver-already-accepted case and the healthy-automatic-offer case (courierStatus ASSIGNED, acceptedAt null, but no offerExpiresAt on this payload to tell the two apart client-side)', async () => {
+    // This is the exact shape an earlier, re-derived version of this screen
+    // got wrong: ASSIGNED + acceptedAt null alone matched a self-healing
+    // AUTOMATIC offer too. Trusting the server's own field -- one
+    // computation, shared with the board -- means there is nothing left
+    // here to derive, and nothing left to get wrong the same way again.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) {
+          return jsonResponse(200, stuckShipment({ manualAssignmentPendingSince: null }));
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    expect(document.body.textContent).not.toContain('Manually assigned to');
+    expect(document.body.textContent).not.toContain('still waiting for them to accept');
+    expect(buttonTexts()).not.toContain('Reassign driver');
+  });
+
+  it('an operator gets a Reassign driver trigger that opens the existing LegAssignModal against this same leg', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, stuckShipment());
+        if (url.includes('/api/admin/logistics/legs/leg_fm/eligible-drivers')) return jsonResponse(200, []);
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    await mount();
+
+    const trigger = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Reassign driver')!;
+    expect(trigger).not.toBeUndefined();
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog!.getAttribute('aria-label')).toBe('Reassign driver');
+    expect(dialog!.textContent).toContain('Jordan Reyes');
+  });
+});

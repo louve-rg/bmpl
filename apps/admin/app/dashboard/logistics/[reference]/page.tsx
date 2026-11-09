@@ -5,9 +5,11 @@ import { useParams } from 'next/navigation';
 import { legScheduleSchema } from '@bmpl/validation';
 import { api, type ApiError } from '../../../../lib/api';
 import { adminCrumbs } from '../../../../lib/admin-nav';
+import { relativeTime } from '../../../../lib/notifications';
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select, Spinner } from '../../../../components/ui';
 import { ExceptionResolution } from '../../../../components/logistics/ExceptionResolution';
 import { ExceptionRecovery } from '../../../../components/logistics/ExceptionRecovery';
+import { LegAssignModal } from '../../../../components/logistics/LegAssignModal';
 import { AddressMapPreview } from '../../../../components/maps/AddressMapPreview';
 import type { MapPoint } from '../../../../lib/trip-map';
 
@@ -64,6 +66,19 @@ interface Leg {
    */
   operatedByProviderId?: string | null;
   operatorName?: string | null;
+  /**
+   * MDF-624/DISPATCH-2: the SAME field the ops board reads, one computation
+   * in `serialize()` shared by both — null for an automatic offer (self-
+   * healing, has its own offerExpiresAt) as well as for every accepted,
+   * unassigned or closed leg; set only for a manual assignment still
+   * waiting on the driver. Deliberately NOT re-derived client-side from
+   * courierStatus/assignedAt/acceptedAt: an earlier version of this screen
+   * did that with a two-clause test (no offerExpiresAt on this payload to
+   * make it three), which silently matched a healthy automatic offer too.
+   * Optional for the same cross-deploy reason as pickupPhotoUrls above.
+   */
+  manualAssignmentPendingSince?: string | null;
+  courier?: { displayName: string | null } | null;
 }
 
 interface Provider {
@@ -165,6 +180,7 @@ export default function ShipmentOpsPage() {
   const [canManage, setCanManage] = useState(false);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [operatorPick, setOperatorPick] = useState<Record<string, string>>({});
+  const [assigning, setAssigning] = useState<{ legId: string; currentOperator: string | null } | null>(null);
 
   // Every control on this screen — depart/arrive, confirm handover, flag a
   // problem, record a hub collection — is drawn only for logistics.operate.
@@ -436,6 +452,25 @@ export default function ShipmentOpsPage() {
                       </Badge>
                     </div>
 
+                    {leg.manualAssignmentPendingSince && (
+                      <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
+                        <p className="text-sm font-medium text-amber-800">
+                          Manually assigned to {leg.courier?.displayName ?? 'a driver'}, still waiting for them to accept —
+                          assigned {relativeTime(leg.manualAssignmentPendingSince)}.
+                        </p>
+                        {canOperate && (
+                          <Button
+                            variant="outline"
+                            className="mt-2"
+                            disabled={busy != null}
+                            onClick={() => setAssigning({ legId: leg.id, currentOperator: leg.courier?.displayName ?? null })}
+                          >
+                            Reassign driver
+                          </Button>
+                        )}
+                      </div>
+                    )}
+
                     {canOperate && (c.depart || c.arrive || c.handoff) && (
                       <div className="mt-3 border-t border-[color:var(--bmpl-border-soft)] pt-3">
                         <div className="flex flex-wrap gap-2">
@@ -642,6 +677,19 @@ export default function ShipmentOpsPage() {
             </ul>
           </Card>
         </div>
+      )}
+
+      {assigning && (
+        <LegAssignModal
+          legId={assigning.legId}
+          mode="reassign"
+          currentOperator={assigning.currentOperator}
+          onClose={() => setAssigning(null)}
+          onDone={() => {
+            setAssigning(null);
+            void load();
+          }}
+        />
       )}
     </div>
   );

@@ -286,6 +286,87 @@ describe('LogisticsOpsPage — unavailable vs exhausted drivers read as differen
   });
 });
 
+/**
+ * MDF-624 (DISPATCH-3): a manual assignment silent for days must be
+ * noticeable on the board itself, without opening the shipment — but the
+ * API hands over a raw instant, never an "is this stale" verdict, so the
+ * test pins the UI's own 24-hour judgement call, not a backend contract.
+ */
+const RECENTLY_ASSIGNED_ROW = {
+  ...ROW,
+  id: 'ship_6',
+  reference: 'BML-TEST0006',
+  legs: [
+    {
+      id: 'leg_recent',
+      sequence: 1,
+      kind: 'FIRST_MILE',
+      mode: 'LAND',
+      status: 'READY',
+      courierStatus: 'ASSIGNED',
+      from: 'Sender',
+      to: 'Belize City Hub',
+      operator: 'A. Cruz',
+      needsDriver: false,
+      manualAssignmentPendingSince: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    },
+  ],
+};
+
+const STALE_ASSIGNED_ROW = {
+  ...ROW,
+  id: 'ship_7',
+  reference: 'BML-TEST0007',
+  legs: [
+    {
+      id: 'leg_stale',
+      sequence: 1,
+      kind: 'FIRST_MILE',
+      mode: 'LAND',
+      status: 'READY',
+      courierStatus: 'ASSIGNED',
+      from: 'Sender',
+      to: 'Belize City Hub',
+      operator: 'A. Cruz',
+      needsDriver: false,
+      manualAssignmentPendingSince: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+  ],
+};
+
+describe('LogisticsOpsPage — a stale manual assignment is noticed on the board itself (MDF-624)', () => {
+  it('a recently-assigned leg shows an informational badge with its real age, and does not highlight the card', async () => {
+    stubFetchRows(['logistics.read'], [RECENTLY_ASSIGNED_ROW]);
+    await mount();
+
+    expect(document.body.textContent).toContain('Awaiting driver');
+    expect(document.body.textContent).toContain('2h ago');
+    expect(document.body.textContent).not.toContain('gone 24+ hours');
+    const card = document.body.querySelector('a[href*="BML-TEST0006"]')?.closest('[class*="border-amber"]');
+    expect(card).toBeNull();
+  });
+
+  it('a manual assignment stuck 24+ hours gets a warning badge, an amber card and a named message — while the normal needsDriver wording stays absent', async () => {
+    stubFetchRows(['logistics.operate'], [STALE_ASSIGNED_ROW]);
+    await mount();
+
+    expect(document.body.textContent).toContain('Awaiting driver');
+    expect(document.body.textContent).toContain('3d ago');
+    expect(document.body.textContent).toContain('gone 24+ hours without the driver accepting');
+    const card = document.body.querySelector('a[href*="BML-TEST0007"]')?.closest('[class*="border-amber"]');
+    expect(card).not.toBeNull();
+    expect(document.body.textContent).not.toContain('No driver found');
+    expect(document.body.textContent).not.toContain('ran out of drivers');
+  });
+
+  it('an operator still sees the existing Reassign control right alongside the staleness badge — no new action was invented', async () => {
+    stubFetchRows(['logistics.operate'], [STALE_ASSIGNED_ROW]);
+    await mount();
+
+    expect(buttonTexts()).toContain('Reassign');
+  });
+});
+
 describe('LogisticsOpsPage — the LegAssignModal trigger is gated on logistics.operate (BMPL-280)', () => {
   it('a logistics.read-only reader sees no assign/reassign trigger, and the leg still reports its state as text', async () => {
     stubFetch(['logistics.read']);
