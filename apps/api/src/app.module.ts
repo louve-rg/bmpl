@@ -39,6 +39,7 @@ import { WalletModule } from './wallet/wallet.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
 import { ShippingModule } from './shipping/shipping.module';
+import { TerminalModule } from './terminal/terminal.module';
 import { HealthModule } from './health/health.module';
 import { DevModule } from './dev/dev.module';
 import { JwtAuthGuard, PermissionsGuard, RolesGuard } from './auth/guards';
@@ -89,6 +90,7 @@ const devModules = process.env.NODE_ENV === 'production' ? [] : [DevModule];
     HealthModule,
     GeocodingModule,
     ShippingModule,
+    TerminalModule,
     ...devModules,
   ],
   providers: [

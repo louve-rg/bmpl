@@ -48,6 +48,15 @@ export const templates = {
       body: `Welcome to Belize Marketplace & Logistics. Confirm your email to activate your account: ${link}`,
     };
   },
+  /** TERM-3: an admin-driven invite to join a terminal company's staff. The
+   *  invitee may or may not have an existing BML account — the link works
+   *  either way, so the copy deliberately says nothing about which. */
+  terminalInvite(link: string, companyName: string): { title: string; body: string } {
+    return {
+      title: `You're invited to join ${companyName} on BML`,
+      body: `${companyName} has invited you to their terminal workspace on Belize Marketplace & Logistics. Use this link to accept: ${link}\n\nIf you don't recognize this invitation, you can ignore this email.`,
+    };
+  },
   passwordReset(link: string): { title: string; body: string } {
     return {
       title: 'Reset your password',
