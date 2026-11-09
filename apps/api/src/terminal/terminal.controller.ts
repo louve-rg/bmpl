@@ -4,15 +4,20 @@ import {
   addTerminalCompanyLocationSchema,
   createTerminalCompanySchema,
   inviteTerminalCompanyMemberSchema,
+  legHandoffSchema,
+  legReleaseToCourierSchema,
   type AcceptTerminalInviteInput,
   type AddTerminalCompanyLocationInput,
   type CreateTerminalCompanyInput,
   type InviteTerminalCompanyMemberInput,
+  type LegHandoffInput,
+  type LegReleaseToCourierInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Public, RequirePermission } from '../common/decorators';
 import { StrictThrottle } from '../throttling/throttle.decorators';
 import type { AuthContext } from '../common/auth-context';
+import { ShipmentService } from '../shipping/shipment.service';
 import { TerminalService } from './terminal.service';
 
 /** The admin console's side: create companies/locations, drive invites, end members. */
@@ -92,6 +97,48 @@ export class TerminalController {
   @Get('me')
   myWorkspace(@CurrentUser() u: AuthContext) {
     return this.terminal.myWorkspace(u.userId);
+  }
+}
+
+/**
+ * TERM-5: a terminal company's own staff submitting a courier's code —
+ * the location-scoped alternative to `admin/logistics/legs/:id/handoff`
+ * and `/release-to-courier` (`ShippingController`, `logistics.operate`,
+ * unrestricted by location — BML's own ops staff, unchanged by this card).
+ *
+ * No `@RequirePermission`/`@Roles`, same reasoning as `TerminalController`
+ * above: a terminal member holds neither axis. The ONE check that matters
+ * is `TerminalService.assertStaffLocationAccess` against the SPECIFIC hub
+ * this leg's handoff/pickup happens at — looked up from ShipmentService,
+ * never assumed from the request. The underlying business logic (code
+ * verification, custody, the lockout) is entirely ShipmentService's; this
+ * controller adds authorization, nothing else.
+ */
+@Controller('terminal/legs')
+export class TerminalLegsController {
+  constructor(
+    private readonly terminal: TerminalService,
+    private readonly shipments: ShipmentService,
+  ) {}
+
+  @StrictThrottle()
+  @Post(':id/handoff')
+  async handoff(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legHandoffSchema)) dto: LegHandoffInput) {
+    const hubId = await this.shipments.legHubForLocationCheck(id);
+    await this.terminal.assertStaffLocationAccess(u.userId, hubId);
+    return this.shipments.completeLeg(id, dto, { userId: u.userId });
+  }
+
+  @StrictThrottle()
+  @Post(':id/release-to-courier')
+  async releaseToCourier(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(legReleaseToCourierSchema)) dto: LegReleaseToCourierInput,
+  ) {
+    const hubId = await this.shipments.legHubForLocationCheck(id);
+    await this.terminal.assertStaffLocationAccess(u.userId, hubId);
+    return this.shipments.staffReleaseToCourier(id, dto, { userId: u.userId });
   }
 }
 

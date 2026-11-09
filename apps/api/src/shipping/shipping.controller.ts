@@ -11,6 +11,7 @@ import {
   legDepartSchema,
   legExceptionSchema,
   legHandoffSchema,
+  legReleaseToCourierSchema,
   legScheduleSchema,
   reassignShipmentLegSchema,
   addHubHoursExceptionSchema,
@@ -47,6 +48,7 @@ import {
   type LegDepartInput,
   type LegExceptionInput,
   type LegHandoffInput,
+  type LegReleaseToCourierInput,
   type LegOperatorRejectInput,
   type LegScheduleInput,
   type ReassignShipmentLegInput,
@@ -772,12 +774,40 @@ export class AdminLogisticsController {
     return this.shipments.revealHandoffPin(id, { userId: u.userId });
   }
 
-  /** Completing a leg means proving the handoff, not asserting it. */
+  /**
+   * Completing a leg means proving the handoff, not asserting it.
+   *
+   * TERM-5: `dto.presentedCourierUserId` is how staff submit a FIRST_MILE
+   * handoff — the courier presents their own self-revealed code
+   * (ShipmentDriverService.revealOwnCode), staff never learn it
+   * independently. Omitted, this behaves exactly as before: a LINE_HAUL
+   * handoff (no assigned courier to present anything) still completes on
+   * the code alone, and an ops account with no presented identity still
+   * cannot stand in for an assigned courier on any other leg kind.
+   */
   @RequirePermission('logistics.operate')
   @StrictThrottle()
   @Post('legs/:id/handoff')
   handoff(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legHandoffSchema)) dto: LegHandoffInput) {
     return this.shipments.completeLeg(id, dto, { userId: u.userId });
+  }
+
+  /**
+   * TERM-5: release a LAST_MILE leg to the courier presenting their own
+   * terminal code at the hub counter — the staff-submit path confirmPickup
+   * never had, closing the "a courier collects from a terminal and nothing
+   * verifies it" gap. `presentedCourierUserId` is required here, unlike
+   * `handoff` above: this route has no self-submit fallback.
+   */
+  @RequirePermission('logistics.operate')
+  @StrictThrottle()
+  @Post('legs/:id/release-to-courier')
+  releaseToCourier(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(legReleaseToCourierSchema)) dto: LegReleaseToCourierInput,
+  ) {
+    return this.shipments.staffReleaseToCourier(id, dto, { userId: u.userId });
   }
 
   @RequirePermission('logistics.operate')

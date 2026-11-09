@@ -54,6 +54,16 @@ export class DriverShippingController {
   }
 
   /**
+   * TERM-5: the courier's own code to present at a hub counter — never the
+   * recipient's delivery code. See ShipmentService.revealCourierCode.
+   */
+  @StrictThrottle()
+  @Get(':id/code')
+  revealCode(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.jobs.revealOwnCode({ userId: u.userId }, id);
+  }
+
+  /**
    * The parcel is in the vehicle. Custody moves here. Throttled: on an
    * enforcing leg (FIRST_MILE/DIRECT, service needsFirstMile) this is now
    * also a code-verification endpoint, same reasoning as /handoff below.

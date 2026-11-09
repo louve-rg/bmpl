@@ -2060,7 +2060,7 @@ export class ShipmentService {
     // A failed attempt recorded inside the transaction is rolled back when that
     // transaction throws, so the counter would never climb and the lockout below
     // would be unreachable — the code could be guessed forever.
-    await this.verifyLegPinOrThrow(legId, 'handoff', input.pin, actor);
+    await this.verifyLegPinOrThrow(legId, 'handoff', input.pin, actor, input.presentedCourierUserId);
 
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
       // Conditional write, NOT an unconditional update by id. `leg.status` is
@@ -2185,12 +2185,25 @@ export class ShipmentService {
    * ShipmentDriverService.confirmPickup). This method's only job, given that
    * a check IS happening, is: is there a pin, does it match, count the
    * failure, lock out at the shared threshold.
+   *
+   * TERM-5: `presentedCourierUserId` decouples "who is assigned" from "who
+   * is signed in." Every pre-existing caller (the courier's own
+   * completeHandoff/confirmPickup) omits it, so `isAssignedCourier` falls
+   * back to `actor.userId` exactly as before this param existed. The two
+   * NEW staff-submitted callers (completeLeg's admin route with an explicit
+   * presentedCourierUserId, and staffReleaseToCourier) are never themselves
+   * the courier — the whole point of the reversal is that the courier
+   * presents a code only THEY could have self-revealed, and staff submit it
+   * on their behalf. Checking the PRESENTED identity against
+   * assignedDriverProfileId, instead of the submitting actor's, is what
+   * makes that submission meaningful rather than just "staff knows a code."
    */
   private async verifyLegPinOrThrow(
     legId: string,
     kind: 'pickup' | 'handoff',
     pin: string | undefined,
     actor: { userId: string },
+    presentedCourierUserId?: string,
   ) {
     const leg = await this.prisma.shipmentLeg.findUnique({
       where: { id: legId },
@@ -2242,10 +2255,11 @@ export class ShipmentService {
       throw new BadRequestException(`Enter the ${label} code.`);
     }
 
+    const courierIdentityUserId = presentedCourierUserId ?? actor.userId;
     const isAssignedCourier =
       leg.assignedDriverProfileId == null ||
-      (await this.prisma.driverProfile.findUnique({ where: { userId: actor.userId }, select: { id: true } }))?.id ===
-        leg.assignedDriverProfileId;
+      (await this.prisma.driverProfile.findUnique({ where: { userId: courierIdentityUserId }, select: { id: true } }))
+        ?.id === leg.assignedDriverProfileId;
     const codeMatches = !!storedPin && timingSafeEqualStr(pin, storedPin);
 
     if (!isAssignedCourier || !codeMatches) {
@@ -2257,7 +2271,13 @@ export class ShipmentService {
         // batch was not scoped for) — `kind` in the payload disambiguates.
         action: 'SHIPMENT_LEG_HANDOFF_PIN_FAILED',
         actorId: actor.userId,
-        newValue: { legId: leg.id, shipmentId: leg.shipmentId, kind, wrongCourier: !isAssignedCourier },
+        newValue: {
+          legId: leg.id,
+          shipmentId: leg.shipmentId,
+          kind,
+          wrongCourier: !isAssignedCourier,
+          ...(presentedCourierUserId ? { presentedCourierUserId } : {}),
+        },
       });
       const left = DELIVERY_PIN_MAX_ATTEMPTS - attempts - 1;
       if (left <= 0) {
@@ -2283,9 +2303,14 @@ export class ShipmentService {
     }
   }
 
-  /** Public entry for ShipmentDriverService.confirmPickup — same method, see above. */
-  async verifyPickupPin(legId: string, pin: string | undefined, actor: { userId: string }) {
-    return this.verifyLegPinOrThrow(legId, 'pickup', pin, actor);
+  /**
+   * Public entry for ShipmentDriverService.confirmPickup — same method, see
+   * above. `presentedCourierUserId` is for staffReleaseToCourier's own
+   * call (the LAST_MILE hub-pickup case); confirmPickup's own self-submit
+   * call never passes it.
+   */
+  async verifyPickupPin(legId: string, pin: string | undefined, actor: { userId: string }, presentedCourierUserId?: string) {
+    return this.verifyLegPinOrThrow(legId, 'pickup', pin, actor, presentedCourierUserId);
   }
 
   /**
@@ -4508,14 +4533,33 @@ export class ShipmentService {
   }
 
   /**
-   * The deliberate STAFF reveal the serializer's null promises. FIRST_MILE and
-   * line-haul handoffs end at a counter, and the code the deliverer must produce
-   * is held by the RECEIVING side — terminal staff — who until now had no way to
-   * obtain it (finding 2 of the delivery audit: those handoffs could not
-   * legitimately complete). Mirrors the delivery console's PIN reveal, with one
-   * deliberate difference: EVERY reveal writes an audit row, because this module
-   * already audits failed PIN attempts and an unaudited reveal would be below
-   * its own standard. The audit records THAT the code was revealed and by whom —
+   * The deliberate STAFF reveal the serializer's null promises — still
+   * FIRST_MILE/LINE_HAUL for now. A line-haul handoff has no assigned courier
+   * at all (no carrier user account exists in that flow), so staff are
+   * necessarily both the revealer and the eventual submitter — the one case
+   * where that is correct, not a leak, because there is no second party to
+   * separate it from.
+   *
+   * FIRST_MILE's reveal here IS the pre-existing leak (finding 2 of the
+   * original delivery audit): staff learning the code and telling the
+   * assigned courier verbally makes the handoff's "proof" circular — whoever
+   * staff told passes, correct courier or not. TERM-5 built the fix
+   * (`revealCourierCode`, the courier's own self-reveal, plus `completeLeg`'s
+   * `presentedCourierUserId` for staff to SUBMIT without ever learning the
+   * code) but narrowing this method to LINE_HAUL-only is deliberately held
+   * back off this branch — `apps/admin/.../handoff-desk/page.tsx:226` still
+   * calls this endpoint for FIRST_MILE and has no replacement path yet. The
+   * narrowing to `leg.kind !== 'LINE_HAUL'` ships on its own branch, merged
+   * atomically with the handoff-desk UI change that replaces that call
+   * (TERM-5-UI). Until then this stays permissive and the leak stays open —
+   * known, not fixed by omission. A LAST_MILE or DIRECT leg's own handoff
+   * code was never staff's to read either way — it ends at the recipient's
+   * door, and the serializer already shows it to them.
+   *
+   * Mirrors the delivery console's PIN reveal, with one deliberate difference:
+   * EVERY reveal writes an audit row, because this module already audits
+   * failed PIN attempts and an unaudited reveal would be below its own
+   * standard. The audit records THAT the code was revealed and by whom —
    * never the code itself.
    */
   async revealHandoffPin(legId: string, actor: { userId: string }) {
@@ -4534,34 +4578,212 @@ export class ShipmentService {
       },
     });
     if (!leg) throw new NotFoundException('Leg not found.');
-    // Only a code held at a DESK is staff's to reveal. A LAST_MILE or DIRECT
-    // leg ends at the recipient's door, and that code belongs to the recipient
-    // — the serializer already shows it to them, and staff have no business
-    // reading it out.
     if (leg.kind !== 'FIRST_MILE' && leg.kind !== 'LINE_HAUL') {
-      throw new BadRequestException('This code is held by the recipient, not at a terminal, and cannot be revealed to staff.');
+      throw new BadRequestException('This code is held by the courier or the recipient, never by staff, and cannot be revealed here.');
     }
     // A completed or cancelled leg's code is dead — the same rule pinFor
     // applies to the customer's own view.
     if (leg.status === 'COMPLETED' || leg.status === 'CANCELLED') {
       throw new BadRequestException('This leg is finished; its handoff code is no longer valid.');
     }
-    // The self-delivery invariant, in reveal form: the driver who must PRODUCE
-    // the code never obtains it from us, whatever permissions their other hats
-    // hold. Matched on the USER id, never the active role, exactly as every
-    // other conflict-of-interest check in this codebase.
+    // Live for FIRST_MILE (assignedDriver is the courier) — blocks the
+    // assigned courier from reading their own code through the STAFF route
+    // if they also happen to hold staff access. Dead code for LINE_HAUL
+    // today (assignedDriver is always null for this kind — no carrier user
+    // account exists in that flow), kept as a defensive backstop rather than
+    // removed: the self-delivery invariant must still hold if a future
+    // change ever gives LINE_HAUL an assignee.
     if (leg.assignedDriver && leg.assignedDriver.userId === actor.userId) {
       throw new ForbiddenException('You are the assigned driver for this leg; the receiving side holds the code.');
     }
     await this.audit.record({
       action: 'SHIPMENT_HANDOFF_PIN_REVEALED',
       actorId: actor.userId,
-      newValue: { legId: leg.id, shipmentId: leg.shipmentId, reference: leg.shipment.reference, kind: leg.kind, legStatus: leg.status },
+      newValue: {
+        legId: leg.id,
+        shipmentId: leg.shipmentId,
+        reference: leg.shipment.reference,
+        legKind: leg.kind,
+        legStatus: leg.status,
+        revealedBy: 'STAFF',
+      },
     });
     return {
       handoffPin: leg.handoffPin,
       handoffPinAttempts: leg.handoffPinAttempts,
       handoffVerificationStatus: leg.handoffVerificationStatus,
     };
+  }
+
+  /**
+   * TERM-5: the courier's OWN half of the handoff reversal — the code they
+   * must present at a hub counter, read directly rather than relayed through
+   * staff. This is the fix for the "wrong direction" defect: before this
+   * existed, staff had to reveal a FIRST_MILE leg's code (above) and tell the
+   * assigned courier verbally, which made the handoff's "proof" circular.
+   *
+   * Eligible for exactly the two leg kinds where a courier hands a parcel to,
+   * or collects one from, a hub counter with no customer present to hold the
+   * code instead: FIRST_MILE (handoffPin, the code staff used to reveal) and
+   * LAST_MILE (pickupPin — generated for every leg kind at creation, but
+   * never exposed anywhere for LAST_MILE until now, since no leg of this kind
+   * had a legitimate reason to show it to anyone before this card).
+   *
+   * Deliberately NEVER returns a LAST_MILE/DIRECT leg's handoffPin (the
+   * RECIPIENT's own delivery code) or a FIRST_MILE/DIRECT leg's pickupPin
+   * (the SENDER's own collection code) — the owner's standing boundary that
+   * "the driver must never receive the secret code through an API response
+   * intended for the driver" is about exactly those two codes, and this
+   * method's kind-gate is what keeps it that way: every other leg kind falls
+   * through to the refusal below, never to a code lookup.
+   */
+  async revealCourierCode(legId: string, actor: { userId: string }) {
+    const leg = await this.prisma.shipmentLeg.findUnique({
+      where: { id: legId },
+      select: {
+        id: true,
+        shipmentId: true,
+        kind: true,
+        status: true,
+        assignedDriverProfileId: true,
+        handoffPin: true,
+        handoffPinAttempts: true,
+        pickupPin: true,
+        pickupPinAttempts: true,
+        shipment: { select: { reference: true } },
+      },
+    });
+    if (!leg) throw new NotFoundException('Leg not found.');
+    if (leg.status === 'COMPLETED' || leg.status === 'CANCELLED') {
+      throw new BadRequestException('This leg is finished; its code is no longer valid.');
+    }
+    // The inverse of revealHandoffPin's own check: ONLY the assigned courier
+    // may read this. Matched on the USER id via their driver profile, never
+    // on the active role, same as every other conflict-of-interest check in
+    // this codebase — and checked even though the controller route is
+    // already driver-scoped (ownedLeg), as a second, self-contained lock.
+    const profile = await this.prisma.driverProfile.findUnique({ where: { userId: actor.userId }, select: { id: true } });
+    if (!profile || profile.id !== leg.assignedDriverProfileId) {
+      throw new ForbiddenException('You are not the courier assigned to this leg.');
+    }
+
+    let kind: 'pickup' | 'handoff';
+    let code: string | null;
+    let attempts: number;
+    if (leg.kind === 'FIRST_MILE') {
+      kind = 'handoff';
+      code = leg.handoffPin;
+      attempts = leg.handoffPinAttempts;
+    } else if (leg.kind === 'LAST_MILE') {
+      kind = 'pickup';
+      code = leg.pickupPin;
+      attempts = leg.pickupPinAttempts;
+    } else {
+      // DIRECT and LINE_HAUL never reach a hub counter from the courier's
+      // side (DIRECT has none at all; LINE_HAUL has no courier at all) — no
+      // code for either belongs to a courier to present.
+      throw new BadRequestException('This leg has no terminal code for a courier to present.');
+    }
+
+    await this.audit.record({
+      action: 'SHIPMENT_HANDOFF_PIN_REVEALED',
+      actorId: actor.userId,
+      newValue: {
+        legId: leg.id,
+        shipmentId: leg.shipmentId,
+        reference: leg.shipment.reference,
+        legKind: leg.kind,
+        legStatus: leg.status,
+        pinKind: kind,
+        revealedBy: 'COURIER',
+      },
+    });
+    return { kind, code, attempts };
+  }
+
+  /**
+   * TERM-5: which hub a leg's courier-code submission actually happens at —
+   * for the terminal module's own location-scoped authorization ONLY
+   * (TerminalLegsController, via TerminalService.assertStaffLocationAccess),
+   * never for a customer-facing or `logistics.operate` read. A FIRST_MILE or
+   * LINE_HAUL handoff happens at the RECEIVING hub (destinationHubId); a
+   * LAST_MILE release happens at the hub the courier is COLLECTING from
+   * (originHubId) — the two staff-submit actions this card adds. DIRECT has
+   * no hub at all and returns null, which the caller must refuse on.
+   */
+  async legHubForLocationCheck(legId: string): Promise<string | null> {
+    const leg = await this.prisma.shipmentLeg.findUnique({
+      where: { id: legId },
+      select: { kind: true, originHubId: true, destinationHubId: true },
+    });
+    if (!leg) throw new NotFoundException('Leg not found.');
+    return leg.kind === 'LAST_MILE' ? leg.originHubId : leg.destinationHubId;
+  }
+
+  /**
+   * TERM-5's second gap: a LAST_MILE `confirmPickup` (ShipmentDriverService)
+   * is the courier's own self-submit call and takes no code at all for this
+   * leg kind — measured live, the hub-to-courier handover had no
+   * verification whatsoever. This is staff's SUBMIT side of the same
+   * reversal `completeLeg`'s `presentedCourierUserId` gives the hub-to-staff
+   * direction: the courier self-reveals their own `pickupPin` above, presents
+   * it verbally at the counter, and staff submit it here — staff never learn
+   * the code independently, and `presentedCourierUserId` is required (not
+   * optional, unlike `completeLeg`'s): this route has no self-submit
+   * fallback to fall back to.
+   *
+   * Mirrors `ShipmentDriverService.confirmPickup`'s own writes (courierStatus
+   * DRIVER_ACCEPTED -> PICKUP_CONFIRMED, pickedUpAt, pickupVerifiedAt/
+   * pickupVerificationStatus) followed by `startLeg` for the status
+   * transition and custody — reused as-is, not reimplemented: `startLeg`
+   * already re-derives the assigned courier from whatever userId its own
+   * actor carries (BMPL-174, "closes the same gap for the admin desk"), so
+   * passing the already-verified `presentedCourierUserId` as that actor makes
+   * `startLeg`'s own check pass naturally and attributes the resulting
+   * custody event to the courier who now actually holds the parcel — exactly
+   * who custody is supposed to name, not the staff member who processed the
+   * release. Staff's own part is recorded on the audit row below instead.
+   */
+  async staffReleaseToCourier(legId: string, input: { pin: string; presentedCourierUserId: string }, actor: { userId: string }) {
+    const leg = await this.prisma.shipmentLeg.findUnique({
+      where: { id: legId },
+      select: { id: true, shipmentId: true, kind: true, status: true, courierStatus: true, assignedDriverProfileId: true, shipment: { select: { reference: true } } },
+    });
+    if (!leg) throw new NotFoundException('Leg not found.');
+    if (leg.kind !== 'LAST_MILE') {
+      throw new BadRequestException('Only a last-mile leg is released to a courier at a terminal.');
+    }
+    if (leg.assignedDriverProfileId == null) {
+      throw new BadRequestException('No courier is assigned to this leg yet.');
+    }
+    if (leg.courierStatus !== 'DRIVER_ACCEPTED') {
+      throw new BadRequestException('This leg is not ready to be released to its courier.');
+    }
+
+    // Checked BEFORE the write below, in its own write — same reasoning as
+    // completeLeg's own call: a failed attempt recorded only inside a later
+    // transaction would roll back when that transaction throws, and the
+    // counter would never climb.
+    await this.verifyLegPinOrThrow(legId, 'pickup', input.pin, actor, input.presentedCourierUserId);
+
+    const claimed = await this.prisma.shipmentLeg.updateMany({
+      where: { id: legId, courierStatus: 'DRIVER_ACCEPTED', status: { not: 'EXCEPTION' } },
+      data: { courierStatus: 'PICKUP_CONFIRMED', pickedUpAt: new Date(), pickupVerifiedAt: new Date(), pickupVerificationStatus: 'VERIFIED' },
+    });
+    if (claimed.count === 0) {
+      throw new ConflictException('This leg has an open exception and must be resolved by staff before it can be released.');
+    }
+    await this.audit.record({
+      action: 'SHIPMENT_LEG_PICKED_UP',
+      actorId: actor.userId,
+      newValue: {
+        legId,
+        shipmentId: leg.shipmentId,
+        reference: leg.shipment.reference,
+        releasedBy: 'STAFF',
+        presentedCourierUserId: input.presentedCourierUserId,
+      },
+    });
+    return this.startLeg(legId, { userId: input.presentedCourierUserId, label: 'Courier (verified at terminal)' });
   }
 }
