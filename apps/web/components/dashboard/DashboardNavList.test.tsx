@@ -117,3 +117,42 @@ describe('DashboardNavList — Carrier group (MDF-526)', () => {
     expect(c.textContent).toMatch(/Rejected/);
   });
 });
+
+/**
+ * TERM-11: terminal staff hold no account role code at all, so "Terminal" can
+ * only ever appear through this same forced-visible override shape MDF-526
+ * built for Carrier -- see useTerminalMembership and the empty `requires: []`
+ * on the Terminal entry in dashboard-nav-items.ts.
+ */
+describe('DashboardNavList — Terminal group (TERM-11)', () => {
+  it('is hidden for a user with no active terminal company membership', async () => {
+    apiGet.mockImplementation((path: string) => (path === '/terminal/me' ? Promise.reject({ status: 403 }) : Promise.resolve([])));
+    const c = await mount(meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }]));
+
+    expect(c.textContent).not.toMatch(/Terminal/);
+  });
+
+  it('is shown for an active terminal company member, even though no account role grants it', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path === '/terminal/me'
+        ? Promise.resolve({ companyId: 'co_1', companyName: 'Tropic Air', memberRole: 'OPERATOR', locations: [] })
+        : Promise.resolve([]),
+    );
+    const c = await mount(meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }]));
+
+    expect(c.textContent).toMatch(/Terminal/);
+    expect(c.textContent).toMatch(/Terminal Workspace/);
+  });
+
+  it('does not affect whether the Carrier group shows -- the two overrides are independent', async () => {
+    apiGet.mockImplementation((path: string) => {
+      if (path === '/terminal/me') return Promise.resolve({ companyId: 'co_1', companyName: 'Tropic Air', memberRole: 'OPERATOR', locations: [] });
+      if (path === '/shipping/provider/profile') return Promise.resolve(null);
+      return Promise.resolve([]);
+    });
+    const c = await mount(meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }]));
+
+    expect(c.textContent).toMatch(/Terminal/);
+    expect(c.textContent).not.toMatch(/Carrier/);
+  });
+});
