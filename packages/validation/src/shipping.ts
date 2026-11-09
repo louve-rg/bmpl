@@ -408,11 +408,27 @@ export const legHandoffSchema = z.object({
    * the caller rather than inferred from who is signed in. Absent on the
    * courier's own app call (the courier IS the actor there, so
    * ShipmentService.verifyLegPinOrThrow falls back to the actor's own
-   * identity, exactly as before this field existed). Present only on the
-   * staff-submitted admin route, where the actor is staff, never the
-   * courier — see verifyLegPinOrThrow's `presentedCourierUserId` param.
+   * identity, exactly as before this field existed).
+   *
+   * TERM-7: when supplied, `ShipmentService.completeLeg` leaves this value
+   * exactly as given and checks it against the leg's own assignment —
+   * never overwrites it with the derived identity, so a wrong claim is
+   * refused rather than silently ignored. `presentedByAssignedCourier`
+   * below exists for the OTHER case: no identity known at all, so the
+   * server derives and fills one in.
    */
   presentedCourierUserId: cuidSchema.optional(),
+  /**
+   * TERM-7: staff asserting "whoever is currently assigned to this leg is
+   * who presented this code" — without the client ever learning or sending
+   * that person's user id. Oscar's handoff-desk screen needed a way to
+   * submit a FIRST_MILE handoff on a courier's behalf, but `expectedAtHub`
+   * deliberately never exposes a courier's user id (BMPL-247's minimum-
+   * identity line), so there was no legitimate value to put in
+   * `presentedCourierUserId` above. Setting this instead makes
+   * `ShipmentService.completeLeg` look the assignment up itself.
+   */
+  presentedByAssignedCourier: z.literal(true).optional(),
 });
 export type LegHandoffInput = z.infer<typeof legHandoffSchema>;
 
@@ -442,16 +458,21 @@ export type LegPickupInput = z.infer<typeof legPickupSchema>;
  * TERM-5: staff release a LAST_MILE leg to the courier presenting their own
  * terminal code at a hub counter — the second half of the handoff reversal,
  * closing the gap where `confirmPickup` (the courier's own self-submit path)
- * takes no code at all for this leg kind. Unlike legHandoffSchema's optional
- * field, `presentedCourierUserId` is required here: this route has no
- * self-submit fallback, so there is no actor identity to fall back to.
+ * takes no code at all for this leg kind.
+ *
+ * TERM-7: `presentedCourierUserId` is now optional. When omitted,
+ * `ShipmentService.staffReleaseToCourier` derives the presenting courier
+ * from the leg's own assignment (this route only ever exists for a leg
+ * that already has one). When supplied, it is left as given and checked
+ * against that same assignment — like `legHandoffSchema`'s own field, a
+ * wrong claim is refused, not silently overwritten.
  */
 export const legReleaseToCourierSchema = z.object({
   pin: z
     .string()
     .trim()
     .regex(/^\d{4,8}$/, 'Enter the collection code.'),
-  presentedCourierUserId: cuidSchema,
+  presentedCourierUserId: cuidSchema.optional(),
 });
 export type LegReleaseToCourierInput = z.infer<typeof legReleaseToCourierSchema>;
 

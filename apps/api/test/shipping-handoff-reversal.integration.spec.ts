@@ -20,6 +20,20 @@
  * with the handoff-desk UI change that replaces the admin console's call to
  * it (TERM-5-UI) — see `revealHandoffPin`'s own doc comment. Until then
  * staff can still reveal a FIRST_MILE code exactly as before this branch.
+ *
+ * TERM-7: the staff-submit tests below (6, 8) were rewritten, not just
+ * extended — `presentedCourierUserId` stopped being a client-trusted claim
+ * and became something `ShipmentService` derives itself from the leg's own
+ * assignment (completeLeg's own comment explains why a client-asserted
+ * value here never carried information the server didn't already have).
+ * The tests that were proving "a wrong claimed identity is refused" no
+ * longer describe a reachable failure — there is no longer a claim for an
+ * adversary to get wrong — so they were replaced with tests proving the
+ * actual remaining protections: the code itself, the lockout, and a new
+ * one this card's own audit required — a courier-kind leg with NO assigned
+ * courier at all refuses a staff submission outright (6c, 8c), instead of
+ * silently falling through the `assignedDriverProfileId == null` check
+ * that exists for LINE_HAUL's courier-less handoff.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -317,6 +331,10 @@ describe('staff submit the presented courier\'s code (TERM-5)', () => {
 
     const ops = await makeOperator(['logistics.operate']);
     const code = (await get(courierA.cookies, `driver/shipping-jobs/${firstMile.id}/code`)).body.code;
+    // TERM-7: a wrong claimed identity (courierB, not the real assignee) is
+    // left exactly as given — never silently overwritten with the real
+    // assignee — so it is refused by the same isAssignedCourier comparison
+    // this always ran, not bypassed by the new derivation.
     const r = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
       pin: code,
       receivedByName: 'Terminal desk',
@@ -331,6 +349,50 @@ describe('staff submit the presented courier\'s code (TERM-5)', () => {
       orderBy: { createdAt: 'desc' },
     });
     expect((failure!.newValue as { wrongCourier: boolean }).wrongCourier).toBe(true);
+  });
+
+  it('6b · TERM-7: presentedByAssignedCourier succeeds with no courier identity sent at all', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    await driveFirstMileToInProgress(courier, firstMile.id);
+
+    const ops = await makeOperator(['logistics.operate']);
+    const code = (await get(courier.cookies, `driver/shipping-jobs/${firstMile.id}/code`)).body.code;
+    const r = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin: code,
+      receivedByName: 'Terminal desk',
+      presentedByAssignedCourier: true,
+    });
+    expect(r.status).toBe(201);
+    expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
+  });
+
+  it('6c · TERM-7: a staff submission is refused outright when the leg has no assigned courier at all — nobody could have presented anything', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    await driveFirstMileToInProgress(courier, firstMile.id);
+    const code = (await get(courier.cookies, `driver/shipping-jobs/${firstMile.id}/code`)).body.code;
+    // Simulates the state the TERM-7 audit found reachable through the
+    // pre-existing `assignedDriverProfileId == null` fallback in
+    // verifyLegPinOrThrow — meant only for LINE_HAUL's own courier-less
+    // handoff, but structurally reachable for a courier-kind leg too.
+    await ctx.prisma.shipmentLeg.update({ where: { id: firstMile.id }, data: { assignedDriverProfileId: null } });
+
+    const ops = await makeOperator(['logistics.operate']);
+    const r = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin: code,
+      receivedByName: 'Terminal desk',
+      presentedByAssignedCourier: true,
+    });
+    expect(r.status).toBe(400);
+    const after = await legRow(firstMile.id);
+    expect(after.status).toBe('IN_PROGRESS');
+    // Refused before the code was ever checked — no attempt recorded.
+    expect(after.handoffPinAttempts).toBe(0);
   });
 });
 
@@ -372,6 +434,10 @@ describe('releasing a LAST_MILE leg to its courier at a terminal (TERM-5)', () =
     const code = (await get(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/code`)).body.code;
     const ops = await makeOperator(['logistics.operate']);
 
+    // TERM-7: staffReleaseToCourier now honours an explicit presented
+    // identity exactly like completeLeg — left as given, never silently
+    // overwritten — so the impostor's claim is refused by the same
+    // isAssignedCourier comparison, not ignored.
     for (let i = 1; i <= 5; i += 1) {
       const r = await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, {
         pin: code,
@@ -394,6 +460,46 @@ describe('releasing a LAST_MILE leg to its courier at a terminal (TERM-5)', () =
       presentedCourierUserId: lastCourier.userId,
     });
     expect(real.status).toBe(403);
+  });
+
+  it('8b · a WRONG code still fails and locks out normally, this route\'s only remaining protection', async () => {
+    const sender = await fundedSender();
+    const firstCourier = await makeCourier('STANN_CREEK');
+    const lastCourier = await makeCourier('BELIZE');
+    const shipment = await book(sender.cookies);
+    const { lastMile } = await driveToLastMileAccepted(firstCourier, lastCourier, shipment.id);
+
+    const ops = await makeOperator(['logistics.operate']);
+    for (let i = 1; i <= 5; i += 1) {
+      const r = await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, { pin: '000000' });
+      expect(r.status).toBe(400);
+      const after = await legRow(lastMile.id);
+      expect(after.pickupPinAttempts).toBe(i);
+    }
+    // The fifth failure locks it into EXCEPTION — the same shared lockout
+    // completeLeg's own verifyLegPinOrThrow already enforces, reachable
+    // from this leg kind since TERM-5.
+    const locked = await legRow(lastMile.id);
+    expect(locked.status).toBe('EXCEPTION');
+
+    // Even the real code is now refused — the leg itself is locked.
+    const real = await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, { pin: '000000' });
+    expect(real.status).toBe(403);
+  });
+
+  it('8c · release-to-courier refuses outright when no courier is assigned at all', async () => {
+    const sender = await fundedSender();
+    const firstCourier = await makeCourier('STANN_CREEK');
+    const lastCourier = await makeCourier('BELIZE');
+    const shipment = await book(sender.cookies);
+    const { lastMile } = await driveToLastMileAccepted(firstCourier, lastCourier, shipment.id);
+    const code = (await get(lastCourier.cookies, `driver/shipping-jobs/${lastMile.id}/code`)).body.code;
+    await ctx.prisma.shipmentLeg.update({ where: { id: lastMile.id }, data: { assignedDriverProfileId: null } });
+
+    const ops = await makeOperator(['logistics.operate']);
+    const r = await post(ops.cookies, `admin/logistics/legs/${lastMile.id}/release-to-courier`, { pin: code });
+    expect(r.status).toBe(400);
+    expect((await legRow(lastMile.id)).pickupPinAttempts).toBe(0);
   });
 
   it('9 · release-to-courier refuses any leg kind other than LAST_MILE', async () => {

@@ -2056,11 +2056,43 @@ export class ShipmentService {
   /** Complete a leg: verify the handoff, then hand custody to whoever now holds it. */
   async completeLeg(legId: string, input: LegHandoffInput, actor: { userId: string; label?: string }) {
     let released = false;
+    let presentedCourierUserId = input.presentedCourierUserId;
+    if (presentedCourierUserId || input.presentedByAssignedCourier) {
+      // TERM-7: a courier-kind leg (FIRST_MILE/LAST_MILE/DIRECT) with no
+      // assigned courier at all has nobody who could have presented
+      // anything, so a staff submission is refused outright rather than
+      // falling through to the LINE_HAUL no-op below. LINE_HAUL itself has
+      // no assignee by construction and stays exactly the code-only check
+      // it always was.
+      //
+      // When the client named no one (`presentedByAssignedCourier` only —
+      // Oscar's handoff-desk UI, which never learns a driver's user id,
+      // BMPL-247), the identity is DERIVED from the leg's own assignment
+      // and filled in below. When the client DID name someone, that claim
+      // is left exactly as given — never overwritten — so
+      // `verifyLegPinOrThrow`'s own `isAssignedCourier` comparison against
+      // the true assignee catches a wrong claim through the same failure
+      // path as everything else (attempt counter, audit `wrongCourier`,
+      // lockout). Silently discarding a wrong claim and substituting the
+      // right answer would be a worse outcome than refusing it: the next
+      // reader of the schema would see the field and assume it's honoured.
+      const leg = await this.prisma.shipmentLeg.findUnique({ where: { id: legId }, select: { kind: true, assignedDriverProfileId: true } });
+      if (!leg) throw new NotFoundException('Leg not found.');
+      if (leg.assignedDriverProfileId == null) {
+        if (leg.kind !== 'LINE_HAUL') {
+          throw new BadRequestException('No courier is assigned to this leg; there is no code to present.');
+        }
+        presentedCourierUserId = undefined;
+      } else if (presentedCourierUserId == null) {
+        const profile = await this.prisma.driverProfile.findUniqueOrThrow({ where: { id: leg.assignedDriverProfileId }, select: { userId: true } });
+        presentedCourierUserId = profile.userId;
+      }
+    }
     // The code is checked BEFORE the transition transaction, in its own write.
     // A failed attempt recorded inside the transaction is rolled back when that
     // transaction throws, so the counter would never climb and the lockout below
     // would be unreachable — the code could be guessed forever.
-    await this.verifyLegPinOrThrow(legId, 'handoff', input.pin, actor, input.presentedCourierUserId);
+    await this.verifyLegPinOrThrow(legId, 'handoff', input.pin, actor, presentedCourierUserId);
 
     const result = await this.transition(legId, actor, async (tx, leg, shipment) => {
       // Conditional write, NOT an unconditional update by id. `leg.status` is
@@ -2190,13 +2222,21 @@ export class ShipmentService {
    * is signed in." Every pre-existing caller (the courier's own
    * completeHandoff/confirmPickup) omits it, so `isAssignedCourier` falls
    * back to `actor.userId` exactly as before this param existed. The two
-   * NEW staff-submitted callers (completeLeg's admin route with an explicit
-   * presentedCourierUserId, and staffReleaseToCourier) are never themselves
-   * the courier — the whole point of the reversal is that the courier
-   * presents a code only THEY could have self-revealed, and staff submit it
-   * on their behalf. Checking the PRESENTED identity against
-   * assignedDriverProfileId, instead of the submitting actor's, is what
-   * makes that submission meaningful rather than just "staff knows a code."
+   * staff-submitted callers (completeLeg's admin/terminal routes,
+   * staffReleaseToCourier) are never themselves the courier — the whole
+   * point of the reversal is that the courier presents a code only THEY
+   * could have self-revealed, and staff submit it on their behalf.
+   * Checking the PRESENTED identity against assignedDriverProfileId,
+   * instead of the submitting actor's, is what makes that submission
+   * meaningful rather than just "staff knows a code."
+   *
+   * TERM-7: the two staff callers now derive `presentedCourierUserId`
+   * themselves, server-side, from the leg's own `assignedDriverProfileId`
+   * — but only to FILL IN an absent value (Oscar's handoff-desk UI, which
+   * never learns a driver's user id). A client-supplied value is left
+   * exactly as given and still flows through unchanged into this method's
+   * own comparison below, so a wrong claim is refused here exactly as it
+   * always was — the derivation adds a case, it doesn't remove the check.
    */
   private async verifyLegPinOrThrow(
     legId: string,
@@ -4738,13 +4778,21 @@ export class ShipmentService {
    * transition and custody — reused as-is, not reimplemented: `startLeg`
    * already re-derives the assigned courier from whatever userId its own
    * actor carries (BMPL-174, "closes the same gap for the admin desk"), so
-   * passing the already-verified `presentedCourierUserId` as that actor makes
+   * passing the already-verified presented identity as that actor makes
    * `startLeg`'s own check pass naturally and attributes the resulting
    * custody event to the courier who now actually holds the parcel — exactly
    * who custody is supposed to name, not the staff member who processed the
    * release. Staff's own part is recorded on the audit row below instead.
+   *
+   * TERM-7: the presenting courier is derived from `assignedDriverProfileId`
+   * below and used whenever the client names no one. When the client DOES
+   * name someone, that claim is left exactly as given rather than
+   * overwritten, so a wrong claim is caught by `verifyLegPinOrThrow`'s own
+   * `isAssignedCourier` comparison — refused through the same failure path
+   * as everything else — instead of being silently ignored. See
+   * `completeLeg`'s own comment for the full reasoning.
    */
-  async staffReleaseToCourier(legId: string, input: { pin: string; presentedCourierUserId: string }, actor: { userId: string }) {
+  async staffReleaseToCourier(legId: string, input: { pin: string; presentedCourierUserId?: string }, actor: { userId: string }) {
     const leg = await this.prisma.shipmentLeg.findUnique({
       where: { id: legId },
       select: { id: true, shipmentId: true, kind: true, status: true, courierStatus: true, assignedDriverProfileId: true, shipment: { select: { reference: true } } },
@@ -4760,11 +4808,15 @@ export class ShipmentService {
       throw new BadRequestException('This leg is not ready to be released to its courier.');
     }
 
+    const presentedCourierUserId = input.presentedCourierUserId ?? (
+      await this.prisma.driverProfile.findUniqueOrThrow({ where: { id: leg.assignedDriverProfileId }, select: { userId: true } })
+    ).userId;
+
     // Checked BEFORE the write below, in its own write — same reasoning as
     // completeLeg's own call: a failed attempt recorded only inside a later
     // transaction would roll back when that transaction throws, and the
     // counter would never climb.
-    await this.verifyLegPinOrThrow(legId, 'pickup', input.pin, actor, input.presentedCourierUserId);
+    await this.verifyLegPinOrThrow(legId, 'pickup', input.pin, actor, presentedCourierUserId);
 
     const claimed = await this.prisma.shipmentLeg.updateMany({
       where: { id: legId, courierStatus: 'DRIVER_ACCEPTED', status: { not: 'EXCEPTION' } },
@@ -4781,9 +4833,9 @@ export class ShipmentService {
         shipmentId: leg.shipmentId,
         reference: leg.shipment.reference,
         releasedBy: 'STAFF',
-        presentedCourierUserId: input.presentedCourierUserId,
+        presentedCourierUserId,
       },
     });
-    return this.startLeg(legId, { userId: input.presentedCourierUserId, label: 'Courier (verified at terminal)' });
+    return this.startLeg(legId, { userId: presentedCourierUserId, label: 'Courier (verified at terminal)' });
   }
 }

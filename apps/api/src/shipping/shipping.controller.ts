@@ -784,6 +784,12 @@ export class AdminLogisticsController {
    * handoff (no assigned courier to present anything) still completes on
    * the code alone, and an ops account with no presented identity still
    * cannot stand in for an assigned courier on any other leg kind.
+   *
+   * TERM-7: `dto.presentedByAssignedCourier` does the same job without the
+   * caller ever needing to know a courier's user id — ShipmentService.
+   * completeLeg derives it from the leg's own assignment. Either flag
+   * triggers that derivation; omitting both keeps this route's original,
+   * unmodified behavior (BMPL-174) for a plain code-only submission.
    */
   @RequirePermission('logistics.operate')
   @StrictThrottle()
@@ -796,8 +802,14 @@ export class AdminLogisticsController {
    * TERM-5: release a LAST_MILE leg to the courier presenting their own
    * terminal code at the hub counter — the staff-submit path confirmPickup
    * never had, closing the "a courier collects from a terminal and nothing
-   * verifies it" gap. `presentedCourierUserId` is required here, unlike
-   * `handoff` above: this route has no self-submit fallback.
+   * verifies it" gap.
+   *
+   * TERM-7: when `dto.presentedCourierUserId` is omitted,
+   * ShipmentService.staffReleaseToCourier derives the presenting courier
+   * from the leg's own assignment — this route is always a staff
+   * submission, so there is no self-submit fallback to omit it for. When
+   * it IS supplied, it is left as given and checked against the live
+   * assignment exactly like `handoff` above.
    */
   @RequirePermission('logistics.operate')
   @StrictThrottle()
