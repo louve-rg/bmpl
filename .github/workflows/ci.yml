@@ -762,19 +762,99 @@ jobs:
           # "succeeds", and the failure only surfaces one step later as a
           # broken `tar`, under a job named "Secret scan". That mislabels a
           # network flake as a possible leak, and makes a real leak
-          # indistinguishable from a bad download. `--fail` plus a bounded
-          # retry catches the HTTP-error case; the gzip check below catches
-          # the remaining case where curl calls it a success but the body
-          # still isn't a real archive. Bounded on purpose — three attempts,
-          # then fail loudly as a download problem, never a silent retry
-          # loop that would hide a persistent outage.
-          if ! curl -sSL --fail --retry 3 --retry-all-errors "$URL" -o /tmp/gl.tgz; then
-            echo "DOWNLOAD FAILED: could not fetch gitleaks v${VER} after retries — a network/release problem, not a secret-scan result." >&2
-            exit 1
+          # indistinguishable from a bad download. `--fail` plus the gzip
+          # check below catches both the HTTP-error case and the case where
+          # curl calls it a success but the body still isn't a real archive.
+          #
+          # FLOOR-6: the ~7s total window (0.13s/1s/2s/4s backoff) this used
+          # to have could not ride out a real 504 spell — #623, #625 and #627
+          # all hit one on the SAME DAY this first landed, each one stopping
+          # every PR on the floor. `--retry-delay 10 --retry-max-time 120`
+          # below gives it roughly two minutes, still bounded (curl stops
+          # retrying once --retry-max-time elapses, win or lose — this can
+          # never become an unbounded loop), still failing loudly on the far
+          # side of that window.
+          download_primary() {
+            curl -sSL --fail --retry 10 --retry-delay 10 --retry-max-time 120 --retry-all-errors "$URL" -o /tmp/gl.tgz \
+              && gzip -t /tmp/gl.tgz 2>/dev/null
+          }
+          if download_primary; then
+            tar -xzf /tmp/gl.tgz -C /tmp gitleaks
+          else
+            # SECOND SOURCE (FLOOR-6): the primary asset lives on GitHub's
+            # release-asset CDN (objects.githubusercontent.com) — a single
+            # origin. gitleaks also publishes the exact same release as an
+            # official Docker Hub image, a genuinely independent registry
+            # and CDN, so one origin wobbling doesn't halt the floor. Same
+            # pinned version, confirmed to exist as this exact tag before
+            # relying on it (hub.docker.com/v2/repositories/zricethezav/
+            # gitleaks/tags lists "v8.24.3"). Still bounded — one pull
+            # attempt, no retry loop of its own — and still fails loudly if
+            # this origin is down too, rather than silently skipping the scan.
+            echo "Primary download failed after the retry window — trying the Docker Hub image as a second source." >&2
+            if ! docker pull "docker.io/zricethezav/gitleaks:v${VER}"; then
+              echo "DOWNLOAD FAILED: both the GitHub release asset and the Docker Hub image for gitleaks v${VER} are unreachable — a network/release problem, not a secret-scan result." >&2
+              exit 1
+            fi
+            mkdir -p /tmp/gitleaks-docker
+            cid=$(docker create "docker.io/zricethezav/gitleaks:v${VER}")
+            docker cp "$cid:/usr/bin/gitleaks" /tmp/gitleaks-docker/gitleaks
+            docker rm "$cid" >/dev/null
+            mkdir -p /tmp && cp /tmp/gitleaks-docker/gitleaks /tmp/gitleaks
+            chmod +x /tmp/gitleaks
           fi
-          if ! gzip -t /tmp/gl.tgz 2>/dev/null; then
-            echo "DOWNLOAD FAILED: the gitleaks v${VER} download is not a valid gzip archive — a network/release problem, not a secret-scan result." >&2
-            exit 1
-          fi
-          tar -xzf /tmp/gl.tgz -C /tmp gitleaks
           /tmp/gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 2
+
+  docker-build-api:
+    # FLOOR-6, part 2: no job anywhere in this workflow actually builds the
+    # production Docker image. #620 passed all five checks in
+    # build-and-test above and still broke the deployed API: that job runs
+    # `nest build` directly against the full repo checkout, where
+    # apps/api/package.json's `prebuild` script (`node ../../scripts/
+    # check-prisma-fresh.mjs`) can see the root scripts/ directory just
+    # fine. apps/api/Dockerfile's own build context is also the repo root,
+    # but it COPYs only an explicit allowlist (pnpm-workspace.yaml,
+    # package.json, pnpm-lock.yaml, .npmrc, turbo.json, tsconfig.base.json,
+    # tsconfig.lib.json, packages, apps) -- scripts/ was never on that
+    # list, so the same prebuild hook that works everywhere else fails
+    # inside the image with "Cannot find module '/app/scripts/check-
+    # prisma-fresh.mjs'". That packaging boundary (the image's own COPY
+    # list vs. the full checkout) is invisible to every other job in this
+    # file, because none of them build the image. Confirmed by actually
+    # running `docker build -f apps/api/Dockerfile .` locally against
+    # current main: reproduces that exact error.
+    #
+    # SCOPED FOR COST (god, FLOOR-6): a full image build on every PR is not
+    # acceptable on this floor's budget, so this only runs when a change
+    # could plausibly affect the image -- apps/api/Dockerfile itself,
+    # apps/api/package.json (the file #620 actually changed), anything
+    # under the root scripts/ directory (the thing the Dockerfile's COPY
+    # list silently excludes), or railway.json (the deploy config that
+    # points at this Dockerfile). dorny/paths-filter is used rather than a
+    # hand-rolled git-diff step because it reads the changed-file list
+    # straight from the GitHub REST API on pull_request events -- no deep
+    # clone needed -- and falls back to git (against the previous commit on
+    # the same branch) only for the push-to-main case, which matches this
+    # workflow's only two trigger events exactly.
+    name: Docker build (apps/api)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Does this change touch the Docker build surface?
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            docker:
+              - 'apps/api/Dockerfile'
+              - 'apps/api/package.json'
+              - 'scripts/**'
+              - 'railway.json'
+
+      - name: Docker build (apps/api)
+        if: steps.filter.outputs.docker == 'true'
+        run: docker build -f apps/api/Dockerfile -t bmpl-api-ci .
