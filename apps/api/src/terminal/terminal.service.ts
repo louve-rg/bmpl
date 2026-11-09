@@ -6,6 +6,7 @@ import type {
   AddTerminalCompanyLocationInput,
   CreateTerminalCompanyInput,
   InviteTerminalCompanyMemberInput,
+  UpdateTerminalCompanyInput,
 } from '@bmpl/validation';
 import type { TerminalCompanyProfile } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
@@ -101,6 +102,32 @@ export class TerminalService {
       members: members.map((m) => this.serializeMember(m)),
       pendingInvites: invites.map((i) => this.serializeInvite(i)),
     };
+  }
+
+  /**
+   * TERM-6: slice 1 is not complete until a mistyped company name is
+   * correctable through the product, not just at creation. `isTest` is not
+   * in `dto`'s type at all (see the schema's own comment) — the simulation
+   * boundary is fixed at creation, never edited after locations/members
+   * already exist on one side of it.
+   */
+  async updateCompany(actorId: string, companyId: string, dto: UpdateTerminalCompanyInput) {
+    const before = await this.companyOrThrow(companyId);
+    const company = await this.prisma.terminalCompanyProfile.update({
+      where: { id: companyId },
+      data: {
+        businessName: dto.businessName,
+        contactEmail: dto.contactEmail,
+        contactPhone: dto.contactPhone,
+      },
+    });
+    await this.audit.record({
+      action: 'TERMINAL_COMPANY_UPDATED',
+      actorId,
+      previousValue: { businessName: before.businessName, contactEmail: before.contactEmail, contactPhone: before.contactPhone },
+      newValue: { terminalCompanyId: companyId, businessName: company.businessName, contactEmail: company.contactEmail, contactPhone: company.contactPhone },
+    });
+    return this.serializeCompany(company);
   }
 
   private async companyOrThrow(companyId: string): Promise<TerminalCompanyProfile> {
@@ -341,6 +368,95 @@ export class TerminalService {
       newValue: { terminalCompanyId: companyId },
     });
     return { ended: true };
+  }
+
+  /**
+   * TERM-6: the direct door. Before this, the only working path for an
+   * ended member was ending (already done) then a FRESH INVITE — and
+   * `acceptInvite`'s own existing-member branch reactivates on accept
+   * (`status: 'ACTIVE', endedAt: null`). This endpoint must mean the same
+   * thing that door already means, nothing more: flips those same two
+   * fields and stops there. It does NOT touch `memberRole` (the invite
+   * path only changes it because it's also carrying a fresh role choice —
+   * there is no new role here to carry) and does NOT touch location
+   * grants (the invite path never removes old ones either; both doors
+   * already auto-restore every surviving `TerminalCompanyMemberLocation`
+   * row the moment `status` reads ACTIVE again, via `myWorkspace`'s and
+   * `assertStaffLocationAccess`'s own read-time re-check — reactivating
+   * here only needs to flip the same switch invite-acceptance flips).
+   */
+  async reactivateMember(actorId: string, companyId: string, userId: string) {
+    const existing = await this.prisma.terminalCompanyMember.findUnique({
+      where: { terminalCompanyId_userId: { terminalCompanyId: companyId, userId } },
+    });
+    if (!existing || existing.status === 'ACTIVE') throw new NotFoundException('Member not found.');
+    await this.prisma.terminalCompanyMember.update({
+      where: { id: existing.id },
+      data: { status: 'ACTIVE', endedAt: null },
+    });
+    await this.audit.record({
+      action: 'TERMINAL_COMPANY_MEMBER_REACTIVATED',
+      actorId,
+      targetUserId: userId,
+      newValue: { terminalCompanyId: companyId },
+    });
+    return { reactivated: true };
+  }
+
+  /**
+   * TERM-6: the gap the UI named directly — an ACTIVE member's own
+   * locations could only change by ending them and sending a new invite.
+   * Scoped to an ACTIVE member on purpose (the card's own instruction):
+   * an ended member has no access regardless of grants, so editing one's
+   * grants is a question for `reactivateMember` first, not this endpoint.
+   */
+  async grantMemberLocation(actorId: string, companyId: string, userId: string, locationId: string) {
+    const member = await this.prisma.terminalCompanyMember.findUnique({
+      where: { terminalCompanyId_userId: { terminalCompanyId: companyId, userId } },
+    });
+    if (!member || member.status !== 'ACTIVE') throw new NotFoundException('Member not found.');
+    const location = await this.prisma.terminalCompanyLocation.findFirst({
+      where: { id: locationId, terminalCompanyId: companyId, isActive: true },
+    });
+    if (!location) throw new BadRequestException('That location is not an active location of this company.');
+    // Same upsert convention as acceptInvite's own grant loop: re-granting
+    // an already-held location is a no-op, not a duplicate-row error.
+    await this.prisma.terminalCompanyMemberLocation.upsert({
+      where: { memberId_locationId: { memberId: member.id, locationId } },
+      create: { memberId: member.id, locationId },
+      update: {},
+    });
+    await this.audit.record({
+      action: 'TERMINAL_COMPANY_MEMBER_LOCATION_GRANTED',
+      actorId,
+      targetUserId: userId,
+      newValue: { terminalCompanyId: companyId, locationId },
+    });
+    return { granted: true };
+  }
+
+  async revokeMemberLocation(actorId: string, companyId: string, userId: string, locationId: string) {
+    const member = await this.prisma.terminalCompanyMember.findUnique({
+      where: { terminalCompanyId_userId: { terminalCompanyId: companyId, userId } },
+    });
+    if (!member || member.status !== 'ACTIVE') throw new NotFoundException('Member not found.');
+    const grant = await this.prisma.terminalCompanyMemberLocation.findUnique({
+      where: { memberId_locationId: { memberId: member.id, locationId } },
+    });
+    // Unlike TerminalCompanyLocation itself, this join row has no isActive
+    // flag to flip (see its schema comment) — there is no handoff/custody
+    // history keyed off a grant row the way there is off a location or a
+    // membership, so deleting it outright is the correct "remove" here,
+    // not a soft-delete this model was never given.
+    if (!grant) throw new NotFoundException('This member does not hold that location.');
+    await this.prisma.terminalCompanyMemberLocation.delete({ where: { id: grant.id } });
+    await this.audit.record({
+      action: 'TERMINAL_COMPANY_MEMBER_LOCATION_REVOKED',
+      actorId,
+      targetUserId: userId,
+      newValue: { terminalCompanyId: companyId, locationId },
+    });
+    return { revoked: true };
   }
 
   /* ---- staff: the one read this card proves scoping with ------------------

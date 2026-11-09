@@ -20,10 +20,34 @@ export const createTerminalCompanySchema = z.object({
 });
 export type CreateTerminalCompanyInput = z.infer<typeof createTerminalCompanySchema>;
 
+/**
+ * TERM-6: edit a company's own contact details. `isTest` is deliberately
+ * excluded — it is the simulation boundary, admin-set once at creation
+ * (see `createTerminalCompanySchema`'s own comment), and flipping it after
+ * locations/members already exist on one side of it would orphan them, not
+ * correct a typo.
+ */
+export const updateTerminalCompanySchema = z
+  .object({
+    businessName: z.string().trim().min(1).max(160),
+    contactEmail: emailSchema,
+    contactPhone: z.string().trim().max(40).optional(),
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update.' });
+export type UpdateTerminalCompanyInput = z.infer<typeof updateTerminalCompanySchema>;
+
 export const addTerminalCompanyLocationSchema = z.object({
   hubId: cuidSchema,
 });
 export type AddTerminalCompanyLocationInput = z.infer<typeof addTerminalCompanyLocationSchema>;
+
+/** TERM-6: grant an already-ACTIVE member one more location, without
+ *  ending and re-inviting them. */
+export const grantTerminalCompanyMemberLocationSchema = z.object({
+  locationId: cuidSchema,
+});
+export type GrantTerminalCompanyMemberLocationInput = z.infer<typeof grantTerminalCompanyMemberLocationSchema>;
 
 export const terminalCompanyMemberRoleSchema = z.enum(['MANAGER', 'OPERATOR']);
 

@@ -1,17 +1,21 @@
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import {
   acceptTerminalInviteSchema,
   addTerminalCompanyLocationSchema,
   createTerminalCompanySchema,
+  grantTerminalCompanyMemberLocationSchema,
   inviteTerminalCompanyMemberSchema,
   legHandoffSchema,
   legReleaseToCourierSchema,
+  updateTerminalCompanySchema,
   type AcceptTerminalInviteInput,
   type AddTerminalCompanyLocationInput,
   type CreateTerminalCompanyInput,
+  type GrantTerminalCompanyMemberLocationInput,
   type InviteTerminalCompanyMemberInput,
   type LegHandoffInput,
   type LegReleaseToCourierInput,
+  type UpdateTerminalCompanyInput,
 } from '@bmpl/validation';
 import { ZodBody } from '../common/zod-validation.pipe';
 import { CurrentUser, Public, RequirePermission } from '../common/decorators';
@@ -41,6 +45,14 @@ export class AdminTerminalController {
   @Get('companies/:id')
   getCompany(@Param('id') id: string) {
     return this.terminal.getCompany(id);
+  }
+
+  /** TERM-6: slice 1 is not complete until a mistyped company name is
+   *  correctable through the product — see TerminalService.updateCompany. */
+  @RequirePermission('terminals.manage')
+  @Patch('companies/:id')
+  updateCompany(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(updateTerminalCompanySchema)) dto: UpdateTerminalCompanyInput) {
+    return this.terminal.updateCompany(u.userId, id, dto);
   }
 
   @RequirePermission('terminals.manage')
@@ -79,6 +91,39 @@ export class AdminTerminalController {
   @Delete('companies/:id/members/:userId')
   endMember(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('userId') userId: string) {
     return this.terminal.endMember(u.userId, id, userId);
+  }
+
+  /** TERM-6: the direct door for an ended member — see
+   *  TerminalService.reactivateMember for why it means the same thing
+   *  re-inviting already did, and nothing more. */
+  @RequirePermission('terminals.manage')
+  @Post('companies/:id/members/:userId/reactivate')
+  reactivateMember(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('userId') userId: string) {
+    return this.terminal.reactivateMember(u.userId, id, userId);
+  }
+
+  /** TERM-6: grant/revoke one location for an already-ACTIVE member,
+   *  without ending and re-inviting them. */
+  @RequirePermission('terminals.manage')
+  @Post('companies/:id/members/:userId/locations')
+  grantMemberLocation(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Body(ZodBody(grantTerminalCompanyMemberLocationSchema)) dto: GrantTerminalCompanyMemberLocationInput,
+  ) {
+    return this.terminal.grantMemberLocation(u.userId, id, userId, dto.locationId);
+  }
+
+  @RequirePermission('terminals.manage')
+  @Delete('companies/:id/members/:userId/locations/:locationId')
+  revokeMemberLocation(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Param('locationId') locationId: string,
+  ) {
+    return this.terminal.revokeMemberLocation(u.userId, id, userId, locationId);
   }
 }
 
