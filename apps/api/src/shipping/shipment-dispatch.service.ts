@@ -236,6 +236,27 @@ export class ShipmentDispatchService {
       }
     }
 
+    // DISPATCH-2 (god's ruling): `rankFor`'s untried-driver exclusion below is
+    // scoped to THIS leg's own `ShipmentLegOffer` history, so a brand-new
+    // driver signup in this leg's district makes them "untried" for THIS leg
+    // again — correct in isolation, but it meant `sweepExhaustedRecovery`
+    // could revive a long-declined leg every time anyone signs up nearby, with
+    // no bound at all. EXHAUSTED's own admin alarm (`markExhausted`) never got
+    // a chance to stay EXHAUSTED long enough for a human to see it; it just
+    // flickered through recovery and back, offerCount climbing forever.
+    // Bounding on `offerCount` against the SAME `cfg.maxOffers` the
+    // marketplace delivery engine already enforces (`dispatch-engine.service.ts`)
+    // closes it with no new state and no new policy: once a leg has been
+    // offered `maxOffers` times, it is done trying, full stop — regardless of
+    // whether a technically-untried driver exists — and `sweepExhaustedRecovery`
+    // (below) honors the same bound, so it never clears `dispatchExhaustedAt`
+    // for a leg that already spent its budget. A human still closes it via
+    // `assignManual`, exactly as the alarm already says.
+    if (leg.offerCount >= cfg.maxOffers) {
+      await this.markExhausted(leg.id, leg.shipment.reference, leg.offerCount);
+      return { result: 'EXHAUSTED' };
+    }
+
     // Where the driver has to BE to start: a first mile and a door-to-door run
     // both collect from the sender's district; a last mile collects from the
     // arrival terminal. BMPL-194: the city that goes with whichever of those
@@ -753,12 +774,22 @@ export class ShipmentDispatchService {
   /**
    * Courier legs whose turn has come but which nobody has been offered yet.
    *
+   * DISPATCH-2: `orderBy: createdAt asc` — oldest waiting leg first. This was
+   * missing entirely (not merely "not FIFO"): with no `orderBy`, Postgres is
+   * free to return any 50 rows matching `waitingLegsWhere()` on a given tick,
+   * in no defined order. With 51+ legs waiting, a real customer's leg past
+   * whichever 50 the database happened to pick that tick was invisible to
+   * the dispatcher — not delayed, not deprioritized, simply never reached by
+   * any `take: 50` slice, for as long as the backlog stayed above 50. Oldest
+   * first is the fairness rule every caller of this already assumed.
+   *
    * CLOSE-17: isolated per leg — see sweepExpiredOffers's comment for why.
    */
   async sweepUndispatched(): Promise<number> {
     const waiting = await this.prisma.shipmentLeg.findMany({
       where: this.waitingLegsWhere(),
       select: { id: true, shipment: { select: { id: true, reference: true } } },
+      orderBy: { createdAt: 'asc' },
       take: 50,
     });
     let offered = 0;
@@ -803,6 +834,14 @@ export class ShipmentDispatchService {
    * needed for the recovery itself — if it succeeds, the `SHIPMENT_LEG_OFFERED`
    * row `dispatchLeg` already writes IS the "recovered" event in the trail,
    * exactly as BMPL-275 already reasons for a cleared hub-hours deferral.
+   *
+   * DISPATCH-2: `offerCount: { lt: cfg.maxOffers }` in the where-clause below
+   * is the other half of the bound `dispatchLeg` now enforces — a leg that
+   * has already spent its whole offer budget is excluded from recovery
+   * entirely, never re-checked for a new untried driver, so it stays
+   * EXHAUSTED (and its admin alarm stays meaningful) until a human closes it
+   * via `assignManual`, rather than cycling forever on every new driver
+   * signup in its district.
    */
   async sweepExhaustedRecovery(): Promise<number> {
     const cfg = await this.engine.settings();
@@ -812,6 +851,7 @@ export class ShipmentDispatchService {
         status: 'READY',
         assignedDriverProfileId: null,
         dispatchExhaustedAt: { not: null },
+        offerCount: { lt: cfg.maxOffers },
       },
       select: {
         id: true,

@@ -1644,6 +1644,12 @@ export class ShipmentService {
               id: true, sequence: true, kind: true, mode: true, status: true, courierStatus: true,
               dispatchExhaustedAt: true,
               dispatchUnavailableAt: true,
+              // DISPATCH-2: assignedAt + offerExpiresAt + acceptedAt together
+              // identify a human assignment still waiting on the driver to
+              // accept — see manualAssignmentPendingSince below.
+              assignedAt: true,
+              offerExpiresAt: true,
+              acceptedAt: true,
               originHub: { select: { code: true, name: true } },
               destinationHub: { select: { code: true, name: true } },
               assignedDriver: { select: { displayName: true } },
@@ -1722,6 +1728,20 @@ export class ShipmentService {
               : l.dispatchUnavailableAt != null
                 ? ('UNAVAILABLE' as const)
                 : null,
+          // DISPATCH-2 (god's ruling): `assignManual` deliberately sets
+          // `offerExpiresAt: null` so a human assignment never lapses — "a
+          // human assignment does not lapse" is a product decision, not a
+          // bug, and this card does NOT auto-expire it. But that same null
+          // makes a 3-day-silent manual assignment LOOK identical to a
+          // healthy one-minute-old pending acceptance on this board. This is
+          // the fix: the raw instant a courier was manually assigned and is
+          // still waiting to accept, so whoever reads the board can judge
+          // "too long" for themselves — no staleness threshold or new policy
+          // is invented here, only the fact made visible. Null for every
+          // other state: an automatic offer (has its own offerExpiresAt),
+          // an already-accepted leg, or one with no assignment at all.
+          manualAssignmentPendingSince:
+            l.courierStatus === 'ASSIGNED' && l.offerExpiresAt == null && l.acceptedAt == null ? l.assignedAt : null,
         })),
       })),
     };
