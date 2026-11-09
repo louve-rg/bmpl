@@ -4393,6 +4393,17 @@ export class ShipmentService {
         // secret, just operational detail a customer has no use for.
         assignedAt: opts.audience === 'STAFF' ? l.assignedAt : null,
         acceptedAt: opts.audience === 'STAFF' ? l.acceptedAt : null,
+        // MDF-624: the exact expression `listForOps` emits (:1743-1744) for
+        // the same fact — not a re-derivation, because `offerExpiresAt`
+        // itself is never serialized here, so a two-clause approximation on
+        // the detail page silently dropped it and could call a healthy
+        // automatic offer (which has its own offerExpiresAt) a stale manual
+        // assignment. If these two expressions ever disagree, that is the
+        // bug this field exists to prevent — keep them identical.
+        manualAssignmentPendingSince:
+          opts.audience === 'STAFF' && l.courierStatus === 'ASSIGNED' && l.offerExpiresAt == null && l.acceptedAt == null
+            ? l.assignedAt
+            : null,
         // The carrier org operating this LINE_HAUL leg, staff-only — see the
         // batched resolution just above `legs` for why operatorName always
         // travels with the id rather than the admin console showing a bare one.

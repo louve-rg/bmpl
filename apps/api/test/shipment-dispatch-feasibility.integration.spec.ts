@@ -646,6 +646,51 @@ describe('DISPATCH-2: a human assignment\'s silent wait is made visible on the o
 
     expect((await legRowOnBoard(r.body.id, leg.id)).manualAssignmentPendingSince).toBeNull();
   });
+
+  it('the shipment DETAIL page carries the same field, not a two-clause approximation that cannot see offerExpiresAt (MDF-624)', async () => {
+    async function legRowOnDetail(reference: string, legId: string) {
+      const detail = await get(admin, `admin/logistics/shipments/${reference}`);
+      expect(detail.status).toBe(200);
+      return detail.body.legs.find((l: { id: string }) => l.id === legId);
+    }
+
+    // Manual, still unaccepted: the detail page must show the assign instant,
+    // the same `listForOps` expression — not a re-derivation that can drift.
+    await setAutomatic(false);
+    const manualCustomer = await registerCustomer(`manualdetail_${uniq()}@example.com`);
+    await fund(manualCustomer.userId, 10_000);
+    const manual = await post(manualCustomer.cookies, 'shipping', { ...parcel('ORANGE_WALK', 'Orange Walk Town'), payWithWallet: true });
+    expect(manual.status).toBe(201);
+    const manualLeg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: manual.body.id } });
+    await setAutomatic(true);
+    const manualDriver = await onlineDriverWithVehicle('ORANGE_WALK');
+    expect((await post(admin, `admin/logistics/legs/${manualLeg.id}/assign`, {
+      driverProfileId: manualDriver.driverProfileId,
+      vehicleId: manualDriver.vehicleId,
+    })).status).toBe(201);
+
+    const manualOnDetail = await legRowOnDetail(manual.body.reference, manualLeg.id);
+    expect(manualOnDetail.manualAssignmentPendingSince).not.toBeNull();
+    const dbManualLeg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: manualLeg.id }, select: { assignedAt: true } });
+    expect(new Date(manualOnDetail.manualAssignmentPendingSince).getTime()).toBe(dbManualLeg.assignedAt!.getTime());
+
+    // Automatic, still unaccepted: this is the whole point. courierStatus is
+    // ASSIGNED and acceptedAt is null, exactly like the manual leg above —
+    // the two-clause approximation Oscar's page used could not tell these
+    // apart. Only offerExpiresAt (never serialized before this card) does.
+    await onlineDriverFor('STANN_CREEK');
+    const autoCustomer = await registerCustomer(`autodetail_${uniq()}@example.com`);
+    await fund(autoCustomer.userId, 10_000);
+    const auto = await post(autoCustomer.cookies, 'shipping', { ...parcel('STANN_CREEK', 'Dangriga'), payWithWallet: true });
+    expect(auto.status).toBe(201);
+    const autoLeg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId: auto.body.id } });
+    const dbAutoLeg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: autoLeg.id }, select: { courierStatus: true, offerExpiresAt: true } });
+    expect(dbAutoLeg.courierStatus).toBe('ASSIGNED');
+    expect(dbAutoLeg.offerExpiresAt).not.toBeNull();
+
+    const autoOnDetail = await legRowOnDetail(auto.body.reference, autoLeg.id);
+    expect(autoOnDetail.manualAssignmentPendingSince).toBeNull();
+  });
 });
 
 describe('a blocked leg is still safely cancellable and refundable', () => {
