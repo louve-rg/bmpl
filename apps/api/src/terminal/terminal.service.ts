@@ -507,6 +507,37 @@ export class TerminalService {
     };
   }
 
+  /**
+   * TERM-8: the hub ids `TerminalController.queue` is allowed to ask
+   * `ShipmentService.terminalQueue` about — the ONLY place that decides
+   * which hubs are "mine." Same ACTIVE-membership + ACTIVE-location query
+   * `myWorkspace` already runs (not a parallel derivation of it), across
+   * EVERY company the caller belongs to, not just one — a person who holds
+   * ACTIVE membership at two different terminal companies sees one combined
+   * queue, the same way `myWorkspace` would need `findMany` instead of
+   * `findFirst` to do if a second slice ever asked for multi-company reads
+   * there.
+   */
+  async myActiveHubIds(userId: string): Promise<string[]> {
+    // Same existence check `myWorkspace` makes, same exception — a caller
+    // with NO active membership anywhere is refused, same as `terminal/me`;
+    // a genuine member with zero CURRENT grants gets an empty queue instead,
+    // which is a different, valid state (not an error).
+    const hasMembership = await this.prisma.terminalCompanyMember.findFirst({
+      where: { userId, status: 'ACTIVE', terminalCompany: { isActive: true } },
+      select: { id: true },
+    });
+    if (!hasMembership) throw new ForbiddenException('No active terminal company membership.');
+    const grants = await this.prisma.terminalCompanyMemberLocation.findMany({
+      where: {
+        member: { userId, status: 'ACTIVE', terminalCompany: { isActive: true } },
+        location: { isActive: true },
+      },
+      select: { location: { select: { hubId: true } } },
+    });
+    return [...new Set(grants.map((g) => g.location.hubId))];
+  }
+
   /* ---- shaping -------------------------------------------------------------- */
 
   private serializeCompany(c: TerminalCompanyProfile) {

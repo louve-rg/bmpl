@@ -2,17 +2,21 @@ import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/commo
 import {
   acceptTerminalInviteSchema,
   addTerminalCompanyLocationSchema,
+  collectShipmentSchema,
   createTerminalCompanySchema,
   grantTerminalCompanyMemberLocationSchema,
   inviteTerminalCompanyMemberSchema,
+  legDepartSchema,
   legHandoffSchema,
   legReleaseToCourierSchema,
   updateTerminalCompanySchema,
   type AcceptTerminalInviteInput,
   type AddTerminalCompanyLocationInput,
+  type CollectShipmentInput,
   type CreateTerminalCompanyInput,
   type GrantTerminalCompanyMemberLocationInput,
   type InviteTerminalCompanyMemberInput,
+  type LegDepartInput,
   type LegHandoffInput,
   type LegReleaseToCourierInput,
   type UpdateTerminalCompanyInput,
@@ -137,11 +141,30 @@ export class AdminTerminalController {
  */
 @Controller('terminal')
 export class TerminalController {
-  constructor(private readonly terminal: TerminalService) {}
+  constructor(
+    private readonly terminal: TerminalService,
+    private readonly shipments: ShipmentService,
+  ) {}
 
   @Get('me')
   myWorkspace(@CurrentUser() u: AuthContext) {
     return this.terminal.myWorkspace(u.userId);
+  }
+
+  /**
+   * TERM-8: the work queue the owner found missing — everything waiting on
+   * a terminal action at one of MY granted ACTIVE locations, across every
+   * company I belong to. Scoped the same way `myWorkspace` is: re-read at
+   * call time, never cached from grant time. `myActiveHubIds` is the ONLY
+   * place that decides which hubs are mine; `ShipmentService.terminalQueue`
+   * never sees a hub id this method did not hand it, so a leg at a location
+   * I was not granted cannot appear in the list, not merely be refused if I
+   * try to act on it.
+   */
+  @Get('queue')
+  async queue(@CurrentUser() u: AuthContext) {
+    const hubIds = await this.terminal.myActiveHubIds(u.userId);
+    return this.shipments.terminalQueue(hubIds);
   }
 }
 
@@ -169,7 +192,7 @@ export class TerminalLegsController {
   @StrictThrottle()
   @Post(':id/handoff')
   async handoff(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legHandoffSchema)) dto: LegHandoffInput) {
-    const hubId = await this.shipments.legHubForLocationCheck(id);
+    const hubId = await this.shipments.legHubForLocationCheck(id, 'HANDOFF');
     await this.terminal.assertStaffLocationAccess(u.userId, hubId);
     return this.shipments.completeLeg(id, dto, { userId: u.userId });
   }
@@ -181,9 +204,73 @@ export class TerminalLegsController {
     @Param('id') id: string,
     @Body(ZodBody(legReleaseToCourierSchema)) dto: LegReleaseToCourierInput,
   ) {
-    const hubId = await this.shipments.legHubForLocationCheck(id);
+    const hubId = await this.shipments.legHubForLocationCheck(id, 'RELEASE_TO_COURIER');
     await this.terminal.assertStaffLocationAccess(u.userId, hubId);
     return this.shipments.staffReleaseToCourier(id, dto, { userId: u.userId });
+  }
+
+  /**
+   * TERM-8, part 1's first gap: departure from the origin terminal had no
+   * terminal-scoped door at all. Mirrors `AdminLogisticsController.depart`
+   * exactly (same schema, same service call) under the location-scoped gate
+   * instead of `logistics.operate`. `departLeg` itself still refuses a
+   * non-LINE_HAUL leg or one whose turn has not come — this controller adds
+   * authorization only, never a second copy of that business logic.
+   */
+  @StrictThrottle()
+  @Post(':id/depart')
+  async depart(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legDepartSchema)) dto: LegDepartInput) {
+    const hubId = await this.shipments.legHubForLocationCheck(id, 'DEPART');
+    await this.terminal.assertStaffLocationAccess(u.userId, hubId);
+    return this.shipments.departLeg(id, dto, { userId: u.userId });
+  }
+
+  /**
+   * TERM-8, part 1's second gap: arrival confirmation — distinct from
+   * `handoff` above, same as `arriveLeg`'s own doc comment draws the line:
+   * the leg has reached the far terminal but has not been handed over yet.
+   */
+  @StrictThrottle()
+  @Post(':id/arrive')
+  async arrive(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    const hubId = await this.shipments.legHubForLocationCheck(id, 'ARRIVE');
+    await this.terminal.assertStaffLocationAccess(u.userId, hubId);
+    return this.shipments.arriveLeg(id, { userId: u.userId });
+  }
+}
+
+/**
+ * TERM-8, part 1's third gap: collection at the destination terminal — a
+ * SHIPMENT-level action (the recipient walked in; no leg moves), so it
+ * cannot live on `TerminalLegsController` above. Same authorization shape:
+ * one location-scoped gate before delegating to `ShipmentService`'s own
+ * `recordCollection`, which still enforces everything it always did
+ * (AWAITING_COLLECTION only, once).
+ */
+@Controller('terminal/shipments')
+export class TerminalShipmentsController {
+  constructor(
+    private readonly terminal: TerminalService,
+    private readonly shipments: ShipmentService,
+  ) {}
+
+  @StrictThrottle()
+  @Post(':id/collect')
+  async collect(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(collectShipmentSchema)) dto: CollectShipmentInput) {
+    const hubId = await this.shipments.shipmentHubForLocationCheck(id);
+    await this.terminal.assertStaffLocationAccess(u.userId, hubId);
+    const result = await this.shipments.recordCollection(id, dto.collectedByName, { userId: u.userId });
+    // Deliberately NOT `return result` as-is. `recordCollection` resolves
+    // through `SHIPMENT_INCLUDE`, whose `legs` block is a bare Prisma
+    // `include` (every column — `handoffPin`/`pickupPin` included, the
+    // exact shape `RECIPIENT_VIEW_INCLUDE`'s own comment names as the
+    // hazard it was built to avoid). `admin/logistics`'s `logistics.operate`
+    // staff already see that whole graph; a terminal company's OWN staff
+    // must not — this reversal is the entire point of TERM-5/TERM-8, and a
+    // recipient's own collection code is their secret to present, never a
+    // value staff can read off a response. Reshaped to the same minimal,
+    // fact-only shape every other terminal write on this controller returns.
+    return { collected: true, reference: result.reference, status: result.status };
   }
 }
 
