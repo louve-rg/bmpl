@@ -197,6 +197,7 @@ function PlaceBlock({
   place,
   locked,
   windows = [],
+  windowLabel,
 }: {
   step: number;
   label: string;
@@ -206,6 +207,10 @@ function PlaceBlock({
    *  action point by the caller (pickup gets SENDER's, dropoff gets
    *  RECIPIENT's) — empty when none apply (a hub end, or none set). */
   windows?: Array<{ startTime: string; endTime: string }>;
+  /** LABEL-1: PlaceBlock renders both ends of the leg from this one
+   *  component, so a single hard-coded "Available" would mislabel whichever
+   *  end it's wrong for — the caller says which end this instance is. */
+  windowLabel: string;
 }) {
   if (!place) return null;
   return (
@@ -219,7 +224,7 @@ function PlaceBlock({
 
       {windows.length > 0 && (
         <p className="mt-1 break-words text-sm text-[color:var(--bmpl-text-muted)]">
-          Available {windows.map(formatWindow).join(', ')}
+          {windowLabel} {windows.map(formatWindow).join(', ')}
         </p>
       )}
 
@@ -418,6 +423,7 @@ export default function DriverShippingJobPage() {
               place={job.pickup}
               locked={!(job.contactUnlocked ?? job.addressUnlocked)}
               windows={(job.availabilityWindows ?? []).filter((w) => w.role === 'SENDER')}
+              windowLabel="Pickup Window:"
             />
             <PlaceBlock
               step={2}
@@ -425,6 +431,7 @@ export default function DriverShippingJobPage() {
               place={job.dropoff}
               locked={!(job.contactUnlocked ?? job.addressUnlocked)}
               windows={(job.availabilityWindows ?? []).filter((w) => w.role === 'RECIPIENT')}
+              windowLabel="Delivery Window:"
             />
 
             {/* The map draws only the pins the server sent: a terminal is a

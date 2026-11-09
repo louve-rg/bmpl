@@ -187,7 +187,7 @@ describe('DriverShippingJobPage — availability windows (SHIP-C)', () => {
       shippingJob({ availabilityWindows: [{ role: 'SENDER', startTime: '08:00', endTime: '12:00' }] }),
     );
     const el = await mount();
-    expect(el.textContent).toMatch(/Available 8:00 AM–12:00 PM/);
+    expect(el.textContent).toMatch(/Pickup Window: 8:00 AM–12:00 PM/);
   });
 
   it('shows an overnight window clearly rather than as an invalid range', async () => {
@@ -195,7 +195,7 @@ describe('DriverShippingJobPage — availability windows (SHIP-C)', () => {
       shippingJob({ availabilityWindows: [{ role: 'SENDER', startTime: '22:00', endTime: '02:00' }] }),
     );
     const el = await mount();
-    expect(el.textContent).toMatch(/Available 10:00 PM–2:00 AM \(overnight\)/);
+    expect(el.textContent).toMatch(/Pickup Window: 10:00 PM–2:00 AM \(overnight\)/);
   });
 
   it('a RECIPIENT window appears beside Deliver to, never beside Collect from', async () => {
@@ -206,17 +206,17 @@ describe('DriverShippingJobPage — availability windows (SHIP-C)', () => {
     const text = el.textContent ?? '';
     const collectIndex = text.indexOf('Collect from');
     const deliverIndex = text.indexOf('Deliver to');
-    const availableIndex = text.indexOf('Available 9:00 AM–5:00 PM');
+    const availableIndex = text.indexOf('Delivery Window: 9:00 AM–5:00 PM');
     expect(availableIndex).toBeGreaterThan(deliverIndex);
     expect(availableIndex).toBeGreaterThan(collectIndex);
-    // Nothing "Available"-shaped sits between the two blocks (i.e. on pickup).
-    expect(text.slice(collectIndex, deliverIndex)).not.toMatch(/Available/);
+    // Nothing window-shaped sits between the two blocks (i.e. on pickup).
+    expect(text.slice(collectIndex, deliverIndex)).not.toMatch(/Pickup Window:|Delivery Window:/);
   });
 
   it('renders nothing extra when no window was set — "attempt at any time" stays silent, not an empty line', async () => {
     apiGet.mockResolvedValue(shippingJob());
     const el = await mount();
-    expect(el.textContent).not.toMatch(/Available \d/);
+    expect(el.textContent).not.toMatch(/Pickup Window:|Delivery Window:/);
   });
 
   it('does not crash when availabilityWindows is missing from the wire entirely', async () => {
