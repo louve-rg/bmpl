@@ -110,8 +110,16 @@ function MessagesCenter() {
   }, [router]);
 
   // Mark a conversation read locally (badge → 0) after the thread opens it.
+  // Bails out (returns the SAME array) once it's already 0 -- otherwise every
+  // call produces a new array by identity even when nothing changed, which is
+  // a re-render for no reason and, combined with an effect that fires off a
+  // markRead call of its own, is exactly the shape of MSG-1's infinite loop.
   const markReadLocal = useCallback((id: string) => {
-    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c)));
+    setConversations((prev) => {
+      const current = prev.find((c) => c.id === id);
+      if (!current || current.unreadCount === 0) return prev;
+      return prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c));
+    });
   }, []);
 
   const onSupportCreated = useCallback(
@@ -339,21 +347,66 @@ function ThreadPane({
   const [statusBusy, setStatusBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const d = await messagingApi.get(conversationId);
-      setDetail(d);
-      setError(null);
-      // Mark read (best-effort) once the thread is open.
-      messagingApi.markRead(conversationId).then(onRead).catch(() => {});
-    } catch (e) {
-      setError(errMessage(e));
-    }
-  }, [conversationId, onRead]);
+  // onRead/onMutated are passed down as fresh inline closures on every render
+  // of the parent (MessagesCenter) -- they are not, and should not need to
+  // be, memoized there. Reading them through a ref means THIS component's
+  // own effects/callbacks never have to depend on their identity, only on
+  // what they actually need (conversationId). This is the fix for MSG-1: the
+  // mount-fetch effect used to depend on `load`, which depended on `onRead`,
+  // which changed identity every render -- and `onRead` itself was invoked
+  // from inside that same fetch (markRead().then(onRead)), so every fetch
+  // caused a parent re-render that recreated `onRead`, which retriggered the
+  // fetch. A closed loop with no terminating condition, measured at ~56
+  // requests/second against a production build. Depending on the ref instead
+  // of the prop breaks the cycle: the effect now only reacts to
+  // conversationId, never to a callback identity.
+  const onReadRef = useRef(onRead);
+  onReadRef.current = onRead;
+  const onMutatedRef = useRef(onMutated);
+  onMutatedRef.current = onMutated;
+
+  const load = useCallback(
+    async (opts: { background?: boolean } = {}) => {
+      try {
+        const d = await messagingApi.get(conversationId);
+        setDetail(d);
+        setError(null);
+        // Mark read (best-effort) once the thread is open -- but only on the
+        // true first load. A background refresh re-marking an already-read
+        // conversation every 15s is a write for nothing: the unread count
+        // doesn't change, so it just doubles the request rate for no effect.
+        if (!opts.background) {
+          messagingApi.markRead(conversationId).then(() => onReadRef.current()).catch(() => {});
+        }
+      } catch (e) {
+        // A background refresh failing silently keeps the last-known-good
+        // transcript on screen rather than replacing it with an error --
+        // only a true first load surfaces the error state.
+        if (!opts.background) setError(errMessage(e));
+      }
+    },
+    [conversationId],
+  );
 
   useEffect(() => {
     setLoading(true);
     void load().finally(() => setLoading(false));
+  }, [load]);
+
+  // Background refresh while the thread stays open, so a reply the other
+  // party sends shows up without the page being reloaded. Deliberately does
+  // NOT touch `loading` -- the existing transcript stays on screen for the
+  // whole request, which is the "existing messages stay visible during a
+  // background refresh" requirement; only the true first load (above) shows
+  // the spinner.
+  // Skip the tick entirely while the tab is hidden -- an open messages tab
+  // in a background window has no user watching it, so there is no reason
+  // to keep polling for as long as the browser lives.
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') void load({ background: true });
+    }, 15_000);
+    return () => clearInterval(t);
   }, [load]);
 
   // Keep the transcript pinned to the newest message.
@@ -361,13 +414,10 @@ function ThreadPane({
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [detail?.messages.length]);
 
-  const applyUpdate = useCallback(
-    (d: ConversationDetail) => {
-      setDetail(d);
-      void onMutated();
-    },
-    [onMutated],
-  );
+  const applyUpdate = useCallback((d: ConversationDetail) => {
+    setDetail(d);
+    void onMutatedRef.current();
+  }, []);
 
   async function toggleStatus() {
     if (!detail) return;
@@ -398,7 +448,7 @@ function ThreadPane({
           </svg>
         </button>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-belize-navy">{detail?.subject || detail?.contextLabel || 'Conversation'}</p>
+          <p className="truncate text-sm font-semibold text-[color:var(--bmpl-text)]">{detail?.subject || detail?.contextLabel || 'Conversation'}</p>
           {detail && (
             <div className="mt-0.5 flex flex-wrap items-center gap-2">
               <Badge tone="neutral">{detail.contextLabel}</Badge>
@@ -821,7 +871,7 @@ function SupportForm({
             <path d="M15 18l-6-6 6-6" />
           </svg>
         </button>
-        <p className="text-sm font-semibold text-belize-navy">Contact support</p>
+        <p className="text-sm font-semibold text-[color:var(--bmpl-text)]">Contact support</p>
       </div>
 
       <form onSubmit={submit} className="space-y-4 p-5">

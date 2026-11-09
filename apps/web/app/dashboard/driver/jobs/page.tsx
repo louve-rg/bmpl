@@ -321,7 +321,7 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
             )}
             {pickupWindows.length > 0 && (
               <p className="break-words text-xs text-[color:var(--bmpl-text-faint)]">
-                Available {pickupWindows.map(formatWindow).join(', ')}
+                Pickup Window: {pickupWindows.map(formatWindow).join(', ')}
               </p>
             )}
             <p className="mt-0.5 break-words text-sm text-[color:var(--bmpl-text-muted)]">
@@ -334,7 +334,7 @@ function JobCard({ job, view }: { job: JobSummary; view: DriverDeliveryView }) {
             )}
             {dropoffWindows.length > 0 && (
               <p className="break-words text-xs text-[color:var(--bmpl-text-faint)]">
-                Available {dropoffWindows.map(formatWindow).join(', ')}
+                Delivery Window: {dropoffWindows.map(formatWindow).join(', ')}
               </p>
             )}
             <p className="mt-0.5 break-words text-xs text-[color:var(--bmpl-text-muted)]">{job.load}</p>
