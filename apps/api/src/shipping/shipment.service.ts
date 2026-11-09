@@ -4349,6 +4349,15 @@ export class ShipmentService {
         // before acting on it; the courier pipeline is staff-facing detail.
         courierStatus: opts.audience === 'STAFF' ? l.courierStatus : null,
         assignedDriverProfileId: opts.audience === 'STAFF' ? l.assignedDriverProfileId : null,
+        // DISPATCH-2: a manual assign deliberately never expires
+        // (assignManual sets offerExpiresAt: null on purpose), so nothing
+        // else here tells staff a leg has sat ASSIGNED with no answer for
+        // days — these two raw timestamps are what a reader derives that
+        // from (assignedAt set, acceptedAt still null). Staff-only, same
+        // line this serializer already draws field by field above; not
+        // secret, just operational detail a customer has no use for.
+        assignedAt: opts.audience === 'STAFF' ? l.assignedAt : null,
+        acceptedAt: opts.audience === 'STAFF' ? l.acceptedAt : null,
         // The carrier org operating this LINE_HAUL leg, staff-only — see the
         // batched resolution just above `legs` for why operatorName always
         // travels with the id rather than the admin console showing a bare one.
