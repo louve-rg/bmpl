@@ -785,23 +785,52 @@ jobs:
             # release-asset CDN (objects.githubusercontent.com) — a single
             # origin. gitleaks also publishes the exact same release as an
             # official Docker Hub image, a genuinely independent registry
-            # and CDN, so one origin wobbling doesn't halt the floor. Same
-            # pinned version, confirmed to exist as this exact tag before
-            # relying on it (hub.docker.com/v2/repositories/zricethezav/
-            # gitleaks/tags lists "v8.24.3"). Still bounded — one pull
-            # attempt, no retry loop of its own — and still fails loudly if
-            # this origin is down too, rather than silently skipping the scan.
+            # and CDN, so one origin wobbling doesn't halt the floor. Still
+            # bounded — one pull attempt, no retry loop of its own — and
+            # still fails loudly if this origin is down too, rather than
+            # silently skipping the scan.
+            #
+            # PINNED BY DIGEST, NOT TAG (god, FLOOR-6): this binary runs over
+            # the entire repository in CI, and a Docker Hub tag is mutable —
+            # a plain `:v8.24.3` tag reference would let a re-push of that
+            # tag change which bytes we execute, with nobody reviewing it,
+            # and the fallback engages precisely during an outage, when
+            # nobody here is watching closely. The digest below was read
+            # from Docker Hub's own tag API (hub.docker.com/v2/repositories/
+            # zricethezav/gitleaks/tags/v8.24.3 -> "digest") before relying
+            # on it, and confirmed locally end to end: pulls, extracts, and
+            # `docker run ... version` reports exactly "v8.24.3".
+            GL_DOCKER_DIGEST="sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055"
             echo "Primary download failed after the retry window — trying the Docker Hub image as a second source." >&2
-            if ! docker pull "docker.io/zricethezav/gitleaks:v${VER}"; then
+            if ! docker pull "docker.io/zricethezav/gitleaks@${GL_DOCKER_DIGEST}"; then
               echo "DOWNLOAD FAILED: both the GitHub release asset and the Docker Hub image for gitleaks v${VER} are unreachable — a network/release problem, not a secret-scan result." >&2
               exit 1
             fi
             mkdir -p /tmp/gitleaks-docker
-            cid=$(docker create "docker.io/zricethezav/gitleaks:v${VER}")
+            cid=$(docker create "docker.io/zricethezav/gitleaks@${GL_DOCKER_DIGEST}")
             docker cp "$cid:/usr/bin/gitleaks" /tmp/gitleaks-docker/gitleaks
             docker rm "$cid" >/dev/null
             mkdir -p /tmp && cp /tmp/gitleaks-docker/gitleaks /tmp/gitleaks
             chmod +x /tmp/gitleaks
+          fi
+          # PROVE WHAT WAS EXTRACTED (god, FLOOR-6): a check nobody re-runs
+          # is a check that rots — the exact reason this card exists. Assert
+          # the binary that came out of EITHER path actually reports the
+          # version we pinned, before trusting it to scan anything.
+          #
+          # The two sources format this differently — checked by actually
+          # running both binaries (the release tar.gz one inside a plain
+          # ubuntu container, since it can't execute on a non-Linux runner
+          # directly; the Docker Hub one via `docker run ... version`):
+          # the GitHub release binary reports "8.24.3" (no "v"), the Docker
+          # Hub image reports "v8.24.3" — same release, different build
+          # metadata. Strip an optional leading "v" before comparing so a
+          # real mismatch can't hide behind that formatting difference, and
+          # a formatting difference can't be mistaken for a real mismatch.
+          ACTUAL_VER="$(/tmp/gitleaks version)"
+          if [ "${ACTUAL_VER#v}" != "$VER" ]; then
+            echo "VERSION MISMATCH: expected gitleaks v${VER}, extracted binary reports '${ACTUAL_VER}' — refusing to run an unverified scanner." >&2
+            exit 1
           fi
           /tmp/gitleaks dir . --config .gitleaks.toml --redact --no-banner --exit-code 2
 
