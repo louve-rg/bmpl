@@ -278,3 +278,116 @@ describe('MSG-1: a background refresh reuses a repeated attachment URL but adopt
     }
   });
 });
+
+/**
+ * MSG-1 follow-up (god's dispatch, conv-391e7e): a thread used to pin to the
+ * newest message unconditionally on every new message, including yanking a
+ * viewer who had scrolled up to read something back down to the bottom the
+ * moment a reply landed -- "the page jumped" is exactly how a user describes
+ * that. The fix tracks whether the viewer was already at/near the bottom
+ * (via `onScroll`, `NEAR_BOTTOM_PX` threshold) and only re-pins in that case.
+ *
+ * jsdom has no real layout, so scrollHeight/clientHeight are stubbed
+ * directly on the element (configurable, so a real browser's own getters
+ * are never touched); scrollTop itself jsdom does let a plain assignment
+ * through.
+ */
+describe('MSG-1 follow-up: pin-to-bottom only re-fires when the viewer was already near the bottom', () => {
+  // ConversationList's own <ul> also carries "overflow-y-auto" and sits
+  // earlier in the DOM (list pane renders before the thread pane) -- a bare
+  // `[class*="overflow-y-auto"]` query matches it first. ThreadPane's own
+  // transcript container is the only element also carrying "bg-slate-50/50".
+  function threadScrollEl(c: HTMLElement): HTMLElement {
+    const el = c.querySelector('[class*="bg-slate-50/50"]');
+    if (!el) throw new Error('thread scroll container not found');
+    return el as HTMLElement;
+  }
+
+  function stubScrollGeometry(el: HTMLElement, { scrollHeight, clientHeight }: { scrollHeight: number; clientHeight: number }) {
+    Object.defineProperty(el, 'scrollHeight', { value: scrollHeight, configurable: true });
+    Object.defineProperty(el, 'clientHeight', { value: clientHeight, configurable: true });
+  }
+
+  it('re-pins to the bottom when a new message arrives and the viewer was already there', async () => {
+    vi.useFakeTimers();
+    try {
+      listConversations.mockResolvedValue([conversationSummary({ unreadCount: 0 })]);
+      markRead.mockResolvedValue(undefined);
+      getConversation.mockResolvedValueOnce(conversationDetail({ messages: [messageWithAttachment({ attachments: [] })] }));
+
+      const c = await mount();
+      const el = threadScrollEl(c);
+      stubScrollGeometry(el, { scrollHeight: 200, clientHeight: 100 });
+      el.scrollTop = 100; // at the bottom (200 - 100 - 100 = 0 < threshold)
+      el.dispatchEvent(new Event('scroll', { bubbles: true }));
+
+      getConversation.mockResolvedValueOnce(
+        conversationDetail({ messages: [messageWithAttachment({ attachments: [] }), messageWithAttachment({ id: 'm2', body: 'new', attachments: [] })] }),
+      );
+      stubScrollGeometry(el, { scrollHeight: 260, clientHeight: 100 }); // grew, as a real new message would
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+
+      expect(el.scrollTop).toBe(260);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves the scroll position alone when a new message arrives and the viewer had scrolled up', async () => {
+    vi.useFakeTimers();
+    try {
+      listConversations.mockResolvedValue([conversationSummary({ unreadCount: 0 })]);
+      markRead.mockResolvedValue(undefined);
+      getConversation.mockResolvedValueOnce(conversationDetail({ messages: [messageWithAttachment({ attachments: [] })] }));
+
+      const c = await mount();
+      const el = threadScrollEl(c);
+      stubScrollGeometry(el, { scrollHeight: 500, clientHeight: 100 });
+      el.scrollTop = 0; // scrolled all the way up (500 - 0 - 100 = 400, well past threshold)
+      el.dispatchEvent(new Event('scroll', { bubbles: true }));
+
+      getConversation.mockResolvedValueOnce(
+        conversationDetail({ messages: [messageWithAttachment({ attachments: [] }), messageWithAttachment({ id: 'm2', body: 'new', attachments: [] })] }),
+      );
+      stubScrollGeometry(el, { scrollHeight: 560, clientHeight: 100 });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+
+      expect(el.scrollTop).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still pins to the bottom before the viewer has ever scrolled at all (default-true, unchanged behaviour)', async () => {
+    vi.useFakeTimers();
+    try {
+      listConversations.mockResolvedValue([conversationSummary({ unreadCount: 0 })]);
+      markRead.mockResolvedValue(undefined);
+      getConversation.mockResolvedValueOnce(conversationDetail({ messages: [messageWithAttachment({ attachments: [] })] }));
+
+      const c = await mount();
+      const el = threadScrollEl(c);
+      // Deliberately never dispatch a 'scroll' event -- nearBottomRef must
+      // default to true, or a freshly opened thread's very next incoming
+      // message would stop landing on the newest one.
+      getConversation.mockResolvedValueOnce(
+        conversationDetail({ messages: [messageWithAttachment({ attachments: [] }), messageWithAttachment({ id: 'm2', body: 'new', attachments: [] })] }),
+      );
+      stubScrollGeometry(el, { scrollHeight: 300, clientHeight: 100 });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+
+      expect(el.scrollTop).toBe(300);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
