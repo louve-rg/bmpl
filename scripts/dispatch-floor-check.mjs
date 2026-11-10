@@ -50,6 +50,38 @@
  *      supervisor that can respawn into the picture mid-test. Non-listening
  *      API processes on no requested worktree's identity are ALSO a floor
  *      problem, reported as "armed" rather than "live".
+ *   5. ALSO reports every LISTENING Next.js server process found in step 1's
+ *      own scan, informationally -- a CLEAN verdict here has only ever meant
+ *      "no scheduler-lock contention from another API server"; it was never
+ *      proof that no dev server is running at all, and nothing in the
+ *      output said so. That gap matters more with four agents sharing one
+ *      host's ports: an admin/web `next dev` left running from an earlier
+ *      session can make a DIFFERENT agent's own `ensurePortFree()` throw
+ *      minutes later, with no clue from this script that it was coming.
+ *      MATCHING NOTE, found live while building this, not assumed: the
+ *      process that actually owns the listening socket is NOT the `next
+ *      dev` (or `next start`) CLI invocation itself -- that one spawns a
+ *      child whose own command line is `.../next/dist/server/lib/
+ *      start-server.js`, with no "next dev" text anywhere in it. Matching on
+ *      "next dev" as a string, which seemed like the obvious pattern,
+ *      silently matched nothing real on this host's own live `next dev`
+ *      processes; matching `start-server.js` is what actually finds the
+ *      bound port. That path is identical for `next start` (production)
+ *      and `next dev`, so this reports both under one "Next.js server"
+ *      label rather than falsely narrowing to "dev" -- both equally squat a
+ *      port, which is the only thing this step cares about. This does NOT
+ *      change what CLEAN means or the exit code -- scheduler lock
+ *      contention and port squatting are different problems with different
+ *      remedies, and conflating them would make a genuinely clean floor (no
+ *      lock contention) read as dirty for an unrelated reason. Worktree
+ *      attribution usually works here (start-server.js's own command line
+ *      carries the real resolved path under node_modules, unlike the CLI
+ *      wrapper that spawned it), but can still come back "(unknown)" for a
+ *      process launched outside this host's GSP worktree layout -- the same
+ *      could-not-classify gap this script already has for an
+ *      unidentifiable API-shaped process, a separate, not-yet-built piece of
+ *      work, not something this step invents a new way to solve. Visibility
+ *      (there IS something on this port) is the fix here, not attribution.
  *
  * VERDICT: prints one line per API server/process found, with worktree,
  * port (if listening), commit, and ancestor result. If more than one
@@ -207,8 +239,20 @@ async function main() {
 
   const listeners = listListeners();
   const apiListeners = [];
+  const nextServerListeners = [];
   const apiShapeRe = /apps[\\/]api[\\/]dist[\\/]main|nest(\.js)?\s+start.*--watch/i;
+  // Informational only (see "WHAT THIS SCRIPT DOES" step 5 above) -- never
+  // joined into apiListeners/othersListening/clean. Matches the process that
+  // actually binds the port (`start-server.js`), not the `next dev`/`next
+  // start` CLI wrapper that spawned it -- that wrapper's own command line
+  // has no distinguishing text and isn't the listener anyway. See the
+  // MATCHING NOTE above for why "next dev" as a literal string, the obvious
+  // first guess, matches nothing real here.
+  const nextServerShapeRe = /next[\\/]dist[\\/]server[\\/]lib[\\/]start-server\.js/i;
   for (const row of listeners) {
+    if (nextServerShapeRe.test(row.CommandLine ?? '')) {
+      nextServerListeners.push({ port: row.Port, pid: row.Pid, worktree: worktreeFromCommandLine(row.CommandLine), commandLine: row.CommandLine });
+    }
     // Require the OWNING process's own command line to look like a real API
     // build, not just a response that LOOKS like /api/health -- a Next.js dev
     // server with an /api/* rewrite faithfully proxies the real API's health
@@ -246,6 +290,13 @@ async function main() {
     const worktree = worktreeFromCommandLine(r.CommandLine);
     const mine = sameWorktree(worktree, MY_ROOT);
     console.log(`  pid ${r.Pid}  worktree ${worktree ?? '(unknown)'}  ${mine ? '[MINE]' : ''}  cmd: ${r.CommandLine}`);
+  }
+
+  console.log('\n--- OTHER NEXT.JS SERVERS DETECTED (dev or start; informational only, does not affect the FLOOR verdict) ---');
+  if (nextServerListeners.length === 0) console.log('  (none)');
+  for (const r of nextServerListeners) {
+    const mine = sameWorktree(r.worktree, MY_ROOT);
+    console.log(`  port ${r.port}  pid ${r.pid}  worktree ${r.worktree ?? '(unknown)'}  ${mine ? '[MINE]' : ''}`);
   }
 
   const othersListening = apiListeners.filter((r) => !sameWorktree(r.worktree, MY_ROOT));
