@@ -10,7 +10,7 @@ import type { Page } from '@playwright/test';
  */
 export const OPS_FULL_EMAIL = 'uat-ops-full@bzemarketplace.com';
 export const OPS_LIMITED_EMAIL = 'uat-ops-limited@bzemarketplace.com';
-export const OPS_PASSWORD = process.env.UAT_OPS_PASSWORD;
+export const OPS_PASSWORD = process.env.UAT_SEED_PASSWORD;
 
 /**
  * Logs in through the real login form and reports whether it landed on
