@@ -64,6 +64,17 @@ const ACCEPTED: ShippingProviderLeg = {
   canSchedule: true,
 };
 
+const ARRIVED: ShippingProviderLeg = {
+  ...ACCEPTED,
+  id: 'leg_3',
+  reference: 'SHP-2003',
+  status: 'IN_PROGRESS',
+  arrivedAt: new Date().toISOString(),
+  canDepart: false,
+  canArrive: false,
+  canSchedule: false,
+};
+
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
@@ -182,6 +193,46 @@ describe('LegsManager — an accepted leg', () => {
     await click(findButton('Confirm departure')!);
 
     expect(apiPost).toHaveBeenCalledWith('/shipping/provider/legs/leg_2/depart', { carrierName: undefined, carrierBookingRef: undefined });
+  });
+});
+
+describe('LegsManager — MDF-611 carrier handoff-code reveal', () => {
+  it('does not offer the reveal button before the leg has arrived', async () => {
+    apiGet.mockResolvedValue([ACCEPTED]);
+    await mount();
+
+    expect(findButton('Reveal handoff code')).toBeNull();
+  });
+
+  it('does not offer the reveal button once the leg is COMPLETED, even with arrivedAt set', async () => {
+    apiGet.mockResolvedValue([{ ...ARRIVED, status: 'COMPLETED' }]);
+    await mount();
+
+    expect(findButton('Reveal handoff code')).toBeNull();
+  });
+
+  it('offers the reveal button once arrived and not yet completed, and reveals the code from the dedicated endpoint', async () => {
+    apiGet.mockResolvedValueOnce([ARRIVED]);
+    apiGet.mockResolvedValueOnce({ kind: 'handoff', code: '4821', attempts: 0 });
+    await mount();
+
+    expect(findButton('Reveal handoff code')).toBeTruthy();
+    await click(findButton('Reveal handoff code')!);
+
+    expect(apiGet).toHaveBeenCalledWith('/shipping/provider/legs/leg_3/code');
+    expect(container!.textContent).toContain('4821');
+  });
+
+  it('Hide clears the revealed code from the screen', async () => {
+    apiGet.mockResolvedValueOnce([ARRIVED]);
+    apiGet.mockResolvedValueOnce({ kind: 'handoff', code: '4821', attempts: 0 });
+    await mount();
+
+    await click(findButton('Reveal handoff code')!);
+    expect(container!.textContent).toContain('4821');
+
+    await click(findButton('Hide')!);
+    expect(container!.textContent).not.toContain('4821');
   });
 });
 

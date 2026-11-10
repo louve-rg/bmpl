@@ -87,6 +87,27 @@ export function isPendingProposal(l: Pick<ShippingProviderLeg, 'canAccept' | 'ca
   return l.canAccept && l.canReject;
 }
 
+/** `GET /shipping/provider/legs/:id/code` -- MDF-611. `kind` is always the literal `'handoff'` (a LINE_HAUL leg has no pickup-code case); kept for shape parity with the driver app's own reveal response rather than a different contract. */
+export interface ShippingProviderLegCode {
+  kind: 'handoff';
+  code: string | null;
+  attempts: number;
+}
+
+/**
+ * Whether "Reveal handoff code" should even appear on a leg row (MDF-611) --
+ * NOT a trust boundary, the API enforces its own `arrivedAt` gate on the read
+ * itself. This only controls when the button is worth showing: `completeLeg`
+ * refuses the handoff transaction outright until `arrivedAt` is set, so a
+ * code shown before that is real but useless -- nothing a carrier could do
+ * with it yet. Deliberately NOT `revealHandoffPin`'s own (broader) window --
+ * that one has no `arrivedAt` check at all, which would show a code before
+ * there's anything to do with it.
+ */
+export function canRevealHandoffCode(l: Pick<ShippingProviderLeg, 'arrivedAt' | 'status'>): boolean {
+  return l.arrivedAt != null && l.status !== 'COMPLETED' && l.status !== 'CANCELLED';
+}
+
 /**
  * Where the carrier's ORGANIZATION (not the generic SHIPPING_PROVIDER role —
  * see OrgStatusCard's own doc comment for why the two are shown separately)
