@@ -49,6 +49,31 @@ export class StorageService implements OnModuleInit {
   private readonly enabled: boolean;
   private readonly client: S3Client | null;
 
+  /**
+   * MSG-2: a signed URL embeds the signing timestamp, so re-signing the same
+   * key on every call hands out a different URL string for an unchanged
+   * object. A client that polls (messaging, driver photos) sees its `<img
+   * src>` change every call and re-fetches, even though nothing moved —
+   * Oscar traced the messaging-thread flicker to exactly this. Caching the
+   * minted URL per `(visibility, key)` — not per key alone, so `private` and
+   * `public` can never share an entry even if a raw key string collided
+   * across buckets — makes repeated reads of the same object return the
+   * SAME string while that string is still comfortably valid.
+   *
+   * In-process only, on purpose (no Redis, per the brief): if this API ever
+   * runs multiple replicas behind a load balancer, each instance keeps its
+   * own cache, so a client whose polls land on different instances can
+   * still see the URL change within the margin window below — not a
+   * correctness or security issue (a signed URL's authorization is scoped
+   * to the object and bucket, never to who signed it or who asked), just a
+   * partial reduction in how stable the URL looks. Single instance: fully
+   * stable. Multiple instances: still strictly better than today, where
+   * EVERY call re-signs regardless of instance count.
+   */
+  private readonly downloadUrlCache = new Map<string, { url: string; mintedAt: number }>();
+  /** Bound the cache's own memory, not the URLs' lifetime — see presignDownload. */
+  private static readonly DOWNLOAD_CACHE_SWEEP_THRESHOLD = 5000;
+
   constructor(@Inject(ENV) private readonly env: Env) {
     this.enabled = storageEnabled(env);
     // Only construct an S3 client when storage is actually configured, so we
@@ -197,16 +222,52 @@ export class StorageService implements OnModuleInit {
     return { uploadUrl, key, expiresIn: this.env.STORAGE_SIGNED_URL_TTL };
   }
 
-  /** Short-lived GET URL for viewing a PRIVATE object (admin document review). */
+  /**
+   * Short-lived GET URL for viewing a PRIVATE object (admin document
+   * review), or any other visibility's download URL.
+   *
+   * MSG-2: returns a CACHED url while it still has a healthy margin of its
+   * validity window left, so repeated calls for the same `(visibility,
+   * key)` are stable rather than re-signing — and re-signing a comfortable
+   * margin before the real expiry rather than waiting for the boundary, so
+   * nobody is ever handed a URL that is about to go dead. The margin is 60
+   * seconds, or half the configured TTL if that is shorter: at the default
+   * 300s TTL, a caller gets at least 240s of guaranteed-fresh validity from
+   * the moment they receive a cached URL — several times Oscar's 15s poll
+   * interval, comfortable headroom for a slow page load or clock skew, and
+   * small enough that a dropped/restarted process loses at most one margin
+   * window of staleness, never the whole cache.
+   */
   async presignDownload(
     key: string,
     visibility: Visibility = 'private',
   ): Promise<{ url: string; expiresIn: number }> {
+    const ttlMs = this.env.STORAGE_SIGNED_URL_TTL * 1000;
+    const marginMs = Math.min(60_000, ttlMs / 2);
+    const cacheKey = `${visibility}:${key}`;
+    const now = Date.now();
+    const cached = this.downloadUrlCache.get(cacheKey);
+    if (cached && now - cached.mintedAt < ttlMs - marginMs) {
+      return { url: cached.url, expiresIn: this.env.STORAGE_SIGNED_URL_TTL };
+    }
+
     const client = this.requireClient();
     const command = new GetObjectCommand({ Bucket: this.bucketFor(visibility), Key: key });
     const url = await getSignedUrl(client, command, {
       expiresIn: this.env.STORAGE_SIGNED_URL_TTL,
     });
+    this.downloadUrlCache.set(cacheKey, { url, mintedAt: now });
+    // Sweep only when the cache has actually grown large, not on every
+    // call — a long-running process that views many distinct objects over
+    // its lifetime must not accumulate one entry per object forever. A
+    // genuinely expired entry (older than the full TTL, not just past the
+    // rotation margin) is always safe to drop: the next read for that key
+    // simply re-signs, same as a cold cache.
+    if (this.downloadUrlCache.size > StorageService.DOWNLOAD_CACHE_SWEEP_THRESHOLD) {
+      for (const [k, v] of this.downloadUrlCache) {
+        if (now - v.mintedAt >= ttlMs) this.downloadUrlCache.delete(k);
+      }
+    }
     return { url, expiresIn: this.env.STORAGE_SIGNED_URL_TTL };
   }
 
