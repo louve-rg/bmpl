@@ -9,8 +9,10 @@ proof down.
 not a stronger one:** every walk below was run by one QA agent (Jim,
 `hive/agents/jim-mv09alb5/memory.md`) against his own local dev stack — his
 own worktree, his own Postgres/Redis/MinIO containers, seeded and ad-hoc
-`uat-*` test accounts, real code paths and real database writes, but never
-production and never real money. **None of this is "production-verified."**
+`uat-*` test accounts (see [`docs/TEST-ACCOUNTS.md`](TEST-ACCOUNTS.md) for
+which ones are reproducible fixtures, by role, and which script seeds each
+one), real code paths and real database writes, but never production and
+never real money. **None of this is "production-verified."**
 Where this document cannot tell from the record where something was
 checked, it says so rather than picking the stronger word. This document was
 written from that existing record; nothing in it was re-run to produce it.
