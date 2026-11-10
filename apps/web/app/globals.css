@@ -189,12 +189,27 @@ body {
     background-color: #eff6ff;
   }
   [data-theme='glass'] .bmpl-nav-item[aria-current='page'] {
-    /* Same fix, glass branch: the gradient's rgba() stops were translucent,
-       compositing toward whatever mural pixels sit behind this nav item --
-       made opaque so the surface is a fixed, known colour instead of one
-       that depends on where the item lands. Construction fixed; the
-       rendered ratio was not measured. */
-    background: linear-gradient(135deg, rgb(59, 130, 246), rgb(14, 165, 233));
+    /* Textually identical to apps/admin's copy of this rule before MDF-383
+       (glass.css's own header comment names this file as carrying the same
+       construction) -- found while fixing admin's, measured with the same
+       instrument, and FAILED the same way: #f4f8ff foreground on this
+       bright, saturated, translucent gradient does not clear 4.5:1 on
+       apps/web's authenticated dashboard sidebar either, for every
+       customer/vendor/driver/employer/property-owner/agent page. Fixed the
+       same way as admin, reusing the pairing `.bmpl-nav-item:hover` already
+       uses two rules above (--bmpl-surface-muted + --bmpl-text) -- the
+       "ambient" fill level glass.css's own header comment documents as
+       correct for "topbar/rail navigation furniture, sparse text". No new
+       token, no new arithmetic.
+       MEASURED LIVE (Oscar, 2026-11-10, MDF-383), independently on this
+       app's own dashboard rather than inferred from admin's -- the two
+       apps' Sidebar wrappers use the identical `glass-chrome` construction,
+       but that similarity was verified here with its own render, not
+       assumed: getComputedStyle foreground + a direct screenshot pixel
+       decode, no clustering, no dominant-share heuristic, 10 points kept
+       off the label's own glyphs: 16.81:1 to 16.85:1 everywhere sampled --
+       PASSES the 4.5:1 text floor with very wide margin. */
+    background-color: var(--bmpl-surface-muted);
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
   }
   .bmpl-nav-heading {
