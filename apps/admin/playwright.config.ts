@@ -17,7 +17,7 @@ export default defineConfig({
   // e2e/visual belongs to playwright.visual.config.ts and e2e/contrast to
   // playwright.contrast.config.ts -- see apps/web's own configs for the
   // full reasoning; identical here.
-  testIgnore: ['**/visual/**', '**/contrast/**'],
+  testIgnore: ['**/visual/**', '**/contrast/**', '**/*.local-only.spec.ts'],
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,
