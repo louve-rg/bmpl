@@ -86,12 +86,28 @@ const needsCommit = flag('needs') ?? localHead();
 
 function myWorktreeRoot() {
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim().replace(/\//g, '\\');
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
   } catch {
     return null;
   }
 }
 const MY_ROOT = myWorktreeRoot();
+
+// `git rev-parse --show-toplevel` always answers with forward slashes, even
+// on Windows. A path pulled from a Win32_Process CommandLine uses whatever
+// separator the process was actually launched with -- backslashes from
+// cmd.exe/PowerShell, forward slashes from bash (which is how everyone on
+// this floor launches node). Comparing those two kinds of string with only
+// `.toLowerCase()` silently fails whenever the two sides don't happen to
+// share a launch style, which misclassifies the script's OWN process as a
+// stranger's. Every worktree-identity comparison in this file MUST go
+// through this one function -- not a `.replace()` fixed up on one side at
+// one call site, which only moves which launch style breaks.
+function sameWorktree(a, b) {
+  if (!a || !b) return false;
+  const norm = (p) => p.replace(/\//g, '\\').toLowerCase();
+  return norm(a) === norm(b);
+}
 
 function psJson(script) {
   const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', maxBuffer: 1024 * 1024 * 16 });
@@ -220,7 +236,7 @@ async function main() {
   console.log('--- LISTENING API servers ---');
   if (apiListeners.length === 0) console.log('  (none)');
   for (const r of apiListeners) {
-    const mine = r.worktree && MY_ROOT && r.worktree.toLowerCase() === MY_ROOT.toLowerCase();
+    const mine = sameWorktree(r.worktree, MY_ROOT);
     console.log(`  port ${r.port}  pid ${r.pid}  worktree ${r.worktree ?? '(unknown)'}  commit ${r.commit ?? '(none reported)'}  ancestor-check: ${r.ancestor}  ${mine ? '[MINE]' : ''}`);
   }
 
@@ -228,15 +244,12 @@ async function main() {
   if (armed.length === 0) console.log('  (none)');
   for (const r of armed) {
     const worktree = worktreeFromCommandLine(r.CommandLine);
-    const mine = worktree && MY_ROOT && worktree.toLowerCase() === MY_ROOT.toLowerCase();
+    const mine = sameWorktree(worktree, MY_ROOT);
     console.log(`  pid ${r.Pid}  worktree ${worktree ?? '(unknown)'}  ${mine ? '[MINE]' : ''}  cmd: ${r.CommandLine}`);
   }
 
-  const othersListening = apiListeners.filter((r) => !(r.worktree && MY_ROOT && r.worktree.toLowerCase() === MY_ROOT.toLowerCase()));
-  const othersArmed = armed.filter((r) => {
-    const worktree = worktreeFromCommandLine(r.CommandLine);
-    return !(worktree && MY_ROOT && worktree.toLowerCase() === MY_ROOT.toLowerCase());
-  });
+  const othersListening = apiListeners.filter((r) => !sameWorktree(r.worktree, MY_ROOT));
+  const othersArmed = armed.filter((r) => !sameWorktree(worktreeFromCommandLine(r.CommandLine), MY_ROOT));
 
   if (killOthers) {
     console.log('\n--kill-others: stopping every API-shaped process not in my own worktree...');
