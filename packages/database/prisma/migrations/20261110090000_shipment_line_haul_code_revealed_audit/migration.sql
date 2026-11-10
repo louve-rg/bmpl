@@ -1,0 +1,29 @@
+-- MDF-611: a LINE_HAUL leg's handoff code could only ever be revealed to
+-- BML staff (logistics.verify), via SHIPMENT_HANDOFF_PIN_REVEALED. Edward's
+-- direction is the inverse: the carrier org that physically carries the
+-- parcel should be able to see its own leg's code directly, without going
+-- through staff at all.
+--
+-- THE FIX (implementation PR, not this migration): ShipmentService's new
+-- revealCarrierHandoffCode, reached via ShippingProviderService.revealCode ->
+-- GET /shipping/provider/legs/:id/code, gated on an ACTIVE ShippingProviderMember
+-- in the org operating the specific leg (the same assertMyLeg ownership gate
+-- depart/arrive/schedule already use), and only once the leg has arrived and
+-- is still awaiting handoff.
+--
+-- A NEW action, not a reuse of SHIPMENT_HANDOFF_PIN_REVEALED: who was
+-- permitted to reveal the code is exactly the question this card answers
+-- differently for carriers than for staff, so the two reveals stay
+-- separately auditable rather than folded into one action with a
+-- `revealedBy` tag that an audit query would have to unpack every time.
+--
+-- Does NOT touch SHIPMENT_HANDOFF_PIN_REVEALED, revealHandoffPin, or
+-- logistics.verify's existing reveal path — that stays exactly as it is;
+-- whether it should be narrowed or retired now that carriers can self-reveal
+-- is a separate, un-decided product question, not part of this change.
+--
+-- ROLLBACK: cannot remove an enum value Postgres has ever stored a row
+-- against (see packages/database/CLAUDE.md §2) — not reversible by a
+-- migration, same as every other AuditAction addition.
+
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_LINE_HAUL_CODE_REVEALED';

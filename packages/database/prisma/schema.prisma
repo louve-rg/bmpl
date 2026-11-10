@@ -348,6 +348,15 @@ enum AuditAction {
   /// ShipmentLeg.scheduledDepartureAt/scheduledArrivalAt.
   SHIPMENT_LEG_SCHEDULED
   SHIPMENT_HANDOFF_PIN_REVEALED
+  /// MDF-611: the carrier org's OWN self-reveal of a LINE_HAUL leg's handoff
+  /// code (ShipmentService.revealCarrierHandoffCode) — distinct from
+  /// SHIPMENT_HANDOFF_PIN_REVEALED, which fires on the STAFF (logistics.verify)
+  /// reveal of the same leg kind's code. Kept as two actions, not a shared
+  /// one with a `revealedBy` tag, because "who is permitted to reveal this"
+  /// is the exact security question this card changes — collapsing the two
+  /// would make an audit query asking "did a carrier ever see this code"
+  /// indistinguishable from "did staff."
+  SHIPMENT_LINE_HAUL_CODE_REVEALED
   /// CLOSE-2: an unlinked recipient asked for the handoff-code reveal email.
   /// Distinct from SHIPMENT_HANDOFF_PIN_REVEALED, which fires once the code
   /// is actually read (by a linked recipient's own account, staff, or this

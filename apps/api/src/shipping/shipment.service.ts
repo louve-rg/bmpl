@@ -4898,6 +4898,73 @@ export class ShipmentService {
   }
 
   /**
+   * MDF-611: the carrier org's OWN self-reveal of a LINE_HAUL leg's handoff
+   * code — the inversion `revealHandoffPin` above never offered, because a
+   * LINE_HAUL leg has no `DriverProfile`-backed courier for `revealCourierCode`
+   * below to serve either. The org that physically carries the parcel
+   * (`ShippingProviderMember`) is the actor here instead.
+   *
+   * Ownership — an ACTIVE `ShippingProviderMember` in the org operating THIS
+   * leg — is asserted by the caller (`ShippingProviderService.revealCode`,
+   * which reuses `assertMyLeg`, the same gate `depart`/`arrive`/`schedule`
+   * already use) before this method is ever reached. Never re-derived here:
+   * two ownership checks that must agree are one bug waiting for a
+   * divergence, the same reasoning `depart`/`arrive`/`schedule` already
+   * follow by trusting `ShippingProviderService`'s gate rather than
+   * repeating it against `ShipmentService`'s own copy of the leg.
+   *
+   * Deliberately a NARROWER window than `revealHandoffPin`'s staff-facing
+   * reveal above, which has no arrival check at all: this refuses until
+   * `arrivedAt` is set. Showing the code earlier would be real but useless —
+   * `completeLeg`'s own TERM-10 guard refuses the handoff transaction until
+   * arrival — so gating the reveal the same way keeps the code's exposure
+   * window no wider than the window in which it can actually be used.
+   *
+   * Audited as its own action (`SHIPMENT_LINE_HAUL_CODE_REVEALED`), not
+   * folded into `SHIPMENT_HANDOFF_PIN_REVEALED` with a `revealedBy` tag —
+   * see that migration's comment for why the two reveals stay separately
+   * queryable.
+   */
+  async revealCarrierHandoffCode(legId: string, actor: { userId: string }) {
+    const leg = await this.prisma.shipmentLeg.findUnique({
+      where: { id: legId },
+      select: {
+        id: true,
+        shipmentId: true,
+        kind: true,
+        status: true,
+        arrivedAt: true,
+        handoffPin: true,
+        handoffPinAttempts: true,
+        shipment: { select: { reference: true } },
+      },
+    });
+    if (!leg) throw new NotFoundException('Leg not found.');
+    if (leg.kind !== 'LINE_HAUL') {
+      throw new BadRequestException('This leg has no carrier handoff code to reveal.');
+    }
+    if (leg.status === 'COMPLETED' || leg.status === 'CANCELLED') {
+      throw new BadRequestException('This leg is finished; its handoff code is no longer valid.');
+    }
+    if (leg.arrivedAt === null) {
+      throw new BadRequestException('This leg has not arrived at its destination terminal yet.');
+    }
+    await this.audit.record({
+      action: 'SHIPMENT_LINE_HAUL_CODE_REVEALED',
+      actorId: actor.userId,
+      newValue: {
+        legId: leg.id,
+        shipmentId: leg.shipmentId,
+        reference: leg.shipment.reference,
+        legKind: leg.kind,
+        legStatus: leg.status,
+        revealedBy: 'CARRIER',
+      },
+    });
+    return { kind: 'handoff' as const, code: leg.handoffPin, attempts: leg.handoffPinAttempts };
+  }
+
+  /**
    * TERM-5: the courier's OWN half of the handoff reversal — the code they
    * must present at a hub counter, read directly rather than relayed through
    * staff. This is the fix for the "wrong direction" defect: before this
