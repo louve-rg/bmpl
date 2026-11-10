@@ -389,6 +389,22 @@ function ThreadPane({
   const [error, setError] = useState<string | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // MSG-1 follow-up: whether the viewer was already at (or very near) the
+  // bottom the last time they scrolled -- tracked via onScroll, not
+  // recomputed inside the pin effect below, because by the time that effect
+  // runs the new message's bubble is already in the DOM and scrollHeight has
+  // already grown to include it. scrollTop itself does NOT change just from
+  // content being appended below the fold, so the viewer's own last scroll
+  // position is still the right signal to decide whether they wanted to stay
+  // pinned to the bottom. Starts true: a freshly opened thread should still
+  // land on the newest message, same as before this change.
+  const nearBottomRef = useRef(true);
+  const NEAR_BOTTOM_PX = 80;
+  const handleThreadScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+  }, []);
 
   // onRead/onMutated are passed down as fresh inline closures on every render
   // of the parent (MessagesCenter) -- they are not, and should not need to
@@ -452,15 +468,36 @@ function ThreadPane({
     return () => clearInterval(t);
   }, [load]);
 
-  // Keep the transcript pinned to the newest message.
+  // Keep the transcript pinned to the newest message -- but only when the
+  // viewer was already at (or near) the bottom. A viewer scrolled up reading
+  // older messages does not want to be yanked down to the newest one the
+  // moment a reply lands; that is the page jumping under them, not a
+  // feature. MSG-1 follow-up (god's dispatch, conv-391e7e): the original
+  // unconditional version was intentional but not correct.
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (scrollRef.current && nearBottomRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [detail?.messages.length]);
 
   const applyUpdate = useCallback((d: ConversationDetail) => {
     setDetail((prev) => reconcileDetail(prev, d));
     void onMutatedRef.current();
   }, []);
+
+  // A viewer's OWN message always pins, even if they'd scrolled up to read
+  // something -- unlike a remote reply arriving while they're not looking,
+  // they just took the action that produced this new message and sending it
+  // with no visible result ("the app ate my message") is a worse symptom
+  // than the flash this whole effect exists to avoid. Deliberately a
+  // separate handler, not folded into applyUpdate itself: applyUpdate is
+  // also toggleStatus's path, and a close/reopen is not the viewer asking to
+  // see the bottom.
+  const handleSent = useCallback(
+    (d: ConversationDetail) => {
+      nearBottomRef.current = true;
+      applyUpdate(d);
+    },
+    [applyUpdate],
+  );
 
   async function toggleStatus() {
     if (!detail) return;
@@ -509,7 +546,7 @@ function ThreadPane({
       </div>
 
       {/* transcript */}
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto bg-slate-50/50 p-4 md:max-h-[60vh]">
+      <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 space-y-4 overflow-y-auto bg-slate-50/50 p-4 md:max-h-[60vh]">
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
             <Spinner className="h-4 w-4" /> Loading…
@@ -533,7 +570,7 @@ function ThreadPane({
       {detail && (
         <Composer
           conversation={detail}
-          onSent={applyUpdate}
+          onSent={handleSent}
           inlineError={error && detail ? error : null}
         />
       )}
