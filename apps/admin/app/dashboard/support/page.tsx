@@ -537,11 +537,40 @@ function MessageRow({ message }: { message: SupportMessage }) {
   );
 }
 
+/**
+ * ATT-1 (god's dispatch, conv-ac77e8): `ready` used to require `CLEAN` or
+ * `PASSED` -- nothing ever writes `scanStatus` (no scan worker exists) and
+ * `PASSED` isn't even in the enum (`ATTACHMENT_SCAN_STATUSES`,
+ * packages/shared/src/messaging.ts), so `ready` could never be true and
+ * every support attachment, image or not, fell to the `<span>` with no
+ * `href` below -- staff could never open or view anything a customer sent.
+ * Mirrors the customer-facing gate exactly (`AttachmentView`,
+ * apps/web/app/dashboard/messages/page.tsx): only `FLAGGED` blocks viewing.
+ * `PENDING` is cosmetic only (a "scanning" label on the non-image chip),
+ * same as the customer side -- support staff are strictly more privileged
+ * than the conversation's own participants, who already see this object
+ * over the same signed URL the instant it's PENDING.
+ */
 function AttachmentChip({ attachment }: { attachment: SupportAttachment }) {
   const isImage = attachment.mimeType.startsWith('image/');
-  const ready = attachment.scanStatus === 'CLEAN' || attachment.scanStatus === 'PASSED';
+  const pending = attachment.scanStatus === 'PENDING';
+  const flagged = attachment.scanStatus === 'FLAGGED';
 
-  if (isImage && ready) {
+  if (flagged) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700"
+        title={`Scan status: ${attachment.scanStatus}`}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5 shrink-0" aria-hidden>
+          <path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+        </svg>
+        {attachment.fileName} · unavailable
+      </span>
+    );
+  }
+
+  if (isImage) {
     return (
       <a
         href={attachment.url}
@@ -556,36 +585,19 @@ function AttachmentChip({ attachment }: { attachment: SupportAttachment }) {
     );
   }
 
-  const content = (
-    <>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-[color:var(--bmpl-text-muted-strong)]" aria-hidden>
-        <path d="M14 3v5h5M8 3h6l5 5v11a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
-      </svg>
-      <span className="max-w-[10rem] truncate">{attachment.fileName}</span>
-      <span className="text-[color:var(--bmpl-text-muted-strong)]">{formatBytes(attachment.fileSizeBytes)}</span>
-    </>
-  );
-
-  if (!ready) {
-    return (
-      <span
-        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-500"
-        title={`Scan status: ${attachment.scanStatus}`}
-      >
-        {content}
-        <span className="text-amber-800">· scanning</span>
-      </span>
-    );
-  }
-
   return (
     <a
       href={attachment.url}
       target="_blank"
       rel="noopener noreferrer"
       className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-belize-navy transition hover:border-belize-blue hover:bg-belize-blue/5"
+      title={`Scan status: ${attachment.scanStatus}`}
     >
-      {content}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-[color:var(--bmpl-text-muted-strong)]" aria-hidden>
+        <path d="M14 3v5h5M8 3h6l5 5v11a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+      </svg>
+      <span className="max-w-[10rem] truncate">{attachment.fileName}</span>
+      <span className="text-[color:var(--bmpl-text-muted-strong)]">{pending ? 'scanning' : formatBytes(attachment.fileSizeBytes)}</span>
     </a>
   );
 }
