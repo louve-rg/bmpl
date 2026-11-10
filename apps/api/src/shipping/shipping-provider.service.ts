@@ -713,6 +713,20 @@ export class ShippingProviderService {
     return this.myLeg(userId, legId);
   }
 
+  /**
+   * MDF-611: the carrier's own self-reveal of their LINE_HAUL leg's handoff
+   * code — the inversion of "only logistics.verify can see this." `assertMyLeg`
+   * is the SAME ownership gate `depart`/`arrive`/`schedule` already use; the
+   * actual reveal logic (leg kind, status, the arrival window, the audit
+   * row) lives entirely in `ShipmentService.revealCarrierHandoffCode`, never
+   * duplicated here — same split as `depart`/`arrive` above, which assert
+   * ownership here and leave the state machine to `ShipmentService`.
+   */
+  async revealCode(userId: string, legId: string) {
+    await this.assertMyLeg(userId, legId);
+    return this.shipments.revealCarrierHandoffCode(legId, { userId });
+  }
+
   /** 404 on a cross-org id: one carrier must not be able to probe another's legs. */
   private async assertMyLeg(userId: string, legId: string) {
     const orgIds = await this.myOrgIds(userId);

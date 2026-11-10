@@ -1018,6 +1018,19 @@ export class ShippingProviderLegsController {
     return this.providers.myLeg(u.userId, id);
   }
 
+  /**
+   * MDF-611: the carrier's own code to present at the destination hub
+   * counter — the LINE_HAUL analogue of DriverShippingController's
+   * `/driver/shipping-jobs/:id/code`. Always `kind: 'handoff'` (a LINE_HAUL
+   * leg has no pickup code of its own to present) — kept in the same shape
+   * as that endpoint for contract parity, not a narrower one invented here.
+   */
+  @StrictThrottle()
+  @Get('legs/:id/code')
+  revealCode(@CurrentUser() u: AuthContext, @Param('id') id: string) {
+    return this.providers.revealCode(u.userId, id);
+  }
+
   @Post('legs/:id/depart')
   depart(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(legDepartSchema)) dto: LegDepartInput) {
     return this.providers.depart(u.userId, id, dto);

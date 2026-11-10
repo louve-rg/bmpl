@@ -513,3 +513,87 @@ describe('the carrier surface', () => {
     expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(201);
   });
 });
+
+/**
+ * MDF-611: the inverse of the desk-side reveal `admin/logistics/legs/:id/handoff-pin`
+ * already carries — the org that PRODUCES the code for a LINE_HAUL leg can
+ * now read it directly, without staff in the middle. Reuses `assertMyLeg`
+ * (the exact gate depart/arrive/schedule already use), so the ownership
+ * assertions below (own org / foreign org / no org at all) are expected to
+ * read identically to the existing cross-org tests above — that agreement
+ * is the point, not a coincidence.
+ */
+describe('revealing the LINE_HAUL handoff code (MDF-611)', () => {
+  it('the operating org reads its own code only once arrived, and not before or after', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await bookedFor(carrier.profileId, 'SEA', carrier.cookies);
+    const pin = await pinOf(leg.id);
+
+    // Before departure: real but not yet usable — refused, not revealed.
+    const beforeDeparture = await get(carrier.cookies, `shipping/provider/legs/${leg.id}/code`);
+    expect(beforeDeparture.status).toBe(400);
+    expect(beforeDeparture.body.message).toContain('has not arrived');
+
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {})).status).toBe(201);
+    // Departed but not yet arrived: still refused — the same window, not a
+    // separate "departed is close enough" case.
+    const afterDeparture = await get(carrier.cookies, `shipping/provider/legs/${leg.id}/code`);
+    expect(afterDeparture.status).toBe(400);
+    expect(afterDeparture.body.message).toContain('has not arrived');
+
+    expect((await post(carrier.cookies, `shipping/provider/legs/${leg.id}/arrive`)).status).toBe(201);
+    const revealed = await get(carrier.cookies, `shipping/provider/legs/${leg.id}/code`);
+    expect(revealed.status).toBe(200);
+    expect(revealed.body).toEqual({ kind: 'handoff', code: pin, attempts: 0 });
+
+    const audit = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'SHIPMENT_LINE_HAUL_CODE_REVEALED' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(audit?.actorId).toBe(carrier.userId);
+    expect((audit?.newValue as { revealedBy: string }).revealedBy).toBe('CARRIER');
+
+    // Completed: the receiving desk finishes the handoff, and the now-dead
+    // code is refused on both sides symmetrically (revealHandoffPin already
+    // refuses a COMPLETED leg the same way for staff).
+    expect((await post(admin, `admin/logistics/legs/${leg.id}/handoff`, { pin, receivedByName: 'Desk staff' })).status).toBe(201);
+    const afterCompletion = await get(carrier.cookies, `shipping/provider/legs/${leg.id}/code`);
+    expect(afterCompletion.status).toBe(400);
+    expect(afterCompletion.body.message).toContain('finished');
+  });
+
+  it('a member of a DIFFERENT org reads a missing leg, exactly like every other cross-org probe here', async () => {
+    const carrierA = await makeCarrier('Reef Runner Ltd');
+    const carrierB = await makeCarrier('Cave Branch Bus Co');
+    const { leg } = await bookedFor(carrierA.profileId, 'SEA', carrierA.cookies);
+    await post(carrierA.cookies, `shipping/provider/legs/${leg.id}/depart`, {});
+    await post(carrierA.cookies, `shipping/provider/legs/${leg.id}/arrive`);
+
+    const foreign = await get(carrierB.cookies, `shipping/provider/legs/${leg.id}/code`);
+    const missing = await get(carrierB.cookies, `shipping/provider/legs/nonexistent00000000000000/code`);
+    expect(foreign.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(foreign.body).toEqual(missing.body);
+  });
+
+  it('an account with the role but no active membership anywhere is refused outright', async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await bookedFor(carrier.profileId, 'SEA', carrier.cookies);
+    await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {});
+    await post(carrier.cookies, `shipping/provider/legs/${leg.id}/arrive`);
+
+    const roleOnly = await registerUser(`xrole_${uniq()}@example.com`);
+    await approveProviderRole(roleOnly.userId);
+    expect((await get(roleOnly.cookies, `shipping/provider/legs/${leg.id}/code`)).status).toBe(403);
+  });
+
+  it("does not leak into the admin handoff desk's own serializer, and staff cannot reach this carrier-only door", async () => {
+    const carrier = await makeCarrier('Reef Runner Ltd');
+    const { leg } = await bookedFor(carrier.profileId, 'SEA', carrier.cookies);
+    await post(carrier.cookies, `shipping/provider/legs/${leg.id}/depart`, {});
+    await post(carrier.cookies, `shipping/provider/legs/${leg.id}/arrive`);
+    // Staff (admin cookies hold no carrier membership at all) are refused —
+    // this door is carrier-only, the desk-side reveal stays the staff path.
+    expect((await get(admin, `shipping/provider/legs/${leg.id}/code`)).status).toBe(403);
+  });
+});
