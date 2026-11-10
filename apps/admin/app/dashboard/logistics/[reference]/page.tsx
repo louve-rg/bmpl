@@ -113,6 +113,16 @@ interface Shipment {
   destination: { name: string | null; address: string | null; city: string | null; district: string | null; latitude: number | null; longitude: number | null };
   legs: Leg[];
   custody: Custody[];
+  /**
+   * TERM-12 / MDF-645 follow-up: the collection-code lockout, STAFF-only
+   * (serialize() sends null to CUSTOMER) — never the code itself, which has
+   * its own independent, unconditional staff exclusion and is not part of
+   * this type at all. Optional for the same cross-deploy reason as
+   * pickupPhotoUrls/manualAssignmentPendingSince above: this screen can
+   * deploy before the API starts sending it.
+   */
+  collectionVerificationStatus?: 'PENDING' | 'VERIFIED' | 'FAILED' | null;
+  collectionPinAttemptsRemaining?: number | null;
 }
 
 const when = (iso: string | null) =>
@@ -299,6 +309,31 @@ export default function ShipmentOpsPage() {
     }
   }
 
+  /**
+   * TERM-12 / MDF-645 follow-up: the way back out of a locked collection
+   * code. Same shape as recordCollection/flagException above — a prompt for
+   * the mandatory reason, same client-side floor (4 chars) as
+   * unlockShipmentCollectionSchema's own `min(4, ...)`, so an operator who
+   * types nothing or next-to-nothing gets no request at all rather than a
+   * round trip to be told the same thing. The server's own check is what
+   * actually enforces it; this is just not wasting the operator's time.
+   */
+  async function unlockCollection() {
+    if (!s) return;
+    const note = window.prompt('Why is this collection code being unlocked? The reason is audited.')?.trim();
+    if (!note || note.length < 4) return;
+    setBusy('unlock-collection');
+    setErr(null);
+    try {
+      await api.post(`/admin/logistics/shipments/${s.id}/unlock-collection`, { note });
+      await load();
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Could not unlock that collection code.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -395,6 +430,56 @@ export default function ShipmentOpsPage() {
                 <Button onClick={recordCollection} disabled={busy === 'collect'} className="mt-3">
                   {busy === 'collect' ? 'Recording…' : 'Record collection'}
                 </Button>
+              )}
+
+              {/*
+               * TERM-12 / MDF-645 follow-up: the collection-code lockout
+               * this screen used to have no way to even see, let alone fix
+               * — the only prior way to discover a shipment was locked was
+               * attempting a collection and reading the error. Status shown
+               * whenever the field is present (PENDING or VERIFIED too, not
+               * just FAILED) — "nothing is locked" is itself useful
+               * information at a counter. The unlock control stays absent
+               * entirely for a read-only viewer (same `canOperate &&` gate
+               * every other write affordance on this page uses — not
+               * CSS-hidden, not merely disabled) and never renders at all
+               * unless the status is actually FAILED, matching the server's
+               * own refusal ("not locked, nothing to unlock").
+               */}
+              {s.collectionVerificationStatus && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-emerald-200 pt-3">
+                  <Badge
+                    tone={
+                      s.collectionVerificationStatus === 'FAILED'
+                        ? 'warning'
+                        : s.collectionVerificationStatus === 'VERIFIED'
+                          ? 'success'
+                          : 'neutral'
+                    }
+                  >
+                    Collection code:{' '}
+                    {s.collectionVerificationStatus === 'FAILED'
+                      ? 'Locked'
+                      : s.collectionVerificationStatus === 'VERIFIED'
+                        ? 'Verified'
+                        : 'Pending'}
+                  </Badge>
+                  {s.collectionVerificationStatus !== 'VERIFIED' && s.collectionPinAttemptsRemaining != null && (
+                    <span className="text-xs text-emerald-800">
+                      {s.collectionPinAttemptsRemaining} attempt{s.collectionPinAttemptsRemaining === 1 ? '' : 's'} remaining
+                    </span>
+                  )}
+                  {s.collectionVerificationStatus === 'FAILED' && canOperate && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={unlockCollection}
+                      disabled={busy === 'unlock-collection'}
+                    >
+                      {busy === 'unlock-collection' ? 'Unlocking…' : 'Unlock collection code'}
+                    </Button>
+                  )}
+                </div>
               )}
             </Card>
           )}

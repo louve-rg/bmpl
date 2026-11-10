@@ -865,3 +865,151 @@ describe('ShipmentOpsPage — confirming and acting on a stuck manual assignment
     expect(dialog!.textContent).toContain('Jordan Reyes');
   });
 });
+
+/**
+ * TERM-12 / MDF-645 follow-up: surfacing the collection-code lockout
+ * (STAFF-only serializer fields, apps/api/src/shipping/shipment.service.ts)
+ * and the way out of it. Same gating discipline as every other write
+ * affordance on this page -- canOperate, checked against the real /me
+ * response, not a hand-derived guess.
+ */
+describe('ShipmentOpsPage — collection-code lockout visibility and unlock (TERM-12 / MDF-645)', () => {
+  function lockedShipment(overrides: Partial<typeof SHIPMENT> = {}) {
+    return { ...SHIPMENT, collectionVerificationStatus: 'FAILED' as const, collectionPinAttemptsRemaining: 0, ...overrides };
+  }
+
+  function stubFetchLocked(adminPermissions: string[], shipment: unknown = lockedShipment()) {
+    const posted: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
+        if (url.includes('/api/admin/logistics/shipments/ship_1/unlock-collection') && init?.method === 'POST') {
+          posted.push({ url, body: init.body ? JSON.parse(String(init.body)) : null });
+          return jsonResponse(200, { shipmentId: 'ship_1', reference: 'SHP-1001', collectionVerificationStatus: 'PENDING' });
+        }
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001') && (!init?.method || init.method === 'GET')) {
+          return jsonResponse(200, shipment);
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    return posted;
+  }
+
+  it('shows Locked plus attempts remaining, and an operator sees the unlock control', async () => {
+    stubFetchLocked(['logistics.operate']);
+    await mount();
+
+    expect(document.body.textContent).toMatch(/Collection code:\s*Locked/);
+    expect(document.body.textContent).toMatch(/0 attempts remaining/);
+    expect(buttonTexts()).toContain('Unlock collection code');
+  });
+
+  it('a logistics.read-only viewer sees the Locked status but never the unlock control -- absent, not merely disabled', async () => {
+    stubFetchLocked(['logistics.read']);
+    await mount();
+
+    expect(document.body.textContent).toMatch(/Collection code:\s*Locked/);
+    expect(buttonTexts()).not.toContain('Unlock collection code');
+    expect(document.body.querySelectorAll('button[disabled]').length).toBe(0);
+  });
+
+  it('does not offer the unlock control when the status is PENDING, even for an operator', async () => {
+    stubFetchLocked(['logistics.operate'], { ...SHIPMENT, collectionVerificationStatus: 'PENDING' as const, collectionPinAttemptsRemaining: 5 });
+    await mount();
+
+    expect(document.body.textContent).toMatch(/Collection code:\s*Pending/);
+    expect(document.body.textContent).toMatch(/5 attempts remaining/);
+    expect(buttonTexts()).not.toContain('Unlock collection code');
+  });
+
+  it('does not offer the unlock control when the status is VERIFIED, and hides the attempts count once verified', async () => {
+    stubFetchLocked(['logistics.operate'], { ...SHIPMENT, collectionVerificationStatus: 'VERIFIED' as const, collectionPinAttemptsRemaining: 5 });
+    await mount();
+
+    expect(document.body.textContent).toMatch(/Collection code:\s*Verified/);
+    expect(document.body.textContent).not.toMatch(/attempts remaining/);
+    expect(buttonTexts()).not.toContain('Unlock collection code');
+  });
+
+  it('shows no collection-code line at all when the field is absent (API not yet deployed this change -- cross-deploy safety)', async () => {
+    const { collectionVerificationStatus, collectionPinAttemptsRemaining, ...withoutField } = lockedShipment();
+    stubFetchLocked(['logistics.operate'], withoutField);
+    await mount();
+
+    expect(document.body.textContent).not.toMatch(/Collection code:/);
+    expect(buttonTexts()).not.toContain('Unlock collection code');
+  });
+
+  it('a short or empty reason sends no request at all', async () => {
+    const posted = stubFetchLocked(['logistics.operate']);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('hi');
+    await mount();
+
+    const btn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Unlock collection code')!;
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(posted).toHaveLength(0);
+    promptSpy.mockRestore();
+  });
+
+  it('unlocking posts the note and reloads with no manual refresh needed', async () => {
+    const posted = stubFetchLocked(['logistics.operate']);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Operator confirmed the recipient in person.');
+    await mount();
+
+    const btn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Unlock collection code')!;
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.body).toMatchObject({ note: 'Operator confirmed the recipient in person.' });
+    promptSpy.mockRestore();
+  });
+
+  it('surfaces the server refusal verbatim when the unlock call is refused', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions: ['logistics.operate'] });
+        if (url.includes('/api/admin/logistics/shipments/ship_1/unlock-collection') && init?.method === 'POST') {
+          return jsonResponse(400, { message: 'This collection code was already unlocked.' });
+        }
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001')) return jsonResponse(200, lockedShipment());
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Operator confirmed the recipient in person.');
+    await mount();
+
+    const btn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Unlock collection code')!;
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(document.body.textContent).toContain('This collection code was already unlocked.');
+    promptSpy.mockRestore();
+  });
+
+  it('never renders a collection code anywhere on the page, locked or not (security: STAFF must never see it)', async () => {
+    stubFetchLocked(['logistics.operate']);
+    await mount();
+
+    expect(document.body.textContent).not.toMatch(/collectionCode/i);
+    // The fixture deliberately carries no collectionPin/collectionCode field at all --
+    // this asserts the rendered page never invents or leaks one even so.
+  });
+});
