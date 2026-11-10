@@ -33,7 +33,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, findPinLeak, resetDb, seedLimitedAdmin, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
 import { ShipmentDispatchService } from '../src/shipping/shipment-dispatch.service';
 
 let ctx: TestContext;
@@ -287,7 +287,7 @@ describe('the courier self-reveal (TERM-5)', () => {
     expect(r.body.kind).toBe('pickup');
     expect(r.body.code).toBe(row.pickupPin);
     expect(r.body.code).not.toBe(row.handoffPin);
-    expect(JSON.stringify(r.body)).not.toContain(row.handoffPin!);
+    expect(findPinLeak(r.body, row.handoffPin!)).toBeNull();
   });
 
   it('4 · staff can no longer reveal a FIRST_MILE code — the reveal route is LINE_HAUL only now', async () => {
@@ -751,9 +751,13 @@ describe('the staff-audience payload never carries a pin, for any leg (SEC-1)', 
       expect(leg.pickupPin).toBeNull();
     }
     // Not merely absent-by-coincidence: the real, live secret strings do not
-    // appear anywhere in the response body, by any field name.
-    const body = JSON.stringify(r.body);
-    expect(body).not.toContain(firstMileRow.pickupPin!);
-    expect(body).not.toContain(lastMileRow.handoffPin!);
+    // appear anywhere in the response body, by any field name. Walking the
+    // PARSED body (findPinLeak, BMPL-348/SEC-1) rather than substring-
+    // searching the stringified one: a short PIN substring-searched against a
+    // whole JSON body collides with phone numbers, ids, coordinates,
+    // priceMinor values and timestamps at a real rate — this exact case once
+    // false-failed when pin `4445` matched inside `"501-4445555"`.
+    expect(findPinLeak(r.body, firstMileRow.pickupPin!)).toBeNull();
+    expect(findPinLeak(r.body, lastMileRow.handoffPin!)).toBeNull();
   });
 });

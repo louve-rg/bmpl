@@ -19,7 +19,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, findPinLeak, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 import { EmailService } from '../src/email/email.service';
 
 let ctx: TestContext;
@@ -553,7 +553,7 @@ describe('the delivery code (CLOSE-2)', () => {
 
     const res = await myDeliveryCode(stranger.cookies, s.reference);
     expect(res.status).toBe(404);
-    expect(JSON.stringify(res.body)).not.toContain(await handoffPinOf(s.id));
+    expect(findPinLeak(res.body, await handoffPinOf(s.id))).toBeNull();
   });
 
   it('an unlinked recipient requests the code by email and reveals it with the emailed token', async () => {
@@ -625,7 +625,7 @@ describe('the delivery code (CLOSE-2)', () => {
 
     const attempt = await revealCode(s.recipientTrackingToken, 'NOTTHEREALTOKEN1');
     expect(attempt.status).toBe(400);
-    expect(JSON.stringify(attempt.body)).not.toContain(await handoffPinOf(s.id));
+    expect(findPinLeak(attempt.body, await handoffPinOf(s.id))).toBeNull();
 
     // The real token (from the genuine request above) is UNCHANGED by the
     // wrong guess and still works — no lockout on a guess against a

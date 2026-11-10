@@ -20,7 +20,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { belizeCalendarDate } from '@bmpl/shared';
-import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, findPinLeak, resetDb, seedLimitedAdmin, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let admin: string[];
@@ -129,52 +129,8 @@ async function pinOf(legId: string) {
   return leg.handoffPin!;
 }
 
-/**
- * BMPL-348: `JSON.stringify(body)` then `.not.toContain(pin)` flattens the
- * whole document into one string first — and a flattened document has
- * substrings that exist in no actual value, manufactured across field
- * boundaries and punctuation. That is exactly how this assertion once
- * failed on real, correct code: a fixture phone number ending
- * `...2223333` collided with a CI run whose random PIN happened to be
- * `2223`, four digits sitting inside one field's value, not leaked from
- * anywhere. Walking the PARSED body and checking real leaf values avoids
- * both directions of the mistake:
- *
- * 1. Every leaf, compared to the PIN as a string, must not be an exact
- *    match — this is what actually does the work: it finds the PIN under a
- *    key nobody thought to name, and it catches one serialized as a NUMBER
- *    (`String(2223) === '2223'`), which a substring search on stringified
- *    JSON would miss (`2223` with no surrounding quotes never appears as a
- *    substring of `"2223"`).
- * 2. A string leaf must not contain the PIN as a STANDALONE TOKEN — bounded
- *    by a non-alphanumeric character (or the start/end of the string) on
- *    both sides — which is what preserves "your code is 2223" inside a
- *    notification body or an echoed error. A bare `\b` is not enough: it
- *    still fires inside a cuid like `cmuoid2223x`. `501-2223333` does not
- *    match because the run is followed by another digit; `cmuoid2223x`
- *    does not match because it is preceded by a letter.
- *
- * RESIDUAL, not pretended away: a prose field that legitimately contains a
- * standalone four-digit run equal to this run's real PIN would still fire.
- * Far rarer than an arbitrary digit run landing inside an unrelated field,
- * and when it fires it is at least pointing at something shaped like a
- * code — rule that out first if this ever goes red, rather than assuming
- * the assertion itself regressed.
- */
-function findPinLeak(value: unknown, pin: string, path = '$'): string | null {
-  if (value == null) return null;
-  if (typeof value === 'object') {
-    const entries = Array.isArray(value) ? value.map((v, i) => [i, v] as const) : Object.entries(value as Record<string, unknown>);
-    for (const [key, child] of entries) {
-      const hit = findPinLeak(child, pin, `${path}.${key}`);
-      if (hit) return hit;
-    }
-    return null;
-  }
-  if (String(value) === pin) return path;
-  if (typeof value === 'string' && new RegExp(`(?<![0-9A-Za-z])${pin}(?![0-9A-Za-z])`).test(value)) return path;
-  return null;
-}
+// findPinLeak (BMPL-348 / SEC-1) now lives in ./helpers, shared by every spec
+// that checks a PIN never leaks through a whole response body.
 
 const assign = (legId: string, d: { driverProfileId: string; vehicleId: string }) =>
   post(admin, `admin/logistics/legs/${legId}/assign`, { driverProfileId: d.driverProfileId, vehicleId: d.vehicleId });
@@ -367,7 +323,7 @@ describe('recording a transport leg\'s scheduled departure/arrival (BMPL-346)', 
       scheduledDepartureAt: new Date(Date.now() + 3600_000).toISOString(),
     });
     expect(r.status).toBe(201);
-    expect(JSON.stringify(r.body)).not.toContain(pin);
+    expect(findPinLeak(r.body, pin)).toBeNull();
   });
 
   it('refuses a courier leg — there is nothing here for a driver-worked leg to commit to', async () => {
