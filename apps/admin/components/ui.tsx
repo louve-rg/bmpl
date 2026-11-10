@@ -121,13 +121,33 @@ export function PageHeader({
   return (
     <div className="mb-6">
       {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs items={breadcrumbs} className="mb-3" />}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      {/*
+       * OVERFLOW-768 (Dwight): two separate gaps, both needed.
+       *
+       * (1) The title/actions row had no `flex-wrap` of its own, so once
+       * row mode engaged at sm:, the actions slot could never drop to its
+       * own line no matter how little room was left beside the title.
+       *
+       * (2) `flex-wrap` ALONE doesn't fix the actions slot once it IS on its
+       * own line: it's `shrink-0` (deliberately -- a link should never get
+       * crushed narrower than its own text) with no width of its own, so a
+       * flex item sizes itself to its UNWRAPPED content's max-content width
+       * by default, regardless of its own `flex-wrap` -- a flex container
+       * only wraps its children once something ELSE constrains its own
+       * width below that. `max-w-full` is that constraint: capped to
+       * whatever the row actually has available, the actions slot's own
+       * `flex-wrap` (unchanged) then genuinely wraps the individual links
+       * across as many lines as it needs, instead of demanding the width
+       * all of them would take unwrapped and overflowing the page shell's
+       * silent overflow-x-hidden clip with no visual cue.
+       */}
+      <div className="flex flex-col flex-wrap gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           {eyebrow && <p className="bmpl-eyebrow">{eyebrow}</p>}
           <h1 className="bmpl-page-title mt-1 break-words">{title}</h1>
           {description && <p className={`mt-1.5 break-words text-sm ${descriptionClassName}`}>{description}</p>}
         </div>
-        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+        {actions && <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
     </div>
   );
