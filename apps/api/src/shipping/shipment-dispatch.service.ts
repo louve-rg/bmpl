@@ -5,6 +5,7 @@ import {
   isAvailable,
   isLegActionable,
   rankDrivers,
+  TERMINAL_LEG_STATUSES,
   type DriverCandidate,
   type LegView,
   type RankedDriver,
@@ -421,6 +422,15 @@ export class ShipmentDispatchService {
         where: {
           assignedDriverProfileId: { in: ids },
           courierStatus: { in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'] },
+          // DISPATCH-6: the leg's OWN status is the truth about whether it is
+          // still open. `courierStatus` is a second, driver-app-facing column
+          // that a completed staff/terminal handoff can leave stale at
+          // whatever it held a moment before completion (typically ARRIVING)
+          // -- see `ShipmentService.completeLeg`. Excluding a leg that has
+          // already reached a terminal `status` here means a stale
+          // `courierStatus` can never again be mistaken for live load, no
+          // matter which code path left it unsynced.
+          status: { notIn: [...TERMINAL_LEG_STATUSES] },
         },
         _count: { _all: true },
       }),

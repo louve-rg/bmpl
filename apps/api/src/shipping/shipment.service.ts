@@ -2177,6 +2177,20 @@ export class ShipmentService {
           handoffVerifiedAt: new Date(),
           handoffVerificationStatus: 'VERIFIED',
           handoffReceivedByName: input.receivedByName,
+          // DISPATCH-6: a courier-kind leg (FIRST_MILE/LAST_MILE/DIRECT) keeps
+          // its own driver-app-facing `courierStatus`/`driverQueuePosition`
+          // alongside this shipment-side `status` — a staff/terminal handoff
+          // (this path) used to leave both untouched, stale at whatever they
+          // held a moment before completion (typically ARRIVING), which
+          // `ShipmentDispatchService.rankFor`/`DriverService.activeJobCount`/
+          // `eligibleDriversForDistrict` then counted as live load forever.
+          // Cleared HERE, in the SAME conditional updateMany, not as a
+          // follow-up write: the WHERE above re-asserts `leg.status` because a
+          // concurrent flagException() can land between the read and this
+          // write (MDF-223), and a second write after this one would reopen
+          // exactly that window. LINE_HAUL has no assigned courier and
+          // nothing to clear.
+          ...(leg.kind !== 'LINE_HAUL' ? { courierStatus: 'DELIVERED' as const, driverQueuePosition: null } : {}),
         },
       });
       if (claimed.count === 0) {

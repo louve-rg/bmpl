@@ -7,6 +7,7 @@ import {
   isExpiredOrMissing,
   MAX_PRODUCT_IMAGE_BYTES,
   STORAGE_PREFIX,
+  TERMINAL_LEG_STATUSES,
   type District,
   type DriverAvailability,
 } from '@bmpl/shared';
@@ -479,7 +480,13 @@ export class DriverService {
     const liveStatuses = ['ASSIGNED', 'DRIVER_ACCEPTED', 'PICKUP_CONFIRMED', 'IN_TRANSIT', 'ARRIVING'] as const;
     const [deliveries, legs] = await Promise.all([
       this.prisma.orderDelivery.count({ where: { assignedDriverProfileId: driverProfileId, status: { in: [...liveStatuses] } } }),
-      this.prisma.shipmentLeg.count({ where: { assignedDriverProfileId: driverProfileId, courierStatus: { in: [...liveStatuses] } } }),
+      // DISPATCH-6: `courierStatus` alone can survive past the leg's own
+      // terminal `status` (a staff/terminal handoff leaves it stale) — see
+      // `ShipmentService.completeLeg`. Guard on `status` too, so a finished
+      // leg can never again count toward a driver's live job total.
+      this.prisma.shipmentLeg.count({
+        where: { assignedDriverProfileId: driverProfileId, courierStatus: { in: [...liveStatuses] }, status: { notIn: [...TERMINAL_LEG_STATUSES] } },
+      }),
     ]);
     return deliveries + legs;
   }
@@ -641,6 +648,10 @@ export class DriverService {
         where: {
           assignedDriverProfileId: { in: ids },
           courierStatus: { in: [...liveStatuses] },
+          // DISPATCH-6: same guard as `activeJobCount` just above — a leg
+          // whose own `status` already reached COMPLETED/CANCELLED must
+          // never contribute load, no matter what `courierStatus` still says.
+          status: { notIn: [...TERMINAL_LEG_STATUSES] },
         },
         _count: { _all: true },
       }),
