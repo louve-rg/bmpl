@@ -39,6 +39,7 @@ const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.
 const ADMIN_PASSWORD = process.env.SEED_SUPER_ADMIN_PASSWORD;
 
 const stamp = Date.now();
+const DESTINATION_PHONE = '501-222-5555'; // must match the recipient-claim step's own account phone, below
 
 test.describe.configure({ mode: 'serial' });
 
@@ -104,7 +105,7 @@ test('MDF-587 customer -> courier -> admin shipping journey', async ({ page, bro
 
   const deliverGroup = page.getByRole('group', { name: 'Deliver to' });
   await deliverGroup.getByLabel('Full name').fill(`Mdf587 Recipient ${stamp}`);
-  await deliverGroup.getByLabel('Phone').fill('501-222-5555');
+  await deliverGroup.getByLabel('Phone').fill(DESTINATION_PHONE);
   await deliverGroup.getByLabel('Street').fill('77 Freetown Road');
   await deliverGroup.getByLabel('City, town or village').fill('Belize City');
   await deliverGroup.getByLabel('District or island').selectOption('BELIZE');
@@ -232,6 +233,7 @@ test('MDF-587 customer -> courier -> admin shipping journey', async ({ page, bro
 
   // ---- STEP 16-17: completed, customer side ----
   await page.goto(`${WEB}/dashboard/shipments/${encodeURIComponent(reference)}`);
+  await page.waitForTimeout(1200); // same settle wait STEP 12 already uses -- missing here let one run catch "Loading…"
   const customerFinalText = await page.locator('main, body').first().innerText();
   console.log('STEP 16-17 customer final page text:\n' + customerFinalText.slice(0, 1200));
   expect(customerFinalText, 'customer page does not show the shipment as delivered').toMatch(/delivered/i);
@@ -257,6 +259,100 @@ test('MDF-587 customer -> courier -> admin shipping journey', async ({ page, bro
     const adminText = await adminPage.locator('main, body').first().innerText();
     console.log('STEP 18b admin logistics detail page text:\n' + adminText.slice(0, 1500));
     expect(adminText, 'admin logistics detail page does not show this reference').toContain(reference);
+  }
+
+  // ---- RECIPIENT CLAIM (18-step inventory step 14): the real /track/:token
+  // -> "Save to my account" flow, god's explicit follow-up once step 15
+  // resolved clean.
+  //
+  // No seeded UAT fixture works here, discovered live, not assumed: the API
+  // refuses a claim unless (a) the claiming account's own user-level isTest
+  // matches the shipment's isTest, AND (b) the claiming account's own
+  // email/phone matches the shipment's destination contact
+  // (shipment.service.ts claimAsRecipient, ~line 1502-1514). Only
+  // UAT_CUSTOMER_EMAIL/UAT_DRIVER_EMAIL carry user-level isTest:true (direct
+  // curl proof: UAT_VENDOR_EMAIL -> 400 "cannot be linked to this account";
+  // UAT_DRIVER_EMAIL -> isTest passes but 400 "couldn't confirm this parcel
+  // is addressed to you", since its own phone doesn't match
+  // DESTINATION_PHONE) -- and both of those are already playing sender/
+  // driver in this same journey. So this registers a genuinely new,
+  // third-party account through the real UI (exactly what an actual
+  // recipient with no BML account would do), sets its phone to
+  // DESTINATION_PHONE on the real profile page, then flags it isTest true
+  // via the same real admin endpoint seed-uat-logistics.ts itself uses for
+  // the customer/driver fixtures -- no DB shortcut, just the same sanctioned
+  // path a human operator would use for a new UAT participant. ----
+  await page.goto(`${WEB}/dashboard/shipments/${encodeURIComponent(reference)}`);
+  const shareLink = await page.getByLabel('Recipient tracking link').inputValue();
+  expect(shareLink, 'no recipient tracking link shown on the sender\'s own shipment page').toContain('/track/');
+  console.log('STEP 14 (recipient claim) share link read from the real sender page:', shareLink);
+
+  const recipientPage = await (await browser.newContext()).newPage();
+  await recipientPage.goto(shareLink);
+  const publicTrackText = await recipientPage.locator('main, body').first().innerText();
+  console.log('STEP 14 public /track page text (no account, before any claim):\n' + publicTrackText.slice(0, 600));
+  expect(publicTrackText, 'public tracking page did not resolve this token').not.toMatch(/couldn.t find anything/i);
+
+  if (!ADMIN_PASSWORD) {
+    console.log('STEP 14 claim SKIPPED -- no SEED_SUPER_ADMIN_PASSWORD to flag the new recipient account isTest.');
+  } else {
+    const recipientEmail = `mdf587-recipient-${stamp}@example.test`;
+    await recipientPage.goto(`${WEB}/register`);
+    await recipientPage.getByLabel('First name').fill('Mdf587');
+    await recipientPage.getByLabel('Last name').fill('Recipient');
+    await recipientPage.getByLabel('Email').fill(recipientEmail);
+    await recipientPage.getByLabel('Password').fill(UAT_FIXTURE_PASSWORD);
+    await recipientPage.getByRole('checkbox').check();
+    await recipientPage.getByRole('button', { name: 'Create account' }).click();
+    await recipientPage.waitForURL(/\/dashboard/, { timeout: 10_000 });
+    console.log('STEP 14 registered a genuinely new recipient account:', recipientEmail);
+
+    await recipientPage.goto(`${WEB}/dashboard/profile`);
+    await recipientPage.getByLabel('Phone').fill(DESTINATION_PHONE);
+    await recipientPage.getByRole('button', { name: 'Save changes' }).click();
+    await expect(recipientPage.getByText('Profile saved.'), 'profile phone save did not confirm').toBeVisible({ timeout: 10_000 });
+
+    const adminPage2 = await (await browser.newContext()).newPage();
+    const admin2LoggedIn = await tryLogin(adminPage2, ADMIN_EMAIL, ADMIN_PASSWORD);
+    expect(admin2LoggedIn, 'admin login (for the isTest flag) failed -- hard stop, not a skip').toBeTruthy();
+    const found = await adminPage2.evaluate(async (email) => {
+      const res = await fetch(`/api/admin/users?query=${encodeURIComponent(email)}`, { credentials: 'include' });
+      if (!res.ok) throw new Error(`GET /admin/users -> ${res.status} ${await res.text()}`);
+      return res.json();
+    }, recipientEmail);
+    const recipientUserId = (found.items as Array<{ id: string; email: string }>).find((r) => r.email === recipientEmail)?.id;
+    expect(recipientUserId, 'could not find the just-registered recipient account via /admin/users').toBeTruthy();
+    await adminPage2.evaluate(
+      async ({ userId, reason }) => {
+        // Double-submit CSRF: the non-HttpOnly csrf_token cookie must be
+        // echoed back as x-csrf-token on any mutating request, same as
+        // apps/web/lib/api.ts's own csrfToken() helper does for every real
+        // app request -- a raw fetch() from here doesn't get that for free.
+        const csrfToken = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/)?.[1];
+        const res = await fetch('/api/admin/users/test-flag', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}) },
+          credentials: 'include',
+          body: JSON.stringify({ userId, isTest: true, reason }),
+        });
+        if (!res.ok) throw new Error(`POST /admin/users/test-flag -> ${res.status} ${await res.text()}`);
+      },
+      { userId: recipientUserId, reason: 'MDF-587 E2E recipient-claim account' },
+    );
+    console.log('STEP 14 recipient account flagged isTest via the real admin endpoint: OK');
+
+    await recipientPage.goto(shareLink);
+    await recipientPage.getByRole('button', { name: 'Save to my account' }).click();
+    await expect(
+      recipientPage.getByText('Saved. This parcel now shows up in your BML account too.'),
+      'claim click did not show the "Saved" confirmation',
+    ).toBeVisible({ timeout: 10_000 });
+    console.log('STEP 14 claim via "Save to my account": OK');
+
+    await recipientPage.goto(`${WEB}/dashboard/incoming/${encodeURIComponent(reference)}`);
+    const incomingText = await recipientPage.locator('main, body').first().innerText();
+    console.log('STEP 14 recipient\'s own /dashboard/incoming view after claim:\n' + incomingText.slice(0, 800));
+    expect(incomingText, 'claimed shipment does not appear on the recipient\'s own incoming-parcels page').toContain(reference);
   }
 
   console.log('JOURNEY COMPLETE for', reference);
