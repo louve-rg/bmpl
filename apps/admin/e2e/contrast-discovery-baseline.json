@@ -1,0 +1,19 @@
+{
+  "_README": "CONTRAST-DISCOVERY-DROP (god, 2026-11-10). Maintained like contrast-known-violations.json: a human/agent copies in the suggested entry a test run prints, deliberately -- nothing auto-writes this file. Key is \"<route>@<viewport>\"; value is the TOTAL element count discoverElements() found at that (route, viewport) -- scored (pass+fail+ambiguous) plus excluded-but-accounted-for (disabled text, composite icons). A run reporting FEWER than this number throws loudly (see contrast-ratchet.ts's checkDiscoveryDrop); a run reporting MORE just logs a suggestion to bump this file, never fails. Deliberately incomplete -- only routes/viewports this agent actually ran and captured a real count for are listed; every other (route, viewport) in this app's e2e/contrast specs starts unprotected until someone runs it once and copies in the printed suggestion.",
+  "/dashboard/analytics@320": 52,
+  "/dashboard/analytics@375": 52,
+  "/dashboard/analytics@390": 52,
+  "/dashboard/analytics@430": 52,
+  "/dashboard/analytics@640": 52,
+  "/dashboard/analytics@768": 52,
+  "/dashboard/analytics@834": 52,
+  "/dashboard/analytics@1024": 52,
+  "/dashboard/analytics@1440": 52,
+  "/dashboard/dispatch@1024": 31,
+  "/dashboard/dispatch@1440": 31,
+  "/dashboard/dispatch/[id]@320": 46,
+  "/dashboard/dispatch/[id]@640": 46,
+  "/dashboard/dispatch/[id]@834": 46,
+  "/dashboard/dispatch/[id]@1440": 46,
+  "/__discovery_drop_regression_test__@1": 10
+}

@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
 import { sweepContrast, formatSweepReport, measureFirstEyebrowForeground, measureBackgroundColorsByText, measureBoxSizeByText, writeSweepResultRecords } from '../support/contrast-sweep';
-import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
+import { assertRatchet, assertAllWidthsExamined, type KnownViolationEntry } from '../support/contrast-ratchet';
 
 /**
  * Requirement 7's public-marketplace route (`hive/agents/god/CONTRAST-STANDARD.md`,
@@ -91,6 +91,7 @@ test.describe('contrast: public products listing', () => {
     } else {
       for (const name of [...discoveredPassNames].sort()) console.log(`  - ${name}`);
     }
+    assertAllWidthsExamined(contributedCount, VIEWPORTS.length, { route: ROUTE });
   });
 
   for (const viewport of VIEWPORTS) {

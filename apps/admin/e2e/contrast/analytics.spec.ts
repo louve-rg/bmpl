@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { tryLogin, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD } from '../support/auth';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
 import { sweepContrast, formatSweepReport, writeSweepResultRecords } from '../support/contrast-sweep';
-import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
+import { assertRatchet, assertAllWidthsExamined, type KnownViolationEntry } from '../support/contrast-ratchet';
 
 /**
  * Requirement 7 (`hive/agents/god/CONTRAST-STANDARD.md`, now
@@ -70,6 +70,7 @@ test.describe('contrast: admin analytics', () => {
     } else {
       for (const name of [...discoveredPassNames].sort()) console.log(`  - ${name}`);
     }
+    assertAllWidthsExamined(contributedCount, VIEWPORTS.length, { route: ROUTE });
   });
 
   for (const viewport of VIEWPORTS) {

@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { SweepReading, SweepResult, SweepTextElement, SweepIconElement } from './contrast-sweep';
 
 /**
@@ -189,15 +191,126 @@ export function checkRatchet(result: SweepResult, scopedEntries: KnownViolationE
 }
 
 /**
+ * MDF-678 addition (god, 2026-11-10, same turn he endorsed PR #660): a
+ * width that never ran at all looks EXACTLY like a width that ran and
+ * passed -- same shape as the count-drop guard above, a second symptom of
+ * the same defect class. Found live on the admin dispatch DETAIL route's
+ * own `test.afterAll` recorder: 5 of 9 widths showed as Playwright-skipped
+ * ("-", not a failure) and nothing before this addition ever complained.
+ *
+ * `contributedCount` (each spec file's own, incremented once per width
+ * that reached `recordPassNames`/`sweepContrast`) already existed in every
+ * one of these spec files before this card -- it just only ever fed an
+ * informational console.log ("contributed=N/9"), never an assertion. This
+ * function is what a spec file's own `test.afterAll` now calls with that
+ * existing counter, turning an easy-to-miss log line into a hard failure.
+ *
+ * Deliberately agnostic about WHY a width is missing -- a real
+ * `test.skip()`, a worker restart after an earlier test's failure
+ * reloading this module and resetting the counter (this file's own
+ * existing comments already document that mechanism), or anything else not
+ * yet named. The guard's job is to notice the gap, not diagnose it; see
+ * this file's own header comment on `checkDiscoveryDrop` for the matching
+ * philosophy on the count-drop half of this same card.
+ */
+export function assertAllWidthsExamined(contributedCount: number, totalWidths: number, context: { route: string }): void {
+  if (contributedCount >= totalWidths) return;
+  throw new Error(
+    `contrast sweep for ${context.route}: only ${contributedCount}/${totalWidths} width(s) were actually examined by the end of this run -- ` +
+      `${totalWidths - contributedCount} width(s) never ran at all (skipped, or lost to a worker restart after an earlier failure). ` +
+      `A width that never ran reports nothing, which looks identical to a width that ran and passed -- do not treat that silence as clean.`,
+  );
+}
+
+const DISCOVERY_BASELINE_PATH = path.join(__dirname, '..', 'contrast-discovery-baseline.json');
+
+function loadDiscoveryBaseline(): Record<string, number> {
+  try {
+    return JSON.parse(fs.readFileSync(DISCOVERY_BASELINE_PATH, 'utf8')) as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * CONTRAST-DISCOVERY-DROP (god, 2026-11-10): an element the sweep once
+ * SCORED (pass, fail, or ambiguous -- any of the three) can later vanish
+ * from the sweep entirely -- zero appearances, in no bucket -- and nothing
+ * else in this file notices, because `checkRatchet` above only ever looks
+ * at the FAIL bucket. A scored violation quietly turning into "not
+ * discovered at all" reads as the violation being FIXED, when the real
+ * cause is the instrument no longer looking at that element at all. MDF-390
+ * names the general principle: absence of a violation line is not a pass.
+ *
+ * This is a BLUNT, total-count guard, not a per-element one: it compares
+ * the total number of elements `discoverElements()` found at a given
+ * (route, viewport) -- scored (pass/fail/ambiguous) PLUS excluded-but-
+ * accounted-for (disabled text, composite icons) -- against the last count
+ * this same (route, viewport) committed to `contrast-discovery-baseline.json`.
+ * It cannot say WHICH element disappeared (the NDJSON results file
+ * (`contrast-results.ndjson`) from the run that regressed is the place to
+ * look for that, by diffing its role+name set against a known-good run) --
+ * only THAT the total dropped, which is already enough to stop a silent
+ * drop from reading as a fix.
+ *
+ * A missing baseline entry (new route/viewport, never recorded) is NOT a
+ * failure -- there is nothing to compare against yet. GROWTH is also not a
+ * failure -- new UI legitimately adds elements to measure, and this guard
+ * exists to catch the instrument looking at LESS than before, never more.
+ * Both cases print a line naming the exact JSON entry to add/update; the
+ * baseline is maintained the same way `contrast-known-violations.json` is --
+ * a human (or an agent, same as this one) copies the printed suggestion in,
+ * deliberately, same as adding a known violation. Nothing here auto-writes
+ * the file -- a test run that silently rewrote its own baseline on every
+ * pass could not ever catch a drop, because the baseline would always equal
+ * whatever the last (possibly-regressed) run just saw.
+ */
+export function checkDiscoveryDrop(
+  result: SweepResult,
+  context: { route: string; viewport: number },
+  baselineOverride?: Record<string, number>,
+): string | null {
+  const textDiscovered = result.text.pass.length + result.text.fail.length + result.text.ambiguous.length + result.text.excludedDisabledCount;
+  const iconDiscovered = result.icon.pass.length + result.icon.fail.length + result.icon.ambiguous.length + result.icon.compositeGraphics.length;
+  const discovered = textDiscovered + iconDiscovered;
+  const key = `${context.route}@${context.viewport}`;
+  const known = (baselineOverride ?? loadDiscoveryBaseline())[key];
+
+  if (known === undefined) {
+    // eslint-disable-next-line no-console
+    console.log(`[contrast-discovery] ${key}: first time seen, ${discovered} element(s) discovered (text ${textDiscovered} + icon ${iconDiscovered}) -- not yet in contrast-discovery-baseline.json. Add: "${key}": ${discovered}`);
+    return null;
+  }
+  if (discovered > known) {
+    // eslint-disable-next-line no-console
+    console.log(`[contrast-discovery] ${key}: discovery count grew (${known} -> ${discovered}) -- update contrast-discovery-baseline.json when convenient ("${key}": ${discovered}), not required.`);
+    return null;
+  }
+  if (discovered === known) return null;
+
+  return (
+    `DISCOVERY COUNT DROPPED for ${key}: was ${known}, now ${discovered} (text ${textDiscovered} + icon ${iconDiscovered}) -- ` +
+    `${known - discovered} element(s) that used to be discovered (in SOME bucket -- pass, fail, or ambiguous) are gone entirely, not in any bucket. ` +
+    `A scored violation disappearing like this looks exactly like the violation being fixed; it usually means the instrument stopped looking at it. ` +
+    `Diff this run's contrast-results.ndjson role+name set against a known-good run's to find which element(s). Do NOT lower the baseline number ` +
+    `to make this pass unless you have confirmed by hand that the missing element(s) are gone from the page on purpose.`
+  );
+}
+
+/**
  * Throws with a single, complete, actionable message covering every new
  * violation and every stale entry at once -- not one failure per entry,
  * which would hide how many problems a run actually found.
  */
 export function assertRatchet(result: SweepResult, scopedEntries: KnownViolationEntry[], context: { route: string; viewport: number }): void {
   const { newViolations, staleEntries, regressions } = checkRatchet(result, scopedEntries, context);
-  if (newViolations.length === 0 && staleEntries.length === 0 && regressions.length === 0) return;
+  const discoveryDrop = checkDiscoveryDrop(result, context);
+  if (newViolations.length === 0 && staleEntries.length === 0 && regressions.length === 0 && !discoveryDrop) return;
 
   const lines: string[] = [];
+  if (discoveryDrop) {
+    lines.push(discoveryDrop);
+  }
   if (newViolations.length > 0) {
     lines.push(`${newViolations.length} NEW contrast violation(s) not on the known-violations allowlist (${context.route} @ ${context.viewport}px):`);
     for (const v of newViolations) {
