@@ -915,8 +915,23 @@ export class ShipmentDispatchService {
 
   private async expireOffer(legId: string, driverProfileId: string | null): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
+      // MDF-646: `assignedDriverProfileId` is re-asserted here, not just
+      // `courierStatus`/`acceptedAt`. `assignManual`'s REASSIGN leaves a leg
+      // in the identical shape this WHERE already checks for — ASSIGNED,
+      // acceptedAt null — because a human reassignment doesn't lapse
+      // (offerExpiresAt: null) but still reads as "freshly offered, not yet
+      // accepted" on every OTHER column. Without this, a sweep tick that
+      // read this leg's stale, already-lapsed offer from driver X — before
+      // an admin's REASSIGN to driver Y committed — would still match this
+      // WHERE after the reassignment landed, and silently overwrite Y's
+      // brand-new assignment back to unassigned/DRIVER_DECLINED, with an
+      // audit trail that reads as "the offer expired" rather than "an
+      // admin's reassignment got reverted". Pinning the driver this call
+      // was actually asked to expire makes the reassignment invisible to it
+      // instead: the row no longer matches, same as if the driver had
+      // already accepted.
       const cleared = await tx.shipmentLeg.updateMany({
-        where: { id: legId, courierStatus: 'ASSIGNED', acceptedAt: null },
+        where: { id: legId, courierStatus: 'ASSIGNED', acceptedAt: null, assignedDriverProfileId: driverProfileId },
         data: {
           courierStatus: 'DRIVER_DECLINED',
           assignedDriverProfileId: null,

@@ -453,3 +453,79 @@ describe('DISPATCH-2 / manual-assign hold: an ASSIGNED leg with offerExpiresAt=n
     }
   });
 });
+
+describe('MDF-646 / DISPATCH-5: a sweep tick that read a now-stale driver must not overwrite a fresher reassignment', () => {
+  // The real race: sweepExpiredOffers() reads `{ id, assignedDriverProfileId }`
+  // for every lapsed offer in ONE findMany, then calls the private
+  // expireOffer(legId, thatDriverId) per leg. If an admin's REASSIGN commits
+  // in the gap between that read and expireOffer's own write, expireOffer's
+  // WHERE (before this fix: id + courierStatus + acceptedAt, no driver check)
+  // still matches — REASSIGN leaves the leg ASSIGNED/acceptedAt-null, same
+  // shape as a genuinely-lapsed offer — so the stale expiry silently reverts
+  // the admin's fresh assignment to a DIFFERENT driver, audited as "offer
+  // expired" rather than "a reassignment got reverted".
+  //
+  // Reproduced deterministically rather than via real concurrency (which
+  // would be a flaky, timing-dependent test for an outcome this specific):
+  // `expireOffer` is called directly with the STALE driver id, exactly the
+  // argument a sweep tick would be holding at the moment it lost the race —
+  // the same shape of direct-private-call test `sweepExpiredOffers`'s own
+  // callers in this file already use for `sweepUndispatched`/
+  // `sweepExpiredOffers` themselves.
+  it('a stale expireOffer(legId, oldDriver) is a no-op once the leg has been reassigned to a new driver', async () => {
+    const district = 'COROZAL';
+    const driverX = await makeDriver(district, { online: true });
+    const driverY = await makeDriver(district, { online: true });
+    const { cookies: senderCookies } = await fundedCustomer();
+
+    await setDispatch({ automatic: false });
+    const shipmentId = await bookDirect(senderCookies, district, 'Corozal Town');
+    let leg = await ctx.prisma.shipmentLeg.findFirstOrThrow({ where: { shipmentId } });
+    try {
+      const assignRes = await post(admin, `admin/logistics/legs/${leg.id}/assign`, {
+        driverProfileId: driverX.driverProfileId,
+        vehicleId: driverX.vehicleId,
+      });
+      expect(assignRes.status).toBe(201);
+
+      const reassignRes = await post(admin, `admin/logistics/legs/${leg.id}/reassign`, {
+        driverProfileId: driverY.driverProfileId,
+        vehicleId: driverY.vehicleId,
+        reason: 'Driver X went offline; reassigning to Y.',
+      });
+      expect(reassignRes.status).toBe(201);
+      leg = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } });
+      expect(leg.assignedDriverProfileId).toBe(driverY.driverProfileId);
+      expect(leg.courierStatus).toBe('ASSIGNED');
+      expect(leg.acceptedAt).toBeNull();
+
+      // The stale sweep call: it read driver X before the reassignment, and
+      // is only now trying to commit the expiry it decided on back then.
+      const staleExpired = await (dispatch as unknown as { expireOffer: (legId: string, driverProfileId: string | null) => Promise<boolean> }).expireOffer(
+        leg.id,
+        driverX.driverProfileId,
+      );
+      expect(staleExpired).toBe(false);
+
+      const afterStaleExpiry = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } });
+      expect(afterStaleExpiry.assignedDriverProfileId).toBe(driverY.driverProfileId);
+      expect(afterStaleExpiry.courierStatus).toBe('ASSIGNED');
+      expect(afterStaleExpiry.acceptedAt).toBeNull();
+      expect(afterStaleExpiry.declineReason).toBeNull();
+
+      // Sanity: expireOffer still works when given the driver the leg is
+      // ACTUALLY currently assigned to — the fix narrows the match, it does
+      // not break the ordinary, non-raced expiry path.
+      const freshExpired = await (dispatch as unknown as { expireOffer: (legId: string, driverProfileId: string | null) => Promise<boolean> }).expireOffer(
+        leg.id,
+        driverY.driverProfileId,
+      );
+      expect(freshExpired).toBe(true);
+      const afterFreshExpiry = await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: leg.id } });
+      expect(afterFreshExpiry.assignedDriverProfileId).toBeNull();
+      expect(afterFreshExpiry.courierStatus).toBe('DRIVER_DECLINED');
+    } finally {
+      await ctx.prisma.shipment.deleteMany({ where: { id: shipmentId } });
+    }
+  });
+});

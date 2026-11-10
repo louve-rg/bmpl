@@ -965,3 +965,54 @@ describe('marketplace dispatch lifecycle — the round-2 walk', () => {
     expect((await availableTab(driver)).map((j) => j.id)).not.toContain(deliveryId);
   });
 });
+
+describe('MDF-646 / DISPATCH-5: a sweep tick that read a now-stale driver must not overwrite a fresher reassignment (marketplace mirror)', () => {
+  // Exact mirror of the shipping-side regression
+  // (shipment-dispatch-starvation.integration.spec.ts) — same gap, same fix,
+  // in DispatchEngineService.expireOffer instead of
+  // ShipmentDispatchService.expireOffer. DispatchService.assignInternal's
+  // REASSIGN leaves a delivery ASSIGNED/acceptedAt-null, the identical shape
+  // a genuinely-lapsed offer has, so a sweep tick holding the PRE-reassignment
+  // driver id would (before this fix) still match expireOffer's WHERE after
+  // the reassignment committed and silently revert it.
+  it('a stale expireOffer(deliveryId, oldDriver) is a no-op once the delivery has been reassigned to a new driver', async () => {
+    const { DispatchEngineService } = await import('../src/dispatch/dispatch-engine.service');
+    const engine = ctx.app.get(DispatchEngineService) as unknown as {
+      expireOffer: (deliveryId: string, driverProfileId: string | null) => Promise<boolean>;
+    };
+
+    const { order, driver: driverX } = await assignedDelivery();
+    const driverY = await makeDriver({ districts: ['BELIZE'] });
+
+    const reassignRes = await post(adminCookies, `admin/deliveries/${order.deliveryId}/reassign`, {
+      driverProfileId: driverY.driverProfileId,
+      vehicleId: driverY.vehicleId,
+      reason: 'Driver X went offline; reassigning to Y.',
+    });
+    expect(reassignRes.status).toBe(201);
+
+    let delivery = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: order.deliveryId } });
+    expect(delivery.assignedDriverProfileId).toBe(driverY.driverProfileId);
+    expect(delivery.status).toBe('ASSIGNED');
+    expect(delivery.acceptedAt).toBeNull();
+
+    // The stale sweep call: it read driver X before the reassignment, and is
+    // only now trying to commit the expiry it decided on back then.
+    const staleExpired = await engine.expireOffer(order.deliveryId, driverX.driverProfileId);
+    expect(staleExpired).toBe(false);
+
+    delivery = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: order.deliveryId } });
+    expect(delivery.assignedDriverProfileId).toBe(driverY.driverProfileId);
+    expect(delivery.status).toBe('ASSIGNED');
+    expect(delivery.acceptedAt).toBeNull();
+    expect(delivery.declineReason).toBeNull();
+
+    // Sanity: expireOffer still works when given the driver the delivery is
+    // ACTUALLY currently assigned to.
+    const freshExpired = await engine.expireOffer(order.deliveryId, driverY.driverProfileId);
+    expect(freshExpired).toBe(true);
+    delivery = await ctx.prisma.orderDelivery.findUniqueOrThrow({ where: { id: order.deliveryId } });
+    expect(delivery.assignedDriverProfileId).toBeNull();
+    expect(delivery.status).toBe('DRIVER_DECLINED');
+  });
+});

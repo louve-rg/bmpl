@@ -462,8 +462,18 @@ export class DispatchEngineService {
       // be accepting this very offer between the sweep query and this write; if
       // they got there first the row no longer matches and the sweep backs off,
       // rather than expiring a job somebody is already driving to collect.
+      //
+      // MDF-646: `assignedDriverProfileId` is re-asserted here too, mirroring
+      // the identical fix on the shipping side (ShipmentDispatchService's own
+      // expireOffer). DispatchService.assignInternal's REASSIGN leaves a
+      // delivery ASSIGNED/acceptedAt-null — the same shape a stale, already-
+      // lapsed offer has — so a sweep tick that read this delivery before an
+      // admin's reassignment to a NEW driver committed would otherwise still
+      // match this WHERE afterward and silently overwrite that reassignment
+      // back to DRIVER_DECLINED. Pinning the driver this call believes it is
+      // expiring makes a reassignment invisible to it instead.
       const expired = await tx.orderDelivery.updateMany({
-        where: { id: deliveryId, status: 'ASSIGNED', acceptedAt: null },
+        where: { id: deliveryId, status: 'ASSIGNED', acceptedAt: null, assignedDriverProfileId: driverProfileId },
         data: {
           status: 'DRIVER_DECLINED',
           declinedAt: new Date(),
