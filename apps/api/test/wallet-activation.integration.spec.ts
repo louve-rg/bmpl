@@ -14,7 +14,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, seedLimitedAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, raceOverSeparateConnections, resetDb, seedRoles, seedSuperAdmin, seedLimitedAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let admin: string[];
@@ -373,6 +373,46 @@ describe('paying twice is not possible', () => {
     expect(summary.availableMinor).toBe(10000 - Number(payment.amountMinor));
     expect(summary.onHoldMinor).toBe(Number(payment.amountMinor));
     expect(summary.totalMinor).toBe(10000);
+  });
+});
+
+describe('MDF-684: /wallet/top-up has no server-side double-submit protection — proven by a run, not by reading the reference code', () => {
+  // The route's own comment claims "a fresh reference per request... makes an
+  // accidental double-submit collide". `WalletController.topUp` builds that
+  // reference as `test-topup:${userId}:${randomUUID()}` — a FRESH uuid every
+  // call, so two calls get two DIFFERENT references and the unique constraint
+  // on WalletTransaction.reference never has anything to collide on. Both
+  // cases below prove what that actually means for the balance and the
+  // ledger, concurrent and sequential, rather than taking the comment's word
+  // or inferring it from the code.
+  it('two concurrent top-ups both post — two TOPUP transactions, two credits, not one', async () => {
+    const c = await makeTestCustomer();
+    const probe = await raceOverSeparateConnections(ctx.prisma, [1, 2].map(() => () => post(c.cookies, 'wallet/top-up', { amountMinor: 1000 })));
+    console.log(
+      `[CONCURRENCY wallet.topUp] ${probe.observed ? 'OBSERVED' : 'NOT-FORCED'} ` +
+      `(peakConcurrentActive=${probe.peakConcurrentActive}, samples=${probe.samples}, elapsedMs=${probe.elapsedMs})`,
+    );
+    const statuses = probe.responses.map((r) => r.status).sort();
+    // If the claimed protection were real (selfServiceTestCredit's own
+    // lock+unique-reference pair, a few describe blocks up, is what that
+    // would look like), one of these would be 409 or 400. BOTH succeed.
+    expect(statuses, `statuses: ${JSON.stringify(statuses)}`).toEqual([201, 201]);
+
+    const wallet = await walletOf(c.userId);
+    const topUpCount = await ctx.prisma.walletTransaction.count({
+      where: { type: 'TOPUP', entries: { some: { accountId: wallet.id, direction: 'CREDIT' } } },
+    });
+    expect(topUpCount, 'two distinct TOPUP transactions actually posted').toBe(2);
+    expect((await ctx.prisma.walletAccount.findUniqueOrThrow({ where: { id: wallet.id } })).cachedBalanceMinor).toBe(2000n);
+  });
+
+  it('two sequential (non-concurrent) top-ups also both post — not a timing artifact of the race above', async () => {
+    const c = await makeTestCustomer();
+    expect((await post(c.cookies, 'wallet/top-up', { amountMinor: 1500 })).status).toBe(201);
+    expect((await post(c.cookies, 'wallet/top-up', { amountMinor: 1500 })).status).toBe(201);
+
+    const wallet = await walletOf(c.userId);
+    expect((await ctx.prisma.walletAccount.findUniqueOrThrow({ where: { id: wallet.id } })).cachedBalanceMinor).toBe(3000n);
   });
 });
 
