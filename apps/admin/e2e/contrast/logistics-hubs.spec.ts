@@ -14,10 +14,13 @@ import { assertRatchet, type KnownViolationEntry } from '../support/contrast-rat
  * as OPS_LIMITED directly (not `loginAsRole`, which only covers ADMIN/
  * SUPER_ADMIN today -- OPS_LIMITED_EMAIL/OPS_PASSWORD are already exported
  * for exactly this case, per auth.ts's own comment on the #12 permission
- * split; no new fixture built for this). Fixed by Oscar's
- * `fix/glass-navy-text-admin` batch, off `e953569`, not yet merged --
- * EXPECT THIS TO FAIL IN CI RIGHT NOW, the same deliberate-regression
- * pattern as the other three specs in this cluster. Do not allowlist it.
+ * split; no new fixture built for this). Was red against Oscar's
+ * `fix/glass-navy-text-admin` batch (off `e953569`) when this spec was
+ * written, since that fix had not yet merged. It has since landed on main --
+ * confirmed green across all 8 executed widths on a live run at `edcd6a90`
+ * (OVERFLOW-768, 2026-11-10). If this goes red again, treat it as a real
+ * recurrence of the bug class, not a stale "expected failure" -- do not
+ * allowlist it without investigating.
  */
 
 const VIEWPORTS = CONTRAST_VIEWPORTS;
