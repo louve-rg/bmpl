@@ -57,6 +57,10 @@ export class AdminDriverService {
           availability: p.availability,
           roleStatus: roleBy.get(p.userId) ?? null,
           isActive: p.isActive,
+          // MDF-674: staff moderating this list are the same people who flip
+          // it via setTestMode below — without it here, telling a simulation
+          // driver apart from a real one requires a direct database read.
+          isTest: p.isTest,
           vehicleCount: p.vehicles.length,
           approvedVehicles: p.vehicles.filter((v) => v.approvalStatus === 'APPROVED').length,
           serviceDistricts: p.serviceAreas.map((s) => s.district),
@@ -196,6 +200,11 @@ export class AdminDriverService {
       vehicleOwnership: p.vehicleOwnership,
       availability: p.availability,
       isActive: p.isActive,
+      // MDF-674: same field, same reason as the list() row above — this is
+      // DriverProfile.isTest (the simulation-network boundary setTestMode
+      // flips), never User.isTest (the separate flag that gates wallet
+      // top-up funding).
+      isTest: p.isTest,
       ratingAverage: p.ratingAverage,
       completedDeliveries: p.completedDeliveries,
       createdAt: p.createdAt,

@@ -405,6 +405,30 @@ describe('admin driver management', () => {
     expect(detail.body.roleStatus).toBe('APPROVED');
   });
 
+  it('MDF-674: the list row and the detail both expose isTest, derived from DriverProfile and flipped by setTestMode — not a DB-only fact', async () => {
+    const { cookies, userId } = await registerCustomer('drv_istest_view@example.bz');
+    await put(cookies, 'driver/profile', profilePayload({ displayName: 'Simulation Sam' }));
+    await setDriverRole(userId, 'APPROVED');
+    const profile = await ctx.prisma.driverProfile.findUniqueOrThrow({ where: { userId } });
+    expect(profile.isTest).toBe(false);
+
+    const listBefore = await get(adminCookies, 'admin/drivers');
+    const rowBefore = listBefore.body.find((d: { userId: string }) => d.userId === userId);
+    expect(rowBefore.isTest).toBe(false);
+    const detailBefore = await get(adminCookies, `admin/drivers/${profile.id}`);
+    expect(detailBefore.body.isTest).toBe(false);
+
+    const flipped = await patch(adminCookies, `admin/drivers/${profile.id}/test-mode`, { isTest: true, reason: 'Simulation cohort.' });
+    expect(flipped.status).toBe(200);
+    expect(flipped.body.isTest).toBe(true);
+
+    const listAfter = await get(adminCookies, 'admin/drivers');
+    const rowAfter = listAfter.body.find((d: { userId: string }) => d.userId === userId);
+    expect(rowAfter.isTest).toBe(true);
+    const detailAfter = await get(adminCookies, `admin/drivers/${profile.id}`);
+    expect(detailAfter.body.isTest).toBe(true);
+  });
+
   it('admin can approve and reject vehicles', async () => {
     const { cookies } = await registerCustomer('drv_veh_mod@example.bz');
     await put(cookies, 'driver/profile', profilePayload());
