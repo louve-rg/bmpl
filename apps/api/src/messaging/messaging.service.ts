@@ -540,14 +540,20 @@ export class MessagingService {
 
   private async resolveAttachments(userId: string, keys: string[]) {
     const namespace = STORAGE_PREFIX.messageAttachment(userId);
-    const out: Array<{ storageKey: string; mimeType: string; fileSizeBytes: number }> = [];
+    const out: Array<{ storageKey: string; mimeType: string; fileSizeBytes: number; fileName: string | null }> = [];
     for (const key of keys) {
       this.storage.assertKeyInNamespace(key, namespace);
       const meta = await this.storage.headObject(key, 'private');
       if (!meta) throw new BadRequestException('An uploaded attachment could not be found in storage.');
       if (!isAllowedMessageAttachmentMime(meta.contentType)) throw new BadRequestException('Unsupported attachment type.');
       if (meta.sizeBytes <= 0 || meta.sizeBytes > MAX_MESSAGE_ATTACHMENT_BYTES) throw new BadRequestException('An attachment exceeds the maximum allowed size.');
-      out.push({ storageKey: key, mimeType: meta.contentType, fileSizeBytes: meta.sizeBytes });
+      // ATT-2: `uploadAttachment` wrote the uploader's real filename as
+      // object metadata at upload time (`UploadIngestService.put`) — this is
+      // the only place it is ever recoverable, since the key itself carries
+      // only a sanitized, truncated, extension-stripped stem. `null`, not a
+      // fallback string, when no name was ever given: inventing one here
+      // would be fabricated data the uploader never supplied.
+      out.push({ storageKey: key, mimeType: meta.contentType, fileSizeBytes: meta.sizeBytes, fileName: meta.fileName ?? null });
     }
     return out;
   }

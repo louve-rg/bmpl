@@ -377,3 +377,62 @@ describe('attachments + security invariants', () => {
     await ctx.prisma.user.update({ where: { id: order.customerId }, data: { status: 'ACTIVE' } });
   });
 });
+
+describe('ATT-2: a real attachment round-trips the uploader\'s filename', () => {
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+
+  const uploadRaw = (cookies: string[], buf: Buffer, contentType: string, fileName: string) =>
+    request(ctx.server)
+      .post(`/api/conversations/attachments/upload?filename=${encodeURIComponent(fileName)}`)
+      .set('Cookie', cookies)
+      .set('Content-Type', contentType)
+      .send(buf);
+
+  it('an image sent with no caption — the exact attachment-only shape that broke four of MSG-1\'s runs', async () => {
+    const vendor = await makeVendor();
+    const order = await makeDeliveryOrder(vendor);
+    const conv = (await post(order.customerCookies, `conversations/vendor-order/${order.vendorOrderId}`)).body;
+    // A name with a space and parentheses: proves this is the REAL uploaded
+    // name, not the sanitized/truncated stem `buildKey` embeds in the
+    // storage key (which would have replaced both with underscores).
+    const upload = await uploadRaw(order.customerCookies, PNG, 'image/png', 'Delivery photo (front door).png');
+    expect(upload.status).toBe(201);
+
+    const sent = await post(order.customerCookies, `conversations/${conv.id}/messages`, { body: '', attachmentKeys: [upload.body.key] });
+    expect(sent.status).toBe(201);
+    const withAtt = sent.body.messages.find((m: { attachments: unknown[] }) => m.attachments.length > 0);
+    expect(withAtt.attachments[0].fileName).toBe('Delivery photo (front door).png');
+
+    // Not just the immediate response — the same conversation re-fetched
+    // from scratch must serialize the same name, proving it is read back
+    // from the persisted row, not carried only in the request/response pair.
+    const reread = await get(order.customerCookies, `conversations/${conv.id}`);
+    const rereadAtt = reread.body.messages.find((m: { attachments: unknown[] }) => m.attachments.length > 0);
+    expect(rereadAtt.attachments[0].fileName).toBe('Delivery photo (front door).png');
+  });
+
+  it('a PDF sent WITH a caption also round-trips its filename', async () => {
+    const vendor = await makeVendor();
+    const order = await makeDeliveryOrder(vendor);
+    const conv = (await post(order.customerCookies, `conversations/vendor-order/${order.vendorOrderId}`)).body;
+    const upload = await uploadRaw(order.customerCookies, PDF, 'application/pdf', 'Invoice 2026-11.pdf');
+    expect(upload.status).toBe(201);
+
+    const sent = await post(order.customerCookies, `conversations/${conv.id}/messages`, { body: 'Here is the invoice', attachmentKeys: [upload.body.key] });
+    expect(sent.status).toBe(201);
+    const withAtt = sent.body.messages.find((m: { attachments: unknown[] }) => m.attachments.length > 0);
+    expect(withAtt.attachments[0].fileName).toBe('Invoice 2026-11.pdf');
+  });
+
+  it('the deprecated presign path still leaves fileName null — no regression, nothing invented', async () => {
+    const vendor = await makeVendor();
+    const order = await makeDeliveryOrder(vendor);
+    const conv = (await post(order.customerCookies, `conversations/vendor-order/${order.vendorOrderId}`)).body;
+    const presign = await post(order.customerCookies, 'conversations/attachments/presign', { fileName: 'issue.jpg', contentType: 'image/jpeg', sizeBytes: 4 });
+    expect(await putToPresigned(presign.body.uploadUrl, Buffer.from([0xff, 0xd8, 0xff, 0xd9]), 'image/jpeg')).toBe(200);
+    const sent = await post(order.customerCookies, `conversations/${conv.id}/messages`, { body: '', attachmentKeys: [presign.body.key] });
+    const withAtt = sent.body.messages.find((m: { attachments: unknown[] }) => m.attachments.length > 0);
+    expect(withAtt.attachments[0].fileName).toBeNull();
+  });
+});

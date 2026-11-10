@@ -24,6 +24,8 @@ import { storageEnabled, type Env } from '../config/env';
 export interface ObjectMetadata {
   contentType: string;
   sizeBytes: number;
+  /** ATT-2: the uploader's original filename, if the object was stored with one. */
+  fileName?: string;
 }
 
 export type StorageHealth = 'ok' | 'not_configured' | 'error';
@@ -191,6 +193,14 @@ export class StorageService implements OnModuleInit {
     body: Buffer,
     contentType: string,
     visibility: Visibility = 'private',
+    // ATT-2: object metadata (S3 `x-amz-meta-*`) is the only thing that
+    // survives between the upload request (where the uploader's real
+    // filename is known) and whatever LATER request attaches this key to a
+    // database row (where it is not, re-derivable only lossily from the
+    // sanitized key `buildKey` produces). Every value here is assumed
+    // pre-encoded by the caller — S3 metadata values must be valid HTTP
+    // header text, which an arbitrary Unicode filename is not.
+    metadata?: Record<string, string>,
   ): Promise<void> {
     const client = this.requireClient();
     await client.send(
@@ -200,6 +210,7 @@ export class StorageService implements OnModuleInit {
         Body: body,
         ContentType: contentType,
         ContentLength: body.length,
+        Metadata: metadata,
       }),
     );
   }
@@ -331,9 +342,15 @@ export class StorageService implements OnModuleInit {
       const res = await client.send(
         new HeadObjectCommand({ Bucket: this.bucketFor(visibility), Key: key }),
       );
+      // ATT-2: S3 lower-cases metadata keys on the way back, regardless of
+      // how they were sent. `decodeURIComponent` is the exact inverse of the
+      // `encodeURIComponent` every writer of this metadata is required to
+      // apply first; an object with no filename metadata simply has no key.
+      const rawFileName = res.Metadata?.filename;
       return {
         contentType: res.ContentType ?? 'application/octet-stream',
         sizeBytes: Number(res.ContentLength ?? 0),
+        fileName: rawFileName ? decodeURIComponent(rawFileName) : undefined,
       };
     } catch {
       return null;
