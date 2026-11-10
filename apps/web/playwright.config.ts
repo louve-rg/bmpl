@@ -25,7 +25,7 @@ export default defineConfig({
   // directive 2026-10-16) and e2e/contrast to playwright.contrast.config.ts
   // (requirement 7) -- both excluded here so no suite silently
   // double-enumerates another's spec files under this config too.
-  testIgnore: ['**/visual/**', '**/contrast/**'],
+  testIgnore: ['**/visual/**', '**/contrast/**', '**/*.local-only.spec.ts'],
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,
