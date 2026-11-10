@@ -837,32 +837,47 @@ describe('collecting from a terminal', () => {
     return s;
   }
 
+  /** TERM-12: the collection code is never shown to STAFF — the admin door's
+   *  own response carries `collectionCode: null` even for the CUSTOMER-only
+   *  field, same secrecy rule as every other pin. These fixtures read it
+   *  straight out of the database instead, exactly as `pinOf` already does
+   *  for a leg's own handoffPin. */
+  const collectionCodeOf = (shipmentId: string) =>
+    ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, select: { collectionPin: true } }).then((s) => s.collectionPin!);
+
   it('closes out a journey that no leg can close', async () => {
     // Nobody moves a leg when a recipient walks into a counter, so without this
     // the shipment would read "Ready to collect" forever.
     const s = await awaitingCollection();
-    const r = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
+    const r = await post(admin, `admin/logistics/shipments/${s.id}/collect`, {
+      collectedByName: 'Maria Cruz',
+      code: await collectionCodeOf(s.id),
+    });
     expect(r.status).toBe(201);
     expect(r.body.status).toBe('DELIVERED');
   });
 
   it('records the collection as the final custody transfer', async () => {
     const s = await awaitingCollection();
-    await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
+    await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code: await collectionCodeOf(s.id) });
     const events = await ctx.prisma.custodyEvent.findMany({ where: { shipmentId: s.id }, orderBy: { occurredAt: 'asc' } });
     expect(events.at(-1)).toMatchObject({ fromHolder: 'HUB', toHolder: 'RECIPIENT', actorLabel: 'Maria Cruz' });
   });
 
   it('will not collect a parcel that has not arrived', async () => {
     const s = await book();
+    // No code supplied — this must refuse on status ("not waiting to be
+    // collected yet") BEFORE ever reaching TERM-12's code check, so a code
+    // is deliberately absent here to prove that ordering.
     const r = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Too Early' });
     expect(r.status).toBe(400);
   });
 
   it('will not collect the same parcel twice', async () => {
     const s = await awaitingCollection();
-    await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
-    const again = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Someone Else' });
+    const code = await collectionCodeOf(s.id);
+    await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code });
+    const again = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Someone Else', code });
     expect(again.status).toBe(400);
   });
 
@@ -870,6 +885,81 @@ describe('collecting from a terminal', () => {
     const s = await awaitingCollection();
     const r = await post(customer, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Me' });
     expect([401, 403]).toContain(r.status);
+  });
+
+  // TERM-12 / MDF-645: before this, collection took a typed name and
+  // verified nothing at all — the owner's §7 requires rejecting invalid
+  // codes, and there was no code to be invalid.
+  describe('TERM-12: the collection code is actually verified', () => {
+    it('refuses a wrong code, and counts the attempt', async () => {
+      const s = await awaitingCollection();
+      const real = await collectionCodeOf(s.id);
+      const wrong = real === '0000' ? '1111' : '0000';
+      const r = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code: wrong });
+      expect(r.status).toBe(400);
+      expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).collectionPinAttempts).toBe(1);
+      expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).collectedAt).toBeNull();
+
+      // The real code still works afterward — one wrong guess is not a lockout.
+      const right = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code: real });
+      expect(right.status).toBe(201);
+    });
+
+    it('refuses when no code is submitted at all', async () => {
+      const s = await awaitingCollection();
+      const r = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
+      expect(r.status).toBe(400);
+      expect(r.body.message).toMatch(/collection code/i);
+    });
+
+    it('locks out after too many wrong attempts, and the lockout refuses even the right code', async () => {
+      const s = await awaitingCollection();
+      const real = await collectionCodeOf(s.id);
+      const wrong = real === '0000' ? '1111' : '0000';
+      // 5 wrong attempts exhaust the counter (the 5th itself still reads as
+      // an ordinary wrong-code 400, "...and that was the last try"); the
+      // NEXT attempt is the one that actually sees the lockout, since the
+      // attempts-exceeded check runs at the START of a call, before this
+      // one is counted.
+      let last;
+      for (let i = 0; i < 6; i++) {
+        last = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code: wrong });
+      }
+      expect(last!.status).toBe(403);
+      expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).collectionVerificationStatus).toBe('FAILED');
+
+      const stillLocked = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code: real });
+      expect(stillLocked.status).toBe(403);
+      expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).collectedAt).toBeNull();
+    });
+
+    it('reveals the code to the customer while waiting, never to staff, and no longer once collected', async () => {
+      const s = await awaitingCollection();
+      const real = await collectionCodeOf(s.id);
+
+      const customerView = await get(customer, `shipping/${s.reference}`);
+      expect(customerView.body.collectionCode).toBe(real);
+
+      const staffView = await get(admin, `admin/logistics/shipments/${s.reference}`);
+      expect(staffView.body.collectionCode).toBeNull();
+
+      await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code: real });
+      const afterCollection = await get(customer, `shipping/${s.reference}`);
+      expect(afterCollection.body.collectionCode).toBeNull();
+    });
+
+    it('a shipment that predates this feature collects with no code at all (migration-day grandfather)', async () => {
+      const s = await awaitingCollection();
+      // Simulate a row that existed before collectionPin shipped — exactly
+      // what the migration's one-time default-flip produces for a
+      // pre-existing row, not a state any post-feature booking can reach.
+      await ctx.prisma.shipment.update({
+        where: { id: s.id },
+        data: { collectionPin: null, collectionPinGrandfathered: true },
+      });
+      const r = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
+      expect(r.status).toBe(201);
+    });
   });
 });
 

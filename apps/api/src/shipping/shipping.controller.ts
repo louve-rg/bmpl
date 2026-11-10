@@ -906,11 +906,14 @@ export class AdminLogisticsController {
   }
 
   /** The recipient walked in and picked it up. No leg moves, so nothing else can
-   *  close out a hub-ending journey. */
+   *  close out a hub-ending journey. TERM-12: now a guessable-code route like
+   *  every other handoff/pickup endpoint, so it gets the same StrictThrottle
+   *  those already carry (`/legs/:id/handoff` above). */
   @RequirePermission('logistics.operate')
+  @StrictThrottle()
   @Post('shipments/:id/collect')
   collect(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(collectShipmentSchema)) dto: CollectShipmentInput) {
-    return this.shipments.recordCollection(id, dto.collectedByName, { userId: u.userId });
+    return this.shipments.recordCollection(id, dto.collectedByName, dto.code, { userId: u.userId });
   }
 
   @RequirePermission('logistics.manage')

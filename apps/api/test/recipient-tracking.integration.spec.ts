@@ -253,7 +253,10 @@ describe('the link exists and works', () => {
       instructions: 'Counter beside the departure gate.',
     });
 
-    expect((await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Rory Recipient' })).status).toBe(201);
+    const collectionCode = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { collectionPin: true } }).then((r) => r.collectionPin);
+    expect(
+      (await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Rory Recipient', code: collectionCode })).status,
+    ).toBe(201);
     const done = await publicTrack(s.recipientTrackingToken);
     expect(done.body.status).toBe('DELIVERED');
     expect(done.body.deliveredAt).not.toBeNull();

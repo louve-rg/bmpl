@@ -1021,6 +1021,14 @@ export class ShipmentService {
           weightGrams: input.weightGrams ?? null,
           pieces: input.pieces,
           bookedAt: new Date(),
+          // TERM-12: generated universally, same reasoning as handoffPin/
+          // pickupPin on every leg (legData, above) — cheap, consistent, and
+          // this shipment does not need to know at creation time whether its
+          // own service type will ever end at a hub (verifyCollectionPinOrThrow
+          // decides that from recordCollection's own status check, not from
+          // whether a value exists).
+          collectionPin: this.genPin(),
+          collectionPinGrandfathered: false,
           legs: { create: plan.legs.map((l) => this.legData(l, payNow, routeOperators)) },
         },
         include: SHIPMENT_INCLUDE,
@@ -3664,13 +3672,94 @@ export class ShipmentService {
   }
 
   /**
+   * TERM-12 / MDF-645: the pre-check for `recordCollection` below, run
+   * BEFORE the collection write rather than inside it — same reasoning as
+   * `verifyLegPinOrThrow`, called from `completeLeg` the same way. Status
+   * eligibility is checked here too (not just inside the later transaction):
+   * a defensive backstop, not the authoritative copy, and an unconditional
+   * one regardless of outcome — there is no "not yet eligible" state a
+   * wrong-vs-right code could be timed against here (unlike MDF-641's
+   * arrival guard), since AWAITING_COLLECTION/collectedAt are the SAME
+   * status facts `recordCollection`'s own transaction re-checks afterward,
+   * not a narrower one this call could get ahead of.
+   */
+  private async verifyCollectionPinOrThrow(shipmentId: string, code: string | undefined, actor: { userId: string }): Promise<void> {
+    const s = await this.prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        collectedAt: true,
+        collectionPin: true,
+        collectionPinAttempts: true,
+        collectionPinGrandfathered: true,
+      },
+    });
+    if (!s) throw new NotFoundException('Shipment not found.');
+    if (s.collectedAt) throw new BadRequestException('That shipment has already been collected.');
+    if (s.status !== 'AWAITING_COLLECTION') {
+      throw new BadRequestException('That shipment is not waiting to be collected yet.');
+    }
+    // Migration-day grandfather (packages/database/CLAUDE.md §2's own
+    // pattern) — this shipment predates collectionPin entirely and has no
+    // code to present, so it collects exactly as it did before this
+    // shipped. `bookShipment` always sets this false for a shipment created
+    // from here on, so this column — not a null check on collectionPin — is
+    // the single, explicit signal that a shipment is exempt.
+    if (s.collectionPinGrandfathered) return;
+
+    if (s.collectionPinAttempts >= DELIVERY_PIN_MAX_ATTEMPTS) {
+      throw new ForbiddenException('Too many incorrect codes. An administrator has to confirm this collection.');
+    }
+    if (!code) throw new BadRequestException('Enter the collection code.');
+
+    const codeMatches = !!s.collectionPin && timingSafeEqualStr(code, s.collectionPin);
+    if (!codeMatches) {
+      const nextAttempts = s.collectionPinAttempts + 1;
+      await this.prisma.shipment.update({
+        where: { id: s.id },
+        data: {
+          collectionPinAttempts: { increment: 1 },
+          ...(nextAttempts >= DELIVERY_PIN_MAX_ATTEMPTS ? { collectionVerificationStatus: 'FAILED' } : {}),
+        },
+      });
+      // Reuses the existing leg-handoff-pin-failure action rather than
+      // adding a new AuditAction value for a shipment-level failure — same
+      // reasoning the leg-level SHIPPING-E2E migration gave for reusing
+      // 'handoff' across pickup/handoff: `kind` in the payload
+      // disambiguates, and this already-populated migration did not need a
+      // second enum value to say "collection" too.
+      await this.audit.record({
+        action: 'SHIPMENT_LEG_HANDOFF_PIN_FAILED',
+        actorId: actor.userId,
+        newValue: { shipmentId: s.id, reference: s.reference, kind: 'collection' },
+      });
+      const left = DELIVERY_PIN_MAX_ATTEMPTS - nextAttempts;
+      throw new BadRequestException(
+        left > 0 ? `That code is not right. ${left} ${left === 1 ? 'try' : 'tries'} left.` : 'That code is not right, and that was the last try.',
+      );
+    }
+
+    await this.prisma.shipment.update({ where: { id: s.id }, data: { collectionVerificationStatus: 'VERIFIED' } });
+  }
+
+  /**
    * The recipient collected their parcel from the terminal.
    *
    * Without this a hub-ending shipment reaches "Ready to collect" and stays
    * there forever: no leg moves when somebody walks into a counter and picks a
    * box up, so nothing in the leg-derived status could ever close it out.
+   *
+   * TERM-12 / MDF-645: `code` is verified by verifyCollectionPinOrThrow
+   * BEFORE this transaction opens — closing the gap where collection took a
+   * typed name and verified nothing at all. The transaction's own
+   * status/collectedAt checks stay exactly as they were: the race-safe,
+   * authoritative copy, same two-guards-for-one-fact shape MDF-641 uses for
+   * completeLeg's arrival check.
    */
-  async recordCollection(id: string, collectedByName: string, actor: { userId: string }) {
+  async recordCollection(id: string, collectedByName: string, code: string | undefined, actor: { userId: string }) {
+    await this.verifyCollectionPinOrThrow(id, code, actor);
     const shipment = await this.prisma.$transaction(async (tx) => {
       const s = await tx.shipment.findUnique({
         where: { id },
@@ -4483,6 +4572,16 @@ export class ShipmentService {
       bookedAt: s.bookedAt,
       deliveredAt: s.deliveredAt,
       cancelledAt: s.cancelledAt,
+      // TERM-12 / MDF-645: the recipient's own collection code, same secrecy
+      // rule as handoffPin/pickupPin — staff reveal it deliberately (never
+      // by listing), and even for the customer it only exists while there is
+      // something to present: live while AWAITING_COLLECTION and uncollected,
+      // null once collected, cancelled, or for a grandfathered shipment that
+      // predates this column and has no code at all.
+      collectionCode:
+        opts.audience === 'STAFF' || s.status !== 'AWAITING_COLLECTION' || s.collectedAt || s.collectionPinGrandfathered
+          ? null
+          : s.collectionPin,
       // MDF-243 follow-up: fails closed — raw only when authorship is
       // positively established as the customer's own. See
       // `cancellationAuthorshipFor()`'s own doc for why there is no third

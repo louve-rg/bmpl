@@ -571,9 +571,23 @@ export const rerouteSchema = rerouteDestinationChecks(
 );
 export type RerouteInput = z.infer<typeof rerouteSchema>;
 
-/** Recording that a recipient collected their parcel from a terminal. */
+/**
+ * Recording that a recipient collected their parcel from a terminal.
+ *
+ * TERM-12 / MDF-645: `code` is optional, not required, because a shipment
+ * that predates this feature (`collectionPinGrandfathered`) genuinely has no
+ * code to present — ShipmentService.verifyCollectionPinOrThrow is the single
+ * place that decides whether an absent code is a refusal or a no-op,
+ * exactly as `legHandoffSchema`'s `pin` required-ness is decided by its own
+ * caller rather than by this schema needing two shapes.
+ */
 export const collectShipmentSchema = z.object({
   collectedByName: z.string().trim().min(2, 'Who collected it?').max(120),
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{4,8}$/, 'Enter the collection code.')
+    .optional(),
 });
 export type CollectShipmentInput = z.infer<typeof collectShipmentSchema>;
 
