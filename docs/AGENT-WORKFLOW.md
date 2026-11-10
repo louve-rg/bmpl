@@ -62,6 +62,27 @@ main checkout is fine. **Two agents in one checkout is not.**
 
 Remove it when the work is integrated: `git worktree remove ../bmpl-driver-queue`.
 
+### After pulling or rebasing `main` into an existing branch
+
+A plain `git pull` or `git rebase origin/main` brings in new source, but
+nothing rebuilds for you — if a package you depend on changed, your
+worktree's `dist` is now stale and nothing will say so on its own. Rebuild
+before trusting anything after a sync:
+
+```bash
+pnpm turbo run build --force
+```
+
+**Use `--force`, not a filtered, cache-enabled `pnpm turbo run build
+--filter=<pkg>`.** FLOOR-STALEDIST recorded a filtered turbo build — run
+exactly as this document used to recommend, with a correct `dependsOn` in
+`turbo.json` and a correct workspace dependency — still skip rebuilding
+`packages/validation`, with no signal in the output that it had happened.
+The cause is still open (see `CLAUDE.md`'s note on this), so until it is
+found, `--force` is the only build in this repo documented to not read a
+stale cache entry; a filtered build without it is not proof the result is
+current.
+
 ---
 
 ## 3. Committing

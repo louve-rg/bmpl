@@ -367,6 +367,38 @@ switch, a schema edit, someone else's merge. The per-package form is fine
 once you already know every dependency is current; it just cannot tell you
 that on its own.
 
+**This section used to end there, blessing `pnpm turbo run <task>
+--filter=<pkg>` as the fix. It is not reliably one.** FLOOR-STALEDIST
+(2026-11-10, third recorded occurrence) ran exactly that — `pnpm turbo run
+build --filter @bmpl/api`, using turbo, with a filter, as recommended above
+— and `packages/validation` still was not rebuilt, with nothing in the
+output signalling it. This was checked, not assumed: `turbo.json`'s `build`
+task declares `"dependsOn": ["^build"]` (both on the generic task and on
+each per-package override), and `apps/api/package.json` correctly lists
+`"@bmpl/validation": "workspace:*"` as a real dependency — the task graph
+and the dependency edge are both configured correctly, so this is not the
+same missing-`dependsOn` config gap the rest of this section describes.
+The actual cause is still open and tracked on FLOOR-STALEDIST; the leading
+suspect is turbo's build cache treating a changed upstream package as
+already satisfied, but that is not yet confirmed by a reproduction.
+
+Until the cause is found, **the only build guaranteed not to read a stale
+cache entry is one run with `--force`**, which is turbo's own documented
+flag for skipping cache reads entirely — not an assumption, a stated
+property of the flag:
+
+```bash
+pnpm turbo run build --filter=<pkg> --force   # or: pnpm turbo run build --force
+```
+
+This costs the time of a full rebuild of everything in scope. Reach for it
+after pulling or rebasing `main`, after someone else's merge touched a
+package you depend on, or whenever a build result needs to be trusted and
+not just fast — e.g. before verification in §11, or before relying on a
+`dist` to decide a change is safe. Do not treat a filtered, cache-enabled
+`pnpm turbo run build` as sufficient proof the build is current until
+FLOOR-STALEDIST's root cause is found and this note is updated.
+
 This is a *different* problem from a package that is missing outright — a
 dependency present in the lockfile but never installed into this worktree's
 `node_modules` (`TS2307 Cannot find module '@bmpl/...'` or a third-party
