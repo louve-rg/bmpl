@@ -54,6 +54,19 @@ export const UAT_PASSENGER_PROVIDER_EMAIL = 'uat-passenger-provider@bzemarketpla
  * data entirely when NODE_ENV=production), so a login failure here means the
  * environment this spec needs isn't present -- see the file-level comment in
  * each spec for what that means for CI.
+ *
+ * TRYLOGIN-RACE (measured on this app specifically, not copied from admin's
+ * identical fix): the post-login redirect used to get only 10_000ms, racing
+ * a real cost rather than a flake. `globalSetup` here only warms /login the
+ * same way admin's does; /dashboard is a separate Next dev route nothing
+ * warms ahead of it. Three cold-start samples on this host: 8158ms, 10105ms
+ * (already past the old 10s ceiling), 7698ms click-to-/dashboard; the same
+ * login once the route is compiled: ~300-360ms every time. Widened to
+ * 30_000ms -- comfortably above the worst observed sample with real margin
+ * for a busier machine. This is an environment-readiness wait, not a
+ * product-behaviour assertion: the check itself (must land on /dashboard)
+ * is unchanged, and a genuine failure (wrong password, unseeded fixtures)
+ * still correctly returns false, just after waiting out the new ceiling.
  */
 export async function tryLogin(page: Page, email: string, password: string): Promise<boolean> {
   try {
@@ -61,7 +74,7 @@ export async function tryLogin(page: Page, email: string, password: string): Pro
     await page.getByLabel('Email').fill(email);
     await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: /sign in/i }).click();
-    await page.waitForURL(/\/dashboard/, { timeout: 10_000 });
+    await page.waitForURL(/\/dashboard/, { timeout: 30_000 });
     return true;
   } catch {
     return false;
