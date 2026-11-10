@@ -90,6 +90,16 @@
  * one listening, feature-ancestor-confirmed server and zero armed
  * processes is the only clean-floor result — exit code 0.
  *
+ * A row whose worktree can't be determined from its command line (outside
+ * this host's GSP worktree layout, or a truncated command line) is tagged
+ * [COULD NOT CLASSIFY] rather than silently printed the same way as a
+ * row confirmed to belong to a DIFFERENT, KNOWN worktree. It still counts
+ * toward NOT CLEAN exactly as before -- "I don't know whose this is" is not
+ * the same claim as "I know it isn't mine", and this script already errs
+ * toward over-reporting contention rather than risking a miss -- but the
+ * verdict line also says how many rows were unclassified, so a reader isn't
+ * left assuming every NOT CLEAN row was a confirmed stranger.
+ *
  * `--kill-others` kills every API-shaped process found OTHER than the one
  * matching `process.cwd()`'s own worktree (both listening and armed),
  * using the whole process family (parent cmd.exe/nest.js wrapper + child
@@ -277,19 +287,36 @@ async function main() {
   // manually-backgrounded single server does not report itself twice.
   const armed = allApiShaped.filter((r) => !listeningPids.has(String(r.Pid)) && !/nohup|^"?[^"]*\\(bash|cmd)\.exe"?\s+-c/i.test(r.CommandLine ?? ''));
 
+  // A row's tag is exactly one of [MINE] (confirmed own worktree),
+  // [COULD NOT CLASSIFY] (API-shaped, but worktreeFromCommandLine() found no
+  // path to compare -- e.g. launched from outside this host's GSP worktree
+  // layout, or a command line Windows truncated), or blank (confirmed to be
+  // a DIFFERENT, KNOWN worktree). Before this, an unclassifiable row and a
+  // confirmed-foreign row printed identically (both got no tag), so a reader
+  // had no way to tell "this is definitely not mine, kill it freely" apart
+  // from "nobody could tell whose this is, go look by hand" -- the first
+  // case is safe to act on without re-checking; the second is not. The
+  // VERDICT is unchanged: an unclassifiable row still counts toward
+  // othersListening/othersArmed exactly as before (fail-safe -- "I don't
+  // know whose this is" is not the same claim as "I know it isn't mine",
+  // and the floor-dirty check already errs toward over-reporting rather
+  // than missing real contention).
+  function tag(worktree) {
+    if (worktree == null) return '[COULD NOT CLASSIFY]';
+    return sameWorktree(worktree, MY_ROOT) ? '[MINE]' : '';
+  }
+
   console.log('--- LISTENING API servers ---');
   if (apiListeners.length === 0) console.log('  (none)');
   for (const r of apiListeners) {
-    const mine = sameWorktree(r.worktree, MY_ROOT);
-    console.log(`  port ${r.port}  pid ${r.pid}  worktree ${r.worktree ?? '(unknown)'}  commit ${r.commit ?? '(none reported)'}  ancestor-check: ${r.ancestor}  ${mine ? '[MINE]' : ''}`);
+    console.log(`  port ${r.port}  pid ${r.pid}  worktree ${r.worktree ?? '(unknown)'}  commit ${r.commit ?? '(none reported)'}  ancestor-check: ${r.ancestor}  ${tag(r.worktree)}`);
   }
 
   console.log('\n--- ARMED (not listening now, but can respawn a child and re-bind at any moment) ---');
   if (armed.length === 0) console.log('  (none)');
   for (const r of armed) {
     const worktree = worktreeFromCommandLine(r.CommandLine);
-    const mine = sameWorktree(worktree, MY_ROOT);
-    console.log(`  pid ${r.Pid}  worktree ${worktree ?? '(unknown)'}  ${mine ? '[MINE]' : ''}  cmd: ${r.CommandLine}`);
+    console.log(`  pid ${r.Pid}  worktree ${worktree ?? '(unknown)'}  ${tag(worktree)}  cmd: ${r.CommandLine}`);
   }
 
   console.log('\n--- OTHER NEXT.JS SERVERS DETECTED (dev or start; informational only, does not affect the FLOOR verdict) ---');
@@ -301,6 +328,8 @@ async function main() {
 
   const othersListening = apiListeners.filter((r) => !sameWorktree(r.worktree, MY_ROOT));
   const othersArmed = armed.filter((r) => !sameWorktree(worktreeFromCommandLine(r.CommandLine), MY_ROOT));
+  const unclassifiedCount =
+    apiListeners.filter((r) => r.worktree == null).length + armed.filter((r) => worktreeFromCommandLine(r.CommandLine) == null).length;
 
   if (killOthers) {
     console.log('\n--kill-others: stopping every API-shaped process not in my own worktree...');
@@ -312,7 +341,8 @@ async function main() {
   }
 
   const clean = othersListening.length === 0 && othersArmed.length === 0;
-  console.log(`\nFLOOR IS ${clean ? 'CLEAN' : 'NOT CLEAN'}${killOthers && !clean ? ' (ran --kill-others above -- re-run to confirm)' : ''}`);
+  const unclassifiedNote = unclassifiedCount > 0 ? ` (${unclassifiedCount} of the above could not be classified -- see [COULD NOT CLASSIFY] rows)` : '';
+  console.log(`\nFLOOR IS ${clean ? 'CLEAN' : 'NOT CLEAN'}${killOthers && !clean ? ' (ran --kill-others above -- re-run to confirm)' : ''}${unclassifiedNote}`);
   process.exitCode = clean ? 0 : 1;
 }
 
