@@ -488,11 +488,20 @@ export class ShipmentDriverService {
     // `status` is EXCEPTION, inside the same transaction as its write — this
     // check only gives the driver the specific, honest reason on the request
     // that hits the common case rather than the race window.
+    //
+    // DISPATCH-6: `completeLeg` itself now sets `courierStatus: 'DELIVERED'`
+    // and `driverQueuePosition: null` for every courier-kind leg, inside the
+    // same conditional `updateMany` as the terminal `status` write — this
+    // call used to be the ONLY place that happened, as a second, unconditional
+    // write right here. That second write is removed, not merely redundant:
+    // `completeLeg` either commits both in one race-safe write or throws
+    // `ConflictException` (in which case execution never reaches this line),
+    // and once it has committed the leg is COMPLETED — a status
+    // `flagException`/`resolveException` both refuse to touch — so nothing
+    // can change `courierStatus` out from under a second write anyway. A
+    // write that can only ever re-assert values already true is not a safety
+    // net, it is a second source of truth for the same fact.
     const shipment = await this.shipments.completeLeg(legId, dto, { userId: actor.userId, label: dto.receivedByName });
-    await this.prisma.shipmentLeg.update({
-      where: { id: legId },
-      data: { courierStatus: 'DELIVERED', driverQueuePosition: null },
-    });
 
     // A completed first mile puts the parcel at the terminal; the next leg may
     // now become workable. Dispatching here rather than waiting for the sweeper
