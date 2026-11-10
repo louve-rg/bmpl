@@ -76,6 +76,28 @@ export class WalletController {
    * When a real funding rail is eventually configured, it posts the same TOPUP
    * against the same clearing account, and this endpoint stops being the only
    * way in rather than needing to be unpicked.
+   *
+   * MDF-684: this route has NO protection against a duplicate post, and a
+   * previous version of this comment claimed otherwise. The reference below
+   * embeds a fresh `randomUUID()` on every call, so two identical requests —
+   * concurrent or sequential — get two DIFFERENT references, never collide on
+   * `WalletTransaction.reference`'s unique constraint, and both post: proven
+   * by `wallet-activation.integration.spec.ts`'s "MDF-684" describe block (a
+   * forced, measured race, not an inference), not by reading this code. The
+   * client has a same-tab double-click guard (MDF-518, `wallet/page.tsx`'s
+   * `addMoneyRef`) but sends no idempotency key, so the server has nothing to
+   * de-duplicate on even if it wanted to. The fix is a CLIENT-supplied
+   * idempotency key, via the existing generic `IdempotencyKey` model with a
+   * new scope, following `/checkout`'s exact pattern (`orders.service.ts`):
+   * an `IN_PROGRESS` row keyed by `(userId, scope, key)`, `P2002` returns the
+   * prior result instead of reposting. `selfServiceTestCredit`'s DERIVED
+   * reference, a few lines down, does NOT transfer here — it works there
+   * because the claimable amount is capped and state-derived, so a retry of
+   * "the same claim" really is the same request; this route takes an
+   * arbitrary amount a user may legitimately repeat, and a derived reference
+   * would collide on — and block — a second legitimate top-up. Tracked, not
+   * built here; the owner's no-backend-only-features rule applies (the
+   * client sends no key yet).
    */
   @StrictThrottle()
   @Post('top-up')
@@ -96,8 +118,10 @@ export class WalletController {
       newValue: { amountMinor: dto.amountMinor, currency: 'BZD' },
     });
     return this.wallet.topUp(user.userId, BigInt(dto.amountMinor), 'BZD', {
-      // A fresh reference per request: the ledger's unique constraint then makes
-      // an accidental double-submit collide rather than fund twice.
+      // MDF-684: NOT a de-duplication key — a fresh UUID on every call means
+      // the unique constraint on WalletTransaction.reference never collides
+      // between two requests, so a double-submit funds twice. See this
+      // method's doc comment above for what a real fix needs.
       reference: `test-topup:${user.userId}:${randomUUID()}`,
       description: 'Simulation funds added for testing',
       actorId: user.userId,
