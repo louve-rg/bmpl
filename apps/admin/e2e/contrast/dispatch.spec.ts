@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { loginAsRole } from '../support/auth';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
 import { sweepContrast, formatSweepReport, writeSweepResultRecords } from '../support/contrast-sweep';
-import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
+import { assertRatchet, assertAllWidthsExamined, type KnownViolationEntry } from '../support/contrast-ratchet';
 
 /**
  * MDF-376 slice 1 (god, 2026-10-22): the two highest-severity, highest-
@@ -65,6 +65,7 @@ function makeRecorder() {
     } else {
       for (const name of [...discoveredPassNames].sort()) console.log(`  - ${name}`);
     }
+    assertAllWidthsExamined(contributedCount, VIEWPORTS.length, { route: label });
   }
   return { recordPassNames, report };
 }

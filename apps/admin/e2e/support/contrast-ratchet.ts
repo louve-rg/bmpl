@@ -190,6 +190,38 @@ export function checkRatchet(result: SweepResult, scopedEntries: KnownViolationE
   return { newViolations, staleEntries, regressions };
 }
 
+/**
+ * MDF-678 addition (god, 2026-11-10, same turn he endorsed PR #660): a
+ * width that never ran at all looks EXACTLY like a width that ran and
+ * passed -- same shape as the count-drop guard above, a second symptom of
+ * the same defect class. Found live on the admin dispatch DETAIL route's
+ * own `test.afterAll` recorder: 5 of 9 widths showed as Playwright-skipped
+ * ("-", not a failure) and nothing before this addition ever complained.
+ *
+ * `contributedCount` (each spec file's own, incremented once per width
+ * that reached `recordPassNames`/`sweepContrast`) already existed in every
+ * one of these spec files before this card -- it just only ever fed an
+ * informational console.log ("contributed=N/9"), never an assertion. This
+ * function is what a spec file's own `test.afterAll` now calls with that
+ * existing counter, turning an easy-to-miss log line into a hard failure.
+ *
+ * Deliberately agnostic about WHY a width is missing -- a real
+ * `test.skip()`, a worker restart after an earlier test's failure
+ * reloading this module and resetting the counter (this file's own
+ * existing comments already document that mechanism), or anything else not
+ * yet named. The guard's job is to notice the gap, not diagnose it; see
+ * this file's own header comment on `checkDiscoveryDrop` for the matching
+ * philosophy on the count-drop half of this same card.
+ */
+export function assertAllWidthsExamined(contributedCount: number, totalWidths: number, context: { route: string }): void {
+  if (contributedCount >= totalWidths) return;
+  throw new Error(
+    `contrast sweep for ${context.route}: only ${contributedCount}/${totalWidths} width(s) were actually examined by the end of this run -- ` +
+      `${totalWidths - contributedCount} width(s) never ran at all (skipped, or lost to a worker restart after an earlier failure). ` +
+      `A width that never ran reports nothing, which looks identical to a width that ran and passed -- do not treat that silence as clean.`,
+  );
+}
+
 const DISCOVERY_BASELINE_PATH = path.join(__dirname, '..', 'contrast-discovery-baseline.json');
 
 function loadDiscoveryBaseline(): Record<string, number> {

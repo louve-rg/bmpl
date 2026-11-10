@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { tryLogin, OPS_LIMITED_EMAIL, OPS_PASSWORD } from '../support/auth';
 import { settleForSnapshot, CONTRAST_VIEWPORTS } from '../support/visual';
 import { sweepContrast, formatSweepReport, writeSweepResultRecords } from '../support/contrast-sweep';
-import { assertRatchet, type KnownViolationEntry } from '../support/contrast-ratchet';
+import { assertRatchet, assertAllWidthsExamined, type KnownViolationEntry } from '../support/contrast-ratchet';
 
 /**
  * Requirement 7 regression coverage, same bug class as notifications.spec.ts
@@ -52,6 +52,7 @@ test.describe('contrast: admin logistics hubs (read-only ops)', () => {
     } else {
       for (const name of [...discoveredPassNames].sort()) console.log(`  - ${name}`);
     }
+    assertAllWidthsExamined(contributedCount, VIEWPORTS.length, { route: ROUTE });
   });
 
   for (const viewport of VIEWPORTS) {
