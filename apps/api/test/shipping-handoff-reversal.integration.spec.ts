@@ -562,6 +562,47 @@ describe('a terminal company\'s own staff submitting at their own location (TERM
     expect((await legRow(lastMile.id)).pickupPinAttempts).toBe(0);
   });
 
+  it('11b · a terminal staff member holding a DIFFERENT location is refused a HANDOFF too, even with the right code and the right courier', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    await driveFirstMileToInProgress(courier, firstMile.id);
+    const correctHubId = (await legRow(firstMile.id)).destinationHubId!;
+    // A real, active grant at this staff member's own company — just not the
+    // hub this FIRST_MILE leg's handoff actually happens at. Same shape as
+    // test 11's "a DIFFERENT location their OWN company operates", for the
+    // door that test never covered: handoff, not release-to-courier.
+    const otherHubId = Object.values(hub).find((id) => id !== correctHubId)!;
+    expect(otherHubId).not.toBe(correctHubId);
+    const staff = await makeTerminalStaff([otherHubId]);
+
+    const code = (await get(courier.cookies, `driver/shipping-jobs/${firstMile.id}/code`)).body.code;
+    const r = await post(staff.cookies, `terminal/legs/${firstMile.id}/handoff`, {
+      pin: code,
+      receivedByName: 'Wrong desk',
+      presentedCourierUserId: courier.userId,
+    });
+    expect(r.status).toBe(403);
+    // Refused before the code was ever checked — same discipline as test
+    // 11's release-to-courier case: a location mismatch is caught before
+    // verifyLegPinOrThrow runs, so the attempt counter never moves.
+    const refused = await legRow(firstMile.id);
+    expect(refused.status).toBe('IN_PROGRESS');
+    expect(refused.handoffPinAttempts).toBe(0);
+
+    // The right desk, same code, same courier, succeeds — proving the code
+    // and the courier were never the problem here, only the location.
+    const rightStaff = await makeTerminalStaff([correctHubId]);
+    const ok = await post(rightStaff.cookies, `terminal/legs/${firstMile.id}/handoff`, {
+      pin: code,
+      receivedByName: 'Right desk',
+      presentedCourierUserId: courier.userId,
+    });
+    expect(ok.status).toBe(201);
+    expect((await legRow(firstMile.id)).status).toBe('COMPLETED');
+  });
+
   it('12 · a terminal staff member holding the RIGHT location releases a LAST_MILE leg to its courier', async () => {
     const sender = await fundedSender();
     const firstCourier = await makeCourier('STANN_CREEK');
