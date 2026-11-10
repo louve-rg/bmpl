@@ -14,6 +14,7 @@ import {
   reorderBlockedReason,
   mapsDirectionsUrl,
   ROUTE_ESTIMATE_DISCLOSURE,
+  TERMINAL_LEG_STATUSES,
   type DeliveryStatus,
   type DriverDeliveryView,
   type DriverJobKind,
@@ -153,7 +154,18 @@ export class DriverJobFeedService {
       }),
       this.prisma.shipmentLeg.groupBy({
         by: ['courierStatus', 'acceptedAt'],
-        where: { assignedDriverProfileId: profileId, ...notOwnLeg(userId), courierStatus: { in: [...OPEN, 'DELIVERED'] as never } },
+        where: {
+          assignedDriverProfileId: profileId,
+          ...notOwnLeg(userId),
+          courierStatus: { in: [...OPEN, 'DELIVERED'] as never },
+          // DISPATCH-6: a staff/terminal handoff can leave `courierStatus`
+          // stale (e.g. ARRIVING) on a leg whose own `status` already
+          // reached COMPLETED -- see `ShipmentService.completeLeg`. Without
+          // this guard the driver's own tab badge kept counting a finished
+          // leg as "active" forever: the same root cause as the dispatch
+          // load queries, one layer up in the UI the driver actually sees.
+          status: { notIn: [...TERMINAL_LEG_STATUSES] },
+        },
         _count: { _all: true },
       }),
     ]);

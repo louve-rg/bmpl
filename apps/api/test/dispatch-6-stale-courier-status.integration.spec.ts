@@ -29,6 +29,13 @@
  *      independent of how the staleness arose.
  *  (2) a staff/terminal handoff must leave the driver immediately offerable
  *      again — proven end-to-end through the real admin handoff route.
+ *
+ * (3), folded into the same PR rather than a follow-up card: the same
+ * unguarded `courierStatus` grouping, one layer up, in
+ * `DriverJobFeedService.counts()` — the driver app's own tab badges. Not a
+ * dispatch/eligibility gate, but the same half-fix the owner's "no partial
+ * features" rule exists for: after (1) and (2), the driver's own app would
+ * still have told them they had a job they could never find.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
@@ -46,6 +53,14 @@ const FUTURE = new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
 const post = (c: string[], p: string, b: object = {}) => request(ctx.server).post(`/api/${p}`).set('Cookie', c).send(b);
 const patch = (c: string[], p: string, b: object = {}) => request(ctx.server).patch(`/api/${p}`).set('Cookie', c).send(b);
+const get = (c: string[], p: string) => request(ctx.server).get(`/api/${p}`).set('Cookie', c);
+
+/** Logs in as the user behind a driver profile — every registration here uses the same fixed password. */
+async function cookiesForDriver(driverProfileId: string): Promise<string[]> {
+  const { userId } = await ctx.prisma.driverProfile.findUniqueOrThrow({ where: { id: driverProfileId }, select: { userId: true } });
+  const { email } = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
+  return cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email, password: 'CustomerPass123' }));
+}
 
 async function registerCustomer(email: string) {
   const reg = await request(ctx.server)
@@ -249,5 +264,23 @@ describe('DISPATCH-6 (2): a staff/terminal handoff leaves the driver immediately
     expect(after.courierStatus).toBe('DELIVERED');
     expect(after.driverQueuePosition).toBeNull();
     expect(await drivers.activeJobCount(driverProfileId)).toBe(0);
+  });
+});
+
+describe('DISPATCH-6 (3): the driver\'s own tab badge must not show a phantom job either', () => {
+  it('GET driver/jobs/counts ignores a COMPLETED leg with a stale courierStatus (same root cause, one layer up in the UI)', async () => {
+    const { driverProfileId } = await makeDriver('BELIZE');
+    await makeStaleCompletedLeg(driverProfileId);
+    await makeStaleCompletedLeg(driverProfileId);
+    await makeStaleCompletedLeg(driverProfileId);
+    const driverCookies = await cookiesForDriver(driverProfileId);
+
+    const res = await get(driverCookies, 'driver/jobs/counts');
+    expect(res.status).toBe(200);
+    // ARRIVING maps to the 'active' tab (driverViewForStatus) — a stale
+    // ARRIVING on a leg whose own status is already COMPLETED must not
+    // land there, or the driver's app tells them they still have a job
+    // they can never find.
+    expect(res.body.active).toBe(0);
   });
 });
