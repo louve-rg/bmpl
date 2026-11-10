@@ -447,6 +447,12 @@ jobs:
       API_PORT: '4000'
       NEXT_PUBLIC_API_URL: http://localhost:4000
       ADMIN_PUBLIC_API_URL: http://localhost:4000
+      # FLOOR-SEEDTARGET (god, 2026-11-10): restores previously-implicit
+      # behavior, not a new CI dependency -- this job already seeded against
+      # localhost:4000 through seed-uat-logistics.ts/seed-uat-roles.ts's own
+      # (now removed) default. Written down explicitly because that default
+      # is gone: both scripts now refuse to run without this set.
+      UAT_SEED_API_URL: http://localhost:4000
       # Deterministic, CI-only, non-secret fixture credentials (root
       # CLAUDE.md §9 — never a real credential) so the suite's seeded role
       # fixtures (apps/web/e2e/support/auth.ts: SUPER_ADMIN, UAT_DRIVER,
