@@ -148,17 +148,39 @@ body {
     color: var(--bmpl-text);
     /* Solid, not color-mix(..., transparent) -- the same alpha-fill-over-
        transparent construction as the Badge/Alert brand tones, just written
-       in raw CSS instead of a Tailwind /NN utility. Construction fixed; the
-       rendered ratio was not measured. */
+       in raw CSS instead of a Tailwind /NN utility. Construction fixed.
+       MEASURED LIVE (Oscar, 2026-11-10, MDF-383) -- independent of
+       contrast-sweep.ts/contrast.ts (getComputedStyle foreground + a direct
+       screenshot pixel decode, no clustering, no dominant-share heuristic;
+       the sweeper itself is under suspicion as of CONTRAST-CLIP/MDF-424):
+       #0f172a foreground on this #eff6ff background = 16.4:1. Passes the
+       4.5:1 text floor comfortably. */
     background-color: #eff6ff;
   }
   [data-theme='glass'] .bmpl-nav-item[aria-current='page'] {
-    /* Same fix, glass branch: the gradient's rgba() stops were translucent,
-       compositing toward whatever mural pixels sit behind this nav item --
-       made opaque so the surface is a fixed, known colour instead of one
-       that depends on where the item lands. Construction fixed; the
-       rendered ratio was not measured. */
-    background: linear-gradient(135deg, rgb(59, 130, 246), rgb(14, 165, 233));
+    /* FIXED for real, not just reconstructed -- god's ruling (MDF-383,
+       2026-11-10): the measured 2.60-3.45:1 gradient failed the 4.5:1 text
+       floor on every page, for every admin user, and needed an
+       ALREADY-SANCTIONED pairing, not a new colour picked by eye.
+       Reuses the exact pairing `.bmpl-nav-item:hover` already uses two
+       rules above (--bmpl-surface-muted + --bmpl-text) -- the "ambient"
+       fill level this file's own header comment documents as the correct
+       one for "topbar/rail navigation furniture, sparse text" (glass.css,
+       the four-fill-level block). No new token, no new arithmetic: the
+       foreground was already var(--bmpl-text) before this change (line
+       above); only the background moves off the bright, saturated,
+       translucent gradient onto the same flat ambient fill the hover state
+       already proves out.
+       MEASURED LIVE (Oscar, 2026-11-10, MDF-383) -- same instrument as the
+       FAILS measurement above (getComputedStyle foreground + a direct
+       screenshot pixel decode, no clustering, no dominant-share heuristic),
+       10 points sampled across this surface, kept off the label's own
+       glyphs (a first pass centred on the element hit an actual letter --
+       near-white text against near-white text is not a background
+       reading): 16.24:1 to 16.41:1 everywhere sampled -- PASSES the 4.5:1
+       text floor with very wide margin, landing almost exactly on the
+       (unreachable) light branch's own measured 16.4:1. */
+    background-color: var(--bmpl-surface-muted);
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
   }
   .bmpl-nav-heading {
