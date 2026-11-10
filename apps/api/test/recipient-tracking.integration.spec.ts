@@ -14,7 +14,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, findPinLeak, resetDb, seedRoles, seedBaselineCourierCoverage, seedSuperAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let admin: string[];
@@ -299,8 +299,11 @@ describe('the payload is an allowlist — nothing private, however rich the stat
     expect(raw).not.toContain('Minor');
     // The description is customer-typed and can be sensitive.
     expect(raw).not.toContain('Prescription');
-    // A leaked link must not be able to complete a handoff.
-    expect(raw).not.toContain(pin);
+    // A leaked link must not be able to complete a handoff. findPinLeak
+    // (BMPL-348/SEC-1), not a whole-body substring search: this very fixture
+    // phone number, '501-4445555', is the exact string that false-failed a
+    // sibling PIN check when a run's random pin happened to be `4445`.
+    expect(findPinLeak(r.body, pin)).toBeNull();
     expect(raw).not.toContain('handoffPin');
     // No custody actors, no driver identity, no internal flags.
     expect(raw).not.toContain('custody');
