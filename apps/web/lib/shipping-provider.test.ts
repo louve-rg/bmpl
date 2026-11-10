@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPendingProposal, navApplicationBadge, operatingStatusLabel, orgStatusView, type ProviderStatus } from './shipping-provider';
+import { canRevealHandoffCode, isPendingProposal, navApplicationBadge, operatingStatusLabel, orgStatusView, type ProviderStatus } from './shipping-provider';
 
 describe('isPendingProposal', () => {
   it('is a live proposal only while both accept and reject are still open', () => {
@@ -44,6 +44,24 @@ describe('navApplicationBadge (MDF-526) — labels the Carrier nav heading legib
 
   it('APPROVED still reads as not-yet-live, since the badge only renders before role approval', () => {
     expect(navApplicationBadge('APPROVED')).toMatch(/pending/i);
+  });
+});
+
+describe('canRevealHandoffCode (MDF-611) — only once there is something a carrier could do with the code', () => {
+  it('is false before the leg has arrived, even if otherwise open', () => {
+    expect(canRevealHandoffCode({ arrivedAt: null, status: 'IN_PROGRESS' })).toBe(false);
+  });
+
+  it('is true once arrived, for a non-terminal status', () => {
+    expect(canRevealHandoffCode({ arrivedAt: new Date().toISOString(), status: 'IN_PROGRESS' })).toBe(true);
+  });
+
+  it('is false once COMPLETED, even with arrivedAt set', () => {
+    expect(canRevealHandoffCode({ arrivedAt: new Date().toISOString(), status: 'COMPLETED' })).toBe(false);
+  });
+
+  it('is false once CANCELLED, even with arrivedAt set', () => {
+    expect(canRevealHandoffCode({ arrivedAt: new Date().toISOString(), status: 'CANCELLED' })).toBe(false);
   });
 });
 

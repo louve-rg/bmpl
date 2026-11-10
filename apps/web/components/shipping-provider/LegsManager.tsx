@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type ApiError } from '../../lib/api';
 import { Alert, Badge, Button, Card as UiCard, EmptyState, Field, Input, Spinner } from '../ui';
 import { errMessage } from '../driver/dashboard-data';
-import { isPendingProposal, type ShippingProviderLeg } from '../../lib/shipping-provider';
+import { canRevealHandoffCode, isPendingProposal, type ShippingProviderLeg, type ShippingProviderLegCode } from '../../lib/shipping-provider';
 import { ApprovalRequired } from './data';
 
 /**
@@ -92,6 +92,15 @@ function LegCard({ leg: l, onChanged }: { leg: ShippingProviderLeg; onChanged: (
   const [carrierName, setCarrierName] = useState(l.carrierName ?? '');
   const [carrierBookingRef, setCarrierBookingRef] = useState(l.carrierBookingRef ?? '');
   const [err, setErr] = useState<string | null>(null);
+  const [code, setCode] = useState<ShippingProviderLegCode | null>(null);
+  const [codeErr, setCodeErr] = useState<string | null>(null);
+
+  // MDF-611: hide an already-revealed code the instant this leg leaves the
+  // window it was revealed for (e.g. this org just recorded the handoff) --
+  // never hold onto it past the point it stopped being current.
+  useEffect(() => {
+    if (!canRevealHandoffCode(l)) setCode(null);
+  }, [l.arrivedAt, l.status]);
 
   async function accept() {
     setBusy('accept');
@@ -152,6 +161,23 @@ function LegCard({ leg: l, onChanged }: { leg: ShippingProviderLeg; onChanged: (
     } finally {
       setBusy(null);
     }
+  }
+
+  async function revealCode() {
+    setBusy('reveal');
+    setCodeErr(null);
+    try {
+      setCode(await api.get<ShippingProviderLegCode>(`/shipping/provider/legs/${l.id}/code`));
+    } catch (e) {
+      setCodeErr(errMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function hideCode() {
+    setCode(null);
+    setCodeErr(null);
   }
 
   async function submitSchedule() {
@@ -225,8 +251,29 @@ function LegCard({ leg: l, onChanged }: { leg: ShippingProviderLeg; onChanged: (
               Set schedule
             </Button>
           )}
+          {canRevealHandoffCode(l) && !code && (
+            <Button type="button" size="sm" variant="outline" disabled={busy != null} onClick={() => void revealCode()}>
+              {busy === 'reveal' ? 'Revealing…' : 'Reveal handoff code'}
+            </Button>
+          )}
         </div>
       </div>
+
+      {code && (
+        <div data-theme="light" className="mt-3 rounded-bmpl-md border border-slate-200 bg-white p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Handoff code</p>
+          <p className="mt-1 font-mono text-2xl tracking-widest text-belize-navy">{code.code ?? '—'}</p>
+          {code.attempts > 0 && (
+            <p className="mt-1 text-xs text-slate-500">
+              {code.attempts} wrong {code.attempts === 1 ? 'attempt' : 'attempts'} recorded against this leg so far.
+            </p>
+          )}
+          <p className="mt-2 text-xs text-slate-500">Give this to BML staff only when they ask for it at the receiving terminal.</p>
+          <Button type="button" size="sm" variant="outline" className="mt-2" onClick={hideCode}>
+            Hide
+          </Button>
+        </div>
+      )}
 
       {rejecting && (
         <div className="mt-3 space-y-2 rounded-bmpl-md border border-slate-200 p-3">
@@ -289,6 +336,11 @@ function LegCard({ leg: l, onChanged }: { leg: ShippingProviderLeg; onChanged: (
       {err && (
         <Alert tone="error" className="mt-3">
           {err}
+        </Alert>
+      )}
+      {codeErr && (
+        <Alert tone="error" className="mt-3">
+          {codeErr}
         </Alert>
       )}
     </UiCard>
