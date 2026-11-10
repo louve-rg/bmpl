@@ -259,7 +259,14 @@ async function main(): Promise<void> {
 
   // ---- VENDOR ----------------------------------------------------------
   console.info('• Vendor');
-  await ensureUser(superAdmin, USERS.vendor);
+  const vendorUserId = await ensureUser(superAdmin, USERS.vendor);
+  // MDF-681: the storefront's own VendorProfile.isTest (set further down via
+  // admin/vendors/:id/test-mode) does not imply User.isTest — they are two
+  // separate flags, and only User.isTest gates wallet self-funding
+  // (docs/TEST-ACCOUNTS.md). Without this call the fixture was marked
+  // simulation on its storefront but could never fund its own test wallet.
+  await superAdmin.post('/admin/users/test-flag', { userId: vendorUserId, isTest: true, reason: 'UAT role-coverage seed' });
+  console.info('  ✓ user flagged isTest via POST admin/users/test-flag (MDF-681, idempotent)');
   const vendor = new Client('vendor');
   await vendor.login(USERS.vendor.email, PASSWORD);
 
@@ -394,7 +401,11 @@ async function main(): Promise<void> {
 
   // ---- PASSENGER_DRIVER --------------------------------------------------
   console.info('• Passenger driver');
-  await ensureUser(superAdmin, USERS.passengerDriver);
+  const passengerDriverUserId = await ensureUser(superAdmin, USERS.passengerDriver);
+  // MDF-681: see the VENDOR block above — PassengerDriverProfile.isTest
+  // (set further down) does not imply User.isTest.
+  await superAdmin.post('/admin/users/test-flag', { userId: passengerDriverUserId, isTest: true, reason: 'UAT role-coverage seed' });
+  console.info('  ✓ user flagged isTest via POST admin/users/test-flag (MDF-681, idempotent)');
   const paxDriver = new Client('passenger driver');
   await paxDriver.login(USERS.passengerDriver.email, PASSWORD);
 
@@ -491,7 +502,11 @@ async function main(): Promise<void> {
   // apps/web/components/passenger-operator/FleetRosterCard.tsx's own comment
   // says as much. No affiliation/vehicle data created here on purpose.
   console.info('• Passenger provider');
-  await ensureUser(superAdmin, USERS.passengerProvider);
+  const passengerProviderUserId = await ensureUser(superAdmin, USERS.passengerProvider);
+  // MDF-681: see the VENDOR block above — PassengerProviderProfile.isTest
+  // (set further down) does not imply User.isTest.
+  await superAdmin.post('/admin/users/test-flag', { userId: passengerProviderUserId, isTest: true, reason: 'UAT role-coverage seed' });
+  console.info('  ✓ user flagged isTest via POST admin/users/test-flag (MDF-681, idempotent)');
   const paxProvider = new Client('passenger provider');
   await paxProvider.login(USERS.passengerProvider.email, PASSWORD);
 
