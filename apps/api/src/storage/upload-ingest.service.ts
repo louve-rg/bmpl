@@ -138,7 +138,13 @@ export class UploadIngestService {
     // uploads of the same filename never collide.
     const name = uploadBaseName(opts.fileName, opts.fallbackName ?? fallbackKind);
     const key = this.storage.buildKey(prefix, `${name}.${ext}`);
-    await this.storage.putObject(key, bytes, mime, visibility);
+    // ATT-2: the REAL name, not the sanitized/truncated `name` above — object
+    // metadata has no character restrictions `buildKey`'s own key segment
+    // does, so there is no reason to carry the lossy version forward. Only
+    // written when the uploader actually gave one; a fallback-named upload
+    // has no real name to remember.
+    const metadata = opts.fileName ? { filename: encodeURIComponent(opts.fileName) } : undefined;
+    await this.storage.putObject(key, bytes, mime, visibility, metadata);
     return { key, contentType: mime, sizeBytes: bytes.length };
   }
 }
