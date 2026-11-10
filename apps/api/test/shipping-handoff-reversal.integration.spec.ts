@@ -394,6 +394,57 @@ describe('staff submit the presented courier\'s code (TERM-5)', () => {
     // Refused before the code was ever checked — no attempt recorded.
     expect(after.handoffPinAttempts).toBe(0);
   });
+
+  it('6d · SEC7-DUPLICATE-HANDOFF: a second handoff submission against an already-COMPLETED leg is refused, even with the correct code — the owner\'s own "reject duplicate handoffs" requirement', async () => {
+    const sender = await fundedSender();
+    const courier = await makeCourier('STANN_CREEK');
+    const shipment = await book(sender.cookies);
+    const { firstMile } = await journey(shipment.id);
+    await driveFirstMileToInProgress(courier, firstMile.id);
+
+    const ops = await makeOperator(['logistics.operate']);
+    const code = (await get(courier.cookies, `driver/shipping-jobs/${firstMile.id}/code`)).body.code;
+    const first = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin: code,
+      receivedByName: 'Terminal desk',
+      presentedCourierUserId: courier.userId,
+    });
+    expect(first.status).toBe(201);
+    const completed = await legRow(firstMile.id);
+    expect(completed.status).toBe('COMPLETED');
+
+    // Same code, same leg, same everyone — submitted again. The guard this
+    // proves (verifyLegPinOrThrow, shipment.service.ts: `kind === 'handoff'
+    // && leg.status !== 'IN_PROGRESS'`) fires BEFORE the code is ever
+    // compared, so using the objectively correct code is the strongest
+    // version of this proof: if a repeat of the right code still gets
+    // refused, no code could get a different answer. This guard sits inside
+    // completeLeg/verifyLegPinOrThrow, so it is shared by all three callers
+    // (terminal.controller.ts, this admin route, shipment-driver.service.ts)
+    // — see MDF-675's own verification of that inheritance.
+    const second = await post(ops.cookies, `admin/logistics/legs/${firstMile.id}/handoff`, {
+      pin: code,
+      receivedByName: 'Terminal desk',
+      presentedCourierUserId: courier.userId,
+    });
+    expect(second.status).toBe(400);
+    expect(second.body.message).toBe('That leg has not started, so there is nothing to hand over.');
+
+    // Nothing moved. Refused before the code was compared, so this is not
+    // treated as a wrong-code attempt either — no attempt counted, no
+    // SHIPMENT_LEG_HANDOFF_PIN_FAILED audit row, and the leg's own
+    // completion fields are untouched by the second call, not silently
+    // re-stamped with a new timestamp.
+    const after = await legRow(firstMile.id);
+    expect(after.status).toBe('COMPLETED');
+    expect(after.handoffPinAttempts).toBe(0);
+    expect(after.completedAt?.getTime()).toBe(completed.completedAt?.getTime());
+    expect(after.handoffVerifiedAt?.getTime()).toBe(completed.handoffVerifiedAt?.getTime());
+    const failedAudit = await ctx.prisma.auditLog.findFirst({
+      where: { action: 'SHIPMENT_LEG_HANDOFF_PIN_FAILED', actorId: ops.userId },
+    });
+    expect(failedAudit).toBeNull();
+  });
 });
 
 describe('releasing a LAST_MILE leg to its courier at a terminal (TERM-5)', () => {
