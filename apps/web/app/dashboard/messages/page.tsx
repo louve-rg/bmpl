@@ -483,6 +483,22 @@ function ThreadPane({
     void onMutatedRef.current();
   }, []);
 
+  // A viewer's OWN message always pins, even if they'd scrolled up to read
+  // something -- unlike a remote reply arriving while they're not looking,
+  // they just took the action that produced this new message and sending it
+  // with no visible result ("the app ate my message") is a worse symptom
+  // than the flash this whole effect exists to avoid. Deliberately a
+  // separate handler, not folded into applyUpdate itself: applyUpdate is
+  // also toggleStatus's path, and a close/reopen is not the viewer asking to
+  // see the bottom.
+  const handleSent = useCallback(
+    (d: ConversationDetail) => {
+      nearBottomRef.current = true;
+      applyUpdate(d);
+    },
+    [applyUpdate],
+  );
+
   async function toggleStatus() {
     if (!detail) return;
     setStatusBusy(true);
@@ -554,7 +570,7 @@ function ThreadPane({
       {detail && (
         <Composer
           conversation={detail}
-          onSent={applyUpdate}
+          onSent={handleSent}
           inlineError={error && detail ? error : null}
         />
       )}

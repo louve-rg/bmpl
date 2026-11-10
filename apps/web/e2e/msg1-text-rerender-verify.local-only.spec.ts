@@ -166,6 +166,14 @@ test('(b) a real text conversation: no full remount of existing bubbles on an id
   const jumpedToBottomOnNewMessage =
     scrollHeightAfterNewMessage - clientHeightAfterNewMessage - scrollTopAfterNewMessage < 5;
 
+  // ---- regression check god traced through the diff (conv-e622e6): the viewer's OWN send must always pin, even though a remote one (just above) correctly did not ----
+  await scrollContainer.evaluate((el) => { el.scrollTop = 0; });
+  await desktop.waitForTimeout(200);
+  const OWN_MSG = `own-send-while-scrolled-up-${RUN_TAG}`;
+  await sendText(desktop, OWN_MSG);
+  const scrollTopAfterOwnSend = await scrollContainer.evaluate((el) => el.scrollTop);
+  const pinnedAfterOwnSend = await scrollContainer.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop < 5);
+
   // ---- complementary check, opposite direction: already at the bottom, a new message must still pin ----
   await scrollContainer.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await desktop.waitForTimeout(200);
@@ -188,6 +196,7 @@ test('(b) a real text conversation: no full remount of existing bubbles on an id
   console.log(`  scroll position stayed put during idle polling, nothing new arriving (should be TRUE): ${!scrollJumpedDuringIdle}`);
   console.log(`  scrollTop: manual=${scrollTopAfterManualScroll}, after idle=${scrollTopAfterIdle}, after a genuinely new message arrived=${scrollTopAfterNewMessage}`);
   console.log(`  view stayed where the viewer left it when a new message arrived while scrolled up (should now be TRUE, post-fix): ${!jumpedToBottomOnNewMessage}`);
+  console.log(`  the viewer's OWN send still pins to the bottom even though they had scrolled up (should be TRUE -- the regression god caught in review): scrollTop after own send=${scrollTopAfterOwnSend}, pinned=${pinnedAfterOwnSend}`);
   console.log(`  still pins to the bottom when a new message arrives and the viewer WAS already there (should be TRUE -- fix must not break the normal case): ${stillPinnedWhenAtBottom}`);
   console.log(`  GET /conversations/:id hits over the run (bounded-pattern check): ${detailApiHits}`);
   console.log(`  GET /conversations (list) hits over the run (should be small -- list is not on a polling interval, only mount + own mutations): ${listApiHits}`);
@@ -195,6 +204,7 @@ test('(b) a real text conversation: no full remount of existing bubbles on an id
   expect(remountedDuringIdle, 'an idle background poll (no new message) must not recreate existing message DOM nodes').toBe(false);
   expect(scrollJumpedDuringIdle, 'an idle background poll (no new message) must not move the scroll position').toBe(false);
   expect(jumpedToBottomOnNewMessage, 'a viewer scrolled away from the bottom must not be yanked down when a new message arrives').toBe(false);
+  expect(pinnedAfterOwnSend, 'sending your own message must always scroll to it, even if you had scrolled away first').toBe(true);
   expect(stillPinnedWhenAtBottom, 'a viewer already at the bottom must still land on a genuinely new message').toBe(true);
   expect(detailApiHits, 'request pattern must be bounded (~1 per 15s poll), not an uncontrolled loop').toBeLessThan(40);
   // One GET per deliberate mutation (mount, support-create, each of the 7
