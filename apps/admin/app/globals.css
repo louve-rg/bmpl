@@ -146,16 +146,6 @@ body {
   }
   .bmpl-nav-item[aria-current='page'] {
     color: var(--bmpl-text);
-    /* Solid, not color-mix(..., transparent) -- the same alpha-fill-over-
-       transparent construction as the Badge/Alert brand tones, just written
-       in raw CSS instead of a Tailwind /NN utility. Construction fixed.
-       MEASURED LIVE (Oscar, 2026-11-10, MDF-383) -- independent of
-       contrast-sweep.ts/contrast.ts (getComputedStyle foreground + a direct
-       screenshot pixel decode, no clustering, no dominant-share heuristic;
-       the sweeper itself is under suspicion as of CONTRAST-CLIP/MDF-424):
-       #0f172a foreground on this #eff6ff background = 16.4:1. Passes the
-       4.5:1 text floor comfortably. */
-    background-color: #eff6ff;
   }
   [data-theme='glass'] .bmpl-nav-item[aria-current='page'] {
     /* FIXED for real, not just reconstructed -- god's ruling (MDF-383,
@@ -178,14 +168,20 @@ body {
        glyphs (a first pass centred on the element hit an actual letter --
        near-white text against near-white text is not a background
        reading): 16.24:1 to 16.41:1 everywhere sampled -- PASSES the 4.5:1
-       text floor with very wide margin, landing almost exactly on the
-       (unreachable) light branch's own measured 16.4:1. */
+       text floor with very wide margin.
+       MDF-668 (2026-11-10): this used to be compared against a sibling
+       `.bmpl-nav-item[aria-current='page']` rule (no `[data-theme]`
+       qualifier) that set `background-color: #eff6ff` and measured 16.4:1
+       on its own -- a light-theme variant that read as a second, confirming
+       data point. It never was one: `AdminShell` hardcodes
+       `data-theme="glass"` on its root with no toggle, stored preference,
+       system-preference path, print stylesheet or PDF/email render that
+       could ever produce anything else, so that rule could never win the
+       cascade and was removed as dead code. RE-MEASURED LIVE after removal
+       (Oscar, 2026-11-10, MDF-668, same instrument): 16.24:1 to 16.39:1 --
+       unchanged, confirming the deleted rule was never the one rendering. */
     background-color: var(--bmpl-surface-muted);
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
-  }
-  .bmpl-nav-heading {
-    @apply flex w-full items-center justify-between gap-2 rounded-bmpl-md px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.18em] transition;
-    color: var(--bmpl-text-faint, var(--bmpl-text-muted));
   }
   [data-theme='glass'] .bmpl-nav-heading {
     background-color: var(--bmpl-surface-muted);
