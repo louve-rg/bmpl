@@ -17,7 +17,7 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { bootApp, cookiesOf, resetDb, seedLimitedAdmin, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let admin: string[];
@@ -959,6 +959,79 @@ describe('collecting from a terminal', () => {
       });
       const r = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
       expect(r.status).toBe(201);
+    });
+
+    describe('the way back out of a lockout', () => {
+      async function locked() {
+        const s = await awaitingCollection();
+        const real = await collectionCodeOf(s.id);
+        const wrong = real === '0000' ? '1111' : '0000';
+        for (let i = 0; i < 6; i++) {
+          await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code: wrong });
+        }
+        expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).collectionVerificationStatus).toBe('FAILED');
+        return { s, real };
+      }
+
+      it('unlocks a locked shipment, and a collection succeeds afterward', async () => {
+        const { s, real } = await locked();
+        const r = await post(admin, `admin/logistics/shipments/${s.id}/unlock-collection`, { note: 'Confirmed with the recipient by phone; code is correct.' });
+        expect(r.status).toBe(201);
+
+        const row = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } });
+        expect(row.collectionVerificationStatus).toBe('PENDING');
+        expect(row.collectionPinAttempts).toBe(0);
+
+        const collect = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code: real });
+        expect(collect.status).toBe(201);
+      });
+
+      it('the unlock is audited, with the actor and the required reason', async () => {
+        const { s } = await locked();
+        await post(admin, `admin/logistics/shipments/${s.id}/unlock-collection`, { note: 'Confirmed with the recipient by phone; code is correct.' });
+
+        const unlockAudit = (await ctx.prisma.auditLog.findMany({ where: { action: 'SHIPMENT_LEG_EXCEPTION_RESOLVED' } })).find(
+          (a) => (a.newValue as { shipmentId?: string }).shipmentId === s.id,
+        );
+        expect(unlockAudit).toBeTruthy();
+        expect(unlockAudit!.actorId).not.toBeNull();
+        expect(unlockAudit!.reason).toBe('Confirmed with the recipient by phone; code is correct.');
+        expect((unlockAudit!.newValue as { kind?: string }).kind).toBe('collection');
+        expect((unlockAudit!.newValue as { collectionPinAttemptsReset?: boolean }).collectionPinAttemptsReset).toBe(true);
+      });
+
+      it('requires a reason', async () => {
+        const { s } = await locked();
+        const r = await post(admin, `admin/logistics/shipments/${s.id}/unlock-collection`, { note: 'no' });
+        expect(r.status).toBe(400);
+      });
+
+      it('refuses when there is nothing to unlock', async () => {
+        const s = await awaitingCollection();
+        const r = await post(admin, `admin/logistics/shipments/${s.id}/unlock-collection`, { note: 'Nothing is locked here.' });
+        expect(r.status).toBe(400);
+        expect(r.body.message).toMatch(/not locked/i);
+      });
+
+      it('unlocking needs logistics.operate — reading the board is not enough', async () => {
+        const { s } = await locked();
+
+        const reader = await seedLimitedAdmin(ctx.prisma, `xreader_${uniq()}@example.com`, ['logistics.read']);
+        const readerCookies = cookiesOf(
+          await request(ctx.server).post('/api/auth/login').send({ email: reader.email, password: reader.password }),
+        );
+        expect((await post(readerCookies, `admin/logistics/shipments/${s.id}/unlock-collection`, {
+          note: 'Read-only admin trying to operate.',
+        })).status).toBe(403);
+
+        const operator = await seedLimitedAdmin(ctx.prisma, `xoperator_${uniq()}@example.com`, ['logistics.operate']);
+        const operatorCookies = cookiesOf(
+          await request(ctx.server).post('/api/auth/login').send({ email: operator.email, password: operator.password }),
+        );
+        expect((await post(operatorCookies, `admin/logistics/shipments/${s.id}/unlock-collection`, {
+          note: 'Operator unlocking.',
+        })).status).toBe(201);
+      });
     });
   });
 });

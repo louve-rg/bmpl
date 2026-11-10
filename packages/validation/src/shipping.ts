@@ -591,6 +591,18 @@ export const collectShipmentSchema = z.object({
 });
 export type CollectShipmentInput = z.infer<typeof collectShipmentSchema>;
 
+/**
+ * TERM-12 / MDF-645 follow-up: the way back out of a locked collection code.
+ * Same shape as `resolveLegExceptionSchema`'s mandatory `note` — an
+ * administrator overriding a security lockout leaves a reason, same as
+ * resolving a leg exception does. No `resolution` field: unlike a leg
+ * exception, there is only one way out of a maxed collection-code counter.
+ */
+export const unlockShipmentCollectionSchema = z.object({
+  note: z.string().trim().min(4, 'Say why this is being unlocked.').max(500),
+});
+export type UnlockShipmentCollectionInput = z.infer<typeof unlockShipmentCollectionSchema>;
+
 /* ------------------------------------------- carrier organizations (137) */
 
 /**

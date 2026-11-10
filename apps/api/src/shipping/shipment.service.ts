@@ -3745,6 +3745,50 @@ export class ShipmentService {
   }
 
   /**
+   * TERM-12 / MDF-645 follow-up: the way back out of a locked collection
+   * code. Without this, five wrong guesses bricked a parcel at the counter
+   * permanently — `verifyCollectionPinOrThrow`'s own error message promises
+   * "an administrator has to confirm this collection," but nothing let one.
+   * Same precedent `resolveException`'s RESUME branch already set for a
+   * PIN-locked LEG (`handoffPinAttempts`/`pickupPinAttempts` reset only when
+   * actually maxed, comment at :2557 above): clear the counter, not the
+   * code — there is no reason to believe the code itself was wrong, only
+   * that too many guesses were spent finding that out.
+   *
+   * Conditional update, not an update by id: two operators looking at the
+   * same locked shipment, exactly one unlock may land — same shape
+   * `resolveException`'s own claim does.
+   */
+  async unlockCollection(id: string, note: string, actor: { userId: string }) {
+    const s = await this.prisma.shipment.findUnique({
+      where: { id },
+      select: { id: true, reference: true, collectedAt: true, cancelledAt: true, collectionVerificationStatus: true },
+    });
+    if (!s) throw new NotFoundException('Shipment not found.');
+    if (s.collectedAt) throw new BadRequestException('That shipment has already been collected.');
+    if (s.cancelledAt) throw new BadRequestException('That shipment was cancelled.');
+    if (s.collectionVerificationStatus !== 'FAILED') {
+      throw new BadRequestException('This collection code is not locked, so there is nothing to unlock.');
+    }
+    const claimed = await this.prisma.shipment.updateMany({
+      where: { id: s.id, collectionVerificationStatus: 'FAILED' },
+      data: { collectionPinAttempts: 0, collectionVerificationStatus: 'PENDING' },
+    });
+    if (claimed.count === 0) throw new BadRequestException('This collection code was already unlocked.');
+    // Reuses the leg-exception-resolved action rather than adding a new
+    // AuditAction value — same reasoning the FAILED side of this feature
+    // already gave for reusing SHIPMENT_LEG_HANDOFF_PIN_FAILED: `kind` in
+    // the payload says this was a shipment, not a leg.
+    await this.audit.record({
+      action: 'SHIPMENT_LEG_EXCEPTION_RESOLVED',
+      actorId: actor.userId,
+      reason: note,
+      newValue: { shipmentId: s.id, reference: s.reference, kind: 'collection', collectionPinAttemptsReset: true },
+    });
+    return { shipmentId: s.id, reference: s.reference, collectionVerificationStatus: 'PENDING' as const };
+  }
+
+  /**
    * The recipient collected their parcel from the terminal.
    *
    * Without this a hub-ending shipment reaches "Ready to collect" and stays
