@@ -51,6 +51,49 @@ function absoluteTime(iso: string): string {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+/**
+ * MSG-1, the second mechanism: the API's signed attachment URL expires
+ * (`STORAGE_SIGNED_URL_TTL`, 300s by default) -- so `url` cannot be pinned
+ * forever without eventually serving a dead link, on download, on cache
+ * eviction (most likely on mobile), or on any remount that re-fetches
+ * rather than reusing an already-decoded bitmap. That is why URL is part
+ * of the identity test below, same as body/deleted/editedAt: a changed
+ * `url` must be adopted, never pinned.
+ *
+ * As of this writing the API (`apps/api` messaging serializer) still
+ * re-signs on every serialization, so today a `url` differs on every 15s
+ * poll regardless of whether the attachment itself changed -- this fix
+ * does not, by itself, stop that flash; see MSG-2. Once MSG-2 lands (the
+ * API caching the signed URL per storage key and rotating it only before
+ * expiry), a changed `url` here will mean a real, deliberate rotation, and
+ * adopting it will cost at most one reload per rotation instead of one per
+ * poll. Until then, this still reuses the previous message object (and
+ * avoids an unnecessary <img> reload) whenever the server happens to
+ * repeat the same URL unchanged.
+ */
+function messageUnchanged(prev: Message, next: Message): boolean {
+  return (
+    prev.id === next.id &&
+    prev.body === next.body &&
+    prev.deleted === next.deleted &&
+    prev.editedAt === next.editedAt &&
+    prev.attachments.length === next.attachments.length &&
+    prev.attachments.every(
+      (a, i) => a.id === next.attachments[i]?.id && a.scanStatus === next.attachments[i]?.scanStatus && a.url === next.attachments[i]?.url,
+    )
+  );
+}
+
+function reconcileDetail(prev: ConversationDetail | null, next: ConversationDetail): ConversationDetail {
+  if (!prev) return next;
+  const prevById = new Map(prev.messages.map((m) => [m.id, m]));
+  const messages = next.messages.map((m) => {
+    const old = prevById.get(m.id);
+    return old && messageUnchanged(old, m) ? old : m;
+  });
+  return { ...next, messages };
+}
+
 /* =============================================================== page shell */
 
 export default function MessagesPage() {
@@ -369,7 +412,7 @@ function ThreadPane({
     async (opts: { background?: boolean } = {}) => {
       try {
         const d = await messagingApi.get(conversationId);
-        setDetail(d);
+        setDetail((prev) => reconcileDetail(prev, d));
         setError(null);
         // Mark read (best-effort) once the thread is open -- but only on the
         // true first load. A background refresh re-marking an already-read
@@ -415,7 +458,7 @@ function ThreadPane({
   }, [detail?.messages.length]);
 
   const applyUpdate = useCallback((d: ConversationDetail) => {
-    setDetail(d);
+    setDetail((prev) => reconcileDetail(prev, d));
     void onMutatedRef.current();
   }, []);
 
