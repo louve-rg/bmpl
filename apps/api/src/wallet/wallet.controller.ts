@@ -86,13 +86,18 @@ export class WalletController {
    * forced, measured race, not an inference), not by reading this code. The
    * client has a same-tab double-click guard (MDF-518, `wallet/page.tsx`'s
    * `addMoneyRef`) but sends no idempotency key, so the server has nothing to
-   * de-duplicate on even if it wanted to. `selfServiceTestCredit`, a few lines
-   * down, is the pattern a real fix would follow: a `FOR UPDATE` row lock
-   * taken before a state-derived read, paired with a reference that is
-   * DERIVED rather than random so a genuine retry collides on purpose. A true
-   * fix also needs the CLIENT to send a key (see `/checkout`'s
-   * `Idempotency-Key` header, `orders.controller.ts`) — tracked, not built
-   * here; the owner's no-backend-only-features rule applies.
+   * de-duplicate on even if it wanted to. The fix is a CLIENT-supplied
+   * idempotency key, via the existing generic `IdempotencyKey` model with a
+   * new scope, following `/checkout`'s exact pattern (`orders.service.ts`):
+   * an `IN_PROGRESS` row keyed by `(userId, scope, key)`, `P2002` returns the
+   * prior result instead of reposting. `selfServiceTestCredit`'s DERIVED
+   * reference, a few lines down, does NOT transfer here — it works there
+   * because the claimable amount is capped and state-derived, so a retry of
+   * "the same claim" really is the same request; this route takes an
+   * arbitrary amount a user may legitimately repeat, and a derived reference
+   * would collide on — and block — a second legitimate top-up. Tracked, not
+   * built here; the owner's no-backend-only-features rule applies (the
+   * client sends no key yet).
    */
   @StrictThrottle()
   @Post('top-up')
