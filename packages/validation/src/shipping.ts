@@ -571,11 +571,37 @@ export const rerouteSchema = rerouteDestinationChecks(
 );
 export type RerouteInput = z.infer<typeof rerouteSchema>;
 
-/** Recording that a recipient collected their parcel from a terminal. */
+/**
+ * Recording that a recipient collected their parcel from a terminal.
+ *
+ * TERM-12 / MDF-645: `code` is optional, not required, because a shipment
+ * that predates this feature (`collectionPinGrandfathered`) genuinely has no
+ * code to present — ShipmentService.verifyCollectionPinOrThrow is the single
+ * place that decides whether an absent code is a refusal or a no-op,
+ * exactly as `legHandoffSchema`'s `pin` required-ness is decided by its own
+ * caller rather than by this schema needing two shapes.
+ */
 export const collectShipmentSchema = z.object({
   collectedByName: z.string().trim().min(2, 'Who collected it?').max(120),
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{4,8}$/, 'Enter the collection code.')
+    .optional(),
 });
 export type CollectShipmentInput = z.infer<typeof collectShipmentSchema>;
+
+/**
+ * TERM-12 / MDF-645 follow-up: the way back out of a locked collection code.
+ * Same shape as `resolveLegExceptionSchema`'s mandatory `note` — an
+ * administrator overriding a security lockout leaves a reason, same as
+ * resolving a leg exception does. No `resolution` field: unlike a leg
+ * exception, there is only one way out of a maxed collection-code counter.
+ */
+export const unlockShipmentCollectionSchema = z.object({
+  note: z.string().trim().min(4, 'Say why this is being unlocked.').max(500),
+});
+export type UnlockShipmentCollectionInput = z.infer<typeof unlockShipmentCollectionSchema>;
 
 /* ------------------------------------------- carrier organizations (137) */
 

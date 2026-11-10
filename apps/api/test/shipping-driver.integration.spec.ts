@@ -370,7 +370,8 @@ describe('every service type, end to end', () => {
     const done = await runWholeJourney(driver, s.id);
     expect(done.status).toBe('AWAITING_COLLECTION');
 
-    const collected = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
+    const code = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { collectionPin: true } }).then((r) => r.collectionPin);
+    const collected = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code });
     expect(collected.body.status).toBe('DELIVERED');
   });
 

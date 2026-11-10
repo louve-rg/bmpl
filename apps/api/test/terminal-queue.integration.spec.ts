@@ -368,7 +368,8 @@ describe('TERM-8: collection at the destination terminal — previously admin-on
     expect(item).toBeDefined();
     expect(item.hubId).toBe(net.destinationHubId);
 
-    const collected = await post(destStaff.cookies, `terminal/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz' });
+    const code = await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id }, select: { collectionPin: true } }).then((r) => r.collectionPin);
+    const collected = await post(destStaff.cookies, `terminal/shipments/${s.id}/collect`, { collectedByName: 'Maria Cruz', code });
     expect(collected.status).toBe(201);
     expect((await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: s.id } })).status).toBe('DELIVERED');
 

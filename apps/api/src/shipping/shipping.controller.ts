@@ -34,6 +34,7 @@ import {
   shippingProviderProfileUpdateSchema,
   shipmentListSchema,
   shipmentQuoteSchema,
+  unlockShipmentCollectionSchema,
   updateCourierLaneSchema,
   updateHubSchema,
   updateRouteSchema,
@@ -70,6 +71,7 @@ import {
   type ShippingProviderProfileUpdateInput,
   type ShipmentListInput,
   type ShipmentQuoteInput,
+  type UnlockShipmentCollectionInput,
   type UpdateCourierLaneInput,
   type UpdateHubInput,
   type UpdateRouteInput,
@@ -906,11 +908,29 @@ export class AdminLogisticsController {
   }
 
   /** The recipient walked in and picked it up. No leg moves, so nothing else can
-   *  close out a hub-ending journey. */
+   *  close out a hub-ending journey. TERM-12: now a guessable-code route like
+   *  every other handoff/pickup endpoint, so it gets the same StrictThrottle
+   *  those already carry (`/legs/:id/handoff` above). */
   @RequirePermission('logistics.operate')
+  @StrictThrottle()
   @Post('shipments/:id/collect')
   collect(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(collectShipmentSchema)) dto: CollectShipmentInput) {
-    return this.shipments.recordCollection(id, dto.collectedByName, { userId: u.userId });
+    return this.shipments.recordCollection(id, dto.collectedByName, dto.code, { userId: u.userId });
+  }
+
+  /**
+   * The way back out of a locked collection code (TERM-12 follow-up) —
+   * `logistics.operate`, the same tier `/collect` and `/resolve-exception`
+   * already use. Clears the attempt counter, not the code itself.
+   */
+  @RequirePermission('logistics.operate')
+  @Post('shipments/:id/unlock-collection')
+  unlockCollection(
+    @CurrentUser() u: AuthContext,
+    @Param('id') id: string,
+    @Body(ZodBody(unlockShipmentCollectionSchema)) dto: UnlockShipmentCollectionInput,
+  ) {
+    return this.shipments.unlockCollection(id, dto.note, { userId: u.userId });
   }
 
   @RequirePermission('logistics.manage')

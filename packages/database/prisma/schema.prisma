@@ -5186,6 +5186,29 @@ model Shipment {
   exceptionAt        DateTime?
   exceptionReason    String?
 
+  // ---- Collection verification at the terminal counter (TERM-12) ----
+  // Before this, `recordCollection` took a typed name and verified nothing —
+  // neither the final leg's own handoffPin nor pickupPin apply here: both are
+  // deliberately null for a leg that ends/starts at a hub (ShipmentService's
+  // pinFor/pickupPinFor), and even if they weren't, reusing either would hand
+  // the SAME secret to two different parties (the leg's own courier already
+  // knew/presented it to reach the hub) — a genuinely separate code is
+  // required. Same shape as ShipmentLeg's handoff/pickup columns: the
+  // recipient holds the code, the person at the counter must produce it,
+  // access-controlled, never logged, never returned to the person who has to
+  // submit it.
+  collectionPin                String?
+  collectionPinAttempts        Int                @default(0)
+  collectionVerificationStatus VerificationStatus  @default(PENDING)
+  /// Same migration-day grandfather as ShipmentLeg.pickupPinGrandfathered —
+  /// every shipment that existed before this column shipped has no code and
+  /// never will, so it is exempt from the code requirement rather than
+  /// locked out of collection on deploy day. bookShipment always sets this
+  /// false explicitly for every shipment this creates, so this column — not
+  /// a null check on collectionPin — is the single, explicit signal that a
+  /// shipment is exempt.
+  collectionPinGrandfathered    Boolean            @default(false)
+
   /// BMPL-345: the estimated arrival instant the customer was last told about,
   /// OR — if none has ever been material enough to tell them — the first
   /// instant the shipment's ETA became knowable at all. Null until the ETA

@@ -259,7 +259,7 @@ export class TerminalShipmentsController {
   async collect(@CurrentUser() u: AuthContext, @Param('id') id: string, @Body(ZodBody(collectShipmentSchema)) dto: CollectShipmentInput) {
     const hubId = await this.shipments.shipmentHubForLocationCheck(id);
     await this.terminal.assertStaffLocationAccess(u.userId, hubId);
-    const result = await this.shipments.recordCollection(id, dto.collectedByName, { userId: u.userId });
+    const result = await this.shipments.recordCollection(id, dto.collectedByName, dto.code, { userId: u.userId });
     // Deliberately NOT `return result` as-is. `recordCollection` resolves
     // through `SHIPMENT_INCLUDE`, whose `legs` block is a bare Prisma
     // `include` (every column — `handoffPin`/`pickupPin` included, the

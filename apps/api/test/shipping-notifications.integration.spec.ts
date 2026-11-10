@@ -109,6 +109,9 @@ const legsOf = (id: string) => ctx.prisma.shipmentLeg.findMany({ where: { shipme
 const pinOf = async (legId: string) =>
   (await ctx.prisma.shipmentLeg.findUniqueOrThrow({ where: { id: legId }, select: { handoffPin: true } })).handoffPin!;
 
+const collectionCodeOf = async (shipmentId: string) =>
+  (await ctx.prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId }, select: { collectionPin: true } })).collectionPin!;
+
 /** One delivered notification, flattened to what a test cares about. */
 interface Delivered {
   event: string | null;
@@ -348,7 +351,9 @@ describe('the customer follows one journey', () => {
       await post(admin, `admin/logistics/legs/${lh.id}/arrive`, {});
       await post(admin, `admin/logistics/legs/${lh.id}/handoff`, { pin: await pinOf(lh.id), receivedByName: 'Counter' });
     }
-    const fired = await capture(() => post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria' }));
+    const fired = await capture(async () =>
+      post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria', code: await collectionCodeOf(s.id) }),
+    );
     const mine = to(fired, customerId);
     expect(mine).toHaveLength(1);
     expect(mine[0]!.body).toBe('Delivered');
@@ -810,7 +815,7 @@ describe('replaying a transition does not double-notify', () => {
       await post(admin, `admin/logistics/legs/${lh.id}/arrive`, {});
       await post(admin, `admin/logistics/legs/${lh.id}/handoff`, { pin: await pinOf(lh.id), receivedByName: 'Counter' });
     }
-    await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria' });
+    await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Maria', code: await collectionCodeOf(s.id) });
 
     const fired = await capture(async () => {
       const again = await post(admin, `admin/logistics/shipments/${s.id}/collect`, { collectedByName: 'Someone else' });
