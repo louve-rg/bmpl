@@ -126,8 +126,10 @@ const apiGet = vi.fn((path: string) => {
   if (path === '/wallet') return Promise.resolve(WALLET);
   return Promise.resolve(null);
 });
+const ORDER = { id: 'order_1' };
 const apiPost = vi.fn((path: string, _body?: unknown) => {
   if (path === '/checkout/delivery-quote') return Promise.resolve(QUOTE);
+  if (path === '/checkout') return Promise.resolve(ORDER);
   return Promise.resolve(null);
 });
 // `errorMessage` kept real via `importOriginal` -- checkout's own submit
@@ -284,3 +286,40 @@ describe('CheckoutPage mounts its real next/dynamic-wrapped AddressField (BMPL-3
     expect(container!.querySelectorAll('[role="application"]')).toHaveLength(1);
   });
 }, 15000);
+
+/**
+ * MDF-518: a double-click or double-tap fires two click events in the same
+ * synchronous tick, before React has re-rendered the `disabled={placing}`
+ * button from the first click's `setPlacing(true)` -- so the DOM-level
+ * `disabled` attribute has NOT taken effect yet when the second click's
+ * handler runs, and cannot be what stops it. The guard that matters is
+ * `placingRef` inside `placeOrder` itself (page.tsx) -- this test proves it
+ * by dispatching both clicks inside one `act()`, never awaiting in between,
+ * which is the only way to actually reproduce "before the first response
+ * lands" rather than merely asserting against it.
+ */
+describe('CheckoutPage: a same-tick double submit posts exactly one order (MDF-518)', () => {
+  it('fires two click events in the same tick and still calls /checkout exactly once', async () => {
+    mount();
+    await flush();
+
+    const placeWithoutPaying = Array.from(container!.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Place order without paying now',
+    ) as HTMLButtonElement;
+    expect(placeWithoutPaying).toBeTruthy();
+
+    await act(async () => {
+      // Deliberately NOT awaited between dispatches -- both handlers start
+      // running before either reaches its first `await`, which is the exact
+      // shape of a same-tick double dispatch.
+      placeWithoutPaying.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      placeWithoutPaying.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiPost.mock.calls.filter((c) => c[0] === '/checkout')).toHaveLength(1);
+    expect(router.push).toHaveBeenCalledWith('/orders/order_1?placed=1');
+  });
+});

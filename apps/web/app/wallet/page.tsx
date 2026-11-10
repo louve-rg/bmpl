@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '../../components/landing/Header';
@@ -27,6 +27,17 @@ export default function WalletPage() {
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [amount, setAmount] = useState('50.00');
   const [busy, setBusy] = useState(false);
+  /**
+   * MDF-518: `/wallet/top-up` posts a real ledger TOPUP with no server-side
+   * de-duplication across two distinct requests (unlike claimTestFunds below,
+   * which is lock+cap-guarded in one transaction) -- the API generates a
+   * fresh unique reference per call, so two same-tick calls do not collide,
+   * they both post. `busy` is React state and has not taken effect yet in a
+   * second call made in the same tick as the first (same reasoning as
+   * checkout's placingRef) -- a ref is what actually stops a double-tap of
+   * "Add money" from crediting the wallet twice.
+   */
+  const addMoneyRef = useRef(false);
   const [note, setNote] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   /** Whether this account may add simulation funds. Discovered by trying. */
@@ -73,11 +84,13 @@ export default function WalletPage() {
   }, [load]);
 
   async function addMoney() {
+    if (addMoneyRef.current) return;
     const minor = Math.round(Number(amount) * 100);
     if (!Number.isFinite(minor) || minor <= 0) {
       setErr('Enter an amount greater than zero.');
       return;
     }
+    addMoneyRef.current = true;
     setBusy(true);
     setErr(null);
     try {
@@ -92,6 +105,7 @@ export default function WalletPage() {
       if (api.status === 403) setFundingBlocked(api.message ?? 'Adding money is not available on this account.');
       else setErr(api.message ?? 'We could not add money just now.');
     } finally {
+      addMoneyRef.current = false;
       setBusy(false);
     }
   }

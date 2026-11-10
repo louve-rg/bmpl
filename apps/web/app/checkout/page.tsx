@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '../../components/landing/Header';
@@ -119,6 +119,15 @@ export default function CheckoutPage() {
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * MDF-518: `placing` is React state, so it has not taken effect yet in a
+   * second call made in the SAME tick as the first — both calls still see
+   * `placing === false`, and so does the button's own `disabled={placing}`,
+   * since neither has re-rendered. A ref is read/written synchronously, so
+   * it is the thing that actually stops a same-tick double dispatch (a
+   * double-click or double-tap) from posting two real orders/payments.
+   */
+  const placingRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -169,6 +178,8 @@ export default function CheckoutPage() {
 
   async function placeOrder(payWithWallet: boolean) {
     if (!cart) return;
+    if (placingRef.current) return;
+    placingRef.current = true;
     setError(null);
     /**
      * Say what is actually missing.
@@ -182,6 +193,7 @@ export default function CheckoutPage() {
     const gap = anyDelivery ? addressGap(address, { contact: 'ESSENTIAL' }) : null;
     if (gap) {
       setError(gap);
+      placingRef.current = false;
       return;
     }
     setPlacing(true);
@@ -224,6 +236,7 @@ export default function CheckoutPage() {
         // message, not the generic "Validation failed" wrapper.
         setError(errorMessage(err, 'Checkout failed. Please review your cart and try again.'));
         setPlacing(false);
+        placingRef.current = false;
         // A payment refusal is worth re-reading the balance for: it may have
         // changed under another tab, and the customer is about to be told what
         // they can do about it.
