@@ -35,7 +35,18 @@ export interface ContrastReading {
   dominantBackground: RGB;
   /** 0..1 — the fraction of sampled grid points that matched the dominant color. Low means an ambiguous read (gradient, image, glass edge) — check by eye before trusting the ratio. */
   dominantShare: number;
-  /** 0..1 — the fraction of the grid that fell outside the sampler's own canvas before clamping. High means the box does not correspond to anything actually rendered where it was sampled (e.g. clipped by a scrolling ancestor's overflow) — a different failure from a low `dominantShare`, and the stronger of the two reasons not to trust `ratio`. */
+  /**
+   * 0..1 — the fraction of the grid that fell outside the sampler's own
+   * canvas before clamping, OR outside the visible rect left over after
+   * intersecting every ancestor's own CSS overflow clip (CONTRAST-CLIP,
+   * god, 2026-11-10 — see `clusterAt`'s own comment for the mechanism and
+   * why the canvas-edge check alone missed this). High means the box does
+   * not correspond to anything actually rendered where it was sampled —
+   * e.g. clipped by a scrolling ancestor's `overflow-x-auto`/`hidden`/
+   * `scroll`/`clip`, whether or not that also pushes it past the full
+   * document's own edge — a different failure from a low `dominantShare`,
+   * and the stronger of the two reasons not to trust `ratio`.
+   */
   outOfBoundsShare: number;
 }
 
@@ -107,6 +118,25 @@ export interface SampleOptions {
    * know or doesn't care, same convention as the scrollOffset fix above.
    */
   fixedPosition?: boolean;
+  /**
+   * CONTRAST-CLIP (god, 2026-11-10): the visible rect left over after
+   * intersecting every CSS-clipping ancestor's own padding-box, in the
+   * SAME viewport-relative coordinate space as the `box` passed to
+   * `sampleDominant`/`sampleClustersOrdered` (i.e. computed the same way
+   * `getBoundingClientRect()` is, before this sampler's own scroll/fullPage
+   * offset is added). `null`/undefined means "no clipping ancestor found at
+   * discovery time" -- the overwhelmingly common case -- and is a true
+   * no-op, identical to omitting this option entirely: every sample point
+   * is checked only against the screenshot canvas, exactly as before this
+   * option existed. Only an element that discovery found to actually sit
+   * under an `overflow-x-auto`/`hidden`/`scroll`/`clip` ancestor gets a
+   * non-null value here, and even then only the fraction of its OWN sample
+   * points that fall outside that ancestor's visible window are affected --
+   * see `clusterAt`'s own comment for why a canvas-edge check alone cannot
+   * catch this (MDF-424: the dispatch list's clipped cells never pushed the
+   * full page past its own edge, so `outOfBoundsShare` read 0 every time).
+   */
+  clipRect?: { x: number; y: number; width: number; height: number } | null;
 }
 
 export interface PixelSampler {
@@ -283,8 +313,9 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
     samplerPage: Page,
     box: { x: number; y: number; width: number; height: number },
     offset: { x: number; y: number },
+    clipRect: { x: number; y: number; width: number; height: number } | null = null,
   ): Promise<{ clusters: Array<{ rgb: RGB; count: number; total: number }>; outOfBoundsShare: number }> {
-    const { pts: grid, outOfBounds } = await samplerPage.evaluate(({ rect, offset }) => {
+    const { pts: grid, outOfBounds } = await samplerPage.evaluate(({ rect, offset, clipRect }) => {
       const canvas = document.getElementById('cv') as HTMLCanvasElement;
       const ctx = canvas.getContext('2d')!;
       const pts: { r: number; g: number; b: number }[] = [];
@@ -298,8 +329,13 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
       // document-absolute space -- see openPixelSampler's own comment.
       for (const fx of fxs) {
         for (const fy of fys) {
-          const rawX = rect.x + offset.x + fx * rect.width;
-          const rawY = rect.y + offset.y + fy * rect.height;
+          // Viewport-relative point, BEFORE `offset` -- the same space
+          // `clipRect` was computed in (getBoundingClientRect-style), so
+          // the ancestor-clip check below needs no offset of its own.
+          const vx = rect.x + fx * rect.width;
+          const vy = rect.y + fy * rect.height;
+          const rawX = vx + offset.x;
+          const rawY = vy + offset.y;
           // Found live (god/frontend owner, 2026-10-22, MDF-376, the
           // dispatch list table's `overflow-x-auto`): an element clipped
           // away by a scrolling ANCESTOR's own overflow still returns a
@@ -315,7 +351,26 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
           // pixel for the clustering math -- but clamping to the nearest
           // edge is exactly how a clipped box used to read a confident,
           // wrong color instead of refusing to answer.
-          if (rawX < 0 || rawX >= canvas.width || rawY < 0 || rawY >= canvas.height) outOfBounds += 1;
+          const outOfCanvas = rawX < 0 || rawX >= canvas.width || rawY < 0 || rawY >= canvas.height;
+          // CONTRAST-CLIP (god, 2026-11-10, MDF-424 root cause): the check
+          // above only ever catches a point that falls past the FULL
+          // DOCUMENT's own edge -- it says nothing about an INTERMEDIATE
+          // ancestor's own `overflow-x-auto`/`hidden`/`scroll`/`clip`,
+          // which clips its descendants to its own padding-box regardless
+          // of where the document's edge is. The dispatch table's clipped
+          // cells stayed well within the full page's own width at every
+          // broken viewport -- only the table's SCROLLING CARD clipped
+          // them -- so this check alone read `outOfBoundsShare: 0` for
+          // every one of them and let a confidently-wrong reading through.
+          // `clipRect`, computed once per element at discovery time by
+          // walking its real ancestor chain (contrast-sweep.ts's
+          // `visibleClipRect`), is the intersection of every clipping
+          // ancestor's own visible window; a point outside it is exactly
+          // as untrustworthy as one outside the canvas, so it folds into
+          // the SAME counter and the SAME existing cutoff downstream --
+          // never a new bucket, never a new threshold to calibrate.
+          const outOfAncestorClip = !!clipRect && (vx < clipRect.x || vx >= clipRect.x + clipRect.width || vy < clipRect.y || vy >= clipRect.y + clipRect.height);
+          if (outOfCanvas || outOfAncestorClip) outOfBounds += 1;
           const x = Math.max(0, Math.min(canvas.width - 1, Math.round(rawX)));
           const y = Math.max(0, Math.min(canvas.height - 1, Math.round(rawY)));
           const data = ctx.getImageData(x, y, 1, 1).data;
@@ -323,7 +378,7 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
         }
       }
       return { pts, outOfBounds };
-    }, { rect: box, offset });
+    }, { rect: box, offset, clipRect });
 
     const counts = new Map<string, { count: number; rgb: RGB }>();
     for (const p of grid) {
@@ -342,8 +397,9 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
   }
 
   async function clustersFor(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions) {
-    if (opts?.fixedPosition) return clusterAt(await ensureViewportSampler(), box, { x: 0, y: 0 });
-    return clusterAt(sampler, box, scrollOffset);
+    const clipRect = opts?.clipRect ?? null;
+    if (opts?.fixedPosition) return clusterAt(await ensureViewportSampler(), box, { x: 0, y: 0 }, clipRect);
+    return clusterAt(sampler, box, scrollOffset, clipRect);
   }
 
   return {
