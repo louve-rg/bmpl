@@ -4626,6 +4626,21 @@ export class ShipmentService {
         opts.audience === 'STAFF' || s.status !== 'AWAITING_COLLECTION' || s.collectedAt || s.collectionPinGrandfathered
           ? null
           : s.collectionPin,
+      // TERM-12 follow-up: the lockout itself, STAFF-only — the whole reason
+      // `unlockCollection` existed as a defect before it existed as a fix is
+      // that nothing let staff SEE a shipment was locked without attempting
+      // a collection and reading the error. CUSTOMER gets null for both:
+      // this is staff-operational state, not something the booking customer
+      // needs to track. `collectionPinAttemptsRemaining` mirrors the
+      // existing `pinAttemptsRemaining` shape (shipment-driver.service.ts
+      // :726) — remaining, not the raw counter, so staff read "how much
+      // budget is left" directly rather than doing the subtraction
+      // themselves. Never the code: collectionCode above is computed
+      // independently and already excludes STAFF unconditionally, so adding
+      // these two fields cannot widen that gate.
+      collectionVerificationStatus: opts.audience === 'STAFF' ? s.collectionVerificationStatus : null,
+      collectionPinAttemptsRemaining:
+        opts.audience === 'STAFF' ? Math.max(0, DELIVERY_PIN_MAX_ATTEMPTS - s.collectionPinAttempts) : null,
       // MDF-243 follow-up: fails closed — raw only when authorship is
       // positively established as the customer's own. See
       // `cancellationAuthorshipFor()`'s own doc for why there is no third

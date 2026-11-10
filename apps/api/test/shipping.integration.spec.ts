@@ -973,6 +973,20 @@ describe('collecting from a terminal', () => {
         return { s, real };
       }
 
+      it('a STAFF view of a locked shipment shows FAILED and zero attempts remaining — and still no code', async () => {
+        const { s } = await locked();
+        const staffView = await get(admin, `admin/logistics/shipments/${s.reference}`);
+        expect(staffView.body.collectionVerificationStatus).toBe('FAILED');
+        expect(staffView.body.collectionPinAttemptsRemaining).toBe(0);
+        expect(staffView.body.collectionCode).toBeNull();
+
+        // The CUSTOMER view never gets the lockout state either — it is
+        // staff-operational, not something the booking customer tracks.
+        const customerView = await get(customer, `shipping/${s.reference}`);
+        expect(customerView.body.collectionVerificationStatus).toBeNull();
+        expect(customerView.body.collectionPinAttemptsRemaining).toBeNull();
+      });
+
       it('unlocks a locked shipment, and a collection succeeds afterward', async () => {
         const { s, real } = await locked();
         const r = await post(admin, `admin/logistics/shipments/${s.id}/unlock-collection`, { note: 'Confirmed with the recipient by phone; code is correct.' });
