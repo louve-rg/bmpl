@@ -23,7 +23,7 @@ export interface ContrastReading {
   foreground: RGB;
   dominantBackground: RGB;
   dominantShare: number;
-  /** 0..1 -- see the web copy of this file for the full reasoning. High means the box does not correspond to anything actually rendered where it was sampled. */
+  /** 0..1 -- see the web copy of this file for the full reasoning (CONTRAST-CLIP, god, 2026-11-10: now also folds in ancestor-overflow-clip, not just the screenshot canvas edge). High means the box does not correspond to anything actually rendered where it was sampled. */
   outOfBoundsShare: number;
 }
 
@@ -76,6 +76,15 @@ export function contrastRatioOf(fg: RGB, bg: RGB): number {
 export interface SampleOptions {
   /** True when the element (or an ancestor) is `position: fixed` -- see the web copy of this file for the full reasoning. Defaults to false, a true no-op for every caller that doesn't pass it. */
   fixedPosition?: boolean;
+  /**
+   * CONTRAST-CLIP (god, 2026-11-10, MDF-424) -- the visible rect left over
+   * after intersecting every CSS-clipping ancestor's own padding-box, same
+   * viewport-relative space as `box`. See the web copy of this file for the
+   * full reasoning. `null`/undefined (no clipping ancestor found at
+   * discovery time, the overwhelming majority of elements) is a true
+   * no-op, identical to omitting this option.
+   */
+  clipRect?: { x: number; y: number; width: number; height: number } | null;
 }
 
 export interface PixelSampler {
@@ -163,8 +172,9 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
     samplerPage: Page,
     box: { x: number; y: number; width: number; height: number },
     offset: { x: number; y: number },
+    clipRect: { x: number; y: number; width: number; height: number } | null = null,
   ): Promise<{ clusters: Array<{ rgb: RGB; count: number; total: number }>; outOfBoundsShare: number }> {
-    const { pts: grid, outOfBounds } = await samplerPage.evaluate(({ rect, offset }) => {
+    const { pts: grid, outOfBounds } = await samplerPage.evaluate(({ rect, offset, clipRect }) => {
       const canvas = document.getElementById('cv') as HTMLCanvasElement;
       const ctx = canvas.getContext('2d')!;
       const pts: { r: number; g: number; b: number }[] = [];
@@ -173,15 +183,27 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
       const fys = [0.2, 0.5, 0.8];
       for (const fx of fxs) {
         for (const fy of fys) {
-          const rawX = rect.x + offset.x + fx * rect.width;
-          const rawY = rect.y + offset.y + fy * rect.height;
+          // Viewport-relative, before `offset` -- same space `clipRect` was
+          // computed in. See the web copy of this file for the full
+          // reasoning (CONTRAST-CLIP, god, 2026-11-10, MDF-424).
+          const vx = rect.x + fx * rect.width;
+          const vy = rect.y + fy * rect.height;
+          const rawX = vx + offset.x;
+          const rawY = vy + offset.y;
           // See the web copy of this file's identical comment for the full
           // reasoning -- an element clipped away by a scrolling ancestor's
           // own overflow still returns a real, non-zero
           // `getBoundingClientRect()`, and that content is never
           // rasterized anywhere, so this has to be caught here, not fixed
           // with a coordinate offset.
-          if (rawX < 0 || rawX >= canvas.width || rawY < 0 || rawY >= canvas.height) outOfBounds += 1;
+          const outOfCanvas = rawX < 0 || rawX >= canvas.width || rawY < 0 || rawY >= canvas.height;
+          // CONTRAST-CLIP: the canvas-edge check alone misses a clip by an
+          // INTERMEDIATE ancestor that never pushes the point past the full
+          // document's own edge (MDF-424's dispatch table) -- see the web
+          // copy of this file for the full mechanism. Folds into the SAME
+          // counter/cutoff, never a new bucket.
+          const outOfAncestorClip = !!clipRect && (vx < clipRect.x || vx >= clipRect.x + clipRect.width || vy < clipRect.y || vy >= clipRect.y + clipRect.height);
+          if (outOfCanvas || outOfAncestorClip) outOfBounds += 1;
           const x = Math.max(0, Math.min(canvas.width - 1, Math.round(rawX)));
           const y = Math.max(0, Math.min(canvas.height - 1, Math.round(rawY)));
           const data = ctx.getImageData(x, y, 1, 1).data;
@@ -189,7 +211,7 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
         }
       }
       return { pts, outOfBounds };
-    }, { rect: box, offset });
+    }, { rect: box, offset, clipRect });
 
     const counts = new Map<string, { count: number; rgb: RGB }>();
     for (const p of grid) {
@@ -208,8 +230,9 @@ export async function openPixelSampler(page: Page): Promise<PixelSampler> {
   }
 
   async function clustersFor(box: { x: number; y: number; width: number; height: number }, opts?: SampleOptions) {
-    if (opts?.fixedPosition) return clusterAt(await ensureViewportSampler(), box, { x: 0, y: 0 });
-    return clusterAt(sampler, box, scrollOffset);
+    const clipRect = opts?.clipRect ?? null;
+    if (opts?.fixedPosition) return clusterAt(await ensureViewportSampler(), box, { x: 0, y: 0 }, clipRect);
+    return clusterAt(sampler, box, scrollOffset, clipRect);
   }
 
   return {

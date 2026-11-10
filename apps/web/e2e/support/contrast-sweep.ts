@@ -198,8 +198,9 @@ export interface SweepResult {
  * reports how many it excluded for that reason rather than silently
  * shrinking the count.
  */
-type DiscoveredText = SweepTextElement & { disabled: boolean; fixedPositionAncestor: boolean };
-type DiscoveredIcon = SweepIconElement & { composite: boolean; fixedPositionAncestor: boolean };
+type ClipRect = { x: number; y: number; width: number; height: number } | null;
+type DiscoveredText = SweepTextElement & { disabled: boolean; fixedPositionAncestor: boolean; visibleClipRect: ClipRect };
+type DiscoveredIcon = SweepIconElement & { composite: boolean; fixedPositionAncestor: boolean; visibleClipRect: ClipRect };
 
 async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; icon: DiscoveredIcon[] }> {
   return page.evaluate(() => {
@@ -262,6 +263,58 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         node = node.parentElement;
       }
       return false;
+    }
+
+    // CONTRAST-CLIP (god, 2026-11-10, root-caused by Oscar inside MDF-424):
+    // `getBoundingClientRect()` returns an element's unclipped LAYOUT rect
+    // even when an ancestor's own `overflow-x-auto`/`hidden`/`scroll`/
+    // `clip` has clipped it away -- content clipped this way is never
+    // rasterized at that position in ANY screenshot, so `clusterAt` ends up
+    // sampling whatever genuinely IS painted there instead (in production:
+    // the Liquid Glass mural behind the admin dispatch table's scrolling
+    // card). The existing `OUT_OF_BOUNDS_SHARE_CUTOFF` only ever compared a
+    // sample point against the full-page screenshot's own canvas edges, so
+    // it caught this only on the rare width where clipping also happened to
+    // push the box past the document's own edge, and missed every other
+    // width where a nearer ancestor clipped it first. This walks every
+    // ancestor ONCE per element (parallel to `hasFixedPositionAncestor`
+    // above, same traversal shape, same cost) and intersects the running
+    // clip rect with any ancestor whose resolved `overflowX`/`overflowY`
+    // is not `visible`, in VIEWPORT-RELATIVE space (the same space
+    // `getBoundingClientRect()` and `box` already use) so `contrast.ts` can
+    // compare a sample point against it with no coordinate conversion.
+    // Clips to each ancestor's PADDING edge (border-box rect minus its own
+    // border widths) -- the actual edge CSS `overflow` clips to, not the
+    // border edge. Returns `null` when no clipping ancestor exists at all
+    // -- the overwhelming majority of elements on this platform -- which
+    // `contrast.ts`'s `clipRect` option treats as a true no-op: this is a
+    // pure addition, it does not and cannot narrow any box that was never
+    // actually clipped by anything.
+    function visibleClipRect(el: Element): { x: number; y: number; width: number; height: number } | null {
+      let node: Element | null = el.parentElement;
+      let clip: { left: number; top: number; right: number; bottom: number } | null = null;
+      while (node && node !== document.documentElement) {
+        const cs = getComputedStyle(node);
+        const clipsX = cs.overflowX !== 'visible';
+        const clipsY = cs.overflowY !== 'visible';
+        if (clipsX || clipsY) {
+          const r = node.getBoundingClientRect();
+          const bl = parseFloat(cs.borderLeftWidth) || 0;
+          const br = parseFloat(cs.borderRightWidth) || 0;
+          const bt = parseFloat(cs.borderTopWidth) || 0;
+          const bb = parseFloat(cs.borderBottomWidth) || 0;
+          const left = clipsX ? r.x + bl : -Infinity;
+          const right = clipsX ? r.x + r.width - br : Infinity;
+          const top = clipsY ? r.y + bt : -Infinity;
+          const bottom = clipsY ? r.y + r.height - bb : Infinity;
+          clip = clip
+            ? { left: Math.max(clip.left, left), top: Math.max(clip.top, top), right: Math.min(clip.right, right), bottom: Math.min(clip.bottom, bottom) }
+            : { left, top, right, bottom };
+        }
+        node = node.parentElement;
+      }
+      if (!clip) return null;
+      return { x: clip.left, y: clip.top, width: clip.right - clip.left, height: clip.bottom - clip.top };
     }
 
     function isDisabled(el: Element): boolean {
@@ -338,6 +391,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       disabled: boolean;
       color: string;
       fixedPositionAncestor: boolean;
+      visibleClipRect: { x: number; y: number; width: number; height: number } | null;
     }> = [];
     const iconOut: Array<{
       kind: 'icon';
@@ -347,6 +401,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       box: { x: number; y: number; width: number; height: number };
       composite: boolean;
       fixedPositionAncestor: boolean;
+      visibleClipRect: { x: number; y: number; width: number; height: number } | null;
     }> = [];
 
     for (const el of document.body.querySelectorAll('*')) {
@@ -369,6 +424,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
           box: { x: box.x, y: box.y, width: box.width, height: box.height },
           composite: hasOwnFillDescendant(el),
           fixedPositionAncestor: hasFixedPositionAncestor(el),
+          visibleClipRect: visibleClipRect(el),
         });
         continue;
       }
@@ -402,6 +458,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         disabled: isDisabled(el),
         color: cs.color,
         fixedPositionAncestor: hasFixedPositionAncestor(el),
+        visibleClipRect: visibleClipRect(el),
       });
     }
 
@@ -436,7 +493,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       const fgParsed = parseRgbLocal(t.color);
       if (!fgParsed) continue;
 
-      const { rgb: bg, share, outOfBoundsShare } = await sampler.sampleDominant(t.box, { fixedPosition: t.fixedPositionAncestor });
+      const { rgb: bg, share, outOfBoundsShare } = await sampler.sampleDominant(t.box, { fixedPosition: t.fixedPositionAncestor, clipRect: t.visibleClipRect });
       const fg = compositeOver(fgParsed.rgb, fgParsed.alpha, bg);
       const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
       const requiredRatio = t.isLargeText ? WCAG_LARGE_TEXT_MIN_RATIO : WCAG_NORMAL_TEXT_MIN_RATIO;
@@ -468,7 +525,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
 
     const iconBucket: SweepBucket<SweepIconElement> = { pass: [], fail: [], ambiguous: [] };
     for (const ic of measurableIcons) {
-      const clusters = await sampler.sampleClustersOrdered(ic.box, { fixedPosition: ic.fixedPositionAncestor });
+      const clusters = await sampler.sampleClustersOrdered(ic.box, { fixedPosition: ic.fixedPositionAncestor, clipRect: ic.visibleClipRect });
       const boxOutOfBounds = clusters.outOfBoundsShare > OUT_OF_BOUNDS_SHARE_CUTOFF;
       if (clusters.length === 0) continue;
       const bg = clusters[0]!.rgb;

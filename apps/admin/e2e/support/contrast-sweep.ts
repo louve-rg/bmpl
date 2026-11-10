@@ -119,8 +119,9 @@ export interface SweepResult {
   borderOnlyNotMeasured: true;
 }
 
-type DiscoveredText = SweepTextElement & { disabled: boolean; fixedPositionAncestor: boolean };
-type DiscoveredIcon = SweepIconElement & { composite: boolean; fixedPositionAncestor: boolean };
+type ClipRect = { x: number; y: number; width: number; height: number } | null;
+type DiscoveredText = SweepTextElement & { disabled: boolean; fixedPositionAncestor: boolean; visibleClipRect: ClipRect };
+type DiscoveredIcon = SweepIconElement & { composite: boolean; fixedPositionAncestor: boolean; visibleClipRect: ClipRect };
 
 async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; icon: DiscoveredIcon[] }> {
   return page.evaluate(() => {
@@ -172,6 +173,43 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         node = node.parentElement;
       }
       return false;
+    }
+
+    // CONTRAST-CLIP (god, 2026-11-10, root-caused by Oscar inside MDF-424,
+    // this very dispatch table) -- see apps/web's identical copy of this
+    // function for the full mechanism and reasoning. Walks every ancestor
+    // ONCE per element (same shape/cost as `hasFixedPositionAncestor`
+    // above) and intersects the running clip rect with any ancestor whose
+    // resolved `overflowX`/`overflowY` is not `visible`, clipped to each
+    // ancestor's PADDING edge (border-box minus its own border widths), in
+    // the same viewport-relative space `getBoundingClientRect()` already
+    // uses. Returns `null` when no clipping ancestor exists at all -- a
+    // true no-op for the overwhelming majority of elements.
+    function visibleClipRect(el: Element): { x: number; y: number; width: number; height: number } | null {
+      let node: Element | null = el.parentElement;
+      let clip: { left: number; top: number; right: number; bottom: number } | null = null;
+      while (node && node !== document.documentElement) {
+        const cs = getComputedStyle(node);
+        const clipsX = cs.overflowX !== 'visible';
+        const clipsY = cs.overflowY !== 'visible';
+        if (clipsX || clipsY) {
+          const r = node.getBoundingClientRect();
+          const bl = parseFloat(cs.borderLeftWidth) || 0;
+          const br = parseFloat(cs.borderRightWidth) || 0;
+          const bt = parseFloat(cs.borderTopWidth) || 0;
+          const bb = parseFloat(cs.borderBottomWidth) || 0;
+          const left = clipsX ? r.x + bl : -Infinity;
+          const right = clipsX ? r.x + r.width - br : Infinity;
+          const top = clipsY ? r.y + bt : -Infinity;
+          const bottom = clipsY ? r.y + r.height - bb : Infinity;
+          clip = clip
+            ? { left: Math.max(clip.left, left), top: Math.max(clip.top, top), right: Math.min(clip.right, right), bottom: Math.min(clip.bottom, bottom) }
+            : { left, top, right, bottom };
+        }
+        node = node.parentElement;
+      }
+      if (!clip) return null;
+      return { x: clip.left, y: clip.top, width: clip.right - clip.left, height: clip.bottom - clip.top };
     }
 
     function isDisabled(el: Element): boolean {
@@ -231,6 +269,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       disabled: boolean;
       color: string;
       fixedPositionAncestor: boolean;
+      visibleClipRect: { x: number; y: number; width: number; height: number } | null;
     }> = [];
     const iconOut: Array<{
       kind: 'icon';
@@ -240,6 +279,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
       box: { x: number; y: number; width: number; height: number };
       composite: boolean;
       fixedPositionAncestor: boolean;
+      visibleClipRect: { x: number; y: number; width: number; height: number } | null;
     }> = [];
 
     for (const el of document.body.querySelectorAll('*')) {
@@ -259,6 +299,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
           box: { x: box.x, y: box.y, width: box.width, height: box.height },
           composite: hasOwnFillDescendant(el),
           fixedPositionAncestor: hasFixedPositionAncestor(el),
+          visibleClipRect: visibleClipRect(el),
         });
         continue;
       }
@@ -292,6 +333,7 @@ async function discoverElements(page: Page): Promise<{ text: DiscoveredText[]; i
         disabled: isDisabled(el),
         color: cs.color,
         fixedPositionAncestor: hasFixedPositionAncestor(el),
+        visibleClipRect: visibleClipRect(el),
       });
     }
 
@@ -320,7 +362,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
       const fgParsed = parseRgbLocal(t.color);
       if (!fgParsed) continue;
 
-      const { rgb: bg, share, outOfBoundsShare } = await sampler.sampleDominant(t.box, { fixedPosition: t.fixedPositionAncestor });
+      const { rgb: bg, share, outOfBoundsShare } = await sampler.sampleDominant(t.box, { fixedPosition: t.fixedPositionAncestor, clipRect: t.visibleClipRect });
       const fg = compositeOver(fgParsed.rgb, fgParsed.alpha, bg);
       const ratio = Math.round(contrastRatioOf(fg, bg) * 100) / 100;
       const requiredRatio = t.isLargeText ? WCAG_LARGE_TEXT_MIN_RATIO : WCAG_NORMAL_TEXT_MIN_RATIO;
@@ -348,7 +390,7 @@ export async function sweepContrast(page: Page, ambiguousShareCutoff: number = A
 
     const iconBucket: SweepBucket<SweepIconElement> = { pass: [], fail: [], ambiguous: [] };
     for (const ic of measurableIcons) {
-      const clusters = await sampler.sampleClustersOrdered(ic.box, { fixedPosition: ic.fixedPositionAncestor });
+      const clusters = await sampler.sampleClustersOrdered(ic.box, { fixedPosition: ic.fixedPositionAncestor, clipRect: ic.visibleClipRect });
       if (clusters.length === 0) continue;
       const boxOutOfBounds = clusters.outOfBoundsShare > OUT_OF_BOUNDS_SHARE_CUTOFF;
       const bg = clusters[0]!.rgb;
