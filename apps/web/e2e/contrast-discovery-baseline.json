@@ -1,0 +1,4 @@
+{
+  "_README": "CONTRAST-DISCOVERY-DROP (god, 2026-11-10). Maintained like contrast-known-violations.json: a human/agent copies in the suggested entry a test run prints, deliberately -- nothing auto-writes this file. Key is \"<route>@<viewport>\"; value is the TOTAL element count discoverElements() found at that (route, viewport) -- scored (pass+fail+ambiguous) plus excluded-but-accounted-for (disabled text, composite icons). A run reporting FEWER than this number throws loudly (see contrast-ratchet.ts's checkDiscoveryDrop); a run reporting MORE just logs a suggestion to bump this file, never fails. Empty for this app so far -- no entry here means every route/viewport in apps/web/e2e/contrast starts unprotected until someone runs it once and copies in the printed suggestion from the test's own console output.",
+  "/__discovery_drop_regression_test__@1": 10
+}
