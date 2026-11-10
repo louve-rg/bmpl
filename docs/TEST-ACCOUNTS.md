@@ -70,8 +70,8 @@ production by design; the e2e/demo fixtures above it in this table do not.
 | Script | Run with | Production behavior |
 | --- | --- | --- |
 | `packages/database/prisma/seed.ts` | `pnpm db:seed` | Always run. `seedSuperAdmin()` runs unconditionally; `seedDemoData()` is skipped when `NODE_ENV=production` (`seed.ts:452-456`). |
-| `packages/database/prisma/seed-uat-logistics.ts` | `pnpm --filter @bmpl/database seed:uat` | **Refuses to run at all** — `process.exit(1)` — unless `NODE_ENV!=production` and `DATABASE_URL` points at `localhost`/`127.0.0.1` on a database literally named `bmpl` (`assertDevelopmentEnvironment()`, lines 52-80). A stronger guarantee than `seed.ts`'s simple skip: this script cannot touch production regardless of what calls it. |
-| `packages/database/prisma/seed-uat-roles.ts` | `pnpm --filter @bmpl/database seed:uat-roles` | Same refusal guard, same reasoning (lines 44-72). |
+| `packages/database/prisma/seed-uat-logistics.ts` | `pnpm --filter @bmpl/database seed:uat` | **Refuses to run at all** — `process.exit(1)` — unless `NODE_ENV!=production`, `DATABASE_URL` points at `localhost`/`127.0.0.1` on a database literally named `bmpl`, AND `UAT_SEED_API_URL` is explicitly set to a local API (`assertDevelopmentEnvironment()`, lines 52-95; FLOOR-SEEDTARGET, 2026-11-10 — no `localhost:4000` default anymore, since every local stack's database is also named `bmpl`, so a missing API target used to fall through to whatever happened to be listening, not necessarily the caller's own API). A stronger guarantee than `seed.ts`'s simple skip: this script cannot touch production regardless of what calls it. |
+| `packages/database/prisma/seed-uat-roles.ts` | `pnpm --filter @bmpl/database seed:uat-roles` | Same refusal guard, same reasoning (lines 44-91). |
 
 ---
 

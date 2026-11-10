@@ -7,7 +7,8 @@
  *
  *   node scripts/dispatch-floor-check.mjs
  *   node scripts/dispatch-floor-check.mjs --needs 79495e9e
- *   node scripts/dispatch-floor-check.mjs --needs 79495e9e --kill-others
+ *   node scripts/dispatch-floor-check.mjs --needs 79495e9e --kill-others          (dry run -- names what WOULD die, kills nothing)
+ *   node scripts/dispatch-floor-check.mjs --needs 79495e9e --kill-others --confirm (actually kills)
  *
  * THE PROBLEM THIS ANSWERS: every git worktree on this dev host shares the
  * SAME local Redis and the SAME local Postgres by default. Scheduler lock
@@ -100,13 +101,23 @@
  * verdict line also says how many rows were unclassified, so a reader isn't
  * left assuming every NOT CLEAN row was a confirmed stranger.
  *
- * `--kill-others` kills every API-shaped process found OTHER than the one
+ * `--kill-others` targets every API-shaped process found OTHER than the one
  * matching `process.cwd()`'s own worktree (both listening and armed),
  * using the whole process family (parent cmd.exe/nest.js wrapper + child
  * dist/main, matched by command line, not by the single PID a port lookup
  * would give you) — this is what actually stops a `nest --watch`
  * supervisor instead of letting it respawn. Windows-only, matching this
  * repo's dev platform (same convention as scripts/dev-server-check.mjs).
+ *
+ * CONFIRMATION GATE (god, CONTRAST-DISCOVERY-DROP, 2026-11-10): with up to
+ * four agents each running their own servers on one host, a bare
+ * `--kill-others` that fires immediately can end a colleague's in-progress
+ * test run with nothing in THEIR terminal explaining why it died. `--kill-
+ * others` alone is now a DRY RUN — it names every pid/worktree/command line
+ * it WOULD kill and kills nothing. `--kill-others --confirm` is required to
+ * actually kill. This does not make killing a stranger's process safe by
+ * itself (a [COULD NOT CLASSIFY] row is still a guess about whose it is),
+ * only deliberate and visible in the log of whoever ran it.
  */
 import { execFileSync } from 'node:child_process';
 
@@ -116,6 +127,7 @@ const flag = (name) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const killOthers = args.includes('--kill-others');
+const confirmed = args.includes('--confirm');
 
 function localHead() {
   try {
@@ -332,11 +344,25 @@ async function main() {
     apiListeners.filter((r) => r.worktree == null).length + armed.filter((r) => worktreeFromCommandLine(r.CommandLine) == null).length;
 
   if (killOthers) {
-    console.log('\n--kill-others: stopping every API-shaped process not in my own worktree...');
-    for (const r of [...othersListening, ...othersArmed]) {
-      const pid = r.pid ?? r.Pid;
-      console.log(`  killing pid ${pid}...`);
-      killFamily(pid, r.commandLine ?? r.CommandLine);
+    const targets = [...othersListening, ...othersArmed];
+    if (targets.length === 0) {
+      console.log('\n--kill-others: nothing to kill -- no other API-shaped process found.');
+    } else if (!confirmed) {
+      console.log(`\n--kill-others: DRY RUN (pass --confirm to actually kill). Would kill ${targets.length} process(es):`);
+      for (const r of targets) {
+        const pid = r.pid ?? r.Pid;
+        const worktree = r.worktree ?? worktreeFromCommandLine(r.CommandLine) ?? '[COULD NOT CLASSIFY -- whose this is is a guess]';
+        console.log(`  pid ${pid}  worktree ${worktree}  cmd: ${r.commandLine ?? r.CommandLine}`);
+      }
+      console.log('Re-run with --confirm to actually kill the above. Nothing was touched.');
+    } else {
+      console.log(`\n--kill-others --confirm: killing ${targets.length} process(es) not in my own worktree...`);
+      for (const r of targets) {
+        const pid = r.pid ?? r.Pid;
+        const worktree = r.worktree ?? worktreeFromCommandLine(r.CommandLine) ?? '[COULD NOT CLASSIFY]';
+        console.log(`  killing pid ${pid}  worktree ${worktree}...`);
+        killFamily(pid, r.commandLine ?? r.CommandLine);
+      }
     }
   }
 

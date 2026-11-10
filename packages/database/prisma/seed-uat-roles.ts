@@ -65,7 +65,16 @@ function assertDevelopmentEnvironment(): void {
   if (dbName !== 'bmpl') {
     fail(`database "${dbName}" is not the local development database "bmpl".`);
   }
-  const api = new URL(API_BASE);
+  // FLOOR-SEEDTARGET: deliberately NO default here — see seed-uat-logistics.ts's
+  // copy of this guard for the full rationale (duplicated, not imported, for
+  // the reason given at the top of this file).
+  if (!API_BASE) {
+    fail(
+      'UAT_SEED_API_URL is not set. This script drives a real API over HTTP with no safe default — ' +
+        'set it to the API you mean to seed, e.g. UAT_SEED_API_URL=http://localhost:4000.',
+    );
+  }
+  const api = new URL(API_BASE as string);
   if (!['localhost', '127.0.0.1'].includes(api.hostname)) {
     fail(`API base "${API_BASE}" is not local.`);
   }
@@ -73,7 +82,7 @@ function assertDevelopmentEnvironment(): void {
 
 /* ------------------------------------------------------------- http client */
 
-const API_BASE = process.env.UAT_SEED_API_URL ?? 'http://localhost:4000';
+const API_BASE = process.env.UAT_SEED_API_URL;
 
 interface ApiFailure {
   status: number;
@@ -222,6 +231,11 @@ async function ensureEmailVerified(client: Client, email: string): Promise<void>
 
 async function main(): Promise<void> {
   assertDevelopmentEnvironment();
+
+  // FLOOR-SEEDTARGET: state the write target before anything is touched —
+  // this file has no direct-Prisma fallback (see header comment), so the
+  // API below is the only target.
+  console.info(`Target API (HTTP): ${API_BASE}`);
 
   try {
     await new Client('preflight').get('/health');
