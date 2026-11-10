@@ -148,16 +148,32 @@ body {
     color: var(--bmpl-text);
     /* Solid, not color-mix(..., transparent) -- the same alpha-fill-over-
        transparent construction as the Badge/Alert brand tones, just written
-       in raw CSS instead of a Tailwind /NN utility. Construction fixed; the
-       rendered ratio was not measured. */
+       in raw CSS instead of a Tailwind /NN utility. Construction fixed.
+       MEASURED LIVE (Oscar, 2026-11-10, MDF-383) -- independent of
+       contrast-sweep.ts/contrast.ts (getComputedStyle foreground + a direct
+       screenshot pixel decode, no clustering, no dominant-share heuristic;
+       the sweeper itself is under suspicion as of CONTRAST-CLIP/MDF-424):
+       #0f172a foreground on this #eff6ff background = 16.4:1. Passes the
+       4.5:1 text floor comfortably. */
     background-color: #eff6ff;
   }
   [data-theme='glass'] .bmpl-nav-item[aria-current='page'] {
     /* Same fix, glass branch: the gradient's rgba() stops were translucent,
        compositing toward whatever mural pixels sit behind this nav item --
        made opaque so the surface is a fixed, known colour instead of one
-       that depends on where the item lands. Construction fixed; the
-       rendered ratio was not measured. */
+       that depends on where the item lands. Construction fixed, but that is
+       NOT the same as passing.
+       MEASURED LIVE (Oscar, 2026-11-10, MDF-383) -- independent of
+       contrast-sweep.ts/contrast.ts (getComputedStyle foreground + a direct
+       screenshot pixel decode, no clustering, no dominant-share heuristic;
+       the sweeper itself is under suspicion as of CONTRAST-CLIP/MDF-424):
+       #f4f8ff foreground against 10 points sampled across the live gradient
+       ranges 2.60:1 (near the rgb(14,165,233) stop) to 3.45:1 (near the
+       rgb(59,130,246) stop) -- FAILS the 4.5:1 text floor everywhere on the
+       gradient, and fails the lower 3:1 floor across most of it too. This is
+       a real, measured failure, not a sweeper artifact. NOT FIXED HERE --
+       god's explicit call (MDF-383): a colour change here is a construction
+       decision, reported with the number rather than made unilaterally. */
     background: linear-gradient(135deg, rgb(59, 130, 246), rgb(14, 165, 233));
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
   }
