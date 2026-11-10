@@ -25,16 +25,16 @@ into are separate products with separate login surfaces:
 
 ## Web app fixtures (`apps/web/e2e/support/auth.ts`)
 
-| Role code | Account | Purpose | Seeded by | Password env var |
-| --- | --- | --- | --- | --- |
-| CUSTOMER | `uat-customer@bzemarketplace.com` | UAT walkthrough sender: funded test wallet, booked shipments | `seed-uat-logistics.ts` (`USERS.customer`, line 237) | `UAT_SEED_PASSWORD` |
-| VENDOR | `uat-vendor@bzemarketplace.com` | Approved VENDOR role fixture for role-coverage specs | `seed-uat-roles.ts` (`USERS.vendor`, line 167) | `UAT_SEED_PASSWORD` |
-| DELIVERY_DRIVER | `uat-driver@bzemarketplace.com` | **The only fixture with an approved driver profile** (ONLINE, in-district, approved vehicle) — needed for any driver-only surface; SUPER_ADMIN holds no driver role | `seed-uat-logistics.ts` (`USERS.driver`, line 238) | `UAT_SEED_PASSWORD` |
-| JOB_SEEKER | `uat-job-seeker@bzemarketplace.com` | Role-coverage fixture. **Different grant path from every other role on this page**: JOB_SEEKER self-grants on request with no admin approval step (`seed-uat-roles.ts:368`) | `seed-uat-roles.ts` (`USERS.jobSeeker`, line 168) | `UAT_SEED_PASSWORD` |
-| PASSENGER_DRIVER | `uat-passenger-driver@bzemarketplace.com` | Role-coverage fixture, approved via the real application + review flow | `seed-uat-roles.ts` (`USERS.passengerDriver`, line 169) | `UAT_SEED_PASSWORD` |
-| PASSENGER_PROVIDER | `uat-passenger-provider@bzemarketplace.com` | Role-coverage fixture, approved via the real application + review flow | `seed-uat-roles.ts` (`USERS.passengerProvider`, line 170) | `UAT_SEED_PASSWORD` |
-| EMPLOYER | `e2e-fixture.employer-with-profile@example.bz` | Approved employer **with** a saved profile — safe to reuse for anything that needs one. No DELETE endpoint exists for an employer profile, so any profile a test creates against this account is permanent, bounded residue, not cleanup debt. | `seed.ts` → `seedEmployerE2eFixtures()` (`packages/database/prisma/seed.ts:234-253`) | `SEED_DEMO_PASSWORD` |
-| SUPER_ADMIN | `admin@bzemarketplace.com` (or `SEED_SUPER_ADMIN_EMAIL`) | Platform administrator | `seed.ts` → `seedSuperAdmin()` (`seed.ts:96-123`) | `SEED_SUPER_ADMIN_PASSWORD` — **no hardcoded fallback** in `auth.ts` (`apps/web/e2e/support/auth.ts:12-22`); a spec must skip, not log in with a guessed value, when it's unset |
+| Role code | Account | Purpose | Seeded by | Password env var | `isTest` |
+| --- | --- | --- | --- | --- | --- |
+| CUSTOMER | `uat-customer@bzemarketplace.com` | UAT walkthrough sender: funded test wallet, booked shipments | `seed-uat-logistics.ts` (`USERS.customer`, line 237) | `UAT_SEED_PASSWORD` | `User.isTest` **true** |
+| VENDOR | `uat-vendor@bzemarketplace.com` | Approved VENDOR role fixture for role-coverage specs | `seed-uat-roles.ts` (`USERS.vendor`, line 167) | `UAT_SEED_PASSWORD` | `VendorProfile.isTest` true; `User.isTest` **false — see Gaps, below** |
+| DELIVERY_DRIVER | `uat-driver@bzemarketplace.com` | **The only fixture with an approved driver profile** (ONLINE, in-district, approved vehicle) — needed for any driver-only surface; SUPER_ADMIN holds no driver role | `seed-uat-logistics.ts` (`USERS.driver`, line 238) | `UAT_SEED_PASSWORD` | `DriverProfile.isTest` **and** `User.isTest` both true |
+| JOB_SEEKER | `uat-job-seeker@bzemarketplace.com` | Role-coverage fixture. **Different grant path from every other role on this page**: JOB_SEEKER self-grants on request with no admin approval step (`seed-uat-roles.ts:368`) | `seed-uat-roles.ts` (`USERS.jobSeeker`, line 168) | `UAT_SEED_PASSWORD` | No `isTest` column exists anywhere Belize Connect owns (BMPL-148, open) |
+| PASSENGER_DRIVER | `uat-passenger-driver@bzemarketplace.com` | Role-coverage fixture, approved via the real application + review flow | `seed-uat-roles.ts` (`USERS.passengerDriver`, line 169) | `UAT_SEED_PASSWORD` | `PassengerDriverProfile.isTest` true; `User.isTest` **false — see Gaps, below** |
+| PASSENGER_PROVIDER | `uat-passenger-provider@bzemarketplace.com` | Role-coverage fixture, approved via the real application + review flow | `seed-uat-roles.ts` (`USERS.passengerProvider`, line 170) | `UAT_SEED_PASSWORD` | `PassengerProviderProfile.isTest` true; `User.isTest` **false — see Gaps, below** |
+| EMPLOYER | `e2e-fixture.employer-with-profile@example.bz` | Approved employer **with** a saved profile — safe to reuse for anything that needs one. No DELETE endpoint exists for an employer profile, so any profile a test creates against this account is permanent, bounded residue, not cleanup debt. | `seed.ts` → `seedEmployerE2eFixtures()` (`packages/database/prisma/seed.ts:234-253`) | `SEED_DEMO_PASSWORD` | No `isTest` column on `EmployerProfile` (BMPL-148, open) |
+| SUPER_ADMIN | `admin@bzemarketplace.com` (or `SEED_SUPER_ADMIN_EMAIL`) | Platform administrator | `seed.ts` → `seedSuperAdmin()` (`seed.ts:96-123`) | `SEED_SUPER_ADMIN_PASSWORD` — **no hardcoded fallback** in `auth.ts` (`apps/web/e2e/support/auth.ts:12-22`); a spec must skip, not log in with a guessed value, when it's unset | `User.isTest` **false — correct.** This is the real platform administrator, present in production by design; flagging it would be wrong, not missing. |
 
 **A second EMPLOYER-role account exists outside the table above on purpose,
 and it is a landmine by design:** `do-not-create-a-profile.e2e-fixture@example.bz`
@@ -57,11 +57,11 @@ production by design; the e2e/demo fixtures above it in this table do not.
 
 ## Admin console fixtures (`apps/admin/e2e/support/auth.ts`)
 
-| Role code | Account | Purpose | Seeded by | Password env var |
-| --- | --- | --- | --- | --- |
-| ADMIN | `uat-ops-full@bzemarketplace.com` | Full `logistics.read`/`manage`/`operate`/`verify` — the default ADMIN fixture | `seed-uat-logistics.ts` (`USERS.opsFull`, line 235; permissions line 249) | See **finding 1** below |
-| ADMIN | `uat-ops-limited@bzemarketplace.com` | `logistics.read`/`operate` only — deliberately missing `logistics.verify`, so the permission split (#12) can be demonstrated rather than asserted | `seed-uat-logistics.ts` (`USERS.opsLimited`, line 236; permissions line 250) | See **finding 1** below |
-| SUPER_ADMIN | `admin@bzemarketplace.com` | Same account as the web table above — the admin console is one of the two places it logs into | `seed.ts` → `seedSuperAdmin()` | `SEED_SUPER_ADMIN_PASSWORD`, same no-fallback rule |
+| Role code | Account | Purpose | Seeded by | Password env var | `isTest` |
+| --- | --- | --- | --- | --- | --- |
+| ADMIN | `uat-ops-full@bzemarketplace.com` | Full `logistics.read`/`manage`/`operate`/`verify` — the default ADMIN fixture | `seed-uat-logistics.ts` (`USERS.opsFull`, line 235; permissions line 249) | See **finding 1** below | `User.isTest` **false — see Gaps, below. Flagged nowhere.** |
+| ADMIN | `uat-ops-limited@bzemarketplace.com` | `logistics.read`/`operate` only — deliberately missing `logistics.verify`, so the permission split (#12) can be demonstrated rather than asserted | `seed-uat-logistics.ts` (`USERS.opsLimited`, line 236; permissions line 250) | See **finding 1** below | `User.isTest` **false — see Gaps, below. Flagged nowhere.** |
+| SUPER_ADMIN | `admin@bzemarketplace.com` | Same account as the web table above — the admin console is one of the two places it logs into | `seed.ts` → `seedSuperAdmin()` | `SEED_SUPER_ADMIN_PASSWORD`, same no-fallback rule | `User.isTest` **false — correct**, same reasoning as the web table |
 
 ---
 
@@ -74,6 +74,48 @@ production by design; the e2e/demo fixtures above it in this table do not.
 | `packages/database/prisma/seed-uat-roles.ts` | `pnpm --filter @bmpl/database seed:uat-roles` | Same refusal guard, same reasoning (lines 44-91). |
 
 ---
+
+## `isTest` is four different flags, not one
+
+The "`isTest`" column above names which flag, because there is no single
+`isTest` — each one gates something different, confirmed by reading the
+code each gates, not assumed from the name:
+
+| Flag | Where | Gates |
+| --- | --- | --- |
+| `User.isTest` | `schema.prisma:556-559` | **The only thing that gates self-service test wallet funding.** Read directly, and alone — no profile flag is consulted — at `apps/api/src/wallet/wallet.controller.ts:82-84`. |
+| `VendorProfile.isTest` | `schema.prisma:1214-1218` | Storefront reachability (an `isTest` store 404s on its own public slug), and whether an order placed against that vendor becomes an `isTest` order. Nothing to do with funding. |
+| `DriverProfile.isTest` | `schema.prisma:2227-2234` | Which deliveries a driver is offered — test deliveries go only to `isTest` drivers, and an `isTest` driver is offered only test deliveries. Nothing to do with funding. Now visible in the admin console on both the drivers list and detail — **PR #662, open at time of writing, not yet merged; do not treat as shipped until confirmed.** Before that PR, telling a test driver from a real one in the admin UI required a direct database read. |
+| `PassengerDriverProfile.isTest` / `PassengerProviderProfile.isTest` | `schema.prisma:5985-5991`, `schema.prisma:6037+` | Same symmetric isolation as `DriverProfile.isTest`, for passenger trips instead of deliveries. Nothing to do with funding. |
+
+**A fixture can hold one of these without the other, and three of the
+fixtures above do:**
+
+- **VENDOR, PASSENGER_DRIVER and PASSENGER_PROVIDER are flagged on their
+  profile but not on the owning `User` row.** `seed-uat-roles.ts` calls each
+  role's own test-mode endpoint (`/admin/vendors/:id/test-mode`,
+  `/admin/passengers/drivers/:id/test-mode`,
+  `/admin/passengers/providers/:id/test-mode`) but never calls
+  `POST /admin/users/test-flag` for the `User` row underneath — unlike
+  `seed-uat-logistics.ts`, which flags both for `uat-driver@`. Practical
+  effect: **none of these three fixtures can fund their own test wallet**,
+  because that path reads `User.isTest` alone. Tracked as **MDF-681** — a
+  seed-script omission, not a two-sources-of-truth defect (a different
+  model, `ShippingProviderProfile`, does enforce `User.isTest` / profile-flag
+  symmetry at `shipping-provider.service.ts:350-353`; BML has chosen not to
+  require the same symmetry for these three). The fix waits on nothing now
+  that FLOOR-SEEDTARGET is merged, but building it is not this document's
+  job — recorded here as the gap it is.
+- **`uat-ops-full@` and `uat-ops-limited@` are flagged nowhere at all** —
+  not on `User`, and there is no profile-level flag for an ADMIN role to
+  hold. These are the same two accounts the FLOOR-SEEDTARGET incident wrote
+  simulation-network permissions for by accident. Likely low-risk today,
+  since the only confirmed effect of `User.isTest` is gating wallet funding
+  and an ADMIN account has no customer-style wallet to fund — but that is
+  this document's own read of the current code, not a guarantee against
+  every future feature that might filter on `User.isTest` (analytics,
+  reporting, an audit query) and would silently treat these two as real
+  staff.
 
 ## Findings — code and documentation disagree
 
