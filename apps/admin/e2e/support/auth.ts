@@ -18,6 +18,19 @@ export const OPS_PASSWORD = process.env.UAT_SEED_PASSWORD;
  * UAT fixtures are not seeded in whatever database ADMIN_PUBLIC_API_URL
  * points at — both mean "this environment cannot run the spec", not a test
  * failure.
+ *
+ * MDF-653/OVERFLOW-768: this used to give the post-login redirect only
+ * 10_000ms, which raced a real, measured cost rather than a flake.
+ * `globalSetup`'s `waitForRealReadiness` only warms /login — Next dev
+ * compiles each route on first request, and /dashboard is a DIFFERENT route
+ * that nothing warms ahead of time. Measured on this host: a cold /dashboard
+ * compile took ~7.9s (login page load ~0.7s, then click-to-dashboard ~7.9s);
+ * the same login immediately after, once compiled, took ~0.25s. 10_000ms
+ * left under 3s of margin over a real one-time cost that a busier machine
+ * (CI, parallel workers) can easily push past 10s — not a product-behavior
+ * assertion, so widening it isn't weakening a check: the only thing that
+ * changes is how long we wait for a known, legitimate first-compile cost
+ * before concluding the environment genuinely can't log in.
  */
 export async function tryLogin(page: Page, email: string, password: string): Promise<boolean> {
   try {
@@ -25,7 +38,7 @@ export async function tryLogin(page: Page, email: string, password: string): Pro
     await page.getByLabel('Email').fill(email);
     await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: /sign in/i }).click();
-    await page.waitForURL(/\/dashboard/, { timeout: 10_000 });
+    await page.waitForURL(/\/dashboard/, { timeout: 25_000 });
     return true;
   } catch {
     return false;
