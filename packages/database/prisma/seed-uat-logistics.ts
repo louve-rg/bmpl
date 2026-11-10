@@ -73,7 +73,22 @@ function assertDevelopmentEnvironment(): void {
   if (dbName !== 'bmpl') {
     fail(`database "${dbName}" is not the local development database "bmpl".`);
   }
-  const api = new URL(API_BASE);
+  // FLOOR-SEEDTARGET: deliberately NO default here. Every isolated stack on
+  // this machine uses a database literally named "bmpl" (docker-compose's
+  // own default), so the DATABASE_URL check above cannot tell "my stack"
+  // from "someone else's" — and a missing API target used to fall through
+  // to localhost:4000, which is wherever a long-lived process on this shared
+  // machine happens to be listening, not necessarily this run's own API.
+  // Failing loudly here costs the operator one environment variable; the
+  // silent version cost a real write into another agent's environment
+  // (2026-11-10, FLOOR-SEEDTARGET incident).
+  if (!API_BASE) {
+    fail(
+      'UAT_SEED_API_URL is not set. This script drives a real API over HTTP with no safe default — ' +
+        'set it to the API you mean to seed, e.g. UAT_SEED_API_URL=http://localhost:4000.',
+    );
+  }
+  const api = new URL(API_BASE as string);
   if (!['localhost', '127.0.0.1'].includes(api.hostname)) {
     fail(`API base "${API_BASE}" is not local.`);
   }
@@ -81,7 +96,7 @@ function assertDevelopmentEnvironment(): void {
 
 /* ------------------------------------------------------------- http client */
 
-const API_BASE = process.env.UAT_SEED_API_URL ?? 'http://localhost:4000';
+const API_BASE = process.env.UAT_SEED_API_URL;
 
 interface ApiFailure {
   status: number;
@@ -175,6 +190,16 @@ class Client {
 
 const isFailure = (e: unknown): e is ApiFailure =>
   typeof e === 'object' && e !== null && 'status' in e && 'message' in e;
+
+/** Host:port/dbname only — DATABASE_URL's credentials are never printed. */
+function describeDatabaseTarget(): string {
+  try {
+    const u = new URL(process.env.DATABASE_URL ?? '');
+    return `${u.hostname}:${u.port || '5432'}${u.pathname}`;
+  } catch {
+    return '(unparseable DATABASE_URL)';
+  }
+}
 
 /* ---------------------------------------------------------------- fixtures */
 
@@ -317,6 +342,15 @@ async function ensureEmailVerified(client: Client, email: string): Promise<void>
 
 async function main(): Promise<void> {
   assertDevelopmentEnvironment();
+
+  // FLOOR-SEEDTARGET: this script writes to TWO different targets in one
+  // run — almost everything goes over HTTP to the API below, but granting
+  // the ADMIN staff role (no endpoint exists for that) writes directly to
+  // the database below via Prisma, a different coupling than the API one.
+  // State both before anything is touched, rather than leaving the reader
+  // to find the split by reading the whole file.
+  console.info(`Target API (HTTP):                                    ${API_BASE}`);
+  console.info(`Target database (Prisma, ADMIN-role fallback only):   ${describeDatabaseTarget()}`);
 
   // Preflight: the API must be running, because this seed IS an API client.
   try {
