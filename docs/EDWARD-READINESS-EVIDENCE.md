@@ -17,9 +17,9 @@ merged PR, a green CI check, or an existing endpoint is never read as a pass.
 The **GO/NO-GO recommendation is the owner's, made through god** — this
 document holds the slot for it (§4) and does not pre-fill it.
 
-**Last synced against `tasks.json` and the cited PRs:** 2026-11-12, ~23:20
-UTC. Re-sync before trusting a row that looks final — fourteen cards are
-moving under this document right now.
+**Last synced against `tasks.json` and the cited PRs:** 2026-11-12, ~23:40
+UTC. Re-sync before trusting a row that looks final — fourteen-plus cards
+are moving under this document right now.
 
 ---
 
@@ -68,20 +68,20 @@ one as more terminal PRs land.
 
 | # | Workflow | Card(s) | Code state (now) | Stanley verdict (MDF-697) | Note |
 | - | --- | --- | --- | --- | --- |
-| 1 | Collect parcel at counter (name + code) | MDF-696 (fix), MDF-703 (admin parity) | **Deployed** — fix merged+deployed to web at `6cc75009` (confirmed §1) | **FAIL** (ticket T-1, baseline `5cbb515c`, *before* this fix existed) | **Stale verdict, not resolved.** Stanley's FAIL predates the code fix. His own charter: "never mark a failure resolved on an implementer's report" — this row stays FAIL until he re-tests, even though the code he failed no longer matches what's deployed. Flagging the mismatch is this document's job; closing it is his. |
+| 1 | Collect parcel at counter (name + code) | MDF-696 (fix), MDF-703 (admin parity, PR #684 open) | **Deployed** (web, confirmed §1) + **Implemented** (admin half, PR #684, CI green, not merged) | **FIXED IN SOURCE** (ticket T-1), live **NOT TESTED** | **Self-corrected by Stanley, not by this document.** His first pass read T-1 as FAIL against a stale worktree baseline (`5cbb515c`, cut before the collection-code fix existed); his own Update 2 caught that himself, re-based, and moved T-1 to FIXED IN SOURCE, citing `apps/web/app/dashboard/terminal/page.tsx:92, 208-222, 466-481` — he still marks live behaviour NOT TESTED, since re-reading source is not running the app. **The honest residual is T-1b**, a distinct gap he separately holds open: the **admin** console's own collect action (not this web screen) still posted the collector's name only, no code. Oscar's PR #684 fixes it — CI green, held for Stanley's review, not merged. This row does not go to FIXED IN SOURCE on T-1b until that PR is reviewed. |
 | 2 | Obtain the collection code (recipient/sender) | MDF-709 (API), MDF-710 (UI) | **Implemented** — both cards `doing`, not merged | **FAIL** (ticket T-2, corrected 2026-11-12) | Stanley's correction already names the exact fix path (reuse the CLOSE-2 two-step reveal pattern) and marks the live half NOT TESTED pending it. No owner decision needed — god's notes on both cards confirm this is pure build-out. |
 | 3 | Collection lockout + a way forward when locked | MDF-698 (manager unlock-request), MDF-703 (messaging) | **Implemented** — both `doing` | **FAIL** (ticket T-6, added after PR #680 review) | Admin-only unlock is correct by design (owner's own ruling) and is not the defect; the screen giving the clerk nothing to do next is. |
 | 4 | Look up a parcel by reference | MDF-699 | **Implemented** — contract approved (`GET /terminal/shipments/:reference`, 404/403/200 split, carries `isTest`); no PR yet | **FAIL** (ticket T-3) | Contract approval is a decision, not code — this row does not move to Merged until a PR lands. |
-| 5 | MANAGER vs OPERATOR permission difference | MDF-698 | **Implemented** — PR #683 open (branch `fix/term-role-manager-operator-split`, commit `261692f4`), held for Stanley + CI, not merged | **FAIL** (ticket T-4) — *superseded design decision since his verdict, not yet re-tested* | God ruled **MANAGER is a strict superset of OPERATOR**, not disjoint (Edward is onboarded as the sole active Manager; a disjoint split would leave him unable to do anything on day one). PR #683 adds `assertActiveMemberRole`, a MANAGER-only `GET /terminal/staff` roster, and 5 integration tests — unit/typecheck green, integration **NOT TESTED** (Docker loss, see §3). **Today, before this PR merges, the two roles are still functionally identical** — independently confirmed a second time by Toby (same grep, same conclusion as Stanley and Jim before him). |
+| 5 | MANAGER vs OPERATOR permission difference | MDF-698, MDF-716 (structural follow-on) | **Implemented** — PR #683 open (branch `fix/term-role-manager-operator-split`, commit `261692f4`), CI now green (all checks SUCCESS as of 23:17 UTC), held for Stanley, not merged | **FAIL** (ticket T-4) stands | Stanley assessed PR #683 directly rather than waiting for merge, and **his verdict hardened, not softened**: the PR "adds a check beside the hole, not in it" — an OPERATOR can still depart, arrive, hand off, release and collect exactly as a MANAGER; the only change is one new read (`GET /terminal/staff`) nothing yet consumes. His own words for the matrix: "functionally identical" becomes **"a Manager has one extra read."** T-4 stays FAIL until the actions themselves are gated, not just a roster endpoint added. **New structural finding from this review, carded separately as MDF-716**: `assertActiveMemberRole` is opt-in per endpoint and fails **open** — a future MANAGER-only route is protected only if its author remembers to call it. Deliverable (Pam's call): either a declarative guard that makes an undeclared route unreachable, or a test enumerating every terminal route and asserting each declares a required role. |
 | 6 | Work queue (5 sections), including the silent 100/200-row cap | MDF-700 (cap + isTest), base queue pre-existing | **Deployed** (base) with a **named, confirmed gap** (silent truncation); contracts approved for 3 new siblings — `GET /terminal/inbound`, `/outbound`, `/custody` — each carrying `isTest` and paging/overflow from the start, no PR yet | **NOT TESTED** — "code supports it... live behaviour NOT run"; cap itself noted as ticket T-5 | — |
 | 7 | Core actions: depart / arrive / handoff / release-to-courier | pre-existing, deployed | **Deployed** | **BLOCKED** (MDF-696/708 — no live account) | Jim's 8 real specs for this journey exist (PR #680, not merged) but **zero have been run** — he self-declared NOT TESTED on every one. |
 | 8 | Custody chain / who holds a parcel, visible to staff | MDF-701 | **Implemented** — backend writes custody today; display does not exist yet | **FAIL** (ticket T-5, feature gap) | — |
 | 9 | Manager dashboard / activity-audit / exception / manifest views | MDF-702, MDF-701 | **Implemented** — `doing`, rebuild in progress | **FAIL** (ticket T-5) | — |
 | 10 | Staff invitation → account creation → sign-in, incl. delivery-outcome visibility | MDF-695 (merged+deployed) | **Deployed** — `2951a385`, confirmed §1 — but see note: provisioning does not finish inside the admin console | **BLOCKED** (MDF-696 + "a QA admin who is not the owner") | No real invite has been sent through the deployed admin UI yet; automated-test evidence only. **Toby's finding, load-bearing for MDF-708**: an invite does not become an ACTIVE member on admin action alone — the invited person must separately open a *different app, different domain* (`apps/web /terminal/accept-invite?token=...`), fill their own first name, last name and password, and even then receives no session there — signing in afterward is a further, separate step. **Two real people must complete this hop for each account.** For Edward specifically, the owner has already ruled he must activate his own account himself and must not be impersonated — so this is not a step the floor can do on his behalf even once provisioned. |
 | 11 | Admin: terminal company + location setup | pre-existing, deployed | **Deployed** | **BLOCKED** (MDF-696) | — |
-| 12 | Hub drop-off / release / line-haul: courier's own code visibility | MDF-711 | **Implemented** (pre-existing; under confirmation, not a UI build yet) | **NOT TESTED** — moved from FAIL after correction; the design is now read as *correct* (it's the courier's own pickup code, not the recipient's secret); pending MDF-711's written confirmation | Not a security defect as first reported — see MDF-711's own notes. |
+| 12 | Hub drop-off / release / line-haul: courier's own code visibility | MDF-711 (determination, complete), MDF-717 (new UI card) | **Deployed** (backend `revealCourierCode`, pre-existing) with **Blocked-by-defect** (no UI consumes it) | **NOT TESTED** — the security question is resolved in the product's favour; live behaviour not run | **Determination now complete, confirmed independently twice** (Jim, then Pam, matching traces): the endpoint returns `handoffPin` for a FIRST_MILE leg and `pickupPin` for LAST_MILE — always the courier's **own** code, never the recipient's or sender's secret (`shipment.service.ts:4989-5029`, kind-gated branch at `:5022-5035`; ownership checked on the driver's own `userId` at `:5014-5017`). The owner's absolute rule ("a driver must never receive the secret code through a driver-intended API") is satisfied. **The residual is real and now carded separately as MDF-717**: a repo-wide grep found exactly one caller of this route, an e2e spec — no driver-facing screen calls it, so a real courier has no in-app way to see their own code today. |
 | 13 | Demo/test data visibly labelled on this screen | MDF-707 (spec, PR #681 open), MDF-700 (backend exposure), MDF-702 (frontend badge) | **Implemented** (spec only; code not started) | **FAIL** (new ticket **T-7**) | Stanley accepted the spec's own PASS criterion verbatim: *"a rendered Demo or Test label observed on a real isTest company and a real isTest parcel, absent on a real one, and a code reading cannot satisfy it."* That exact wording now binds MDF-700/702 — a future claim of PASS here must be checked against it, not a looser paraphrase. |
-| 14 | Terminal company + hub provisioning actually usable for `isTest` data | MDF-708, new cards HUB-ISTEST-API / HUB-ISTEST-UI | **Blocked-by-defect** — see note | **Not Stanley's own row; Toby's finding, 23:07** | **Toby found the thing that would have made the pending owner grant fail outright.** There is no way to create a hub with `isTest: true` — `createHubSchema`/`hubBase` has no such field and `createHub` spreads validated input straight into Prisma's `create`, so `isTest` can only default to `false`. Attaching a location to a terminal company only offers hubs whose `isTest` matches the company's own. So ticking **"Simulation company (isTest)"** at company creation produces an **empty hub dropdown** at the very next step, with nothing further to click — the demo-data path the owner's grant is supposed to produce does not work today. Carded urgent, ahead of MDF-700/701: **HUB-ISTEST-API** (Pam) and **HUB-ISTEST-UI** (Oscar). This is why MDF-708 was held rather than sent to the owner as Toby's provisioning-clicks document stood. |
+| 14 | Terminal company + hub provisioning actually usable for `isTest` data | MDF-708, MDF-714 (done — not a defect), MDF-715 (open) | **Blocked-by-defect** — narrowed to one UI gap, see note | **Not Stanley's own row; corrected by Pam/Oscar/Stanley/god jointly, 23:15** | Toby's original finding (no API path to create an `isTest` hub) was checked by three agents independently before anyone wrote code, and does not hold: `hubBase`/`createHubSchema` already accept `isTest` and `createHub` already honours it (`logistics-network.service.ts:194-209`, shipped since `111cd4b`, 2026-09-04). **MDF-714 closed as not a defect — no code changed.** The real, narrower blocker: the **admin console's hub-creation form has no `isTest` checkbox**, so nobody can reach the capability that already exists — ticking "Simulation company (isTest)" on the terminal-company form still produces an empty hub dropdown next step, for a UI reason, not an API one. Carded as **MDF-715** (Oscar), now the sole code dependency on MDF-708's pending owner grant. |
 
 **Rows 1–12 cover every workflow named in Stanley's own Section 1 (Terminal
 Workspace).** Row 13 (demo labelling) is the ticket his audit predates but
@@ -115,18 +115,36 @@ Pulled from the cards and from Stanley's own matrix/tickets, not re-derived:
   (`wrong-terminal`, `direct-delivery`) check only that a reference is
   *not* visible, with no positive control, so they'd pass on an empty or
   broken page too.
-- **MANAGER and OPERATOR are identical today in the deployed code** —
-  confirmed independently three times now (Stanley's grep, Jim, then Toby).
-  **This has a date on it, not a permanent one**: PR #683 (MANAGER as a
-  strict superset of OPERATOR) is written and held for Stanley + CI, not a
-  speculative fix.
-- **No way exists today to create an `isTest: true` hub** — confirmed by
-  Toby while writing MDF-708's provisioning-click document: neither
-  `createHubSchema` nor `createHub` accepts or sets it, so ticking
-  "Simulation company (isTest)" at company creation leads to an empty hub
-  dropdown with nothing further to click. **This blocks MDF-708's pending
-  grant from producing anything usable** until HUB-ISTEST-API/HUB-ISTEST-UI
-  ship — carded urgent, ahead of MDF-700/701.
+- **MANAGER and OPERATOR are identical today in the deployed code, and the
+  fix in flight does not yet close the gap.** Confirmed independently three
+  times (Stanley's grep, Jim, then Toby). PR #683 (god's ruling: MANAGER is
+  a strict superset of OPERATOR) is CI-green and held for Stanley, but his
+  own assessment of the PR is that it "adds a check beside the hole, not in
+  it" — an OPERATOR can still depart, arrive, hand off, release and collect
+  exactly as a MANAGER; the PR adds one new read-only roster endpoint
+  nothing consumes yet. T-4 stays FAIL. **A second, structural finding from
+  that same review is now its own card, MDF-716**: the enforcement
+  mechanism (`assertActiveMemberRole`) is opt-in per endpoint and fails
+  **open** — a future MANAGER-only route is unprotected unless its author
+  remembers to add the check, which is a live hazard given MDF-701 and the
+  unlock-request path are both still unwritten.
+- **Creating an `isTest: true` hub was never actually broken — it was
+  mis-reported, and the correction is itself worth recording.** Toby's
+  initial reading (no schema field, no service path) was checked
+  independently by Pam, by Oscar and by Stanley before anyone wrote code,
+  and all three — plus god, reading `origin/main` directly — found
+  `hubBase` already declares `isTest: z.boolean().optional()`,
+  `createHubSchema` inherits it, and `createHub`
+  (`logistics-network.service.ts:194-209`) already spreads it straight into
+  the Prisma create, the same way `isActive` is handled beside it — shipped
+  since commit `111cd4b` (2026-09-04). **MDF-714 is closed as not a
+  defect**, no code was written, and none was needed. **The real and only
+  remaining blocker is MDF-715**: the admin console's hub-creation form has
+  no `isTest` control in its UI at all — a read-only badge on existing hubs
+  is the only place the field appears — so an administrator still cannot
+  *reach* the API capability that already exists. This is now the sole code
+  dependency standing between MDF-708's pending owner grant and usable
+  simulation data.
 - **The console's own demo-company control is a one-way switch, not a
   setting.** The admin creation form's checkbox is literally labelled
   `"Simulation company (isTest) — never mixed with real hubs or real
@@ -182,6 +200,12 @@ Pulled from the cards and from Stanley's own matrix/tickets, not re-derived:
 - **By design, not a gap:** admin-only collection-code unlock; no real-money
   rail anywhere (root `CLAUDE.md` §1); production carries no hubs/lanes
   until configured through the admin console (§5).
+- **A stale comment was actively misleading, and has been fixed.** PR #678
+  merged to `main` as `76b13e07`: the terminal workspace's own header
+  comment still claimed the collect action took no code, which stopped
+  being true at `6cc75009`. Comment-only, no behaviour change — recorded
+  here because a reader of the source between those two commits would have
+  been told the wrong contract by the code itself.
 
 ---
 
@@ -201,8 +225,17 @@ not repeated here.
   `hive/agents/stanley-mwe4jkri/acceptance-matrix.md` — never by inferring a
   row from a PR merging or a check going green.
 - A code fix landing after a Stanley FAIL does **not** change his verdict in
-  this table. Note the mismatch explicitly (as row 1 does) and wait for his
-  re-test.
+  this table. Note the mismatch explicitly and wait for his re-test or his
+  own correction — **when a row's verdict and its code state disagree, that
+  disagreement IS the content; do not resolve it, show both, and name the
+  card that closes the gap.** Row 1 is the model for this: it stayed FAIL
+  while the fix had already shipped, until Stanley corrected his own stale
+  baseline and moved it himself — this document only ever reported the
+  mismatch, never adjudicated it.
+- **Sync continuously, not in batches.** With fourteen-plus cards moving,
+  a row that is right now and wrong an hour from now is more dangerous than
+  one that is obviously stale, because a reader stops checking the
+  timestamp once the document looks current.
 - Re-run `node scripts/deploy-status.mjs` before restating §1 — it reads
   live config and production every time; this document's own copy of its
   output is a snapshot, not a source of truth going forward.
