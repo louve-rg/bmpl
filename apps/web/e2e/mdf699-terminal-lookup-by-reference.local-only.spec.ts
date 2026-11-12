@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { tryLogin, UAT_FIXTURE_PASSWORD } from './support/auth';
+import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/auth';
 
 /**
  * [LOCAL ONLY, MDF-705 follow-up] Written ahead of MDF-699 (Pam, API)
@@ -11,23 +11,16 @@ import { tryLogin, UAT_FIXTURE_PASSWORD } from './support/auth';
  * a collection code, PIN or reveal token to a terminal-authenticated
  * caller.
  *
- * No route exists yet (confirmed in the already-merged MDF-705 batch: zero
- * search input on page.tsx, no query param on GET /terminal/queue, no
- * GET /terminal/shipments/:ref anywhere on terminal.controller.ts). Every
- * test below except the first is `test.fixme`, each naming the exact
- * assertion to make real the moment MDF-699 publishes its route -- not a
- * guessed route, since the card text does not commit to one and inventing
- * it would be exactly the business-rule guess CLAUDE.md §12 forbids.
- *
- * The one test that runs today proves an absence, which a pass-count tally
- * cannot tell apart from a healthy feature -- Stanley's ruling on this
- * file's sibling (MDF-709/710). Its title starts `GAP-PROOF:` so it can be
- * excluded from any such tally by title/grep. It asserts the control is
- * absent by a best-guess label regex (`reference|tracking|search|lookup`);
- * that regex, not just the absence, will need re-checking against
- * whatever MDF-699/MDF-702 actually ships (a control labelled e.g. "Find a
- * shipment" would slip past it) -- plan to replace this with a positive
- * lookup test once MDF-699 lands, not just flip a wording nit.
+ * UPDATE (2026-11-12, #686/bbf90094): the API half of this card has
+ * SHIPPED -- `GET /terminal/shipments/:reference` on
+ * `TerminalShipmentsController`, scoped via `myActiveHubIds`, 404 for an
+ * unknown reference, 403 for a real shipment that touches none of the
+ * caller's hubs (confirmed by reading `ShipmentService.lookupForTerminal`
+ * directly, not guessed). The three tests below that were `test.fixme`
+ * are now real, against that exact contract. The UI half has NOT shipped
+ * (Oscar/MDF-702/MDF-710) -- the one `GAP-PROOF:` test stays, because the
+ * Terminal Workspace page still has no lookup control, and it now proves
+ * ONLY that remaining gap, not the API one the header used to describe.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
@@ -81,6 +74,14 @@ async function adminLogin(page: Page): Promise<void> {
   expect(await tryLogin(page, ADMIN_EMAIL, ADMIN_PASSWORD!), 'admin login failed -- hard stop, not a skip').toBeTruthy();
 }
 
+async function findHubs(adminPage: Page): Promise<{ hubA: { id: string; code: string }; hubB: { id: string; code: string } }> {
+  const { body: hubs } = await getJson<Array<{ id: string; code: string }>>(adminPage, '/admin/logistics/hubs');
+  const hubA = hubs.find((h) => h.code === 'UATBC');
+  const hubB = hubs.find((h) => h.code === 'UATBP');
+  expect(hubA && hubB, 'UATBC/UATBP simulation hubs not found').toBeTruthy();
+  return { hubA: hubA!, hubB: hubB! };
+}
+
 async function createTerminalStaff(adminPage: Page, label: string, hubId: string): Promise<{ email: string }> {
   const company = await postWithCsrf<{ id: string }>(adminPage, '/admin/terminal/companies', {
     businessName: `MDF699 ${label} Co ${stamp}`,
@@ -120,10 +121,8 @@ test('GAP-PROOF: the Terminal Workspace has no lookup-by-reference control anywh
   test.setTimeout(60_000);
   const adminPage = await (await browser.newContext()).newPage();
   await adminLogin(adminPage);
-  const { body: hubs } = await getJson<Array<{ id: string; code: string }>>(adminPage, '/admin/logistics/hubs');
-  const hubA = hubs.find((h) => h.code === 'UATBC');
-  expect(hubA, 'UATBC simulation hub not found').toBeTruthy();
-  const { email } = await createTerminalStaff(adminPage, 'Today', hubA!.id);
+  const { hubA } = await findHubs(adminPage);
+  const { email } = await createTerminalStaff(adminPage, 'Today', hubA.id);
 
   const staffPage = await (await browser.newContext()).newPage();
   expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
@@ -136,34 +135,117 @@ test('GAP-PROOF: the Terminal Workspace has no lookup-by-reference control anywh
   console.log('[MDF699-GAP] confirmed live: nothing on the Terminal Workspace page lets a clerk look anything up by reference.');
 });
 
-/**
- * PENDING MDF-699. Route not yet published -- this is the primary happy
- * path the card describes: a terminal staff member looks up a reference
- * belonging to a shipment with a leg at one of THEIR OWN granted hubs, and
- * gets back a detail payload (status, parcel description, pieces, current
- * custody step -- enough for a counter conversation) with NO code/PIN/
- * reveal-token field present at all, not merely null.
- */
-test.fixme('A terminal staff member can look up a reference at their own hub and gets a detail payload with no code/PIN/reveal-token field (PENDING: route not published)', async () => {});
+/** Books HUB_TO_DOOR (hub -> a Belize City door) via the real endpoint --
+ * same sanctioned route-around mdf705's release-to-courier fixture already
+ * uses, since the booking UI's hub picker cannot select an isTest hub.
+ * Touches exactly ONE hub (the origin), deterministically -- no planner
+ * routing ambiguity, unlike a door-origin booking. */
+async function bookHubToDoor(customerPage: Page, hubId: string, label: string): Promise<{ reference: string }> {
+  const booking = {
+    service: 'HUB_TO_DOOR',
+    origin: { hubId },
+    destination: { name: label, phone: '501-222-7099', address: '12 MDF-699 Fixture Road', city: 'Belize City', district: 'BELIZE' },
+    pieces: 1,
+    description: `MDF-699 fixture ${label}`,
+    payWithWallet: true,
+  };
+  await postWithCsrf(customerPage, '/shipping/quote', booking);
+  const created = await postWithCsrf<{ reference: string }>(customerPage, '/shipping', booking);
+  expect(created.status, `HUB_TO_DOOR booking failed: ${JSON.stringify(created.body)}`).toBe(201);
+  return { reference: created.body.reference };
+}
 
-/**
- * PENDING MDF-699. The card's own named negative case: a reference whose
- * leg(s) touch only a DIFFERENT terminal's hub(s) must be refused -- same
- * "structurally invisible, not merely 403'd" standard MDF-705's own
- * WRONG-TERMINAL case already proved for the queue (assertStaffLocationAccess
- * must still bind, per the card text verbatim).
- */
-test.fixme('A reference belonging to another terminal is refused on lookup, the same way it is invisible in the queue (PENDING: route not published)', async () => {});
+type LookupResponse = {
+  shipmentId: string;
+  reference: string;
+  status: string;
+  description: string;
+  pieces: number;
+  isTest: boolean;
+  senderName: string | null;
+  recipientName: string | null;
+  legs: Array<{ sequence: number; kind: string; status: string }>;
+};
 
-/**
- * PENDING MDF-699. A reference that does not exist at all, and a reference
- * for a DIRECT (no-hub) shipment -- both must be refused the same
- * structural way as "another terminal," never a different error shape that
- * would let staff distinguish "exists elsewhere" from "exists but not
- * here" from "never existed" (an information-leak the card's own "never
- * return a collection code, PIN or reveal token" spirit implies extends to
- * not leaking existence either, though the card does not say so in so many
- * words -- confirm this reading with Pam rather than asserting it as fact
- * once the route exists).
- */
-test.fixme('An unknown reference and a DIRECT (no-hub) reference are both refused, ideally indistinguishably from the wrong-terminal case (PENDING: route not published; confirm the no-leak reading with Pam)', async () => {});
+test('A terminal staff member can look up a reference at their own hub and gets a detail payload with no code/PIN/reveal-token field', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const adminPage = await (await browser.newContext()).newPage();
+  await adminLogin(adminPage);
+  const { hubA } = await findHubs(adminPage);
+  const { email } = await createTerminalStaff(adminPage, 'OwnHub', hubA.id);
+
+  const customerPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  const { reference } = await bookHubToDoor(customerPage, hubA.id, `Mdf699OwnHub ${stamp}`);
+
+  const staffPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+
+  const lookup = await getJson<LookupResponse>(staffPage, `/terminal/shipments/${encodeURIComponent(reference)}`);
+  expect(lookup.status, 'a staff member at the right hub must get 200').toBe(200);
+  expect(lookup.body.reference).toBe(reference);
+  expect(Array.isArray(lookup.body.legs), 'detail payload must include a legs array for a counter conversation').toBeTruthy();
+
+  const leakedKeys = Object.keys(lookup.body).filter((k) => /code|pin|token/i.test(k));
+  expect(leakedKeys, `response must never carry a code/PIN/token field, found: ${leakedKeys.join(', ')}`).toEqual([]);
+});
+
+test('A reference belonging to another terminal is refused on lookup with a real 403, never a silent empty result', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const adminPage = await (await browser.newContext()).newPage();
+  await adminLogin(adminPage);
+  const { hubA, hubB } = await findHubs(adminPage);
+  // Staff holds ONLY hubA. Book a shipment that touches ONLY hubB.
+  const { email } = await createTerminalStaff(adminPage, 'WrongHub', hubA.id);
+
+  const customerPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  const { reference } = await bookHubToDoor(customerPage, hubB.id, `Mdf699WrongHub ${stamp}`);
+
+  const staffPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+
+  const lookup = await getJson<Record<string, unknown>>(staffPage, `/terminal/shipments/${encodeURIComponent(reference)}`);
+  expect(lookup.status, 'a real shipment at a DIFFERENT terminal must be a real 403, not a 200 with empty/null fields').toBe(403);
+  expect('reference' in lookup.body, '403 body must not leak the shipment payload').toBe(false);
+});
+
+test('An unknown reference gets 404, and a DIRECT (no-hub) reference gets the same 403 as the wrong-terminal case', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const adminPage = await (await browser.newContext()).newPage();
+  await adminLogin(adminPage);
+  const { hubA } = await findHubs(adminPage);
+  const { email } = await createTerminalStaff(adminPage, 'NoHub', hubA.id);
+
+  const staffPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+
+  // Unknown reference: no shipment with this reference exists anywhere.
+  const unknown = await getJson(staffPage, `/terminal/shipments/BML-MDF699-NOPE-${stamp}`);
+  expect(unknown.status, 'a reference that never existed must be 404, distinct from the wrong-terminal 403').toBe(404);
+
+  // DIRECT (no-hub): a DOOR_TO_DOOR shipment touches no hub at all, so it
+  // takes the SAME path as "touches none of my hubs" -- 403, confirmed by
+  // reading ShipmentService.lookupForTerminal directly, not guessed. The
+  // original fixme here asked whether this should be indistinguishable
+  // from the wrong-terminal case to avoid an existence leak; the shipped
+  // contract answers that by construction, since both a real-but-elsewhere
+  // shipment and a real-but-hub-less shipment hit the identical 403 branch
+  // (only "never existed anywhere" gets the different 404).
+  const customerPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(customerPage, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD)).toBeTruthy();
+  const doorToDoor = {
+    service: 'DOOR_TO_DOOR',
+    origin: { name: 'Sender', phone: '501-222-7098', address: '1 MDF-699 Sender Road', city: 'Belize City', district: 'BELIZE' },
+    destination: { name: `Mdf699Direct ${stamp}`, phone: '501-222-7097', address: '2 MDF-699 Recipient Road', city: 'Belize City', district: 'BELIZE' },
+    pieces: 1,
+    description: `MDF-699 DIRECT fixture ${stamp}`,
+    payWithWallet: true,
+  };
+  await postWithCsrf(customerPage, '/shipping/quote', doorToDoor);
+  const created = await postWithCsrf<{ reference: string }>(customerPage, '/shipping', doorToDoor);
+  expect(created.status, `DOOR_TO_DOOR booking failed: ${JSON.stringify(created.body)}`).toBe(201);
+
+  const direct = await getJson(staffPage, `/terminal/shipments/${encodeURIComponent(created.body.reference)}`);
+  expect(direct.status, 'a DIRECT shipment touches no hub, so it must 403 the same way a wrong-terminal shipment does').toBe(403);
+});
