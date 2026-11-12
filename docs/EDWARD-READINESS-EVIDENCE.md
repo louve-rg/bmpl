@@ -17,9 +17,11 @@ merged PR, a green CI check, or an existing endpoint is never read as a pass.
 The **GO/NO-GO recommendation is the owner's, made through god** — this
 document holds the slot for it (§4) and does not pre-fill it.
 
-**Last synced against `tasks.json` and the cited PRs:** 2026-11-12, ~23:40
-UTC. Re-sync before trusting a row that looks final — fourteen-plus cards
-are moving under this document right now.
+**Last synced against `tasks.json` and the cited PRs:** 2026-11-12, ~23:50
+UTC. **Re-sync trigger, by design (not every card update):** a Stanley
+verdict changing, or immediately before the GO/NO-GO slot in §4 is filled
+in. A card note moving on its own is reasoning, not a status change, and is
+not a trigger.
 
 ---
 
@@ -68,7 +70,7 @@ one as more terminal PRs land.
 
 | # | Workflow | Card(s) | Code state (now) | Stanley verdict (MDF-697) | Note |
 | - | --- | --- | --- | --- | --- |
-| 1 | Collect parcel at counter (name + code) | MDF-696 (fix), MDF-703 (admin parity, PR #684 open) | **Deployed** (web, confirmed §1) + **Implemented** (admin half, PR #684, CI green, not merged) | **FIXED IN SOURCE** (ticket T-1), live **NOT TESTED** | **Self-corrected by Stanley, not by this document.** His first pass read T-1 as FAIL against a stale worktree baseline (`5cbb515c`, cut before the collection-code fix existed); his own Update 2 caught that himself, re-based, and moved T-1 to FIXED IN SOURCE, citing `apps/web/app/dashboard/terminal/page.tsx:92, 208-222, 466-481` — he still marks live behaviour NOT TESTED, since re-reading source is not running the app. **The honest residual is T-1b**, a distinct gap he separately holds open: the **admin** console's own collect action (not this web screen) still posted the collector's name only, no code. Oscar's PR #684 fixes it — CI green, held for Stanley's review, not merged. This row does not go to FIXED IN SOURCE on T-1b until that PR is reviewed. |
+| 1 | Collect parcel at counter (name + code) | MDF-696 (fix), MDF-703 (admin parity, PR #684 open) | **Deployed** (web, confirmed §1) + **Implemented** (admin half, PR #684, CI green, not merged) | **FIXED IN SOURCE** (T-1 and T-1b both), live **NOT TESTED** on both | **Self-corrected by Stanley, not by this document, on both halves.** T-1 (the web screen): his first pass read FAIL against a stale worktree baseline (`5cbb515c`, cut before the collection-code fix existed); his own Update 2 caught that himself and moved T-1 to FIXED IN SOURCE, citing `apps/web/app/dashboard/terminal/page.tsx:92, 208-222, 466-481`. T-1b (the **admin** console's collect action, previously name-only): on reading PR #684's diff directly, Stanley moved this from FAIL to FIXED IN SOURCE too — not merged, so still **live NOT TESTED**; he will not close it until he sees it working, so "fixed in source" is as far as a verdict goes before that. |
 | 2 | Obtain the collection code (recipient/sender) | MDF-709 (API), MDF-710 (UI) | **Implemented** — both cards `doing`, not merged | **FAIL** (ticket T-2, corrected 2026-11-12) | Stanley's correction already names the exact fix path (reuse the CLOSE-2 two-step reveal pattern) and marks the live half NOT TESTED pending it. No owner decision needed — god's notes on both cards confirm this is pure build-out. |
 | 3 | Collection lockout + a way forward when locked | MDF-698 (manager unlock-request), MDF-703 (messaging) | **Implemented** — both `doing` | **FAIL** (ticket T-6, added after PR #680 review) | Admin-only unlock is correct by design (owner's own ruling) and is not the defect; the screen giving the clerk nothing to do next is. |
 | 4 | Look up a parcel by reference | MDF-699 | **Implemented** — contract approved (`GET /terminal/shipments/:reference`, 404/403/200 split, carries `isTest`); no PR yet | **FAIL** (ticket T-3) | Contract approval is a decision, not code — this row does not move to Merged until a PR lands. |
@@ -77,9 +79,9 @@ one as more terminal PRs land.
 | 7 | Core actions: depart / arrive / handoff / release-to-courier | pre-existing, deployed | **Deployed** | **BLOCKED** (MDF-696/708 — no live account) | Jim's 8 real specs for this journey exist (PR #680, not merged) but **zero have been run** — he self-declared NOT TESTED on every one. |
 | 8 | Custody chain / who holds a parcel, visible to staff | MDF-701 | **Implemented** — backend writes custody today; display does not exist yet | **FAIL** (ticket T-5, feature gap) | — |
 | 9 | Manager dashboard / activity-audit / exception / manifest views | MDF-702, MDF-701 | **Implemented** — `doing`, rebuild in progress | **FAIL** (ticket T-5) | — |
-| 10 | Staff invitation → account creation → sign-in, incl. delivery-outcome visibility | MDF-695 (merged+deployed) | **Deployed** — `2951a385`, confirmed §1 — but see note: provisioning does not finish inside the admin console | **BLOCKED** (MDF-696 + "a QA admin who is not the owner") | No real invite has been sent through the deployed admin UI yet; automated-test evidence only. **Toby's finding, load-bearing for MDF-708**: an invite does not become an ACTIVE member on admin action alone — the invited person must separately open a *different app, different domain* (`apps/web /terminal/accept-invite?token=...`), fill their own first name, last name and password, and even then receives no session there — signing in afterward is a further, separate step. **Two real people must complete this hop for each account.** For Edward specifically, the owner has already ruled he must activate his own account himself and must not be impersonated — so this is not a step the floor can do on his behalf even once provisioned. |
+| 10 | Staff invitation → account creation → sign-in, incl. delivery-outcome visibility | MDF-695 (merged+deployed) | **Deployed** — `2951a385`, confirmed §1 — but see note: provisioning does not finish inside the admin console | **BLOCKED** (MDF-696 + "a QA admin who is not the owner") | No real invite has been sent through the deployed admin UI yet; automated-test evidence only. **Toby's finding, load-bearing for MDF-708**: an invite does not become an ACTIVE member on admin action alone — the invited person must separately open a *different app, different domain* (`apps/web /terminal/accept-invite?token=...`), fill their own first name, last name and password, and even then receives no session there — signing in afterward is a further, separate step. **Two real people must complete this hop for each account.** For Edward specifically, the owner has already ruled he must activate his own account himself and must not be impersonated — so this is not a step the floor can do on his behalf even once provisioned. **Whether the invitation email that starts this hop actually arrives in production is itself unverified — see §3.** |
 | 11 | Admin: terminal company + location setup | pre-existing, deployed | **Deployed** | **BLOCKED** (MDF-696) | — |
-| 12 | Hub drop-off / release / line-haul: courier's own code visibility | MDF-711 (determination, complete), MDF-717 (new UI card) | **Deployed** (backend `revealCourierCode`, pre-existing) with **Blocked-by-defect** (no UI consumes it) | **NOT TESTED** — the security question is resolved in the product's favour; live behaviour not run | **Determination now complete, confirmed independently twice** (Jim, then Pam, matching traces): the endpoint returns `handoffPin` for a FIRST_MILE leg and `pickupPin` for LAST_MILE — always the courier's **own** code, never the recipient's or sender's secret (`shipment.service.ts:4989-5029`, kind-gated branch at `:5022-5035`; ownership checked on the driver's own `userId` at `:5014-5017`). The owner's absolute rule ("a driver must never receive the secret code through a driver-intended API") is satisfied. **The residual is real and now carded separately as MDF-717**: a repo-wide grep found exactly one caller of this route, an e2e spec — no driver-facing screen calls it, so a real courier has no in-app way to see their own code today. |
+| 12 | Hub drop-off / release / line-haul: courier's own code visibility | MDF-711 (security, closed), MDF-717 (usability, open) | **Deployed** (backend `revealCourierCode`, pre-existing) with **Blocked-by-defect** (no UI consumes it) | **Ruled, and split** (S-1): security half **NO DEFECT**; usability half **FAIL** as MDF-717. Live **NOT TESTED** on both | Stanley's ruling, confirmed independently twice before he ruled (Jim, then Pam, matching traces): the endpoint returns `handoffPin` for a FIRST_MILE leg and `pickupPin` for LAST_MILE — always the courier's **own** code, never the recipient's or sender's secret (`shipment.service.ts:4989-5029`, kind-gated branch at `:5022-5035`); finished legs refused; ownership checked on the assigned driver's own profile (`userId` at `:5014-5017`). The owner's absolute rule ("a driver must never receive the secret code through a driver-intended API") is satisfied — **no defect**. The usability half is a separate, real FAIL: a repo-wide grep found exactly one caller of this route, an e2e spec — no driver-facing screen calls it, so a real courier has no in-app way to see the code the clerk asks for. Carded as **MDF-717**. |
 | 13 | Demo/test data visibly labelled on this screen | MDF-707 (spec, PR #681 open), MDF-700 (backend exposure), MDF-702 (frontend badge) | **Implemented** (spec only; code not started) | **FAIL** (new ticket **T-7**) | Stanley accepted the spec's own PASS criterion verbatim: *"a rendered Demo or Test label observed on a real isTest company and a real isTest parcel, absent on a real one, and a code reading cannot satisfy it."* That exact wording now binds MDF-700/702 — a future claim of PASS here must be checked against it, not a looser paraphrase. |
 | 14 | Terminal company + hub provisioning actually usable for `isTest` data | MDF-708, MDF-714 (done — not a defect), MDF-715 (open) | **Blocked-by-defect** — narrowed to one UI gap, see note | **Not Stanley's own row; corrected by Pam/Oscar/Stanley/god jointly, 23:15** | Toby's original finding (no API path to create an `isTest` hub) was checked by three agents independently before anyone wrote code, and does not hold: `hubBase`/`createHubSchema` already accept `isTest` and `createHub` already honours it (`logistics-network.service.ts:194-209`, shipped since `111cd4b`, 2026-09-04). **MDF-714 closed as not a defect — no code changed.** The real, narrower blocker: the **admin console's hub-creation form has no `isTest` checkbox**, so nobody can reach the capability that already exists — ticking "Simulation company (isTest)" on the terminal-company form still produces an empty hub dropdown next step, for a UI reason, not an API one. Carded as **MDF-715** (Oscar), now the sole code dependency on MDF-708's pending owner grant. |
 
@@ -145,6 +147,18 @@ Pulled from the cards and from Stanley's own matrix/tickets, not re-derived:
   *reach* the API capability that already exists. This is now the sole code
   dependency standing between MDF-708's pending owner grant and usable
   simulation data.
+- **Whether a production invitation email actually arrives is unverified,
+  not confirmed working.** `EMAIL_PROVIDER` defaults to `'console'`
+  (`apps/api/src/config/env.ts:109`), and in console mode
+  `EmailService.sendDetailed()` (`apps/api/src/email/email.service.ts:74-80`)
+  logs a "simulated accept" and returns `delivered: true` **without sending
+  anything**. Nobody on this floor can currently read the deployed value of
+  this variable: the broker returns an empty integrations list, and the
+  app's own secret store has no keys saved. Record this as **unverified**,
+  not as broken — it is a real prerequisite for row 10's two-person
+  accept-invite hop (Edward's own self-activation depends on the invite
+  email actually landing), and Toby is checking whether the value is set
+  anywhere committed.
 - **The console's own demo-company control is a one-way switch, not a
   setting.** The admin creation form's checkbox is literally labelled
   `"Simulation company (isTest) — never mixed with real hubs or real
@@ -232,10 +246,10 @@ not repeated here.
   while the fix had already shipped, until Stanley corrected his own stale
   baseline and moved it himself — this document only ever reported the
   mismatch, never adjudicated it.
-- **Sync continuously, not in batches.** With fourteen-plus cards moving,
-  a row that is right now and wrong an hour from now is more dangerous than
-  one that is obviously stale, because a reader stops checking the
-  timestamp once the document looks current.
+- **Re-sync on two triggers only: a Stanley verdict changing, and
+  immediately before §4's GO/NO-GO is filled in.** Not on every card note —
+  most of what lands on a card is reasoning in progress, not a status
+  change, and re-syncing on each one is churn, not value.
 - Re-run `node scripts/deploy-status.mjs` before restating §1 — it reads
   live config and production every time; this document's own copy of its
   output is a snapshot, not a source of truth going forward.
