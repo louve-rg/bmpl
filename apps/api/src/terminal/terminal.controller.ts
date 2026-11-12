@@ -160,6 +160,18 @@ export class TerminalController {
   }
 
   /**
+   * MDF-698: the one MANAGER-only read this card wires up. Same "no
+   * `@RequirePermission`/`@Roles`" reasoning as this whole controller —
+   * the check is `TerminalService.assertActiveMemberRole`, inside
+   * `myStaff`, against the terminal-role axis, not either of the other
+   * two. An OPERATOR gets a 403 from the service, not an empty list.
+   */
+  @Get('staff')
+  staff(@CurrentUser() u: AuthContext) {
+    return this.terminal.myStaff(u.userId);
+  }
+
+  /**
    * TERM-8: the work queue the owner found missing — everything waiting on
    * a terminal action at one of MY granted ACTIVE locations, across every
    * company I belong to. Scoped the same way `myWorkspace` is: re-read at
