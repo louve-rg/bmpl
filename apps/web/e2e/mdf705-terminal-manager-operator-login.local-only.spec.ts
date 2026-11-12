@@ -225,8 +225,19 @@ test('MDF-698 contract: OPERATOR and MANAGER are identical on GET /terminal/me a
   // (assertActiveMemberRole). If this ever reads 200 for OPERATOR, the role
   // split has regressed to cosmetic-only. If MANAGER ever reads anything but
   // 200, the route itself is broken for the role it's supposed to serve.
-  const managerStaff = await getJson(managerPage, '/terminal/staff');
-  const operatorStaff = await getJson(operatorPage, '/terminal/staff');
+  const managerStaff = await getJson<{ message?: string }>(managerPage, '/terminal/staff');
+  const operatorStaff = await getJson<{ message?: string }>(operatorPage, '/terminal/staff');
   expect(managerStaff.status, 'MANAGER GET /terminal/staff must be 200').toBe(200);
   expect(operatorStaff.status, 'OPERATOR GET /terminal/staff must be 403 -- this is the one route MDF-698 actually restricts').toBe(403);
+
+  // Tie the 403 to the ROLE reason, not just the status code (Stanley's
+  // limit: a bare 403 can't distinguish wrong-role from no-membership,
+  // which assertActiveMemberRole throws as a DIFFERENT message --
+  // "No active terminal company membership." This OPERATOR has an active
+  // membership, so a 403 with that other message would mean the wrong
+  // check fired, not the right one, and this assertion would catch it.
+  expect(
+    operatorStaff.body.message,
+    'OPERATOR 403 must be the terminal-manager-role reason, not the no-membership reason -- this OPERATOR has an active membership',
+  ).toBe('This action requires the terminal manager role.');
 });
