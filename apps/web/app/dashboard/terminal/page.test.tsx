@@ -50,6 +50,29 @@ const RELEASE_ROW = {
 };
 const COLLECT_ROW = { action: 'COLLECT' as const, shipmentId: 'ship_1', hubId: HUB.id, reference: 'BML-5', parcel: '3 parcels' };
 
+const LOOKUP_RESULT = {
+  shipmentId: 'ship_9',
+  reference: 'BML-9',
+  status: 'IN_TRANSIT',
+  description: 'Spare parts',
+  pieces: 2,
+  isTest: false,
+  senderName: 'Juan Perez',
+  recipientName: 'Maria Lopez',
+  legs: [
+    {
+      sequence: 1,
+      kind: 'LINE_HAUL',
+      status: 'COMPLETED',
+      originHub: { id: 'hub_a', name: 'Belize City Hub' },
+      destinationHub: { id: 'hub_b', name: 'San Pedro Hub' },
+      departedAt: '2026-11-01T10:00:00.000Z',
+      arrivedAt: '2026-11-01T14:00:00.000Z',
+      completedAt: '2026-11-01T14:05:00.000Z',
+    },
+  ],
+};
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -65,6 +88,8 @@ type StubOpts = {
   queueRowsAfter?: unknown[];
   actionStatus?: number;
   actionBody?: unknown;
+  lookupStatus?: number;
+  lookupBody?: unknown;
 };
 
 function stubFetch(opts: StubOpts = {}) {
@@ -77,6 +102,10 @@ function stubFetch(opts: StubOpts = {}) {
       const method = init?.method ?? 'GET';
       if (url.includes('/api/terminal/me')) {
         return jsonResponse(opts.workspaceStatus ?? 200, opts.workspaceBody ?? WORKSPACE);
+      }
+      if (url.includes('/api/terminal/shipments/') && method === 'GET') {
+        calls.push({ url, method, body: null });
+        return jsonResponse(opts.lookupStatus ?? 200, opts.lookupBody ?? {});
       }
       if (url.includes('/api/terminal/queue')) {
         queueCallCount += 1;
@@ -378,6 +407,93 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(calls.find((c) => c.url.includes('/depart'))).toBeDefined();
       expect(container!.textContent).toContain('Nothing to depart right now');
       expect(container!.textContent).not.toContain('Nothing waiting at your locations');
+    });
+  });
+
+  // MDF-702 step 2 / T-7: the Lookup tab, GET /terminal/shipments/:reference,
+  // and the Demo badge this endpoint's isTest field makes possible.
+  describe('MDF-702 step 2 — the Lookup tab, and T-7\'s Demo badge', () => {
+    it('shows a prompt rather than a result before any search has run', async () => {
+      stubFetch({ queueRows: [] });
+      await mount();
+      await clickTab('Lookup');
+
+      expect(container!.textContent).toContain('Look up a parcel');
+    });
+
+    it('refuses an empty search without calling the API', async () => {
+      const calls = stubFetch({ queueRows: [] });
+      await mount();
+      await clickTab('Lookup');
+      await clickButton('Look up');
+
+      expect(calls.find((c) => c.url.includes('/terminal/shipments/'))).toBeUndefined();
+      expect(container!.textContent).toContain('Enter a reference to look up.');
+    });
+
+    it('looks up a reference and renders the result -- status, description, pieces, sender, recipient and each leg', async () => {
+      const calls = stubFetch({ queueRows: [], lookupBody: LOOKUP_RESULT });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(calls.find((c) => c.url.includes('/terminal/shipments/BML-9'))).toBeDefined();
+      expect(container!.textContent).toContain('BML-9');
+      expect(container!.textContent).toContain('Spare parts');
+      expect(container!.textContent).toContain('2 pieces');
+      expect(container!.textContent).toContain('Juan Perez');
+      expect(container!.textContent).toContain('Maria Lopez');
+      expect(container!.textContent).toContain('Belize City Hub');
+      expect(container!.textContent).toContain('San Pedro Hub');
+    });
+
+    it('renders a Demo badge when the result is isTest, and no badge at all when it is not', async () => {
+      stubFetch({ queueRows: [], lookupBody: { ...LOOKUP_RESULT, isTest: true } });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('Demo');
+    });
+
+    it('renders no Demo badge for a real (non-test) shipment', async () => {
+      stubFetch({ queueRows: [], lookupBody: LOOKUP_RESULT });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('BML-9');
+      expect(container!.textContent).not.toContain('Demo');
+    });
+
+    it('surfaces the server\'s real 404 message for a reference that does not exist, distinct from the 403 case', async () => {
+      stubFetch({ queueRows: [], lookupStatus: 404, lookupBody: { message: 'No shipment with that reference.' } });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-404');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('No shipment with that reference.');
+    });
+
+    it('surfaces the server\'s real 403 message for a shipment outside the caller\'s hubs', async () => {
+      stubFetch({ queueRows: [], lookupStatus: 403, lookupBody: { message: 'This shipment is not at one of your terminal locations.' } });
+      await mount();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('This shipment is not at one of your terminal locations.');
+    });
+
+    it('is visible to an OPERATOR, not just a MANAGER -- lookup is hub-scoped, not role-scoped', async () => {
+      stubFetch({ workspaceBody: WORKSPACE, queueRows: [] });
+      await mount();
+
+      expect(() => findTab('Lookup')).not.toThrow();
     });
   });
 });
