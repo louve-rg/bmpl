@@ -294,13 +294,31 @@ export default function ShipmentOpsPage() {
     await act(legId, 'operator', { providerProfileId: picked || null });
   }
 
+  /**
+   * MDF-703: this screen used to send only `{ collectedByName }`.
+   * `collectShipmentSchema` (packages/validation/src/shipping.ts) requires
+   * `code` -- the same defect `apps/web/app/dashboard/terminal/page.tsx` had
+   * before `6cc75009`, just never caught here because no card named this
+   * file. Same regex as that fix and as the schema itself
+   * (`/^\d{4,8}$/`), same message. Code is asked for first and validated
+   * before the second prompt, so a bad code costs nothing beyond typing it
+   * again -- the operator is never asked for the recipient's name only to
+   * be told afterward that the code they already gave was wrong.
+   */
   async function recordCollection() {
     if (!s) return;
+    const code = window.prompt('Enter the 4-8 digit collection code the recipient presents:')?.trim();
+    if (!code) return;
+    if (!/^\d{4,8}$/.test(code)) {
+      setErr('Enter the 4-8 digit collection code the recipient presents.');
+      return;
+    }
     const collectedByName = window.prompt('Who collected the parcel?')?.trim();
     if (!collectedByName || collectedByName.length < 2) return;
     setBusy('collect');
+    setErr(null);
     try {
-      await api.post(`/admin/logistics/shipments/${s.id}/collect`, { collectedByName });
+      await api.post(`/admin/logistics/shipments/${s.id}/collect`, { code, collectedByName });
       await load();
     } catch (e) {
       setErr((e as ApiError).message ?? 'Could not record that collection.');
