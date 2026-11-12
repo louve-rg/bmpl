@@ -49,14 +49,21 @@ unlock anything extra yet.
 ## The codes
 
 Several of these steps ask for a short code — four to eight digits. The
-idea is simple and deliberate: **the person on the other side (the courier,
-or the person collecting the parcel) reads that code aloud from their own
-phone or paperwork, and the counter staff type it in.** Staff never look the
-code up themselves, and the screen never shows it to them in advance —
-that would defeat the point, which is proving the other person actually has
-it in hand. Typing in the wrong code enough times locks that parcel's
-collection until an administrator clears it, so it can't be brute-forced by
-guessing.
+design is simple and deliberate: **the person on the other side reads that
+code aloud from their own device or paperwork, and the counter staff type it
+in.** Staff never look the code up themselves, and the screen never shows it
+to them in advance — that would defeat the point, which is proving the
+other person actually has it in hand. Typing in the wrong code enough times
+locks that parcel's collection until an administrator clears it, so it
+can't be brute-forced by guessing.
+
+**For the collection step specifically, that path does not exist yet.**
+Today there is no screen or message anywhere that shows a recipient their
+own collection code — so a real person arriving to collect a parcel has no
+way to know what to present at the counter. This is being built now (cards
+MDF-709 and MDF-710); until it ships, collection cannot actually be
+completed by a real recipient, demo or otherwise. Do not demonstrate the
+collection step as working end to end before those two cards close.
 
 ## Demo data vs. real data
 

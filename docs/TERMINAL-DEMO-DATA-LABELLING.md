@@ -20,10 +20,13 @@ system is **already real, at write time, today**:
 - `terminal.service.ts:155` refuses to authorize a terminal company at a
   hub whose `LogisticsHub.isTest` doesn't match the company's own `isTest` —
   a test company cannot be placed at a real hub or vice versa.
-- `terminal.service.ts:315` refuses to invite an existing user into a
-  terminal company whose `User.isTest` doesn't match the company's — a real
-  person's account cannot be pulled into a test company's staff, or a test
-  account into a real one.
+- `terminal.service.ts:315` refuses to let an existing user *accept* an
+  invite into a terminal company whose `User.isTest` doesn't match the
+  company's — a real person's account cannot be pulled into a test
+  company's staff, or a test account into a real one. **Corrected
+  2026-11-12**: this check runs inside `acceptInvite`, at the moment the
+  invited person accepts — not when the invite is sent, as an earlier
+  version of this line (and the dispatch it came from) said.
 - `Shipment.isTest` (`schema.prisma:5090`) carries the same boundary at the
   parcel level. `ShipmentLeg` has no `isTest` column of its own — it is
   reached only through its `shipment` relation (`schema.prisma:5338-5341`),
@@ -43,8 +46,9 @@ currently tell which side of the boundary they're looking at.
    value is fetched from the database and then thrown away before the
    response leaves the method.
 2. `GET /terminal/queue` (`terminal.controller.ts:172-175`, backed by
-   `apps/api/src/shipping/shipment.service.ts:5111-5192`, `terminalQueue`)
-   runs five separate Prisma queries — one per queue section (DEPART,
+   `apps/api/src/shipping/shipment.service.ts:5111-5214`, `terminalQueue`
+   — corrected 2026-11-12 from `5111-5192`, which cut the function's own
+   `return` statement mid-way) runs five separate Prisma queries — one per queue section (DEPART,
    ARRIVE, HANDOFF, RELEASE_TO_COURIER, COLLECT) — and **none of their five
    `select`/`include` clauses fetches `shipment.isTest`**
    (`shipment.service.ts:5118,5124,5143,5152,5161`). The backend cannot
@@ -136,3 +140,9 @@ yet, that is a separate, already-known gap (`docs/TEST-ACCOUNTS.md`'s new
 verdict is **BLOCKED**, naming that gap precisely — not a PASS on a
 code-reading alone, and not a FAIL for a precondition this card does not
 control.
+
+**Update 2026-11-12:** Stanley accepted the §4 PASS criterion above
+verbatim and logged the missing label itself as a new ticket, **T-7**,
+owned by MDF-700 (the backend exposure in §3.1) and MDF-702 (the frontend
+badge in §3.2) — so a future PASS on either card should be checked against
+exactly this wording, not a looser paraphrase of it.
