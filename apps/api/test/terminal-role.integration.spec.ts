@@ -16,6 +16,8 @@
  * terminal-queue.integration.spec.ts and shipping-handoff-reversal.
  * integration.spec.ts, and this file does not re-test them.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
@@ -287,41 +289,76 @@ describe('MDF-716: every terminal-staff route is accounted for here — a new on
   // — deliberately NOT AdminTerminalController (a different axis entirely:
   // terminals.manage/terminals.read) and NOT TerminalInviteController
   // (@Public(), no session, so "role" does not apply).
+  //
+  // `throttled`: Stanley's follow-up finding on this same card — a route
+  // whose path carries a specific resource id/reference (so a caller can
+  // probe many values of it) needs @StrictThrottle() to bound that; a
+  // parameterless route (me/staff/queue — nothing to probe) does not need
+  // the same bound, so it is correctly `false` here, not an oversight.
   const ROLE_MATRIX = [
-    { controller: 'TerminalController', route: 'GET /terminal/me', roles: 'ANY' },
-    { controller: 'TerminalController', route: 'GET /terminal/staff', roles: 'MANAGER' },
-    { controller: 'TerminalController', route: 'GET /terminal/queue', roles: 'ANY' },
-    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/handoff', roles: 'ANY' },
-    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/release-to-courier', roles: 'ANY' },
-    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/depart', roles: 'ANY' },
-    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/arrive', roles: 'ANY' },
-    { controller: 'TerminalShipmentsController', route: 'POST /terminal/shipments/:id/collect', roles: 'ANY' },
-    { controller: 'TerminalShipmentsController', route: 'GET /terminal/shipments/:reference', roles: 'ANY' },
+    { controller: 'TerminalController', route: 'GET /terminal/me', roles: 'ANY', throttled: false },
+    { controller: 'TerminalController', route: 'GET /terminal/staff', roles: 'MANAGER', throttled: false },
+    { controller: 'TerminalController', route: 'GET /terminal/queue', roles: 'ANY', throttled: false },
+    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/handoff', roles: 'ANY', throttled: true },
+    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/release-to-courier', roles: 'ANY', throttled: true },
+    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/depart', roles: 'ANY', throttled: true },
+    { controller: 'TerminalLegsController', route: 'POST /terminal/legs/:id/arrive', roles: 'ANY', throttled: true },
+    { controller: 'TerminalShipmentsController', route: 'POST /terminal/shipments/:id/collect', roles: 'ANY', throttled: true },
+    { controller: 'TerminalShipmentsController', route: 'GET /terminal/shipments/:reference', roles: 'ANY', throttled: true },
   ] as const;
 
-  it('terminal.controller.ts declares exactly as many routes on these three classes as ROLE_MATRIX lists', async () => {
-    const fs = await import('node:fs');
-    const path = await import('node:path');
-    const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'terminal', 'terminal.controller.ts'), 'utf8');
-
+  /** One scan, reused by both assertions below: every @Get/@Post/@Delete/
+   *  @Patch on the three terminal-staff classes, in source order, each
+   *  tagged with whether a @StrictThrottle() appears in the ~80 characters
+   *  immediately before it — long enough to span the decorator's own line
+   *  plus a blank line, short enough that an unrelated sibling route's
+   *  throttle can never be mistaken for this one's. */
+  function scanTerminalStaffRoutes(src: string) {
     const classNames = ['TerminalController', 'TerminalLegsController', 'TerminalShipmentsController'];
-    let total = 0;
+    const routes: { method: string; throttled: boolean }[] = [];
     for (const name of classNames) {
       const marker = `export class ${name}`;
       const start = src.indexOf(marker);
       expect(start, `could not find ${marker} in terminal.controller.ts — did it get renamed?`).toBeGreaterThan(-1);
       const nextClassStart = src.indexOf('\n@Controller(', start + marker.length);
       const block = src.slice(start, nextClassStart === -1 ? src.length : nextClassStart);
-      const matches = block.match(/@(Get|Post|Delete|Patch)\(/g) ?? [];
-      total += matches.length;
+      const re = /@(Get|Post|Delete|Patch)\(/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(block)) !== null) {
+        const windowStart = Math.max(0, m.index - 80);
+        const preceding = block.slice(windowStart, m.index);
+        routes.push({ method: m[1]!, throttled: preceding.includes('@StrictThrottle()') });
+      }
     }
+    return routes;
+  }
+
+  it('terminal.controller.ts declares exactly as many routes on these three classes as ROLE_MATRIX lists', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'terminal', 'terminal.controller.ts'), 'utf8');
+    const routes = scanTerminalStaffRoutes(src);
 
     expect(
-      total,
-      `terminal.controller.ts now declares ${total} routes across TerminalController/TerminalLegsController/` +
+      routes.length,
+      `terminal.controller.ts now declares ${routes.length} routes across TerminalController/TerminalLegsController/` +
         `TerminalShipmentsController, but ROLE_MATRIX above only accounts for ${ROLE_MATRIX.length}. A route was ` +
         `added or removed — extend (or trim) ROLE_MATRIX with an explicit ANY/MANAGER decision for it before ` +
         `trusting this test again.`,
     ).toBe(ROLE_MATRIX.length);
+  });
+
+  it('every route ROLE_MATRIX marks throttled actually carries @StrictThrottle(), in source order', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'terminal', 'terminal.controller.ts'), 'utf8');
+    const routes = scanTerminalStaffRoutes(src);
+
+    expect(routes.length, 'route count drifted from ROLE_MATRIX — see the test above for the real failure').toBe(ROLE_MATRIX.length);
+    routes.forEach((r, i) => {
+      const expected = ROLE_MATRIX[i]!;
+      expect(
+        r.throttled,
+        `${expected.route} (${expected.controller}) is declared throttled=${expected.throttled} in ROLE_MATRIX, ` +
+          `but its actual @StrictThrottle() presence in the source is ${r.throttled} — MDF-716's own finding ` +
+          `(the lookup route shipped without one) is exactly this class of drift.`,
+      ).toBe(expected.throttled);
+    });
   });
 });

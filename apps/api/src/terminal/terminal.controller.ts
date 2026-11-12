@@ -302,7 +302,15 @@ export class TerminalShipmentsController {
    * location-scoping every other route on this controller already uses,
    * and refuses with a REAL 403 for a shipment that exists but belongs to
    * another terminal — never a quiet empty 200.
+   *
+   * MDF-716 (Stanley, accepting the 404/403 split as designed): that same
+   * split makes this route an existence oracle for a reference the caller
+   * does not hold — bounded, never removed, by the identical
+   * `@StrictThrottle()` every sibling write on this controller already
+   * carries. Missing it here was the same "depends on an author
+   * remembering" class of gap as the role check being opt-in.
    */
+  @StrictThrottle()
   @Get(':reference')
   async lookup(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
     const hubIds = await this.terminal.myActiveHubIds(u.userId);
