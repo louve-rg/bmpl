@@ -18,6 +18,16 @@ import { tryLogin, UAT_FIXTURE_PASSWORD } from './support/auth';
  * assertion to make real the moment MDF-699 publishes its route -- not a
  * guessed route, since the card text does not commit to one and inventing
  * it would be exactly the business-rule guess CLAUDE.md §12 forbids.
+ *
+ * The one test that runs today proves an absence, which a pass-count tally
+ * cannot tell apart from a healthy feature -- Stanley's ruling on this
+ * file's sibling (MDF-709/710). Its title starts `GAP-PROOF:` so it can be
+ * excluded from any such tally by title/grep. It asserts the control is
+ * absent by a best-guess label regex (`reference|tracking|search|lookup`);
+ * that regex, not just the absence, will need re-checking against
+ * whatever MDF-699/MDF-702 actually ships (a control labelled e.g. "Find a
+ * shipment" would slip past it) -- plan to replace this with a positive
+ * lookup test once MDF-699 lands, not just flip a wording nit.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
@@ -96,7 +106,17 @@ async function createTerminalStaff(adminPage: Page, label: string, hubId: string
   return { email };
 }
 
-test('TODAY: the Terminal Workspace has no lookup-by-reference control anywhere, and the queue endpoint has no query parameter to filter by', async ({ browser }) => {
+/** Positive control for the absence check below: prove the workspace
+ * actually loaded a real, non-error session first. Without this, a lookup
+ * control's absence would pass just as happily on a blank/errored page
+ * (Stanley's finding, originally raised against MDF-705's sibling spec). */
+async function waitForWorkspaceLoaded(page: Page): Promise<void> {
+  await expect(page.getByText(/signed in as (manager|operator) ·/i), 'workspace never actually loaded (would make the "no lookup control" check below meaningless)').toBeVisible({
+    timeout: 15_000,
+  });
+}
+
+test('GAP-PROOF: the Terminal Workspace has no lookup-by-reference control anywhere, and the queue endpoint has no query parameter to filter by', async ({ browser }) => {
   test.setTimeout(60_000);
   const adminPage = await (await browser.newContext()).newPage();
   await adminLogin(adminPage);
@@ -108,6 +128,7 @@ test('TODAY: the Terminal Workspace has no lookup-by-reference control anywhere,
   const staffPage = await (await browser.newContext()).newPage();
   expect(await tryLogin(staffPage, email, UAT_FIXTURE_PASSWORD)).toBeTruthy();
   await staffPage.goto(`${WEB}/dashboard/terminal`);
+  await waitForWorkspaceLoaded(staffPage);
 
   await expect(staffPage.getByRole('textbox', { name: /reference|tracking|search|lookup/i }), 'a lookup control must not exist yet -- MDF-699 is the card to add it').toHaveCount(0);
   await expect(staffPage.getByRole('button', { name: /search|look ?up/i }), 'no lookup button exists yet either').toHaveCount(0);
