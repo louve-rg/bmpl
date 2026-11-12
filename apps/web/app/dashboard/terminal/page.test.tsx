@@ -13,9 +13,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * reads as an explanation, not an error; an empty queue reads as "caught
  * up", not a failure; DEPART/ARRIVE are one-click with no body; HANDOFF
  * always sends `presentedByAssignedCourier: true` and never a courier id;
- * RELEASE_TO_COURIER sends only a pin; COLLECT sends only a name, never a
- * code field the backend doesn't accept; and no row ever renders a pin
- * anywhere, since the queue payload never contains one.
+ * RELEASE_TO_COURIER sends only a pin; COLLECT sends both the recipient's
+ * presented code and a name (TERM-5/TERM-8: the code is never prefetched,
+ * displayed or defaulted -- the counter clerk types in what the recipient
+ * reads aloud); and no row ever renders a pin anywhere, since the queue
+ * payload never contains one.
  */
 
 const HUB = { id: 'hub_1', code: 'BZE', name: 'Belize City Hub', district: 'Belize', city: 'Belize City' };
@@ -192,15 +194,47 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
     expect(call?.body).toEqual({ pin: '7733' });
   });
 
-  it('submits a collection with only a name -- no code field the backend would reject', async () => {
+  it('renders a code input on the collect row, separate from the name field', async () => {
+    stubFetch({ queueRows: [COLLECT_ROW] });
+    await mount();
+
+    expect(container!.querySelector('#collect-code-ship_1')).not.toBeNull();
+    expect(container!.querySelector('#collect-who-ship_1')).not.toBeNull();
+  });
+
+  it('submits a collection with both the presented code and the recipient name', async () => {
+    const calls = stubFetch({ queueRows: [COLLECT_ROW] });
+    await mount();
+
+    setValue(container!.querySelector('#collect-code-ship_1') as HTMLInputElement, '4821');
+    setValue(container!.querySelector('#collect-who-ship_1') as HTMLInputElement, 'Ana Cruz');
+    await clickButton('Record collection');
+
+    const call = calls.find((c) => c.url.includes('/collect'));
+    expect(call?.body).toEqual({ code: '4821', collectedByName: 'Ana Cruz' });
+  });
+
+  it('refuses to submit a collection with no code, without calling the API', async () => {
     const calls = stubFetch({ queueRows: [COLLECT_ROW] });
     await mount();
 
     setValue(container!.querySelector('#collect-who-ship_1') as HTMLInputElement, 'Ana Cruz');
     await clickButton('Record collection');
 
-    const call = calls.find((c) => c.url.includes('/collect'));
-    expect(call?.body).toEqual({ collectedByName: 'Ana Cruz' });
+    expect(calls.find((c) => c.url.includes('/collect'))).toBeUndefined();
+    expect(container!.textContent).toContain('Enter the 4-8 digit collection code the recipient presents.');
+  });
+
+  it('refuses to submit a collection with a malformed code, without calling the API', async () => {
+    const calls = stubFetch({ queueRows: [COLLECT_ROW] });
+    await mount();
+
+    setValue(container!.querySelector('#collect-code-ship_1') as HTMLInputElement, 'abc');
+    setValue(container!.querySelector('#collect-who-ship_1') as HTMLInputElement, 'Ana Cruz');
+    await clickButton('Record collection');
+
+    expect(calls.find((c) => c.url.includes('/collect'))).toBeUndefined();
+    expect(container!.textContent).toContain('Enter the 4-8 digit collection code the recipient presents.');
   });
 
   it('refuses to submit a handoff with no received-by name, without calling the API', async () => {

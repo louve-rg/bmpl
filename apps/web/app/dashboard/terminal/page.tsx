@@ -89,7 +89,7 @@ export default function TerminalWorkspacePage() {
   const [rowErr, setRowErr] = useState<Record<string, string>>({});
   const [handoffForms, setHandoffForms] = useState<Record<string, { pin: string; receivedByName: string }>>({});
   const [releaseForms, setReleaseForms] = useState<Record<string, string>>({});
-  const [collectForms, setCollectForms] = useState<Record<string, string>>({});
+  const [collectForms, setCollectForms] = useState<Record<string, { code: string; collectedByName: string }>>({});
 
   const loadWorkspace = useCallback(async () => {
     setWorkspaceErr(null);
@@ -205,15 +205,21 @@ export default function TerminalWorkspacePage() {
   }
 
   async function collect(shipmentId: string) {
-    const collectedByName = (collectForms[shipmentId] ?? '').trim();
+    const form = collectForms[shipmentId] ?? { code: '', collectedByName: '' };
+    const code = form.code.trim();
+    const collectedByName = form.collectedByName.trim();
     if (!collectedByName) {
       setRowErr((prev) => ({ ...prev, [shipmentId]: 'Enter who is collecting it.' }));
+      return;
+    }
+    if (!/^\d{4,8}$/.test(code)) {
+      setRowErr((prev) => ({ ...prev, [shipmentId]: 'Enter the 4-8 digit collection code the recipient presents.' }));
       return;
     }
     setBusy(shipmentId);
     clearRowState(shipmentId);
     try {
-      await api.post(`/terminal/shipments/${shipmentId}/collect`, { collectedByName });
+      await api.post(`/terminal/shipments/${shipmentId}/collect`, { code, collectedByName });
       setCollectForms((prev) => {
         const { [shipmentId]: _drop, ...rest } = prev;
         return rest;
@@ -306,8 +312,8 @@ export default function TerminalWorkspacePage() {
                       onHandoffChange={(next) => setHandoffForms((prev) => ({ ...prev, [row.action === 'HANDOFF' ? row.legId : '']: next }))}
                       releaseValue={row.action === 'RELEASE_TO_COURIER' ? releaseForms[row.legId] : undefined}
                       onReleaseChange={(v) => setReleaseForms((prev) => ({ ...prev, [row.action === 'RELEASE_TO_COURIER' ? row.legId : '']: v }))}
-                      collectValue={row.action === 'COLLECT' ? collectForms[row.shipmentId] : undefined}
-                      onCollectChange={(v) => setCollectForms((prev) => ({ ...prev, [row.action === 'COLLECT' ? row.shipmentId : '']: v }))}
+                      collectForm={row.action === 'COLLECT' ? collectForms[row.shipmentId] : undefined}
+                      onCollectChange={(next) => setCollectForms((prev) => ({ ...prev, [row.action === 'COLLECT' ? row.shipmentId : '']: next }))}
                       onDepart={depart}
                       onArrive={arrive}
                       onHandoff={handoff}
@@ -334,7 +340,7 @@ function QueueRowCard({
   onHandoffChange,
   releaseValue,
   onReleaseChange,
-  collectValue,
+  collectForm,
   onCollectChange,
   onDepart,
   onArrive,
@@ -350,8 +356,8 @@ function QueueRowCard({
   onHandoffChange: (next: { pin: string; receivedByName: string }) => void;
   releaseValue: string | undefined;
   onReleaseChange: (v: string) => void;
-  collectValue: string | undefined;
-  onCollectChange: (v: string) => void;
+  collectForm: { code: string; collectedByName: string } | undefined;
+  onCollectChange: (next: { code: string; collectedByName: string }) => void;
   onDepart: (legId: string) => void;
   onArrive: (legId: string) => void;
   onHandoff: (legId: string) => void;
@@ -452,19 +458,35 @@ function QueueRowCard({
         )}
 
         {row.action === 'COLLECT' && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-            <Field label="Collected by" htmlFor={`collect-who-${row.shipmentId}`}>
-              <Input
-                id={`collect-who-${row.shipmentId}`}
-                value={collectValue ?? ''}
-                onChange={(e) => onCollectChange(e.target.value)}
-                placeholder="Recipient's name"
-              />
-            </Field>
-            <Button onClick={() => onCollect(row.shipmentId)} disabled={isBusy} className="w-full sm:w-auto">
-              {isBusy ? 'Recording…' : 'Record collection'}
-            </Button>
-          </div>
+          <>
+            <p className="text-xs text-[color:var(--bmpl-text-muted)]">
+              Ask the recipient for the code on their own device, and their name.
+            </p>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+              <Field label="Code presented" htmlFor={`collect-code-${row.shipmentId}`}>
+                <Input
+                  id={`collect-code-${row.shipmentId}`}
+                  value={collectForm?.code ?? ''}
+                  onChange={(e) => onCollectChange({ code: e.target.value, collectedByName: collectForm?.collectedByName ?? '' })}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  className="w-full font-mono sm:w-28"
+                  placeholder="1234"
+                />
+              </Field>
+              <Field label="Collected by" htmlFor={`collect-who-${row.shipmentId}`}>
+                <Input
+                  id={`collect-who-${row.shipmentId}`}
+                  value={collectForm?.collectedByName ?? ''}
+                  onChange={(e) => onCollectChange({ code: collectForm?.code ?? '', collectedByName: e.target.value })}
+                  placeholder="Recipient's name"
+                />
+              </Field>
+              <Button onClick={() => onCollect(row.shipmentId)} disabled={isBusy} className="w-full sm:w-auto">
+                {isBusy ? 'Recording…' : 'Record collection'}
+              </Button>
+            </div>
+          </>
         )}
 
         {error && <p className="mt-2 break-words text-xs font-medium text-amber-800">{error}</p>}
