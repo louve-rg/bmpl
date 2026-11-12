@@ -425,6 +425,35 @@ const MEMBER_ROLES: MemberRole[] = ['MANAGER', 'OPERATOR'];
  * must stop reading as access here on the very next load, with no separate
  * cleanup step.
  */
+/**
+ * What the API now tells us about the invitation email itself. The endpoint
+ * used to return 201 whether Resend accepted the message or threw, so an
+ * administrator had no way to tell a sent invitation from a lost one. The
+ * invite row is still created either way — a provider outage must not cost us
+ * the invitation — so a failure here means "resend", never "start again".
+ */
+type InviteDelivery = { delivered: boolean; outcome: string };
+
+function deliveryMessage(d: InviteDelivery): { tone: 'success' | 'warning'; text: string } {
+  if (d.delivered) {
+    return d.outcome === 'simulated'
+      ? { tone: 'warning', text: 'Invitation created. Email was SIMULATED by this environment, not actually delivered.' }
+      : { tone: 'success', text: 'Invitation created and the email was accepted by the provider.' };
+  }
+  const why =
+    d.outcome === 'missing_credential'
+      ? 'the email provider is not configured in this environment'
+      : d.outcome === 'provider_error'
+        ? 'the email provider rejected or failed the send'
+        : d.outcome === 'not_implemented'
+          ? 'no email transport is enabled here'
+          : d.outcome;
+  return {
+    tone: 'warning',
+    text: `Invitation created but the email was NOT delivered — ${why}. The invite is still valid: use Resend below. The link cannot be recovered any other way.`,
+  };
+}
+
 function MembersCard({
   company,
   activeLocationIds,
@@ -446,6 +475,7 @@ function MembersCard({
   const [locationActionBusy, setLocationActionBusy] = useState<string | null>(null);
   const [grantPick, setGrantPick] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
+  const [delivery, setDelivery] = useState<InviteDelivery | null>(null);
 
   const activeLocations = company.locations.filter((l) => l.isActive);
 
@@ -473,12 +503,19 @@ function MembersCard({
     }
     setInviteBusy(true);
     setErr(null);
+    setDelivery(null);
     try {
-      await api.post(`/admin/terminal/companies/${company.id}/invites`, {
-        email: email.trim(),
-        memberRole,
-        locationIds: Array.from(pickedLocations),
-      });
+      const created = await api.post<{ delivery?: InviteDelivery }>(
+        `/admin/terminal/companies/${company.id}/invites`,
+        {
+          email: email.trim(),
+          memberRole,
+          locationIds: Array.from(pickedLocations),
+        },
+      );
+      // The send outcome, not just the 201. An older API that does not report
+      // it leaves this null rather than claiming a delivery it never proved.
+      if (created?.delivery) setDelivery(created.delivery);
       setEmail('');
       setMemberRole('OPERATOR');
       setPickedLocations(new Set());
@@ -709,6 +746,11 @@ function MembersCard({
           <Button type="button" disabled={inviteBusy || activeLocations.length === 0} onClick={() => void invite()}>
             {inviteBusy ? 'Sending…' : 'Send invite'}
           </Button>
+          {delivery && (
+            <Alert tone={deliveryMessage(delivery).tone === 'success' ? 'success' : 'warning'} className="mt-2">
+              {deliveryMessage(delivery).text}
+            </Alert>
+          )}
         </div>
       )}
     </Card>
@@ -726,7 +768,32 @@ function InvitesCard({
   onChanged: () => void;
 }) {
   const [revokeBusy, setRevokeBusy] = useState<string | null>(null);
+  const [resendBusy, setResendBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [delivery, setDelivery] = useState<InviteDelivery | null>(null);
+
+  /**
+   * Resend rotates this invite's token server-side, because the raw token was
+   * never stored and cannot be read back. The previous link stops working,
+   * which is the point: a link that went astray dies when an admin resends.
+   */
+  async function resend(inviteId: string) {
+    setResendBusy(inviteId);
+    setErr(null);
+    setDelivery(null);
+    try {
+      const res = await api.post<{ delivery?: InviteDelivery }>(
+        `/admin/terminal/companies/${company.id}/invites/${inviteId}/resend`,
+        {},
+      );
+      if (res?.delivery) setDelivery(res.delivery);
+      onChanged();
+    } catch (e) {
+      setErr((e as ApiError).message ?? 'Could not resend that invite.');
+    } finally {
+      setResendBusy(null);
+    }
+  }
 
   async function revoke(inviteId: string) {
     setRevokeBusy(inviteId);
@@ -745,6 +812,11 @@ function InvitesCard({
     <Card className="p-4">
       <h3 className="text-sm font-semibold text-[color:var(--bmpl-text)]">Pending invites</h3>
       {err && <Alert tone="warning" className="mt-2">{err}</Alert>}
+      {delivery && (
+        <Alert tone={deliveryMessage(delivery).tone === 'success' ? 'success' : 'warning'} className="mt-2">
+          {deliveryMessage(delivery).text}
+        </Alert>
+      )}
       {company.pendingInvites.length === 0 ? (
         <p className="mt-2 text-sm text-[color:var(--bmpl-text-muted)]">No pending invites.</p>
       ) : (
@@ -759,9 +831,19 @@ function InvitesCard({
                 </span>
               </div>
               {canManage && (
-                <Button variant="ghost" size="sm" disabled={revokeBusy === inv.id} onClick={() => void revoke(inv.id)}>
-                  {revokeBusy === inv.id ? 'Revoking…' : 'Revoke'}
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={resendBusy === inv.id || revokeBusy === inv.id}
+                    onClick={() => void resend(inv.id)}
+                  >
+                    {resendBusy === inv.id ? 'Resending…' : 'Resend'}
+                  </Button>
+                  <Button variant="ghost" size="sm" disabled={revokeBusy === inv.id || resendBusy === inv.id} onClick={() => void revoke(inv.id)}>
+                    {revokeBusy === inv.id ? 'Revoking…' : 'Revoke'}
+                  </Button>
+                </div>
               )}
             </li>
           ))}

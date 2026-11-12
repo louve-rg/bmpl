@@ -232,11 +232,53 @@ export class TerminalService {
     // flow observable in dev/test exactly the way every other token-email
     // flow already is (auth.integration.spec.ts's own `/dev/emails/latest`
     // convention), without borrowing a type that doesn't fit.
-    const delivered = await this.email.send({ to: dto.email, subject: tpl.title, body: tpl.body });
-    if (delivered) {
+    //
+    // W8/INVITE-SILENT-FAIL: `sendDetailed`, not `send`. The boolean form
+    // discarded the reason a send failed, so a provider error and a real
+    // delivery both left this endpoint returning 201 with nothing to tell
+    // them apart — an administrator could not see that an invitation never
+    // left the building. The invite row is deliberately still committed
+    // before the send (a failed provider must not cost us the invitation),
+    // so the outcome travels back in the response instead.
+    const delivery = await this.email.sendDetailed({ to: dto.email, subject: tpl.title, body: tpl.body });
+    if (delivery.delivered) {
       this.devMailbox.record({ to: dto.email, subject: tpl.title, body: tpl.body, createdAt: new Date().toISOString() });
     }
-    return this.serializeInvite(invite);
+    return { ...this.serializeInvite(invite), delivery };
+  }
+
+  /**
+   * The way back from a failed send. Rotates the token (the raw one was never
+   * stored and cannot be recovered — `serializeInvite` has never returned it
+   * and still does not), re-sends the same invitation, and reports the real
+   * outcome. Rotating rather than re-mailing the old token means a link that
+   * did reach someone it should not stops working the moment an admin
+   * resends, and the invite stays ONE row rather than accumulating live
+   * tokens the way a second `inviteMember` call would.
+   */
+  async resendInvite(actorId: string, companyId: string, inviteId: string) {
+    const company = await this.companyOrThrow(companyId);
+    const invite = await this.prisma.terminalCompanyInvite.findFirst({ where: { id: inviteId, terminalCompanyId: companyId } });
+    if (!invite) throw new NotFoundException('Invite not found.');
+    if (invite.consumedAt) throw new BadRequestException('This invite was already accepted.');
+    if (invite.revokedAt) throw new BadRequestException('This invite was revoked. Issue a new one instead.');
+    const { raw, hash, expiresAt } = issueToken(INVITE_TTL_MS);
+    const updated = await this.prisma.terminalCompanyInvite.update({
+      where: { id: inviteId },
+      data: { tokenHash: hash, expiresAt },
+    });
+    await this.audit.record({
+      action: 'TERMINAL_COMPANY_INVITE_RESENT',
+      actorId,
+      newValue: { terminalCompanyId: companyId, inviteId, email: invite.email },
+    });
+    const link = `${this.env.NEXT_PUBLIC_SITE_URL}/terminal/accept-invite?token=${raw}`;
+    const tpl = templates.terminalInvite(link, company.businessName);
+    const delivery = await this.email.sendDetailed({ to: invite.email, subject: tpl.title, body: tpl.body });
+    if (delivery.delivered) {
+      this.devMailbox.record({ to: invite.email, subject: tpl.title, body: tpl.body, createdAt: new Date().toISOString() });
+    }
+    return { ...this.serializeInvite(updated), delivery };
   }
 
   async revokeInvite(actorId: string, companyId: string, inviteId: string) {
