@@ -12,19 +12,28 @@ import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/au
  * can read.
  *
  * Two different kinds of test in this file, labelled so neither is mistaken
- * for the other:
- *  - REAL tests, against EXISTING endpoints, proving today's actual gap.
- *    These need no new route and no guessed contract -- `trackAsRecipient`
- *    already exists; it is the shape of what it returns that MDF-709 item 1
- *    changes. The ones that currently FAIL on purpose use Playwright's own
- *    `test.fail()`, which flips to a real failure (catching a regression)
- *    the moment the underlying behavior starts passing unexpectedly -- i.e.
- *    once MDF-709 lands, these go green with ZERO edits, which is the "runs
- *    the instant the feature exists" instruction read literally.
- *  - `test.fixme` stubs for the pieces that need a ROUTE neither card has
- *    published yet (the unlinked two-step reveal, the notification, the UI
- *    block). Each names its best-mirror-of-the-existing-pattern guess in a
- *    comment, explicitly marked as a guess to confirm, not a contract to trust.
+ * for the other, and neither is counted as health by anyone tallying green:
+ *  - ONE real test, against an EXISTING endpoint, proving today's actual
+ *    gap. Its title starts `GAP-PROOF:` -- exclude it from any pass count
+ *    by title/grep, same convention as this file's MDF-699 sibling. A test
+ *    whose PASS means "the product is broken" must never read as health.
+ *  - `test.fixme` stubs for every piece of desired POST-fix behaviour,
+ *    including the one this file originally wrote with `test.fail()`.
+ *    Stanley reviewed that technique (god's own request, after proposing it
+ *    floor-wide) and found it unsound here: `test.fail()` accepts ANY
+ *    failure, so a down environment, a broken login, or a failed booking
+ *    step all read as the expected "pending" state too, and if MDF-709
+ *    ships a HALF-right fix (e.g. a code that doesn't match the sender's,
+ *    or one that stays visible after collection) the test keeps failing
+ *    and keeps reading green forever -- the flip never comes and nobody
+ *    learns the feature is partial. `test.fixme` has neither flaw: it is
+ *    always shown as skipped, never counted as a pass, and the full target
+ *    assertion is written out below ready to run the day someone removes
+ *    `test.fixme` and confirms the real route/shape against Pam's PR --
+ *    which is manual work on ship day, not a zero-edit flip. The
+ *    `GAP-PROOF` test above also needs editing that same day, since its
+ *    whole premise (no `collectionCode` key) becomes false once MDF-709
+ *    item 1 ships.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
@@ -129,7 +138,7 @@ async function bookAndClaimToAwaitingCollection(
   return { reference, recipientToken };
 }
 
-test('TODAY: a linked recipient\'s own incoming-shipment view carries no collection code at all (MDF-709 item 1\'s gap, proven live)', async ({ browser }) => {
+test('GAP-PROOF: a linked recipient\'s own incoming-shipment view carries no collection code at all (MDF-709 item 1\'s gap, proven live)', async ({ browser }) => {
   test.setTimeout(120_000);
   const adminPage = await (await browser.newContext()).newPage();
   await adminLogin(adminPage);
@@ -167,16 +176,14 @@ test('TODAY: a linked recipient\'s own incoming-shipment view carries no collect
 });
 
 /**
- * PENDING MDF-709 item 1. Once Pam's fix makes `trackAsRecipient`/
- * `listIncoming` return a real `collectionCode` for a genuinely linked
- * recipient, this test currently fails ON PURPOSE (`test.fail()`) and will
- * flip to passing with no edit required -- that flip IS the regression
- * proof. If it ever passes unexpectedly before MDF-709 ships, Playwright
- * itself raises that as an error (`test.fail()`'s own behavior), which is
- * the correct alarm: it would mean the fix landed silently, uncredited.
+ * PENDING MDF-709 item 1. `test.fixme` -- always shown as skipped, never
+ * counted as a pass or a fail, no matter what state the environment is in.
+ * The body below is the full target assertion, left in place deliberately
+ * so there is nothing left to write the day Pam's PR lands: confirm the
+ * real response shape against that PR, remove `test.fixme`, and this runs.
+ * (See the file header for why this replaced a `test.fail()` version.)
  */
-test('AFTER MDF-709: a linked recipient sees the real collection code once AWAITING_COLLECTION, and only then', async ({ browser }) => {
-  test.fail(true, 'Pending MDF-709 item 1 -- recipientView() does not expose collectionCode yet');
+test.fixme('AFTER MDF-709: a linked recipient sees the real collection code once AWAITING_COLLECTION, and only then', async ({ browser }) => {
   test.setTimeout(120_000);
   const adminPage = await (await browser.newContext()).newPage();
   await adminLogin(adminPage);
