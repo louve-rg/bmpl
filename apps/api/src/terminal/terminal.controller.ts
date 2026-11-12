@@ -91,6 +91,14 @@ export class AdminTerminalController {
     return this.terminal.revokeInvite(u.userId, id, inviteId);
   }
 
+  /** Re-send a pending invitation after a failed delivery. Same permission as
+   *  issuing one, because it rotates that invite's token. */
+  @RequirePermission('terminals.manage')
+  @Post('companies/:id/invites/:inviteId/resend')
+  resendInvite(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('inviteId') inviteId: string) {
+    return this.terminal.resendInvite(u.userId, id, inviteId);
+  }
+
   @RequirePermission('terminals.manage')
   @Delete('companies/:id/members/:userId')
   endMember(@CurrentUser() u: AuthContext, @Param('id') id: string, @Param('userId') userId: string) {
