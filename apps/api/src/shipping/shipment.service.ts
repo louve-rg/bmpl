@@ -5214,6 +5214,88 @@ export class ShipmentService {
   }
 
   /**
+   * MDF-699 (TERM-LOOKUP): the search `terminal-feature-inventory.md` row 5
+   * named as "the most basic counter task" and genuinely missing — no query
+   * parameter existed anywhere, so a counter clerk could not look up a
+   * parcel by the reference a customer actually hands them.
+   *
+   * Two distinct refusals, not one — a reference belonging to another
+   * terminal is REJECTED, never silently returned empty:
+   *   - no shipment with that reference anywhere -> NotFoundException (404)
+   *   - a real shipment that never touches one of the caller's hubs ->
+   *     ForbiddenException (403)
+   * The "touches" test mirrors `terminalQueue`'s own superset filter above
+   * (any leg's origin OR destination hub in `hubIds`) rather than the
+   * narrower "final leg only" rule `shipmentHubForLocationCheck` uses for
+   * collection — lookup must find a parcel whether it is inbound,
+   * outbound, mid-transfer or already sitting in AWAITING_COLLECTION at my
+   * counter, not only the one specific moment collection is legal.
+   *
+   * The response is a HAND-BUILT allowlist, deliberately not `serialize()`
+   * — same reason `TerminalShipmentsController.collect` already reshapes
+   * `recordCollection`'s result instead of returning it raw: a terminal
+   * company's own third-party staff see less than BML's own ops staff do,
+   * regardless of audience-based pin redaction. `senderName`/
+   * `recipientName` are the shipment's own typed `originName`/
+   * `destinationName` snapshot fields — never the linked account's email,
+   * phone or address, and never money, cancellation/exception text, or any
+   * PIN/code/token.
+   */
+  async lookupForTerminal(reference: string, hubIds: string[]) {
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { reference },
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        description: true,
+        pieces: true,
+        originName: true,
+        destinationName: true,
+        legs: {
+          select: {
+            sequence: true,
+            kind: true,
+            status: true,
+            departedAt: true,
+            arrivedAt: true,
+            completedAt: true,
+            originHubId: true,
+            destinationHubId: true,
+            originHub: { select: { id: true, name: true } },
+            destinationHub: { select: { id: true, name: true } },
+          },
+          orderBy: { sequence: 'asc' },
+        },
+      },
+    });
+    if (!shipment) throw new NotFoundException('No shipment with that reference.');
+    const touchesMyHub = shipment.legs.some(
+      (l) => (l.originHubId != null && hubIds.includes(l.originHubId)) || (l.destinationHubId != null && hubIds.includes(l.destinationHubId)),
+    );
+    if (!touchesMyHub) throw new ForbiddenException('This shipment is not at one of your terminal locations.');
+    return {
+      shipmentId: shipment.id,
+      reference: shipment.reference,
+      status: shipment.status,
+      description: shipment.description,
+      pieces: shipment.pieces,
+      senderName: shipment.originName,
+      recipientName: shipment.destinationName,
+      legs: shipment.legs.map((l) => ({
+        sequence: l.sequence,
+        kind: l.kind,
+        status: l.status,
+        originHub: l.originHub,
+        destinationHub: l.destinationHub,
+        departedAt: l.departedAt,
+        arrivedAt: l.arrivedAt,
+        completedAt: l.completedAt,
+      })),
+    };
+  }
+
+  /**
    * TERM-5's second gap: a LAST_MILE `confirmPickup` (ShipmentDriverService)
    * is the courier's own self-submit call and takes no code at all for this
    * leg kind — measured live, the hub-to-courier handover had no

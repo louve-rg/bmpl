@@ -280,6 +280,22 @@ export class TerminalShipmentsController {
     // fact-only shape every other terminal write on this controller returns.
     return { collected: true, reference: result.reference, status: result.status };
   }
+
+  /**
+   * MDF-699 (TERM-LOOKUP): a counter clerk's own search, by the
+   * customer-facing reference — the thing a customer actually hands them,
+   * as opposed to the primary-key `:id` the `collect` route above takes.
+   * No new authorization axis: `ShipmentService.lookupForTerminal` does its
+   * own hub-membership check against `myActiveHubIds`, mirroring the
+   * location-scoping every other route on this controller already uses,
+   * and refuses with a REAL 403 for a shipment that exists but belongs to
+   * another terminal — never a quiet empty 200.
+   */
+  @Get(':reference')
+  async lookup(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
+    const hubIds = await this.terminal.myActiveHubIds(u.userId);
+    return this.shipments.lookupForTerminal(reference, hubIds);
+  }
 }
 
 /**
