@@ -1,0 +1,660 @@
+openapi: 3.1.0
+info:
+  title: BML Terminal Workspace API
+  version: "1.0.0"
+  description: >
+    Belize Marketplace & Logistics — the Terminal Workspace surface (TERM-1
+    through TERM-8): terminal companies (the organizations staffing a
+    physical hub), their staff membership and per-hub location grants, the
+    invite flow that creates staff accounts, and that staff submitting a
+    courier's handoff/pickup/collection code at their own granted location.
+    All paths are under the `/api` prefix. Every endpoint here was documented
+    from its controller and service read at `origin/main`
+    (`apps/api/src/terminal/terminal.controller.ts`,
+    `terminal.service.ts`, and `ShipmentService` where terminal delegates to
+    it) — nothing is described that was not read.
+
+    19 paths, 21 operations (two paths carry two HTTP methods each). Every
+    POST on this surface returns 201, not 200 — none of the five controllers
+    declares `@HttpCode`, so NestJS's own default for `@Post()` applies
+    uniformly; this file had wrongly documented ten of them as 200 and is now
+    corrected to match, verified controller-by-controller
+    (`apps/api/src/terminal/*.controller.ts`, no `@HttpCode` anywhere in the
+    module).
+
+    THIS IS A BASELINE for what is live today (MDF-706, deliverable 2). It
+    does not yet cover MDF-698 (TERM-ROLE), MDF-699 (TERM-LOOKUP), MDF-700
+    (TERM-INBOUND) or MDF-701 (TERM-HISTORY) — those four endpoints are still
+    `doing`; this file is updated as each contract is confirmed merged, not
+    from a description of planned work.
+
+    A `TerminalCompanyProfile` is NOT a `LogisticsHub` (documented in
+    `shipping.yaml`): a hub is the physical terminal; a terminal company is
+    the organization authorized to staff one or more hubs. Membership
+    (`MANAGER`|`OPERATOR`) and location grants are two separate axes — no
+    membership implies any location, not even `MANAGER` — re-checked at
+    every read against the location's own `isActive` flag, never cached from
+    grant time.
+
+    A terminal company member holds **neither** a RoleCode nor an admin
+    permission for anything under `/terminal/*` below (as opposed to
+    `/admin/terminal/*`, which is `@RequirePermission`-gated exactly like the
+    rest of the admin console). The one check that matters on every
+    staff-facing write is `TerminalService.assertStaffLocationAccess` against
+    the SPECIFIC hub the action happens at, looked up from `ShipmentService`,
+    never assumed from the request body.
+
+    SECRETS ON THIS SURFACE: an invite token is single-use, hashed at rest,
+    and never re-returned once issued (`terminal.service.ts`). A recipient's
+    own collection code is their secret to present verbally — staff submit
+    it, they never read it off a response; `TerminalShipmentsController.collect`
+    deliberately reshapes its result so the underlying `handoffPin`/`pickupPin`
+    columns ordinary staff elsewhere in the admin console can see are never
+    included.
+
+    MONEY: nothing on this surface moves, holds or reports money. No
+    endpoint here prices anything.
+servers:
+  - url: https://bmplapi-production.up.railway.app/api
+    description: Production
+  - url: http://localhost:4000/api
+    description: Local
+tags:
+  - name: AdminTerminal
+    description: >-
+      Admin console (`terminals.read`/`terminals.manage`): create/list/get/edit
+      a terminal company, grant/revoke its hub locations, invite/revoke/resend
+      a staff invite, end/reactivate a membership, grant/revoke one member's
+      location.
+  - name: TerminalStaff
+    description: >-
+      A terminal company's own staff, ordinary authentication only — no role
+      or admin permission. Scoped entirely by ACTIVE membership + ACTIVE
+      location grant, re-read at call time.
+  - name: TerminalInvite
+    description: Public, unauthenticated — the emailed invite's own acceptance link.
+security:
+  - cookieAuth: []
+paths:
+  # ---- Admin console ----
+  /admin/terminal/companies:
+    post:
+      tags: [AdminTerminal]
+      summary: Create a terminal company
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTerminalCompanyInput" }
+      responses:
+        "201":
+          description: The created company
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalCompany" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    get:
+      tags: [AdminTerminal]
+      summary: List all terminal companies
+      responses:
+        "200":
+          description: Every company, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TerminalCompany" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/terminal/companies/{id}:
+    get:
+      tags: [AdminTerminal]
+      summary: Get one company with its locations, members and pending invites
+      parameters: [{ $ref: "#/components/parameters/companyId" }]
+      responses:
+        "200":
+          description: Company detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalCompanyDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [AdminTerminal]
+      summary: Edit a company's contact details (not isTest — admin-set once, at creation, never flipped after)
+      parameters: [{ $ref: "#/components/parameters/companyId" }]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateTerminalCompanyInput" }
+      responses:
+        "200":
+          description: The updated company
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalCompany" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/terminal/companies/{id}/locations:
+    post:
+      tags: [AdminTerminal]
+      summary: Authorize this company to work a hub
+      parameters: [{ $ref: "#/components/parameters/companyId" }]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hubId]
+              properties: { hubId: { type: string } }
+      responses:
+        "201":
+          description: The created (or reactivated) location grant
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalCompanyLocation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/terminal/companies/{id}/locations/{locationId}:
+    delete:
+      tags: [AdminTerminal]
+      summary: Deactivate a company's hub location (history is kept; access is not)
+      parameters:
+        - { $ref: "#/components/parameters/companyId" }
+        - { name: locationId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "200": { description: Deactivated }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/terminal/companies/{id}/invites:
+    post:
+      tags: [AdminTerminal]
+      summary: Invite a staff member (MANAGER or OPERATOR, scoped to at least one location)
+      parameters: [{ $ref: "#/components/parameters/companyId" }]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InviteTerminalCompanyMemberInput" }
+      responses:
+        "201":
+          description: The invite, plus whether the email actually sent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalInviteWithDelivery" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/terminal/companies/{id}/invites/{inviteId}/revoke:
+    post:
+      tags: [AdminTerminal]
+      summary: Revoke a pending invite
+      parameters:
+        - { $ref: "#/components/parameters/companyId" }
+        - { name: inviteId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/terminal/companies/{id}/invites/{inviteId}/resend:
+    post:
+      tags: [AdminTerminal]
+      summary: Re-send a pending invite (rotates its token; the old link stops working the moment this succeeds)
+      parameters:
+        - { $ref: "#/components/parameters/companyId" }
+        - { name: inviteId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201":
+          description: The invite (new token issued server-side, never returned), plus whether the email actually sent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalInviteWithDelivery" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/terminal/companies/{id}/members/{userId}:
+    delete:
+      tags: [AdminTerminal]
+      summary: End a membership
+      parameters:
+        - { $ref: "#/components/parameters/companyId" }
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "200": { description: Ended }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/terminal/companies/{id}/members/{userId}/reactivate:
+    post:
+      tags: [AdminTerminal]
+      summary: Reactivate an ended membership (same effect as a fresh invite's acceptance on an existing account)
+      parameters:
+        - { $ref: "#/components/parameters/companyId" }
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201": { description: Reactivated }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/terminal/companies/{id}/members/{userId}/locations:
+    post:
+      tags: [AdminTerminal]
+      summary: Grant an already-ACTIVE member one more location, without ending and re-inviting them
+      parameters:
+        - { $ref: "#/components/parameters/companyId" }
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [locationId]
+              properties: { locationId: { type: string } }
+      responses:
+        "201": { description: Granted }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/terminal/companies/{id}/members/{userId}/locations/{locationId}:
+    delete:
+      tags: [AdminTerminal]
+      summary: Revoke one member's one location, without ending the membership
+      parameters:
+        - { $ref: "#/components/parameters/companyId" }
+        - { name: userId, in: path, required: true, schema: { type: string } }
+        - { name: locationId, in: path, required: true, schema: { type: string } }
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "200": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Terminal staff's own side ----
+  /terminal/me:
+    get:
+      tags: [TerminalStaff]
+      summary: My own workspace — which company, which role, which ACTIVE locations
+      description: >-
+        401s with "No active terminal company membership" for anyone with no
+        current ACTIVE membership at an active company. Locations are
+        filtered to ACTIVE ones only, re-checked at read time.
+      responses:
+        "200":
+          description: My workspace
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyWorkspace" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /terminal/queue:
+    get:
+      tags: [TerminalStaff]
+      summary: Everything waiting on a terminal action at any of my granted ACTIVE locations
+      description: >-
+        TERM-8. Combines every company I belong to. `myActiveHubIds` is the
+        ONLY place that decides which hubs are mine — a leg at a location I
+        was not granted can never appear here, not merely be refused if I try
+        to act on it.
+      responses:
+        "200":
+          description: Up to 100 rows per action kind (200 for COLLECT), unordered across kinds
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TerminalQueueItem" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  # ---- Leg custody actions (location-scoped) ----
+  /terminal/legs/{id}/depart:
+    post:
+      tags: [TerminalStaff]
+      summary: Confirm a LINE_HAUL leg's departure from this terminal
+      description: >-
+        Mirrors `admin/logistics/legs/:id/depart` under a location-scoped
+        gate instead of `logistics.operate`. Refuses a non-LINE_HAUL leg or
+        one whose turn has not come, same business rule either door uses.
+      parameters: [{ $ref: "#/components/parameters/legId" }]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegDepartInput" }
+      responses:
+        "201":
+          description: The full shipment, staff-serialized (same shape `arrive`/`handoff` return — see `shipping.yaml`'s `ShipmentView`)
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /terminal/legs/{id}/arrive:
+    post:
+      tags: [TerminalStaff]
+      summary: Confirm a LINE_HAUL leg's arrival at this terminal (not yet handed off)
+      parameters: [{ $ref: "#/components/parameters/legId" }]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      responses:
+        "201":
+          description: The full shipment, staff-serialized
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /terminal/legs/{id}/handoff:
+    post:
+      tags: [TerminalStaff]
+      summary: Submit the code the party handing over presents (courier's own code on FIRST_MILE, recipient's on LAST_MILE/DIRECT)
+      description: >-
+        The location-scoped alternative to
+        `admin/logistics/legs/:id/handoff` (`logistics.operate`, unrestricted
+        by location — BML's own ops staff). `presentedCourierUserId`, when
+        given, is checked against the leg's live assignment, never
+        overwritten by the submitting staff member's own identity.
+      parameters: [{ $ref: "#/components/parameters/legId" }]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegHandoffInput" }
+      responses:
+        "201":
+          description: The full shipment, staff-serialized
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /terminal/legs/{id}/release-to-courier:
+    post:
+      tags: [TerminalStaff]
+      summary: Release a LAST_MILE parcel to the courier who presents the collection code
+      description: >-
+        The location-scoped alternative to
+        `admin/logistics/legs/:id/release-to-courier`. Same presented-identity
+        check as `handoff`.
+      parameters: [{ $ref: "#/components/parameters/legId" }]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegReleaseToCourierInput" }
+      responses:
+        "201":
+          description: The full shipment, staff-serialized
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /terminal/shipments/{id}/collect:
+    post:
+      tags: [TerminalStaff]
+      summary: Record the recipient's in-person collection at this (destination) terminal
+      description: >-
+        AWAITING_COLLECTION only, once. Deliberately returns a minimal,
+        fact-only shape — never the full shipment graph admin's own
+        `logistics.operate` staff see, because that graph's bare Prisma
+        `include` carries `handoffPin`/`pickupPin`, and a recipient's own
+        collection code must never be readable by staff off a response.
+      parameters: [{ $ref: "#/components/parameters/shipmentId" }]
+      security: [{ cookieAuth: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CollectShipmentInput" }
+      responses:
+        "201":
+          description: Fact-only confirmation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CollectResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- Public invite acceptance ----
+  /terminal/invites/accept:
+    post:
+      tags: [TerminalInvite]
+      summary: Accept an emailed terminal-staff invite — create an account, or attach to an existing one by email
+      description: >-
+        Unauthenticated, by design: the invitee does not have a session yet.
+        `password`/`firstName`/`lastName` are required only when the invited
+        email has no existing BML account — a runtime lookup the schema
+        cannot express, enforced by the service with a clear message rather
+        than a zod refinement guessing at database state.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AcceptTerminalInviteInput" }
+      responses:
+        "201": { description: Membership created or reactivated; locations granted atomically }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+    csrfToken:
+      type: apiKey
+      in: header
+      name: x-csrf-token
+  parameters:
+    companyId: { name: id, in: path, required: true, schema: { type: string }, description: Terminal company id }
+    legId: { name: id, in: path, required: true, schema: { type: string }, description: Shipment leg id }
+    shipmentId: { name: id, in: path, required: true, schema: { type: string }, description: Shipment id }
+  responses:
+    ValidationError:
+      description: Validation failed, or the operation is not legal in this state (plain-words message)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties: { message: { type: string } }
+    Unauthorized: { description: Not authenticated }
+    Forbidden: { description: Authenticated, but not authorized for this company/location/action }
+    NotFound: { description: No such company, location, invite, member, leg or shipment }
+  schemas:
+    CreateTerminalCompanyInput:
+      type: object
+      required: [businessName, contactEmail]
+      properties:
+        businessName: { type: string, maxLength: 160 }
+        contactEmail: { type: string, format: email }
+        contactPhone: { type: string, maxLength: 40 }
+        isTest: { type: boolean, default: false, description: "Admin-set only; there is no self-registering account to derive it from." }
+    UpdateTerminalCompanyInput:
+      type: object
+      description: At least one field. isTest is deliberately not editable here.
+      properties:
+        businessName: { type: string, maxLength: 160 }
+        contactEmail: { type: string, format: email }
+        contactPhone: { type: string, maxLength: 40 }
+    InviteTerminalCompanyMemberInput:
+      type: object
+      required: [email, locationIds]
+      properties:
+        email: { type: string, format: email }
+        memberRole: { type: string, enum: [MANAGER, OPERATOR], default: OPERATOR }
+        locationIds: { type: array, items: { type: string }, minItems: 1, description: At least one — a staff member is authorized for specific locations, never the whole company by default. }
+    AcceptTerminalInviteInput:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+        password: { type: string, description: Required only if the invited email has no existing BML account yet. }
+        firstName: { type: string, maxLength: 80 }
+        lastName: { type: string, maxLength: 80 }
+    LegDepartInput:
+      type: object
+      properties:
+        carrierName: { type: string, maxLength: 120 }
+        carrierBookingRef: { type: string, maxLength: 120 }
+        note: { type: string, maxLength: 500 }
+    LegHandoffInput:
+      type: object
+      required: [pin, receivedByName]
+      properties:
+        pin: { type: string, pattern: '^\d{4,8}$', description: The handoff code. }
+        receivedByName: { type: string, minLength: 2, maxLength: 120 }
+        note: { type: string, maxLength: 500 }
+        lat: { type: number }
+        lng: { type: number }
+        presentedCourierUserId: { type: string, description: "Who is physically presenting the code, asserted explicitly. Absent on the courier's own app call." }
+    LegReleaseToCourierInput:
+      type: object
+      required: [pin]
+      properties:
+        pin: { type: string, pattern: '^\d{4,8}$', description: The collection code. }
+        presentedCourierUserId: { type: string }
+    CollectShipmentInput:
+      type: object
+      required: [collectedByName]
+      properties:
+        collectedByName: { type: string, minLength: 2, maxLength: 120 }
+        code: { type: string, pattern: '^\d{4,8}$', description: Required by the server even though the schema marks it optional — see TERM-5's own report. }
+    CollectResult:
+      type: object
+      properties:
+        collected: { type: boolean }
+        reference: { type: string }
+        status: { type: string }
+    TerminalCompany:
+      type: object
+      properties:
+        id: { type: string }
+        businessName: { type: string }
+        contactEmail: { type: string }
+        contactPhone: { type: string, nullable: true }
+        isActive: { type: boolean }
+        isTest: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    TerminalCompanyLocation:
+      type: object
+      properties:
+        id: { type: string }
+        isActive: { type: boolean }
+        hub:
+          type: object
+          properties:
+            id: { type: string }
+            code: { type: string }
+            name: { type: string }
+            district: { type: string }
+            city: { type: string }
+    TerminalCompanyMember:
+      type: object
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        name: { type: string }
+        email: { type: string }
+        memberRole: { type: string, enum: [MANAGER, OPERATOR] }
+        status: { type: string, enum: [ACTIVE, ENDED] }
+        createdAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time, nullable: true }
+        locations:
+          type: array
+          items:
+            type: object
+            properties: { id: { type: string }, hub: { type: object } }
+    TerminalInvite:
+      type: object
+      description: Never the token — only its existence and metadata.
+      properties:
+        id: { type: string }
+        email: { type: string }
+        memberRole: { type: string, enum: [MANAGER, OPERATOR] }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        locationCount: { type: integer }
+    TerminalInviteWithDelivery:
+      allOf:
+        - { $ref: "#/components/schemas/TerminalInvite" }
+        - type: object
+          properties:
+            delivery:
+              type: object
+              description: Whether the invitation email actually sent (PR #677 / #676) — the invite row is committed either way, so a provider failure never costs the invitation itself.
+    TerminalCompanyDetail:
+      allOf:
+        - { $ref: "#/components/schemas/TerminalCompany" }
+        - type: object
+          properties:
+            locations: { type: array, items: { $ref: "#/components/schemas/TerminalCompanyLocation" } }
+            members: { type: array, items: { $ref: "#/components/schemas/TerminalCompanyMember" } }
+            pendingInvites: { type: array, items: { $ref: "#/components/schemas/TerminalInvite" } }
+    MyWorkspace:
+      type: object
+      properties:
+        companyId: { type: string }
+        companyName: { type: string }
+        memberRole: { type: string, enum: [MANAGER, OPERATOR] }
+        locations:
+          type: array
+          items:
+            type: object
+            properties:
+              locationId: { type: string }
+              hub: { type: object }
+    TerminalQueueItem:
+      type: object
+      description: One of five action shapes, discriminated by `action`. `legId` on four of them, `shipmentId` on COLLECT.
+      properties:
+        action: { type: string, enum: [DEPART, ARRIVE, HANDOFF, RELEASE_TO_COURIER, COLLECT] }
+        legId: { type: string, description: Present on DEPART/ARRIVE/HANDOFF/RELEASE_TO_COURIER. }
+        shipmentId: { type: string, description: Present on COLLECT only. }
+        hubId: { type: string }
+        reference: { type: string }
+        parcel: { type: string, description: The shipment's own description, or a piece-count fallback. }
+        to: { type: string, description: DEPART only — destination hub name. }
+        from: { type: string, description: ARRIVE/HANDOFF only — origin hub name, or "Door collection" for a FIRST_MILE leg with no originating hub. }
+        broughtBy: { type: string, description: HANDOFF only — the assigned driver's display name, or the carrier name, or "Carrier". }
+        arrived: { type: boolean, description: HANDOFF only. }
+        courier: { type: string, nullable: true, description: RELEASE_TO_COURIER only — the assigned driver's display name. }
