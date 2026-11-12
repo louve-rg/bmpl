@@ -14,6 +14,14 @@ info:
     `terminal.service.ts`, and `ShipmentService` where terminal delegates to
     it) — nothing is described that was not read.
 
+    19 paths, 21 operations (two paths carry two HTTP methods each). Every
+    POST on this surface returns 201, not 200 — none of the five controllers
+    declares `@HttpCode`, so NestJS's own default for `@Post()` applies
+    uniformly; this file had wrongly documented ten of them as 200 and is now
+    corrected to match, verified controller-by-controller
+    (`apps/api/src/terminal/*.controller.ts`, no `@HttpCode` anywhere in the
+    module).
+
     THIS IS A BASELINE for what is live today (MDF-706, deliverable 2). It
     does not yet cover MDF-698 (TERM-ROLE), MDF-699 (TERM-LOOKUP), MDF-700
     (TERM-INBOUND) or MDF-701 (TERM-HISTORY) — those four endpoints are still
@@ -154,7 +162,7 @@ paths:
           description: The created (or reactivated) location grant
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/TerminalLocation" }
+              schema: { $ref: "#/components/schemas/TerminalCompanyLocation" }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -202,7 +210,7 @@ paths:
         - { name: inviteId, in: path, required: true, schema: { type: string } }
       security: [{ cookieAuth: [], csrfToken: [] }]
       responses:
-        "200": { description: Revoked }
+        "201": { description: Revoked }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -215,7 +223,7 @@ paths:
         - { name: inviteId, in: path, required: true, schema: { type: string } }
       security: [{ cookieAuth: [], csrfToken: [] }]
       responses:
-        "200":
+        "201":
           description: The invite (new token issued server-side, never returned), plus whether the email actually sent
           content:
             application/json:
@@ -245,7 +253,7 @@ paths:
         - { name: userId, in: path, required: true, schema: { type: string } }
       security: [{ cookieAuth: [], csrfToken: [] }]
       responses:
-        "200": { description: Reactivated }
+        "201": { description: Reactivated }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -266,7 +274,7 @@ paths:
               required: [locationId]
               properties: { locationId: { type: string } }
       responses:
-        "200": { description: Granted }
+        "201": { description: Granted }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -340,7 +348,7 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/LegDepartInput" }
       responses:
-        "200":
+        "201":
           description: The full shipment, staff-serialized (same shape `arrive`/`handoff` return — see `shipping.yaml`'s `ShipmentView`)
           content:
             application/json:
@@ -356,7 +364,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/legId" }]
       security: [{ cookieAuth: [], csrfToken: [] }]
       responses:
-        "200":
+        "201":
           description: The full shipment, staff-serialized
           content:
             application/json:
@@ -383,7 +391,7 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/LegHandoffInput" }
       responses:
-        "200":
+        "201":
           description: The full shipment, staff-serialized
           content:
             application/json:
@@ -408,7 +416,7 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/LegReleaseToCourierInput" }
       responses:
-        "200":
+        "201":
           description: The full shipment, staff-serialized
           content:
             application/json:
@@ -435,7 +443,7 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/CollectShipmentInput" }
       responses:
-        "200":
+        "201":
           description: Fact-only confirmation
           content:
             application/json:
@@ -463,7 +471,7 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/AcceptTerminalInviteInput" }
       responses:
-        "200": { description: Membership created or reactivated; locations granted atomically }
+        "201": { description: Membership created or reactivated; locations granted atomically }
         "400": { $ref: "#/components/responses/ValidationError" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -567,7 +575,7 @@ components:
         isActive: { type: boolean }
         isTest: { type: boolean }
         createdAt: { type: string, format: date-time }
-    TerminalLocation:
+    TerminalCompanyLocation:
       type: object
       properties:
         id: { type: string }
@@ -580,7 +588,7 @@ components:
             name: { type: string }
             district: { type: string }
             city: { type: string }
-    TerminalMember:
+    TerminalCompanyMember:
       type: object
       properties:
         id: { type: string }
@@ -619,8 +627,8 @@ components:
         - { $ref: "#/components/schemas/TerminalCompany" }
         - type: object
           properties:
-            locations: { type: array, items: { $ref: "#/components/schemas/TerminalLocation" } }
-            members: { type: array, items: { $ref: "#/components/schemas/TerminalMember" } }
+            locations: { type: array, items: { $ref: "#/components/schemas/TerminalCompanyLocation" } }
+            members: { type: array, items: { $ref: "#/components/schemas/TerminalCompanyMember" } }
             pendingInvites: { type: array, items: { $ref: "#/components/schemas/TerminalInvite" } }
     MyWorkspace:
       type: object
