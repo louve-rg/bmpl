@@ -28,9 +28,9 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageH
  * courier's user id, so the server derives who "the assigned courier" is
  * from the leg itself rather than trusting whoever is signed in here.
  *
- * COLLECT takes a name, not a code -- a real gap in the API (TERM-12),
- * already with the owner. This screen builds what `collectShipmentSchema`
- * actually accepts today, not a code field the backend would reject.
+ * COLLECT takes both a code and a name. The TERM-12 gap this comment used
+ * to describe (the API accepting no code at all) closed at `6cc75009` --
+ * `collectShipmentSchema` requires `code`, and the form below sends it.
  */
 
 interface HubRef {
