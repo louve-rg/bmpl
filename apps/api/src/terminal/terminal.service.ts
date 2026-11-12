@@ -8,7 +8,7 @@ import type {
   InviteTerminalCompanyMemberInput,
   UpdateTerminalCompanyInput,
 } from '@bmpl/validation';
-import type { TerminalCompanyProfile } from '@bmpl/database';
+import type { TerminalCompanyMemberRole, TerminalCompanyProfile } from '@bmpl/database';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EmailService } from '../email/email.service';
@@ -532,6 +532,74 @@ export class TerminalService {
       },
     });
     if (!grant) throw new ForbiddenException('You do not hold this terminal location.');
+  }
+
+  /**
+   * MDF-698: the one place `memberRole` is actually enforced, not merely
+   * displayed. `memberRole` lives on `TerminalCompanyMember` itself (see
+   * the schema's own comment) — company-wide, never per-location — so
+   * unlike `assertStaffLocationAccess` above, this never takes a hubId.
+   *
+   * By design, MANAGER is a strict superset of OPERATOR: there are only
+   * the two roles, and the owner's split gives MANAGER a set of
+   * additional capabilities (staff view, exception/override resolution,
+   * post-lockout PIN unlock, history/reporting) without taking anything
+   * away that OPERATOR already had (receive/depart/arrive/handoff/
+   * release-to-courier/collect/lookup). So `assertStaffLocationAccess`
+   * and the five existing operational endpoints it gates deliberately
+   * keep checking ONLY location, never role, exactly as before this
+   * card — an OPERATOR-level action never calls this method. This is
+   * called only by a MANAGER-only capability, e.g. `myStaff` below.
+   */
+  async assertActiveMemberRole(
+    userId: string,
+    allowed: TerminalCompanyMemberRole[],
+  ): Promise<{ id: string; terminalCompanyId: string; memberRole: TerminalCompanyMemberRole }> {
+    const member = await this.prisma.terminalCompanyMember.findFirst({
+      where: { userId, status: 'ACTIVE', terminalCompany: { isActive: true } },
+      select: { id: true, terminalCompanyId: true, memberRole: true },
+    });
+    if (!member) throw new ForbiddenException('No active terminal company membership.');
+    if (!allowed.includes(member.memberRole)) {
+      throw new ForbiddenException('This action requires the terminal manager role.');
+    }
+    return member;
+  }
+
+  /**
+   * MDF-698: "staff view" — the one MANAGER-only capability in the owner's
+   * split that this card builds an endpoint for. Self-scoped exactly like
+   * `myWorkspace`: the company comes from the CALLER's own active
+   * membership, never a company id taken from the request, so a manager
+   * can only ever see their own company's roster. The other three
+   * MANAGER-only capabilities the owner named (exception/override
+   * resolution, post-lockout PIN unlock requests, history/reporting) have
+   * no terminal-facing endpoint anywhere in this codebase yet —
+   * history/reporting is MDF-701; the other two are not part of this
+   * four-card programme and are not built here.
+   *
+   * Reuses `serializeMember`/`serializeInvite` and the exact member/invite
+   * query shape `getCompany` already uses — this is the same roster an
+   * admin already sees, scoped to one company instead of taken by id.
+   */
+  async myStaff(userId: string) {
+    const member = await this.assertActiveMemberRole(userId, ['MANAGER']);
+    const members = await this.prisma.terminalCompanyMember.findMany({
+      where: { terminalCompanyId: member.terminalCompanyId },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+        locations: { include: { location: { include: { hub: { select: { id: true, code: true, name: true } } } } } },
+      },
+      orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
+    });
+    const invites = await this.prisma.terminalCompanyInvite.findMany({
+      where: { terminalCompanyId: member.terminalCompanyId, consumedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return {
+      members: members.map((m) => this.serializeMember(m)),
+      pendingInvites: invites.map((i) => this.serializeInvite(i)),
+    };
   }
 
   async myWorkspace(userId: string) {
