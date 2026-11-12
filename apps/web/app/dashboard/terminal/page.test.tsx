@@ -58,12 +58,18 @@ type StubOpts = {
   workspaceStatus?: number;
   workspaceBody?: unknown;
   queueRows?: unknown[];
+  // What /terminal/queue returns on its SECOND and later call, i.e. after an
+  // action has run and the screen reloads the queue. Defaults to queueRows
+  // again (the shape every test before MDF-702 step 1 relied on); only the
+  // completing-an-action-on-a-filtered-tab test needs this to differ.
+  queueRowsAfter?: unknown[];
   actionStatus?: number;
   actionBody?: unknown;
 };
 
 function stubFetch(opts: StubOpts = {}) {
   const calls: Array<{ url: string; method: string; body: unknown }> = [];
+  let queueCallCount = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -73,7 +79,9 @@ function stubFetch(opts: StubOpts = {}) {
         return jsonResponse(opts.workspaceStatus ?? 200, opts.workspaceBody ?? WORKSPACE);
       }
       if (url.includes('/api/terminal/queue')) {
-        return jsonResponse(200, opts.queueRows ?? []);
+        queueCallCount += 1;
+        const rows = queueCallCount === 1 ? opts.queueRows ?? [] : opts.queueRowsAfter ?? opts.queueRows ?? [];
+        return jsonResponse(200, rows);
       }
       if (method === 'POST') {
         calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
@@ -109,6 +117,22 @@ async function mount() {
   });
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
+  });
+}
+
+function findTab(label: string): HTMLButtonElement {
+  const tabs = Array.from(container!.querySelectorAll('[role="tab"]')) as HTMLButtonElement[];
+  const found = tabs.find((b) => b.textContent?.startsWith(label));
+  if (!found) throw new Error(`No tab found starting with "${label}"`);
+  return found;
+}
+
+// Tab selection is a synchronous setState with no network call, unlike
+// clickButton below (which awaits a POST + queue reload).
+async function clickTab(label: string) {
+  const btn = findTab(label);
+  await act(async () => {
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
 }
 
@@ -268,5 +292,92 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
     expect(container!.textContent).toContain('Collection at the counter (1)');
     expect(container!.textContent).not.toContain('Confirm arrival (');
     expect(container!.textContent).toContain('BZE');
+  });
+
+  // MDF-702 step 1: dashboard figures + navigation. The tab bar is both --
+  // its badges are the real counts, and selecting one is the only new
+  // navigation this step adds.
+  describe('MDF-702 step 1 — tabs are both the dashboard figures and the navigation', () => {
+    it('shows Overview plus one tab per action, each badged with the real count from the queue -- nothing invented', async () => {
+      stubFetch({ queueRows: [DEPART_ROW, HANDOFF_ROW, COLLECT_ROW] });
+      await mount();
+
+      expect(findTab('Overview').textContent).toBe('Overview3');
+      expect(findTab('Overview').getAttribute('aria-selected')).toBe('true');
+      expect(findTab('Depart').textContent).toBe('Depart1');
+      expect(findTab('Hand off').textContent).toBe('Hand off1');
+      expect(findTab('Collect').textContent).toBe('Collect1');
+      // Zero-count tabs render with no badge at all, not a "0".
+      expect(findTab('Arrive').textContent).toBe('Arrive');
+      expect(findTab('Release').textContent).toBe('Release');
+    });
+
+    it('selecting a single-action tab filters to only that section', async () => {
+      stubFetch({ queueRows: [DEPART_ROW, HANDOFF_ROW, COLLECT_ROW] });
+      await mount();
+      await clickTab('Depart');
+
+      expect(findTab('Depart').getAttribute('aria-selected')).toBe('true');
+      expect(container!.textContent).toContain('Ready to depart (1)');
+      expect(container!.textContent).not.toContain('Hand off to recipient or next leg');
+      expect(container!.textContent).not.toContain('Collection at the counter');
+    });
+
+    it('returns to the full mixed view when Overview is reselected', async () => {
+      stubFetch({ queueRows: [DEPART_ROW, HANDOFF_ROW, COLLECT_ROW] });
+      await mount();
+      await clickTab('Collect');
+      await clickTab('Overview');
+
+      expect(container!.textContent).toContain('Ready to depart (1)');
+      expect(container!.textContent).toContain('Hand off to recipient or next leg (1)');
+      expect(container!.textContent).toContain('Collection at the counter (1)');
+    });
+
+    it('a tab with nothing in it shows its own empty state, distinct from the "nothing waiting at all" one', async () => {
+      stubFetch({ queueRows: [DEPART_ROW] });
+      await mount();
+      await clickTab('Arrive');
+
+      expect(container!.textContent).toContain('Nothing to arrive right now');
+      expect(container!.textContent).not.toContain('Nothing waiting at your locations');
+    });
+
+    it('states the real total waiting-item count in the header, singular and plural', async () => {
+      stubFetch({ queueRows: [DEPART_ROW, HANDOFF_ROW, COLLECT_ROW] });
+      await mount();
+      expect(container!.textContent).toContain('3 items waiting on you');
+    });
+
+    it('states "0 items waiting" rather than omitting the figure when the queue is empty', async () => {
+      stubFetch({ queueRows: [] });
+      await mount();
+      expect(container!.textContent).toContain('0 items waiting on you');
+    });
+
+    it('completing the only action anywhere drains the queue to the global caught-up state, even while a single-action tab is selected', async () => {
+      const calls = stubFetch({ queueRows: [DEPART_ROW], queueRowsAfter: [] });
+      await mount();
+      await clickTab('Depart');
+      await clickButton('Mark departed');
+
+      expect(calls.find((c) => c.url.includes('/depart'))).toBeDefined();
+      // The whole queue is empty now, not just this tab's section -- the
+      // global "caught up" state is the more honest one to show, and it
+      // takes priority over a per-tab empty state regardless of which tab
+      // happens to be selected.
+      expect(container!.textContent).toContain('Nothing waiting at your locations');
+    });
+
+    it('completing one action while another section still has work shows that tab\'s own empty state, not the global one', async () => {
+      const calls = stubFetch({ queueRows: [DEPART_ROW, ARRIVE_ROW], queueRowsAfter: [ARRIVE_ROW] });
+      await mount();
+      await clickTab('Depart');
+      await clickButton('Mark departed');
+
+      expect(calls.find((c) => c.url.includes('/depart'))).toBeDefined();
+      expect(container!.textContent).toContain('Nothing to depart right now');
+      expect(container!.textContent).not.toContain('Nothing waiting at your locations');
+    });
   });
 });

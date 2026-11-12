@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageHeader } from '../../../components/ui';
 
@@ -11,6 +11,16 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageH
  * action routes below are exactly what terminal.controller.ts and
  * shipment.service.ts (terminalQueue) on that branch do today. Built off
  * `main`; this PR is expected to merge after Pam's #634.
+ *
+ * MDF-702 step 1 added the tab bar and the header's item count. Both are
+ * computed from `/terminal/queue`'s own rows -- nothing here is fabricated.
+ * Deliberately NOT added: throughput or aging. `QueueRow` carries no
+ * timestamp of any kind for any action, so neither figure can be computed
+ * honestly from what this endpoint returns today; adding one would mean
+ * inventing a number. Also deliberately not added: nav links to lookup,
+ * inbound list, detail view or history -- those routes don't exist yet
+ * (later MDF-702 steps build them) and a link to a page that isn't there
+ * is exactly the kind of half-built control the owner ruled out.
  *
  * `release.courier` is nullable on the actual branch even though it reads as
  * always-present in the summarized contract -- a LAST_MILE leg can be
@@ -72,6 +82,19 @@ const SECTION_ORDER: Array<{ action: QueueRow['action']; title: string }> = [
   { action: 'COLLECT', title: 'Collection at the counter' },
 ];
 
+/** Short tab labels -- SECTION_ORDER's own titles are full sentences, too
+ * long for a tab button on a 320px screen (same reasoning the driver jobs
+ * tablist already applied: apps/web/app/dashboard/driver/jobs/page.tsx). */
+const TAB_LABELS: Record<QueueRow['action'], string> = {
+  DEPART: 'Depart',
+  ARRIVE: 'Arrive',
+  HANDOFF: 'Hand off',
+  RELEASE_TO_COURIER: 'Release',
+  COLLECT: 'Collect',
+};
+
+type TabKey = 'OVERVIEW' | QueueRow['action'];
+
 function errMessage(e: unknown, fallback: string): string {
   return (e as ApiError)?.message ?? fallback;
 }
@@ -84,6 +107,8 @@ export default function TerminalWorkspacePage() {
   const [rows, setRows] = useState<QueueRow[] | null>(null);
   const [queueErr, setQueueErr] = useState<string | null>(null);
   const [queueLoading, setQueueLoading] = useState(false);
+
+  const [tab, setTab] = useState<TabKey>('OVERVIEW');
 
   const [busy, setBusy] = useState<string | null>(null);
   const [rowErr, setRowErr] = useState<Record<string, string>>({});
@@ -235,6 +260,55 @@ export default function TerminalWorkspacePage() {
   const hubFor = (hubId: string): HubRef | null =>
     workspace?.locations.find((l) => l.hub.id === hubId)?.hub ?? null;
 
+  // Real figures, not invented ones: every count below is rows.filter on
+  // what /terminal/queue actually returned, nothing is estimated.
+  const counts = useMemo(() => {
+    const base: Record<QueueRow['action'], number> = {
+      DEPART: 0,
+      ARRIVE: 0,
+      HANDOFF: 0,
+      RELEASE_TO_COURIER: 0,
+      COLLECT: 0,
+    };
+    for (const r of rows ?? []) base[r.action] += 1;
+    return base;
+  }, [rows]);
+  const totalCount = (rows ?? []).length;
+
+  function renderSection(action: QueueRow['action'], title: string) {
+    const section = (rows ?? []).filter((r) => r.action === action);
+    if (section.length === 0) return null;
+    return (
+      <div key={action}>
+        <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">
+          {title} ({section.length})
+        </h2>
+        <div className="space-y-3">
+          {section.map((row) => (
+            <QueueRowCard
+              key={row.action === 'COLLECT' ? row.shipmentId : row.legId}
+              row={row}
+              hub={hubFor(row.hubId)}
+              busy={busy}
+              error={rowErr[row.action === 'COLLECT' ? row.shipmentId : row.legId]}
+              handoffForm={row.action === 'HANDOFF' ? handoffForms[row.legId] : undefined}
+              onHandoffChange={(next) => setHandoffForms((prev) => ({ ...prev, [row.action === 'HANDOFF' ? row.legId : '']: next }))}
+              releaseValue={row.action === 'RELEASE_TO_COURIER' ? releaseForms[row.legId] : undefined}
+              onReleaseChange={(v) => setReleaseForms((prev) => ({ ...prev, [row.action === 'RELEASE_TO_COURIER' ? row.legId : '']: v }))}
+              collectForm={row.action === 'COLLECT' ? collectForms[row.shipmentId] : undefined}
+              onCollectChange={(next) => setCollectForms((prev) => ({ ...prev, [row.action === 'COLLECT' ? row.shipmentId : '']: next }))}
+              onDepart={depart}
+              onArrive={arrive}
+              onHandoff={handoff}
+              onRelease={release}
+              onCollect={collect}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (!workspace && !noMembership && !workspaceErr) {
     return (
       <div className="mx-auto max-w-2xl">
@@ -271,7 +345,9 @@ export default function TerminalWorkspacePage() {
     <div className="mx-auto max-w-2xl space-y-4">
       <PageHeader
         title={workspace!.companyName}
-        description={`Signed in as ${workspace!.memberRole.toLowerCase()} · ${workspace!.locations.length} location${workspace!.locations.length === 1 ? '' : 's'}`}
+        description={`Signed in as ${workspace!.memberRole.toLowerCase()} · ${workspace!.locations.length} location${workspace!.locations.length === 1 ? '' : 's'}${
+          rows ? ` · ${totalCount} item${totalCount === 1 ? '' : 's'} waiting on you` : ''
+        }`}
         actions={
           <Button variant="outline" onClick={() => void loadQueue()} disabled={queueLoading}>
             {queueLoading ? 'Refreshing…' : 'Refresh'}
@@ -283,50 +359,74 @@ export default function TerminalWorkspacePage() {
 
       {queueLoading && !rows && <LoadingRow label="Loading your queue…" />}
 
-      {rows && rows.length === 0 && (
-        <EmptyState
-          title="Nothing waiting at your locations"
-          description="Everything at your locations is caught up. New work appears here the moment something needs you."
-        />
-      )}
-
-      {rows && rows.length > 0 && (
-        <div className="space-y-5">
-          {SECTION_ORDER.map(({ action, title }) => {
-            const section = rows.filter((r) => r.action === action);
-            if (section.length === 0) return null;
-            return (
-              <div key={action}>
-                <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">
-                  {title} ({section.length})
-                </h2>
-                <div className="space-y-3">
-                  {section.map((row) => (
-                    <QueueRowCard
-                      key={row.action === 'COLLECT' ? row.shipmentId : row.legId}
-                      row={row}
-                      hub={hubFor(row.hubId)}
-                      busy={busy}
-                      error={rowErr[row.action === 'COLLECT' ? row.shipmentId : row.legId]}
-                      handoffForm={row.action === 'HANDOFF' ? handoffForms[row.legId] : undefined}
-                      onHandoffChange={(next) => setHandoffForms((prev) => ({ ...prev, [row.action === 'HANDOFF' ? row.legId : '']: next }))}
-                      releaseValue={row.action === 'RELEASE_TO_COURIER' ? releaseForms[row.legId] : undefined}
-                      onReleaseChange={(v) => setReleaseForms((prev) => ({ ...prev, [row.action === 'RELEASE_TO_COURIER' ? row.legId : '']: v }))}
-                      collectForm={row.action === 'COLLECT' ? collectForms[row.shipmentId] : undefined}
-                      onCollectChange={(next) => setCollectForms((prev) => ({ ...prev, [row.action === 'COLLECT' ? row.shipmentId : '']: next }))}
-                      onDepart={depart}
-                      onArrive={arrive}
-                      onHandoff={handoff}
-                      onRelease={release}
-                      onCollect={collect}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+      {/* Tab bar: both the real-figures dashboard (every badge is a live count
+          from the rows above) and the only navigation this step adds -- one
+          mechanism serving both purposes rather than a separate stat-card
+          grid duplicating the same numbers. Horizontally scrollable at
+          320px, same convention as apps/web/app/dashboard/driver/jobs. */}
+      {rows && (
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <div
+            className="inline-flex min-w-full overflow-hidden rounded-bmpl-md border border-slate-200"
+            role="tablist"
+            aria-label="Terminal workspace sections"
+          >
+            {(['OVERVIEW', ...SECTION_ORDER.map((s) => s.action)] as TabKey[]).map((key, i) => {
+              const active = tab === key;
+              const label = key === 'OVERVIEW' ? 'Overview' : TAB_LABELS[key];
+              const count = key === 'OVERVIEW' ? totalCount : counts[key];
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-controls="terminal-workspace-panel"
+                  onClick={() => setTab(key)}
+                  className={`flex min-h-[44px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-sm font-semibold transition ${
+                    i > 0 ? 'border-l border-slate-200' : ''
+                  } ${active ? 'bg-belize-blue text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                >
+                  {label}
+                  {count > 0 && (
+                    <span
+                      className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-[18px] ${
+                        active ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {count > 99 ? '99+' : count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
+
+      <div id="terminal-workspace-panel" role="tabpanel">
+        {rows && rows.length === 0 && (
+          <EmptyState
+            title="Nothing waiting at your locations"
+            description="Everything at your locations is caught up. New work appears here the moment something needs you."
+          />
+        )}
+
+        {rows && rows.length > 0 && tab === 'OVERVIEW' && (
+          <div className="space-y-5">{SECTION_ORDER.map(({ action, title }) => renderSection(action, title))}</div>
+        )}
+
+        {rows && rows.length > 0 && tab !== 'OVERVIEW' && (
+          counts[tab] === 0 ? (
+            <EmptyState
+              title={`Nothing to ${TAB_LABELS[tab].toLowerCase()} right now`}
+              description="This section is caught up. Check Overview for what else needs you."
+            />
+          ) : (
+            renderSection(tab, SECTION_ORDER.find((s) => s.action === tab)!.title)
+          )
+        )}
+      </div>
     </div>
   );
 }
