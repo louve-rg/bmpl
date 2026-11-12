@@ -5240,6 +5240,10 @@ export class ShipmentService {
    * `destinationName` snapshot fields — never the linked account's email,
    * phone or address, and never money, cancellation/exception text, or any
    * PIN/code/token.
+   *
+   * `isTest` carries the same simulation-boundary label MDF-707/MDF-700
+   * require on `myWorkspace`/`terminalQueue` — a lookup result is exactly
+   * where a clerk could otherwise mistake a demo parcel for a real one.
    */
   async lookupForTerminal(reference: string, hubIds: string[]) {
     const shipment = await this.prisma.shipment.findUnique({
@@ -5250,6 +5254,7 @@ export class ShipmentService {
         status: true,
         description: true,
         pieces: true,
+        isTest: true,
         originName: true,
         destinationName: true,
         legs: {
@@ -5280,6 +5285,7 @@ export class ShipmentService {
       status: shipment.status,
       description: shipment.description,
       pieces: shipment.pieces,
+      isTest: shipment.isTest,
       senderName: shipment.originName,
       recipientName: shipment.destinationName,
       legs: shipment.legs.map((l) => ({

@@ -114,6 +114,7 @@ describe('MDF-699 (TERM-LOOKUP): GET /terminal/shipments/:reference', () => {
     expect(res.body.reference).toBe(shipment.reference);
     expect(res.body.senderName).toBe('Sender Name');
     expect(res.body.recipientName).toBe('Recipient Name');
+    expect(res.body.isTest).toBe(false); // MDF-707/MDF-700: the simulation-boundary label
     expect(Array.isArray(res.body.legs)).toBe(true);
     expect(res.body.legs.length).toBeGreaterThanOrEqual(2);
 
