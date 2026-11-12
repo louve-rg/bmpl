@@ -3,7 +3,8 @@
 > **Phase 1.5B does not deploy anything.** This guide is the runbook for the next
 > phase. Every step that needs provider credentials is flagged **[needs creds]**.
 > Architecture + trust boundaries: [`DEPLOYMENT-ARCHITECTURE.md`](./DEPLOYMENT-ARCHITECTURE.md).
-> Variables: [`ENVIRONMENT.md`](./ENVIRONMENT.md).
+> Variables: [`ENVIRONMENT.md`](./ENVIRONMENT.md). One feature's deploy paths
+> applied to its own workflows: [`TERMINAL-DEPLOY-MAP.md`](./TERMINAL-DEPLOY-MAP.md).
 
 > **⚠️ The `*-dev.bzemarketplace.com` hosts in this runbook were never the
 > deployed reality (noted 2026-09-09).** The live API host is
