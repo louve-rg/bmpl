@@ -267,10 +267,16 @@ export class TerminalService {
       where: { id: inviteId },
       data: { tokenHash: hash, expiresAt },
     });
+    // Reuses TERMINAL_COMPANY_MEMBER_INVITED with a `resend` marker rather
+    // than adding an audit action: AuditAction is a PRISMA ENUM, so a new
+    // value needs a migration, and a migration would run against the
+    // production database on deploy. A resend genuinely is "an invitation was
+    // sent to this address", and the marker keeps the two distinguishable in
+    // the trail without touching the schema.
     await this.audit.record({
-      action: 'TERMINAL_COMPANY_INVITE_RESENT',
+      action: 'TERMINAL_COMPANY_MEMBER_INVITED',
       actorId,
-      newValue: { terminalCompanyId: companyId, inviteId, email: invite.email },
+      newValue: { terminalCompanyId: companyId, inviteId, email: invite.email, memberRole: invite.memberRole, resend: true },
     });
     const link = `${this.env.NEXT_PUBLIC_SITE_URL}/terminal/accept-invite?token=${raw}`;
     const tpl = templates.terminalInvite(link, company.businessName);
