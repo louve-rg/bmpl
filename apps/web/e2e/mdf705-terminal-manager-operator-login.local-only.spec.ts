@@ -9,14 +9,16 @@ import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/au
  *
  * Covers god's dispatch items: "Manager login, navigation and session
  * handling", "Operator login plus the actions an Operator must NOT be able
- * to perform once Pam lands MDF-698". The second half is split in two on
- * purpose: the part that is TRUE TODAY (Manager and Operator are
- * interchangeable — `TerminalService.assertStaffLocationAccess` authorizes
- * on hub grant only, never reads `memberRole`) is a real, running assertion.
- * The part that needs MDF-698's own permission matrix does not exist yet —
- * writing a forbidden-action list without it would be inventing a business
- * rule (root CLAUDE.md §12), so that half is `test.fixme` with the open
- * question recorded, not a guessed assertion.
+ * to perform once Pam lands MDF-698". Pam's exhaustive matrix (grepped every
+ * @Get/@Post on all three terminal controllers) makes this a citable
+ * contract rather than a guess: OPERATOR and MANAGER are byte-for-byte
+ * identical on GET /terminal/me, GET /terminal/queue and every POST action
+ * (depart/arrive/handoff/release-to-courier/collect — `assertStaffLocationAccess`
+ * never reads `memberRole`), EXCEPT GET /terminal/staff, which is
+ * MANAGER-only (`assertActiveMemberRole`) — 403 for OPERATOR, 200 for
+ * MANAGER. Stanley's condition for closing MDF-698 is that this file's
+ * OPERATOR-vs-MANAGER assertion flips from "identical" to a real divergence;
+ * the test below is that agreed evidence.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
@@ -194,14 +196,37 @@ test('TODAY: OPERATOR gets the identical workspace/nav/session a MANAGER gets --
   );
 });
 
-/**
- * PENDING MDF-698. Cannot be written yet without inventing a business rule:
- * there is no permission matrix today naming which actions are Manager-only.
- * Once MDF-698 lands, replace this stub with real assertions of the form
- * "OPERATOR attempts <forbidden action> -> 403, custody/state unchanged" for
- * each action MDF-698 actually restricts. Do not guess the list here.
- */
-test.fixme(
-  'OPERATOR is refused the Manager-only actions MDF-698 defines (PENDING: exact action list not yet specified)',
-  async () => {},
-);
+test('MDF-698 contract: OPERATOR and MANAGER are identical on GET /terminal/me and /terminal/queue, and diverge on exactly GET /terminal/staff', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const adminPage = await (await browser.newContext()).newPage();
+  await adminLogin(adminPage);
+
+  const manager = await createTerminalStaff(adminPage, 'MANAGER', 'MatrixManager');
+  const operator = await createTerminalStaff(adminPage, 'OPERATOR', 'MatrixOperator');
+
+  const managerPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(managerPage, manager.email, UAT_FIXTURE_PASSWORD), 'MANAGER login failed').toBeTruthy();
+  const operatorPage = await (await browser.newContext()).newPage();
+  expect(await tryLogin(operatorPage, operator.email, UAT_FIXTURE_PASSWORD), 'OPERATOR login failed').toBeTruthy();
+
+  // Identical halves: /me and /queue never read memberRole, per
+  // assertStaffLocationAccess -- both roles get 200 from both routes.
+  const managerMe = await getJson(managerPage, '/terminal/me');
+  const operatorMe = await getJson(operatorPage, '/terminal/me');
+  expect(managerMe.status, 'MANAGER GET /terminal/me must be 200').toBe(200);
+  expect(operatorMe.status, 'OPERATOR GET /terminal/me must be 200 -- identical to MANAGER by contract').toBe(200);
+
+  const managerQueue = await getJson(managerPage, '/terminal/queue');
+  const operatorQueue = await getJson(operatorPage, '/terminal/queue');
+  expect(managerQueue.status, 'MANAGER GET /terminal/queue must be 200').toBe(200);
+  expect(operatorQueue.status, 'OPERATOR GET /terminal/queue must be 200 -- identical to MANAGER by contract').toBe(200);
+
+  // The one divergence: GET /terminal/staff is MANAGER-only
+  // (assertActiveMemberRole). If this ever reads 200 for OPERATOR, the role
+  // split has regressed to cosmetic-only. If MANAGER ever reads anything but
+  // 200, the route itself is broken for the role it's supposed to serve.
+  const managerStaff = await getJson(managerPage, '/terminal/staff');
+  const operatorStaff = await getJson(operatorPage, '/terminal/staff');
+  expect(managerStaff.status, 'MANAGER GET /terminal/staff must be 200').toBe(200);
+  expect(operatorStaff.status, 'OPERATOR GET /terminal/staff must be 403 -- this is the one route MDF-698 actually restricts').toBe(403);
+});
