@@ -34,7 +34,7 @@ interface Hub extends EditableHub {
 const blank = {
   code: '', name: '', type: 'AIRSTRIP', district: 'BELIZE', city: '',
   addressLine1: '', latitude: '', longitude: '', modes: ['LAND'] as string[],
-  instructions: '', contactPhone: '',
+  instructions: '', contactPhone: '', isTest: false,
 };
 
 function ModesPicker({ modes, onToggle }: { modes: string[]; onToggle: (m: string) => void }) {
@@ -249,6 +249,10 @@ export default function HubsPage() {
             </Field>
           </div>
         </div>
+        <label className="mt-3 flex items-center gap-2 text-sm text-[color:var(--bmpl-text-muted)]">
+          <input type="checkbox" checked={form.isTest} onChange={(e) => setForm({ ...form, isTest: e.target.checked })} className="accent-belize-blue" />
+          Simulation hub (isTest) — never mixed with real hubs or real staff
+        </label>
         <Button onClick={create} disabled={saving || !form.code || !form.name || !form.city || form.modes.length === 0} className="mt-3">
           {saving ? 'Adding…' : 'Add terminal'}
         </Button>
