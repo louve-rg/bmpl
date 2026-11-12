@@ -1013,3 +1013,90 @@ describe('ShipmentOpsPage — collection-code lockout visibility and unlock (TER
     // this asserts the rendered page never invents or leaks one even so.
   });
 });
+
+/**
+ * MDF-703: recordCollection used to send only `{ collectedByName }`, which
+ * `collectShipmentSchema` has always rejected without a `code` -- the same
+ * defect the terminal workspace had before `6cc75009`, just in this file
+ * instead, uncovered because no card named it. SHIPMENT (above) is already
+ * AWAITING_COLLECTION, so "Record collection" is the button under test.
+ */
+describe('ShipmentOpsPage — recordCollection sends the code the backend requires (MDF-703)', () => {
+  function stubFetchCollect(adminPermissions: string[]) {
+    const posted: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/me')) return jsonResponse(200, { adminPermissions });
+        if (url.includes('/api/admin/logistics/shipments/ship_1/collect') && init?.method === 'POST') {
+          posted.push({ url, body: init.body ? JSON.parse(String(init.body)) : null });
+          return jsonResponse(200, { ...SHIPMENT, status: 'DELIVERED' });
+        }
+        if (url.includes('/api/admin/logistics/shipments/SHP-1001') && (!init?.method || init.method === 'GET')) {
+          return jsonResponse(200, SHIPMENT);
+        }
+        return jsonResponse(404, { message: 'not mocked: ' + url });
+      }),
+    );
+    return posted;
+  }
+
+  async function clickRecordCollection() {
+    const btn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim().startsWith('Record collection'))!;
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('posts both the presented code and the recipient name, never the name alone', async () => {
+    const posted = stubFetchCollect(['logistics.operate']);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValueOnce('4821').mockReturnValueOnce('Ana Cruz');
+    await mount();
+
+    await clickRecordCollection();
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.body).toEqual({ code: '4821', collectedByName: 'Ana Cruz' });
+    promptSpy.mockRestore();
+  });
+
+  it('asks for the code first and never prompts for a name if the code is malformed', async () => {
+    const posted = stubFetchCollect(['logistics.operate']);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValueOnce('abc');
+    await mount();
+
+    await clickRecordCollection();
+
+    expect(posted).toHaveLength(0);
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain('Enter the 4-8 digit collection code the recipient presents.');
+    promptSpy.mockRestore();
+  });
+
+  it('sends no request when the code prompt is dismissed, before ever asking for a name', async () => {
+    const posted = stubFetchCollect(['logistics.operate']);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValueOnce(null);
+    await mount();
+
+    await clickRecordCollection();
+
+    expect(posted).toHaveLength(0);
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    promptSpy.mockRestore();
+  });
+
+  it('sends no request when the code is valid but the name prompt is dismissed', async () => {
+    const posted = stubFetchCollect(['logistics.operate']);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValueOnce('4821').mockReturnValueOnce(null);
+    await mount();
+
+    await clickRecordCollection();
+
+    expect(posted).toHaveLength(0);
+    promptSpy.mockRestore();
+  });
+});
