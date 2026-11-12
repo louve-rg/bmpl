@@ -25,6 +25,7 @@ import {
   rerouteSchema,
   resolveLegExceptionSchema,
   returnToSenderSchema,
+  revealCollectionCodeSchema,
   revealDeliveryCodeSchema,
   setAvailabilityWindowsSchema,
   setHubWeeklyHoursSchema,
@@ -62,6 +63,7 @@ import {
   type RerouteInput,
   type ResolveLegExceptionInput,
   type ReturnToSenderInput,
+  type RevealCollectionCodeInput,
   type RevealDeliveryCodeInput,
   type SetAvailabilityWindowsInput,
   type SetHubWeeklyHoursInput,
@@ -180,6 +182,12 @@ export class ShippingClaimController {
  * itself reveal the code. See ShipmentService.requestDeliveryCodeEmail /
  * revealDeliveryCode for the full two-step reasoning and the no-oracle
  * response shape.
+ *
+ * MDF-709: the collection-code pair below is the exact same shape, for a
+ * shipment that ends at a hub instead of a door — same controller, same
+ * `@Public()`/throttle, because the authorization story (holding the link
+ * proves possession, never identity) is identical; only which code and
+ * which token columns differ, entirely inside ShipmentService.
  */
 @Public()
 @Controller('shipping/track')
@@ -196,6 +204,18 @@ export class ShippingDeliveryCodeController {
   @Post(':token/delivery-code/reveal')
   reveal(@Param('token') token: string, @Body(ZodBody(revealDeliveryCodeSchema)) dto: RevealDeliveryCodeInput) {
     return this.shipments.revealDeliveryCode(token, dto.revealToken);
+  }
+
+  @StrictThrottle()
+  @Post(':token/collection-code/request')
+  requestCollectionCode(@Param('token') token: string) {
+    return this.shipments.requestCollectionCodeEmail(token);
+  }
+
+  @StrictThrottle()
+  @Post(':token/collection-code/reveal')
+  revealCollectionCode(@Param('token') token: string, @Body(ZodBody(revealCollectionCodeSchema)) dto: RevealCollectionCodeInput) {
+    return this.shipments.revealCollectionCode(token, dto.revealToken);
   }
 }
 
@@ -247,6 +267,18 @@ export class ShipmentRecipientController {
   @Get(':reference/delivery-code')
   myDeliveryCode(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
     return this.shipments.recipientDeliveryCode(reference, u.userId);
+  }
+
+  /**
+   * MDF-709: the collection-code counterpart to `myDeliveryCode` above —
+   * see ShipmentService.recipientCollectionCode for the full authorization
+   * and reveal-rule reasoning. Same "never reached by token alone" guard:
+   * `@CurrentUser()` requires a real signed-in session already scoped to
+   * `recipientUserId`.
+   */
+  @Get(':reference/collection-code')
+  myCollectionCode(@CurrentUser() u: AuthContext, @Param('reference') reference: string) {
+    return this.shipments.recipientCollectionCode(reference, u.userId);
   }
 
   /**
