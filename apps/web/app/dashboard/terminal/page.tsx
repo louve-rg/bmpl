@@ -38,9 +38,22 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageH
  * courier's user id, so the server derives who "the assigned courier" is
  * from the leg itself rather than trusting whoever is signed in here.
  *
- * COLLECT takes a name, not a code -- a real gap in the API (TERM-12),
- * already with the owner. This screen builds what `collectShipmentSchema`
- * actually accepts today, not a code field the backend would reject.
+ * COLLECT takes both a code and a name. The TERM-12 gap this comment used
+ * to describe (the API accepting no code at all) closed at `6cc75009` --
+ * `collectShipmentSchema` requires `code`, and the form below sends it.
+ *
+ * MDF-702: the MANAGER-only Staff tab, consuming `GET /terminal/staff`
+ * (Pam's #683, MDF-698). This is the one capability that makes the
+ * MANAGER/OPERATOR split real rather than cosmetic -- per Stanley's
+ * acceptance condition on #683, everything else an OPERATOR can already
+ * do too. The tab itself is only drawn for `workspace.memberRole ===
+ * 'MANAGER'`; hiding it is a courtesy, not the control -- the server's
+ * own 403 (`assertActiveMemberRole`) is what actually enforces this, same
+ * as every other guard in this file never being duplicated client-side.
+ * The roster never carries an invite token, by the service's own design
+ * (`serializeInvite` never selects it), so there is nothing here to leak
+ * even by accident. No resend or revoke control here, deliberately --
+ * those stay admin-console actions; this is a read-only roster view.
  */
 
 interface HubRef {
@@ -56,6 +69,32 @@ interface Workspace {
   companyName: string;
   memberRole: string;
   locations: Array<{ locationId: string; hub: HubRef }>;
+}
+
+interface StaffMember {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  memberRole: 'MANAGER' | 'OPERATOR';
+  status: 'ACTIVE' | 'ENDED';
+  createdAt: string;
+  endedAt: string | null;
+  locations: Array<{ id: string; hub: { id: string; code: string; name: string } }>;
+}
+
+interface StaffInvite {
+  id: string;
+  email: string;
+  memberRole: 'MANAGER' | 'OPERATOR';
+  expiresAt: string;
+  createdAt: string;
+  locationCount: number;
+}
+
+interface StaffRoster {
+  members: StaffMember[];
+  pendingInvites: StaffInvite[];
 }
 
 type QueueRow =
@@ -93,11 +132,14 @@ const TAB_LABELS: Record<QueueRow['action'], string> = {
   COLLECT: 'Collect',
 };
 
-type TabKey = 'OVERVIEW' | QueueRow['action'];
+type TabKey = 'OVERVIEW' | QueueRow['action'] | 'STAFF';
 
 function errMessage(e: unknown, fallback: string): string {
   return (e as ApiError)?.message ?? fallback;
 }
+
+const when = (iso: string | null | undefined) =>
+  iso ? new Date(iso).toLocaleString('en-BZ', { dateStyle: 'medium', timeStyle: 'short' }) : null;
 
 export default function TerminalWorkspacePage() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -107,6 +149,10 @@ export default function TerminalWorkspacePage() {
   const [rows, setRows] = useState<QueueRow[] | null>(null);
   const [queueErr, setQueueErr] = useState<string | null>(null);
   const [queueLoading, setQueueLoading] = useState(false);
+
+  const [staff, setStaff] = useState<StaffRoster | null>(null);
+  const [staffErr, setStaffErr] = useState<string | null>(null);
+  const [staffLoading, setStaffLoading] = useState(false);
 
   const [tab, setTab] = useState<TabKey>('OVERVIEW');
 
@@ -149,6 +195,24 @@ export default function TerminalWorkspacePage() {
   useEffect(() => {
     if (workspace) void loadQueue();
   }, [workspace, loadQueue]);
+
+  const loadStaff = useCallback(async () => {
+    setStaffLoading(true);
+    setStaffErr(null);
+    try {
+      setStaff(await api.get<StaffRoster>('/terminal/staff'));
+    } catch (e) {
+      setStaffErr(errMessage(e, 'Could not load your staff roster.'));
+    } finally {
+      setStaffLoading(false);
+    }
+  }, []);
+
+  // MANAGER-only, same as the tab itself -- an OPERATOR never even
+  // triggers this request, rather than firing it and discarding a 403.
+  useEffect(() => {
+    if (workspace?.memberRole === 'MANAGER') void loadStaff();
+  }, [workspace, loadStaff]);
 
   function clearRowState(id: string) {
     setRowErr((prev) => {
@@ -371,10 +435,16 @@ export default function TerminalWorkspacePage() {
             role="tablist"
             aria-label="Terminal workspace sections"
           >
-            {(['OVERVIEW', ...SECTION_ORDER.map((s) => s.action)] as TabKey[]).map((key, i) => {
+            {(
+              [
+                'OVERVIEW',
+                ...SECTION_ORDER.map((s) => s.action),
+                ...(workspace!.memberRole === 'MANAGER' ? (['STAFF'] as const) : []),
+              ] as TabKey[]
+            ).map((key, i) => {
               const active = tab === key;
-              const label = key === 'OVERVIEW' ? 'Overview' : TAB_LABELS[key];
-              const count = key === 'OVERVIEW' ? totalCount : counts[key];
+              const label = key === 'OVERVIEW' ? 'Overview' : key === 'STAFF' ? 'Staff' : TAB_LABELS[key];
+              const count = key === 'OVERVIEW' ? totalCount : key === 'STAFF' ? (staff?.members.length ?? 0) : counts[key];
               return (
                 <button
                   key={key}
@@ -405,26 +475,32 @@ export default function TerminalWorkspacePage() {
       )}
 
       <div id="terminal-workspace-panel" role="tabpanel">
-        {rows && rows.length === 0 && (
-          <EmptyState
-            title="Nothing waiting at your locations"
-            description="Everything at your locations is caught up. New work appears here the moment something needs you."
-          />
-        )}
+        {tab === 'STAFF' ? (
+          <StaffRosterPanel staff={staff} loading={staffLoading} error={staffErr} onRetry={() => void loadStaff()} />
+        ) : (
+          <>
+            {rows && rows.length === 0 && (
+              <EmptyState
+                title="Nothing waiting at your locations"
+                description="Everything at your locations is caught up. New work appears here the moment something needs you."
+              />
+            )}
 
-        {rows && rows.length > 0 && tab === 'OVERVIEW' && (
-          <div className="space-y-5">{SECTION_ORDER.map(({ action, title }) => renderSection(action, title))}</div>
-        )}
+            {rows && rows.length > 0 && tab === 'OVERVIEW' && (
+              <div className="space-y-5">{SECTION_ORDER.map(({ action, title }) => renderSection(action, title))}</div>
+            )}
 
-        {rows && rows.length > 0 && tab !== 'OVERVIEW' && (
-          counts[tab] === 0 ? (
-            <EmptyState
-              title={`Nothing to ${TAB_LABELS[tab].toLowerCase()} right now`}
-              description="This section is caught up. Check Overview for what else needs you."
-            />
-          ) : (
-            renderSection(tab, SECTION_ORDER.find((s) => s.action === tab)!.title)
-          )
+            {rows && rows.length > 0 && tab !== 'OVERVIEW' && (
+              counts[tab] === 0 ? (
+                <EmptyState
+                  title={`Nothing to ${TAB_LABELS[tab].toLowerCase()} right now`}
+                  description="This section is caught up. Check Overview for what else needs you."
+                />
+              ) : (
+                renderSection(tab, SECTION_ORDER.find((s) => s.action === tab)!.title)
+              )
+            )}
+          </>
         )}
       </div>
     </div>
@@ -592,5 +668,93 @@ function QueueRowCard({
         {error && <p className="mt-2 break-words text-xs font-medium text-amber-800">{error}</p>}
       </div>
     </Card>
+  );
+}
+
+/**
+ * MDF-702: read-only roster for a MANAGER -- members and pending invites,
+ * matching the admin console's own display convention for the same data
+ * (`apps/admin/.../terminal-companies/[id]/page.tsx`'s Members and Pending
+ * invites cards) so the two surfaces agree on what a role and a status
+ * mean. No action here mutates anything: no end/reactivate membership, no
+ * resend/revoke invite -- those stay admin-console-only, per the owner's
+ * instruction not to invite that scope onto a client-ready screen.
+ */
+function StaffRosterPanel({
+  staff,
+  loading,
+  error,
+  onRetry,
+}: {
+  staff: StaffRoster | null;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  if (loading && !staff) {
+    return <LoadingRow label="Loading your staff roster…" />;
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-3">
+        <Alert tone="error">{error}</Alert>
+        <Button variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  if (!staff) return null;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Members ({staff.members.length})</h2>
+        {staff.members.length === 0 ? (
+          <EmptyState title="No staff yet" description="Invite a manager or operator from the admin console to see them here." />
+        ) : (
+          <div className="space-y-3">
+            {staff.members.map((m) => (
+              <Card key={m.id} className="p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="font-medium text-[color:var(--bmpl-text)]">{m.name}</span>{' '}
+                    <span className="text-xs text-[color:var(--bmpl-text-muted)]">{m.email}</span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Badge tone={m.memberRole === 'MANAGER' ? 'brand' : 'neutral'}>{m.memberRole}</Badge>
+                    <Badge tone={m.status === 'ACTIVE' ? 'success' : 'neutral'}>{m.status}</Badge>
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-[color:var(--bmpl-text-muted)]">
+                  {m.locations.length === 0 ? 'No locations granted.' : `Granted at: ${m.locations.map((l) => l.hub.name).join(', ')}`}
+                </p>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-sm font-semibold text-[color:var(--bmpl-text-muted-strong)]">Pending invites ({staff.pendingInvites.length})</h2>
+        {staff.pendingInvites.length === 0 ? (
+          <p className="text-sm text-[color:var(--bmpl-text-muted)]">No pending invites.</p>
+        ) : (
+          <ul className="divide-y divide-slate-200 rounded-bmpl-md border border-slate-200 bg-white">
+            {staff.pendingInvites.map((inv) => (
+              <li key={inv.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                <span className="font-medium text-[color:var(--bmpl-text)]">{inv.email}</span>
+                <span className="flex items-center gap-1.5 text-xs text-[color:var(--bmpl-text-muted)]">
+                  <Badge tone={inv.memberRole === 'MANAGER' ? 'brand' : 'neutral'}>{inv.memberRole}</Badge>
+                  {inv.locationCount} location{inv.locationCount === 1 ? '' : 's'} · expires {when(inv.expiresAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
