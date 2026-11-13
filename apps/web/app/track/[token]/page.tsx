@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { BrandLockup } from '../../../components/Logo';
 import { RecipientTracking } from '../../../components/shipping/RecipientTracking';
+import { UnlinkedCollectionCode } from '../../../components/shipping/UnlinkedCollectionCode';
 import { UnlinkedDeliveryCode } from '../../../components/shipping/UnlinkedDeliveryCode';
 import { Alert, Button, Spinner } from '../../../components/ui';
 import type { ApiError } from '../../../lib/api';
@@ -114,6 +115,15 @@ export default function RecipientTrackingPage() {
             <RecipientTracking view={view} />
 
             <UnlinkedDeliveryCode token={token} />
+
+            {/* MDF-710: only while the shipment is actually AWAITING_COLLECTION
+                at a terminal -- `collectionHub` is non-null for exactly that
+                window (RecipientTrackingView's own doc comment), the same
+                window `revealCollectionCode` will return a real code for.
+                Showing this on every shipment regardless of service type
+                would be noise for the door-to-door majority that never has
+                one. */}
+            {view.collectionHub && <UnlinkedCollectionCode token={token} />}
 
             <div className="mt-4 rounded-bmpl-xl border border-slate-200 bg-white p-4 shadow-bmpl-sm sm:p-5">
               {claimState === 'claimed' ? (

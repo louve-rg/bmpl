@@ -75,4 +75,48 @@ describe('anonymous /track/[token] page', () => {
     expect(container!.querySelector('a[href*="/dashboard/messages"]')).toBeNull();
     expect(container!.textContent).not.toContain('Message your courier');
   });
+
+  /**
+   * MDF-710: the collection-ready email tells the recipient to "visit your
+   * tracking page to see your collection code" -- this proves that page
+   * actually offers it, and only in the window the email means (while the
+   * shipment is genuinely AWAITING_COLLECTION, signalled by `collectionHub`
+   * being present).
+   */
+  it('offers "Get your collection code" while the shipment is awaiting collection at a hub', async () => {
+    trackPublic.mockResolvedValue({
+      ...view,
+      status: 'AWAITING_COLLECTION',
+      statusLabel: 'Awaiting collection',
+      collectionHub: { name: 'Belize City Hub', city: 'Belize City', address: null, instructions: null },
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<RecipientTrackingPage />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container!.textContent).toContain('Get your collection code');
+  });
+
+  it('never offers "Get your collection code" for a shipment with no collection hub', async () => {
+    trackPublic.mockResolvedValue(view); // collectionHub: null, per the fixture above
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<RecipientTrackingPage />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container!.textContent).not.toContain('Get your collection code');
+  });
 });
