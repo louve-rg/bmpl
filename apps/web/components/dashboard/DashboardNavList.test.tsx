@@ -15,7 +15,11 @@ import type { MeView } from '../../lib/types';
  * their own unit tests in dashboard-nav.test.ts and shipping-provider.test.ts.
  */
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/dashboard' }));
+// Stable reference across renders -- a fresh object literal from useRouter()
+// on every call would make the hook's effect (deps include `router`) look
+// like it changed every render and re-run forever (BMPL-380's own hazard).
+const router = { push: vi.fn() };
+vi.mock('next/navigation', () => ({ usePathname: () => '/dashboard', useRouter: () => router }));
 
 const apiGet = vi.fn();
 vi.mock('../../lib/api', () => ({
@@ -50,6 +54,7 @@ let container: HTMLDivElement | null = null;
 
 beforeEach(() => {
   apiGet.mockReset();
+  router.push.mockReset();
 });
 
 afterEach(() => {
@@ -358,6 +363,104 @@ describe('DashboardNavList — Terminal group (TERM-11)', () => {
       expect(container.textContent).not.toMatch(/Terminal/);
       expect(container.querySelector('[data-testid="terminal-membership-loading"]')).toBeNull();
       expect(container.querySelector('[data-testid="terminal-membership-error"]')).toBeNull();
+    });
+  });
+
+  /**
+   * TERM-NAV-401 (Stanley's read of F-NAV). Two defects in the same hook:
+   * a 401 was treated identically to any other failure -- retried forever
+   * on the backoff, showing "Something went wrong" for a session that
+   * merely ended, which "Try again" can never fix -- and a re-check that
+   * failed again re-set `error` to the same value, so a working retry and
+   * a dead one looked identical on screen.
+   */
+  describe('TERM-NAV-401 — a 401 is a dead session, not a retryable error', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('redirects to sign-in on a 401, shows neither loading nor error, and never schedules a retry', async () => {
+      let calls = 0;
+      apiGet.mockImplementation((path: string) => {
+        if (path !== '/terminal/me') return Promise.resolve([]);
+        calls += 1;
+        return Promise.reject({ status: 401 });
+      });
+
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(calls).toBe(1);
+      expect(router.push).toHaveBeenCalledTimes(1);
+      expect(router.push.mock.calls[0]![0]).toMatch(/^\/login\?next=/);
+      // Never "Something went wrong" for a session that merely ended.
+      expect(container.textContent).not.toMatch(/something went wrong/i);
+
+      // No retry fires even after the full backoff window -- unlike a
+      // genuine error, nothing here can self-heal an expired session.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
+      expect(calls).toBe(1);
+      expect(router.push).toHaveBeenCalledTimes(1);
+    });
+
+    it('a retry that fails again visibly returns to loading first, rather than silently re-showing the same error', async () => {
+      let calls = 0;
+      let resolveSecond: (() => void) | undefined;
+      apiGet.mockImplementation((path: string) => {
+        if (path !== '/terminal/me') return Promise.resolve([]);
+        calls += 1;
+        if (calls === 1) return Promise.reject(new Error('network error'));
+        return new Promise((_resolve, reject) => {
+          resolveSecond = () => reject(new Error('network error again'));
+        });
+      });
+
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root!.render(<DashboardNavList me={meWith([{ roleCode: 'CUSTOMER', label: 'Customer', status: 'APPROVED', isSelectable: true }])} unread={0} />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('[data-testid="terminal-membership-error"]')).not.toBeNull();
+      const retryButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Try again')!;
+
+      await act(async () => {
+        retryButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      // The second attempt is in flight (deliberately held open above) --
+      // this must show loading, not the stale error affordance, proving
+      // the retry visibly happened rather than nothing changing on screen.
+      expect(container.querySelector('[data-testid="terminal-membership-loading"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="terminal-membership-error"]')).toBeNull();
+
+      await act(async () => {
+        resolveSecond!();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('[data-testid="terminal-membership-error"]')).not.toBeNull();
     });
   });
 });

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { api, type ApiError } from './api';
 
 /**
@@ -46,6 +47,26 @@ export type TerminalMembershipStatus = 'loading' | 'member' | 'not-member' | 'er
  *    also exposing `retry()` for a visible manual "try again" affordance,
  *    so the failure is never silent the way it used to be.
  *
+ * TERM-NAV-401 (Stanley's read of F-NAV): a 401 reaching here is NOT a
+ * transient blip the way a network error or 5xx is -- `api.get` already
+ * attempted one silent token refresh before this hook ever sees the
+ * rejection (see `request()` in lib/api.ts), so a 401 here means the
+ * session is genuinely gone. Lumping it into `error` told the user their
+ * session merely ending was the PRODUCT being broken, and "Try again" can
+ * never fix an expired session -- it would just retry forever on the same
+ * backoff. So a 401 redirects to sign-in instead, the same convention every
+ * other dashboard data fetch in this app already uses on its own 401 (e.g.
+ * `app/wallet/page.tsx`, `app/dashboard/incoming/page.tsx`), and schedules
+ * no retry. `status` is left at `loading` rather than switched to `error`
+ * for the brief moment before navigation completes -- not a fifth state,
+ * just which of the existing four is least wrong to show while leaving.
+ *
+ * Also fixed here: `check()` now sets `loading` at the START of every
+ * attempt, not just the first. Before this, a re-check (the backoff timer
+ * or a manual `retry()`) that failed again re-set status to the SAME
+ * `error` value it already held -- React skips the re-render, so nothing
+ * on screen changed and a working retry looked identical to a dead one.
+ *
  * Exists only so the nav can surface a workspace that is otherwise
  * reachable no other way; the terminal workspace page itself reads
  * `/terminal/me` again on its own terms and does not depend on this hook
@@ -54,6 +75,7 @@ export type TerminalMembershipStatus = 'loading' | 'member' | 'not-member' | 'er
 export function useTerminalMembership(): { status: TerminalMembershipStatus; retry: () => void } {
   const [status, setStatus] = useState<TerminalMembershipStatus>('loading');
   const [retryToken, setRetryToken] = useState(0);
+  const router = useRouter();
 
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +83,7 @@ export function useTerminalMembership(): { status: TerminalMembershipStatus; ret
     let attempt = 0;
 
     function check() {
+      if (!cancelled) setStatus('loading');
       api
         .get('/terminal/me')
         .then(() => {
@@ -68,8 +91,18 @@ export function useTerminalMembership(): { status: TerminalMembershipStatus; ret
         })
         .catch((e) => {
           if (cancelled) return;
-          if ((e as ApiError)?.status === 403) {
+          const httpStatus = (e as ApiError)?.status;
+          if (httpStatus === 403) {
             setStatus('not-member'); // definitive: stop retrying
+            return;
+          }
+          if (httpStatus === 401) {
+            // Session is genuinely gone, not a blip -- see the header
+            // comment. No retry timer; `window.location` (not the closed-
+            // over `usePathname`) so the `next` param is never stale if the
+            // visitor navigated within the dashboard between mount and now.
+            const next = typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/dashboard';
+            router.push(`/login?next=${encodeURIComponent(next)}`);
             return;
           }
           setStatus('error');
@@ -84,7 +117,7 @@ export function useTerminalMembership(): { status: TerminalMembershipStatus; ret
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [retryToken]);
+  }, [retryToken, router]);
 
   const retry = useCallback(() => setRetryToken((t) => t + 1), []);
 
