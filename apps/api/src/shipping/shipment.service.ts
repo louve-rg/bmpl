@@ -5765,8 +5765,15 @@ export class ShipmentService {
    * where a clerk could otherwise mistake a demo parcel for a real one.
    */
   async lookupForTerminal(reference: string, hubIds: string[]) {
+    // TERM-SEARCH-CASE: every generated reference is uppercase
+    // (uniqueReference's own alphabet is A-Z/2-9), but a counter clerk typing
+    // one in from memory or a handwritten note has no reason to match that
+    // case. `findUnique` is an exact Postgres equality match, so a lowercase
+    // or mixed-case entry for a shipment that genuinely exists used to come
+    // back 404 "No shipment with that reference" — a false negative on the
+    // one thing this route exists to answer.
     const shipment = await this.prisma.shipment.findUnique({
-      where: { reference },
+      where: { reference: reference.trim().toUpperCase() },
       select: {
         id: true,
         reference: true,
