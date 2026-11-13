@@ -86,6 +86,10 @@ type StubOpts = {
   // again (the shape every test before MDF-702 step 1 relied on); only the
   // completing-an-action-on-a-filtered-tab test needs this to differ.
   queueRowsAfter?: unknown[];
+  // MDF-721: force /terminal/queue itself to fail, independent of
+  // queueRows/queueRowsAfter, to prove the Lookup tab doesn't go down with it.
+  queueStatus?: number;
+  queueErrorBody?: unknown;
   actionStatus?: number;
   actionBody?: unknown;
   lookupStatus?: number;
@@ -109,6 +113,9 @@ function stubFetch(opts: StubOpts = {}) {
       }
       if (url.includes('/api/terminal/queue')) {
         queueCallCount += 1;
+        if (opts.queueStatus && opts.queueStatus !== 200) {
+          return jsonResponse(opts.queueStatus, opts.queueErrorBody ?? { message: 'Could not load your queue.' });
+        }
         const rows = queueCallCount === 1 ? opts.queueRows ?? [] : opts.queueRowsAfter ?? opts.queueRows ?? [];
         return jsonResponse(200, rows);
       }
@@ -494,6 +501,83 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       await mount();
 
       expect(() => findTab('Lookup')).not.toThrow();
+    });
+
+    /**
+     * MDF-721: Jim's gap-proof on #685 intercepted /api/terminal/queue to a
+     * 500 and found the Lookup tab gone -- not errored, gone, with no way
+     * back to it -- because the whole tab bar sat behind `rows && (...)`,
+     * and `rows` never gets set when the queue fetch fails. Lookup has no
+     * dependency on the queue at all; a tab's visibility must not be a
+     * function of an unrelated fetch's state.
+     */
+    it('stays visible and reachable even when /terminal/queue fails -- a tab is not a function of an unrelated fetch', async () => {
+      const calls = stubFetch({ queueStatus: 500, lookupBody: LOOKUP_RESULT });
+      await mount();
+
+      // Positive control: the page genuinely attempted and failed, rather
+      // than never asking or rendering blank.
+      expect(calls).toBeDefined();
+      expect(container!.textContent).toContain('Could not load your queue.');
+
+      expect(() => findTab('Lookup')).not.toThrow();
+      await clickTab('Lookup');
+      setValue(container!.querySelector('#lookup-reference') as HTMLInputElement, 'BML-9');
+      await clickButton('Look up');
+
+      expect(container!.textContent).toContain('BML-9');
+      expect(container!.textContent).toContain('Spare parts');
+    });
+
+    it('does not let an older, slower search response overwrite a newer one', async () => {
+      let resolveFirst: ((res: Response) => void) | undefined;
+      let secondCallStarted = false;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.includes('/api/terminal/me')) return jsonResponse(200, WORKSPACE);
+          if (url.includes('/api/terminal/queue')) return jsonResponse(200, []);
+          if (url.includes('/api/terminal/shipments/BML-OLD')) {
+            return new Promise<Response>((resolve) => {
+              resolveFirst = resolve;
+            });
+          }
+          if (url.includes('/api/terminal/shipments/BML-NEW')) {
+            secondCallStarted = true;
+            return jsonResponse(200, { ...LOOKUP_RESULT, reference: 'BML-NEW', description: 'Newer search' });
+          }
+          return jsonResponse(404, { message: 'not mocked: ' + url });
+        }),
+      );
+      await mount();
+      await clickTab('Lookup');
+
+      const input = container!.querySelector('#lookup-reference') as HTMLInputElement;
+      setValue(input, 'BML-OLD');
+      await clickButton('Look up');
+      expect(secondCallStarted).toBe(false); // still in flight, unresolved
+
+      // The "Look up" button disables itself while a search is in flight --
+      // the real-world race is a user retyping and hitting Enter again
+      // before the first request resolves, which the Enter handler allows
+      // unconditionally (it isn't gated by `loading`).
+      setValue(input, 'BML-NEW');
+      await act(async () => {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(container!.textContent).toContain('Newer search');
+
+      // The stale first response now resolves, after the newer one already rendered.
+      await act(async () => {
+        resolveFirst!(jsonResponse(200, { ...LOOKUP_RESULT, reference: 'BML-OLD', description: 'Older search' }));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      // Must still show the newer result -- the stale one must not win.
+      expect(container!.textContent).toContain('Newer search');
+      expect(container!.textContent).not.toContain('Older search');
     });
   });
 });

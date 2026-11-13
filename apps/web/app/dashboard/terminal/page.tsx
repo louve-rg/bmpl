@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type ApiError } from '../../../lib/api';
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, LoadingRow, PageHeader, StatusBadge } from '../../../components/ui';
 
@@ -168,6 +168,11 @@ export default function TerminalWorkspacePage() {
   const [lookupErr, setLookupErr] = useState<string | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupSearched, setLookupSearched] = useState(false);
+  // Stanley's review of #692: a fast repeat search (type a reference, search,
+  // edit, search again before the first response lands) could have an older
+  // response overwrite a newer one. Each call stamps its own sequence number
+  // and only applies its result if nothing newer has started since.
+  const lookupSeqRef = useRef(0);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [rowErr, setRowErr] = useState<Record<string, string>>({});
@@ -322,16 +327,20 @@ export default function TerminalWorkspacePage() {
       setLookupErr('Enter a reference to look up.');
       return;
     }
+    const mySeq = ++lookupSeqRef.current;
     setLookupLoading(true);
     setLookupErr(null);
     setLookupResult(null);
     setLookupSearched(true);
     try {
-      setLookupResult(await api.get<LookupResult>(`/terminal/shipments/${encodeURIComponent(reference)}`));
+      const result = await api.get<LookupResult>(`/terminal/shipments/${encodeURIComponent(reference)}`);
+      if (mySeq !== lookupSeqRef.current) return; // a newer search started -- drop this stale response
+      setLookupResult(result);
     } catch (e) {
+      if (mySeq !== lookupSeqRef.current) return;
       setLookupErr(errMessage(e, 'Could not look up that reference.'));
     } finally {
-      setLookupLoading(false);
+      if (mySeq === lookupSeqRef.current) setLookupLoading(false);
     }
   }
 
@@ -441,46 +450,54 @@ export default function TerminalWorkspacePage() {
           from the rows above) and the only navigation this step adds -- one
           mechanism serving both purposes rather than a separate stat-card
           grid duplicating the same numbers. Horizontally scrollable at
-          320px, same convention as apps/web/app/dashboard/driver/jobs. */}
-      {rows && (
-        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-          <div
-            className="inline-flex min-w-full overflow-hidden rounded-bmpl-md border border-slate-200"
-            role="tablist"
-            aria-label="Terminal workspace sections"
-          >
-            {(['OVERVIEW', ...SECTION_ORDER.map((s) => s.action), 'LOOKUP'] as TabKey[]).map((key, i) => {
-              const active = tab === key;
-              const label = key === 'OVERVIEW' ? 'Overview' : key === 'LOOKUP' ? 'Lookup' : TAB_LABELS[key];
-              const count = key === 'OVERVIEW' ? totalCount : key === 'LOOKUP' ? 0 : counts[key];
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  aria-controls="terminal-workspace-panel"
-                  onClick={() => setTab(key)}
-                  className={`flex min-h-[44px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-sm font-semibold transition ${
-                    i > 0 ? 'border-l border-slate-200' : ''
-                  } ${active ? 'bg-belize-blue text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
-                >
-                  {label}
-                  {count > 0 && (
-                    <span
-                      className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-[18px] ${
-                        active ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {count > 99 ? '99+' : count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          320px, same convention as apps/web/app/dashboard/driver/jobs.
+          MDF-721: this used to render only once `rows` was set, which took
+          EVERY tab down -- Lookup included -- whenever /terminal/queue was
+          slow or failed, even though Lookup has no dependency on the queue
+          at all. The tab bar's own visibility must not be a function of an
+          unrelated fetch's state; it depends only on `workspace`, which is
+          guaranteed non-null here (the early returns above already handled
+          !workspace). The queue-dependent tabs' counts naturally read 0
+          while `rows` is null (`counts`/`totalCount` both default off
+          `rows ?? []`), so nothing here invents a number -- they just show
+          no badge until the queue actually loads. */}
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div
+          className="inline-flex min-w-full overflow-hidden rounded-bmpl-md border border-slate-200"
+          role="tablist"
+          aria-label="Terminal workspace sections"
+        >
+          {(['OVERVIEW', ...SECTION_ORDER.map((s) => s.action), 'LOOKUP'] as TabKey[]).map((key, i) => {
+            const active = tab === key;
+            const label = key === 'OVERVIEW' ? 'Overview' : key === 'LOOKUP' ? 'Lookup' : TAB_LABELS[key];
+            const count = key === 'OVERVIEW' ? totalCount : key === 'LOOKUP' ? 0 : counts[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                aria-controls="terminal-workspace-panel"
+                onClick={() => setTab(key)}
+                className={`flex min-h-[44px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-sm font-semibold transition ${
+                  i > 0 ? 'border-l border-slate-200' : ''
+                } ${active ? 'bg-belize-blue text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+              >
+                {label}
+                {count > 0 && (
+                  <span
+                    className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-[18px] ${
+                      active ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {count > 99 ? '99+' : count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
-      )}
+      </div>
 
       <div id="terminal-workspace-panel" role="tabpanel">
         {tab === 'LOOKUP' ? (
