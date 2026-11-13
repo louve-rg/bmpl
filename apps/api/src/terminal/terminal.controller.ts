@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   acceptTerminalInviteSchema,
   addTerminalCompanyLocationSchema,
@@ -180,11 +181,22 @@ export class TerminalController {
    * never sees a hub id this method did not hand it, so a leg at a location
    * I was not granted cannot appear in the list, not merely be refused if I
    * try to act on it.
+   *
+   * TERM-QUEUE-TRUNCATION: the body stays the exact flat array
+   * `apps/web`'s shipped Terminal Workspace queue tab already reads —
+   * `terminalQueue` itself is unchanged in shape to any caller that only
+   * reads the body. The truth about completeness rides a response header
+   * instead (`passthrough: true` so Nest still serializes `items` as the
+   * JSON body): a caller that doesn't read the header loses nothing it had
+   * before, and one that does can finally tell "this is everything" from
+   * "there's more, narrow your query."
    */
   @Get('queue')
-  async queue(@CurrentUser() u: AuthContext) {
+  async queue(@CurrentUser() u: AuthContext, @Res({ passthrough: true }) res: Response) {
     const hubIds = await this.terminal.myActiveHubIds(u.userId);
-    return this.shipments.terminalQueue(hubIds);
+    const { items, hasMore } = await this.shipments.terminalQueue(hubIds);
+    res.setHeader('X-BMPL-Queue-Has-More', String(hasMore));
+    return items;
   }
 
   /**
