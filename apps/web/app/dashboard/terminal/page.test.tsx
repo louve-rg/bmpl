@@ -39,7 +39,17 @@ const HANDOFF_ROW = {
   from: 'Door collection',
   broughtBy: 'Juan Perez',
   arrived: true,
+  kind: 'FIRST_MILE' as const,
+  courier: 'Juan Perez',
 };
+// MDF-747: a FIRST_MILE leg with no assigned courier -- submitting a code
+// here would always 400 server-side (completeLeg's own precheck), so the
+// form must not be offered at all.
+const HANDOFF_ROW_NO_COURIER = { ...HANDOFF_ROW, legId: 'leg_h2', reference: 'BML-30', broughtBy: 'Carrier', courier: null };
+// A LINE_HAUL handoff never has a courier either, but is NOT the same case
+// -- completeLeg exempts LINE_HAUL from the guard entirely, so the form
+// must still be offered here despite courier also being null.
+const HANDOFF_ROW_LINE_HAUL = { ...HANDOFF_ROW, legId: 'leg_h3', reference: 'BML-31', kind: 'LINE_HAUL' as const, courier: null };
 const RELEASE_ROW = {
   action: 'RELEASE_TO_COURIER' as const,
   legId: 'leg_r',
@@ -284,6 +294,33 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
     const call = calls.find((c) => c.url.includes('/handoff'));
     expect(call?.body).toEqual({ pin: '4821', receivedByName: 'Maria Lopez', presentedByAssignedCourier: true });
+  });
+
+  it('MDF-747: offers no handoff form for a FIRST_MILE leg with no assigned courier, and says so instead', async () => {
+    stubFetch({ queueRows: [HANDOFF_ROW_NO_COURIER] });
+    await mount();
+
+    // Not merely visually hidden -- actually absent from the DOM.
+    expect(container!.querySelector('#handoff-pin-leg_h2')).toBeNull();
+    expect(container!.querySelector('#handoff-who-leg_h2')).toBeNull();
+    expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Record handoff')).toBe(false);
+    expect(container!.textContent).toContain('This leg has no courier yet.');
+  });
+
+  it('MDF-747: a LINE_HAUL leg with no courier is normal -- still offers the handoff form, never gating on courier alone', async () => {
+    stubFetch({ queueRows: [HANDOFF_ROW_LINE_HAUL] });
+    await mount();
+
+    expect(container!.querySelector('#handoff-pin-leg_h3')).not.toBeNull();
+    expect(container!.textContent).not.toContain('This leg has no courier yet.');
+  });
+
+  it('still offers the handoff form for a FIRST_MILE leg that does have an assigned courier', async () => {
+    stubFetch({ queueRows: [HANDOFF_ROW] });
+    await mount();
+
+    expect(container!.querySelector('#handoff-pin-leg_h')).not.toBeNull();
+    expect(container!.textContent).not.toContain('This leg has no courier yet.');
   });
 
   it('submits a release-to-courier with only the pin', async () => {
