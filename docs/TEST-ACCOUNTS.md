@@ -23,6 +23,13 @@ into are separate products with separate login surfaces:
   (`apps/web/e2e/support/auth.ts:94-97` explains why ADMIN has no entry in
   the web registry).
 
+**A third kind of account exists on top of these: hand-created through a
+real signup/invite flow for a specific one-off test, not from a seed
+script.** Those are not reproducible fixtures in the sense above — nobody
+should assume they still exist on a fresh database — but the owner has asked
+for them recorded too, so the floor stops re-creating the same role by
+accident. See **"Manually created accounts"** near the end of this document.
+
 ---
 
 ## Web app fixtures (`apps/web/e2e/support/auth.ts`)
@@ -148,3 +155,41 @@ No other fixture in either registry disagreed with its seed script this
 pass: every email, role grant, and password variable named above was
 re-verified against the script that creates it on 2026-11-12, not assumed
 from the previous pass or from a comment.
+
+---
+
+## Manually created accounts — real flows, not seed fixtures (local stack only)
+
+**These are not reproducible.** Each one was created by hand, tonight, by a
+specific agent for a specific reason, through the real signup/invite page
+rather than a seed script — the opposite of the reproducible-fixture rule
+at the top of this document. Recorded here because the owner's standing
+instruction is to reuse an existing test account wherever practical, and
+that is impossible if the only record of one is a single agent's own
+memory file. **No password, token or invitation token appears below, for
+any entry — not even a redacted placeholder that hints at a format.**
+Sourced from `hive/agents/stanley-mwe4jkri/memory.md` and `tasks.json`
+only; the two `*.local` credential files on this host were not opened for
+this document and are not the source of anything here.
+
+| Account | Role | Purpose | Stack | Created by / when | Safe to reuse for |
+| --- | --- | --- | --- | --- | --- |
+| `stanley-manager-1794527832794@example.bz` | Terminal **MANAGER** | Terminal Workspace MANAGER-vs-OPERATOR permission checks (MDF-698) | **Local stack only** — terminal company "Stanley QA Terminal Co 1794527832794" (`isTest`, hub codes `UATBC`/`UATBP`) | Stanley (`stanley-mwe4jkri`), via the real invite-and-accept flow, 2026-11-12 | Any Terminal Workspace check that needs an active MANAGER on an `isTest` terminal company. Do not assume it exists on a fresh database. |
+| `stanley-operator-1794527832794@example.bz` | Terminal **OPERATOR** | Same purpose, OPERATOR side of the same role comparison | Same terminal company, local stack only | Stanley, same flow and date | Any check that needs an active OPERATOR on the same `isTest` company, paired with the MANAGER above for a same-company role comparison. |
+| `stanley-sender-1794527832794@example.bz` | **CUSTOMER** | Sender account to book parcels against for Terminal Workspace testing | Local stack only | Stanley, registered through the real signup page, 2026-11-13 | Booking a parcel as a sender. Funded with **BZ$50.00** by a single admin-console test-credit grant (`WalletOperations` → `/api/admin/wallet/test-credit`, permission `wallet.credit_test`) — performed by Dwight (`bmpl-qa-mtmcz0m1`), **acting as the seeded SUPER_ADMIN**, because no scoped QA-admin account exists yet (open question on MDF-696/MDF-708). Any finding about what this role *should* be able to do, versus what was actually observed under the SUPER_ADMIN account, should say which of the two it is — the effective permissions of a future dedicated QA-admin role are not yet established. |
+
+**Explicitly out of scope — never use for QA, under any circumstance:**
+`edwardbroaster@bzemarketplace.com` (Edward Broaster) is a **real client**,
+not a test account. The owner has been emphatic that Edward is the client,
+not a tester for this floor to exercise. No future shift should create test
+data on his account, book a test parcel to it, or otherwise treat it as
+reusable fixture.
+
+**Starting points already established elsewhere, not re-derived here:** the
+seeded `SUPER_ADMIN` default is `admin@bzemarketplace.com`
+(`packages/database/prisma/seed.ts:97`, same default read again at
+`seed-uat-logistics.ts:369` and `seed-uat-roles.ts:252` — both current line
+numbers, re-checked rather than copied from the dispatch that named earlier
+ones) — see the seed-script table above for the full account. That one *is*
+a reproducible fixture; it belongs in the main tables above, not this
+section, and is listed here only to avoid a reader assuming it was missed.
