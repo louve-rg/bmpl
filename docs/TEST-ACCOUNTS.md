@@ -203,33 +203,64 @@ similar name, the duplicates are empty and not a sign these accounts moved.
 | `stanley-operator-1794527832794@example.bz` | Terminal **OPERATOR** | Same purpose, OPERATOR side of the same role comparison | Same company, same both-hub membership, local stack only | Dwight invited, Stanley accepted, same flow and date. Same address as the pre-wipe OPERATOR, same re-registration note as the MANAGER above. | Any check that needs an active OPERATOR on the same `isTest` company, paired with the MANAGER above for a same-company role comparison. **Cannot** be used for a terminal-scope-enforcement test, for the same reason as the MANAGER. |
 | `stanley-single-1794527832794@example.bz` | Terminal **OPERATOR**, single-hub | **The only account on this stack that can test terminal scope enforcement.** The two accounts above hold memberships at *both* hubs, so neither one can produce a genuine "acting outside my hub" case — there is no hub either of them is outside of. This account exists specifically to fill that gap. | **Local stack only** — same company, `isTest`, `UATBC` only (`locationCount: 1`, confirmed by `GET /api/terminal/me` listing only Belize City for this account) | Invited by Dwight through the real admin-console invite flow; accepted by Stanley through the real invite-accept flow, 2026-11-13 | Any terminal scope-enforcement check. Confirmed so far (Stanley, acceptance-matrix Updates 41–42): read-scope PASS — `GET /api/terminal/queue` as this account excludes a parcel at the other hub; write-scope PASS — `POST /api/terminal/legs/<id>/handoff` against a leg at `UATBP` returned 403 "You do not hold this terminal location." **Do not widen this account's memberships for convenience** — a second hub would destroy the one thing it is for. |
 
-**A stray, non-test carrier organization exists in this stack and is NOT a
-usable test fixture — do not reuse it, and do not mistake it for a real
-one.** `stanley-carrier-1794527832794@example.bz` applied for the
-SHIPPING_PROVIDER role during a carrier-chain experiment (MDF-755/MDF-760)
-and Dwight approved it, deliberately, as SUPER_ADMIN. `isTest` on a
-`ShippingProviderProfile` is **derived from the creating user's own
-`isTest` at the moment the profile is created** (`shipping-provider.
-service.ts:79-88`) — it is a one-time read, not something re-checked later.
-That applicant's `User.isTest` was `false` at the time, so the resulting
-organization came back `isTest: false` too, **and this is not repairable
-after the fact**: there is no endpoint anywhere that can change an
-*existing* `ShippingProviderProfile`'s `isTest`, unlike `VendorProfile`,
-which has an admin `/test-mode` endpoint for exactly that. **The ordering
-is what matters, and it is the lesson this artifact exists to teach**: a
-user's own `isTest` flag genuinely can be set at any time, before or after
-this happened, through the existing `POST /admin/users/test-flag`
-(`admin.controller.ts:140`, permission `users.suspend`) — so flipping the
-*applicant's* flag **before** they apply produces a real, usable `isTest`
-carrier; applying first, the way this one did, locks in a permanent
-non-test org with no repair path. There is also **no delete endpoint**
-(the same TERM-4 gap as the two empty duplicate terminal companies above).
-The practical effect, observed: this org is the only row in
-`GET /admin/logistics/providers`, and the Assign-carrier picker lists it
-but disables it — "not a simulation carrier" — so it cannot select onto a
-simulation leg. It will sit there indefinitely. **If you open that list
-and see one entry, it is this artifact, not evidence that a carrier
-exists to test with.**
+**Two stray, non-test carrier organizations exist in this stack and are NOT
+usable test fixtures — do not reuse either, and do not mistake either for
+a real carrier.** Both exist for the same underlying reason, confirmed at
+`shipping-provider.service.ts:79-88`: `ShippingProviderProfile.isTest` is
+read from the owning user exactly once, on the **first-ever save of that
+user's provider profile** — `upsertProfile`'s `create` branch of a Prisma
+upsert keyed on `userId`. **The trigger is the first save, not a formal
+"submit application" step** — a user who merely saves a profile as a
+draft, never submitting anything, stamps `isTest` at that moment, silently
+and permanently; every later save of the same profile hits the upsert's
+`update` branch, which never touches the flag again. There is **no repair
+path and no delete endpoint** for an existing `ShippingProviderProfile`
+once this has happened (the same TERM-4 gap as the two empty duplicate
+terminal companies above) — unlike `VendorProfile`, which has an admin
+`/test-mode` endpoint for exactly this, and unlike the sibling passenger
+module (`PassengerProviderProfile`), which has its own equivalent at
+`admin-passenger.controller.ts:71`. (The comment directly above the
+`isTest`-derivation code claims "admin flips it thereafter, as before" —
+checked, and no such admin endpoint exists anywhere in
+`shipping-provider.service.ts` or any controller for this model; that
+comment describes the passenger sibling's behavior, not this one's, and
+is itself stale.)
+
+1. `stanley-carrier-1794527832794@example.bz` — applied for SHIPPING_PROVIDER
+   during the carrier-chain experiment (MDF-755/MDF-760) and Dwight approved
+   it, deliberately, as SUPER_ADMIN. That applicant's own `User.isTest` was
+   `false` when the profile was first saved, so the org is permanently
+   `isTest: false`.
+2. `uat-dispatch-vendor@bzemarketplace.com` — the seeded, load-bearing VENDOR
+   fixture MDF-410's admin-dispatch console depends on (see the VENDOR row
+   in the web-app fixtures table above). During the same experiment its
+   `User.isTest` was deliberately flipped to `true` and then back to
+   `false` (its correct, pre-experiment state, where it stays) to test
+   whether the ordering rule held — but a provider profile, "UAT Simulation
+   Carrier B (MDF-697)", had already been saved on it, so it too is
+   permanently `isTest: false`. **Never use this account to test a carrier
+   flow or flip its `User.isTest` for any reason** — it is load-bearing for
+   MDF-410's unrelated dispatch fixture, which must keep measuring under
+   its original, non-test state.
+
+The ordering that *would* have worked, and is the actionable rule to carry
+forward: flip the **applicant's** `User.isTest` to `true` *before* they
+ever save a provider profile for the first time, via the existing
+`POST /admin/users/test-flag` (`admin.controller.ts:140`, permission
+`users.suspend`) — then the first save creates the org already
+`isTest: true`. A third account, created specifically to get this right
+(`stanley-carrier2-1794527832794@example.bz`, `User.isTest` flipped `true`
+*before* any profile save), is in progress as of 2026-11-13 and may become
+the actual reusable carrier fixture this section is missing — **not yet
+recorded here; wait for it to be reported complete**, and when it is, keep
+it clearly separate from the two artifacts above rather than letting a
+reader conflate any of the three.
+
+The practical effect of both artifacts, observed: each sits as a row in
+`GET /admin/logistics/providers` that the Assign-carrier picker lists but
+disables — "not a simulation carrier" — so neither can ever select onto a
+simulation leg. **If you open that list and see an entry, it may well be
+one of these, not evidence that a usable carrier exists to test with.**
 
 **The sender role no longer has — or needs — a hand-made account.** The
 pre-wipe sender, `stanley-sender-1794527832794@example.bz`, was destroyed in
