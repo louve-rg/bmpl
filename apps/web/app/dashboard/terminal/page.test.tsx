@@ -50,6 +50,44 @@ const RELEASE_ROW = {
 };
 const COLLECT_ROW = { action: 'COLLECT' as const, shipmentId: 'ship_1', hubId: HUB.id, reference: 'BML-5', parcel: '3 parcels' };
 
+const MANAGER_WORKSPACE = { ...WORKSPACE, memberRole: 'MANAGER' };
+const STAFF_ROSTER = {
+  members: [
+    {
+      id: 'mem_1',
+      userId: 'user_1',
+      name: 'Edward Broaster',
+      email: 'edward@tropicair.bz',
+      memberRole: 'MANAGER',
+      status: 'ACTIVE',
+      createdAt: '2026-10-01T12:00:00.000Z',
+      endedAt: null,
+      locations: [{ id: 'loc_1', hub: HUB }],
+    },
+    {
+      id: 'mem_2',
+      userId: 'user_2',
+      name: 'Rosa Chi',
+      email: 'rosa@tropicair.bz',
+      memberRole: 'OPERATOR',
+      status: 'ENDED',
+      createdAt: '2026-09-01T12:00:00.000Z',
+      endedAt: '2026-10-15T12:00:00.000Z',
+      locations: [],
+    },
+  ],
+  pendingInvites: [
+    {
+      id: 'inv_1',
+      email: 'new-operator@tropicair.bz',
+      memberRole: 'OPERATOR',
+      expiresAt: '2026-12-01T12:00:00.000Z',
+      createdAt: '2026-11-01T12:00:00.000Z',
+      locationCount: 1,
+    },
+  ],
+};
+
 const LOOKUP_RESULT = {
   shipmentId: 'ship_9',
   reference: 'BML-9',
@@ -92,6 +130,8 @@ type StubOpts = {
   queueErrorBody?: unknown;
   actionStatus?: number;
   actionBody?: unknown;
+  staffStatus?: number;
+  staffBody?: unknown;
   lookupStatus?: number;
   lookupBody?: unknown;
 };
@@ -106,6 +146,9 @@ function stubFetch(opts: StubOpts = {}) {
       const method = init?.method ?? 'GET';
       if (url.includes('/api/terminal/me')) {
         return jsonResponse(opts.workspaceStatus ?? 200, opts.workspaceBody ?? WORKSPACE);
+      }
+      if (url.includes('/api/terminal/staff')) {
+        return jsonResponse(opts.staffStatus ?? 200, opts.staffBody ?? { members: [], pendingInvites: [] });
       }
       if (url.includes('/api/terminal/shipments/') && method === 'GET') {
         calls.push({ url, method, body: null });
@@ -414,6 +457,135 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(calls.find((c) => c.url.includes('/depart'))).toBeDefined();
       expect(container!.textContent).toContain('Nothing to depart right now');
       expect(container!.textContent).not.toContain('Nothing waiting at your locations');
+    });
+  });
+
+  // MDF-702: the MANAGER-only Staff tab consuming GET /terminal/staff
+  // (Pam's #683, MDF-698) -- the one capability that makes the MANAGER/
+  // OPERATOR split real rather than cosmetic.
+  describe('MDF-702 — the MANAGER-only Staff tab', () => {
+    it('never renders a Staff tab for an OPERATOR, and never calls /terminal/staff', async () => {
+      const calls: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          calls.push(url);
+          if (url.includes('/api/terminal/me')) return jsonResponse(200, WORKSPACE);
+          if (url.includes('/api/terminal/queue')) return jsonResponse(200, []);
+          return jsonResponse(404, { message: 'not mocked: ' + url });
+        }),
+      );
+      await mount();
+
+      expect(() => findTab('Staff')).toThrow();
+      expect(calls.some((u) => u.includes('/terminal/staff'))).toBe(false);
+    });
+
+    it('shows a Staff tab for a MANAGER, badged with the ACTIVE member count, not the roster total', async () => {
+      // STAFF_ROSTER is 1 ACTIVE + 1 ENDED -- the badge means "how many are
+      // on my counter right now", same as every other badge on this tab bar.
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(findTab('Staff').textContent).toBe('Staff1');
+    });
+
+    it('does not count ENDED members in the Staff tab badge, even when they outnumber ACTIVE ones', async () => {
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: {
+          members: [
+            { ...STAFF_ROSTER.members[0], id: 'mem_a1', status: 'ACTIVE' },
+            { ...STAFF_ROSTER.members[0], id: 'mem_a2', status: 'ACTIVE' },
+            { ...STAFF_ROSTER.members[1], id: 'mem_e1', status: 'ENDED' },
+            { ...STAFF_ROSTER.members[1], id: 'mem_e2', status: 'ENDED' },
+            { ...STAFF_ROSTER.members[1], id: 'mem_e3', status: 'ENDED' },
+          ],
+          pendingInvites: [],
+        },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      // 2 ACTIVE, 3 ENDED -- the badge must read the active count (2), not
+      // the roster total (5). The panel itself still lists all five; that
+      // part is unchanged and verified by the test above.
+      expect(findTab('Staff').textContent).toBe('Staff2');
+
+      await clickTab('Staff');
+      expect(container!.textContent).toContain('ACTIVE');
+      expect(container!.textContent).toContain('ENDED');
+    });
+
+    it("renders each member's name, email, role and status, and each pending invite's email, role, location count and expiry -- never a token", async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      expect(container!.textContent).toContain('Edward Broaster');
+      expect(container!.textContent).toContain('edward@tropicair.bz');
+      expect(container!.textContent).toContain('Rosa Chi');
+      expect(container!.textContent).toContain('ENDED');
+      expect(container!.textContent).toContain('new-operator@tropicair.bz');
+      expect(container!.textContent).toContain('1 location');
+      expect(container!.textContent?.toLowerCase()).not.toContain('token');
+    });
+
+    it('offers no resend, revoke or end-membership control -- this screen is read-only', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      const buttonTexts = Array.from(container!.querySelectorAll('button')).map((b) => b.textContent?.trim() ?? '');
+      expect(buttonTexts.some((t) => /resend|revoke|end membership|reactivate/i.test(t))).toBe(false);
+    });
+
+    it('shows an honest empty state when a manager has no staff yet', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: { members: [], pendingInvites: [] } });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      expect(container!.textContent).toContain('No staff yet');
+      expect(container!.textContent).toContain('No pending invites.');
+    });
+
+    it('does not let the global "nothing waiting" state cover the Staff tab', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      expect(container!.textContent).not.toContain('Nothing waiting at your locations');
+    });
+
+    it('surfaces a real refusal if /terminal/staff fails, with a retry', async () => {
+      stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffStatus: 403, staffBody: { message: 'This action requires the terminal manager role.' } });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await clickTab('Staff');
+
+      expect(container!.textContent).toContain('This action requires the terminal manager role.');
+      expect(Array.from(container!.querySelectorAll('button')).some((b) => b.textContent === 'Try again')).toBe(true);
     });
   });
 
