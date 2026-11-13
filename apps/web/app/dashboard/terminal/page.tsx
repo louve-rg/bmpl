@@ -174,6 +174,14 @@ type QueueRow =
       broughtBy: string;
       arrived: boolean;
       isTest: boolean;
+      // MDF-747: `broughtBy` above is display-only (falls back to the
+      // literal 'Carrier', indistinguishable from a real carrier of that
+      // name). `kind`/`courier` are the real signal -- `completeLeg`'s own
+      // guard refuses a FIRST_MILE leg with no assigned courier, but a
+      // LINE_HAUL leg never has one and is exempt from that guard by
+      // design, so `courier === null` must never be read alone.
+      kind: 'FIRST_MILE' | 'LINE_HAUL';
+      courier: string | null;
     }
   | { action: 'RELEASE_TO_COURIER'; legId: string; hubId: string; reference: string; parcel: string; courier: string | null; isTest: boolean }
   | { action: 'COLLECT'; shipmentId: string; hubId: string; reference: string; parcel: string; isTest: boolean };
@@ -717,7 +725,11 @@ function QueueRowCard({
           </Button>
         )}
 
-        {row.action === 'HANDOFF' && (
+        {row.action === 'HANDOFF' && row.kind === 'FIRST_MILE' && row.courier === null && (
+          <Alert tone="neutral">This leg has no courier yet.</Alert>
+        )}
+
+        {row.action === 'HANDOFF' && !(row.kind === 'FIRST_MILE' && row.courier === null) && (
           <>
             <p className="text-xs text-[color:var(--bmpl-text-muted)]">
               Ask the courier or driver for the code on their own device, and who is receiving it.
