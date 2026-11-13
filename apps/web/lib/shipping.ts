@@ -331,6 +331,17 @@ export interface DeliveryCodeView {
   deliveryCode: string | null;
 }
 
+/**
+ * MDF-709/MDF-710: the collection-code counterpart to DeliveryCodeView above
+ * — same tiny shape, same reasoning. `collectionCode: null` is the normal,
+ * expected value once the shipment is no longer AWAITING_COLLECTION (already
+ * collected, or never reaches a hub at all) — never a failure.
+ */
+export interface CollectionCodeView {
+  reference: string;
+  collectionCode: string | null;
+}
+
 export interface QuoteLeg {
   sequence: number;
   kind: string;
@@ -514,6 +525,23 @@ export const shippingApi = {
    */
   revealDeliveryCode: (token: string, revealToken: string) =>
     api.post<DeliveryCodeView>(`/shipping/track/${encodeURIComponent(token)}/delivery-code/reveal`, { revealToken }),
+  /**
+   * MDF-709/MDF-710, unlinked-recipient path, step 1 of 2: the collection-code
+   * counterpart to `requestDeliveryCodeEmail` above — same neutral
+   * `{ requested: true }` response whether or not an email was on file or the
+   * request landed inside the cooldown. Same anti-oracle rule applies: never
+   * infer "no email on file" from this response.
+   */
+  requestCollectionCodeEmail: (token: string) =>
+    api.post<{ requested: true }>(`/shipping/track/${encodeURIComponent(token)}/collection-code/request`),
+  /**
+   * MDF-709/MDF-710, unlinked-recipient path, step 2 of 2: redeem the emailed
+   * reveal code for the actual collection code. `collectionCode: null` in a
+   * 2xx response is a normal "nothing to show" state (already collected, or
+   * cancelled), same as `revealDeliveryCode` above.
+   */
+  revealCollectionCode: (token: string, revealToken: string) =>
+    api.post<CollectionCodeView>(`/shipping/track/${encodeURIComponent(token)}/collection-code/reveal`, { revealToken }),
 };
 
 /**
