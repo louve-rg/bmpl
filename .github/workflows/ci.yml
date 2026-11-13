@@ -708,12 +708,12 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      # Four read-only, re-runnable checkers (BMPL-211/BMPL-220/BMPL-304),
+      # Five read-only, re-runnable checkers (BMPL-211/BMPL-220/BMPL-304/MDF-742),
       # wired here because each is ALREADY GREEN on main today — wiring a
       # check that is currently failing would make main red on every
       # unrelated merge until someone resolves the underlying finding, the
       # same harm BMPL-235 caused for an unrelated reason (BMPL-310/BMPL-312).
-      # No `pnpm install` step exists in this job on purpose: all four import
+      # No `pnpm install` step exists in this job on purpose: all five import
       # nothing but node:fs/node:path/node:url and their own local baseline
       # file — zero npm dependencies, confirmed before wiring this.
       - name: Notification event catalog drift (BMPL-220)
@@ -727,6 +727,9 @@ jobs:
 
       - name: Notification category count drift (BMPL-211)
         run: node scripts/detect-notification-category-count-drift.mjs
+
+      - name: Terminal OpenAPI route drift (MDF-742, TERM-OPENAPI-GUARD)
+        run: node scripts/detect-terminal-openapi-route-drift.mjs
 
       # scripts/detect-tracked-deletions.mjs is DELIBERATELY NOT WIRED HERE,
       # and must not be added later without re-reading this comment first
