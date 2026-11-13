@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickupPhotoSection, reportIssueState } from './driver-shipping-job';
+import { pickupPhotoSection, reportIssueState, showsOwnHandoffCode } from './driver-shipping-job';
 
 describe('pickupPhotoSection', () => {
   it('is hidden before the driver has accepted — nothing to photograph at a door you have not committed to', () => {
@@ -59,5 +59,25 @@ describe('reportIssueState', () => {
   it('is "reported" once this session has already reported, regardless of status — a stale reportable status must never offer the control again', () => {
     expect(reportIssueState('IN_TRANSIT', true)).toBe('reported');
     expect(reportIssueState('ASSIGNED', true)).toBe('reported');
+  });
+});
+
+describe('showsOwnHandoffCode (MDF-717)', () => {
+  it('is true only for a FIRST_MILE leg at ARRIVING — the hub handoff where the courier holds his own code', () => {
+    expect(showsOwnHandoffCode('FIRST_MILE', 'ARRIVING')).toBe(true);
+  });
+
+  it('is false for a FIRST_MILE leg at any other status — nothing to present before arriving', () => {
+    expect(showsOwnHandoffCode('FIRST_MILE', 'DRIVER_ACCEPTED')).toBe(false);
+    expect(showsOwnHandoffCode('FIRST_MILE', 'IN_TRANSIT')).toBe(false);
+    expect(showsOwnHandoffCode('FIRST_MILE', 'PICKUP_CONFIRMED')).toBe(false);
+  });
+
+  it('is false for a LAST_MILE leg at ARRIVING — that is the final door delivery, where the RECIPIENT holds the code, never the driver', () => {
+    expect(showsOwnHandoffCode('LAST_MILE', 'ARRIVING')).toBe(false);
+  });
+
+  it('is false for a DIRECT leg at ARRIVING, for the same reason as LAST_MILE', () => {
+    expect(showsOwnHandoffCode('DIRECT', 'ARRIVING')).toBe(false);
   });
 });

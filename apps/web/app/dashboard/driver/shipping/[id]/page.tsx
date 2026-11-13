@@ -7,7 +7,7 @@ import { api, type ApiError } from '../../../../../lib/api';
 import { tripMapPoints } from '../../../../../lib/trip-map';
 import { formatWindow } from '../../../../../lib/availability-window';
 import { uploadFile } from '../../../../../lib/uploads';
-import { isExceptionBlocked, pickupPhotoSection, reportIssueState } from '../../../../../lib/driver-shipping-job';
+import { isExceptionBlocked, pickupPhotoSection, reportIssueState, showsOwnHandoffCode } from '../../../../../lib/driver-shipping-job';
 import { Alert, Badge, Button, Card, Label, PageHeader, Spinner, StatusBadge, StickyActionBar } from '../../../../../components/ui';
 import { DriverBreadcrumb } from '../../../../../components/driver/DriverBreadcrumb';
 import { ExpandableRouteMap } from '../../../../../components/maps/ExpandableRouteMap';
@@ -281,6 +281,13 @@ export default function DriverShippingJobPage() {
   const [photoBusy, setPhotoBusy] = useState(false);
   const [reportedReason, setReportedReason] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
+  // MDF-717: the courier's own code to present at the hub counter, read via
+  // TERM-5's reveal endpoint (never the job payload itself, which never
+  // carried a code for anyone to present). Fetched once per ARRIVING/
+  // FIRST_MILE leg -- see showsOwnHandoffCode's own doc for why only that
+  // combination has an own code to show at all.
+  const [ownCode, setOwnCode] = useState<string | null>(null);
+  const [ownCodeLoading, setOwnCodeLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -296,6 +303,35 @@ export default function DriverShippingJobPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // MDF-717: fetch the courier's own code the moment this leg's screen is
+  // the one that should show it, never otherwise. Keyed on id/jobKind/
+  // status (primitives), not the `job` object itself, which gets a new
+  // identity on every reload -- this must fire once per transition INTO
+  // ARRIVING on a FIRST_MILE leg, not once per reload while it stays there.
+  useEffect(() => {
+    if (!job || !showsOwnHandoffCode(job.jobKind, job.status)) {
+      setOwnCode(null);
+      return;
+    }
+    let cancelled = false;
+    setOwnCodeLoading(true);
+    api
+      .get<{ kind: string; code: string | null; attempts: number }>(`/driver/shipping-jobs/${job.id}/code`)
+      .then((res) => {
+        if (!cancelled) setOwnCode(res?.code ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setOwnCode(null);
+      })
+      .finally(() => {
+        if (!cancelled) setOwnCodeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id, job?.jobKind, job?.status]);
 
   const blocked = job ? isExceptionBlocked(job) : false;
   const action = job && !blocked ? actionFor(job.status, job.requiresPickupPin ?? false) : null;
@@ -559,11 +595,35 @@ export default function DriverShippingJobPage() {
               <p className="text-sm font-semibold text-[color:var(--bmpl-text)]">
                 {action.needsReceivedBy ? 'Finish the handover' : 'Confirm the collection code'}
               </p>
-              <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
-                {action.needsReceivedBy
-                  ? `Ask ${job.handoffCodeHeldBy} for the code and enter it here.`
-                  : 'Ask the sender for the collection code and enter it here.'}
-              </p>
+              {/* MDF-717: a FIRST_MILE leg at ARRIVING is the courier handing a
+                  parcel TO the terminal -- he already HOLDS the code (TERM-5's
+                  reveal, fetched above) and must SHOW it, never go ask someone
+                  else for it. The old "Ask {handoffCodeHeldBy} for the code"
+                  sentence had both directions backwards for exactly this case.
+                  Every other needsCode case (LAST_MILE/DIRECT handoff, where
+                  the RECIPIENT holds their own delivery code; pickup, where
+                  the SENDER holds theirs) is unchanged -- the driver really is
+                  asking someone else there. */}
+              {showsOwnHandoffCode(job.jobKind, job.status) ? (
+                <>
+                  <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
+                    Show this code to the terminal staff. They will enter it, and who is receiving the parcel, to confirm the
+                    handoff.
+                  </p>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]">
+                    Your code to present
+                  </p>
+                  <p className="mt-1 text-2xl font-bold tracking-[0.3em] text-[color:var(--bmpl-text)]">
+                    {ownCode ?? (ownCodeLoading ? '· · · ·' : '—')}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-[color:var(--bmpl-text-muted)]">
+                  {action.needsReceivedBy
+                    ? `Ask ${job.handoffCodeHeldBy} for the code and enter it here.`
+                    : 'Ask the sender for the collection code and enter it here.'}
+                </p>
+              )}
               <label className="mt-3 block text-xs font-semibold uppercase tracking-wide text-[color:var(--bmpl-text-muted)]" htmlFor="code">
                 {action.needsReceivedBy ? 'Handover code' : 'Collection code'}
               </label>
