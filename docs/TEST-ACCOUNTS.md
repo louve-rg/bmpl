@@ -208,19 +208,28 @@ usable test fixture — do not reuse it, and do not mistake it for a real
 one.** `stanley-carrier-1794527832794@example.bz` applied for the
 SHIPPING_PROVIDER role during a carrier-chain experiment (MDF-755/MDF-760)
 and Dwight approved it, deliberately, as SUPER_ADMIN. `isTest` on a
-`ShippingProviderProfile` is **derived from the creating user at creation
-time, never a later admin toggle** (`shipping-provider.service.ts:79-88` —
-unlike `VendorProfile`, which has an admin `/test-mode` endpoint to flip it
-after the fact). That account's own `User.isTest` was `false`, so the
-resulting organization came back `isTest: false` too, permanently — there
-is no endpoint anywhere that can change a `ShippingProviderProfile`'s
-`isTest` after creation, and **no delete endpoint either** (the same TERM-4
-gap as the two empty duplicate terminal companies above). The practical
-effect, observed: it is the only row in `GET /admin/logistics/providers`,
-and the Assign-carrier picker lists it but disables it — "not a simulation
-carrier" — so it cannot select onto a simulation leg. It will sit there
-indefinitely. **If you open that list and see one entry, it is this
-artifact, not evidence that a carrier exists to test with.**
+`ShippingProviderProfile` is **derived from the creating user's own
+`isTest` at the moment the profile is created** (`shipping-provider.
+service.ts:79-88`) — it is a one-time read, not something re-checked later.
+That applicant's `User.isTest` was `false` at the time, so the resulting
+organization came back `isTest: false` too, **and this is not repairable
+after the fact**: there is no endpoint anywhere that can change an
+*existing* `ShippingProviderProfile`'s `isTest`, unlike `VendorProfile`,
+which has an admin `/test-mode` endpoint for exactly that. **The ordering
+is what matters, and it is the lesson this artifact exists to teach**: a
+user's own `isTest` flag genuinely can be set at any time, before or after
+this happened, through the existing `POST /admin/users/test-flag`
+(`admin.controller.ts:140`, permission `users.suspend`) — so flipping the
+*applicant's* flag **before** they apply produces a real, usable `isTest`
+carrier; applying first, the way this one did, locks in a permanent
+non-test org with no repair path. There is also **no delete endpoint**
+(the same TERM-4 gap as the two empty duplicate terminal companies above).
+The practical effect, observed: this org is the only row in
+`GET /admin/logistics/providers`, and the Assign-carrier picker lists it
+but disables it — "not a simulation carrier" — so it cannot select onto a
+simulation leg. It will sit there indefinitely. **If you open that list
+and see one entry, it is this artifact, not evidence that a carrier
+exists to test with.**
 
 **The sender role no longer has — or needs — a hand-made account.** The
 pre-wipe sender, `stanley-sender-1794527832794@example.bz`, was destroyed in
