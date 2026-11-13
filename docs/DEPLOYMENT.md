@@ -276,6 +276,28 @@ to build, and the two platforms decide it in structurally different ways:
   dependency-graph query, not a path list. `git.deploymentEnabled`
   restricts both projects to the `main` branch only.
 
+**Two different waste classes here, and they take two different fixes — do
+not conflate them.** The `apps/api/CLAUDE.md` case above is a **markdown-only
+commit matching a watched path that was never meant to gate on prose.**
+That one is fixable without touching application behavior: `railway.json`'s
+`watchPatterns` are gitignore-style and support negation (Railway's own
+docs: *"negations will only work if you include files in a preceding
+rule"*), so appending `!apps/api/CLAUDE.md` (and the same for
+`apps/api/DEPLOYMENT.md` and `packages/database/CLAUDE.md` — the only other
+markdown files under any currently-watched directory) stops those three
+files alone from triggering a build, with no other path affected. **A
+lockfile change for a dev-only dependency is a separate, harder case and
+this fix does not touch it.** `4a7ecb93` (#730, an embedded-Redis
+`devDependency`) touched `package.json` and `pnpm-lock.yaml` — both
+genuinely changed, so `pnpm-lock.yaml`'s watch entry correctly matches, and
+no negation on *that* commit's content would be honest: the lockfile is
+exactly the file this repo's own watch list treats as "the exact dependency
+tree `pnpm install --frozen-lockfile` resolves" (§2a above), and a
+`devDependency`-only bump still rewrites it. Distinguishing "this dev-only
+package changed" from "a package `apps/api` actually ships changed" from
+the lockfile diff alone is a real, unsolved problem, not a one-line
+negation — recorded here as open, not folded into the markdown fix above.
+
 **A GitHub deployment record existing is not proof a build ran — read its
 `state`/`description`, never just its presence.** Two confirmed shapes,
 read directly from the Deployments API:
