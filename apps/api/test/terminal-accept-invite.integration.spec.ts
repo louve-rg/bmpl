@@ -20,17 +20,23 @@
  *    nothing left to probe for.
  *
  * This suite proves BOTH halves: every dead-link cause still gets the
- * generic message (including a SEQUENTIAL re-submit after a completed
- * accept — the obvious trap of "fixing" this by making the pre-check
- * smarter instead), and only the genuine concurrent race gets the new,
- * specific one.
+ * generic message through the real HTTP door — including a SEQUENTIAL
+ * re-submit after a completed accept, the obvious trap of "fixing" this
+ * by making the pre-check smarter instead, which is also the only place an
+ * ordinary (non-racing) second accept attempt is proven — and the genuine
+ * concurrent race gets the new, specific one, asserted at the SERVICE
+ * layer. That layer choice is deliberate, not a downgrade: see the comment
+ * on the race test itself for why (MDF-727 / TERM-ACCEPT-MSG-RACE-FLAKE).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { BadRequestException } from '@nestjs/common';
 import { bootApp, cookiesOf, resetDb, seedRoles, seedSuperAdmin, type TestContext } from './helpers';
+import { TerminalService } from '../src/terminal/terminal.service';
 
 let ctx: TestContext;
 let admin: string[];
+let terminalService: TerminalService;
 let seq = 0;
 const uniq = () => `${(seq += 1).toString(36)}${Date.now().toString(36)}`;
 
@@ -80,6 +86,7 @@ beforeAll(async () => {
   await seedRoles(ctx.prisma);
   const a = await seedSuperAdmin(ctx.prisma);
   admin = cookiesOf(await request(ctx.server).post('/api/auth/login').send({ email: a.email, password: a.password }));
+  terminalService = ctx.app.get(TerminalService);
 });
 
 afterAll(async () => {
@@ -135,23 +142,90 @@ describe('MDF-727: a dead link, by any cause, stays non-committal', () => {
 });
 
 describe('MDF-727: a genuine concurrent race tells the truth', () => {
-  it('two simultaneous accepts of the same live token: one wins, the loser is told it was already accepted — not that it was invalid', async () => {
+  /**
+   * MDF-727-RACE-FLAKE: this test used to fire the race as two independent
+   * HTTP requests through `Promise.all` (two `supertest` calls, two real
+   * sockets) and hoped that was enough to force both pre-checks to land
+   * before either transaction committed. Nothing in the test or the
+   * product guaranteed that — and it flaked ~1-in-3 on at least one real
+   * host, with the loser occasionally getting the generic "invalid or
+   * expired" message instead of this test's "already accepted" assertion.
+   *
+   * Diagnosis (258 trials across this host, 0 reproductions, including 40
+   * runs with Prisma's own connection pool forced down to a single
+   * connection — so the loser's pre-check was forced to queue behind the
+   * winner's open transaction on the literal same physical connection, and
+   * it STILL never produced the generic message) narrowed this to a test
+   * synchronization gap, not a product defect:
+   *
+   *  - `acceptInvite`'s pre-check (service, ~line 301) runs OUTSIDE any
+   *    transaction and with no lock. It is deliberately non-committal: a
+   *    dead-link cause (never existed, expired, revoked, or already
+   *    consumed AS OF THAT READ) all collapse into the same generic
+   *    message on purpose, so a token can never be used as an existence
+   *    oracle.
+   *  - If the pre-check sees the invite live, the claim itself happens
+   *    inside an interactive `$transaction`, via a CONDITIONAL
+   *    `updateMany({ where: { consumedAt: null, revokedAt: null } })`.
+   *    Under real Postgres MVCC/row-locking this is genuinely race-safe:
+   *    if two transactions truly contend for the same row, the loser's
+   *    `updateMany` blocks on the winner's row lock and only re-evaluates
+   *    once that lock releases — against the WINNER'S NOW-COMMITTED row.
+   *    So a loser that actually overlapped the winner at the database
+   *    layer always re-reads the real, post-commit `consumedAt` and
+   *    correctly reports "already accepted."
+   *  - The only way to see the generic message for a request that was
+   *    genuinely live a moment earlier is for that request's OWN pre-check
+   *    to run AFTER the other request's entire transaction had already
+   *    committed — i.e. the two requests never actually overlapped at the
+   *    database layer at all. In that case the generic message is not a
+   *    leak or a lie; it is correct for that moment, by the pre-check's own
+   *    documented design.
+   *  - Two independent HTTP round-trips (cookie plumbing, socket accept,
+   *    event-loop scheduling, and the winner's request additionally paying
+   *    for a deliberately slow argon2 password hash) are exactly the kind
+   *    of scheduling noise that can let one request's pre-check land after
+   *    the other has already fully committed, even though both calls were
+   *    issued "simultaneously" from the test's point of view.
+   *
+   * Fix (MDF-727 ruling: option B): assert the race at the SERVICE layer
+   * instead, calling `acceptInvite` directly twice via `Promise.all` with
+   * no HTTP round-trip in between. This removes exactly the scheduling
+   * noise identified above, so the test is finally asserting the property
+   * the product actually guarantees — real database-level contention —
+   * rather than hoping two independent HTTP calls happen to interleave.
+   * The assertion itself is NOT weakened: the loser must still get the
+   * exact specific message, never the generic one.
+   *
+   * The HTTP door is not left unproven: the "SEQUENTIAL re-submit" test
+   * above is the HTTP-level test for an ordinary (non-racing) second
+   * accept, and it proves the message a real user gets on a second,
+   * non-concurrent attempt through the real door.
+   */
+  it('two simultaneous accepts of the same live token at the service level: one wins, the loser is told it was already accepted — not that it was invalid', async () => {
     const { companyId, locationId } = await makeCompanyWithLocation();
     const email = `race_${uniq()}@example.com`;
     const token = await inviteAndCaptureToken(companyId, locationId, email);
+    const dto = { token, password: 'InviteePass123', firstName: 'Reef', lastName: 'Clerk' };
 
-    const [a, b] = await Promise.all([acceptInvite(token, email), acceptInvite(token, email)]);
+    const [a, b] = await Promise.allSettled([terminalService.acceptInvite(dto), terminalService.acceptInvite(dto)]);
 
-    const statuses = [a.status, b.status].sort();
-    expect(statuses).toEqual([201, 400]);
-    const winner = a.status === 201 ? a : b;
-    const loser = a.status === 201 ? b : a;
+    const outcomes = [a, b];
+    const winners = outcomes.filter((r) => r.status === 'fulfilled');
+    const losers = outcomes.filter((r) => r.status === 'rejected');
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(1);
 
-    expect(winner.body.accepted).toBe(true);
-    expect(loser.body.message).toBe('This invite has already been accepted. Please sign in instead.');
+    const winner = winners[0] as PromiseFulfilledResult<{ accepted: boolean }>;
+    const loser = losers[0] as PromiseRejectedResult;
+
+    expect(winner.value.accepted).toBe(true);
+    expect(loser.reason).toBeInstanceOf(BadRequestException);
+    const loserMessage = (loser.reason as BadRequestException).message;
+    expect(loserMessage).toBe('This invite has already been accepted. Please sign in instead.');
     // Never the dead-link wording — that would be a lie about a token that
     // really was live a moment before this exact call.
-    expect(loser.body.message).not.toBe('This invite link is invalid or has expired.');
+    expect(loserMessage).not.toBe('This invite link is invalid or has expired.');
 
     // Exactly one account, one ACTIVE membership — the race produced one
     // real outcome, not a duplicate or a half-applied one.
