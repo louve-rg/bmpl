@@ -180,11 +180,15 @@ export default function NewShipmentPage() {
   const submitInFlight = useRef(false);
 
   useEffect(() => {
-    shippingApi.hubs().then(setHubs).catch(() => setHubs([]));
+    // Signed-in picker (TERM-SIM-NETWORK-INVISIBLE): scoped to the caller's
+    // own side, so a test account can see a test hub to pick -- `hubs()`/
+    // `modes()` are the anonymous, real-only pair and stay reserved for a
+    // public marketing/compare surface, not this authenticated booking flow.
+    shippingApi.hubsMine().then(setHubs).catch(() => setHubs([]));
     // Only offer ways of travelling the network can actually provide. Offering
     // "Flight" with no flight configured produces a quote that always fails and
     // a customer who concludes the site is broken.
-    shippingApi.modes().then(setModes).catch(() => setModes([]));
+    shippingApi.modesMine().then(setModes).catch(() => setModes([]));
   }, []);
 
   // The service type decides which end is a door and which is a terminal, so

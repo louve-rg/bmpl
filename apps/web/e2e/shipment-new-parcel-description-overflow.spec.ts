@@ -59,8 +59,8 @@ async function openReviewPanel(page: Page): Promise<Locator | null> {
   await page.context().addCookies([
     { name: 'access_token', value: 'fake-for-layout-check', domain: 'localhost', path: '/' },
   ]);
-  await page.route('**/api/shipping/hubs', (r) => r.fulfill({ json: HUBS }));
-  await page.route('**/api/shipping/modes', (r) => r.fulfill({ json: ['LAND', 'AIR', 'SEA'] }));
+  await page.route('**/api/shipping/hubs/mine', (r) => r.fulfill({ json: HUBS }));
+  await page.route('**/api/shipping/modes/mine', (r) => r.fulfill({ json: ['LAND', 'AIR', 'SEA'] }));
   await page.route('**/api/wallet', (r) => {
     if (r.request().method() !== 'GET') return r.continue();
     return r.fulfill({ json: { currency: 'BZD', availableMinor: 500000, onHoldMinor: 0, totalMinor: 500000, status: 'ACTIVE', exists: true } });

@@ -424,9 +424,17 @@ export type RoutingProposalOutcome =
     };
 
 export const shippingApi = {
+  /** Anonymous, real-network-only picker. Public marketing/compare surfaces
+   *  only -- a signed-in booking flow should use `hubsMine` instead so a test
+   *  account can see a test hub (TERM-SIM-NETWORK-INVISIBLE). */
   hubs: () => api.get<ShippingHub[]>('/shipping/hubs'),
-  /** The modes the configured network can actually offer right now. */
+  /** The modes the configured network can actually offer right now, real side. */
   modes: () => api.get<Array<'LAND' | 'AIR' | 'SEA'>>('/shipping/modes'),
+  /** Signed-in picker, scoped to the caller's own side -- a test account sees
+   *  test hubs, a real account sees exactly what `hubs()` returns. */
+  hubsMine: () => api.get<ShippingHub[]>('/shipping/hubs/mine'),
+  /** Same scoping as `hubsMine`, for transport modes. */
+  modesMine: () => api.get<Array<'LAND' | 'AIR' | 'SEA'>>('/shipping/modes/mine'),
   quote: (body: unknown) => api.post<ShipmentQuote>('/shipping/quote', body),
   create: (body: unknown) => api.post<ShipmentView>('/shipping', body),
   mine: () => api.get<ShipmentView[]>('/shipping'),
