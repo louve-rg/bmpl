@@ -36,7 +36,9 @@ export default function ForgotPasswordPage() {
       {done ? (
         <FormSuccess message="If an account exists for that email, a reset link is on its way." />
       ) : (
-        <form onSubmit={onSubmit} className="space-y-4">
+        // SEC-LOGIN-PASSWORD-IN-URL: method="post" so a pre-hydration click
+        // defaults to POST, not GET — see app/login/page.tsx.
+        <form onSubmit={onSubmit} method="post" className="space-y-4">
           <Field label="Email" name="email" type="email" autoComplete="email" required />
           <Button type="submit" size="lg" className="w-full" disabled={loading}>
             {loading ? 'Sending…' : 'Send reset link'}

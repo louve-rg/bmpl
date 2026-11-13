@@ -42,7 +42,9 @@ function ResetForm() {
     );
   }
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    // SEC-LOGIN-PASSWORD-IN-URL: method="post" so a pre-hydration click
+    // defaults to POST, not GET — see app/login/page.tsx.
+    <form onSubmit={onSubmit} method="post" className="space-y-4">
       <FormError message={error} />
       <Field
         label="New password"

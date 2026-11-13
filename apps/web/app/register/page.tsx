@@ -50,7 +50,10 @@ export default function RegisterPage() {
         </>
       }
     >
-      <form onSubmit={onSubmit} className="space-y-4">
+      {/* SEC-LOGIN-PASSWORD-IN-URL: method="post" so a pre-hydration click
+          (no onSubmit handler attached yet) defaults to POST, not GET —
+          see app/login/page.tsx for the full defect. */}
+      <form onSubmit={onSubmit} method="post" className="space-y-4">
         <FormError message={error} />
         <div className="grid grid-cols-2 gap-3">
           <Field label="First name" name="firstName" autoComplete="given-name" required />

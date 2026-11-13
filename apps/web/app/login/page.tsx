@@ -49,7 +49,12 @@ export default function LoginPage() {
         </>
       }
     >
-      <form onSubmit={onSubmit} className="space-y-4">
+      {/* SEC-LOGIN-PASSWORD-IN-URL: method="post" is load-bearing, not
+          decorative. Before React hydrates, a click has no onSubmit handler
+          yet, so the browser falls back to this attribute's default — omit
+          it and that default is GET, putting the password in the URL,
+          browser history and every access/Referer log on the path. */}
+      <form onSubmit={onSubmit} method="post" className="space-y-4">
         <FormError message={error} />
         <Field label="Email" name="email" type="email" autoComplete="email" required />
         <Field label="Password" name="password" type="password" autoComplete="current-password" required />
