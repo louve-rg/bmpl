@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmailService } from './email.service';
 import type { Env } from '../config/env';
+import type { DevMailboxService } from '../notifications/dev-mailbox.service';
 
 /** Minimal Env stub; only email-related fields matter here. */
 function env(overrides: Partial<Env>): Env {
@@ -13,10 +14,18 @@ function env(overrides: Partial<Env>): Env {
   } as Env;
 }
 
+/** MDF-709 follow-up: EmailService now records every delivered send into the
+ *  dev mailbox itself (previously each of three callers did this ad hoc).
+ *  A fake, not a real DevMailboxService — these tests only need to observe
+ *  whether/how `record` was called. */
+function fakeDevMailbox(): DevMailboxService {
+  return { record: vi.fn() } as unknown as DevMailboxService;
+}
+
 const message = { to: 'user@example.bz', subject: 'Verify your account', body: 'token=secret-token-do-not-log' };
 
 describe('EmailService — console provider (default)', () => {
-  const svc = new EmailService(env({ EMAIL_PROVIDER: 'console' }));
+  const svc = new EmailService(env({ EMAIL_PROVIDER: 'console' }), fakeDevMailbox());
 
   it('send() still returns true — existing callers (dev mailbox, auth flows) are unaffected', async () => {
     await expect(svc.send(message)).resolves.toBe(true);
@@ -42,8 +51,34 @@ describe('EmailService — console provider (default)', () => {
   });
 });
 
+/**
+ * MDF-709 follow-up: this is the centralization fix itself, verified at the
+ * unit level — the dev mailbox used to be filled by whichever CALLER
+ * remembered to do it (three ad-hoc sites), which is exactly how the
+ * MDF-709 reveal email went unrecorded and untestable. Recording lives
+ * here now, once, for every caller.
+ */
+describe('EmailService — dev mailbox capture lives here now, not in each caller', () => {
+  it('records a delivered (console/"simulated") send into the dev mailbox exactly once', async () => {
+    const devMailbox = fakeDevMailbox();
+    const svc = new EmailService(env({ EMAIL_PROVIDER: 'console' }), devMailbox);
+    await svc.sendDetailed(message);
+    expect(devMailbox.record).toHaveBeenCalledTimes(1);
+    expect(devMailbox.record).toHaveBeenCalledWith(
+      expect.objectContaining({ to: message.to, subject: message.subject, body: message.body }),
+    );
+  });
+
+  it('does NOT record a send that was never delivered (missing credential)', async () => {
+    const devMailbox = fakeDevMailbox();
+    const svc = new EmailService(env({ EMAIL_PROVIDER: 'resend', RESEND_API_KEY: undefined }), devMailbox);
+    await svc.sendDetailed(message);
+    expect(devMailbox.record).not.toHaveBeenCalled();
+  });
+});
+
 describe('EmailService — resend provider, credential missing', () => {
-  const svc = new EmailService(env({ EMAIL_PROVIDER: 'resend', RESEND_API_KEY: undefined }));
+  const svc = new EmailService(env({ EMAIL_PROVIDER: 'resend', RESEND_API_KEY: undefined }), fakeDevMailbox());
 
   it('send() returns false (never silently claims delivery without a credential)', async () => {
     await expect(svc.send(message)).resolves.toBe(false);
@@ -60,7 +95,7 @@ describe('EmailService — resend provider, credential missing', () => {
 });
 
 describe('EmailService — resend provider, credential present', () => {
-  const svc = new EmailService(env({ EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'test-only-key-never-real' }));
+  const svc = new EmailService(env({ EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'test-only-key-never-real' }), fakeDevMailbox());
   const fetchMock = vi.fn();
 
   beforeEach(() => {
@@ -105,16 +140,16 @@ describe('EmailService — resend provider, credential present', () => {
 
 describe('EmailService — smtp provider (not implemented)', () => {
   it('send() returns false regardless of SMTP_URL — the transport genuinely does not exist yet', async () => {
-    const withUrl = new EmailService(env({ EMAIL_PROVIDER: 'smtp', SMTP_URL: 'smtps://example.bz' }));
+    const withUrl = new EmailService(env({ EMAIL_PROVIDER: 'smtp', SMTP_URL: 'smtps://example.bz' }), fakeDevMailbox());
     await expect(withUrl.send(message)).resolves.toBe(false);
     await expect(withUrl.sendDetailed(message)).resolves.toEqual({ delivered: false, outcome: 'not_implemented' });
 
-    const withoutUrl = new EmailService(env({ EMAIL_PROVIDER: 'smtp', SMTP_URL: undefined }));
+    const withoutUrl = new EmailService(env({ EMAIL_PROVIDER: 'smtp', SMTP_URL: undefined }), fakeDevMailbox());
     await expect(withoutUrl.send(message)).resolves.toBe(false);
   });
 
   it('getDiagnostics() reports canDeliver=false even when SMTP_URL is set', () => {
-    const svc = new EmailService(env({ EMAIL_PROVIDER: 'smtp', SMTP_URL: 'smtps://example.bz' }));
+    const svc = new EmailService(env({ EMAIL_PROVIDER: 'smtp', SMTP_URL: 'smtps://example.bz' }), fakeDevMailbox());
     expect(svc.getDiagnostics()).toEqual({ provider: 'smtp', credentialPresent: true, canDeliver: false });
   });
 });
