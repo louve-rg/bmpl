@@ -25,11 +25,28 @@ const WORKSPACE = {
   companyId: 'co_1',
   companyName: 'Tropic Air',
   memberRole: 'OPERATOR',
+  isTest: false,
   locations: [{ locationId: 'loc_1', hub: HUB }],
 };
 
-const DEPART_ROW = { action: 'DEPART' as const, legId: 'leg_d', hubId: HUB.id, reference: 'BML-1', parcel: '1 parcel', to: 'San Pedro Hub' };
-const ARRIVE_ROW = { action: 'ARRIVE' as const, legId: 'leg_a', hubId: HUB.id, reference: 'BML-2', parcel: '2 parcels', from: 'San Pedro Hub' };
+const DEPART_ROW = {
+  action: 'DEPART' as const,
+  legId: 'leg_d',
+  hubId: HUB.id,
+  reference: 'BML-1',
+  parcel: '1 parcel',
+  to: 'San Pedro Hub',
+  isTest: false,
+};
+const ARRIVE_ROW = {
+  action: 'ARRIVE' as const,
+  legId: 'leg_a',
+  hubId: HUB.id,
+  reference: 'BML-2',
+  parcel: '2 parcels',
+  from: 'San Pedro Hub',
+  isTest: false,
+};
 const HANDOFF_ROW = {
   action: 'HANDOFF' as const,
   legId: 'leg_h',
@@ -39,6 +56,7 @@ const HANDOFF_ROW = {
   from: 'Door collection',
   broughtBy: 'Juan Perez',
   arrived: true,
+  isTest: false,
 };
 const RELEASE_ROW = {
   action: 'RELEASE_TO_COURIER' as const,
@@ -47,8 +65,9 @@ const RELEASE_ROW = {
   reference: 'BML-4',
   parcel: '1 parcel',
   courier: null,
+  isTest: false,
 };
-const COLLECT_ROW = { action: 'COLLECT' as const, shipmentId: 'ship_1', hubId: HUB.id, reference: 'BML-5', parcel: '3 parcels' };
+const COLLECT_ROW = { action: 'COLLECT' as const, shipmentId: 'ship_1', hubId: HUB.id, reference: 'BML-5', parcel: '3 parcels', isTest: false };
 
 const MANAGER_WORKSPACE = { ...WORKSPACE, memberRole: 'MANAGER' };
 const STAFF_ROSTER = {
@@ -563,6 +582,14 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
 
       expect(container!.textContent).toContain('No staff yet');
       expect(container!.textContent).toContain('No pending invites.');
+
+      // MDF-740: the empty state used to tell a Manager -- who has no
+      // admin-console access at all -- to go invite staff there. The
+      // replacement must name the route that genuinely exists (a BML
+      // administrator does this) and must not promise a console-invite
+      // control this screen has none of.
+      expect(container!.textContent).toContain('A BML administrator adds terminal staff from the admin console.');
+      expect(container!.textContent).not.toContain('Invite a manager or operator from the admin console to see them here.');
     });
 
     it('does not let the global "nothing waiting" state cover the Staff tab', async () => {
@@ -750,6 +777,53 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       // Must still show the newer result -- the stale one must not win.
       expect(container!.textContent).toContain('Newer search');
       expect(container!.textContent).not.toContain('Older search');
+    });
+  });
+
+  /**
+   * T-7/MDF-736: `myWorkspace` and `terminalQueue` have carried `isTest`
+   * since #698, but the `Workspace` interface and `QueueRow` union here
+   * dropped it on arrival -- nothing on this page ever drew it. Fixed by
+   * carrying the field through both types and reusing the same text-only
+   * Demo badge the Lookup tab's own result already renders (see
+   * `result.isTest` above), rather than inventing a second visual language
+   * for the same fact.
+   */
+  describe('T-7/MDF-736 — a Demo badge marks simulation data on the workspace header and queue rows', () => {
+    it('badges the workspace header when the company is isTest', async () => {
+      stubFetch({ workspaceBody: { ...WORKSPACE, isTest: true }, queueRows: [] });
+      await mount();
+
+      const header = container!.querySelector('h1')!;
+      expect(header.textContent).toContain('Tropic Air');
+      expect(header.textContent).toContain('Demo');
+    });
+
+    it('does not badge the header for a real company', async () => {
+      stubFetch({ workspaceBody: { ...WORKSPACE, isTest: false }, queueRows: [] });
+      await mount();
+
+      const header = container!.querySelector('h1')!;
+      expect(header.textContent).not.toContain('Demo');
+    });
+
+    it('badges only the isTest rows in a mixed queue, never the real ones', async () => {
+      stubFetch({
+        queueRows: [
+          { ...DEPART_ROW, isTest: true },
+          { ...ARRIVE_ROW, isTest: false },
+        ],
+      });
+      await mount();
+
+      const cards = Array.from(container!.querySelectorAll('.bmpl-card'));
+      const departCard = cards.find((c) => c.textContent?.includes('BML-1'))!;
+      const arriveCard = cards.find((c) => c.textContent?.includes('BML-2'))!;
+      expect(departCard).toBeDefined();
+      expect(arriveCard).toBeDefined();
+
+      expect(departCard.textContent).toContain('Demo');
+      expect(arriveCard.textContent).not.toContain('Demo');
     });
   });
 });
