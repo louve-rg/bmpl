@@ -185,22 +185,23 @@ only record of one is a single agent's own memory or acceptance-matrix
 file. **No password, token or invitation token appears below, for any
 entry — not even a redacted placeholder that hints at a format.** Sourced
 from `hive/agents/stanley-mwe4jkri/acceptance-matrix.md` (Updates 34, 41–42)
-and `tasks.json` only; the two `*.local` credential files on this host
-were not opened for this document and are not the source of anything here.
+and Stanley's own direct report of the addresses (2026-11-13, not relayed
+through anyone else's paraphrase), plus `tasks.json`; the two `*.local`
+credential files on this host were not opened for this document and are
+not the source of anything here.
+
+**Two empty duplicate companies exist alongside the real one, and there is
+no delete endpoint to remove them** (TERM-4 gap, Stanley's Update 34):
+`MDF697 Stanley Co 1794535082566` is one of them. **The company actually
+holding the three accounts below is `MDF697 Stanley Co 1794535105877`** —
+if you look it up in the admin console and see more than one row with a
+similar name, the duplicates are empty and not a sign these accounts moved.
 
 | Account | Role | Purpose | Stack | Created by / when | Safe to reuse for |
 | --- | --- | --- | --- | --- | --- |
-| Terminal company "MDF697 Stanley Co 1794535105877" — **MANAGER** member (email not recorded in any source available to this document; see note below) | Terminal **MANAGER** | Terminal Workspace MANAGER-vs-OPERATOR permission checks (MDF-698) — the replacement for the pre-wipe "Stanley QA Terminal Co 1794527832794" company, which no longer exists | **Local stack only** — `isTest`, holds active membership at **both** `UATBC` and `UATBP` | Re-created by Dwight through the real admin-console company-and-invite flow; accepted by Stanley through the real invite-accept flow, 2026-11-13 (post-rebuild) | Any Terminal Workspace check that needs an active MANAGER on an `isTest` terminal company holding both hubs. **Cannot** be used for a terminal-scope-enforcement test — see the single-hub account below for why. Do not assume it exists on a fresh database. |
-| Same company — **OPERATOR** member (email not recorded; see note below) | Terminal **OPERATOR** | Same purpose, OPERATOR side of the same role comparison | Same company, same both-hub membership, local stack only | Dwight invited, Stanley accepted, same flow and date | Any check that needs an active OPERATOR on the same `isTest` company, paired with the MANAGER above for a same-company role comparison. **Cannot** be used for a terminal-scope-enforcement test, for the same reason as the MANAGER. |
-| A third, separate terminal-staff member — **OPERATOR** role, membership at **`UATBC` (Belize City) only** (`locationCount: 1`, email not recorded; see note below) | Terminal **OPERATOR**, single-hub | **The only account on this stack that can test terminal scope enforcement.** The two accounts above hold memberships at *both* hubs, so neither one can produce a genuine "acting outside my hub" case — there is no hub either of them is outside of. This account exists specifically to fill that gap. | **Local stack only** — `isTest`, `UATBC` only, confirmed by `GET /api/terminal/me` listing only Belize City for this account | Invited by Dwight through the real admin-console invite flow; accepted by Stanley through the real invite-accept flow, 2026-11-13 | Any terminal scope-enforcement check. Confirmed so far (Stanley, acceptance-matrix Updates 41–42): read-scope PASS — `GET /api/terminal/queue` as this account excludes a parcel at the other hub; write-scope PASS — `POST /api/terminal/legs/<id>/handoff` against a leg at `UATBP` returned 403 "You do not hold this terminal location." **Do not widen this account's memberships for convenience** — a second hub would destroy the one thing it is for. |
-
-**Email addresses above are intentionally blank, not omitted by mistake.**
-Neither Stanley's acceptance-matrix entries nor any task-tracker note
-available to this document records the actual email for the rebuilt
-MANAGER, OPERATOR or single-hub OPERATOR accounts — only the company name,
-hub scope and the behavior each account was used to observe. This document
-does not invent one. Whoever next uses these accounts should get the
-address from Stanley or Dwight directly and may wish to add it here.
+| `stanley-manager-1794527832794@example.bz` | Terminal **MANAGER** | Terminal Workspace MANAGER-vs-OPERATOR permission checks (MDF-698) | **Local stack only** — company `MDF697 Stanley Co 1794535105877` (`isTest`), holds active membership at **both** `UATBC` (Belize City UAT Depot) and `UATBP` (Belmopan UAT Depot) | Re-created by Dwight through the real admin-console company-and-invite flow; accepted by Stanley through the real invite-accept flow, 2026-11-13 (post-rebuild). **Same address as the pre-wipe MANAGER** — the old `User` row was destroyed with the rest of the database, so re-registering this email created a fresh account; it is not a survivor. | Any Terminal Workspace check that needs an active MANAGER on an `isTest` terminal company holding both hubs. **Cannot** be used for a terminal-scope-enforcement test — see the single-hub account below for why. Do not assume it exists on a fresh database. |
+| `stanley-operator-1794527832794@example.bz` | Terminal **OPERATOR** | Same purpose, OPERATOR side of the same role comparison | Same company, same both-hub membership, local stack only | Dwight invited, Stanley accepted, same flow and date. Same address as the pre-wipe OPERATOR, same re-registration note as the MANAGER above. | Any check that needs an active OPERATOR on the same `isTest` company, paired with the MANAGER above for a same-company role comparison. **Cannot** be used for a terminal-scope-enforcement test, for the same reason as the MANAGER. |
+| `stanley-single-1794527832794@example.bz` | Terminal **OPERATOR**, single-hub | **The only account on this stack that can test terminal scope enforcement.** The two accounts above hold memberships at *both* hubs, so neither one can produce a genuine "acting outside my hub" case — there is no hub either of them is outside of. This account exists specifically to fill that gap. | **Local stack only** — same company, `isTest`, `UATBC` only (`locationCount: 1`, confirmed by `GET /api/terminal/me` listing only Belize City for this account) | Invited by Dwight through the real admin-console invite flow; accepted by Stanley through the real invite-accept flow, 2026-11-13 | Any terminal scope-enforcement check. Confirmed so far (Stanley, acceptance-matrix Updates 41–42): read-scope PASS — `GET /api/terminal/queue` as this account excludes a parcel at the other hub; write-scope PASS — `POST /api/terminal/legs/<id>/handoff` against a leg at `UATBP` returned 403 "You do not hold this terminal location." **Do not widen this account's memberships for convenience** — a second hub would destroy the one thing it is for. |
 
 **The sender role no longer has — or needs — a hand-made account.** The
 pre-wipe sender, `stanley-sender-1794527832794@example.bz`, was destroyed in
