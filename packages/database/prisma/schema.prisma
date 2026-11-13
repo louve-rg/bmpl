@@ -374,6 +374,14 @@ enum AuditAction {
   /// SHIPMENT_DELIVERY_CODE_EMAIL_REQUESTED just above, for the separate
   /// collection-code token pair.
   SHIPMENT_COLLECTION_CODE_EMAIL_REQUESTED
+  /// MDF-719: an UNLINKED recipient (no BMPL account, `recipientUserId` null)
+  /// was emailed, at their on-file `destinationEmail`, that their parcel
+  /// reached AWAITING_COLLECTION. Distinct from the two actions above, which
+  /// both fire on a recipient's OWN request — this one is system-initiated,
+  /// the proactive counterpart `notifyRecipientCollectionReady` already
+  /// sends in-app to a LINKED recipient. The email never carries the code;
+  /// it points at the tracking page, same shape as the reveal flow.
+  SHIPMENT_COLLECTION_READY_EMAIL_SENT
   SHIPMENT_LEG_OFFERED
   SHIPMENT_LEG_OFFER_EXPIRED
   SHIPMENT_LEG_DISPATCH_EXHAUSTED

@@ -1,0 +1,32 @@
+-- MDF-719 (TERM-UNLINKED-NOTIFY): an unlinked recipient was never told
+-- their parcel is ready. `notifyRecipientCollectionReady`
+-- (shipment.service.ts) returns early whenever `recipientUserId` is null,
+-- so the "parcel is ready" notification at AWAITING_COLLECTION reached
+-- ONLY a linked recipient (in-app). An unlinked recipient who has an
+-- email on file (`destinationEmail`) was told nothing at all unless the
+-- sender happened to pass on the tracking link themselves.
+--
+-- Owner's own standing instruction, not engineering judgement: "Do not
+-- assume every recipient has a BMPL account." Stanley's finding B on
+-- PR #689.
+--
+-- THE FIX (implementation PR, not this migration): when the shipment
+-- transitions into AWAITING_COLLECTION and `recipientUserId` is null,
+-- email the on-file `destinationEmail` (the existing EmailService path,
+-- no new channel — no paid SMS exists in this system and none is added
+-- here, same owner ruling as `requestDeliveryCodeEmail`/
+-- `requestCollectionCodeEmail` already honour). The email never carries
+-- the collection code; it points at the tracking page, the same shape as
+-- the reveal flow. No email on file: still a no-op, same as before.
+--
+-- This migration adds ONLY the audit action recording that send and its
+-- outcome (delivered/simulated/provider_error/etc, mirroring
+-- SHIPMENT_COLLECTION_CODE_EMAIL_REQUESTED's own CLOSE-19 shape) — no new
+-- columns. Nothing here is a reveal-token flow, so none of the
+-- collectionCodeRevealToken-shaped machinery applies.
+--
+-- ROLLBACK: not applicable — an added enum value cannot be removed by
+-- any migration once a row may hold it (packages/database/CLAUDE.md §2).
+
+-- AlterEnum
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'SHIPMENT_COLLECTION_READY_EMAIL_SENT';
