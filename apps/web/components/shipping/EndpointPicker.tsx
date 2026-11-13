@@ -200,6 +200,36 @@ export function EndpointPicker({
             </label>
           </div>
 
+          {/* Destination only (contactLabel is "Recipient" there, never
+              "Sender") -- this is MDF-746: a hub destination's recipient had
+              no way to be emailed when the parcel is ready to collect, so
+              the #695 "collection ready" mail was a silent no-op for every
+              parcel ending at a terminal. Optional, deliberately: a sender
+              often does not know the recipient's email, and requiring it
+              would block bookings that work today. The origin side keeps no
+              equivalent field -- a sender dropping off at a hub themselves
+              has no "ready to collect" notification to receive. */}
+          {contactLabel === 'Recipient' && (
+            <label className="mt-3 block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {contactLabel} email <span className="font-normal normal-case text-slate-400">(optional)</span>
+              </span>
+              <input
+                value={value.email}
+                onChange={(e) => set('email', e.target.value)}
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="name@example.com"
+                className="w-full min-h-[44px] rounded-bmpl-md border border-slate-300 px-3 text-base"
+              />
+              <span className="mt-1 block text-xs text-slate-500">
+                We email the recipient when the parcel is ready to collect. Without this, they can only find out
+                by using the tracking link.
+              </span>
+            </label>
+          )}
+
           <label className="mt-3 block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
               Anything the driver should know
