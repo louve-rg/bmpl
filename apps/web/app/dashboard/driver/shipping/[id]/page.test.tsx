@@ -589,6 +589,74 @@ describe('DriverShippingJobPage — a 404 never strands the driver (MDF-nav2)', 
   });
 });
 
+/**
+ * MDF-717 (god/Stanley, live walkthrough): a FIRST_MILE driver who accepted,
+ * passed the pickup code, started the trip and arrived at the terminal hit
+ * a dead end — nothing showed him the handoff code he is supposed to
+ * present, and the copy told him to go ask the terminal staff for it
+ * instead, backwards from how TERM-5's reveal (GET
+ * /driver/shipping-jobs/:id/code) and the terminal's own Hand off card are
+ * both built: the courier presents, the staff verifies. These tests use a
+ * synthetic fixture code, never a value from a live system.
+ */
+describe('DriverShippingJobPage — the courier sees his own handoff code at a terminal (MDF-717)', () => {
+  const FIXTURE_CODE = 'TEST-CODE-0007';
+
+  it('fetches and shows the courier his own code on a FIRST_MILE leg at ARRIVING, with show-this-code copy', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path.endsWith('/code')
+        ? Promise.resolve({ kind: 'handoff', code: FIXTURE_CODE, attempts: 5 })
+        : Promise.resolve(shippingJob({ status: 'ARRIVING', jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' })),
+    );
+    const el = await mount();
+
+    expect(apiGet).toHaveBeenCalledWith('/driver/shipping-jobs/job1/code');
+    expect(el.textContent).toContain('Show this code to the terminal staff');
+    expect(el.textContent).toContain(FIXTURE_CODE);
+    // The old, backwards sentence must be gone for this exact case.
+    expect(el.textContent).not.toContain('Ask the terminal staff for the code');
+  });
+
+  it('still tells a LAST_MILE driver to ask the recipient for their own code at ARRIVING — unchanged, never the driver\'s own code', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path.endsWith('/code')
+        ? Promise.resolve({ kind: 'pickup', code: FIXTURE_CODE, attempts: 5 })
+        : Promise.resolve(
+            shippingJob({ status: 'ARRIVING', jobKind: 'LAST_MILE', handoffCodeHeldBy: 'the person receiving it', nextActionLabel: 'Confirm handoff' }),
+          ),
+    );
+    const el = await mount();
+
+    expect(el.textContent).toContain('Ask the person receiving it for the code and enter it here.');
+    expect(el.textContent).not.toContain('Show this code to the terminal staff');
+    expect(el.textContent).not.toContain(FIXTURE_CODE);
+  });
+
+  it('does not fetch the courier code before ARRIVING — nothing to present yet', async () => {
+    apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', jobKind: 'FIRST_MILE', nextActionLabel: 'Mark as arriving' }));
+    await mount();
+
+    expect(apiGet).not.toHaveBeenCalledWith('/driver/shipping-jobs/job1/code');
+  });
+
+  it('falls back to a plain placeholder, never a crash, when the code fetch fails', async () => {
+    apiGet.mockImplementation((path: string) =>
+      path.endsWith('/code')
+        ? Promise.reject({ status: 403, message: 'You are not the courier assigned to this leg.' })
+        : Promise.resolve(shippingJob({ status: 'ARRIVING', jobKind: 'FIRST_MILE', nextActionLabel: 'Confirm handoff' })),
+    );
+
+    let threw = false;
+    try {
+      await mount();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    expect(container!.textContent).toContain('Show this code to the terminal staff');
+  });
+});
+
 describe('DriverShippingJobPage — report-issue is itself blocked during an open exception', () => {
   it('hides "Report an issue" once legStatus is EXCEPTION, even while courierStatus is still reportable', async () => {
     apiGet.mockResolvedValue(shippingJob({ status: 'IN_TRANSIT', nextActionLabel: 'Mark as arriving', legStatus: 'EXCEPTION' }));
