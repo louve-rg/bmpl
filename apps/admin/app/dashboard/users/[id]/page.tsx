@@ -7,6 +7,7 @@ import { StatusBadge } from '../../../../components/StatusBadge';
 import { Badge, Breadcrumbs, Card } from '../../../../components/ui';
 import { adminCrumbs } from '../../../../lib/admin-nav';
 import { AccountActions, RoleActions } from './RoleActions';
+import { TestFlagCard } from './TestFlagCard';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,7 @@ interface UserDetail {
   phone: string | null;
   district: string | null;
   status: string;
+  isTest: boolean;
   emailVerifiedAt: string | null;
   createdAt: string;
   roles: Array<{ roleCode: RoleCode; status: string; statusReason: string | null }>;
@@ -124,6 +126,11 @@ export default async function UserDetailPage({ params }: { params: { id: string 
           ))}
         </ul>
       </Card>
+
+      {/* TERM-SIM-DESIGNATE: same permission (users.suspend) AccountActions
+          above already checks -- that is what the endpoint itself requires,
+          not a new flag invented for this card. */}
+      <TestFlagCard userId={u.id} firstName={u.firstName} lastName={u.lastName} isTest={u.isTest} canSet={canSuspendAccount} />
 
       {canViewWallet && (
         <Card className="mb-5 p-5">
