@@ -339,6 +339,12 @@ export default function TerminalWorkspacePage() {
   }, [rows]);
   const totalCount = (rows ?? []).length;
 
+  // The Staff tab panel deliberately lists every status, same as the admin
+  // console's own Members card -- but the tab bar's own badge means "how many
+  // are on my counter right now", same as every other badge on this bar.
+  // Counting ENDED members there would read as a live headcount it is not.
+  const activeStaffCount = (staff?.members ?? []).filter((m) => m.status === 'ACTIVE').length;
+
   function renderSection(action: QueueRow['action'], title: string) {
     const section = (rows ?? []).filter((r) => r.action === action);
     if (section.length === 0) return null;
@@ -444,7 +450,7 @@ export default function TerminalWorkspacePage() {
             ).map((key, i) => {
               const active = tab === key;
               const label = key === 'OVERVIEW' ? 'Overview' : key === 'STAFF' ? 'Staff' : TAB_LABELS[key];
-              const count = key === 'OVERVIEW' ? totalCount : key === 'STAFF' ? (staff?.members.length ?? 0) : counts[key];
+              const count = key === 'OVERVIEW' ? totalCount : key === 'STAFF' ? activeStaffCount : counts[key];
               return (
                 <button
                   key={key}

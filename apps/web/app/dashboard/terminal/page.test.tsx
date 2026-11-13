@@ -446,14 +446,46 @@ describe('TerminalWorkspacePage (TERM-11)', () => {
       expect(calls.some((u) => u.includes('/terminal/staff'))).toBe(false);
     });
 
-    it('shows a Staff tab for a MANAGER, badged with the real member count', async () => {
+    it('shows a Staff tab for a MANAGER, badged with the ACTIVE member count, not the roster total', async () => {
+      // STAFF_ROSTER is 1 ACTIVE + 1 ENDED -- the badge means "how many are
+      // on my counter right now", same as every other badge on this tab bar.
       stubFetch({ workspaceBody: MANAGER_WORKSPACE, queueRows: [], staffBody: STAFF_ROSTER });
       await mount();
       await act(async () => {
         await new Promise((r) => setTimeout(r, 0));
       });
 
+      expect(findTab('Staff').textContent).toBe('Staff1');
+    });
+
+    it('does not count ENDED members in the Staff tab badge, even when they outnumber ACTIVE ones', async () => {
+      stubFetch({
+        workspaceBody: MANAGER_WORKSPACE,
+        queueRows: [],
+        staffBody: {
+          members: [
+            { ...STAFF_ROSTER.members[0], id: 'mem_a1', status: 'ACTIVE' },
+            { ...STAFF_ROSTER.members[0], id: 'mem_a2', status: 'ACTIVE' },
+            { ...STAFF_ROSTER.members[1], id: 'mem_e1', status: 'ENDED' },
+            { ...STAFF_ROSTER.members[1], id: 'mem_e2', status: 'ENDED' },
+            { ...STAFF_ROSTER.members[1], id: 'mem_e3', status: 'ENDED' },
+          ],
+          pendingInvites: [],
+        },
+      });
+      await mount();
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      // 2 ACTIVE, 3 ENDED -- the badge must read the active count (2), not
+      // the roster total (5). The panel itself still lists all five; that
+      // part is unchanged and verified by the test above.
       expect(findTab('Staff').textContent).toBe('Staff2');
+
+      await clickTab('Staff');
+      expect(container!.textContent).toContain('ACTIVE');
+      expect(container!.textContent).toContain('ENDED');
     });
 
     it("renders each member's name, email, role and status, and each pending invite's email, role, location count and expiry -- never a token", async () => {
