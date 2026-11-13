@@ -32,6 +32,26 @@ import { tryLogin, UAT_FIXTURE_PASSWORD } from './support/auth';
  * `test.fixme` names the target (three distinct outcomes: loading, error,
  * not-a-member) without guessing Oscar's actual implementation -- replace
  * the stub with the real selectors/copy once MDF-720 ships.
+ *
+ * 2026-11-13, Dwight's first real run (god's dispatch): did not reproduce
+ * as written -- a selector gap, not a dead defect. Two fixes, confirmed
+ * from source (`DashboardNavList.tsx`), not guessed:
+ *  - The DELAYED test's post-resolve assertion failed. TERM-11 made every
+ *    role-gated nav group COLLAPSIBLE, closed by default unless it
+ *    contains the current page; plain `/dashboard` never does. The "Terminal"
+ *    group header (`role="button"`, `aria-expanded`) appearing with no
+ *    visible inner link is itself the evidence membership resolved true --
+ *    the group only renders at all once `terminalForcedVisible` flips. Fixed
+ *    by expanding the group before asserting the link's visibility.
+ *  - The ERRORED test's "no error text anywhere" assertion failed with
+ *    matches Dwight could not attribute to the product (not in the a11y
+ *    tree -- `getByText` also matches non-visible DOM, which a Next.js dev
+ *    overlay can supply). An assertion a dev overlay can break is not
+ *    measuring the product, so both the loading- and error-absence checks
+ *    are now scoped to the `<nav aria-label="Dashboard">` region itself
+ *    (confirmed as the only such region mounted on initial load --
+ *    `MobileNavDrawer`'s copy renders only `{open && createPortal(...)}`,
+ *    closed by default) -- the same region the link they gate lives in.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
@@ -123,6 +143,14 @@ async function waitForDashboardLoaded(page: Page): Promise<void> {
   await expect(page.getByRole('link', { name: 'Overview' }), 'dashboard never actually loaded (would make every check below meaningless)').toBeVisible({ timeout: 15_000 });
 }
 
+/** The single nav region ("Terminal Workspace" and its loading/error state
+ * both live here) -- scoping text-absence checks to it, rather than the
+ * whole page, keeps a Next.js dev overlay's own (non-visible) DOM from
+ * producing a false match unrelated to the product. */
+function navRegion(page: Page) {
+  return page.getByRole('navigation', { name: 'Dashboard' });
+}
+
 test('GAP-PROOF: a DELAYED (but eventually successful) GET /terminal/me hides the nav for the whole delay, indistinguishable from no access', async ({ browser }) => {
   test.setTimeout(60_000);
   const adminPage = await (await browser.newContext()).newPage();
@@ -147,17 +175,28 @@ test('GAP-PROOF: a DELAYED (but eventually successful) GET /terminal/me hides th
     page.getByRole('link', { name: 'Terminal Workspace' }),
     'CONFIRMED GAP: while GET /terminal/me is pending, a real MANAGER sees no Terminal Workspace link, no spinner, no indication anything is loading -- identical to having no access at all',
   ).toHaveCount(0);
-  await expect(page.getByText(/loading/i), 'no loading indicator exists anywhere for this -- confirms the hidden state is not even accompanied by a spinner').toHaveCount(0);
+  await expect(
+    navRegion(page).getByText(/loading/i),
+    'no loading indicator exists anywhere in the nav for this -- confirms the hidden state is not even accompanied by a spinner',
+  ).toHaveCount(0);
 
   // After the delay resolves: the nav DOES appear -- proving this is a
   // logic defect (any pending state reads as "hide"), not a request that
   // never completes. A longer client-side timeout would not have helped a
   // test waiting on this link; the link only ever flips once the fetch's
   // OWN promise resolves, with nothing to poll for in between.
+  //
+  // TERM-11 made the "Terminal" group collapsible, closed by default on a
+  // page it doesn't contain (plain /dashboard): the group header appearing
+  // IS the evidence membership resolved true, but the inner link stays
+  // hidden until the group is expanded -- expand it before asserting.
+  const terminalGroup = navRegion(page).getByRole('button', { name: 'Terminal' });
+  await expect(terminalGroup, 'Terminal nav group header never appeared -- membership never resolved true after the delay').toBeVisible({ timeout: 15_000 });
+  await terminalGroup.click();
   await expect(
-    page.getByRole('link', { name: 'Terminal Workspace' }),
+    navRegion(page).getByRole('link', { name: 'Terminal Workspace' }),
     'once GET /terminal/me finally resolves, the nav link must appear -- this is the "eventually correct, never loading" half of the defect',
-  ).toBeVisible({ timeout: 15_000 });
+  ).toBeVisible({ timeout: 5_000 });
 });
 
 test('GAP-PROOF: an ERRORED GET /terminal/me hides the nav forever, with no error shown anywhere', async ({ browser }) => {
@@ -186,7 +225,10 @@ test('GAP-PROOF: an ERRORED GET /terminal/me hides the nav forever, with no erro
     page.getByRole('link', { name: 'Terminal Workspace' }),
     'CONFIRMED GAP: a real MANAGER whose GET /terminal/me errors sees no Terminal Workspace link, ever, with no error message anywhere on the page',
   ).toHaveCount(0);
-  await expect(page.getByText(/error|something went wrong|try again/i), 'no error indicator exists anywhere for this -- the failure is completely silent').toHaveCount(0);
+  await expect(
+    navRegion(page).getByText(/error|something went wrong|try again/i),
+    'no error indicator exists anywhere in the nav for this -- the failure is completely silent',
+  ).toHaveCount(0);
 });
 
 /**
