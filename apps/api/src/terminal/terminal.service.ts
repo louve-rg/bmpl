@@ -389,7 +389,13 @@ export class TerminalService {
         },
         tx,
       );
-      return { accepted: true as const, createdAccount: !existingUser };
+      // TERM-INVITE-COPY: the invite's own role, read-only, so the frontend's
+      // success copy can say "manager" or "operator" correctly instead of a
+      // role-blind "you were invited to manage a terminal company" that told
+      // an OPERATOR they held a permission the Staff tab then 403s them for.
+      // Nothing about the accept flow, token handling or membership write
+      // above changes — this is one more field on the same return value.
+      return { accepted: true as const, createdAccount: !existingUser, memberRole: member.memberRole };
     });
   }
 

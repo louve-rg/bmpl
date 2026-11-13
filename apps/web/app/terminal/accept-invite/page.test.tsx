@@ -91,6 +91,46 @@ describe('AcceptInvitePage (TERM-9)', () => {
     expect(container!.textContent).not.toContain('Your account has been created');
   });
 
+  /**
+   * TERM-INVITE-COPY: Stanley observed a real OPERATOR's first screen
+   * telling them "You were invited to manage a terminal company" -- a
+   * permission the Staff tab then 403s them for. The invited role is
+   * unknowable before accepting (no public preview-by-token route, by
+   * design), so the page-level subtitle must stay role-neutral; only the
+   * post-accept success message, once the server's real `memberRole` comes
+   * back, may say "manager" or "operator" specifically.
+   */
+  it('never claims a management permission before the invited role is known', async () => {
+    await mount();
+
+    expect(container!.textContent).not.toMatch(/invited to manage/i);
+  });
+
+  it('tells a MANAGER invite exactly that, not a role-blind message', async () => {
+    postMock.mockResolvedValue({ accepted: true, createdAccount: true, memberRole: 'MANAGER' });
+    await mount();
+    await fillAndSubmit();
+
+    expect(container!.textContent).toContain('added to the team as a manager');
+  });
+
+  it('tells an OPERATOR invite exactly that, never "manager"', async () => {
+    postMock.mockResolvedValue({ accepted: true, createdAccount: true, memberRole: 'OPERATOR' });
+    await mount();
+    await fillAndSubmit();
+
+    expect(container!.textContent).toContain('added to the team as an operator');
+    expect(container!.textContent).not.toMatch(/as a manager/i);
+  });
+
+  it('falls back to the generic wording, never a crash, if an older API omits memberRole', async () => {
+    postMock.mockResolvedValue({ accepted: true, createdAccount: false });
+    await mount();
+    await fillAndSubmit();
+
+    expect(container!.textContent).toContain('it has been added to the team. Sign in with your existing password');
+  });
+
   it('shows the server refusal for an invalid or expired token and never strands the invitee on a dead screen', async () => {
     postMock.mockRejectedValue({ status: 400, message: 'This invite link is invalid or has expired.' });
     await mount();

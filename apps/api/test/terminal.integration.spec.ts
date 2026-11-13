@@ -157,6 +157,10 @@ describe('TERM-3: the invite flow — the primitive that did not exist before th
       .send({ token, password: 'StafferPass123', firstName: 'Stan', lastName: 'Operator' });
     expect(accept.status).toBe(201);
     expect(accept.body.createdAccount).toBe(true);
+    // TERM-INVITE-COPY: the frontend's success copy reads this to say
+    // "operator" rather than a role-blind "manage" claim an OPERATOR cannot
+    // act on.
+    expect(accept.body.memberRole).toBe('OPERATOR');
 
     // The account now logs in exactly like any other — no session was issued
     // by acceptance itself.
