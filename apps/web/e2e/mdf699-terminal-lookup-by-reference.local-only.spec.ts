@@ -34,14 +34,20 @@ import { tryLogin, UAT_CUSTOMER_EMAIL, UAT_FIXTURE_PASSWORD } from './support/au
  * `GAP-PROOF:` UI-absence test is replaced below with real tests driving
  * the real tab, per the exact moment this file's own header warned about.
  *
- * A SECOND, SEPARATE defect Stanley found in the same #692 diff, same
- * class as MDF-720 (one fetch failing silently removes an unrelated
- * capability): the entire tab bar -- Lookup included -- is gated behind
- * `{rows && (...)}`, and `rows` is `/terminal/queue`'s own state. Lookup's
- * data source (`/terminal/shipments/:reference`) has no dependency on the
- * queue at all, so a queue fetch failure hides a capability that never
- * needed it. One more `GAP-PROOF:` test below proves that live, using the
- * same `page.route` intercept technique MDF-720's spec established.
+ * A SECOND, SEPARATE defect Stanley found in the same #692 diff -- now
+ * carded as MDF-721 (TERM-QUEUE-GATE, Oscar), kept separate from #692
+ * itself because Stanley already cleared #692 as non-blocking and folding
+ * a fix in would invalidate that read rather than extend it. Same class
+ * as MDF-720 (one fetch failing silently removes an unrelated capability):
+ * the entire tab bar -- Lookup included -- is gated behind `{rows && (...)}`,
+ * and `rows` is `/terminal/queue`'s own state. Lookup's data source
+ * (`/terminal/shipments/:reference`) has no dependency on the queue at
+ * all, so a queue fetch failure hides a capability that never needed it.
+ * One more `GAP-PROOF:` test below proves that live, using the same
+ * `page.route` intercept technique MDF-720's spec established. Its
+ * premise (zero tabs when the queue fails) will expire the moment Oscar's
+ * fix lands -- rewrite into a positive test then, never delete, same as
+ * every other gap-proof in this batch.
  */
 const WEB = process.env.BASE_URL ?? 'http://localhost:3177';
 const ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL ?? 'admin@bzemarketplace.com';
@@ -313,7 +319,7 @@ test('The Lookup tab shows the server\'s own refusal message verbatim, never a p
   await expect(staffPage.getByText('No shipment with that reference.'), 'the OTHER refusal -- a reference that never existed anywhere -- must be a visibly different message').toBeVisible({ timeout: 15_000 });
 });
 
-test('GAP-PROOF: the Lookup tab, which has no dependency on the queue, disappears entirely when GET /terminal/queue fails', async ({ browser }) => {
+test('GAP-PROOF (MDF-721, TERM-QUEUE-GATE): the Lookup tab, which has no dependency on the queue, disappears entirely when GET /terminal/queue fails', async ({ browser }) => {
   test.setTimeout(60_000);
   const adminPage = await (await browser.newContext()).newPage();
   await adminLogin(adminPage);
@@ -332,10 +338,13 @@ test('GAP-PROOF: the Lookup tab, which has no dependency on the queue, disappear
   await waitForWorkspaceLoaded(staffPage);
   await expect(staffPage.getByText('Could not load your queue.'), 'the page must show the queue actually failed, not render nothing at all').toBeVisible({ timeout: 15_000 });
 
-  // CONFIRMED GAP: the entire tab bar, including Lookup, is gated behind
-  // the queue's own `rows` state (`{rows && (<tablist>...)}` in
-  // page.tsx) -- a capability with NO dependency on the queue vanishes
-  // because of it. Same class as MDF-720: one fetch failing silently
-  // removes an unrelated capability.
+  // CONFIRMED GAP, carded as MDF-721 (TERM-QUEUE-GATE, Oscar, same fix
+  // pass as MDF-720 -- same pattern, one fetch failing silently removes
+  // an unrelated capability): the entire tab bar, including Lookup, is
+  // gated behind the queue's own `rows` state (`{rows && (<tablist>...)}`
+  // in page.tsx) -- a capability with NO dependency on the queue vanishes
+  // because of it. Kept as a SEPARATE card from #692 on purpose -- Stanley
+  // already cleared #692 as non-blocking, so folding a fix in would
+  // invalidate that read rather than extend it.
   await expect(staffPage.getByRole('tab', { name: 'Lookup' }), 'CONFIRMED GAP: a failed queue fetch hides the Lookup tab too, even though Lookup never reads the queue').toHaveCount(0);
 });
