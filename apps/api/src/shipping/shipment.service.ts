@@ -4420,7 +4420,11 @@ export class ShipmentService {
       const sendResult = await this.email.sendDetailed({
         to: s.destinationEmail,
         subject: `Your delivery code for shipment ${s.reference}`,
-        body: `Use this code to confirm it's you when your driver arrives: ${revealToken}\n\nThis code expires in ${DELIVERY_CODE_REVEAL_TTL_MINUTES} minutes and can only be used once. If you did not request this, you can ignore this email.`,
+        // MDF-709 adjacent tightening (optional, Stanley flagged this one as
+        // harmless but equally loose): this token is NOT the delivery code
+        // either — same "enter it on the tracking page to reveal the real
+        // code" shape as the collection-code email above.
+        body: `Enter this code on your shipment's tracking page to see your delivery code: ${revealToken}\n\nThis is NOT the code to give your driver — it only unlocks your tracking page so you can see your own delivery code there. It expires in ${DELIVERY_CODE_REVEAL_TTL_MINUTES} minutes and can only be used once. If you did not request this, you can ignore this email.`,
       });
       await this.audit.record({
         action: 'SHIPMENT_DELIVERY_CODE_EMAIL_REQUESTED',
@@ -4534,7 +4538,17 @@ export class ShipmentService {
       const sendResult = await this.email.sendDetailed({
         to: s.destinationEmail,
         subject: `Your collection code for shipment ${s.reference}`,
-        body: `Use this code at the counter to collect your parcel: ${revealToken}\n\nThis code expires in ${DELIVERY_CODE_REVEAL_TTL_MINUTES} minutes and can only be used once. If you did not request this, you can ignore this email.`,
+        // MDF-709 follow-up (urgent): this token is NOT the collection code
+        // — it only unlocks the tracking page so the real code can be
+        // shown there. The old wording ("use this code at the counter")
+        // told the recipient to hand the TOKEN to a terminal clerk, who
+        // would enter it as the collection code, get refused, and burn one
+        // of DELIVERY_PIN_MAX_ATTEMPTS — with no terminal-side unlock at
+        // all (that's admin-only). Five obedient attempts following our
+        // own email would permanently lock a shipment nobody at the
+        // counter could clear. Never say "counter" or imply this token is
+        // presentable to staff.
+        body: `Enter this code on your shipment's tracking page to see your collection code: ${revealToken}\n\nThis is NOT your collection code — never give it to a terminal clerk. It only unlocks your tracking page so you can see your own collection code there. It expires in ${DELIVERY_CODE_REVEAL_TTL_MINUTES} minutes and can only be used once. If you did not request this, you can ignore this email.`,
       });
       await this.audit.record({
         action: 'SHIPMENT_COLLECTION_CODE_EMAIL_REQUESTED',
