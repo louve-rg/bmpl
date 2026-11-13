@@ -70,3 +70,7 @@ tmp/
 uploads/
 *.tmp
 .gstack/
+
+# MDF-728: the dev-only captured-email mailbox, persisted so it survives an
+# API restart. Local, throwaway, per-worktree — never committed.
+apps/api/.dev-mailbox.json
