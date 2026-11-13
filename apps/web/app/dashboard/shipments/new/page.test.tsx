@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import NewShipmentPage from './page';
+import type { ShippingHub } from '../../../../lib/shipping';
 
 // react-dom's act() checks this flag; see checkout/page.test.tsx /
 // LocationPicker.test.tsx for the same convention (no
@@ -38,7 +39,7 @@ quoteMock.mockResolvedValue({
 
 const WALLET = { currency: 'BZD', availableMinor: 100000, onHoldMinor: 0, totalMinor: 100000, status: 'ACTIVE', exists: true };
 
-function defaultApiGetImpl(path: string) {
+function defaultApiGetImpl(path: string): Promise<ShippingHub[] | string[] | typeof WALLET | null> {
   if (path === '/shipping/hubs') return Promise.resolve([]);
   if (path === '/shipping/modes') return Promise.resolve(['LAND']);
   if (path === '/wallet') return Promise.resolve(WALLET);
@@ -414,4 +415,96 @@ describe('NewShipmentPage sticky-bar blocking reason (MDF-559)', () => {
     expect(book.disabled).toBe(true);
     expect(findStickyBar(container!).textContent).toContain('Tell us the town at each end and we will price the whole journey.');
   });
+});
+
+/**
+ * MDF-746: a hub destination carried no recipient email at all, so the
+ * "collection ready" mail (sent to `destinationEmail`) was a silent no-op
+ * for every parcel ending at a terminal. `toRequest()` (page.tsx) now
+ * passes the optional email through on the non-door end, same shape as the
+ * door end already does. One hub in `hubs` so the destination's hub
+ * `<select>` has a real option to choose beyond the empty placeholder.
+ */
+describe('NewShipmentPage hub-destination recipient email (MDF-746)', () => {
+  const HUB = {
+    id: 'hub-1',
+    code: 'BZE',
+    name: 'Belize City Hub',
+    type: 'TERMINAL',
+    district: 'BELIZE',
+    city: 'Belize City',
+    address: null,
+    latitude: null,
+    longitude: null,
+    modes: ['LAND'],
+    instructions: null,
+  };
+
+  function fieldByLabel(fieldset: Element, textMatch: RegExp): HTMLInputElement {
+    const label = Array.from(fieldset.querySelectorAll('label')).find((l) =>
+      textMatch.test(l.querySelector('span')?.textContent ?? ''),
+    );
+    if (!label) throw new Error(`no label matching ${textMatch}`);
+    const input = label.querySelector('input');
+    if (!input) throw new Error('no input under matching label');
+    return input;
+  }
+
+  /** DOOR_TO_HUB: origin stays a door (sender's address), destination
+   *  becomes a hub -- the exact shape the card describes ("Door to
+   *  terminal"). Fills both, picks the hub, and settles the quote. */
+  async function fillDoorToHub(): Promise<void> {
+    apiGet.mockImplementation((path: string) => (path === '/shipping/hubs' ? Promise.resolve([HUB]) : defaultApiGetImpl(path)));
+    mount();
+    await flush();
+    await waitForNoPulse(container!);
+
+    const serviceSelect = container!.querySelector<HTMLSelectElement>('#service-type')!;
+    setSelectValue(serviceSelect, 'DOOR_TO_HUB');
+
+    fillTownAndDistrict(container!, 'Collect from', 'Belize City', 'BELIZE');
+
+    const destFieldset = container!.querySelector('fieldset[aria-label="Deliver to"]')!;
+    const hubSelect = destFieldset.querySelector<HTMLSelectElement>('select')!;
+    setSelectValue(hubSelect, HUB.id);
+    setInputValue(fieldByLabel(destFieldset, /Recipient name/), 'Jane Doe');
+    setInputValue(fieldByLabel(destFieldset, /Recipient phone/), '501-222-4444');
+
+    await settleQuote();
+  }
+
+  it('sends the recipient email filled on a hub destination through to the API', async () => {
+    createMock.mockResolvedValue({ reference: 'BML-TEST0004' });
+    await fillDoorToHub();
+
+    const destFieldset = container!.querySelector('fieldset[aria-label="Deliver to"]')!;
+    setInputValue(fieldByLabel(destFieldset, /Recipient email/), 'recipient@example.com');
+
+    const book = findBookButton(container!);
+    expect(book.disabled).toBe(false);
+    await act(async () => {
+      book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const body = createMock.mock.calls[0]![0] as { destination: { email?: string } };
+    expect(body.destination.email).toBe('recipient@example.com');
+  }, 10000);
+
+  it('omits the email entirely (never an empty string) when the sender leaves it blank -- booking a hub destination must still work with no email', async () => {
+    createMock.mockResolvedValue({ reference: 'BML-TEST0005' });
+    await fillDoorToHub();
+
+    const book = findBookButton(container!);
+    expect(book.disabled).toBe(false);
+    await act(async () => {
+      book.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const body = createMock.mock.calls[0]![0] as { destination: { email?: string } };
+    expect(body.destination.email).toBeUndefined();
+  }, 10000);
 });

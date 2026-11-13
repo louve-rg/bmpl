@@ -126,7 +126,17 @@ function toRequest(
           latitude: v.latitude ?? undefined,
           longitude: v.longitude ?? undefined,
         }
-      : { hubId: v.hubId, name: v.name || undefined, phone: v.phone || undefined, instructions: v.instructions || undefined };
+      : {
+          hubId: v.hubId,
+          name: v.name || undefined,
+          phone: v.phone || undefined,
+          // MDF-746: the recipient's email, same shape as the door-end
+          // email just above -- optional, so a sender who does not know it
+          // can still book. Without it the #695 "collection ready" mail for
+          // this parcel has no address to send to.
+          email: v.email || undefined,
+          instructions: v.instructions || undefined,
+        };
   return {
     service,
     origin: end(origin, needsFirstMile(service)),
