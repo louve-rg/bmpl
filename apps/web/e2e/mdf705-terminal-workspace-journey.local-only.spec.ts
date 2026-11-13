@@ -532,9 +532,17 @@ test('Release to courier via the UI: a LAST_MILE leg a driver has accepted can b
   // HUB_TO_DOOR: the booking UI's own hub picker cannot select an isTest hub
   // (confirmed defect, see mdf587's WRONG-TERMINAL case) -- booked via the
   // real endpoint directly, same sanctioned route-around.
+  //
+  // Origin MUST be hubB (Belmopan), not hubA (Belize City): a destination
+  // inside hubA's own city, with an hubA origin, collapses under the real
+  // geo rule into a local delivery with no transport leg at all ("Both ends
+  // are served by the same terminal") -- a real 400, confirmed by Dwight
+  // reproducing it outside the browser, not a flake. Cross-city (hubB ->
+  // hubA's city) is the combination Dwight confirmed produces a genuine
+  // LINE_HAUL plus LAST_MILE, which is what this test needs to exercise.
   const booking = {
     service: 'HUB_TO_DOOR',
-    origin: { hubId: hubA.id },
+    origin: { hubId: hubB.id },
     destination: { name: `MDF705 Release ${stamp}`, phone: '501-222-7004', address: '56 MDF-705 Release Fixture Road', city: 'Belize City', district: 'BELIZE' },
     pieces: 1,
     description: `MDF-705 release-to-courier fixture ${stamp}`,
@@ -620,14 +628,21 @@ test('Release to courier via the UI: a LAST_MILE leg a driver has accepted can b
 });
 
 /**
- * PENDING: there is no lookup-by-reference anywhere in the terminal surface
- * today -- no search input on apps/web/app/dashboard/terminal/page.tsx, no
- * query parameter on GET /terminal/queue, and no GET /terminal/shipments/:ref
- * on terminal.controller.ts (confirmed by reading every route on both
- * TerminalController and TerminalShipmentsController). A test asserting "a
- * reference belonging to another terminal is refused" needs a lookup
- * mechanism to attempt first; none exists to attempt. This is the finding
- * itself (NOT IMPLEMENTED, matching terminal-feature-inventory.md row 5),
- * not an environment gap -- recorded here rather than silently dropped.
+ * UPDATE (2026-11-12, #686/bbf90094): the claim this comment made when
+ * written -- "no GET /terminal/shipments/:ref on terminal.controller.ts" --
+ * is now FALSE. Pam's #686 added it at terminal.controller.ts:306, scoped
+ * via myActiveHubIds, and `mdf699-terminal-lookup-by-reference.local-only
+ * .spec.ts` (MDF-705 follow-up branch) now has three REAL tests against
+ * that exact contract: own-hub happy path, cross-terminal 403, and
+ * unknown-404-vs-DIRECT-403. This is the second gap-proof premise to close
+ * out from under this programme in one day; the GAP-PROOF convention
+ * caught it both times.
+ *
+ * What is STILL pending here, and the only thing left `test.fixme`: the
+ * Terminal Workspace page itself has no lookup control (Oscar/MDF-702/
+ * MDF-710) for this journey test to click through. Once that control
+ * exists, replace this stub with a real UI step: use it to find the
+ * reference this test already books, and separately confirm it refuses a
+ * reference from a leg this account does not hold.
  */
-test.fixme('Lookup by reference, including cross-terminal refusal (PENDING: no lookup-by-reference surface exists anywhere, UI or API)', async () => {});
+test.fixme('Lookup by reference through the real Terminal Workspace UI control (PENDING: MDF-702/MDF-710 UI not yet shipped -- API coverage lives in mdf699-terminal-lookup-by-reference.local-only.spec.ts)', async () => {});

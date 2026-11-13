@@ -44,29 +44,30 @@ environment, or a production terminal-staff test account is granted
 | ARRIVE (LINE_HAUL, `destinationHubId` mine, departed not arrived) | Same shipment | `POST /terminal/legs/:id/depart` (via the real UI button) on the leg above |
 | HANDOFF (LINE_HAUL, arrived, OR any FIRST_MILE) | Same shipment, after ARRIVE | `POST /terminal/legs/:id/arrive` (via the real UI button). The handoff PIN a LINE_HAUL leg needs is staff-revealed (`GET /admin/logistics/legs/:id/handoff-pin` — no self-reveal UI exists for staff on this leg kind, confirmed by grep; see "Known gaps" below) |
 | COLLECT (shipment `AWAITING_COLLECTION`) | Same shipment, after HANDOFF | The shipment auto-recomputes once its only leg completes |
-| RELEASE_TO_COURIER (LAST_MILE, `courierStatus: 'DRIVER_ACCEPTED'`) | `HUB_TO_DOOR` (UATBC→a written address), booked via raw API (`payWithWallet: true`) since the booking UI's hub picker cannot select an `isTest` hub (confirmed defect, `mdf587`'s own WRONG-TERMINAL case) | The UAT driver fixture accepts the offered job (first click only — do not confirm pickup) |
+| RELEASE_TO_COURIER (LAST_MILE, `courierStatus: 'DRIVER_ACCEPTED'`) | `HUB_TO_DOOR` (UATBP→a written Belize City address — NOT UATBC→Belize City, which 400s as a local delivery under the real geo rule once origin and destination share a terminal's catchment; confirmed live, not a flake), booked via raw API (`payWithWallet: true`) since the booking UI's hub picker cannot select an `isTest` hub (confirmed defect, `mdf587`'s own WRONG-TERMINAL case) | The UAT driver fixture accepts the offered job (first click only — do not confirm pickup) |
 | Invalid/locked collection | Same HUB_TO_HUB shape as COLLECT above | Five wrong codes through the real "Record collection" UI field |
 | Wrong-terminal (any action) | Any of the above | A staff account granted only the OTHER hub attempts the same leg/shipment |
 | Direct-delivery control | `DOOR_TO_DOOR` | Booked through the real customer UI exactly as `mdf587-shipping-journey` already does — asserted to NEVER appear in ANY terminal queue, at any hub, for any staff account |
 
 ## Known gaps this plan does not paper over
 
-- **No lookup-by-reference anywhere.** `GET /terminal/queue` is the only read
-  route on `TerminalController`; there is no `GET /terminal/shipments/:ref`,
-  no query param on the queue, and no search input in
-  `apps/web/app/dashboard/terminal/page.tsx`. A spec asserting "a reference
-  belonging to another terminal is refused" cannot be written against
-  anything that exists — there is nothing to attempt a lookup against, so
-  there is nothing to refuse. `mdf705-terminal-lookup-by-reference.local-only.spec.ts`
-  records this as the finding itself, not a BLOCKED test.
-- **No Operator-forbidden-action list exists yet.** `assertStaffLocationAccess`
-  authorizes on hub grant only; `memberRole` is serialized but never read by
-  any guard. Until MDF-698 lands with a real permission matrix, there is no
-  business rule to assert against — inventing one would violate root
-  CLAUDE.md §12 ("report uncertainty; never invent a business rule"). The
-  spec for this is written as a proof that today's behavior is identical
-  (a real, currently-true assertion) plus a documented placeholder for what
-  MDF-698 needs to define before the forbidden-action half can be written.
+- **UPDATE (2026-11-12): both gaps below have since SHIPPED.** This section
+  is left in place as the historical record of what was missing when this
+  plan was written, not as a current status — see each bullet's own update.
+- **No lookup-by-reference anywhere — CLOSED by #686/bbf90094.**
+  `GET /terminal/shipments/:reference` now exists on
+  `TerminalShipmentsController`, scoped via `myActiveHubIds`; real tests
+  against it (own-hub happy path, cross-terminal 403, unknown-404-vs-
+  DIRECT-403) live in `mdf699-terminal-lookup-by-reference.local-only.spec.ts`
+  (the MDF-705 follow-up branch). Still open: the Terminal Workspace page
+  itself has no lookup CONTROL (Oscar/MDF-702/MDF-710) — that half is the
+  one remaining `test.fixme` in this file's own journey spec.
+- **No Operator-forbidden-action list — CLOSED by MDF-698/#683 (`fe991b98`).**
+  `GET /terminal/staff` is now MANAGER-only (`assertActiveMemberRole`),
+  real test in `mdf705-terminal-manager-operator-login.local-only.spec.ts`
+  asserting the divergence both ways plus the role-reason message. Per
+  Stanley/god: this does not by itself close T-4, which still needs a
+  MANAGER-only capability visible on a SCREEN (Oscar's staff tab).
 - **No unlock-collection UI exists in the Terminal Workspace.** The lockout
   itself is reachable from the real "Record collection" field; clearing it is
   only reachable via `POST /admin/logistics/shipments/:id/unlock-collection`
