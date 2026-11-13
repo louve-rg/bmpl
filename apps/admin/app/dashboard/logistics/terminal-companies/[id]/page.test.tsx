@@ -57,12 +57,37 @@ type StubOpts = {
   companyStatus?: number;
   company?: unknown;
   hubs?: unknown[];
+  inviteDelivery?: { delivered: boolean; outcome: string };
+  resendDelivery?: { delivered: boolean; outcome: string };
+  // MDF-722 regression tests only: a real network call always has a real
+  // timing gap between the mutation's response and the refresh's response.
+  // Without one, a synchronous/microtask-only mock lets React's automatic
+  // batching coalesce "mutation response -> setLoading(true)" and "refresh
+  // response -> setLoading(false)" into a SINGLE commit, so the bug this
+  // card fixes (a real, separately-painted unmount in between) never
+  // actually manifests in the test even against the unfixed code -- the
+  // trap the card explicitly warned about. A few milliseconds of real
+  // setTimeout delay is enough to force React to commit and paint each
+  // state separately, the same way a real browser against a real API
+  // would. Every other test in this file relies on near-instant resolution
+  // (a single `setTimeout(r, 0)` tick), so this defaults to 0 and must
+  // never become the file's default.
+  networkDelayMs?: number;
 };
 
 function stubFetch(opts: StubOpts = {}) {
   const permissions = opts.adminPermissions ?? ['terminals.manage', 'terminals.read'];
   const company = opts.company ?? BASE_COMPANY;
   const posts: Array<{ url: string; method: string; body: unknown }> = [];
+  const delay = opts.networkDelayMs ?? 0;
+  const respond = (status: number, body: unknown): Response | Promise<Response> =>
+    delay > 0 ? new Promise((resolve) => setTimeout(() => resolve(jsonResponse(status, body)), delay)) : jsonResponse(status, body);
+  // The FIRST company GET (the page's own initial load) stays instant even
+  // when networkDelayMs is set -- only a later refresh (triggered by a
+  // card's onChanged) needs the real timing gap. Delaying the first load
+  // too would just need mount() to wait longer; it isn't part of what this
+  // option exists to prove.
+  let companyGetCount = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -75,7 +100,9 @@ function stubFetch(opts: StubOpts = {}) {
         return jsonResponse(200, { ...(company as object), ...(init?.body ? JSON.parse(String(init.body)) : {}) });
       }
       if (url.includes('/api/admin/terminal/companies/tc_1') && method === 'GET' && !url.includes('/locations') && !url.includes('/members') && !url.includes('/invites')) {
-        return jsonResponse(opts.companyStatus ?? 200, opts.companyStatus && opts.companyStatus !== 200 ? company : company);
+        companyGetCount += 1;
+        const status = opts.companyStatus ?? 200;
+        return companyGetCount === 1 ? jsonResponse(status, company) : respond(status, company);
       }
       // TERM-6 member-location and reactivate endpoints both contain
       // "/members", so they're matched BEFORE the generic end-membership
@@ -92,9 +119,15 @@ function stubFetch(opts: StubOpts = {}) {
         posts.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
         return jsonResponse(200, {});
       }
+      // /resend and /revoke both contain "/invites" and are POST, so they're
+      // matched BEFORE the generic invite-creation POST check below.
+      if (url.includes('/invites/') && url.includes('/resend') && method === 'POST') {
+        posts.push({ url, method, body: null });
+        return respond(200, { delivery: opts.resendDelivery ?? { delivered: true, outcome: 'accepted' } });
+      }
       if (url.includes('/api/admin/terminal/companies/tc_1/invites') && method === 'POST') {
         posts.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
-        return jsonResponse(200, {});
+        return respond(200, { delivery: opts.inviteDelivery ?? { delivered: true, outcome: 'accepted' } });
       }
       if (url.includes('/api/admin/terminal/companies/tc_1/members') && method === 'DELETE') {
         posts.push({ url, method, body: null });
@@ -413,6 +446,60 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
     expect(posts.some((p) => p.method === 'POST' && p.url.includes('/invites/inv_1/revoke'))).toBe(true);
   });
 
+  /**
+   * MDF-722. Dwight found this driving the real #676 resend feature:
+   * InvitesCard.resend() genuinely succeeds (HTTP 201, a real delivery
+   * outcome) and sets its own `delivery` state -- then calls `onChanged` in
+   * the SAME tick, which used to set the page's `loading` synchronously,
+   * unmounting the entire body (InvitesCard included) into the full-page
+   * spinner before the administrator ever saw the outcome.
+   *
+   * `networkDelayMs` and a SEPARATE `act()` per real network round trip are
+   * deliberate, not style: a single `act()` spanning both the resend
+   * response and the refresh response lets React's automatic batching
+   * coalesce "resend resolves -> setLoading(true)" and "refresh resolves ->
+   * setLoading(false)" into ONE commit, so the actual unmount this card
+   * fixes never gets separately painted and the bug cannot be observed even
+   * against the unfixed code -- confirmed by hand: against the pre-fix
+   * page.tsx, a test shaped the simpler way (one act(), one setTimeout(0))
+   * passed regardless of the bug. Checked by hand against the pre-fix code
+   * with this same act()-per-round-trip shape: the spinner showed after the
+   * first act() and the outcome was permanently gone after the second,
+   * which is exactly what this test would need to catch on a regression.
+   */
+  it('shows the resend outcome, and it survives the refresh that follows -- not merely in the same tick', async () => {
+    const posts = stubFetch({
+      company: {
+        ...BASE_COMPANY,
+        pendingInvites: [{ id: 'inv_1', email: 'new@bts.bz', memberRole: 'OPERATOR', expiresAt: new Date().toISOString(), createdAt: new Date().toISOString(), locationCount: 1 }],
+      },
+      resendDelivery: { delivered: true, outcome: 'simulated' },
+      networkDelayMs: 5,
+    });
+    await mount();
+
+    const resendButton = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Resend')!;
+    await act(async () => {
+      resendButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Separate act() per real network round trip -- the resend response
+    // lands and triggers a refresh in this one, the refresh's own response
+    // in the next. (Collapsing both into one act() is exactly the trap this
+    // test guards against -- see the comment above.)
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 8));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 8));
+    });
+
+    expect(posts.some((p) => p.method === 'POST' && p.url.includes('/invites/inv_1/resend'))).toBe(true);
+    expect(container!.querySelector('[role="status"]')).toBeNull(); // settled, not stuck loading
+    expect(container!.textContent).toContain('Invitation created. Email was SIMULATED by this environment, not actually delivered.');
+    expect(container!.textContent).toContain('new@bts.bz');
+  });
+
   it('refuses to send an invite with no location selected', async () => {
     const posts = stubFetch({ company: { ...BASE_COMPANY, locations: [ACTIVE_LOCATION] } });
     await mount();
@@ -456,6 +543,54 @@ describe('TerminalCompanyDetailPage (TERM-4)', () => {
 
     const invitePost = posts.find((p) => p.url.includes('/invites') && p.method === 'POST');
     expect(invitePost?.body).toMatchObject({ email: 'new@bts.bz', memberRole: 'MANAGER', locationIds: [ACTIVE_LOCATION.id] });
+  });
+
+  /**
+   * MDF-722: sending an invite sets a local `delivery` state and then calls
+   * `onChanged` in the SAME tick. `onChanged` used to be `load`, which set
+   * the page's own `loading` to true synchronously -- unmounting the whole
+   * body, MembersCard and the outcome alert it had just set along with it,
+   * into the full-page spinner. See the resend test above for why this uses
+   * `networkDelayMs` and separate `act()` calls per round trip rather than
+   * one `setTimeout(0)`: without a real timing gap, React's batching
+   * coalesces the mutation's and the refresh's state updates into one
+   * commit, and the actual unmount this fixes is never separately painted
+   * -- a test shaped the other way passes even against the unfixed code.
+   */
+  it('shows the invite send outcome, and it survives the refresh that follows -- not merely in the same tick', async () => {
+    stubFetch({
+      company: { ...BASE_COMPANY, locations: [ACTIVE_LOCATION] },
+      inviteDelivery: { delivered: true, outcome: 'simulated' },
+      networkDelayMs: 5,
+    });
+    await mount();
+
+    const emailInput = container!.querySelector<HTMLInputElement>('#tc-invite-email')!;
+    await act(async () => {
+      setValue(emailInput, 'new@bts.bz');
+    });
+    const locationCheckbox = container!.querySelector<HTMLInputElement>('#tc-invite-locations input[type="checkbox"]')!;
+    await act(async () => {
+      locationCheckbox.click();
+    });
+    const sendButton = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Send invite')!;
+    await act(async () => {
+      sendButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Separate act() per real network round trip -- see the resend test
+    // above for why this matters (one act() spanning both responses lets
+    // React batch away the exact unmount this fixes).
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 8));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 8));
+    });
+
+    expect(container!.querySelector('[role="status"]')).toBeNull(); // settled, not stuck loading
+    expect(container!.textContent).toContain('Invitation created. Email was SIMULATED by this environment, not actually delivered.');
+    expect(container!.textContent).toContain('Belize Terminal Services'); // the page body, not a blank screen
   });
 
   it('attaches a hub as a new location', async () => {
